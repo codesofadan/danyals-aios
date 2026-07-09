@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AIOS — Client Onboarding Checklist</title>
+<style>/*FONTCSS*/</style>
+<style>/*BASECSS*/</style>
+<style>
+.kbd{font-family:ui-monospace,monospace;background:var(--wash-2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11px;color:var(--violet-ink);}
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <div class="cover-bg"></div>
+  <div class="cover-glow"></div>
+  <div class="cover-in">
+    <div class="toprow">
+      <span class="xlogo"></span>
+      <span class="kick">Everything we need from you to begin</span>
+    </div>
+    <div class="brand">
+      <div class="eyeb">Client Onboarding</div>
+      <div class="title">What We Need From You</div>
+      <div class="subtitle">The accounts, access &amp; data to get your platform live.</div>
+      <div class="lede">A short setup checklist — create a few accounts, grant some access, and send us your client details. Everything else, we build, run and hand over to you.</div>
+    </div>
+    <div class="meta">
+      <div><div class="mk">Prepared for</div><div class="mv">M. Haseeb Imran<br>Storage Visibility</div></div>
+      <div><div class="mk">Prepared by</div><div class="mv">Xegents</div></div>
+      <div><div class="mk">Date</div><div class="mv">9 July 2026</div></div>
+      <div><div class="mk">This document</div><div class="mv">Everything we need<br>to begin</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 WHAT WE NEED ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Client Onboarding</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">01</span><span class="eyebrow">Checklist</span></div>
+  <div class="h-sec">What We Need From You</div>
+  <div class="rule"></div>
+  <div class="h-sub mb14">A handful of accounts, access grants and inputs — everything else (all the software) we set up and run for you. Tick each box as you send it over. Sections 1–4 are all we need to start.</div>
+
+  <div class="card alt mb14"><p style="font-size:13px;font-weight:430;color:var(--ink);line-height:1.5;"><b>Your keys stay safe:</b> every API key and password you send is stored in an encrypted key vault (Supabase Vault) the moment it reaches us — never in plain text, and never in our logs.</p></div>
+
+  <div class="cols2 start">
+    <div>
+      <div class="cgroup mb14">
+        <div class="cg-h"><span class="cg-n">1.</span> ACCOUNTS &amp; API KEYS</div>
+        <div class="note mb8" style="margin-top:-4px;">Create each under your own billing, then send us the key.</div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>serper.dev API key</b> — Google Search + Maps data that powers rankings and local results.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Anthropic (Claude) API key</b> — the AI that reads the data and writes the reports.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Resend account</b> — sends the client report emails.</span></div>
+      </div>
+      <div class="cgroup mb14">
+        <div class="cg-h"><span class="cg-n">2.</span> HOSTING, DOMAIN &amp; DNS</div>
+        <div class="note mb8" style="margin-top:-4px;">Your server and web address, in your name.</div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>A server (VPS)</b> — a Hetzner CPX31 (~$16/mo) or similar; SSH/root access, or approve us to rent one.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>A domain name</b> — e.g. aios.yourbrand.com — for the app and the client portal.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>DNS / registrar access</b> — login or permission to add records, so we can point subdomains and set up email.</span></div>
+      </div>
+      <div class="cgroup">
+        <div class="cg-h"><span class="cg-n">3.</span> GOOGLE SEARCH &amp; ANALYTICS</div>
+        <div class="note mb8" style="margin-top:-4px;">We send one service-account email; you just add it inside Google. No passwords shared.</div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Google Search Console</b> — add our service-account email as an Owner on each site.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Google Analytics 4</b> — add it as a Viewer, and send the numeric Property ID.</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="cgroup mb14">
+        <div class="cg-h"><span class="cg-n">4.</span> GOOGLE BUSINESS (GMB)</div>
+        <div class="note mb8" style="margin-top:-4px;">For auto-posts, review replies &amp; Maps rank. Uses Manager access.</div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>A verified Business Profile</b> — verified and active (Google needs ~60 days of history).</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Manager access</b> — add the Google account we give you as a Manager.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Business details</b> — business name, address, and location / Store ID if you have one.</span></div>
+      </div>
+      <div class="cgroup mb14">
+        <div class="cg-h"><span class="cg-n">5.</span> YOUR CLIENTS &amp; THEIR SEO</div>
+        <div class="note mb8" style="margin-top:-4px;">The starting set of 15 clients — a simple spreadsheet is fine.</div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Website address</b> — for each client.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Target keywords</b> — per client — plus the city / region / country to track.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Main competitors</b> — per client (2–5 websites), if you know them.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Existing data to import</b> — rank, backlink or audit exports (CSV / Excel). Optional.</span></div>
+      </div>
+      <div class="cgroup">
+        <div class="cg-h"><span class="cg-n">6.</span> BRANDING &amp; BUSINESS</div>
+        <div class="note mb8" style="margin-top:-4px;">Used on the reports and the client portal.</div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Logo &amp; brand colors</b> — and fonts, if you have specific ones.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Company name &amp; footer</b> — contact details and report-footer text.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Team login emails</b> — who should sign in to the portal.</span></div>
+        <div class="check"><span class="cb"></span><span class="ct"><b>Legal / company details</b> — for invoices and the privacy &amp; terms pages.</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="pfoot"><span>Section 01 · What We Need</span><span class="pn">02</span></div>
+</section>
+
+<!-- ============ 03 HOW TO GIVE US EACH ITEM ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Client Onboarding</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">02</span><span class="eyebrow">Step by step</span></div>
+  <div class="h-sec">How to Give Us Each Item</div>
+  <div class="rule"></div>
+  <div class="h-sub mb18">Follow the steps under each item. Tip: send anything secret (API keys, passwords) through the private link we'll share — never plain email. We store every key in an encrypted key vault (Supabase Vault) the moment it arrives.</div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span><span class="ih-t">serper.dev API key</span><span class="ih-line"></span><span class="ih-b">4 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Sign up</div><div class="sd">Go to serper.dev and sign up (Google login works). You get 2,500 free searches.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Open API Keys</div><div class="sd">Open the API Keys page (serper.dev/api-keys).</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Copy the key</div><div class="sd">Copy the API key shown there.</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Send it to us</div><div class="sd">Send us the key. No billing until you pass the free tier.</div></div></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span><span class="ih-t">Anthropic (Claude) API key</span><span class="ih-line"></span><span class="ih-b">5 Steps</span></div>
+  <div class="steps">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Sign up</div><div class="sd">Go to console.anthropic.com and sign up or log in.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Add credits</div><div class="sd">Open Billing and add a payment method or buy credits — the key needs credits.</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Create key</div><div class="sd">Go to Settings → API Keys → Create Key and name it "AIOS".</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Copy it</div><div class="sd">Copy the key (<span class="kbd">sk-ant-…</span>). It is shown only once.</div></div></div>
+    <div class="step"><span class="sn">5</span><div class="sb"><div class="st">Send it to us</div><div class="sd">Send us the key.</div></div></div>
+  </div>
+  <div class="pfoot"><span>Section 02 · How to Give Us Each Item</span><span class="pn">03</span></div>
+</section>
+
+<!-- ============ 04 HOW TO GIVE US EACH ITEM (cont.) ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Client Onboarding</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">02</span><span class="eyebrow">Step by step · continued</span></div>
+  <div class="h-sec">How to Give Us Each Item</div>
+  <div class="rule"></div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 6h18v12H3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span><span class="ih-t">Resend account (report emails)</span><span class="ih-line"></span><span class="ih-b">5 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Sign up</div><div class="sd">Create an account at resend.com.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Create key</div><div class="sd">Open API Keys → Create API Key and copy it (<span class="kbd">re_…</span>).</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Add domain</div><div class="sd">Open Domains → Add Domain and enter your sending address (e.g. reports.yourbrand.com).</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Set DNS</div><div class="sd">Add the SPF / DKIM / DMARC records Resend shows — or send them to us.</div></div></div>
+    <div class="step"><span class="sn">5</span><div class="sb"><div class="st">Send key</div><div class="sd">Send us the API key.</div></div></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5h16v9H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 19h8M12 14v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="ih-t">A server (VPS)</span><span class="ih-line"></span><span class="ih-b">2 Ways</span></div>
+  <div class="cols2 mb18">
+    <div class="card"><span class="optlabel">Option A</span><p><b>Already have a server?</b> Send us its IP address and an SSH login (root or sudo), or add the SSH key we give you.</p></div>
+    <div class="card"><span class="optlabel">Option B</span><p><b>Need one?</b> Create a Hetzner Cloud account, add billing, make a Project, and invite our email — we set up the server (CPX31, ~$16/mo).</p></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3c2.5 2.5 3.5 6 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-6-3.5-9s1-6.5 3.5-9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span><span class="ih-t">A domain name</span><span class="ih-line"></span><span class="ih-b">3 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Choose address</div><div class="sd">Decide the web address for AIOS (e.g. aios.yourbrand.com). A subdomain you own is perfect.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Buy if needed</div><div class="sd">No domain yet? Buy one at Namecheap, Cloudflare, or GoDaddy.</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Tell us</div><div class="sd">Tell us the exact domain or subdomain to use.</div></div></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="9" cy="18" r="2" fill="currentColor"/></svg></span><span class="ih-t">DNS / registrar access</span><span class="ih-line"></span><span class="ih-b">2 Ways</span></div>
+  <div class="cols2">
+    <div class="card"><span class="optlabel">Option A</span><p><b>Easiest:</b> give us login access to your registrar or DNS provider (e.g. Cloudflare), or add our email as a user — we add every record.</p></div>
+    <div class="card"><span class="optlabel">Option B</span><p><b>Prefer to do it yourself?</b> We send a short list; for each record open DNS settings → Add record, paste the Type / Name / Value, and Save.</p></div>
+  </div>
+  <div class="pfoot"><span>Section 02 · How to Give Us Each Item</span><span class="pn">04</span></div>
+</section>
+
+<!-- ============ 05 HOW TO GIVE US EACH ITEM (cont.) ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Client Onboarding</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">02</span><span class="eyebrow">Step by step · continued</span></div>
+  <div class="h-sec">How to Give Us Each Item</div>
+  <div class="rule"></div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M16 16l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="ih-t">Google Search Console access</span><span class="ih-line"></span><span class="ih-b">4 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Get our email</div><div class="sd">We send you our service-account email (<span class="kbd">name@project.iam.gserviceaccount.com</span>).</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Open Search Console</div><div class="sd">Go to search.google.com/search-console and select the client's site.</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Add as Owner</div><div class="sd">Open Settings → Users and permissions → Add user, paste our email, set Owner.</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Repeat per site</div><div class="sd">Do this for each client site. If a site isn't set up yet, tell us — we'll help verify.</div></div></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="ih-t">Google Analytics 4 access</span><span class="ih-line"></span><span class="ih-b">4 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Use same email</div><div class="sd">Use the same service-account email we sent you.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Open Admin</div><div class="sd">Go to analytics.google.com and click Admin (gear, bottom-left).</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Add as Viewer</div><div class="sd">In Property access management click + → Add users, paste our email, role Viewer.</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Send Property ID</div><div class="sd">Send the numeric Property ID (Admin → Property Settings, e.g. 123456789).</div></div></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21c4.5-4 7-7.5 7-11a7 7 0 10-14 0c0 3.5 2.5 7 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="2"/></svg></span><span class="ih-t">Google Business Profile access</span><span class="ih-line"></span><span class="ih-b">4 Steps</span></div>
+  <div class="steps">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Verify listing</div><div class="sd">Make sure the profile is verified. If it shows "Verify now", finish that first — it can take days.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Open profile</div><div class="sd">Sign in as the owner, then search your business on Google (or go to business.google.com).</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Add as Manager</div><div class="sd">Open Business Profile settings → People and access → Add, paste our email, choose Manager.</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Send details</div><div class="sd">Send the business name, address, and location / Store ID if you manage several.</div></div></div>
+  </div>
+  <div class="pfoot"><span>Section 02 · How to Give Us Each Item</span><span class="pn">05</span></div>
+</section>
+
+<!-- ============ 06 HOW TO GIVE US EACH ITEM (cont.) ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Client Onboarding</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">02</span><span class="eyebrow">Step by step · continued</span></div>
+  <div class="h-sec">How to Give Us Each Item</div>
+  <div class="rule"></div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="ih-t">Your client list &amp; SEO details</span><span class="ih-line"></span><span class="ih-b">3 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Make a sheet</div><div class="sd">One row per client: website URL, target keywords, city / region / country, and competitors.</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Add exports</div><div class="sd">Attach any existing rank, backlink, or audit files — optional.</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Share it</div><div class="sd">Send us the sheet (a link or the file).</div></div></div>
+  </div>
+
+  <div class="itemhead"><span class="ih-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M7 8l2 2M17 8l-2 2M7 16l2-2M17 16l-2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="ih-t">Branding &amp; business details</span><span class="ih-line"></span><span class="ih-b">4 Steps</span></div>
+  <div class="steps mb18">
+    <div class="step"><span class="sn">1</span><div class="sb"><div class="st">Send brand</div><div class="sd">Your logo (PNG / SVG) and brand colors (hex codes if you know them).</div></div></div>
+    <div class="step"><span class="sn">2</span><div class="sb"><div class="st">Send business</div><div class="sd">Company name, contact details, and any report-footer text.</div></div></div>
+    <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Send logins</div><div class="sd">The email addresses of team members who need portal access.</div></div></div>
+    <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Send legal</div><div class="sd">Company / legal details for invoices and the privacy &amp; terms pages.</div></div></div>
+  </div>
+
+  <div class="hero"><div class="kl">Ready when you are</div><p><b>Sections 1–4 are what we need to start building.</b> Send those over and we'll take it from there — 5 and 6 can follow while we set up. Every key you send lands straight in the encrypted vault.</p></div>
+  <div class="pfoot"><span>Section 02 · How to Give Us Each Item</span><span class="pn">06</span></div>
+</section>
+
+</body>
+</html>

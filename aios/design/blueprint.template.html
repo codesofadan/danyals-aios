@@ -54,6 +54,11 @@ svg{ display:block; width:100%; height:auto; overflow:visible; }
 .lg{ display:flex; align-items:center; gap:7px; font-size:10.5px; font-weight:600; color:var(--muted); }
 .sw{ width:22px; height:14px; border-radius:4px; }
 .cols5{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+.cols6{ display:grid; grid-template-columns:repeat(6,1fr); gap:7px; }
+.cols6 .root{ font-size:11px; padding:8px 5px; }
+.cols6 .leaf{ font-size:8.7px; padding:5px 6px; }
+.cols6 .trunk{ margin-left:8px; padding-left:8px; gap:5px; }
+.cols6 .cap{ font-size:8px; }
 .tcol .root{ background:var(--maroon-deep); color:#fff; border-radius:9px; padding:9px 8px; text-align:center;
   font-size:12px; font-weight:800; letter-spacing:.02em; }
 .tcol .trunk{ margin-left:9px; border-left:2px solid var(--rose-soft); padding-left:9px; margin-top:8px; display:grid; gap:6px; }
@@ -146,78 +151,55 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="lg"><span class="sw" style="background:#fff;border:1.4px dashed var(--rose);"></span>Phase 2 (dashed)</div>
   </div>
   <div class="diagwrap">
-  <svg viewBox="0 0 680 470">
+  <svg viewBox="0 0 680 292">
     <!-- root -->
-    <rect class="s-solid" x="280" y="10" width="120" height="46" rx="11"/>
-    <text class="t-lw" x="340" y="31" text-anchor="middle">AIOS</text>
-    <text class="t-sw" x="340" y="46" text-anchor="middle">SEO automation platform</text>
-    <!-- trunk down -->
-    <line class="edge-t" x1="340" y1="56" x2="340" y2="82"/>
-    <!-- horizontal bus -->
-    <line class="edge-t" x1="80" y1="82" x2="600" y2="82"/>
-    <!-- 5 children -->
+    <rect class="s-solid" x="280" y="8" width="120" height="44" rx="11"/>
+    <text class="t-lw" x="340" y="29" text-anchor="middle">AIOS</text>
+    <text class="t-sw" x="340" y="44" text-anchor="middle">SEO automation platform</text>
+    <line class="edge-t" x1="340" y1="52" x2="340" y2="80"/>
+    <line class="edge-t" x1="58" y1="80" x2="626" y2="80"/>
+    <!-- 6 children -->
     <g>
-      <line class="edge-t" x1="80" y1="82" x2="80" y2="104" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="210" y1="82" x2="210" y2="104" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="340" y1="82" x2="340" y2="104" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="470" y1="82" x2="470" y2="104" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="600" y1="82" x2="600" y2="104" marker-end="url(#arwm)"/>
+      <line class="edge-t" x1="58" y1="80" x2="58" y2="98" marker-end="url(#arwm)"/>
+      <line class="edge-t" x1="172" y1="80" x2="172" y2="98" marker-end="url(#arwm)"/>
+      <line class="edge-t" x1="286" y1="80" x2="286" y2="98" marker-end="url(#arwm)"/>
+      <line class="edge-t" x1="400" y1="80" x2="400" y2="98" marker-end="url(#arwm)"/>
+      <line class="edge-t" x1="514" y1="80" x2="514" y2="98" marker-end="url(#arwm)"/>
+      <line class="edge-t" x1="626" y1="80" x2="626" y2="98" marker-end="url(#arwm)"/>
     </g>
-    <!-- child boxes centered on x -->
     <g>
-      <rect class="s-box" x="25" y="104" width="110" height="42" rx="9"/><text class="t-l" x="80" y="123" text-anchor="middle">Platform</text><text class="t-s" x="80" y="137" text-anchor="middle">foundation</text>
-      <rect class="s-box" x="155" y="104" width="110" height="42" rx="9"/><text class="t-l" x="210" y="123" text-anchor="middle">Audit</text><text class="t-s" x="210" y="137" text-anchor="middle">module 01</text>
-      <rect class="s-box" x="285" y="104" width="110" height="42" rx="9"/><text class="t-l" x="340" y="123" text-anchor="middle">Content</text><text class="t-s" x="340" y="137" text-anchor="middle">module 02</text>
-      <rect class="s-box" x="415" y="104" width="110" height="42" rx="9"/><text class="t-l" x="470" y="123" text-anchor="middle">Portal</text><text class="t-s" x="470" y="137" text-anchor="middle">module 03</text>
-      <rect class="s-box" x="545" y="104" width="110" height="42" rx="9"/><text class="t-l" x="600" y="123" text-anchor="middle">Reporting</text><text class="t-s" x="600" y="137" text-anchor="middle">Google Sheets</text>
+      <rect class="s-box" x="6" y="98" width="104" height="40" rx="9"/><text class="t-l" x="58" y="116" text-anchor="middle" font-size="11.5">Platform</text><text class="t-s" x="58" y="130" text-anchor="middle">core</text>
+      <rect class="s-box" x="120" y="98" width="104" height="40" rx="9"/><text class="t-l" x="172" y="116" text-anchor="middle" font-size="11.5">Audit</text><text class="t-s" x="172" y="130" text-anchor="middle">module 01</text>
+      <rect class="s-box" x="234" y="98" width="104" height="40" rx="9"/><text class="t-l" x="286" y="116" text-anchor="middle" font-size="11.5">Content</text><text class="t-s" x="286" y="130" text-anchor="middle">module 02</text>
+      <rect class="s-box" x="348" y="98" width="104" height="40" rx="9"/><text class="t-l" x="400" y="116" text-anchor="middle" font-size="11.5">Portal</text><text class="t-s" x="400" y="130" text-anchor="middle">module 03</text>
+      <rect class="s-solid" x="462" y="98" width="104" height="40" rx="9"/><text class="t-lw" x="514" y="114" text-anchor="middle" font-size="11">Policy Radar</text><text class="t-sw" x="514" y="129" text-anchor="middle">module 04</text>
+      <rect class="s-box" x="574" y="98" width="104" height="40" rx="9"/><text class="t-l" x="626" y="116" text-anchor="middle" font-size="11">Reporting</text><text class="t-s" x="626" y="130" text-anchor="middle">Sheets</text>
     </g>
-    <!-- second level leaves per branch -->
     <g font-family="Bricolage Grotesque">
       <!-- Platform -->
-      <line class="edge-t" x1="80" y1="146" x2="80" y2="168"/>
-      <rect class="s-soft" x="20" y="168" width="120" height="118" rx="8"/>
-      <text class="t-l" x="30" y="186" font-size="10">Auth + RBAC</text>
-      <text class="t-l" x="30" y="204" font-size="10">Key vault</text>
-      <text class="t-l" x="30" y="222" font-size="10">Job queue</text>
-      <text class="t-l" x="30" y="240" font-size="10">Cost control</text>
-      <text class="t-l" x="30" y="258" font-size="10">Multi-tenant DB</text>
-      <text class="t-l" x="30" y="276" font-size="10">Backups + logs</text>
+      <line class="edge-t" x1="58" y1="138" x2="58" y2="152"/>
+      <rect class="s-soft" x="4" y="152" width="108" height="128" rx="8"/>
+      <text class="t-l" x="12" y="170" font-size="9.3">Auth + RBAC</text><text class="t-l" x="12" y="188" font-size="9.3">Key vault</text><text class="t-l" x="12" y="206" font-size="9.3">Job queue</text><text class="t-l" x="12" y="224" font-size="9.3">Cost control</text><text class="t-l" x="12" y="242" font-size="9.3">Multi-tenant DB</text><text class="t-l" x="12" y="260" font-size="9.3">Backups + logs</text>
       <!-- Audit -->
-      <line class="edge-t" x1="210" y1="146" x2="210" y2="168"/>
-      <rect class="s-soft" x="150" y="168" width="120" height="118" rx="8"/>
-      <text class="t-l" x="160" y="186" font-size="10">Run free/paid</text>
-      <text class="t-l" x="160" y="204" font-size="10">Engine as job</text>
-      <text class="t-l" x="160" y="222" font-size="10">Technical rpt</text>
-      <text class="t-l" x="160" y="240" font-size="10">Actionable rpt</text>
-      <text class="t-l" x="160" y="258" font-size="10">PDF + JSON</text>
-      <text class="t-e" x="160" y="276" font-size="9.5">Financial (P2)</text>
+      <line class="edge-t" x1="172" y1="138" x2="172" y2="152"/>
+      <rect class="s-soft" x="118" y="152" width="108" height="128" rx="8"/>
+      <text class="t-l" x="126" y="170" font-size="9.3">Run free/paid</text><text class="t-l" x="126" y="188" font-size="9.3">Engine as job</text><text class="t-l" x="126" y="206" font-size="9.3">Technical rpt</text><text class="t-l" x="126" y="224" font-size="9.3">Actionable rpt</text><text class="t-l" x="126" y="242" font-size="9.3">PDF + JSON</text><text class="t-e" x="126" y="260" font-size="9">Financial (P2)</text>
       <!-- Content -->
-      <line class="edge-t" x1="340" y1="146" x2="340" y2="168"/>
-      <rect class="s-soft" x="280" y="168" width="120" height="118" rx="8"/>
-      <text class="t-l" x="290" y="186" font-size="10">AIDA drafting</text>
-      <text class="t-l" x="290" y="204" font-size="10">Auto schema</text>
-      <text class="t-l" x="290" y="222" font-size="10">AI images</text>
-      <text class="t-l" x="290" y="240" font-size="10">Manual PDF</text>
-      <text class="t-l" x="290" y="258" font-size="10">WordPress pub</text>
-      <text class="t-l" x="290" y="276" font-size="10">Review gate</text>
+      <line class="edge-t" x1="286" y1="138" x2="286" y2="152"/>
+      <rect class="s-soft" x="232" y="152" width="108" height="128" rx="8"/>
+      <text class="t-l" x="240" y="170" font-size="9.3">AIDA drafting</text><text class="t-l" x="240" y="188" font-size="9.3">Auto schema</text><text class="t-l" x="240" y="206" font-size="9.3">AI images</text><text class="t-l" x="240" y="224" font-size="9.3">Manual PDF</text><text class="t-l" x="240" y="242" font-size="9.3">WordPress pub</text><text class="t-l" x="240" y="260" font-size="9.3">Review gate</text>
       <!-- Portal -->
-      <line class="edge-t" x1="470" y1="146" x2="470" y2="168"/>
-      <rect class="s-soft" x="410" y="168" width="120" height="118" rx="8"/>
-      <text class="t-l" x="420" y="186" font-size="10">Client portal</text>
-      <text class="t-l" x="420" y="204" font-size="10">Team portal</text>
-      <text class="t-e" x="420" y="222" font-size="9.5">Manager (opt)</text>
-      <text class="t-l" x="420" y="240" font-size="10">Admin portal</text>
-      <text class="t-l" x="420" y="258" font-size="10">Milestones</text>
-      <text class="t-l" x="420" y="276" font-size="10">Fiverr upsells</text>
+      <line class="edge-t" x1="400" y1="138" x2="400" y2="152"/>
+      <rect class="s-soft" x="346" y="152" width="108" height="128" rx="8"/>
+      <text class="t-l" x="354" y="170" font-size="9.3">Client portal</text><text class="t-l" x="354" y="188" font-size="9.3">Team portal</text><text class="t-e" x="354" y="206" font-size="9">Manager (opt)</text><text class="t-l" x="354" y="224" font-size="9.3">Admin portal</text><text class="t-l" x="354" y="242" font-size="9.3">Milestones</text><text class="t-l" x="354" y="260" font-size="9.3">Fiverr upsells</text>
+      <!-- Policy Radar -->
+      <line class="edge-t" x1="514" y1="138" x2="514" y2="152"/>
+      <rect class="s-soft" x="460" y="152" width="108" height="128" rx="8" stroke="#8C1D2E"/>
+      <text class="t-l" x="468" y="170" font-size="9.3">Watch Google</text><text class="t-l" x="468" y="188" font-size="9.3">Detect change</text><text class="t-l" x="468" y="206" font-size="9.3">Research</text><text class="t-l" x="468" y="224" font-size="9.3">Flag KB</text><text class="t-l" x="468" y="242" font-size="9.3">Recommend</text><text class="t-l" x="468" y="260" font-size="9.3">Command Ctr</text>
       <!-- Reporting -->
-      <line class="edge-t" x1="600" y1="146" x2="600" y2="168"/>
-      <rect class="s-soft" x="540" y="168" width="120" height="118" rx="8"/>
-      <text class="t-l" x="550" y="186" font-size="10">Sheets sync</text>
-      <text class="t-l" x="550" y="204" font-size="10">Audit scores</text>
-      <text class="t-l" x="550" y="222" font-size="10">Job status</text>
-      <text class="t-l" x="550" y="240" font-size="10">Milestones</text>
-      <text class="t-l" x="550" y="258" font-size="10">Per-client /</text>
-      <text class="t-l" x="550" y="272" font-size="10">master sheet</text>
+      <line class="edge-t" x1="626" y1="138" x2="626" y2="152"/>
+      <rect class="s-soft" x="572" y="152" width="106" height="128" rx="8"/>
+      <text class="t-l" x="580" y="170" font-size="9.3">Sheets sync</text><text class="t-l" x="580" y="188" font-size="9.3">Audit scores</text><text class="t-l" x="580" y="206" font-size="9.3">Job status</text><text class="t-l" x="580" y="224" font-size="9.3">Milestones</text><text class="t-l" x="580" y="242" font-size="9.3">Per-client</text><text class="t-l" x="580" y="260" font-size="9.3">Master sheet</text>
     </g>
   </svg>
   </div>
@@ -230,7 +212,7 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="eyebrow">Map 02</div>
   <div class="h-sec">Feature map - the whole build</div>
   <div class="rule"></div>
-  <div class="cols5">
+  <div class="cols6">
     <div class="tcol"><div class="root">PLATFORM</div><div class="trunk">
       <div class="leaf"><b>Cloud on VPS</b><br>Docker Compose</div>
       <div class="leaf"><b>Reverse proxy</b><br>auto-TLS</div>
@@ -286,6 +268,20 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
       <div class="leaf"><b>Dashboards</b><br>per role</div>
     </div></div>
 
+    <div class="tcol"><div class="root" style="background:var(--maroon);">POLICY RADAR</div><div class="trunk">
+      <div class="leaf"><b>Watch Google</b><br>official sources</div>
+      <div class="leaf"><b>Change detect</b><br>diff + trigger</div>
+      <div class="leaf"><b>Auto research</b><br>on any change</div>
+      <div class="leaf"><b>Summarize</b><br>+ dedupe</div>
+      <div class="leaf"><b>Severity flag</b><br>crit/major/minor</div>
+      <div class="leaf"><b>Region flag</b><br>global / nation</div>
+      <div class="leaf"><b>Category flag</b><br>algo/policy/tech</div>
+      <div class="leaf"><b>Knowledge base</b><br>versioned</div>
+      <div class="leaf"><b>Recommendations</b><br>baseline + new</div>
+      <div class="leaf"><b>Command Center</b><br>surface</div>
+      <div class="leaf"><b>Closed loop</b><br>checks + advisories</div>
+    </div></div>
+
     <div class="tcol"><div class="root">REPORTING</div><div class="trunk">
       <div class="leaf"><b>Sheets sync</b><br>service account</div>
       <div class="leaf"><b>Audit scores</b></div>
@@ -334,29 +330,38 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
     <line class="edge" x1="420" y1="180" x2="115" y2="205" marker-end="url(#arw)"/>
     <line class="edge" x1="480" y1="184" x2="485" y2="205" marker-end="url(#arw)"/>
     <!-- workers -->
-    <line class="edge" x1="300" y1="262" x2="220" y2="300" marker-end="url(#arw)"/>
-    <line class="edge" x1="300" y1="262" x2="460" y2="300" marker-end="url(#arw)"/>
-    <text class="t-e" x="300" y="284" text-anchor="middle">dequeue jobs</text>
-    <rect class="s-solid" x="110" y="300" width="220" height="46" rx="10"/><text class="t-lw" x="220" y="320" text-anchor="middle">Audit worker</text><text class="t-sw" x="220" y="335" text-anchor="middle">existing engine + PDF</text>
-    <rect class="s-solid" x="350" y="300" width="220" height="46" rx="10"/><text class="t-lw" x="460" y="320" text-anchor="middle">Content worker</text><text class="t-sw" x="460" y="335" text-anchor="middle">Claude copy + AI images</text>
-    <line class="edge" x1="220" y1="346" x2="220" y2="378" marker-end="url(#arw)"/>
-    <line class="edge" x1="460" y1="346" x2="460" y2="378" marker-end="url(#arw)"/>
+    <line class="edge" x1="300" y1="262" x2="105" y2="300" marker-end="url(#arw)"/>
+    <line class="edge" x1="300" y1="262" x2="263" y2="300" marker-end="url(#arw)"/>
+    <line class="edge" x1="300" y1="262" x2="421" y2="300" marker-end="url(#arw)"/>
+    <text class="t-e" x="300" y="282" text-anchor="middle">dequeue jobs</text>
+    <rect class="s-solid" x="30" y="300" width="150" height="46" rx="10"/><text class="t-lw" x="105" y="320" text-anchor="middle" font-size="11">Audit worker</text><text class="t-sw" x="105" y="335" text-anchor="middle">engine + PDF</text>
+    <rect class="s-solid" x="188" y="300" width="150" height="46" rx="10"/><text class="t-lw" x="263" y="320" text-anchor="middle" font-size="11">Content worker</text><text class="t-sw" x="263" y="335" text-anchor="middle">copy + images</text>
+    <rect class="s-solid" x="346" y="300" width="150" height="46" rx="10"/><text class="t-lw" x="421" y="320" text-anchor="middle" font-size="11">Research worker</text><text class="t-sw" x="421" y="335" text-anchor="middle">Policy Radar</text>
+    <rect class="s-box" x="504" y="300" width="150" height="46" rx="10"/><text class="t-l" x="579" y="320" text-anchor="middle" font-size="11">Scheduler</text><text class="t-s" x="579" y="335" text-anchor="middle">cron + change detect</text>
+    <line class="edge" x1="560" y1="300" x2="330" y2="264" marker-end="url(#arw)"/>
+    <line class="edge" x1="105" y1="346" x2="105" y2="378" marker-end="url(#arw)"/>
+    <line class="edge" x1="263" y1="346" x2="290" y2="378" marker-end="url(#arw)"/>
+    <line class="edge" x1="421" y1="346" x2="500" y2="378" marker-end="url(#arw)"/>
+    <line class="edge" x1="421" y1="346" x2="613" y2="378" marker-end="url(#arw)"/>
     <!-- externals -->
     <g>
-      <rect class="s-ext" x="30" y="380" width="118" height="40" rx="9"/><text class="t-l" x="89" y="404" text-anchor="middle" font-size="11">Serper</text>
-      <rect class="s-ext" x="158" y="380" width="118" height="40" rx="9"/><text class="t-l" x="217" y="400" text-anchor="middle" font-size="11">Google APIs</text><text class="t-s" x="217" y="412" text-anchor="middle">PSI/Places/NL</text>
-      <rect class="s-ext" x="286" y="380" width="108" height="40" rx="9"/><text class="t-l" x="340" y="404" text-anchor="middle" font-size="11">Claude API</text>
-      <rect class="s-ext" x="404" y="380" width="118" height="40" rx="9"/><text class="t-l" x="463" y="404" text-anchor="middle" font-size="11">Image gen</text>
-      <rect class="s-ext" x="532" y="380" width="118" height="40" rx="9"/><text class="t-l" x="591" y="400" text-anchor="middle" font-size="11">WordPress</text><text class="t-s" x="591" y="412" text-anchor="middle">REST API</text>
+      <rect class="s-ext" x="20" y="380" width="100" height="40" rx="9"/><text class="t-l" x="70" y="404" text-anchor="middle" font-size="10">Serper</text>
+      <rect class="s-ext" x="128" y="380" width="100" height="40" rx="9"/><text class="t-l" x="178" y="400" text-anchor="middle" font-size="10">Google</text><text class="t-s" x="178" y="412" text-anchor="middle">PSI/Places/NL</text>
+      <rect class="s-ext" x="236" y="380" width="100" height="40" rx="9"/><text class="t-l" x="286" y="404" text-anchor="middle" font-size="10">Claude API</text>
+      <rect class="s-ext" x="344" y="380" width="96" height="40" rx="9"/><text class="t-l" x="392" y="404" text-anchor="middle" font-size="10">Image gen</text>
+      <rect class="s-ext" x="448" y="380" width="100" height="40" rx="9"/><text class="t-l" x="498" y="404" text-anchor="middle" font-size="10">WordPress</text>
+      <rect class="s-ext" x="556" y="380" width="114" height="40" rx="9"/><text class="t-l" x="613" y="400" text-anchor="middle" font-size="10">Google policy</text><text class="t-s" x="613" y="412" text-anchor="middle">sources</text>
     </g>
-    <!-- sheets -->
-    <line class="edge-d" x1="115" y1="256" x2="115" y2="470" marker-end="url(#arwr)"/>
-    <line class="edge-d" x1="340" y1="460" x2="290" y2="470" marker-end="url(#arwr)"/>
-    <rect class="s-ext" x="250" y="470" width="200" height="40" rx="9"/><text class="t-l" x="350" y="490" text-anchor="middle" font-size="11">Google Sheets API</text><text class="t-s" x="350" y="503" text-anchor="middle">reporting layer</text>
+    <!-- reporting + command center -->
+    <line class="edge-d" x1="115" y1="256" x2="115" y2="472" marker-end="url(#arwr)"/>
+    <line class="edge-d" x1="263" y1="346" x2="240" y2="472" marker-end="url(#arwr)"/>
+    <rect class="s-ext" x="150" y="472" width="180" height="40" rx="9"/><text class="t-l" x="240" y="491" text-anchor="middle" font-size="10.5">Google Sheets API</text><text class="t-s" x="240" y="504" text-anchor="middle">reporting layer</text>
+    <line class="edge" x1="421" y1="346" x2="450" y2="472" marker-end="url(#arw)"/>
+    <rect class="s-solid" x="360" y="472" width="210" height="40" rx="9"/><text class="t-lw" x="465" y="491" text-anchor="middle" font-size="10.5">Command Center</text><text class="t-sw" x="465" y="504" text-anchor="middle">Policy Radar recommendations</text>
     <rect x="20" y="196" width="520" height="70" rx="10" fill="none" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
-    <text class="t-tag" x="26" y="192">STATE + QUEUE + SECRETS</text>
-    <rect x="20" y="368" width="640" height="60" rx="10" fill="none" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
-    <text class="t-tag" x="26" y="364">EXTERNAL SERVICES (agency keys)</text>
+    <text class="t-tag" x="26" y="192">STATE + KB + QUEUE + SECRETS</text>
+    <rect x="14" y="368" width="662" height="60" rx="10" fill="none" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
+    <text class="t-tag" x="20" y="364">EXTERNAL SERVICES (agency keys)</text>
   </svg>
   </div>
   <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">04</span></div>
@@ -510,7 +515,58 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">07</span></div>
 </section>
 
-<!-- ============ 08 ROLES TREE + MATRIX ============ -->
+<!-- ============ 08 POLICY RADAR ALGORITHM ============ -->
+<section class="page">
+  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Algorithm - Policy Radar (mandatory core)</span></div>
+  <div class="eyebrow">Algorithm 03 - Module 04</div>
+  <div class="h-sec">Policy Radar - the loop</div>
+  <div class="rule"></div>
+  <div class="diagwrap">
+  <svg viewBox="0 0 680 618">
+    <!-- entry -->
+    <rect class="s-mar" x="250" y="6" width="180" height="28" rx="14"/><text class="t-lw" x="340" y="25" text-anchor="middle">Scheduler tick</text>
+    <line class="edge" x1="340" y1="34" x2="340" y2="48" marker-end="url(#arw)"/>
+    <rect class="s-box" x="245" y="48" width="190" height="38" rx="9"/><text class="t-l" x="340" y="66" text-anchor="middle" font-size="11">Fetch official sources</text><text class="t-s" x="340" y="79" text-anchor="middle">Search Status, Search Central, QRG</text>
+    <line class="edge" x1="340" y1="86" x2="340" y2="100" marker-end="url(#arw)"/>
+    <!-- changed? -->
+    <polygon class="s-dia" points="340,100 405,132 340,164 275,132"/><text class="t-l" x="340" y="130" text-anchor="middle" font-size="10">changed since</text><text class="t-l" x="340" y="143" text-anchor="middle" font-size="10">last run?</text>
+    <line class="edge" x1="405" y1="132" x2="505" y2="132" marker-end="url(#arw)"/><text class="t-e" x="438" y="124">no</text>
+    <rect class="s-soft" x="505" y="112" width="150" height="40" rx="9"/><text class="t-l" x="580" y="130" text-anchor="middle" font-size="10">Wait / next tick</text><text class="t-s" x="580" y="143" text-anchor="middle">nothing to do</text>
+    <path class="edge-d" d="M580,112 V20 H430" marker-end="url(#arwr)"/>
+    <line class="edge" x1="340" y1="164" x2="340" y2="180" marker-end="url(#arw)"/><text class="t-e" x="348" y="176">yes  (or change detected)</text>
+    <!-- research chain -->
+    <rect class="s-box" x="245" y="180" width="190" height="34" rx="9"/><text class="t-l" x="340" y="201" text-anchor="middle" font-size="11">Research the change</text>
+    <line class="edge" x1="340" y1="214" x2="340" y2="228" marker-end="url(#arw)"/>
+    <rect class="s-box" x="245" y="228" width="190" height="34" rx="9"/><text class="t-l" x="340" y="249" text-anchor="middle" font-size="11">Summarize + dedupe</text>
+    <line class="edge" x1="340" y1="262" x2="340" y2="276" marker-end="url(#arw)"/>
+    <!-- flag = national flagging -->
+    <rect class="s-solid" x="215" y="276" width="250" height="46" rx="9"/><text class="t-lw" x="340" y="295" text-anchor="middle" font-size="11">Flag entry</text><text class="t-sw" x="340" y="310" text-anchor="middle">severity + category + region / nation scope</text>
+    <line class="edge" x1="340" y1="322" x2="340" y2="338" marker-end="url(#arw)"/>
+    <!-- KB -->
+    <ellipse cx="340" cy="340" rx="66" ry="8" class="s-soft"/><path class="s-soft" d="M274,340 v30 a66,8 0 0 0 132,0 v-30"/><text class="t-l" x="340" y="360" text-anchor="middle" font-size="11">Knowledge base</text><text class="t-s" x="340" y="373" text-anchor="middle">versioned</text>
+    <line class="edge" x1="340" y1="378" x2="340" y2="392" marker-end="url(#arw)"/>
+    <rect class="s-box" x="245" y="392" width="190" height="34" rx="9"/><text class="t-l" x="340" y="413" text-anchor="middle" font-size="11">Generate recommendations</text>
+    <line class="edge" x1="340" y1="426" x2="340" y2="440" marker-end="url(#arw)"/>
+    <rect class="s-mar" x="245" y="440" width="190" height="40" rx="9"/><text class="t-lw" x="340" y="459" text-anchor="middle" font-size="11">Command Center</text><text class="t-sw" x="340" y="472" text-anchor="middle">baseline + new recommendations</text>
+    <line class="edge" x1="340" y1="480" x2="340" y2="494" marker-end="url(#arw)"/>
+    <!-- human confirm -->
+    <polygon class="s-dia" points="340,494 405,524 340,554 275,524"/><text class="t-l" x="340" y="528" text-anchor="middle" font-size="10">human confirm?</text>
+    <line class="edge" x1="405" y1="524" x2="505" y2="524" marker-end="url(#arw)"/><text class="t-e" x="438" y="516">no</text>
+    <rect class="s-soft" x="505" y="504" width="150" height="40" rx="9"/><text class="t-l" x="580" y="522" text-anchor="middle" font-size="10">Hold / dismiss</text><text class="t-s" x="580" y="535" text-anchor="middle">logged, cited</text>
+    <line class="edge" x1="340" y1="554" x2="340" y2="568" marker-end="url(#arw)"/><text class="t-e" x="348" y="565">yes - apply</text>
+    <!-- fan out -->
+    <line class="edge" x1="340" y1="568" x2="120" y2="580" marker-end="url(#arw)"/>
+    <line class="edge" x1="340" y1="568" x2="340" y2="580" marker-end="url(#arw)"/>
+    <line class="edge" x1="340" y1="568" x2="560" y2="580" marker-end="url(#arw)"/>
+    <rect class="s-box" x="25" y="580" width="190" height="36" rx="9"/><text class="t-l" x="120" y="598" text-anchor="middle" font-size="10">Update audit checks</text><text class="t-s" x="120" y="610" text-anchor="middle">into the checklist</text>
+    <rect class="s-box" x="245" y="580" width="190" height="36" rx="9"/><text class="t-l" x="340" y="598" text-anchor="middle" font-size="10">Adjust content guidance</text><text class="t-s" x="340" y="610" text-anchor="middle">for the writers</text>
+    <rect class="s-box" x="465" y="580" width="190" height="36" rx="9"/><text class="t-l" x="560" y="598" text-anchor="middle" font-size="10">Client advisory</text><text class="t-s" x="560" y="610" text-anchor="middle">by affected region</text>
+  </svg>
+  </div>
+  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">08</span></div>
+</section>
+
+<!-- ============ 09 ROLES TREE + MATRIX ============ -->
 <section class="page">
   <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Roles - tree + access matrix</span></div>
   <div class="eyebrow">Diagram 02</div>
@@ -545,7 +601,7 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
     </tbody>
   </table>
   <div class="legend mt14"><div class="lg"><span class="dot"></span>&nbsp;allowed</div><div class="lg"><span class="dot o"></span>&nbsp;not allowed</div></div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">08</span></div>
+  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">09</span></div>
 </section>
 
 <!-- ============ 09 ERD ============ -->
@@ -555,7 +611,7 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="h-sec">Data model (ERD)</div>
   <div class="rule"></div>
   <div class="diagwrap">
-  <svg viewBox="0 0 680 560">
+  <svg viewBox="0 0 680 580">
     <!-- entity helper: box with title band -->
     <!-- users -->
     <g><rect class="s-box" x="20" y="20" width="150" height="86" rx="8"/><rect class="s-solid" x="20" y="20" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="32" width="150" height="12"/><text class="t-lw" x="30" y="37">users</text>
@@ -590,10 +646,23 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
     <line class="edge-t" x1="360" y1="222" x2="360" y2="280" marker-end="url(#arwm)"/><text class="t-e" x="365" y="255">1 : N</text>
     <line class="edge-t" x1="415" y1="150" x2="470" y2="175" marker-end="url(#arwm)"/><text class="t-e" x="420" y="150">1 : N</text>
     <line class="edge-t" x1="170" y1="120" x2="90" y2="150" marker-end="url(#arwm)"/><text class="t-e" x="100" y="140">logs</text>
-    <text class="t-tag" x="470" y="366" font-size="9">upsells + api_keys: agency-global</text>
+    <text class="t-tag" x="470" y="376" font-size="9">upsells + api_keys: agency-global</text>
+    <!-- Policy Radar entities -->
+    <text class="t-tag" x="20" y="390" font-size="9">POLICY RADAR (INTELLIGENCE) ENTITIES</text>
+    <g><rect class="s-box" x="20" y="398" width="150" height="72" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="20" y="398" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="410" width="150" height="12"/><text class="t-lw" x="30" y="415">policy_sources</text>
+      <text class="t-s" x="30" y="438" font-size="9.5">name, url, type</text><text class="t-s" x="30" y="452" font-size="9.5">last_checked</text><text class="t-s" x="30" y="466" font-size="9.5">last_hash</text></g>
+    <g><rect class="s-box" x="200" y="398" width="150" height="86" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="200" y="398" width="150" height="24" rx="8"/><rect class="s-solid" x="200" y="410" width="150" height="12"/><text class="t-lw" x="210" y="415">kb_entries</text>
+      <text class="t-s" x="210" y="438" font-size="9.5">source, category</text><text class="t-s" x="210" y="452" font-size="9.5">severity, region_flags[]</text><text class="t-s" x="210" y="466" font-size="9.5">summary, version</text><text class="t-s" x="210" y="480" font-size="9.5">hash</text></g>
+    <g><rect class="s-box" x="20" y="492" width="150" height="72" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="20" y="492" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="504" width="150" height="12"/><text class="t-lw" x="30" y="509">change_events</text>
+      <text class="t-s" x="30" y="532" font-size="9.5">source_id</text><text class="t-s" x="30" y="546" font-size="9.5">detected_at, diff_ref</text><text class="t-s" x="30" y="560" font-size="9.5">triggered_job</text></g>
+    <g><rect class="s-box" x="380" y="492" width="150" height="72" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="380" y="492" width="150" height="24" rx="8"/><rect class="s-solid" x="380" y="504" width="150" height="12"/><text class="t-lw" x="390" y="509">recommendations</text>
+      <text class="t-s" x="390" y="532" font-size="9.5">kb_entry_id, scope</text><text class="t-s" x="390" y="546" font-size="9.5">target_module, action</text><text class="t-s" x="390" y="560" font-size="9.5">status</text></g>
+    <line class="edge-t" x1="95" y1="470" x2="95" y2="492" marker-end="url(#arwm)"/><text class="t-e" x="100" y="486">1:N</text>
+    <line class="edge-t" x1="170" y1="528" x2="200" y2="450" marker-end="url(#arwm)"/><text class="t-e" x="176" y="500">creates</text>
+    <line class="edge-t" x1="350" y1="450" x2="380" y2="510" marker-end="url(#arwm)"/><text class="t-e" x="356" y="474">1:N</text>
   </svg>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">09</span></div>
+  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">10</span></div>
 </section>
 
 <!-- ============ 10 DEPLOYMENT ============ -->
@@ -640,7 +709,7 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
     <line class="edge-d" x1="490" y1="250" x2="560" y2="250" marker-end="url(#arwr)"/><text class="t-e" x="498" y="242">agency keys</text>
   </svg>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">10</span></div>
+  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">11</span></div>
 </section>
 
 <!-- ============ 11 BUILD GANTT ============ -->
@@ -683,7 +752,7 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
     </g>
   </svg>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">11</span></div>
+  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">12</span></div>
 </section>
 
 <!-- ============ 12 DEPENDENCY DAG + RISK ============ -->
@@ -730,10 +799,11 @@ table.mx tr:nth-child(even) td{ background:#FCF5F6; }
       <circle cx="520" cy="95" r="8" fill="#8C1D2E"/><text class="t-l" x="534" y="90" font-size="10">Scope creep</text><text class="t-s" x="534" y="103">P2 backlog</text>
       <circle cx="180" cy="170" r="8" fill="#D89AA3"/><text class="t-l" x="194" y="165" font-size="10">VPS SPOF</text><text class="t-s" x="194" y="178">backups</text>
       <circle cx="300" cy="150" r="8" fill="#B85C6B"/><text class="t-l" x="314" y="145" font-size="10">Fiverr no API</text><text class="t-s" x="314" y="158">CSV import</text>
+      <circle cx="250" cy="95" r="8" fill="#B85C6B"/><text class="t-l" x="264" y="90" font-size="10">Policy false positive</text><text class="t-s" x="264" y="103">human-confirm + cite</text>
     </g>
   </svg>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">12</span></div>
+  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">13</span></div>
 </section>
 
 </body>

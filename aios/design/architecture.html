@@ -185,7 +185,8 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="modstrip">
       <div class="mod"><div class="mi">Module 01</div><div class="mn">Audit</div></div>
       <div class="mod"><div class="mi">Module 02</div><div class="mn">Content</div></div>
-      <div class="mod"><div class="mi">Module 03</div><div class="mn">Client Portal</div></div>
+      <div class="mod"><div class="mi">Module 03</div><div class="mn">Portal</div></div>
+      <div class="mod"><div class="mi">Module 04</div><div class="mn">Policy Radar</div></div>
     </div>
     <div class="meta">
       <div>Prepared for <b>Danyal</b><br>Agency Owner</div>
@@ -203,39 +204,37 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="rule"></div>
 
   <div class="stats mb18">
-    <div class="stat"><div class="n">3</div><div class="l">Core modules in v1</div></div>
+    <div class="stat"><div class="n">4</div><div class="l">Core modules in v1</div></div>
     <div class="stat"><div class="n">~90%</div><div class="l">Content automation goal</div></div>
     <div class="stat"><div class="n">3-5</div><div class="l">Week build estimate</div></div>
-    <div class="stat"><div class="n">1</div><div class="l">VPS, Docker Compose</div></div>
+    <div class="stat"><div class="n">24/7</div><div class="l">Policy Radar research</div></div>
   </div>
 
   <div class="cols2" style="align-items:start;">
     <div>
       <div class="lead-lbl">Document contents</div>
-      <div class="toc">
+      <div class="toc" style="gap:6px;">
         <div class="toc-item"><span class="tn">01</span><span class="tt">Executive Summary</span><span class="tp">The what &amp; why</span></div>
         <div class="toc-item"><span class="tn">02</span><span class="tt">System Architecture</span><span class="tp">Full diagram</span></div>
         <div class="toc-item"><span class="tn">03</span><span class="tt">Module - Audit</span><span class="tp">Reports engine</span></div>
         <div class="toc-item"><span class="tn">04</span><span class="tt">Module - Content</span><span class="tp">Generate + publish</span></div>
-        <div class="toc-item"><span class="tn">05</span><span class="tt">Module - Client Portal</span><span class="tp">Client + admin</span></div>
-        <div class="toc-item"><span class="tn">06</span><span class="tt">Data Model &amp; Reporting</span><span class="tp">Entities + Sheets</span></div>
-        <div class="toc-item"><span class="tn">07</span><span class="tt">Tech Stack</span><span class="tp">Choices + rationale</span></div>
-        <div class="toc-item"><span class="tn">08</span><span class="tt">Infra, Security &amp; Cost</span><span class="tp">VPS + controls</span></div>
-        <div class="toc-item"><span class="tn">09</span><span class="tt">Scope</span><span class="tp">In / Phase 2 / Out</span></div>
-        <div class="toc-item"><span class="tn">10</span><span class="tt">Implementation Roadmap</span><span class="tp">Week 0-5</span></div>
-        <div class="toc-item"><span class="tn">11</span><span class="tt">Risks &amp; Next Steps</span><span class="tp">Dependencies</span></div>
+        <div class="toc-item"><span class="tn">05</span><span class="tt">Module - Portal</span><span class="tp">4 portals</span></div>
+        <div class="toc-item"><span class="tn">06</span><span class="tt">Module - Policy Radar</span><span class="tp">Intelligence</span></div>
+        <div class="toc-item"><span class="tn">07</span><span class="tt">Data Model &amp; Reporting</span><span class="tp">Entities + Sheets</span></div>
+        <div class="toc-item"><span class="tn">08</span><span class="tt">Tech Stack</span><span class="tp">Choices + rationale</span></div>
+        <div class="toc-item"><span class="tn">09</span><span class="tt">Infra, Security &amp; Cost</span><span class="tp">VPS + controls</span></div>
+        <div class="toc-item"><span class="tn">10</span><span class="tt">Scope</span><span class="tp">In / Phase 2 / Out</span></div>
+        <div class="toc-item"><span class="tn">11</span><span class="tt">Implementation Roadmap</span><span class="tp">Week 0-5</span></div>
+        <div class="toc-item"><span class="tn">12</span><span class="tt">Risks &amp; Next Steps</span><span class="tp">Dependencies</span></div>
       </div>
     </div>
     <div>
-      <div class="lead-lbl">The three modules</div>
-      <div class="grid" style="gap:10px;">
-        <div class="hero"><h4>01 - Audit</h4><p>Comprehensive 20-30+ page SEO audits (on-page, technical, local, AI) run as a cloud job. Technical + actionable reports in v1.</p></div>
-        <div class="card"><h4>02 - Content</h4><p>AI content (AIDA), automated schema, AI images. Publishes to WordPress or exports a manual PDF. ~90% automated.</p></div>
-        <div class="card"><h4>03 - Client Portal</h4><p>Clients view reports, track milestones, and click through to Fiverr upsells. Admins monitor team + client status.</p></div>
-      </div>
-      <div class="card mt14" style="background:var(--blush-2);">
-        <h4>Why cloud, not local</h4>
-        <p>A cloud architecture with a shared job queue, key vault, and caching is what keeps the platform's API spend predictable - the core reason cited in the scope call.</p>
+      <div class="lead-lbl">The four modules</div>
+      <div class="grid" style="gap:8px;">
+        <div class="hero"><h4>01 - Audit</h4><p>20-30+ page SEO audits (on-page, technical, local, AI) run as a cloud job. Technical + actionable in v1.</p></div>
+        <div class="card"><h4>02 - Content</h4><p>AI content (AIDA), automated schema, AI images. Publishes to WordPress or a manual PDF. ~90% automated.</p></div>
+        <div class="card"><h4>03 - Portal</h4><p>Four role-scoped portals: client, team, manager (optional), admin. Reports, milestones, Fiverr upsells.</p></div>
+        <div class="card" style="background:var(--blush-2);"><h4>04 - Policy Radar</h4><p>Mandatory core. Auto-researches Google changes, flags them in the knowledge base, and feeds the Command Center. Shared across all deployments.</p></div>
       </div>
     </div>
   </div>
@@ -248,16 +247,16 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="eyebrow">Section 01</div>
   <div class="h-sec">Executive Summary</div>
   <div class="rule"></div>
-  <div class="h-sub mb18">AIOS turns the agency's SEO delivery into a self-running, cloud-hosted platform across three modules - Audit, Content, and a Client Portal - with Google Sheets reporting as a cross-cutting layer. The goal is roughly 90% automation of content creation and publishing, cutting per-page effort from hours to minutes, with a human review checkpoint on the final step.</div>
+  <div class="h-sub mb18">AIOS turns the agency's SEO delivery into a self-running, cloud-hosted platform across four modules - Audit, Content, the Portal, and the mandatory Policy Radar intelligence engine - with Google Sheets reporting and a Command Center where recommendations surface. AIOS is a product deployed per agency client (Danyal, Haseeb, and beyond); the core is shared. The goal is roughly 90% automation, cutting per-page effort from hours to minutes, with a human review checkpoint on the final step.</div>
 
   <div class="lead-lbl">Locked decisions - v1</div>
   <div class="cols2" style="align-items:start;">
     <ul class="clean">
       <li><b>Audit module</b> reuses the existing, proven audit engine, wrapped as a cloud job / API.</li>
+      <li><b>Policy Radar</b> is mandatory core in every deployment - auto-researches Google, flags the knowledge base, feeds the Command Center.</li>
       <li><b>Stack:</b> Next.js portal + FastAPI (Python) + Postgres + Redis, on Docker Compose.</li>
       <li><b>API keys</b> are pre-loaded by the agency into a central vault; no payment gateway in v1.</li>
-      <li><b>Publishing:</b> WordPress REST API in v1, plus a manual PDF path.</li>
-      <li><b>Images:</b> AI-generated with automatic alt text.</li>
+      <li><b>Publishing:</b> WordPress REST API in v1, plus a manual PDF path. <b>Images</b> AI-generated with alt text.</li>
     </ul>
     <ul class="clean">
       <li><b>Onboarding:</b> agency-provisioned accounts; no public self-signup.</li>
@@ -282,43 +281,47 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="eyebrow">Section 02</div>
   <div class="h-sec">System Architecture</div>
   <div class="rule"></div>
-  <div class="h-sub mb14">A browser talks to the Next.js app. Next.js calls FastAPI for all logic and auth. FastAPI uses Postgres and enqueues slow work into Redis. Python workers run the Audit and Content engines against external APIs through a shared, encrypted key vault. Everything runs as Docker Compose services on one VPS behind a TLS proxy.</div>
+  <div class="h-sub mb14">A browser talks to the Next.js app. Next.js calls FastAPI for all logic and auth. FastAPI uses Postgres and enqueues slow work into Redis. Python workers run the Audit, Content, and Policy Radar research engines against external APIs through a shared, encrypted key vault. A scheduler drives Policy Radar. Everything runs as Docker Compose services on one VPS behind a TLS proxy.</div>
 
   <!-- diagram -->
   <div style="display:grid; gap:0;">
     <div class="node soft" style="max-width:120mm; margin:0 auto;"><div class="t">Client browser</div><div class="s">Agency team + client users</div></div>
-    <div class="arrow-c" style="height:22px;"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="arrow-c" style="height:16px;"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="node solid" style="max-width:120mm; margin:0 auto;"><div class="t">Reverse proxy - Caddy / Nginx (TLS)</div></div>
-    <div class="arrow-c" style="height:22px;"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="arrow-c" style="height:16px;"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
     <div class="row-eq" style="grid-template-columns:1fr 1fr; max-width:150mm; margin:0 auto; width:100%;">
-      <div class="node"><div class="t">Next.js (React)</div><div class="s">Portal + Admin UI</div></div>
+      <div class="node"><div class="t">Next.js (React)</div><div class="s">Portal + Admin + Command Center</div></div>
       <div class="node"><div class="t">FastAPI (Python)</div><div class="s">API - Auth - Job dispatch</div></div>
     </div>
-    <div class="arrow-c" style="height:22px;"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="arrow-c" style="height:16px;"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
     <div class="row-eq cols3" style="max-width:158mm; margin:0 auto; width:100%;">
-      <div class="node"><div class="t">Postgres</div><div class="s">All application data</div></div>
+      <div class="node"><div class="t">Postgres</div><div class="s">App data + knowledge base</div></div>
       <div class="node"><div class="t">Redis</div><div class="s">Job queue + cache</div></div>
       <div class="node"><div class="t">Key Vault</div><div class="s">Encrypted API keys</div></div>
     </div>
-    <div class="arrow-c" style="height:22px;"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="arrow-c" style="height:16px;"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
-    <div class="row-eq" style="grid-template-columns:1fr 1fr; max-width:150mm; margin:0 auto; width:100%;">
-      <div class="node solid"><div class="t">Audit worker</div><div class="s">Existing audit engine + PDF</div></div>
-      <div class="node solid"><div class="t">Content worker</div><div class="s">Claude copy + AI images</div></div>
+    <div class="row-eq" style="grid-template-columns:1fr 1fr 1fr 1fr; max-width:172mm; margin:0 auto; width:100%; gap:8px;">
+      <div class="node solid"><div class="t">Audit worker</div><div class="s">engine + PDF</div></div>
+      <div class="node solid"><div class="t">Content worker</div><div class="s">copy + images</div></div>
+      <div class="node solid"><div class="t">Research worker</div><div class="s">Policy Radar</div></div>
+      <div class="node"><div class="t">Scheduler</div><div class="s">cron + change detect</div></div>
     </div>
-    <div class="arrow-c" style="height:22px;"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="arrow-c" style="height:16px;"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
-    <div class="row-eq" style="grid-template-columns:repeat(5,1fr); max-width:170mm; margin:0 auto; width:100%; gap:8px;">
+    <div class="row-eq" style="grid-template-columns:repeat(6,1fr); max-width:180mm; margin:0 auto; width:100%; gap:6px;">
       <div class="node ext"><div class="t">Serper</div></div>
       <div class="node ext"><div class="t">Google APIs</div></div>
       <div class="node ext"><div class="t">Claude API</div></div>
       <div class="node ext"><div class="t">Image gen</div></div>
-      <div class="node ext"><div class="t">WordPress REST</div></div>
+      <div class="node ext"><div class="t">WordPress</div></div>
+      <div class="node ext"><div class="t">Google policy sources</div></div>
     </div>
-    <div style="text-align:center; margin-top:10px;">
-      <span class="tag ghost">Google Sheets API - reporting layer across audit, content &amp; milestones</span>
+    <div style="text-align:center; margin-top:10px; display:flex; gap:8px; justify-content:center;">
+      <span class="tag ghost">Google Sheets API - reporting layer</span>
+      <span class="tag">Command Center - Policy Radar recommendations</span>
     </div>
   </div>
   <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">04</span></div>
@@ -432,10 +435,46 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">07</span></div>
 </section>
 
-<!-- ============ 08 DATA MODEL + REPORTING ============ -->
+<!-- ============ 08 MODULE POLICY RADAR ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 06 - Data &amp; Reporting</span></div>
-  <div class="eyebrow">Section 06</div>
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 06 - Policy Radar</span></div>
+  <div class="eyebrow">Section 06 - Module 04 - Mandatory core</div>
+  <div class="h-sec">Policy Radar (Intelligence)</div>
+  <div class="rule"></div>
+  <div class="h-sub mb14">An always-on engine that keeps every AIOS deployment current with Google. It is platform core, not a per-client feature: it ships in every deployment (Danyal, Haseeb, and beyond) and feeds recommendations into the <b>Command Center</b>. When Google changes or releases something, it auto-researches that change and recommends what to do.</div>
+
+  <div class="lead-lbl">The loop</div>
+  <div class="row-eq mb14" style="grid-template-columns:repeat(5,1fr); gap:6px; align-items:stretch;">
+    <div class="node soft"><div class="t">Watch</div><div class="s">official sources</div></div>
+    <div class="node soft"><div class="t">Detect change</div><div class="s">diff + trigger</div></div>
+    <div class="node soft"><div class="t">Research</div><div class="s">summarize</div></div>
+    <div class="node soft"><div class="t">Flag + store</div><div class="s">KB, versioned</div></div>
+    <div class="node soft"><div class="t">Recommend</div><div class="s">Command Center</div></div>
+  </div>
+
+  <div class="cols2" style="align-items:start;">
+    <div>
+      <div class="lead-lbl">National flagging - every entry tagged</div>
+      <ul class="clean">
+        <li><b>Severity</b> - critical / major / minor / info.</li>
+        <li><b>Category</b> - algorithm / policy / technical / content / local / GEO.</li>
+        <li><b>Region / nation scope</b> - global vs specific countries, so advice filters to each client's market.</li>
+        <li><b>Source cited</b> - Search Status Dashboard, Search Central, QRG. Nothing applied on an unverifiable claim.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="lead-lbl">Command Center</div>
+      <div class="card mb8"><h4>Every recommendation, in one place</h4><p>Shows all current best practices as a baseline, plus new or changed recommendations triggered by Google moves - what changed, why it matters, regions affected, and the action.</p></div>
+      <div class="hero"><h4>Closed loop</h4><p>A recommendation can add or update audit checks, adjust content guidance, or raise a client advisory. Human-confirmed before it changes live checks.</p></div>
+    </div>
+  </div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">08</span></div>
+</section>
+
+<!-- ============ 09 DATA MODEL + REPORTING ============ -->
+<section class="page">
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 07 - Data &amp; Reporting</span></div>
+  <div class="eyebrow">Section 07</div>
   <div class="h-sec">Data Model &amp; Reporting</div>
   <div class="rule"></div>
   <div class="h-sub mb14">Multi-tenant under a single agency. A compact relational core drives both faces of the portal; Google Sheets is the cross-cutting reporting layer.</div>
@@ -453,6 +492,14 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="card"><h4>activity_log</h4><p>actor, action, target, timestamp - feeds the admin monitor.</p></div>
   </div>
 
+  <div class="lead-lbl">Policy Radar entities (Intelligence)</div>
+  <div class="cols2 mb14" style="align-items:start;">
+    <div class="card"><h4>kb_entries</h4><p>source, url, category, <b>severity</b>, <b>region_flags[]</b>, summary, version, hash.</p></div>
+    <div class="card"><h4>recommendations</h4><p>kb_entry_id, scope, target_module (audit/content), action, status.</p></div>
+    <div class="card"><h4>policy_sources</h4><p>name, url, type, last_checked, last_hash - drives change detection.</p></div>
+    <div class="card"><h4>change_events</h4><p>source_id, detected_at, diff_ref, triggered_job - Google-move trail.</p></div>
+  </div>
+
   <div class="lead-lbl">Reporting - Google Sheets</div>
   <div class="row-eq" style="grid-template-columns:1fr 24px 1fr 24px 1fr; align-items:center; gap:0;">
     <div class="node soft"><div class="t">Audit scores</div></div>
@@ -462,16 +509,16 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="node soft"><div class="t">Shareable dataviz</div><div class="s">Per client / master</div></div>
   </div>
   <div class="card mt14"><p style="font-size:12.5px;">Content-job status and milestone state push to the same sheets, giving the agency and clients familiar, shareable visualizations without building bespoke charts in v1.</p></div>
-  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">08</span></div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">09</span></div>
 </section>
 
 <!-- ============ 09 TECH STACK ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 07 - Tech Stack</span></div>
-  <div class="eyebrow">Section 07</div>
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 08 - Tech Stack</span></div>
+  <div class="eyebrow">Section 08</div>
   <div class="h-sec">Tech Stack</div>
   <div class="rule"></div>
-  <div class="h-sub mb14">One Python spine for all logic, AI, and both engines; Next.js for a fast modern UI; a queue to isolate expensive work. Chosen to run cleanly on a single VPS with predictable spend.</div>
+  <div class="h-sub mb14">One Python spine for all logic, AI, and every engine; Next.js for a fast modern UI; a queue to isolate expensive work. Chosen to run cleanly on a single VPS with predictable spend.</div>
 
   <table class="tbl">
     <thead><tr><th>Layer</th><th>Choice</th><th>Why it was chosen</th></tr></thead>
@@ -483,23 +530,24 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
       <tr><td>Database</td><td>Postgres</td><td>Reliable relational store for multi-tenant data.</td></tr>
       <tr><td>Queue + cache</td><td>Redis</td><td>Job queue, concurrency caps, and caching of costly API calls.</td></tr>
       <tr><td>Publishing</td><td>WordPress REST API</td><td>The v1 CMS target; app-password auth per client site.</td></tr>
+      <tr><td>Intelligence</td><td>Scheduler + web research + Claude</td><td>Policy Radar: watch Google, research changes, flag the KB, recommend.</td></tr>
       <tr><td>Reporting</td><td>Google Sheets API</td><td>Familiar, shareable client-facing dataviz with no custom charting.</td></tr>
       <tr><td>Deploy</td><td>Docker Compose + Caddy TLS</td><td>Single-box, cost-controlled, simple to operate and hand off.</td></tr>
     </tbody>
   </table>
 
   <div class="cols3 mt14">
-    <div class="hero"><h4>One spine</h4><p>API, workers, and both engines are Python - shared libraries, one mental model, easy hiring.</p></div>
+    <div class="hero"><h4>One spine</h4><p>API, workers, and all engines are Python - shared libraries, one mental model, easy hiring.</p></div>
     <div class="card"><h4>Queue-isolated</h4><p>Slow, costly API work runs off the request path so the UI stays fast and spend stays capped.</p></div>
     <div class="card"><h4>Single-box simple</h4><p>Everything is a Compose service on the VPS - trivial to deploy, back up, and reason about.</p></div>
   </div>
-  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">09</span></div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">10</span></div>
 </section>
 
 <!-- ============ 10 INFRA / SECURITY / COST ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 08 - Infra, Security &amp; Cost</span></div>
-  <div class="eyebrow">Section 08</div>
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 09 - Infra, Security &amp; Cost</span></div>
+  <div class="eyebrow">Section 09</div>
   <div class="h-sec">Infra, Security &amp; Cost Control</div>
   <div class="rule"></div>
   <div class="h-sub mb14">Cost control is the reason the platform is cloud-based. The queue, the shared vault, and caching exist to make automated API spend predictable.</div>
@@ -507,7 +555,7 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
   <div class="cols2 mb14" style="align-items:start;">
     <div>
       <div class="lead-lbl">Deployment</div>
-      <div class="card mb8"><p><b>Docker Compose services:</b> web (Next.js), api (FastAPI), worker (Python), postgres, redis, proxy (Caddy/Nginx, auto-TLS). Artifacts on the VPS volume; add object storage later if needed.</p></div>
+      <div class="card mb8"><p><b>Docker Compose services:</b> web (Next.js), api (FastAPI), worker (audit + content + research), scheduler (Policy Radar cron + change detect), postgres, redis, proxy (Caddy/Nginx, auto-TLS). Artifacts on the VPS volume; add object storage later if needed.</p></div>
       <div class="hero"><h4>Recommended VPS</h4><p>Ubuntu 22.04+, 4 vCPU / 8-16 GB RAM / 100-160 GB NVMe SSD. Hetzner / DigitalOcean / Contabo class. Adan provisions once access is granted.</p></div>
     </div>
     <div>
@@ -528,13 +576,13 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="card"><h4>Resilience</h4><p>Nightly Postgres backups, container restart policies, documented restore, TLS everywhere.</p></div>
     <div class="card"><h4>Trust boundary</h4><p>Audited-site content and generated copy are treated as data, not instructions.</p></div>
   </div>
-  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">10</span></div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">11</span></div>
 </section>
 
 <!-- ============ 11 SCOPE ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 09 - Scope</span></div>
-  <div class="eyebrow">Section 09</div>
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 10 - Scope</span></div>
+  <div class="eyebrow">Section 10</div>
   <div class="h-sec">Project Scope</div>
   <div class="rule"></div>
   <div class="h-sub mb18">A tight v1 protects the 3-5 week timeline. Everything else is parked in a named backlog so new requests never quietly derail the core build.</div>
@@ -546,9 +594,9 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
         <li>Audit module (technical + actionable) as a cloud job / API.</li>
         <li>Content: AIDA drafting, automated schema, AI images.</li>
         <li>Manual-PDF + WordPress publishing, with review checkpoint.</li>
-        <li>Client Portal: client + admin views.</li>
-        <li>Agency-provisioned accounts.</li>
-        <li>Google Sheets reporting.</li>
+        <li>Portal: client, team, admin (manager optional).</li>
+        <li><b>Policy Radar + Command Center (mandatory core).</b></li>
+        <li>Agency-provisioned accounts, Google Sheets reporting.</li>
         <li>Central API key vault + cost controls.</li>
       </ul>
     </div>
@@ -571,13 +619,13 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
       <div class="hero mt14"><h4>Scope discipline</h4><p>New feature requests are logged to the Phase 2 backlog, not slipped into v1 - the guardrail that keeps the timeline honest.</p></div>
     </div>
   </div>
-  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">11</span></div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">12</span></div>
 </section>
 
 <!-- ============ 12 ROADMAP ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 10 - Implementation Roadmap</span></div>
-  <div class="eyebrow">Section 10</div>
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 11 - Implementation Roadmap</span></div>
+  <div class="eyebrow">Section 11</div>
   <div class="h-sec">Implementation Roadmap</div>
   <div class="rule"></div>
   <div class="h-sub mb14">Six tracks over 3-5 weeks. Each closes on a concrete, demoable exit criterion - so progress is provable, not assumed.</div>
@@ -592,17 +640,17 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="tl-row"><div class="tl-wk"><span class="w">Week</span><span class="num">3</span></div>
       <div class="tl-body"><div class="tt">Content module</div><div class="td">Content engine (AIDA + schema + AI images), manual-PDF path, WordPress connector, content-job UI + review checkpoint.</div><div class="ex">Exit: generate a service page, review, publish to a test WordPress site.</div></div></div>
     <div class="tl-row"><div class="tl-wk"><span class="w">Week</span><span class="num">4</span></div>
-      <div class="tl-body"><div class="tt">Portal completion</div><div class="td">Auto-updated milestones, Fiverr upsells, Google Sheets reporting, super-admin team-activity monitor, cost tracking.</div><div class="ex">Exit: full client journey + admin oversight work end-to-end.</div></div></div>
+      <div class="tl-body"><div class="tt">Portal completion + Policy Radar</div><div class="td">Milestones, Fiverr upsells, Google Sheets reporting, team-activity monitor, cost tracking, and the Intelligence engine: scheduler + change detection, flagged KB, Command Center.</div><div class="ex">Exit: full client journey + admin oversight + Command Center recommendations live.</div></div></div>
     <div class="tl-row"><div class="tl-wk"><span class="w">Week</span><span class="num">5</span></div>
       <div class="tl-body"><div class="tt">Hardening + handoff</div><div class="td">Security pass, backups, performance, UAT with Danyal, docs / runbook, production deploy, buffer.</div><div class="ex">Exit: production live, Danyal onboarded.</div></div></div>
   </div>
-  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">12</span></div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">13</span></div>
 </section>
 
 <!-- ============ 13 RISKS + NEXT STEPS ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 11 - Risks &amp; Next Steps</span></div>
-  <div class="eyebrow">Section 11</div>
+  <div class="runhead"><span>AIOS - SEO Automation Platform</span><span>Section 12 - Risks &amp; Next Steps</span></div>
+  <div class="eyebrow">Section 12</div>
   <div class="h-sec">Risks &amp; Next Steps</div>
   <div class="rule"></div>
 
@@ -613,6 +661,7 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
       <tr><td>API cost overruns</td><td>Budget caps, caching, tier gating, per-job cost logging.</td></tr>
       <tr><td>WordPress site variability</td><td>App-password auth, per-site config, graceful fallback to the manual PDF.</td></tr>
       <tr><td>Content hallucination</td><td>Human review checkpoint, schema validation, evidence-based audit rules.</td></tr>
+      <tr><td>Policy Radar false positives</td><td>Every entry cites its source; recommendations human-confirmed in the Command Center before changing live checks.</td></tr>
       <tr><td>Scope creep vs timeline</td><td>New requests parked to the named Phase 2 backlog.</td></tr>
       <tr><td>Single VPS point of failure</td><td>Backups, restart policies, documented restore; scale out later.</td></tr>
       <tr><td>Fiverr has no public API</td><td>Manual / CSV client-data import in v1.</td></tr>
@@ -625,7 +674,7 @@ table.tbl tr:nth-child(even) td{ background:#FCF5F6; }
     <div class="card"><h4>Adan</h4><p>Provision + harden the VPS; set up Docker + CI/CD; begin Week 1 foundations.</p></div>
     <div class="card"><h4>Zain</h4><p>Next call in 1-2 weeks to review the Off-Page module documentation and shape Phase 2.</p></div>
   </div>
-  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">13</span></div>
+  <div class="pfoot"><span>Xegents AI &nbsp;-&nbsp; Prepared for Danyal &nbsp;-&nbsp; Confidential</span><span class="pn">14</span></div>
 </section>
 
 </body>

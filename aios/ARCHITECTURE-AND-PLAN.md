@@ -1,9 +1,11 @@
 # AIOS - SEO Automation Platform
 ## System Architecture, Design & Implementation Plan
 
-**Client:** Danyal (agency owner)
+**Product:** AIOS is a productized platform deployed per agency client. This document is the
+Danyal deployment; the core - including the mandatory **Intelligence (Policy Radar)** module -
+is shared across every deployment (Danyal, Haseeb, and future clients).
 **Built by:** Xegents AI
-**Source:** Scope call 2026-07-03 (see `meeting-notes/2026-07-03-scope-call.md`)
+**Source:** Scope call 2026-07-03 (see `meeting-notes/2026-07-03-scope-call.md`) + follow-ups
 **Status:** Planning - v1 architecture locked, ready to build
 **Estimated build:** 3-5 weeks
 
@@ -12,8 +14,10 @@
 ## 1. Executive Summary
 
 AIOS is a cloud-based SEO automation platform for Danyal's agency. It turns the agency's
-service delivery into a self-running system across three modules - **Audit**, **Content**,
-and a **Client Portal** - with **Google Sheets reporting** as a cross-cutting layer.
+service delivery into a self-running system across four modules - **Audit**, **Content**,
+the **Portal**, and the mandatory **Intelligence (Policy Radar)** engine - with **Google
+Sheets reporting** as a cross-cutting layer and a **Command Center** where recommendations
+surface.
 
 The platform is cloud-hosted (not local) for one reason stated repeatedly in the call:
 **API cost control**. Centralizing the automated processes behind a job queue, a shared
@@ -32,7 +36,8 @@ for the final 10%.
 6. **Onboarding:** agency-provisioned accounts (super-admin creates client logins). No public signup.
 7. **Financial audit report** (market capacity + revenue): documented now, built in Phase 2.
 8. **Off-Page module:** out of scope for v1; documented for a future phase.
-9. **Deliverable audience:** internal founder-grade architecture + build plan.
+9. **Intelligence (Policy Radar):** mandatory core in every AIOS deployment (Danyal, Haseeb, and beyond). Auto-researches Google policy/algorithm changes, stores them flagged in the knowledge base, and drives recommendations in the Command Center.
+10. **Deliverable audience:** internal founder-grade architecture + build plan.
 
 ---
 
@@ -66,24 +71,27 @@ Docker Compose services on a single VPS behind a TLS reverse proxy.
                    | (all app data) |       | (queue + cache)  |       | (encrypted)     |
                    +----------------+       +--------+---------+       +-----------------+
                                                      |
-                              +----------------------+----------------------+
-                              v                                             v
-                     +-----------------+                          +------------------+
-                     | Audit worker    |                          | Content worker   |
-                     | (audit_engine)  |                          | (Claude + images)|
-                     +--------+--------+                          +---------+--------+
-                              |                                             |
-        +---------------------+------------+            +-------------------+------------------+
-        v            v            v         v            v          v          v               v
-     Serper    Google APIs    Crawl     PDF gen      Claude API  Image gen  Schema      WordPress REST API
-              (PSI/Places/NL)                        (AIDA copy)            builder     (per client site)
-                              \                                    /
-                               +------------- Google Sheets API ---+
-                                        (reporting / dataviz)
+                    +-----------------+----------------+-----------------+
+                    v                 v                v                 v
+           +--------------+  +----------------+  +----------------+  +-------------------+
+           | Audit worker |  | Content worker |  | Research worker|  | Scheduler         |
+           | (audit_engine)| | (Claude+images)|  | (Policy Radar) |  | (cron + detect)   |
+           +------+-------+  +-------+--------+  +-------+--------+  +---------+---------+
+                  |                  |                   |                     |
+     +------------+----+    +--------+------+    +-------+--------+   fires research on
+     v      v     v     v   v        v      v    v       v        v   detected Google change
+  Serper Google Crawl PDF  Claude  Image  Schema  Google policy sources -> flagged KB entries
+        APIs        gen    (AIDA)   gen           (Search Status, Search Central, QRG)
+                  \                        /                 |
+                   +--- Google Sheets API -+                 v
+                        (reporting)                +---------------------+
+                                                   | Command Center      |
+                                                   | recommendations     |
+                                                   +---------------------+
 ```
 
-**Why this shape:** one Python spine (FastAPI + workers + both engines) means the audit
-engine, the content engine, and the API all share a language and libraries. Next.js gives
+**Why this shape:** one Python spine (FastAPI + workers + the audit, content, and research
+engines) means every engine and the API share a language and libraries. Next.js gives
 a fast, modern portal/admin UI. The queue isolates expensive, slow API work from the
 request path so the UI stays responsive and spend stays inside concurrency + budget caps.
 
@@ -161,7 +169,41 @@ scope folds into Admin.
 
 ---
 
-## 6. Reporting - Google Sheets
+## 6. Module 4 - Intelligence (Policy Radar) - MANDATORY CORE
+
+An always-on research engine that keeps every AIOS deployment current with Google. It is
+platform core, not a per-client feature: it ships in every deployment (Danyal, Haseeb, and
+future agencies) and feeds recommendations into the **Command Center**.
+
+- **What it does:** continuously researches Google's latest policies, algorithm updates,
+  Search Central documentation changes, and feature releases. When Google changes or
+  releases something, it auto-researches that change and generates new recommendations.
+- **Sources:** Google Search Status Dashboard, Search Central blog + docs, Google policy
+  pages, the Quality Rater Guidelines, corroborated with reputable SEO reporting.
+- **Change detection:** a scheduled watcher diffs the official sources; a detected change
+  fires a research job immediately rather than waiting for the next poll.
+- **Knowledge base + flagging:** each entry is normalized, deduped, summarized, versioned,
+  and **flagged** with (1) impact severity (critical / major / minor / info), (2) category
+  (algorithm / policy / technical / content / local / GEO), and (3) **region / nation scope**
+  - global vs specific countries - so recommendations can be filtered to each client's market.
+  This extends the existing `knowledge/` base and retires the old `kb-refresh` stub.
+- **Command Center:** the recommendations surface. It shows every current best-practice
+  recommendation as a baseline, plus new or changed recommendations triggered by Google
+  moves, each with what changed, why it matters, the regions affected, and the recommended
+  action.
+- **Closed loop:** a recommendation can propose new or updated audit checks (into the
+  checklist the Audit module runs), adjust Content-engine guidance, and raise client-specific
+  advisories when a change hits a client's region or stack.
+- **Human confirm:** Command Center recommendations are reviewed before they change live
+  audit checks or client-facing advice - the same review-checkpoint discipline as Content.
+  Every entry cites its source, so nothing is applied on an unverifiable claim.
+
+Command Center lives in the admin / super-admin portal and is visible to Manager; a filtered,
+client-safe advisory view can surface in the client portal in a later phase.
+
+---
+
+## 7. Reporting - Google Sheets
 
 A cross-cutting layer. Audit scores, content job status, and milestone state are pushed to
 Google Sheets (via a service account) so the agency and clients get familiar, shareable
@@ -169,7 +211,7 @@ data visualizations without building bespoke charts in v1.
 
 ---
 
-## 7. Data Model (multi-tenant, single agency)
+## 8. Data Model (multi-tenant, single agency per deployment)
 
 - **users** - `role` in {super_admin, manager, team_member, client}, email, password_hash. (manager optional in v1)
 - **clients** - the agency's customers (a client owns one or more sites).
@@ -181,10 +223,14 @@ data visualizations without building bespoke charts in v1.
 - **upsells** - title, description, fiverr_url, active.
 - **api_keys** - agency-level encrypted vault (serper, google, anthropic, image gen, sheets).
 - **activity_log** - actor, action, target, timestamp (feeds the admin monitor).
+- **policy_sources** - name, url, type, last_checked, last_hash (drives change detection).
+- **kb_entries** - source, url, title, published_at, category, severity, region_flags[], summary, raw_ref, version, hash.
+- **change_events** - source_id, detected_at, diff_ref, triggered_job (Google-move audit trail).
+- **recommendations** - kb_entry_id, scope (global/client/site), target_module (audit/content/portal), action, status (new/acknowledged/applied/dismissed).
 
 ---
 
-## 8. Tech Stack
+## 9. Tech Stack
 
 | Layer | Choice | Why |
 |---|---|---|
@@ -195,15 +241,17 @@ data visualizations without building bespoke charts in v1.
 | Database | Postgres | Relational, multi-tenant, reliable |
 | Queue + cache | Redis | Job queue, concurrency caps, API caching |
 | Publishing | WordPress REST API | v1 target CMS |
+| Intelligence | Scheduler + web research + Claude | Policy Radar: research, flag, recommend |
 | Reporting | Google Sheets API | Familiar client-facing dataviz |
 | Deploy | Docker Compose on VPS + Caddy TLS | Single-box, cost-controlled, simple ops |
 
 ---
 
-## 9. Infrastructure, Security & Cost Control
+## 10. Infrastructure, Security & Cost Control
 
 **Deployment:** Docker Compose services - `web` (Next.js), `api` (FastAPI), `worker`
-(Python), `postgres`, `redis`, `proxy` (Caddy/Nginx, auto-TLS). Object/file storage for
+(Python, audit + content + research jobs), `scheduler` (Policy Radar cron + change
+detection), `postgres`, `redis`, `proxy` (Caddy/Nginx, auto-TLS). Object/file storage for
 artifacts on the VPS volume (add S3/MinIO later if needed).
 
 **Recommended VPS (starting point):** Ubuntu 22.04+, 4 vCPU / 8-16 GB RAM / 100-160 GB
@@ -222,12 +270,13 @@ and client content treated as data, not instructions.
 
 ---
 
-## 10. Project Scope
+## 11. Project Scope
 
 **In scope (v1)**
 - Audit module (technical + actionable) as a cloud job/API, run from the portal.
 - Content module: AIDA drafting, automated schema, AI images, manual-PDF + WordPress publish, human review checkpoint.
-- Client Portal: client view (reports, milestones, Fiverr upsells) + admin/super-admin view, agency-provisioned accounts.
+- Portal: client, team, and admin portals (Manager optional), agency-provisioned accounts.
+- **Intelligence (Policy Radar) + Command Center: automated Google policy research, flagged knowledge base, and recommendations. Mandatory core in every deployment.**
 - Google Sheets reporting, central API key vault, cost controls.
 
 **Phase 2 (documented now, built later)**
@@ -241,7 +290,7 @@ and client content treated as data, not instructions.
 
 ---
 
-## 11. Implementation Plan (3-5 weeks)
+## 12. Implementation Plan (3-5 weeks)
 
 **Week 0 - Pre-reqs (Danyal-dependent):** VPS access, API keys loaded, sample Fiverr
 client data, a test WordPress site, subdomain + repo/CI. *Exit: environment reachable.*
@@ -258,29 +307,32 @@ in, runs an audit, downloads the PDF.*
 WordPress connector, content-job UI + review checkpoint. *Exit: generate a service page,
 review, publish to a test WordPress site.*
 
-**Week 4 - Portal completion:** auto-updated milestones, Fiverr upsells, Google Sheets
-reporting, super-admin team-activity monitor, cost tracking. *Exit: full client journey +
-admin oversight work end-to-end.*
+**Week 4 - Portal completion + Policy Radar:** auto-updated milestones, Fiverr upsells,
+Google Sheets reporting, super-admin team-activity monitor, cost tracking, and the
+Intelligence engine - scheduler + change detection, flagged knowledge base, and the Command
+Center recommendations surface. *Exit: full client journey + admin oversight + Command
+Center showing baseline and Google-triggered recommendations.*
 
 **Week 5 - Hardening + handoff:** security pass, backups, performance, UAT with Danyal,
 docs/runbook, production deploy, buffer. *Exit: production live, Danyal onboarded.*
 
 ---
 
-## 12. Risks & Mitigations
+## 13. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
 | API cost overruns | Budget caps, caching, tier gating, per-job cost logging |
 | WordPress site variability | App-password auth, per-site config, graceful fallback to manual PDF |
 | Content hallucination / quality | Human review checkpoint, schema validation, evidence-based audit rules |
+| Policy Radar false positives / source drift | Every entry cites its source; recommendations are human-confirmed in the Command Center before changing live checks |
 | Scope creep vs 3-5 week timeline | New requests parked to a Phase 2 backlog |
 | Single VPS as a point of failure | Backups, restart policies, documented restore; scale out later |
 | Fiverr has no public API | Manual/CSV client-data import in v1 |
 
 ---
 
-## 13. Dependencies & Next Steps
+## 14. Dependencies & Next Steps
 
 **Danyal:** provide VPS access; load API keys (Serper, Google, Anthropic, image gen,
 Sheets); share Fiverr client data; provide a test WordPress site + app password; document

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>AIOS - Visual Blueprint</title>
+<title>AIOS — Operating Cost Breakdown</title>
 <style>/* vietnamese */
 @font-face {
   font-family: 'Bricolage Grotesque';
@@ -36,806 +36,645 @@
 
 
 </style>
-<style>
-*{ margin:0; padding:0; box-sizing:border-box; }
+<style>/* ============================================================
+   AIOS · XEGENTS CLIENT DOCUMENT SYSTEM
+   Dark-navy + violet brand. Bricolage Grotesque throughout.
+   Injected into every Haseeb-facing template (replaces /*BASECSS*/).
+   ============================================================ */
+* { margin:0; padding:0; box-sizing:border-box; }
 :root{
-  --maroon:#6E1423; --maroon-2:#8C1D2E; --maroon-deep:#3F0E18;
-  --rose:#B85C6B; --rose-soft:#D89AA3; --blush:#F8ECEE; --blush-2:#F1DADE;
-  --line:#E8D2D7; --ink:#241015; --muted:#6B4A52; --white:#fff;
+  --navy:#1C1838;         /* cover base            */
+  --navy-2:#131029;       /* cover deep (gradient) */
+  --panel:#221E46;        /* dark hero / callout   */
+  --panel-2:#2A2554;      /* dark bars / badges    */
+  --badge:#26214C;        /* section number badge  */
+  --violet:#6C5CE0;       /* primary accent        */
+  --violet-2:#7B69EE;     /* bright accent / highlight column */
+  --violet-ink:#5F4FCE;   /* accent text on light (eyebrows) */
+  --violet-soft:#9F93E6;  /* accent on dark        */
+  --lilac:#C4BBEE;        /* soft on dark          */
+  --wash:#F5F3FC;         /* light card bg         */
+  --wash-2:#EEEAF9;       /* alt light card bg     */
+  --wash-3:#E9E4F6;       /* deeper wash           */
+  --line:#E6E1F4;         /* hairline              */
+  --line-2:#D9D2ED;       /* stronger hairline     */
+  --ink:#232038;          /* body text             */
+  --head:#181534;         /* headings              */
+  --muted:#6E6885;        /* muted text            */
+  --muted-2:#8A85A0;      /* fainter muted (heads) */
+  --white:#ffffff;
+  --ok:#1FA97A;           /* included / yes        */
+  --off:#B9B2CE;          /* excluded / off        */
 }
 html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-body{ font-family:'Bricolage Grotesque',system-ui,sans-serif; color:var(--ink); background:#fff; }
+body{ font-family:'Bricolage Grotesque',system-ui,-apple-system,sans-serif; color:var(--ink);
+  background:var(--white); font-weight:400; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
 @page{ size:A4; margin:0; }
-.page{ position:relative; width:210mm; height:296mm; overflow:hidden; background:#fff;
-  page-break-after:always; padding:16mm 15mm 14mm; }
+
+.page{
+  position:relative; width:210mm; height:296mm; overflow:hidden;
+  background:var(--white); page-break-after:always; padding:19mm 17mm 15mm;
+}
 .page:last-child{ page-break-after:auto; }
-.runhead{ position:absolute; top:8mm; left:15mm; right:15mm; display:flex; justify-content:space-between;
-  align-items:center; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--rose);
-  font-weight:700; border-bottom:1px solid var(--line); padding-bottom:4px; }
-.pfoot{ position:absolute; bottom:7mm; left:15mm; right:15mm; display:flex; justify-content:space-between;
-  align-items:center; font-size:8.5px; letter-spacing:.05em; color:var(--muted); font-weight:450;
-  border-top:1px solid var(--line); padding-top:5px; }
-.pfoot .pn{ font-weight:800; color:var(--maroon); }
-.eyebrow{ font-size:11px; font-weight:700; letter-spacing:.2em; text-transform:uppercase; color:var(--maroon-2); margin-bottom:6px; }
-.h-sec{ font-size:34px; line-height:1.02; font-weight:800; letter-spacing:-.02em; color:var(--maroon-deep); }
-.rule{ height:4px; width:48px; background:var(--maroon); border-radius:3px; margin:10px 0 14px; }
-.diagwrap{ width:100%; }
-svg{ display:block; width:100%; height:auto; overflow:visible; }
-/* SVG shape classes */
-.s-box{ fill:#fff; stroke:var(--maroon); stroke-width:1.6; }
-.s-soft{ fill:var(--blush); stroke:var(--rose-soft); stroke-width:1.4; }
-.s-solid{ fill:var(--maroon-deep); stroke:none; }
-.s-mar{ fill:var(--maroon); stroke:none; }
-.s-ext{ fill:#fff; stroke:var(--rose); stroke-width:1.4; stroke-dasharray:4 3; }
-.s-dia{ fill:var(--blush-2); stroke:var(--maroon); stroke-width:1.7; }
-.s-lane{ fill:#FCF5F6; stroke:var(--line); stroke-width:1; }
-.s-lanehead{ fill:var(--maroon-deep); }
-.s-band{ fill:#FBF0F2; stroke:none; }
-.t-l{ font-family:'Bricolage Grotesque'; font-weight:800; font-size:12.5px; fill:var(--maroon-deep); }
-.t-lw{ font-family:'Bricolage Grotesque'; font-weight:800; font-size:12.5px; fill:#fff; }
-.t-s{ font-family:'Bricolage Grotesque'; font-weight:500; font-size:9.5px; fill:var(--muted); }
-.t-sw{ font-family:'Bricolage Grotesque'; font-weight:500; font-size:9.5px; fill:#EAC9CF; }
-.t-e{ font-family:'Bricolage Grotesque'; font-weight:700; font-size:9px; fill:var(--maroon-2); }
-.t-lane{ font-family:'Bricolage Grotesque'; font-weight:800; font-size:9.5px; fill:#fff; letter-spacing:.06em; }
-.t-tag{ font-family:'Bricolage Grotesque'; font-weight:800; font-size:8.5px; fill:var(--rose); letter-spacing:.08em; }
-.edge{ stroke:var(--maroon-2); stroke-width:1.7; fill:none; }
-.edge-d{ stroke:var(--rose); stroke-width:1.4; fill:none; stroke-dasharray:5 3; }
-.edge-t{ stroke:var(--maroon); stroke-width:1.5; fill:none; }
-/* legend + trees (HTML) */
-.legend{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
-.lg{ display:flex; align-items:center; gap:7px; font-size:10.5px; font-weight:600; color:var(--muted); }
-.sw{ width:22px; height:14px; border-radius:4px; }
-.cols5{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
-.cols6{ display:grid; grid-template-columns:repeat(6,1fr); gap:7px; }
-.cols6 .root{ font-size:11px; padding:8px 5px; }
-.cols6 .leaf{ font-size:8.7px; padding:5px 6px; }
-.cols6 .trunk{ margin-left:8px; padding-left:8px; gap:5px; }
-.cols6 .cap{ font-size:8px; }
-.tcol .root{ background:var(--maroon-deep); color:#fff; border-radius:9px; padding:9px 8px; text-align:center;
-  font-size:12px; font-weight:800; letter-spacing:.02em; }
-.tcol .trunk{ margin-left:9px; border-left:2px solid var(--rose-soft); padding-left:9px; margin-top:8px; display:grid; gap:6px; }
-.leaf{ background:var(--blush); border:1px solid var(--line); border-radius:7px; padding:6px 8px; font-size:9.7px;
-  font-weight:600; color:var(--ink); line-height:1.25; position:relative; }
-.leaf::before{ content:""; position:absolute; left:-11px; top:13px; width:9px; height:2px; background:var(--rose-soft); }
-.leaf b{ color:var(--maroon-deep); font-weight:800; }
-.leaf.p2{ background:#fff; border-style:dashed; border-color:var(--rose); color:var(--maroon-2); }
-.cap{ font-size:9px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--maroon-2); margin:2px 0 8px; }
-/* matrix */
-table.mx{ width:100%; border-collapse:collapse; font-size:11px; }
-table.mx th{ font-family:'Bricolage Grotesque'; font-size:10px; font-weight:800; color:var(--maroon-2); text-transform:uppercase;
-  letter-spacing:.05em; padding:8px 6px; border-bottom:2px solid var(--rose-soft); text-align:center; }
-table.mx th:first-child{ text-align:left; }
-table.mx td{ padding:7px 6px; border-bottom:1px solid var(--line); text-align:center; font-weight:700; color:var(--maroon); }
-table.mx td:first-child{ text-align:left; font-weight:700; color:var(--maroon-deep); font-size:11px; }
-table.mx tr:nth-child(even) td{ background:#FCF5F6; }
-.dot{ display:inline-block; width:11px; height:11px; border-radius:50%; background:var(--maroon); }
-.dot.o{ background:#fff; border:1.5px solid var(--rose-soft); }
-/* gantt */
-.gantt{ display:grid; grid-template-columns:120px repeat(6,1fr); gap:6px; align-items:center; }
-.gh{ font-size:9.5px; font-weight:800; color:var(--maroon-2); text-transform:uppercase; letter-spacing:.05em; text-align:center; padding-bottom:4px; }
-.gtrack{ font-size:11px; font-weight:800; color:var(--maroon-deep); }
-.gcell{ height:22px; border-radius:6px; }
-.gbar{ background:var(--maroon); }
-.gbar.soft{ background:var(--rose-soft); }
-.gbar.deep{ background:var(--maroon-deep); }
-.gempty{ background:#F6E9EC; }
-.mstone{ font-size:9px; font-weight:700; color:var(--maroon-2); }
-/* cover */
-.cover{ background:var(--maroon-deep); }
-.cin{ position:absolute; inset:0; padding:24mm 20mm; display:flex; flex-direction:column; color:#fff; }
-.kick{ font-size:12px; font-weight:700; letter-spacing:.3em; text-transform:uppercase; color:var(--rose-soft); }
-.ctitle{ font-size:82px; font-weight:800; letter-spacing:-.03em; line-height:.92; margin-top:auto; }
-.csub{ font-size:24px; font-weight:600; color:#F0CED4; margin-top:8px; }
-.ctag{ font-size:14px; font-weight:450; color:#E7C4CB; margin-top:16px; max-width:150mm; line-height:1.5; }
-.cmeta{ margin-top:auto; display:flex; justify-content:space-between; border-top:1px solid rgba(216,154,163,.3); padding-top:14px; font-size:12px; color:#E7C4CB; }
-.cmeta b{ color:#fff; font-weight:800; }
-.mt10{ margin-top:10px; } .mt14{ margin-top:14px; } .mb10{ margin-bottom:10px; }
+
+/* ---------- Xegents wordmark ---------- */
+.mark{ display:inline-flex; align-items:center; gap:6px; font-weight:800; letter-spacing:-.01em; }
+.mark svg{ display:block; }
+.mark .wm{ font-size:16px; font-weight:700; letter-spacing:.005em; }
+
+/* real Xegents logo (xegents-logo.png; base64 injected at build) */
+.xlogo{ display:inline-block; flex:none; background:no-repeat center/contain; background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAcsAAADACAYAAABrskgwAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAGg2SURBVHhe7Z0JgE5V/8fNgkSU3jaJCiW9lMQr/8ortCmliJeiJIn2RFKplFb7nqWUokK2IpSd7FtM9nVmjDH7Ps8y/+/3zPk9XRMzz8w8M6HfxxznPvee/fzO+Z1z7r3nllAURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURSleBg4cWNvr9UakAdhpKSkpaS6XKzeTCpPiMMnW+M55PJ6UjIyMlPT09ESEuSouLq735MmT2zdp0uQGG+1pRY0aNS7ftWvXM6mpqWuYZkeekmD4mzbNX/KamZlJm2VCY8rI7XYbY8szHXYGzmfAbeLEiRNvs9EqiqIoZwp16tQpGxkZuRsKjmQRdO6FMlAMWVAWJiyE6YUC8uC8C/H8PGPGjAtt1KcLpTdu3Pge0pcK4zWJ9hM6dxqB+SdQvsbmNShN15w5c76pUKHC+TZeRVEU5UziWvDHH39sQ6fupcKUzv+Uxg03uZgs6g2YnMfpqWker8f740MPPdTERv23cuWVV1bdtGnTACi17FEC8Cv/DkP3OY0oS8JjuPNGRUX9YqNVFEVRzlSGDRvWAh19WmZmJvv2vygFpxEFmJtxZWRC88A9lGRaCmZYf573RkdHL23Tps2lNuq/i5ANGza8gfykZ2RkIHFZWWLnzG9OQ4V4qvM0BOVobChiXPIm9OjR4z4br6IoinKm0q9fv+Dp06d/g47dJZ3/qQyVYG7GQ0WJwxMMlKYrLd0cIwwPlMkPiDY0O/bip2PHji2TkpL2Q0EydVlpaWkmb1w+dub1ZAazRa+4ywnPiaJkmDjO+Oijj/6HKIOzY1YURVHOaHg/bdWqVd9jdoQ+/+SKgobK0J2eEefOyIiCiYSJsIbHR3GdJiozLT0qMzUtyYvgjMKEIrXLsQjGm4nZ7HuItmR27MXHY4891uzYsWOHmAjOBB0Kkr/5IM5RmAiYI9aE29/hUJT7oQR3QcnSzV+WrWVmmZ6ezt+e5OTkKTZaRVEUJYAEWftv4Y033rj23Xff3Yj+vgx+BqHDN+dDQ0NLQBGUCAkJKUHFt27tmp6hQUFLQ8uUyYSycQeDMrjocruDhNTU1KCy5513Tc1raw6Ex8uglYKCEQ6clwgtVbIEwo58+OGHH5k5c+YKE0nxEAwlNxPJawHDZJeAbfIG23P48OGVK1aseGH37t2ZUIiZlStXLtG0adMQXA9ZtGiRC9cTbrrpJtc111zTuV69ep+gnEwZsXycUGGGhYVt+/rrrzsNGDBgsz2tKIqinC28/vrrnTEzOs6ZEpHZEpcVCWeK+3bt6tWmTZtS1kuuLPjpp6acidKfOzP74Rc7m/MeOHBgZ+3atStbp0VN6IQJE96GsqSCN5njAzi8Vwnbc/z48Z233357Xev2lHz22WeVUSb7mX4pG5aVPP2KsuMybcKgQYPetF4URVGUs43GjRuHxsbG9qEusErNdx+OpKemUWFGtWvXrrn1kit333136SWLF4+AonRxVkoFw/DkSdHk5ORv77vvvnOt8yLjyy+/bA5FxvuUNifZy6UEyTjWs2fPO63TXMHs8j2k38NwWD40AvPGcjt69OhQOP1bVwkURVGUIgazvQvQ6YdBIbhFUeJ39izT4zX3HRMTEg41aNDAr1nhBRdcUGH+vHk/ed0eD5WkYJVx0ooVK56qVauWXzPVglC5cuUyyMdOKjLGy3xwpoy0eHHevXPnTj5wFJLt+tQ8+uij1aHctyKc7Gm3hXliOfF8RETE5rZt2za1XhRFUZSzmKAuXbrUO3DgwO+iDGSWSahs+H7ijh07PrHu8+S22267CmFsgjGBMAw7EyMpo0aNesw6DSjVq1e/aNOmTR8gDuizzBNmgowYedv83HPP1bLOT0nXrl1Lzp8//yt44Ss2vldNhKSkJAaX+cgjj/zbelEURVH+CcyePfvO9PR0btfmm0k5li6pRFPeeeed163zvAh6/vnnn4SfBMzqqFhMGFZpemNiYn7r3LlzwBVN9+7dH0E83ILPl26C37y3mDx8+PBucJbnkunDDz9cF37TmVYqSyIKn2WCa4nHjh3rC6d/2ysxiqIoyt9As2bNKsydO3eimZIBzjCJKB4qUSqQHj16VLJe8uTtt99+E37M8q7M8qyy8cbFxS2HUgrYEuZrr712AdK61iTSKnkqN8YLw4d6NterVy/P+6WtW7cuk5ycPA3BwPufr4sQhoWwPXv27FnaoUOH8taLoiiK8g8jZNOmTTOh3HzLp2JTeVIRLVu2bHaVKlUusO5z5fPPPz8/Pj5+BhUPFY3M0ngPkWHNnDlzPJzx1ZVCUb9+/Quh6CchDhfjIQhebN47Dbvlllv8mskOGDCgA/xwndX4lzQz/ygHatDNF1100d+9K5GiKAXg7rvvbtquXbuWYWFhNPfv27fPHO/evdvYw4cPb9mqVauW9913X0041wf3lFPzyCOP3A6FkwBl4XsR36EsaZKXLFnynXWeF0EQvJugHI9bRWMUj8wu8Tt24sSJg+ku23nB2Lx580NQaikM00QAqDT5EyZx+vTpd8NZnjvrdO/evSn8mXutEhRtptuGlzFq1KgXrXNFUc4w0I4PoT/iMpkb7Zo2ujYXj32G55KTkwcX5YOIylnCm2++2QrKJ47KgoqCilJISkqi0kgdOXJkI+s8Tz744IP/wg8Vpg3lz+VdxJM2derUV+CsQAqTD9kcPXrU9y4kw6ViIzwVFxf3E19psc5PySWXXFJ2xYoV3/EeK/3K4MDabFHuoUOHfmydK4pyBhIfHx+HfsK0cbZvYgfCTuNFPze+atWq51hvinJy+P5lZGRkf46yjDQBLp0Sqzy4A87GRo0a3Wy95Erz5s3LLliw4Gv6o0KTpU2+3E/BTElJ2X799ddXs879pl69elWQntUIwpWYmGjCFPhQD8I9/vLLL/v1jmjr1q2bI5xj9Ct5FaWLsD0JCQkLa9asebp9dkxRlHxAZck2zUE12rtp3+yTCH/TUJmqslT8pnLlypdv3LhxGRSHT2GKkrMCxVnbDus8TyZNmnQhlM8q+DUSSgG1hyasvXv3boPy430Cv1m3bt3bCMMls1QqOdsIqJUzx40b94x1misYHNx4/PjxA/TGcCSfVJYIxwtFGd6yZctm1rmiKGcosbGxvhUzR/9jbMJzaPds85+pslT85uqrr66CGSZf8DdLnDQy2+IMMz09PXXMmDG8h+fXKxR79uypDf8bKYwSDqFyQhQuXB8EZ/7cJwh++umn/5ecnBxFZUYBd8LkQnHuatiwYZ4PD1177bXnHTp0aBL8IEnZaZLGw7CRtoTOnTs/bJ0rinIGk5KSEivtXPoNae+E59g/QVmOqV69ep63bxTFx6ZNm/h0aBqUo5EsETCCY97LO96nTx+/XgHhDfMtW7b0ojf6p9A6FRTCyuzWrVueGxZAUV6JMCIkTXxgyD40lIXGQAW3/+uvv77FOs+VTz/9tCUUazL8nKBxEQ7T5k5NTf3cn1dOFEU5/cnIyIhl+2a/4xgUG5uwD8E1KstRqiyVfAEFV27IkCEfQ4gyKGCy5MljgvPc83Xlc88959d7h3Xq1Cl75MiRz6DofK95OMNKTEyMgMLM9QPKv/766ydwyq9X+5ZM7eyUuOfMmcPl17xmu0GLFy9uhvi20RPDQJJ8m6TzXFRU1I4aNWpcbt0rinKGg/ZulCWbPJUkbUf/I7+pLEeoslQKBIRnAQTJLJ/mHJFByST8/PPPj8OZX8uxjz766A3wG0ahdAosj2FzXfVnODuZoAb16tWrUURExB/0S382fmPTLxT30rFjx1aw7k8JBgEVkSfzDij9M34Bvzljjhw4cGAb61xRlLOAtLS0WBlgO/se2mJwnspypCpLpUA8+OCDjaOjo80rGqKcKGyEigvHMfnZVHzDhg1vwF8cwxNhJRRUGNfUqVPH8yPV1rlh0KBBVyPunXBvNJsIPX/CeGNjYw899dRTfn1RZMmSJR8jnmT6M4EAhsN0MElTpkwZDWfF/sFqRVGKjqSkJPOAD9s6+y9Hv+Prz2BztUyXYZWCM2bMmBYQrjQKFYWNiOLEee+xY8e2+Pt1EnDOjBkz+qWmpsbTv4QpChDBpf/www9PW7clEG75tWvXDsR5OMuOW4Sbv3l+9uzZPazz3Aj64IMPbqdiTU9P9y2/Mgxr2FAW3HnnnQ2se0VRzhLQv8Sxj2GbR5/hM+xLpD/BNW7HOUI3JTh9OBO3UuJ9vt6NGzd+OygoqDSEjMJX4pxzzikBQSuB367vv/9+aIcOHbjJeGa2l1PzwAMPnD9hwoRpFStWbAIZDQbmPMMFFOLoevXqNWzevPmx1157bSHccYPzc+gOSq1EqVKl+HRbiTJlyngOHDiwFu7u2bdvX4IJ5BRcffXVF2/btu07+LkVeQih/7Jly5prDDMkJORomzZt/jd9+vQl5uRpAMro6vHjx19aunTpIJvvtKNHj+7asWNHsnVyRnLLLbdcDKs6Kz40NJSy5IUduXz58v3ZLs4uHn300bJXXXVVzWXLlpVhPZYsWZKDwwwMMrft2bMnwzo7a0A/cSXa2OVos8Gws2hQ1Wnbt2/fGRUVlWKdFSsZGRkxsCqy7yDsa5Auc0x4TGWKAfNQDJh7bdiwwWUv/d0Ejxo1qtbkyZMvQF8ZRNnhScoR2w7yQyV/YOnSpUeMa+Xvp0WLFldjRrYYSob3Fs1IjMLFYxiS8t577z1vnedJ9+7db42Pj1/KjlLCklkmwvLs3r37t/nz57+FYz7QY+5xOuE5uN311FNP3WSDPCXcyWfSpEl94SUdM1qz/Ev4JC2PEbcbjePzv3NE2a9fv/PRKLgr0UsHDx4cOnr06BGJiYkbkGZ+viUdJiMtLe0ozn2LTnZkTEzM8EOHDr2yefPm/yB/F9lgTjswAAlBvi6eN29eSwxsPp04ceKI6Oho3gfnNoUZ1qSiDtaPGzdu5Pr164fFx8a/Nmn8pLrwW84Gc0aBdnDZkiVLWmGgM+jzzz8fHhER8S3k7BgMZTkDsswv20RDeUwKCwtjPQ9FnXfs379/VXjPc3vG0w2k+4rxY8d2/23l6mETx48fBTnlhw3SUafE5Bf20XXr1k1B3Q/+6aef7u3cufN51nuxgDKOYZtHOkyfxf6Ethzba170SeP+zvcs27Zte8XYsWMbzZo1q/eIESNGfvHFF58hfbwNZrbqo8Fvs12fNRnox1b8+OOPIyMjIwdjwFkP8qcPJ/7dYIZXHg1+G5crgBEwwmO+uoHzv3fq1MnvDQbef//99qj4GAqpDcooLwqvjQOWi0/KmmvyxCpGiVR4GXPnzm1ig8qNICiepyBQ5j4p/TN8NGhpOO61a9cuhru/4z5FyMCBA59NSkrajnTEIE2JzDNsJtVL22QYoByMzbJC3s11lAMLia+/xG3atGkZZuy1EeZp0dnee++9t6PhfoOR+lGkkVuN8TUkWOb9WKZdBkamPrg0LrgzUeluT3JmesaxXX/88XGr+++/47LLLjvpazxRkVHfJCUkHkmMT4iKi4mNSoiLj8JAIiohIeEYyvUY7Oi4uLjjOI6eM2fO59ZbwOG7yRi49ERc4aiPeJg01hPrS2AdMs+Ev53X0H44aEiAjEcMGTLkvZtvvrnIvpnap0+f5iiXbUhr1PHjx1leLKdjUGTHoCyOpialREZFHg1PSUoOG/TJJ52stxOoXbv21b1f7f1CzLHj4V6PNwEm0+OCXGZXLzH5JMw3TzC/FADIdSp+xmBguKdVq1bNK1euXNEGWxBKo8w+Q/r30/D5CuTrEOsBeQlHvYcjvqMod99H7ilvNITpFDmkgds0yGY4/EfAv5Ef2DTHWF7oi6JgH0WcRyGzHLzu69mzZ0eblgLBQfp9991Xn++2I/oEpC0FaWJjQZKywXmTPg7wCdPvlCX2idZOwSkkNz5iz549b7GebDRKMROEWc3zqBPOCnwCxo7PVppr48aNb8GdXx02b6Rv27atLxpTKireCIRAwWbYggi3FWxK0ZwHH3wwz23oMGO7BmFthXsTmDNMHuPajvbt21PJFCuYYd01efLkL5AGfumE2+rZVJ1wP9jkW36zfJh/5zm6YfkzDJzb+d13332IwcGViOJvWe5v2bJlpcWLF3+IziQGaaJWN2mkkcadM+3E1qs5zoLlysjMSk2GmHnMv8QZ02YMe6DxAyc8+EWyPFlLcN2NjjoL/xu/gsTD8qIyXrFixTzrLWBgVl8eo/+nf/vtt5VIfybiolIw8YpN0Gn78s/0SB2yTnksecfgwtychyLZjhlGG39fzcoPr7322n0oj+OI00QqcYudkYaBC1pYempa5sjhIz+w3gwfffTReaNGjWr2R1jYb3DjojuWO8ufxtQd8sW8ShtmHUvexaYbXKPyTPnll1+GPPbYYwXaUrJ3794VUIZG1lj2BHGYjLBcEXd2piy47Ct/+W3T4vvNcBgGDX/bcz4/hMeQcV53IQ2v2uTkl2C0lepLliwZh7AOMzCWD43E5ZQhZ/yE7nidNmE6xaa843wm+tc133777f8aN258Rq7SnPHMmzfvQ1TGCTVHgWPFoUJdEP4R1qlfDBs27D0KHcNhw7KdvwmXNkbd5pggDj5QdBizqDyfwIUyrrxjx47lCMPDERnDcoRP0tEZ+bU1XqDAbPr/EO8mGBcFmnkSYSdMG5FOlMCt77zA8ibOxiQdEGw2kh+rVat2hY22yLnwwgvPW7hw4QikOfur34Bp4yHLnvBY8iF5oy158A2W6Jt7XtOGQaedhU4ZkuVOWLV8+ZM2SkNSfMLStJRU9GZ/uneWlZQT40H65ltvAWHVqlVtkLdY5MtkRvJEJM/SoTlx1rfAdPK8LTpzjDA4C4uG0uxlowwIO3fuvBfxcCXDpFnKiDDdovSoCPfs2vWJ9VaiS5cu97ld7lU4bwYnHNDQnTsT/m3581jyy7AlP7SZJyuj5pqUDQxOeeMOHjz4mo3Kb/jkPPwzABMPw5N6cMZv4zHHEr8cO8vd+Zu2Myw5dsoU3HmgLHvb5PjNddddV6NXr14vQ1bNkoozLiIyTNuZFubBKd+CnMuZRoJ65kAifNGiRa1t9EpxMX78+EqoAN5P831wmbBSUSlejIo33n///dWt8zzp2bNnncTERL5D6etFWOlOoUA8MtJL6du3b1vrNTeCV69e3RvuzVO8TphOCFMGZnNj4c6vd0QLyyeffFJ26tSpd7HckA/znU9BOhCS87zTJmwsOc9LHTAM5tWGl7lu3bqfX3nllVqIPiQ7FUXDV199VRmK43vEa55wZvxMh+SJ8FjyxmObRp8bqWu6kU44Mz3D13HT4NibkZ4ReSwq6msM2Dh7LhEdFTUFXTcCynZjOm7g7BjF/PrrrwGZWb788sv/Wrly5RfIo5kNSFxE6kRkTuImdMfzUg7MM41cp/IiThlg+Dif/P3333+UjyfOc2XXrl0dIDPm3oazTiQfovxQD+6tm7f2//rrry84sO9Ab5w/inNeqR/OKGls3RjbKE3A8KQsGK7kUWwpHwFuuBQdN2vWrGcrV67s97duqSwRT3ZEgPmRPOWsCyLHtJkWGud1Z9nzWK6JW6d7ho/jfCvLSy+99KLt27dPR1gu5lvCk/gk3fzN+ARnXyt1RWQyIW1Irol82WMP+tgj33333RNdu3bVV+OKE8zIHkPFJjkrl8e2grkeMh3O/O6ka9SocTUEaB0FCOFQK/IeA8MxCz0w6eHh4XMnTJjwDD+rZb2dkoceeqgJ/CQiPbD+FDimkSfQAS198sknC3OvJD8ExcXEDc1IS0fLYOzZ6RGhlt9IWZYbkxTbCM05gUIv5SzuaTuPiTQOaWgwyYMHD+5s0xFw1qxZcwviYL35ltGdaWce+VvSTtup3AnPyXWmm/Aaz8lvZxi45omJiVnzyy+/VIPMDGPcwFxzunfavA5l+ZNNdoEZOnRoB3ROGxGeCZhpYsw0GS4oBRsXoc34mSbWizNvOfMp0D3lgCG4PJh5uVEGiApi4zkeF3PglltuqWuTUmD279nT3pWZnuj1IF7vibMnIunHYNL9xRdf/BAZGRnGtihpZl5EzsQPrznzQVj3znPOcnG652+GA5sDjwwo8342qXlCZQlvZlcwZ1oIw6WReMSmO3FLnMfOcHK6k2s0DJfg2PP666/7rSxr16597Z49e7iyxJ7ApEniYHlJuLQlLoHxix9Bylj8ER7TrZQD2xvrC+dZvq6FCxc+Z5OjFAe8xwChfgnlz9GRqVRpQPjNpcCM2bNn94RTvx84+fDDD++BQtwcFRUVduDAgZ2xsbG79u/f//3atWu7tmzZ8vbGjRv/yzrNFT4dGh0dPR9pM7v0UHhoUu2nwZDWzPnz53N2WuQPw4wbNa7erj/+mI6mkcKZEUfeIsTE2QAo7uwonYgCEqzQG39S3rSdDYjXxB/zi+t7d+zYcUsgX7auV69eyR9//LELFEeYjcOXLkKZYHkL/O2E7phmSTf9ynHOmbJ0GPKbNow7IiJiCzr0Q7xGPzwviB+H7YVynWuTXxBKvvvuuw8iHvOBdMZFw/CNMkO90WYKeF5w5lvSIted1yTPLANfOA5DRQzF6T4SHv5L/fr1r7FpKhAH9u592O3KiM9NWcrx8ePHeQsjO8FA0sz6c9a1IPlwQnfJycnmmPlzlg+v0b+EhWt8oC9m3rx53fx5Ol2UJf2aurDhSPoZnxwTzsKc+SM8ljQ5j0nOY/nNcJlXuPf07dvXr+Xjq6666hIM7qYhjSa9JysLpy04y5TpoxGcbnP2FbzmrBvWAeLjLkVHFyxY0E1nmMVIpUqVLkQFrWAFSIVKRfI3Tm9v1apVkT3VdyqOHj36MuLOQKMzaSEUTGu70WnOhLM8Z6eBIOJw+CIoSg/vu7HX43KVCLCUlSg9QRQPyxXwvpXMsDm6N09VOmE4uGaOpVMSGBevwU/y6NGjO9hkFZo333zzNoSbiPBNepwN2AmvSX55zLTQrdO95EfyLYgbZydwqrh4jn7Fv7hx2F7MLGfb5OebTz755G3EnSzhOzspHtPwGvPqrF+et22BeHCNdchBHC5nr1lKWGI7Z5Q8pqFDlg/LG3W8p2HDhnm+MnUq9u7d1ZrKkoryZMpS5FHSk/O82JJPgrz56pE4O3gndGfz4ZMHwTnAA7GvvPJKPZvkU2KVZSbjc6aHaXfmQ44FyRPhsfM3wrNH2decv3mcI99+zyyXLFkyDeGZiJgmKS/aPC2/eU3SjPAJt/N09gGmT0CeGRzP+RLIQylHPlRGGI7kn9fpPi4uLmPWrFncqlQpJoIw62uEitiPCjRr71LprBQIlXv37t1bMCK/nm6zvRQt/fr1q4m07KEMGekATBPTw6fXYH7v0qVLoUbm/jB48ODzMaN8H+LNVyAgpUiIGEDhZboECjiFmGkESVD4OzEb3Ayhnvzbb791XblyZecNGzY8hwHAnH379m3D6HAvyjcT4ZgQpaERNjSGLY2FeWeg7GRHjhzJ120KNcNcvXr1dYjPDJJMBBabBxO/NFjCtNE4OxnWD35TZkzjRz54yCBNGdBNzg5QOmC489Wp5FWQcpBzDtsDZTnLZiFfzJ07lzLOJy6JCY8wbBqmwQnd0CH88B5AwsGDB7ejvtajLby8cePGTqjPjqjLXji/5tChQzuQr2jk09wvYHiMwWk4q6TiFODevX///p9vvfXWAsnx/v27H4SyjD2VshSk3miQNF8+eUykrJluAO8eN9PG+uRvqVPWp7gVcN0YxkmbSF3zN5XB1q1bp+d1y6Vq1arnI07z3oSEIeHQdtYNZVLkkuclXqbB6Y7Hki7akn+55jxmHv25Z/nMM8/cDxmIpj/6d5ZHzrBhKDuZu3btCgsPD39v1apVT69bt+5JyA1N582bN7Mv6IxzXWCehkx9u3fv3h1o7zEIg96zAwTSZhg246TNcqGbmJiYpXfcccclNolKcTBs2LBXIVS+2pe6oo2K4YM5SzESLvIXZWvVqlVly5YtCxCn7/4KgeAZ4QDpvXr1KpanX9esXv1+Rlq6ebSePZ55AMKmRdLGY2nYNn2pOPfjkCFDnsjr82Dt2rW7ZNq0af3sMqh5KRWd0l8aPk6bBmMbPHu0ZAxecv26S25UqVLlAoSxGHGY1QTGR8N4cnaITI/kT+KHP37+jCOCo9u3b//8ww8/7Pf555+/dezYsbcGDBjQb8+ePT/jGhUTO0DT8p3lxLiIxIXLvoGHXCNy7LA9dkUhX9StW7cS8rmEcsx4COMkTJMcs8wZlz3HD5NH7ty5c/Dbb7/N9xRzu3cfiln6XdzAAHlivhGKERmjJGkExiX5RnweDKh+5YYbNhy/ObhvX8u8lKVzsCNlT+QY+WNdUu5YnRu++eabD5DXvqjPvpCvvh988MEb+P3mgQMHxsBNJAy1qFnSZVnREMbpjIu/JR2IKwmztlzvt9uZZRLKhXDGzic/EbzRGnzugb99t2ME/pZ4aNPwOtNFf+Lfceyb1dEgXAbLcy4M0PN6WjkY7fR9uhflJSAse+SrXzcGtdtnzJjBV/DyRfv27flK0GqEk8kmRnllPnPGyXh4DnbGV199Ndx6V4qDq6++ugI6ue9Q+ObFX6kcVhTB+TSMhL987bXX+IJskc0wMdp6Bw3PJxlOQUS60iGEQ071cnsACX3uueeaZKSm72PzSklKRmvEoIGzSwvLiFBorZ155MiRZePGjXsICj8/Dx0F33bbbVdhxtQdM1DzZKYJEKBdGls6eMJ6YbvHjGYGt/+zYfgNXw+ZPHlyN0SDqj1RMTrrnCZHvPRwfNu2bT/9/PPP93fs2PF6dAbVTlYXXNp/4403aqDTbbR8+fL30ei3ISx2tCZvEo+zbplXMYIcO2wqyx9sNH7B+7Jr1qyZy/wyDCleybszDTzH8se5eAzY+nbr1u3f+dwRqhSUZj34HZ/pdsWlpqeZ2Lgc68wXkXghR/H79u3jPsr5uve+b9/uBzzuzFMqS+bTKaMSn9Qp6iAV8roOcvcw6rIOBxQI9qRp4G44119/fbUJEyY0htx9hvC48YZRmE4ZkbglLsaLcxwQbLDbI56KMr///vuUTZs2rUbZrYCMLcHMawn6gsWwf8WA7FfMxrgKwmmuiZdh05Y4HXHzIbWYsLCwFevXr1+CGdsqhLGKNsJfieOVOL8KM96VCJeG7hY89dRTLW1aTkVZlOcR5ptxE9pMA+WG8VvDFaWPUF585atAz1NA5i4dM2bMQxEREbsRhylMiRNtydgC4uYgIBzK/m/bsegfye23314fHXY4Ct/UDIWAwkDD5UBWHFjXoEGDq6yXgPLII4/w6Vfz8AXjJDJiRVo4ygqDMiryJYcOHTpc5sWgH8oxe3qQLac+gWVnz2N2FEwnkxsbG7u6RYsWF9ggCsQ777zTDYMB3y5FDFvqgEiHYBunGyP/t61Xv/n222/bI/gECZN5kU6V4Tptxmfzx/qIWLBgQXsEke/tBFu1alV53rx5oxBkPMI0mWAWeWjzwlM+5PdJbDc69xk2WL947733WiGPcdKpM6+2eA18xcLcg8ZACAMj3pc+/PO8n5/Pz6sPOWnYsGGZ+Pj4QYjHN+hjnJJnZ75gPHC7PJ8DLLMM61OWWSeG6YS/pX4JjlmXGVB602+88cZ8b7HYuHHjc9CJv4ny5LupZmmW+SI5O3K2XbqB29Q5c+YU+rkHhH/MhucrT0Jb8s38oQ+bVJj6Oxloa48iDvPE7slkVggPD1/66aef+vUQY17Ur1//et4Cw4zWRCZ5ZtxIAw7NE8S/f/nllz24JaX1phQXmAl0gjDy/ouRROk4iRUS97Fjx45glrkTpi9Gag8FQjAxur08MTHxJy492Oh8jZxpAalff/01v1FZ5PdN161b1xvKEloCAupGZ2NnlEwPGwuh0BI2IKR5+AMPPBCIzQNCX3rppbtRDgcRD/Ns4iBsIGIIL6JTiLj//vvrWL95whkCOrDJCNsEIuXrCNN3LMCN+9ChQwuaNm3KHZIK3CApI9w1hrMMxOH7eDhhvM64eUzkt8OmsuTrTH5Rs2bNCxHfjwjvhPcoGbcvPt4Wxx+Upsftcu2aNnXa/8Frod/bveiii8r98ccfvRAPZ2EmXrEZr+TfdnqZGIjwVQu/ZZvLsFCWMQiNIZ5QVhKPDBAIz6HuGRdXB3qxbGxQ+Yaz7cmTJ78CuTfaUfIiZSy/GadVbJm//PJLobaTIwjrGIzJHMMWmGfJP69z3+VAf6KLD/awrhiHxM182j7RnMNvz/z58wfAecD6qMGDB9+IqOIRvtndCPHB8iStXLly8syZM5v8+9//5uShWJ4lUXLQvXv3cuisv4bQcS3fCIUIIgVDzsHmjQ66SYdgVrPeCwyUbkfEY1q3s2NjfDCeuXPnfscHAazzIgNKoT5Gh3uYBsbthI0jR9o8mHHvxkw0oNuZ9enTpwfCzt6Hyw5WpAMiUh84xz1x21lveXLZZZf9C/Vqdhuhf+YFvyUsYzNsHtPAmQcKeWeTJk1usEEUGu6Xiln4NsTN5PvyQpgs/rbJ811z2HwKepoNKk/Q0XDj/QybFxOGT4bxJw9t2dllYkpSCj8TF7BXkfq98srFqSkpP3MpPy0FeoVJoHKGYZ4kX+zgUR77unbteov1mif7du++y5WZHp3bMiyN/EYZUJZSMSscEghFwhkmZux7ET6i+esyryljwPhx7Iay+d56LTCIL5qRgb/kz8bDdHiio6OH5nP5PE9mzZo1Q+IRJE7CfOPYhXK51HoJFOdMnTqVu6NFIm8pmKCsQx/NJ+J12fV0YMSIEVU3bNiwgKMYCoIshRI2CqeQsBFilPNbYbZl4/0tdBYHEKZPOUinxnMpKSkHHn/88eLY9q0UZiITELdPMzENVCrORkKY74MHD6689dZbubtOQKlTp05ZzEo+x6DFpINpsHGaciG0kS7vnj17/H6VAm4noVEjKyfurMSwpLwFxOWB+4UtWrSoYb0HjNGjRzdAp21e6uYyMGGaknO8MiNl7rA5s/zOBpMr7du3vyAhIWEb4iC+QY7YMqPkUjuUWcahA4fegLeAv7P2xutvdEb4qVSY5gExxEnlzDSxzCVvKO9MdPJ8p9mvWcLevbua56YsiciK7cgzd+zYMeTaa68N2JdCuJMMwuVDXKZcaRPalFWmxcqsd+/evSvr1atXwXotECgfsxeuxEXjzLf9zc0uhgdaWf74448zJF6Ji3mTuAnOeSZMmFAU29GV/OSTTy6GwsY4p3rA9xlWCsl///vfxqh87pwP689O1Kk4KTy2k3U9B6zXfFG7dm3u/boInaaRPGf4DBtxuD766KOXrPMihU+JIi/m4QWbhBMahxyzkeA4c+TIkQ9arwGnf//+zRCH+TI8lKZJC2GZS+Mk6EAO3HPPPXm+ftC6desG8LeXfmwHZvzzWBo988fzXAoHiZhlF3qnmVPx8ccfP464zBKlMz2EeSSST4ftgrL81gaRK7169WqNsGMlXF8YUFhcWjcKi1u9cWLk8e7u+cILN1qvAcftcm9FHNAeKF+7zZwoTqaL9ctUYBb/Hpz7tdS9b9+JM0upQ7EJjyXfSUlJR959990833nMD+3atfsPbxmYCADjY306B2KEaUA9HH3qqadaWK8FAoNmPmnsy5PzmDZ/23IM+DLsDGAiAiKfguSXy9wY5BZ6Bn22UeS7xvzdoHGtmjJlSk/IQCx+mtc4KCT8WDTOlYDw8wO45uOlENAgUKAyGTt27H01a9a8vXTp0iHopM1HoRGXCT8kJMS9c+fOMV9//fVn1nmRgs6kEvLG5Y0g5pHp4Adl+cFq2sincYffOPQmYSb0izlRBCxbtmw1GmECG+J5551nPtCN8jdlzvRIWi688MJK9evXf8D8yIXBgwfXRR6qMgxiP9jMMjaG5S3nUcf8dFqvX375ZZM5WQRAmU1CpzYK+eC9GJEjn1wVBr6ygzJpgc6rAvMm8kqC8ZuEIL4glGNmRkb6po0bRn86dOg2c6EIeP/d9/shEZlMQyjylpSYaNJEWJesX3Luued2wkzer5lDkCf3GahtPyZ8xOVF+4rCwOp3ezkgTJ06de0CgIEu+wcTH+uQbZh1KnnkMa6VLVeuXKEegENegtAeTJ5OBtuoJeD38C666CIzgIbCNvIp7Y9IvGg3QVdcccXtw4cPf5GnzUnl7FeWGzZscHXo0GF0y5Yt/7d69erZaAz8/hRv6HPdLAOdG5dfMqEwXBBeF9wVRDhCMJvrgYZtHqhAZ2EEjx0nbcSTNG3atLFbt24tli+zo4N9BPFSE5r4bRqMsQ3eNFQce4YPHTq8d+/eSdZrwFm4cGEKBiyJ/Iq6dDzOL8RLY4XCC8Gs8Ta+q2ZOnJwg+OWrAbRNPojYDItxML8EHcLWcePG/Wx+FB1ZH3300QLEGc8vx0OxmfiZJua1MFStWvXSB1o92O6cMmUQZPYgR/JKTPkhv3wbMiQ4+GjnLl0m4rQn+2rgadumFWf0B0qi7NMwIDyvfHmjrI3S9KDsXW6mKQhyXxH16ddIISskywjAqcqKbYhlShC2+/XXX0cfPjzDnAgcnFWlQhF7nQqMsiTwmGlBG6eiK5QCQR8UREVFxZwHAVdUyB/bupdyxIEI5YplT+PMe5kyZS7q2rXrexjg9wj0UrByZhHUv3//q95555366EwbDBs27P/Q4TUeNGjQ/+XxHtVfwOifD5vMRefAx7vMMhxtGjQGLqdkYuRaZB/6zUmrVq0uW79+/UoIvy8tAtLoW3ph2g4cOLD1k08+Cfi9ypyMHz/+KZSRb12N6aIReIxyIjHcxN56+wvfffddKczaOVP9cz3dwnxJXhEOOz/v7t27v27cuHGRf8mFncmmTZvGIR8mAbbejSGSLoft1zLs8uXLX/NAQTAU57I+wzHLn/Z+JY492zZtOuFbj0VBnz59LomPiVsq9ytpZDlW0kJQ9nxq9FPrLVf27tzZLDMj/VjOvWFzliGXBn///fdlkI8i2VBk4sSJzRGnEUqRTYmbMD0E6Uvt3r17obZmw+DR3JaQ+9yMxyEbkm8+JT460MuwfLoZ8fp2GSISN2E+KWuSXzjjY878YPkrH3zwQXvAJXC/ltgV5QTGjBlzP4SNGyMa4RMZtELvPXz48Jw777yzuL4oUmL//v0PobFzn1STDu7lKduTMW3SEbChQplMHzp0aOk2bdpw5MiZABVLQA2VFWbVd6E8uBuIiZugQzVlJOnk/UX8Tq5bt+4pP6c2cODAMsgDP/ZtHqCiYRiEeRMYD35nQkkX9EO4+WbUqFHPo4Mxn2CjkXImkkaH7ZeyXLNmzeL0zAwjWCwvyaM5dnyOigvAu8PC3mU9oic7WT2ycxOT85rfZt2KddUSYmLXeKEkjWL8M36jNI0C52mvl68e+PUe6c6dO/+TkZEWYZQlt4C3eWRnzWP5DTnxYlDr+55loBk5ciS3TTTCyLaRMx2UU9r4nd6tW7dCfTknNjbWKEsieXTKiP3thbsxgVaWfO0K4a9DG0EU2XIqilGQNknblgXhQx98Z2fXsmXLZqN+x9x44401LrjgggoVK1bkkjvTSfk6a1crdT26kGC0++11113XhutkEDpzH4A2l2wgWJ4tW7Y8edNNN02yzoucTp06dfj888+/QHJC0RDMvaVMV2aJUqElzZIL08blFho0hCNxMTHLgoOCM/E7ze3xZpYrd67XjbkMLmeVDC2Z5fKapSjKiRhB1s3YmGhzaZTHLAcEF8xlHnbsoTiueemll/JBH59/WU5EgzU2f+M4Y/Hixbc0b978pPcYv/jii9sxsl2IMi6FtuxbQiJiM142dJCOMHlvKdBLdqcEeY1F2s5HPrgU6ZQDky6H7V66dOmMO+6445TfQuVsdd68eUuvqFKlIeuvdMlSZtmM4THfLH23rV8UOmcDuxISE1eWDglNKxGU5TqnDMcVuMD6+bOunPVn0nISxE22Dc8IO4iVmJGZcSU6xv+WPuec81G+5jLvl3qQTy7HErcnW74waFvzMID8h5sLp2D37h23VKly1YySoaGXMqysrOzbBpQLhsN4aHCcBWX56YsvvhjQj08LY8eOrfnUU09tRVwlnfHSOGUV1zKff/757iNGjJhgThaAlJSU2NKlS1/AfJq6BDaPRkZ4jlUXHx8/rmHDhs/v2bMnkDIcNGvWrB7333//x4jH914545e+QfLLc0wL+gnexzTPBvD2B9OG82arPcgj3zXmpv6/wv1+yEpK//79j8Nt5oYNG7777bffstfQlX823OHk+PHjfHXAjAZpCBqVsdG58f3BvLafCiRBW7du7QPhNUNFKitn2nIapJOzOacpKhDdydNAcN3Y+E1l2dDm5S/MmDFjELJmhr05w5EwiI0v5rnnngvoqDwvEOdOdiAsfil7m56cNmeWub46gg75Esy2NzMMfwzzbPLNfcMx0xQTKGxY2eE74hVsGnznkP8YdJZ5yv4ff/zxf5hZRnJm6UHVstyIhCPxsFyHDh36kfUWcEaPHl0LcZ8gWzmPbf4yevTo0cV6KxBJSUmxDJErPlJmtAnKF/8Z2xsdFfUZZ4LWW8Dge8oY5P+AwZ3ZEpQwfttt+GxnGQiSVtqsK5gT+g+c5wzUBaWZir5x2dy5c7kL0eXIB59FyNbCZyhn/QM+RQlHTZGRkWsoIxAwMwqjTSAwtIKrV6/+XLNmzaqYk0UMRseh//73v7lEFIQ0nfAwyMlAenMSXETmhBlNLmByEXzKhwkQjHnCN/vXnzB4GubZlj+XYldg4FBkD7ucDHQO37BDYblzBohDe+Wv4FquZQJFyeVUvzsXljEpgdKGCRaDUwExNqzs8HOADtOUPxEbZVCyWrVqeQ5W4N6F2uNMxfgV/6coO9OoigLIjb9lnWu95RfJ7ykIaFwC+qzjK1eufAEyuh7GlClnj5RbPslPm+XP9kRo07BPk/TSpozDLdssfgbxyXvqkxAchmLmXKZcuXK33nvvvR3279+/F2Y25OSdV1999X8mgDOQf4yy5EbUHKXxZWbYV4Jr+aVwwmMomZrXXHNNzVq1anHnCr+F9ODBg7z3FAvB4X03I0CynILjoPPPP/+/Tz75ZONs10XLBRdcwHSX53IJBV4U95kEGtopn6JEY/xLh8Y8smHDn8kzDcv+wIEDi5YuXVqsBYAOJZbxs2Nh50M5OAWsp1xlDKP+YHQ4fsvh6UAOBRcCOcxTAZUMCuKjvsYd6zA3EH6RlQfaKivLr/CLMh0+chloBYKnn376cK9evYbEx8fvRhvylilTxkTIJ/k5+CHsy9i+aEu7EnhMGZc6Z93RiBseU35BiB0A34pw+/Tv338kZrULGjdufDPO+T0YPB34RyjLBx544L/z5s17f8OGDUPWrl07Yc+ePcv27du3Zd26dVvDwsK24vj39evX//7HH39sW7Zs2buYDfr9qPTs2bNXLF68eDzX6CloVFQUIFFW7DDatGnz0d13313kO1Zs376dVkjJkiVNY6aQn2mg7HJL9F/klfeICRu4NHKWPRpqgvlRjKBT4JcijJKU93gLCmQpODExseg75ULCzlHqgMfSWULZh6Bd5Nm/YBpeiv2s/XmCwsxZfux57WHAQVz/iL7QQdbAgQOnot9rg35qLX5zrZVLxKY+pR9zDvjYnxE5TxmX+iasHhpeF0M/sFl1QVDInIJegAlJ04ULF06HfLyFicQZ8w3Ls15AWrduXX3cuHF9y5cv/3LFihW7lipVqjU608qoNPSnpUthFoDGapYNQnAcUqFChZLodP1ulJ999pmrbdu2H0ZHRy+HUHik40CY0mlzmeJfnTt35hZgxTGSCmK87LSZhjMMWco5KcjPSa+xUXJgwLLnMZUmGnu+VggCARSE6USk3DnDPBVwk2va4DeobNmyp30FsrwF1oFzZoGZfZ7p53jOVxSOInGGW0z42xdSRk/7evGXO++88/c+ffr03LJlywLIXFS5cuXMDUo+yMM6YN3IIJTKkfC8yDblnb9piNQlf1MWZFYq5xguwgvG+SsaNGjQp1u3bqP+85//nBEK86xWlvfff/8dY8G//vWvplYZBnF3ClSieXKVlSkVSVjxKSkp+W6lcXFxCWPGjOmP8I/jp7n/IsJDEFdoq1at/jdkyJB77KkiA0rSRIxRXK6d9ekKyq3AvSS9Ms9Umtddd93jmNGfckm3iODSqUmH3APKhVw7XPqXTup0RmSdaeWx/EanyKc5/alL48ZUO4x0tsUN2v7pqAAL3BbyQRb6pZV169Z9sGfPnp2GDRs2ELJnNi6QgY9MAFhHMiCkbPM6j+WaqUPAOhQ37GfZJulPwuN5uA0699xzS9arV+++ZcuWffXEE0/k+zNrxc1ZqywxWrroyy+/7IkZZRNWDCtMOi/aHPGwQtHIcTn7nSJUcvL+/fuXHzx4MN+Par///vurevfu/TqUbRKEgk+UGaGhgEDYOBqt1qFDhw+rF+EGwtdffz2VJL/+b6RWBPkMIgtpzt7Hzk9EobCsaWwdc3Zd6dJLLy3WDhADsfOlU+AonOkpKM8++yz9F0dnWSgoY5BtX15p8zfg1nR5pj8rK6Q03AdbPydQmPLLL+gf/jZleap8okSKs/4zhw4d+vOLL774OvrOhuvXr58GOV6CfmwzlGcCyocjbzPrlH7lZHVGnOeln+Ugkm2T7YO2uEG/i+6xZJOnnnpqWIUKFQq1jWBRc9Yqy2uvvbZ32bJlb0VFcRnUCCQ7MRp2sKgsHHpdqCh+YykD9qZevXo9265dO346qSBC6h40aNDExMTErxCXF+H51vgZJ37zYZ+rH3/8cb8/RZVfMMNluqMxYvMp69xAGRA+s85nxTlq4HPkNDwuiBH/znBOdo5x/vk8ejZsjPzsVmJ26v4KHdlDHyxn1i/bMsuZIN8cnJwD08CcKCZQ7nezntkZONNTEJYvX25kyF9YNsBZj9wVW0zOOiiMkbpmXDQeyjvybOoTeeYGy6zLRNinrEsBTjk4KnhBnd1kQQYK0hcVBjeUZliDBg3aPfnkk/c99thjrXr06PH4559//jKU5nYoPW4Vmgall452x9dETPrYBmkIrhv5z9avfz6ER7gMy3YhChPhBaWlpYU2bNjw3lmzZj1vHJ2m/G2jqSIkaPz48T07duz4LkY15nEsqSx2PrCpSNKOHDkyo23btv3XrVsXfskll/ADu56lS5em2zAKzL333nvjDz/8MAVxXQOhMCNmjq4Il0hBIkZv3caNGzfVnAww6GSfhaAPRvwmUsZPKMgsB6aFQozfWZs3b/48OTnZGwUgtGm4zk4rGJ1+WcxO3ewA6Rdh8IlFdpBmp3lmgucJfpbEz2R7mvIkMsWZOkehFzJehM8tttIxkuT77aURdkmkw4v0BGHwEorfVJQpO3bsGPn666/H2DBO4Pvvv3+9VatW/RBuKeaH+cCxySNtnmNDpI30e7ds2TKpUaNGfCeuWDpjxB2L/J3PDoC/mT52CpImh01Zm3XHHXc8bDyeBIy0Lxs5cuR81KP5KLbkkUi4tAnC9ECev8HgMGH79u3HExISgtGxZWB2G4KyD4U/Osx2DExFBQVR1rmCch6OObBwwfbVK36zrrNQP2XQMXo5U4b8hlB+cI0KMgT54L2nC5COc5CGENQjb3MEI85wXNs/ZMiQL/NqUwcO7Pm/KldUnY4wzX2rLDt+Z/5wzhwThOdFeXz6wgsv9LanAsqwYcMaQCmsxCHlU9pI9kWA/Jr6g+2Gux6jR48u8EcR+J5l2XLlLvBmQR5sc2FeGR/32DWbM3g8WcePHx/T6LZbXwrwpgQFhQktjb4yBHVc8uOPP74X9n+qV69e4aqrruJGHOeg3+DXfcqjjLghSjAUo9mfmmXJvpc2y5Ewr7zGfLOu4Z6Drbg777yzciD6YcUPrr/++ivQWLeys0Thn7CnJho9t29K/fTTT/vyW4vWS6AJffjhh/+DNCTAmDRAEJwv+nLPx+133313kazRYwDQFlGkcVlZwG/fS8QCysKzcuXKu6y3M4JmzZpVQj5QhX/uqSm2HLOO5Tg2NnZ+48aNi/xD2+SZZ565Pz4+3nxxn+mTNBB0Ejltfs9yuvV6UriDz86dO1cxHObJWXc8lrAIZCtj2bJlTa3XM4rx48fcnJyUEI5SQU7+3NSAMJ/8TYM8FummBFDE9VGmZn9nwvYqcUuaeA3HLtR1V+utQDg3JZDwJV7fpgQut+fY0aMjAr3dXREQfN99953LD8ej67mzdevWrWJiYgYhT4fQB/EbeSZjlGGBfZMvv8i79FU4zvjyyy8Lte9uUXJWLcNSAWFWNwOFfn2ZMmU4YzH3jiD45jrqgweTp02bNqgIvwDinj59+prw8PDeGD2ZG2pIj2+kjLQElS9fvuYTTzzBb1vm+gRIQXj66acPoLOO4EgOQmjPZo+Mc8BZwPX2+Ixg0aJFMZgJR2LE6tsEgmVLJH/OGdf5559/e4sWLe41P4oQ7o/Zrl27J1Cv56BTMPdnmAZJ28lg52APTwpm2PwSDvfi9HLpijM65pnh85gjc8o3DfLOujzXej2jCAvbnRUSYrshFAmLhYblx3w6yavMzkL4VOrpnmfv3LlzU7/++uvEb7/9dgH61h8uvPDClyGfVdAXd9m1a9dX6I+OoT/ikq2RV/ZNhNXJdsvfGNhSvkNr1KhxGy79pbM6HThrlCVHYF999dVz1apVux6NLJiNjR0KYaNDJXEfw8OY9X1SHPsVPvnkk7NXrVq1DAJgHsOm4qJwUDDYubVp06Y9X2mxzgPGHXfcsR4d7XYIpu/xb+ljpDxYNrgWVKlSpacbNmx4kzl5ZsB7zNwE4i8diCgmKkvmk3mEKf3ss8++gNNF+okhjIYb33bbbU1Zr6xf1jVljh3BKWD68+wE0ekcgsVtxHzKg4qYeUUHZGTJyhOXvK7N9nVmERzsgZyWzuI+t8iIkVXmVWS2uGB7sYenE6djmvwGM81vMHjvNmXKlLfS0tIiUa+8B2sGfITtgwNAUrFiRcpy8M0331wNM9UrzMnTjLNGWaLTr3feeef1RgWYl4Gk0+RIBg2PQrcbCqrVjz/+uJvX86JJkybVOnXqVLNDhw6Xwb700UcfvTg/n3vCLChi27ZtY5Geg6IwKRzsCPCb38Sr2rx584dr1qx5mfUSKDzlypVbgcZvpJBx5lSW8vuiiy66GsJ8q/lxZuBNTU09aAc+RmkwT5JHmUnzHA3cBKMB1luyZMnEonoKGQO08g0aNGiPejVfPma8rGt2AlLOJwNpzrMjvP3229+FuwyEyaUqXydj82aOKU88deWVV754ww03FMuScyBBMaRxQ1GbD1OXUn+s3+IC/UWe9RFAijOuvxXef+zcufPYlStXDkWdQowzzYBP6pdyDEVq3NJGPVSDDJyWyvKsoEuXLncdPXp0Awqfy3PmnhEqBX2Vuc/A02nTp0/vD6d+Te+hKBvFxsZuQOe0HeGtT0hIWAd7zb59+xah452/cOHC2a1bt25w2WWX5bn0NXLkyBcQTgbSYdbnbZqMzWW2IUOGcOYT0EHLxIkTayCOVJSBiRDKxXfPlEj8LBhc29+1a9czZgnv1Vdfbco0M+3Mh+SFMJ/y23kexGP2dz+8B7Scea8mKirqfSTF3JBh/LxHniPuv6QJdp4bqVtKjxs3biQGCL4AKduCMx4cZ3z22WdvwI/fA7rTgRdeeOFKlytjPzdRRy5OuLfF8kTZGgP59aCtfGi9BZzhw4ffxHqRMmV7kbhpCK/hOBD3LGP8vGc5vFaJs+PDy//3f/9XBWWagLyawqQlZUykv8bv6IceeqiJ9aYEEiqsiIgIbtJrvvbghI0N56LnzJkzDE79uj+I0XyNuLi4I/Bn6lUq0/mgECrWg7DTFixYMOHCCy80M4pTwW++7dy5cxQ6OX63wYTn6ASorNJ79erVHk4D1pHz+3II+g8YUyCMV+KmcZ5DvtybNm3qwb1zrfeiJujZZ5+9CnaB84v67I9yM62Lde6sd+aJsPHxPG3kmSQeOnToiUA92FWrVq1ymzdvfgbxpSEtXmnshPVLEKexJU0Omw/4+KMs+cHrDgiHD4udkE9B8skMQtGkvvXWW22s1yKnfv36F/ozYMyNV1555Sqvx7UfpZLFL49IOUrZ0aZBHotUWQ4dOrQu6sUvZdm9e/enrLcC4aey9B6LjAr4x59PBlckfvzxx9o9evTgLZmADiiFiy+++BLk8zgHfsyryLLYLAPWPa7F33PPPc2tNyVQ8KvfEyZMGI4CTmGB28I2Bscof69r9erVYypXruz7blselBozZgyf5PJ9uoaggu1RNhz9MnAowOQffvjhMev3lEDgL4LzvTBGocN2NkbuJ7qubdu2gVx6CH7vvfdeRNDJznzYcjHHjNva7GSPdezYsZX1W2SwY8UMfwDSse7xxx/njfwCAcVeBQrpKNPOPMhshPk7WSOkoULD9fglS5ZMu/rqqy9GMAV+iKBRo0bXHjx4cBHCjEaYvjRI+dpk+Wyez2H7rSxff/31yyEff9j0G/+ijAXGyWsw3sjIyPXF8HJ3cJMmTa7dv3//b7/88su0KlWqFDi+l19++QpXZvo+zizdrj9nlTI4lfpDfRbp07AjRoy4EeV32ihLD5RlVGTU14UdjORC0CWXXHLx1KlTx2IQuTElJWUP5GonBkBF8tBf1apVL0V/yZmlx9knnZD37LJIuP/++1VZBhrMKLuhgs26lHSO7EhobKX88oSf2yjxUX00mH6oOL4PaJZzWYnOTpdIxUqFHz58eMctt9zCzjc3gqZNm3Yv/BySZTTp4AmO3Xw3E+4CNrvDaPFKlM8adjKMg+mXPDnjZnqYXzSW6BYtWvzbeg84TZs2vXrKlCnjEBWXh91Iw7zGjRtz/9aCUDI+Pn4I8uNivpz5Yf6c9UZblAvPw70bed04aNCgxzCryZfS5OPxX331VUsoiVkIi/jikmPCNBFnvDlsN5TM9zbYPPn9998/QVgmr8QZbs44mD+EPa8IN6gOmjx5clvkeT8MB39cUp6IjrdAM3bOLJGH/Uw/jeSRttMwrqJUlsOGDbvB6/Gi40DkHP9YI/ETm75CK8vExMTjDE/CPplBXBwcHSmKenzuuecuGjBgQDe0w/WIg23R5A/xevft27cWfWHAPymIAdVlCD6dYsxytPEZW/pE2qjn461bt77DelMCwXXXXVcDBR/BCpZCl46DJ+Li4jaj0/D7CcEff/zxHniLhgBxpmXCIQyT4clIF5Xp65xxmkKdER4evsnOVnIjBApxKPxkUGDonwpXwgeu7777bijcBUxhQiG0QBypSK9R/k5EQAlnzojfc/z48d3t27d/IJBLslxG6tSp08MxMTE7qSTZCTBOLv/GxsZuu/HGG2+wTvPFwoULmyUnJ++R8FiOzkbI/NI4ZOIE+YDCTMDvP3766adxtUHdunWrn+xDu+g4KmK0ffPWrVsnIb3bkYdYiZNInE6cZUvEjcOmQuNOUX6BwVhVzBhXso4kHGe8yIuxeY6bTAA3P4NUp06dQi135wQyXmHSpEljkb8YRkL5pQ2S7rjjjgLNBjCzrIlwDkqeEJbJC22nQV2eNcoSAz2jLG35ndIgPveMGTPG8baK9Voo0K7/hUH7SMS7Ewqb70ASkzfa7NdgZx45cmQ7P1lovQWE8ePH346wTQNkXNIf0Za6J7i2DzPLU34AXsknNWrUuDwsLGwZOjuUbXZlJyUlSaGbezeLFi3qZp3nSZcuXa5aunTpQoZnAgNUIOgUGL4Lwv0rbaeSzGFcr776ap5fheeyMTozfqHcIx0cYaOh0MA+Mnbs2IA9ncrODeHOQfrMNJhxML2i+FleokB4jGtUqvGLFy9+Dh1CQWd9Pvr161f50KFDryK/2T24bSCE6YDxIL+9rPN88+KLL/J+XiLDtun35ZG/idPmNRqWN/Nt3bpRz6zoQzNnzhz7wQcfvDt48OB333///XeHDBnyHjoVll8G6gtBZIclZSY2ZUVkQ/LIMnaWbQ47X8qS9O/f/26rpEwYhPmgIQxbrjEtOOaTbbuQh0cLuzEDB09ffvnlf6Kjo79HmC6JkzCPMN5jx44dePPNN/lgRr6WtzGzrI/wwpl+Zx5oOw3KtUiVJcqpzl+UJf9s/MSmr9DKEvXIQbkJU8LPxSRhYPgevBX6wS2kfwr6Sd9MgOEzT6xDpMmc4zHL+uDBg1tQnwFZDoXsXAzZmYT4fH2AtBeB5cG4cX5+q1at8pp4KP6CDngMKpk3JU1BU1ESVgYqPXHgwIHPwplfwvXYY49diBnDQnjl/QoTIDs6hgXSMWvs36xZswoHDhyYhQr1LSEQXDcVTIcQhlX33ntvngrm+++/vw9+DkNoTFwUHoZhw/NCMYdff/311azzQsMX5rds2WJeJXF2cs5jyRPcMO/MYwrStA9K423MavI1wuRMskGDBjeMGDHiPeSFGySYUYE0EsbLeAjzi3gSMAP+uID3Zkpt3LjxPQRjlDHzIfGwTGl4jsaZXzj12XKe/tFQaXn4EALSzSVGL2SL57I9AAmT/iRsYhwBdgJ0Q8QWNw4738oShCxbtuxrRJGO9Jn04NgXB/PN30TKGHlgmSRyxYAPCt100035kisurUIG/os2sBHhHENcrC9fWUgHSxAfy2tp5cqVK1rvfvHSSy/VRnoPM725GYRd9MrS7fFHWboL+zQs2thRypbUWW6G7lDfSZGRkZtQVk/feuuttRCE7wnZ5s2bl4VyuQHn/4N2lOv9RoTzBsI0Dxo6lZWkQ44pU/gNZ57YPXv2zH7hhRfu4m0dG4zf8N45l+xRv3sQLlfUTDyMX3DKENx55syZM9J6P+0o8EMOfxf/+9//bp04ceKvodnwfUXz3g5hB8fvSkJ4WmzYsCHVnMyd0J9++qkrlOF7ISEh5iEFvucFKEyerVu3foyZz2eI7+AXX3zRsmPHjpNQ6eVR2XwJ3LwrRFDJfKHWi9nsL3feeeeDOJVr3M8//3y7jz/+mJ381dxpiOcQpoSXtWvXrh8eeOCBx3fu3MlP5RSatWvXPnbzzTezo+H9j2AIrXxXzuQX5chPk5UoW/bP204UXpYnru1buXLlvG3bth2E4vgZl7hnqJsG17h3aBCUInfeKINyuLdatWrXQsHeg/O8V8y9cc3evIyD+UOYvl2VeI4NB+fTUB5NXnvtNX6ENl8gX1dAEbwIZfs85IBPPAcxDvlEGd+3lbhoM7/MN9OA8jdpcl7nb1sPPuQ8/UqYPCa23rgkGQ8TiTTUQtma3aP4AjaReBx2nnvDngw+KIa8TqxTp849SEMIytaEyfQwHUxTzrTTDS0Yvne7Y9iwYYvh7lfU5WHY3B3IdJ4w3ACeX+fhl+0rli9f/r7zzz//socffvgBuOEDcmafT8ZFeaf8EJaNxI/znrlz577bt2/fj/zdz5T3LDGbZ3vOtTNG3EW6NyyV5fPPPrcBZfLnIBvlmWVfiWTZMv+wPT169OhemL1hobS2Qv5qsaxZdrnhiJcvnXqgaA+jPS5BH5HIeqhdu/YlTZs2bQJ5Kx8TE/NbpUqVTrntIfqy+k899dRkhFH93HPPPUFQpF1aeTH1yTaBONg+ORDaPHPmzIX79u37Eu7ckN+o2bNn/6V/4utUjRo1qgT5qFa3bt2nmzRpchfSVgZhBDE8InExXyKv7Mfhx/XNN9/c9eijjy42J5WC8+uvvz6AAo6GMcMgViQPUbFcCnNj9reO956s8zxZvnz5RPhPYThO8JtbjeV8bDsIHUfTqKioMPgxQyMbr/FDcN6NkRRfA8kVPkyUkJDA9/N8wyrOZhkegZ2ODudl6zwQhKCR3InGtFvSzvhwbOIjPJby5KgTjUPOmxkXfnMoGg87jgZp5KbhsQgnFk54jtfMI8jEMds3trOMJZ+MJ9u1N2XChAkFXn7u169fubCwsIEINzUuLs5EiLT4Zl1onMZGPD6baaChO0Gu05/Uh6RV3Iqb2NhYcw6/PRgsbL333nsboQN7E+d8y5ROvznsPPeGPRVPP/305Sg3Ph3LZVYTpoRLWKaC5IHnpKyRNvpLxjW+jsI6i8e1ePyORzlR4fNeLqfT5gVlwnBgmfxLfCwjGokP5+g0Y+HChZ/lZxkNA8cqCGMfw8/NIO4inVliBn2jmVnKrLIIZ5aPPPLIg+g3TMFJ+KcyLF/Gy7JneeMcZ5q0DCx3W/Zso4kYfDxhozkZQXwqFU4TEZaZ2TJshkvQ55nfRGzCYxMBooCJg5zEwW10REREJNpbRHh4eARXxBITE8Mx6D5GN/CTzDikPYqcME5pHzwmbJ84ZtjbkcaAbwH6j+TYsWOzUbDmwQLnPT/WIoiEgmlkneZJ69atayGcMKlEwkqDoZSsHzNmTG3r9AR++OGHB+GHN7DMsp8IFdOENGRFRkau4I106/yUtG/f/uq9e/dOgkCZz9zQCGwMCDfx8ccfb2udB4QtW7Z0gUxGIi4uM9rYshuD5MNZHjwnDYnIb0mr2Bww8JjXpV7YEHjO6Z/HNBIXrlMRx2I28jyXi20yCwQGSVVRnh8iSPPiszOdkhbmTc4RHvMaEZtpk2MJQ9LrdENwjSPu+BkzZtzHNBw8ePBp/DYZFrdE3DvsfD0Nm5N33nnnHtTfGsbP8JgvqU8pb2c+BWd+JS1CTvcMh2HyvFMmpH6d/in7CDdz0aJFk/L7VCxfHUH4RlkS2gybhsdiEH6RKsuhnw6t66+y7N69+9PWW4Fo2bJlLYSzVeQxN+NE6pYwLfJb6oKy9+abb+Y1yA7FQH0EwjYal/6ccUlY/C11QKSNy3knlCkx4p44wyL87cyDE7jZ9tlnn+lTsIWlfPnyFefNmzcNjdIoFoHHMOxw06dMmTLCOs+Txo0bV4a3OFQch2QmLFYkKpvBbbv00ktP+boJn5hcv379GLjzaWvpqBgWw8TvY3Ca5xOlDRs2rA632xgphcimwYSF37z/urFjx44Bu38JgjAzac6ZEKLkdzwZtS9OsXmOyG/CtInwE+fxqfw5z7NDJVLOsN1Qbhs+/vjjG23aAkFQp06d+ATwJoSf/XSWo3EyHTQ500uYPkkjEQXh9CN5hs1wMzB4W4QZ5e02br7K1BX+TOASB3H4E5vKslCfaOvWrdvFiGMpjNls3QQMJN3O9DrlUwzhdYdX44fGeU5guBKeuCM4x7JI+fLLLwciWSeuAfvBiy++eBnC5jvIJjzajEfSJgbxeYcMGfKx9RZwBg0adFNxKUvyzTfffICwzHMSEsfJDDmZLMo1IjKOsDyTJ08ec7KnunMQjLJ8DfLOGaCpVFpSp4xPwne2CZLTjTMdhL+dbU6ORQYF+Y3rLIAYTHQC2c/9c0FD7IgCNUt8toBNpbGCUZkuKNLJFSpU8OuJPz7Zh056MCrbCAmDtMLnTU5OToqNjc1z+znu5/r777+PRjrgNVt4JD322P3GG2/487WL4G+//bY3ok7CiN0ndSJgFKSwsDC+fxnQpQmMPm9JSkriU7mmo3U2CEcezLH8JnBqj7Lhb+c5ptvpXvLBcxIHznEZKTkuLm7K9ddff51NUkB59dVXbzp69OgraJARiDsdeWE2TZ4E6YAkvbwmeeE5NmZn3uge5xkOH5SKhqyMatOmzQnvo0F2usOfLxIuXzrLgMbG48IsbLL1VmAeeuihq3/99de+iMO87M14pN4EybOzjuWY+aOhe9pyTpC0O8tNYBjwx3dW9x4/frzTtddem+tOVqeC7/whnj22fE38jFfyIOnBOS9mlkWmLBF2PY/L7aKChO3bHEDKimXANCI97meffbbQyhL9UBWE/RXCyxRZZL6lrJlvqUtn+fM3jdSNlI89xwF2zIcffujPe5LcgOWhxMREbhOa/WSbIy6JR8InjFN+iztJh9SfIHlyhuc8tmG50RdsHjt2LJ/z0OXXwsInK6Ojo6NMKQN2QALrF8Kxp3379v7uIBLEHXpQWaYFsPJsA2AHnoEG4/dXQDCTvQ7euOuFkQBZphCBgDJdxW9rWue5wlE5/KYwHcAngAS/XbNmzRoCZwF791GYP38+t43jEpgZ4TLtFGSmgTaRtEi58zwVCW0r8OZY3DsbhNg8BwOn3kz4CcPI/AGbhCKFHfj48eNfQLxHkQ4OtlzIh69FS94kDyTnMiPdwDDt/C9mxYoVUwYMGHDS++IHDx58GW5MAUg5EJaXxEVwzfXzzz9PtN4Kzeeff/7fI0eO/IzOl4MfJD27Dq1s21iz80kjeRN34kbS6Uy7HDMsXmP5wB+8eDO2b9/+c7Vq1Qq18xQfCMEg4w8TCWAckj6rkM05HHuHDRv2ifUWcDDTqp+ZngEtiYhhRFk6y4c20uIJhLIkvNe+f/9+PjTohlxmRwJY5qJspCx4TtIi6SFynbCccC2jSpUqfL/WX0pu3LjxGcQXBb8IInvrRolD0kFyxi3X2PcJTIOz/ujeGQaPcZ0ClIx45/Tu3TvgGyD8I3n//fcvQYOcg0ZsSp+FL7Dx8CZzt27d8txuzhI0ceLE+qikNAjeCbMpHHswwlpUqVKlC63bPOEMdeDAgU/AbzjS4ZMgCgoFAvG416xZ8yuc5jliqlOnzsUQuNkIy/RMDIONg2mEQVDe7bfffvtJ76EWBi7X3HXXXTcdPnx4ZEJCArePMxotW5ZPnIkxTQKvCWwcdOe8zt9yjgGBdJRJOAYQnTCrrWejLzb69Olz2969e1tDmX0YExPDB7SO2zSZjLKDIEiz5J3ywd8sjwTMwvdGRkYOQX3edc0115zyfjTcjWcwzLcMKJxQLmzZZMycOdPv94D9gRtVR0REdETYS9DxxjELzAfrxznAzJkupgfO7K9seJ3nKX+E/hmWJS0qKmrVtm3bnimsoiSdOnU6Jy4uLowrK0wrQRzGONPJiItaWaLmILQoC/5BWRqFCVgOTA9BGj1du3YNWN1hMnAV2v5QyAYfrDKRsOwJByZSDjzH8pH6kvNSR/Ibdgb6Tb5e4jd8kBED2FvDw8M/QT/IwbPZ7xiyYtLDdIgMMf6TyTaRtDCdct2mibZpX3CDZpK0/tdff+1Uq1atQr/LrVgw6hrOAmahOyuCFYfCT8OswV9FWaJFixaXQ6mtlMojrHiEa95thNL4r3WaL9BpvIs0meVMpxDZ40yksYN1mitt2rS5FWkJRzDsrX1pJAwbs+v9N998c13rPOC8+OKLdyJ+LgvtRMPlnrLsbE1aWE7EmT/acGKO6UYMYSMDVDSpKJvfR48e3fe22247XT67E/Lxxx83Gzp06FurV68ejTxsRjoPowGz7LkjFL+7dzgsLGz6mDFjBgwfPry9v0uM8MsBxwm9CBUky4k2Qdhw4k3mvpzWW0Dp3LnzeaNGjeKOSaMQzwEYdnzcUMMsswmsU6lXIrMDti/4Mcd0z/YHvxxNJKD9LPv2229ftVEFBMyughE368CFTpkyQ4OoTUHxgwXGhslEvRXlRuq1EEsGZpceV0amB8fZ/7Lj5oNccpxR2Kdhc8Kn47/44osnkFeWA5dE+YqIqQMi9YTzvvYn8kSk7myZJS5btqyODTrfcCeyVatWvYW0bEFYXN7PgPyaBDjjZ5ooK4S2HPO8uOE5+GGaMtEn8OnrdegLeJvrjOR0fc8yFALZcsCAAWPKly9/EYTBvDcn7yShEjzoDLbed999/9mwYYPLnMwFPmk5Z86cFxo1avRqUFBQOQiafDSXdZq4ePHiF5s1a/aFdZ4vJkyYcHX79u0nlipV6v8QVijfi5J3hyg4UMTrHnvssW7z58/fZE7mwo4dO17EaL0fhOt8vocEITXvOjFMjryhMEffeeedr/j7Dlt+wSi3PPJReezYsVXLli3bFuV841VXXXUp8nM+0lIS17JfQs3K/sK52IR5RVrZuWGiEHcMI9Tf0LnOBXveeuutMDgpvo8T+glH1PXr169y+eWXl4HiNO9G1q1btwRmDlmosyOoj1jr1C+Q3ziUQQWWE8OCba9kg3o1Mgc79qOPPrqub9++0fZSwOHyJhRRbbSZeshfa9RnFbShCxF/WaQtBOnEYZB5v03eU2Z9ShpR57w1ER8bG3sEA4lBkPO96IQPr1+/PhxOA1aXVJb33HPPE+eddx4VAD9qyU62NNJNeTMNCbYHafJ88803a995553NPBdoevfuXeF/bdt24nFwUJA3Ex0+1DYy6g2y31/kC4gsl1Kou7mTJ0/eQ7cBJPjVV1+t8eSTTzZAHM9CNvng00XId0lbV8TUD43tC1lWXrhPP3z4cCRsvgv9EQYVq5G+FBNqAaDyRju4qmfPnpdBJmqh/3wI/XDlcuXKnY9+83zEaRLEdFkv5t1l+16xUaowvBd7HP30USjKhegTFr7xxhuHfvnlF37QPPuLz0rhgeDeisI2u7KgsnxwxIJO27tz5871NWvWvMY6z4ugNWvWDEZQvC9gQ/LdY8xcvnz5IAqHdVsgmjZtWjchIcH3DiMUpImDML3oRPfBWZ5PCjZs2LAMlCJnd9xFxviHEBqb4Njdq1evQL5/mScffPDBHZhN9Jw6deoHEP51SBtHiKwbY1AnyG78cnQgb0PhvAb3fDr0H3ezvkmTJtz70nfzBsfG5iCCdSijbSoEXNuFTjFfO90UFn69ZODAgY9iANpn//793yEdnAUnIl18pzIJHRrt6BUrVnwzYsSId44fP96XO7dY70ox06dPn1r8chDa3keQIc44E9CXJKLeONvjMnsEBuDjZs+e/cbgwYM7W29FBm87vf/++00wWOnJ76ZCXr6CXHMlJgl2PGzu8MTvzM6AjL25adOmlx555JEC7fus+Ak/97Nr165ZEArT27CjIRAUdkC8r5GKjvlm6zxP2rVrdwc6c96n8oWHsBkWX11YwR1ErNNCsWTJku4I2zykYxIMpINE2pOHDh3qz0MtQejQakO5mv1OmVYJQ+4bYeR4GGnmknFxrwoE33DDDZdjYGG48cYbjcEI9Do+HWzd/FMpgxk09770ULYc9W7kDefNb4JrbsxY+8HP3zagqFq16vm1a9e+1lalqccGDRrUuvLKK6/N6/usSrETiiqqIvXE9sanyOvUqXNNPj49GHB4a4JpYJqYnptvvpnyVB1yVdSfh1NImzZtyi1YsICbNZubYRi9mA6GnQ1H6LBd06dPHwunfimKl156qSLCOIAOytyvYedlw+OuJL/zQ8/WaaG57bbb+AmaeYjPdyOIaWa8jC8sLGxVpUqV/Lpvx6df4c83S2GHKyAPzMuG/O7BqRQdd9xxx22oF472fU8UE/z02TxPYKc888wzT1qviqIo+WfmzJnmfUoohz8fRmB/4/Fm8WZ7ZHjkNH82KyeNGjU6LyE+nt9PdIuysQqXCidtxYoVr3JpwToPCG+88UYNKEsuRZhOk3Ex+TQuj9uzedvWZRh95bnk27hx439FRUXNRRmYQsBs0tfZcuaC/HgWL1488rLLLstzpyCl6FmzZg13RuJDMD4FKQM9nxwD1iHM1i5dulS2XhVFUfJHw4YNG+wD0tn4FFymK8uVkclnqjKmTp3q98eJMdpvQD9czpUOyy5leuLi4nZYZwHnyJEj3NnfvKxnOkevJyvDlZmF+WVWanpawocffviIdZorbdu2/S/CiUOaswsESAdMUD6ZP/3009+6nHe6wOWoZs2aVbI/ix3UuRkgOVYuTN1T7pzKEue5ycQiDIYK/bklRVH+gdx0002XxcTEHGFnwk6FHQ0xChOqAkrPteuPXVP82MaJBK9fv75hxJHw3zPS0vkwhSyF0ubrHZsefvjhInsFg5/zSk1NHQ8lbbQ9NV2m22WUJRNzLCZ6YatWrepb57kRvHLlynfghTNtBuV7XJzlg/MkaejQof/4D6WuXbv2haNHj4YvXbq0DwZJl9vTRU69evX+FR4e/hXqg1sHmrrhgEbqSeA5VhbcpI0bN65ArygpiqLwG4/vcWmRHQtH584ZFBRe1t5du7dVq1bNr6+J8MZzXEzc11y2NZrKATor9/Lly0fDWZGO7Dt06HAt8nEIypmvOJtkuDxuY6Aw3Rs2b1pinebKY489djM63j1Mu2+mna0ofQrz4MGDuzBT8fuBp7ON5s2b34GBFjeHJ+74+PhlvXr1amEvFymjR49+HFWcLrN/xO+8L27qTOqN8j1z5sxv+AFw611RFMV/Bg0a9CY6kmR2KM4ROe/TESq9A/sOvGmd58pzzz1XGm4HeN2eTGqo1GSzNZe8JuJZvXr1PDgL+LZxJ+Pw4cOPIs7YtAzMKpgPGC7HsvNEmiKR1sbWaW4E/fjjj/3hni9qm/IgMphgebEThrKYC7f53sT6TIf3nKEcB6EcfGudKCdvSkpKVHR09Pjp06e3vuqqq/gNz4Aya9as6pDP7zBg8b3eRBlzKMYTlCYN3B567bXXin33IkVRzgLWrFlzDToV87krUZTSyRDOnjCzTFu0aFEd/DzZE7A85zObN2xu5850JVAzpaemGQ0lHVhycvL2hx9+ONcviQeS1q1bV1y8ePFkzCShztxZojQJFdz27dtX211cTsiD08Bp0Jdffll21apVU6AgfduBOWFnjTJzYTb1DPz8o/jqq68uQ7nshZwY+RHFxDKxZKAOfpk8efLzfIfVeisUrVq1uhuKeAXKnA+OmfuUiEfqwihNyq38JnR74MCBJYF+oExRlH8AV1xxRaVlwPQmgB2LdDJQbMbmuSOHj+yNOBw+5Wh45BfhR46MjY+JG5KcmDwkIy1jqCsjcweUYzJmn3EwSVCQbvzmzUHzBC0fDiLowLh91Md/w4MVIYh3KfJh7p3atJh8UWHC5tZW/BAv85ACk+ZxubnlVgaOU2GiMlLTdu7dtWcDQ/B9DQF5Q97NMWfP1MK4lj58yJDcPvx61rFt27Z3MNDyzSopPzQyqJCBly1/bkq56vjx429+9913T0DptX7iiSdatWjR4mobXE6C2rVrd3P79u0fgsJ9DPXWNzEx8WcoZ7PnKjD1SCPxUWFLchzK27Np06bVlStXLrZ7qYqinD0ELVmy5Gd0JOhn/vxyBeEx8Y3O3Zh1pqVTUWR3eR6vB0rQg/M4Mr/NOV43UzcYo1Cszc4UHV0094a1cRcrmFG0hjLkvqO+mSHzag1nRLxk8kFFL/mE4udxdl7xm8oRv02+oEyNbQYFtLPPeaFYt3Njahv1Wc2kSZPuiouLi2B5yuxOlCORlQrCcrdyRjxwx9c8oPfSk2NjY9fPnTt32pw5c76dN2/e1NmzZ0+hvXbt2h/gZxfcpUIWXfDDrfxY2iYukU+xHYr5BCUNPwcHDBjgzwNdiqIoJzJs8OB7uLwqCs0oNzsbLJDBn5lF2t9OZYnOaidmCAXeWDgQdO3atSY6zhQqRulQqSwNznzk1+DPKkpjU9Gmp6X/dtddd11poz5bCYGifI/KSJQVgfIzNsuWZew0VGC0BR47Zn/GyCDGeY6GiAIUN4QKmDANcl6UNAZInh07dqwdPnz4P/bhK0VRCsHdTe+uH30seh8UGWdSvg6/MMYXjkOBcDYGJZK0cOHCiafBvSJ+cHooOl6fwmRHazpwO1g4lfmLgsxhmHfjDj/5GwrT/cP06e8wzuyozz74RClmhL9yxgdjNoCAcjJKi4aITUS5ieJj2TvPOZUicZ6jEUVJ6FfqTn4ThidhoI653rG/X79+N9kkK4qi+A86j4rJSUmz7LKp6dxzKof8Glma5CsmjmNvRnrG0fnz53OD4dPipf06deqUHT16dC90orxHicSjV3UahwI0hudyMzncSVlwkIDjlGFDhjxqoz4refDBBxuMHz9+BHJrvgeGUvApq5wKU2ac8pvunMdihJOdo3tRsAIVpswkCX8nJSVlbty4ccKbb76pS6+KchbBpy6LjQEDBtz3Wu/XBrkyM88NDQ0tgc7HfCPLXjafBsJ/PMyyX37yXcuB77zH5SkRWhJhQVmElAwpAWXBTyVlREYeXdT92e49ly5dmm6d/u1wU4Xp06f3qlWr1kPnlCp9blp6WnAo/vEaumjjxhIUFGy/84VjFJHUUxAUoz00frKCg0OyMt2ZJUqGhJYoVbp0EMuUZRgVGRne8YnHOy5evHindX7WwZ175syZ8ybKtXW5cuUqQabO5aeDoLT+8nksgrKhjPk+oQZlaGzC804cYmmO+Ukkhkt3/BQRjynDDIvKmNfxOyoiImJnw4YN7zly5Eia9a4oyllAsSpL7teKjuRyjNJLuVwu84044A3xhGSVQN8WzNF7SAg7nqwQHLthW68GnqfNUb78luOyIWWz3K6kLFdoaNb69evjVq1alcTzpyP81uBFF11UtkKFCqGYmZgndENdruy8lSwZFOJyhXpLlQpBxxxM5Rfq9Qa5cMzfdEOkrM4JOseTnpXuLZGByjwH16E3y5UrFQxtUeIg+P777xOsl7OWzp07V6pevfpdXbp06QelWfmcc84JhgIL4jdQMYs330KlYqRioy3KD7Ij3wU8QTkSp/LkNbp1KmCeoxvYJHPWrFkzt2zZMuyLL77YiGI/bQZoiqIoinIC99xzzzXLly//OCwsbA2U4lHM/sxX92H46KtvWTXncirhNacRnG55zHuUuM5vlLoR/uHExMT1fI9TP22lKGc3xTqzVJTigF92uf3225vceuutN7Zt27YNZoX/Ll26dAhm8cGwMSEMCoK+M26hA80MkcYJz9Nw5pmamsrZKfUlX/Vx4/eeceDYsWNrQkNDt3/yySen7SqGoiiBQZWlcjYTVLly5Qvq1q1b4eWXX340ODi4bo0aNcpVrFiR76Jy/ZXL2sFQiNyvtSquc0mcM9EY2EftTNILRelesmRJChRj0k8//TQFM8mlERERdKMoyj8EVZbKP4o2bdrwxmOpCy64ICQ5OZk3zUNKlSr1r5IlS9aD4TXoR9dBKM4wvo4ChenFcSYUZIoJQFEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVEURVFOV0qU+H9J0EtynEbRiwAAAABJRU5ErkJggg=="); }
+.runhead .xlogo{ width:37px; height:15px; filter:brightness(0); opacity:.9; }   /* dark on white page */
+.toprow  .xlogo{ width:62px; height:26px; }                                      /* white on dark cover */
+.endband .xlogo{ width:50px; height:21px; }                                      /* white on dark band  */
+
+/* ---------- running head + footer ---------- */
+.runhead{ position:absolute; top:9mm; left:17mm; right:17mm; display:flex;
+  justify-content:space-between; align-items:center; padding-bottom:7px;
+  border-bottom:1px solid var(--line); }
+.runhead .rl{ font-size:9px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted-2); font-weight:700; }
+.runhead .mark .wm{ font-size:12px; color:var(--head); }
+.runhead .mark svg{ width:14px; height:14px; }
+
+.pfoot{ position:absolute; bottom:8mm; left:17mm; right:17mm; display:flex;
+  justify-content:space-between; align-items:center; padding-top:7px;
+  border-top:1px solid var(--line); font-size:9.5px; letter-spacing:.04em; color:var(--muted); font-weight:500; }
+.pfoot .pn{ display:inline-flex; align-items:center; justify-content:center; min-width:19px; height:19px; padding:0 5px;
+  background:var(--badge); color:#fff; border-radius:5px; font-size:10px; font-weight:800; font-variant-numeric:tabular-nums; }
+
+/* ---------- section header ---------- */
+.sechead{ display:flex; align-items:center; gap:11px; margin-bottom:12px; }
+.snum{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:8px;
+  background:var(--badge); color:#fff; font-size:13px; font-weight:800; letter-spacing:.02em; }
+.eyebrow{ font-size:11px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--violet-ink); }
+.h-sec{ font-size:41px; line-height:1.02; font-weight:800; letter-spacing:-.025em; color:var(--head); }
+.h-sec.sm{ font-size:34px; }
+.h-sub{ font-size:14.5px; font-weight:420; color:var(--ink); line-height:1.55; max-width:172mm; }
+.h-sub b{ font-weight:750; color:var(--head); }
+.rule{ height:4px; width:52px; background:var(--violet); border-radius:3px; margin:13px 0 18px; }
+.eyebrow-plain{ font-size:11px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--violet-ink); }
+
+/* section-label above a block */
+.lbl{ font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); margin-bottom:10px;
+  display:flex; align-items:center; gap:10px; }
+.lbl::after{ content:""; flex:1; height:1px; background:var(--line); }
+.lbl.plain::after{ display:none; }
+
+/* ---------- layout helpers ---------- */
+.grid{ display:grid; gap:12px; }
+.cols2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.cols3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+.cols4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.start{ align-items:start; }
+.mb8{margin-bottom:8px;} .mb12{margin-bottom:12px;} .mb14{margin-bottom:14px;} .mb18{margin-bottom:18px;} .mb22{margin-bottom:22px;}
+.mt10{margin-top:10px;} .mt14{margin-top:14px;} .mt18{margin-top:18px;} .mt22{margin-top:22px;}
+
+/* ---------- cards ---------- */
+.card{ background:var(--wash); border:1px solid var(--line); border-radius:13px; padding:16px 18px; }
+.card.alt{ background:var(--wash-2); }
+.card h4{ font-size:16.5px; font-weight:800; color:var(--head); margin-bottom:6px; letter-spacing:-.01em; }
+.card p{ font-size:13px; font-weight:430; color:var(--ink); line-height:1.5; }
+.card p b, .card li b{ font-weight:750; color:var(--head); }
+
+.hero{ background:var(--panel); color:#fff; border-radius:14px; padding:19px 22px;
+  background-image:linear-gradient(150deg,#26224E 0%,#1D1940 100%); }
+.hero h4{ color:#fff; font-size:16.5px; font-weight:800; margin-bottom:7px; letter-spacing:-.01em; }
+.hero p{ color:#D9D3F2; font-size:13px; font-weight:430; line-height:1.52; }
+.hero .kl{ font-size:10.5px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--violet-soft); margin-bottom:8px; }
+.hero p b{ color:#fff; font-weight:750; }
+
+/* eyebrow-tag chips */
+.tag{ display:inline-block; font-size:9.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase;
+  padding:4px 10px; border-radius:999px; background:var(--violet); color:#fff; }
+.tag.v1{ background:var(--violet); }
+.tag.ph2{ background:#8E86C4; }
+.tag.out{ background:#ADA6C6; }
+.tag.ghost{ background:#EDEAF9; color:var(--violet-ink); }
+.tag.on-dark{ background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.22); }
+
+/* ---------- stat cards ---------- */
+.stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.stat{ background:#fff; border:1px solid var(--line-2); border-radius:13px; padding:16px 16px 15px; }
+.stat .n{ font-size:44px; font-weight:800; color:var(--head); line-height:.95; letter-spacing:-.035em; }
+.stat .n .u{ font-size:22px; color:var(--violet-ink); font-weight:800; }
+.stat .l{ font-size:11px; font-weight:650; color:var(--muted); margin-top:9px; line-height:1.34; text-transform:uppercase; letter-spacing:.05em; }
+.stat.dark{ background:var(--panel); border-color:var(--panel); background-image:linear-gradient(150deg,#26224E,#1D1940); }
+.stat.dark .n{ color:#fff; } .stat.dark .n .u{ color:var(--violet-soft); }
+.stat.dark .l{ color:var(--lilac); }
+
+/* ---------- clean lists ---------- */
+ul.clean{ list-style:none; }
+ul.clean li{ font-size:13px; font-weight:430; color:var(--ink); line-height:1.5; padding-left:19px; position:relative; margin-bottom:8px; }
+ul.clean li::before{ content:""; position:absolute; left:0; top:6px; width:8px; height:8px; border-radius:2px; background:var(--violet); }
+ul.clean.on-dark li{ color:#D9D3F2; } ul.clean.on-dark li::before{ background:var(--violet-soft); }
+ul.clean li b{ font-weight:750; color:var(--head); }
+
+/* ---------- tables ---------- */
+table.tbl{ width:100%; border-collapse:collapse; font-size:12.5px; }
+table.tbl th{ text-align:left; font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  color:#EDEAFA; font-weight:800; padding:11px 13px; background:var(--panel-2); vertical-align:middle; line-height:1.25; }
+table.tbl th:first-child{ border-top-left-radius:9px; }
+table.tbl th:last-child{ border-top-right-radius:9px; }
+table.tbl th.hi{ background:var(--violet-2); }
+table.tbl th .sub{ display:block; font-weight:650; letter-spacing:.04em; color:#C9C1F2; font-size:9px; margin-top:2px; }
+table.tbl td{ padding:10px 13px; border-bottom:1px solid var(--line); font-weight:430; color:var(--ink); vertical-align:top; line-height:1.4; }
+table.tbl td:first-child{ font-weight:750; color:var(--head); }
+table.tbl tr:nth-child(even) td{ background:var(--wash); }
+table.tbl td.hi{ background:var(--wash-3) !important; }
+table.tbl tr:nth-child(even) td.hi{ background:#E4DEF4 !important; }
+table.tbl .mono{ font-variant-numeric:tabular-nums; }
+.tbl-wrap{ border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.tbl-wrap table.tbl td{ padding-left:13px; padding-right:13px; }
+
+/* yes / no glyphs inside tables */
+.yes{ color:var(--ok); font-weight:750; }
+.no{ color:var(--off); font-weight:700; }
+.mark-ok{ color:var(--ok); font-weight:800; }
+
+/* ---------- 3-column comparison strip legend ---------- */
+.tier-legend{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.tier-chip{ border:1px solid var(--line-2); border-radius:12px; padding:13px 15px; }
+.tier-chip.hi{ border:1.6px solid var(--violet); }
+.tier-chip .tt{ font-size:15px; font-weight:800; color:var(--head); }
+.tier-chip.hi .tt{ color:var(--violet-ink); }
+.tier-chip .td{ font-size:11px; font-weight:500; color:var(--muted); margin-top:4px; line-height:1.4; }
+
+/* ---------- access matrix glyphs ---------- */
+.axbox{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:6px; }
+.axbox.full{ background:var(--badge); color:#fff; }
+.axbox.view{ background:#fff; border:1.5px solid var(--line-2); color:var(--violet); }
+.axbox.none{ background:#F1EEF9; color:var(--off); }
+table.ax{ table-layout:fixed; }
+table.ax th, table.ax td{ text-align:center; }
+table.ax th:first-child, table.ax td:first-child{ text-align:left; width:29%; white-space:normal; }
+table.ax .axbox{ vertical-align:middle; }
+.pill{ display:inline-block; font-size:10px; font-weight:800; letter-spacing:.04em; padding:4px 11px; border-radius:6px; }
+.pill.full{ background:var(--badge); color:#fff; }
+.pill.view{ background:#fff; border:1.4px solid var(--line-2); color:var(--muted); }
+.pill.off{ background:#F1EEF9; color:var(--off); }
+
+/* ---------- process / numbered steps ---------- */
+.steps{ display:grid; gap:11px; }
+.step{ display:grid; grid-template-columns:34px 1fr; gap:13px; align-items:start; }
+.step .sn{ width:34px; height:34px; border-radius:9px; background:var(--violet); color:#fff; font-size:15px; font-weight:800;
+  display:flex; align-items:center; justify-content:center; }
+.step .sb .st{ font-size:14px; font-weight:800; color:var(--head); }
+.step .sb .sd{ font-size:12px; font-weight:440; color:var(--muted); line-height:1.45; margin-top:2px; }
+
+/* horizontal step row (flow) */
+.flow{ display:grid; gap:0; align-items:stretch; }
+.fbox{ background:var(--wash); border:1px solid var(--line); border-radius:11px; padding:12px 13px; text-align:left; }
+.fbox .ft{ font-size:12.5px; font-weight:800; color:var(--head); line-height:1.18; }
+.fbox .fd{ font-size:10.5px; font-weight:500; color:var(--muted); margin-top:4px; line-height:1.3; }
+.fbox .fn{ font-size:9px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--violet-ink); margin-bottom:5px; }
+.arr{ display:flex; align-items:center; justify-content:center; color:var(--violet); }
+
+/* ---------- diagram nodes ---------- */
+.node{ background:#fff; border:1.5px solid var(--line-2); border-radius:10px; padding:10px 12px; text-align:center; }
+.node .t{ font-size:12.5px; font-weight:800; color:var(--head); line-height:1.15; }
+.node .s{ font-size:10px; font-weight:500; color:var(--muted); margin-top:3px; line-height:1.2; }
+.node.soft{ background:var(--wash); border-color:var(--line); }
+.node.solid{ background:var(--panel); border-color:var(--panel); }
+.node.solid .t{ color:#fff; } .node.solid .s{ color:var(--lilac); }
+.node.accent{ background:#fff; border:1.6px solid var(--violet); }
+.node.accent .t{ color:var(--violet-ink); }
+.node.ext{ background:#fff; border:1.4px dashed var(--violet-soft); }
+.node.ext .t{ font-size:11px; color:var(--violet-ink); font-weight:750; }
+.arrow-c{ display:flex; justify-content:center; align-items:center; color:var(--violet); }
+
+/* ---------- wireframe ---------- */
+.wire{ border:1.5px solid var(--line-2); border-radius:12px; overflow:hidden; background:#fff; }
+.wire .bar{ background:var(--panel-2); color:#fff; font-size:11px; font-weight:800; padding:9px 13px; letter-spacing:.02em; }
+.wire .bar.v{ background:var(--violet); }
+.wire .body{ padding:12px 13px; }
+.chip{ display:inline-block; font-size:10px; font-weight:700; padding:4px 9px; border-radius:7px;
+  background:var(--wash-2); color:var(--violet-ink); border:1px solid var(--line); margin:2px 3px 2px 0; }
+.chip.fv{ background:#E4F7EE; color:#12855C; border-color:#BEE9D5; }
+
+/* ---------- checklist rows ---------- */
+.check{ display:grid; grid-template-columns:20px 1fr; gap:11px; align-items:start; margin-bottom:9px; }
+.check .cb{ width:19px; height:19px; border-radius:5px; border:1.6px solid var(--line-2); background:#fff; margin-top:1px; }
+.check .cb.on{ background:var(--violet); border-color:var(--violet); }
+.check .ct{ font-size:12.5px; line-height:1.42; color:var(--ink); font-weight:440; }
+.check .ct b{ font-weight:800; color:var(--head); }
+
+/* group of checklist items with a heading */
+.cgroup .cg-h{ font-size:11px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--violet-ink);
+  padding-bottom:6px; margin-bottom:9px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:8px; }
+.cgroup .cg-h .cg-n{ color:var(--muted-2); }
+
+/* ---------- COVER ---------- */
+.cover{ padding:0; color:#fff; overflow:hidden; }
+.cover-bg{ position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(158deg, var(--navy) 0%, var(--navy-2) 100%);
+  background-size:33px 33px, 33px 33px, 100% 100%; }
+.cover-glow{ position:absolute; width:340px; height:340px; right:-70px; top:120px; border-radius:50%;
+  background:radial-gradient(circle, rgba(108,92,224,.34), transparent 66%); filter:blur(6px); }
+.cover-in{ position:absolute; inset:0; padding:22mm 20mm; display:flex; flex-direction:column; }
+.cover .kick{ font-size:12px; font-weight:800; letter-spacing:.34em; text-transform:uppercase; color:var(--violet-soft); }
+.cover .brand{ margin-top:auto; }
+.cover .eyeb{ font-size:12.5px; font-weight:800; letter-spacing:.34em; text-transform:uppercase; color:var(--violet-soft); margin-bottom:14px; }
+.cover .title{ font-size:74px; font-weight:800; letter-spacing:-.035em; line-height:.98; color:#fff; }
+.cover .title.big{ font-size:112px; letter-spacing:-.045em; }
+.cover .subtitle{ font-size:26px; font-weight:700; color:#EFEBFB; margin-top:16px; letter-spacing:-.015em; line-height:1.15; }
+.cover .lede{ font-size:14.5px; font-weight:440; color:#BDB6DA; margin-top:16px; line-height:1.55; max-width:150mm; }
+.cover .tier-strip{ display:flex; gap:11px; margin-top:26px; }
+.cover .tcard{ flex:1; border:1.4px solid rgba(159,147,230,.32); border-radius:12px; padding:14px 15px; }
+.cover .tcard.hi{ border-color:rgba(159,147,230,.75); background:rgba(108,92,224,.12); }
+.cover .tcard .th{ font-size:16px; font-weight:800; color:#fff; }
+.cover .tcard.hi .th{ color:var(--violet-soft); }
+.cover .tcard .ts{ font-size:11px; font-weight:450; color:#B7B0D6; margin-top:5px; line-height:1.4; }
+.cover .meta{ margin-top:auto; padding-top:16px; border-top:1px solid rgba(159,147,230,.28);
+  display:grid; grid-template-columns:repeat(4,auto); gap:34px; justify-content:start; }
+.cover .meta .mk{ font-size:9.5px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--violet-soft); }
+.cover .meta .mv{ font-size:13.5px; font-weight:750; color:#fff; margin-top:6px; line-height:1.35; }
+.cover .toprow{ display:flex; justify-content:space-between; align-items:center; }
+.cover .mark .wm{ color:#fff; }
+
+/* generic dark full-page footer band (glance pages) */
+.endband{ background:var(--panel); color:#fff; border-radius:14px; padding:17px 20px; display:flex; align-items:center;
+  justify-content:space-between; background-image:linear-gradient(150deg,#26224E,#1B1740); }
+.endband .el{ font-size:10px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--violet-soft); }
+.endband .eb{ font-size:14px; font-weight:750; color:#fff; margin-top:4px; }
+
+/* ---------- toggle switch (roles: create member) ---------- */
+.toggle{ width:38px; height:21px; border-radius:999px; background:#D8D2EC; position:relative; display:inline-block; flex:none; }
+.toggle::after{ content:""; position:absolute; top:2.5px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+.toggle.on{ background:var(--badge); }
+.toggle.on::after{ left:19px; }
+.trow{ display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--line); }
+.trow:last-child{ border-bottom:none; }
+.trow .tn{ font-size:13px; font-weight:800; color:var(--head); }
+.trow .ts{ font-size:10.5px; font-weight:500; color:var(--muted); margin-top:2px; }
+.rolepick{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:7px; margin:4px 0 14px; }
+.rolepick .rp{ border:1.4px solid var(--line-2); border-radius:9px; padding:10px 6px; text-align:center; font-size:11px; font-weight:600; color:var(--muted); }
+.rolepick .rp.on{ background:var(--badge); border-color:var(--badge); color:#fff; }
+.rolepick .rp b{ display:block; font-size:12.5px; font-weight:800; }
+
+/* ---------- option A/B ---------- */
+.optlabel{ display:inline-block; font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#fff; background:var(--violet); padding:4px 11px; border-radius:6px; margin-bottom:10px; }
+
+/* ---------- step-by-step item head (onboarding) ---------- */
+.itemhead{ display:flex; align-items:center; gap:11px; margin:0 0 12px; }
+.itemhead .ih-i{ color:var(--violet); display:flex; }
+.itemhead .ih-t{ font-size:16px; font-weight:800; color:var(--head); }
+.itemhead .ih-line{ flex:1; height:1px; background:var(--line); }
+.itemhead .ih-b{ font-size:9.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--violet-ink); background:#EDEAF9; padding:4px 10px; border-radius:6px; }
+
+/* ---------- role card (three roles) ---------- */
+.rolecard .rc-h{ font-size:19px; font-weight:800; color:var(--head); line-height:1.05; }
+.rolecard .rc-k{ font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--violet-ink); margin-top:5px; }
+.rolecard .rc-d{ font-size:12px; font-weight:440; color:var(--ink); line-height:1.46; margin:10px 0 12px; }
+
+/* ---------- boundary row (where the line sits) ---------- */
+.brow{ display:grid; grid-template-columns:152px 1fr 118px; border:1px solid var(--line-2); border-radius:12px; overflow:hidden; align-items:stretch; }
+.brow .bl{ background:var(--wash-2); padding:14px 15px; display:flex; flex-direction:column; justify-content:center; }
+.brow.hi .bl{ background:var(--panel); background-image:linear-gradient(150deg,#26224E,#1D1940); }
+.brow .bl .bt{ font-size:14.5px; font-weight:800; color:var(--head); }
+.brow.hi .bl .bt{ color:#fff; }
+.brow .bl .bs{ font-size:10.5px; font-weight:500; color:var(--muted); margin-top:3px; }
+.brow.hi .bl .bs{ color:var(--lilac); }
+.brow .bd{ padding:14px 16px; font-size:12.5px; font-weight:440; color:var(--ink); line-height:1.46; display:flex; align-items:center; border-left:1px solid var(--line); }
+.brow .bd b{ font-weight:750; color:var(--head); }
+.brow .bx{ padding:14px 12px; display:flex; align-items:center; justify-content:center; }
+
+/* ---------- tier-in-words card ---------- */
+.tword{ border:1px solid var(--line); border-left:4px solid var(--violet); border-radius:12px; padding:15px 18px; background:var(--wash); }
+.tword.dark{ background:var(--panel); border-color:var(--panel); border-left-color:var(--violet-2); background-image:linear-gradient(150deg,#26224E,#1D1940); }
+.tword .tw-top{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.tword .tw-n{ font-size:23px; font-weight:800; color:var(--head); letter-spacing:-.01em; }
+.tword.dark .tw-n{ color:#fff; }
+.tword .tw-price{ font-size:13px; font-weight:800; color:var(--violet-ink); white-space:nowrap; }
+.tword.dark .tw-price{ color:var(--violet-soft); }
+.tword .tw-sub{ font-size:12px; font-style:italic; color:var(--muted); margin:3px 0 9px; }
+.tword.dark .tw-sub{ color:var(--lilac); }
+.tword .tw-b{ font-size:12px; font-weight:440; color:var(--ink); line-height:1.5; }
+.tword.dark .tw-b{ color:#D9D3F2; }
+.tword .tw-b b{ font-weight:750; color:var(--head); }
+.tword.dark .tw-b b{ color:#fff; }
+.tword .tw-best{ font-size:12px; font-weight:800; color:var(--head); margin-top:9px; }
+.tword.dark .tw-best{ color:#fff; }
+.tword .tw-basis{ font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted-2); margin-top:5px; }
+.tword.dark .tw-basis{ color:var(--violet-soft); }
+
+/* compact table variant for dense matrices */
+table.tbl.compact td, table.tbl.compact th{ padding:7.5px 11px; }
+table.tbl.compact td{ font-size:11.5px; }
+table.tbl.compact th{ font-size:9.5px; }
+
+/* small print */
+.note{ font-size:11.5px; font-weight:450; color:var(--muted); line-height:1.5; }
+.note b{ font-weight:750; color:var(--head); }
+.hairtop{ border-top:1px solid var(--line); padding-top:12px; }
+.two-num{ font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>
 
-<!-- global arrow markers -->
-<svg width="0" height="0" style="position:absolute;"><defs>
-  <marker id="arw" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#8C1D2E"/></marker>
-  <marker id="arwr" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#B85C6B"/></marker>
-  <marker id="arwm" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#6E1423"/></marker>
-</defs></svg>
-
 <!-- ============ COVER ============ -->
 <section class="page cover">
-  <div class="cin">
-    <div class="kick">Xegents AI &nbsp;/&nbsp; Visual Blueprint</div>
-    <svg viewBox="0 0 560 150" style="margin-top:26px; max-width:360px;">
-      <line class="edge-d" x1="80" y1="40" x2="200" y2="40" marker-end="url(#arwr)"/>
-      <line class="edge-d" x1="280" y1="40" x2="400" y2="40" marker-end="url(#arwr)"/>
-      <line class="edge-d" x1="140" y1="55" x2="140" y2="105" marker-end="url(#arwr)"/>
-      <line class="edge-d" x1="340" y1="55" x2="340" y2="105" marker-end="url(#arwr)"/>
-      <rect x="20" y="22" width="120" height="36" rx="9" fill="none" stroke="#D89AA3" stroke-width="1.6"/>
-      <rect x="220" y="22" width="120" height="36" rx="9" fill="none" stroke="#D89AA3" stroke-width="1.6"/>
-      <rect x="420" y="22" width="120" height="36" rx="9" fill="none" stroke="#D89AA3" stroke-width="1.6"/>
-      <rect x="80" y="108" width="120" height="34" rx="9" fill="#8C1D2E"/>
-      <rect x="280" y="108" width="120" height="34" rx="9" fill="#8C1D2E"/>
-      <circle cx="500" cy="128" r="9" fill="none" stroke="#D89AA3" stroke-width="1.6"/>
-    </svg>
-    <div class="ctitle">AIOS</div>
-    <div class="csub">Visual Blueprint</div>
-    <div class="ctag">The whole system as diagrams: capability tree, architecture, job flows and algorithms, data model, deployment, and the build plan. No prose - just the picture.</div>
-    <div class="cmeta">
-      <div>Prepared for <b>Danyal</b></div>
-      <div>Companion to the <b>Architecture &amp; Plan</b></div>
-      <div>Built by <b>Xegents AI</b></div>
+  <div class="cover-bg"></div>
+  <div class="cover-glow"></div>
+  <div class="cover-in">
+    <div class="toprow">
+      <span class="xlogo"></span>
+      <span class="kick">Live provider rates, July 2026</span>
+    </div>
+    <div class="brand">
+      <div class="eyeb">SEO Growth Platform · Running Costs</div>
+      <div class="title">What It Costs to Run</div>
+      <div class="subtitle">A clear, simple breakdown of what you pay each month.</div>
+      <div class="lede">Every monthly cost to run AIOS for your ~15 clients — the server and the data — checked against live provider prices in July 2026. All figures are approximate and confirmed before you buy.</div>
+    </div>
+    <div class="meta">
+      <div><div class="mk">Prepared for</div><div class="mv">M. Haseeb Imran<br>Storage Visibility</div></div>
+      <div><div class="mk">Prepared by</div><div class="mv">Xegents</div></div>
+      <div><div class="mk">Date</div><div class="mv">9 July 2026</div></div>
+      <div><div class="mk">Pricing basis</div><div class="mv">Live provider rates,<br>July 2026</div></div>
     </div>
   </div>
 </section>
 
-<!-- ============ 02 LEGEND + MODULE TREE ============ -->
+<!-- ============ 02 THE BIG PICTURE ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Legend &amp; System Tree</span></div>
-  <div class="eyebrow">Map 01</div>
-  <div class="h-sec">System tree &amp; legend</div>
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">01</span><span class="eyebrow">The big picture</span></div>
+  <div class="h-sec">Cost Is a Dial, Not a Fixed Bill</div>
   <div class="rule"></div>
-  <div class="legend">
-    <div class="lg"><span class="sw" style="background:#fff;border:1.6px solid var(--maroon);"></span>Process / component</div>
-    <div class="lg"><span class="sw" style="background:var(--blush-2);border:1.6px solid var(--maroon);transform:rotate(0);border-radius:2px;"></span>Decision</div>
-    <div class="lg"><span class="sw" style="background:var(--maroon-deep);"></span>Worker / role</div>
-    <div class="lg"><span class="sw" style="background:#fff;border:1.4px dashed var(--rose);"></span>External service</div>
-    <div class="lg"><span class="sw" style="background:var(--blush);border:1.4px solid var(--rose-soft);"></span>Data / artifact</div>
-    <div class="lg"><span class="sw" style="background:#fff;border:1.4px dashed var(--rose);"></span>Phase 2 (dashed)</div>
+  <div class="h-sub mb18">The most important thing to know about running AIOS: you decide what you spend. Free Google data does most of the everyday work. You only pay for extra data when a client is big enough to justify it. That is why a small client can run at almost nothing — and the whole setup stays cheap.</div>
+
+  <div class="stats mb18">
+    <div class="stat"><div class="n">~$110</div><div class="l">Typical total per month, all 15 clients</div></div>
+    <div class="stat"><div class="n">~$7</div><div class="l">Average cost per client / month</div></div>
+    <div class="stat"><div class="n">$0</div><div class="l">Lowest cost for a starter client</div></div>
+    <div class="stat dark"><div class="n">2</div><div class="l">The only things you pay for: server + data</div></div>
   </div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 292">
-    <!-- root -->
-    <rect class="s-solid" x="280" y="8" width="120" height="44" rx="11"/>
-    <text class="t-lw" x="340" y="29" text-anchor="middle">AIOS</text>
-    <text class="t-sw" x="340" y="44" text-anchor="middle">SEO automation platform</text>
-    <line class="edge-t" x1="340" y1="52" x2="340" y2="80"/>
-    <line class="edge-t" x1="58" y1="80" x2="626" y2="80"/>
-    <!-- 6 children -->
-    <g>
-      <line class="edge-t" x1="58" y1="80" x2="58" y2="98" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="172" y1="80" x2="172" y2="98" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="286" y1="80" x2="286" y2="98" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="400" y1="80" x2="400" y2="98" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="514" y1="80" x2="514" y2="98" marker-end="url(#arwm)"/>
-      <line class="edge-t" x1="626" y1="80" x2="626" y2="98" marker-end="url(#arwm)"/>
-    </g>
-    <g>
-      <rect class="s-box" x="6" y="98" width="104" height="40" rx="9"/><text class="t-l" x="58" y="116" text-anchor="middle" font-size="11.5">Platform</text><text class="t-s" x="58" y="130" text-anchor="middle">core</text>
-      <rect class="s-box" x="120" y="98" width="104" height="40" rx="9"/><text class="t-l" x="172" y="116" text-anchor="middle" font-size="11.5">Audit</text><text class="t-s" x="172" y="130" text-anchor="middle">module 01</text>
-      <rect class="s-box" x="234" y="98" width="104" height="40" rx="9"/><text class="t-l" x="286" y="116" text-anchor="middle" font-size="11.5">Content</text><text class="t-s" x="286" y="130" text-anchor="middle">module 02</text>
-      <rect class="s-box" x="348" y="98" width="104" height="40" rx="9"/><text class="t-l" x="400" y="116" text-anchor="middle" font-size="11.5">Portal</text><text class="t-s" x="400" y="130" text-anchor="middle">module 03</text>
-      <rect class="s-solid" x="462" y="98" width="104" height="40" rx="9"/><text class="t-lw" x="514" y="114" text-anchor="middle" font-size="11">Policy Radar</text><text class="t-sw" x="514" y="129" text-anchor="middle">module 04</text>
-      <rect class="s-box" x="574" y="98" width="104" height="40" rx="9"/><text class="t-l" x="626" y="116" text-anchor="middle" font-size="11">Reporting</text><text class="t-s" x="626" y="130" text-anchor="middle">Sheets</text>
-    </g>
-    <g font-family="Bricolage Grotesque">
-      <!-- Platform -->
-      <line class="edge-t" x1="58" y1="138" x2="58" y2="152"/>
-      <rect class="s-soft" x="4" y="152" width="108" height="128" rx="8"/>
-      <text class="t-l" x="12" y="170" font-size="9.3">Auth + RBAC</text><text class="t-l" x="12" y="188" font-size="9.3">Key vault</text><text class="t-l" x="12" y="206" font-size="9.3">Job queue</text><text class="t-l" x="12" y="224" font-size="9.3">Cost control</text><text class="t-l" x="12" y="242" font-size="9.3">Multi-tenant DB</text><text class="t-l" x="12" y="260" font-size="9.3">Backups + logs</text>
-      <!-- Audit -->
-      <line class="edge-t" x1="172" y1="138" x2="172" y2="152"/>
-      <rect class="s-soft" x="118" y="152" width="108" height="128" rx="8"/>
-      <text class="t-l" x="126" y="170" font-size="9.3">Run free/paid</text><text class="t-l" x="126" y="188" font-size="9.3">Engine as job</text><text class="t-l" x="126" y="206" font-size="9.3">Technical rpt</text><text class="t-l" x="126" y="224" font-size="9.3">Actionable rpt</text><text class="t-l" x="126" y="242" font-size="9.3">PDF + JSON</text><text class="t-e" x="126" y="260" font-size="9">Financial (P2)</text>
-      <!-- Content -->
-      <line class="edge-t" x1="286" y1="138" x2="286" y2="152"/>
-      <rect class="s-soft" x="232" y="152" width="108" height="128" rx="8"/>
-      <text class="t-l" x="240" y="170" font-size="9.3">AIDA drafting</text><text class="t-l" x="240" y="188" font-size="9.3">Auto schema</text><text class="t-l" x="240" y="206" font-size="9.3">AI images</text><text class="t-l" x="240" y="224" font-size="9.3">Manual PDF</text><text class="t-l" x="240" y="242" font-size="9.3">WordPress pub</text><text class="t-l" x="240" y="260" font-size="9.3">Review gate</text>
-      <!-- Portal -->
-      <line class="edge-t" x1="400" y1="138" x2="400" y2="152"/>
-      <rect class="s-soft" x="346" y="152" width="108" height="128" rx="8"/>
-      <text class="t-l" x="354" y="170" font-size="9.3">Client portal</text><text class="t-l" x="354" y="188" font-size="9.3">Team portal</text><text class="t-e" x="354" y="206" font-size="9">Manager (opt)</text><text class="t-l" x="354" y="224" font-size="9.3">Admin portal</text><text class="t-l" x="354" y="242" font-size="9.3">Milestones</text><text class="t-l" x="354" y="260" font-size="9.3">Fiverr upsells</text>
-      <!-- Policy Radar -->
-      <line class="edge-t" x1="514" y1="138" x2="514" y2="152"/>
-      <rect class="s-soft" x="460" y="152" width="108" height="128" rx="8" stroke="#8C1D2E"/>
-      <text class="t-l" x="468" y="170" font-size="9.3">Watch Google</text><text class="t-l" x="468" y="188" font-size="9.3">Detect change</text><text class="t-l" x="468" y="206" font-size="9.3">Research</text><text class="t-l" x="468" y="224" font-size="9.3">Flag KB</text><text class="t-l" x="468" y="242" font-size="9.3">Recommend</text><text class="t-l" x="468" y="260" font-size="9.3">Command Ctr</text>
-      <!-- Reporting -->
-      <line class="edge-t" x1="626" y1="138" x2="626" y2="152"/>
-      <rect class="s-soft" x="572" y="152" width="106" height="128" rx="8"/>
-      <text class="t-l" x="580" y="170" font-size="9.3">Sheets sync</text><text class="t-l" x="580" y="188" font-size="9.3">Audit scores</text><text class="t-l" x="580" y="206" font-size="9.3">Job status</text><text class="t-l" x="580" y="224" font-size="9.3">Milestones</text><text class="t-l" x="580" y="242" font-size="9.3">Per-client</text><text class="t-l" x="580" y="260" font-size="9.3">Master sheet</text>
-    </g>
-  </svg>
+
+  <div class="cols3 mb18">
+    <div class="card"><h4>Server &amp; Infrastructure</h4><p>A fixed, steady base: your own private server, the database, backups and a web address. About $70–95/mo, no matter how many clients you have.</p></div>
+    <div class="card"><h4>Live SEO Data</h4><p>You pay only for what you use. Free Google data is always on; paid rank data from serper.dev runs at about ~$30/mo for all 15 clients.</p></div>
+    <div class="card alt"><h4>Already Covered — $0</h4><p>Google's free tools, the AI you already bought (Claude), and your in-house crawler all cost nothing extra here. They do the writing, analysis and audits.</p></div>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">02</span></div>
+
+  <div class="hero mb14"><div class="kl">The one lever that controls everything</div><p>Each client, and each feature, runs at one of three levels: <b>manual (free)</b>, <b>semi-automatic (low cost)</b>, or <b>fully automatic (paid data)</b>. Turn a client up only when their budget pays for it — and turn it back down any time. Nothing is locked in.</p></div>
+
+  <div class="card alt"><h4>And your keys stay locked away — at no extra cost</h4><p>Every password and API key — yours, your clients', and Google's — is kept in an encrypted key vault (Supabase Vault) that comes free with the plan already listed. The key that unlocks it is stored separately, so even a stolen copy of the database can't be read.</p></div>
+
+  <div class="pfoot"><span>Section 01 · The Big Picture</span><span class="pn">02</span></div>
 </section>
 
-<!-- ============ 03 FEATURE MAP ============ -->
+<!-- ============ 03 THE FULL MONTHLY PICTURE ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Feature Map - every capability</span></div>
-  <div class="eyebrow">Map 02</div>
-  <div class="h-sec">Feature map - the whole build</div>
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">02</span><span class="eyebrow">Summary</span></div>
+  <div class="h-sec">The Full Monthly Picture</div>
   <div class="rule"></div>
-  <div class="cols6">
-    <div class="tcol"><div class="root">PLATFORM</div><div class="trunk">
-      <div class="leaf"><b>Cloud on VPS</b><br>Docker Compose</div>
-      <div class="leaf"><b>Reverse proxy</b><br>auto-TLS</div>
-      <div class="leaf"><b>Auth + RBAC</b><br>4 roles</div>
-      <div class="leaf"><b>Provisioned accounts</b><br>no public signup</div>
-      <div class="leaf"><b>Key vault</b><br>encrypted</div>
-      <div class="leaf"><b>Job queue</b><br>concurrency caps</div>
-      <div class="leaf"><b>Cost control</b><br>caps + cache</div>
-      <div class="leaf"><b>Cost logging</b><br>per job</div>
-      <div class="leaf"><b>Multi-tenant DB</b><br>Postgres</div>
-      <div class="leaf"><b>Activity log</b><br>audit trail</div>
-      <div class="leaf"><b>Backups</b><br>+ restart policy</div>
-    </div></div>
+  <div class="h-sub mb18">Here is every monthly cost on one page, at normal usage for your ~15 clients on the recommended low-cost setup. Each line is explained in more detail on the following pages.</div>
 
-    <div class="tcol"><div class="root">AUDIT</div><div class="trunk">
-      <div class="leaf"><b>Run from portal</b><br>free / paid tier</div>
-      <div class="leaf"><b>Engine as job</b><br>wrapped async</div>
-      <div class="leaf"><b>Coverage</b><br>on-page, tech, local, AI</div>
-      <div class="leaf"><b>Technical report</b></div>
-      <div class="leaf"><b>Actionable report</b><br>pages, titles, NAP</div>
-      <div class="leaf"><b>Tier gating</b><br>paid integrations</div>
-      <div class="leaf"><b>Artifacts</b><br>PDF + JSON + scores</div>
-      <div class="leaf"><b>Web + PDF view</b></div>
-      <div class="leaf"><b>Auto milestone</b><br>+ Sheets + notify</div>
-      <div class="leaf"><b>History + track</b><br>deltas</div>
-      <div class="leaf p2"><b>Financial report</b><br>Phase 2</div>
-    </div></div>
-
-    <div class="tcol"><div class="root">CONTENT</div><div class="trunk">
-      <div class="leaf"><b>Job: type + topic</b></div>
-      <div class="leaf"><b>Research</b><br>optional Serper</div>
-      <div class="leaf"><b>Outline</b></div>
-      <div class="leaf"><b>Draft</b><br>AIDA frameworks</div>
-      <div class="leaf"><b>Schema</b><br>JSON-LD auto</div>
-      <div class="leaf"><b>AI images</b><br>+ alt text</div>
-      <div class="leaf"><b>Assemble pkg</b></div>
-      <div class="leaf"><b>Manual export</b><br>PDF / Markdown</div>
-      <div class="leaf"><b>WordPress publish</b><br>body, meta, media</div>
-      <div class="leaf"><b>Review gate</b><br>approve/edit loop</div>
-      <div class="leaf"><b>Cost estimate</b><br>per page</div>
-    </div></div>
-
-    <div class="tcol"><div class="root">PORTAL</div><div class="trunk">
-      <div class="leaf"><b>Client portal</b><br>reports, run audit</div>
-      <div class="leaf"><b>Team portal</b><br>queue, deliver</div>
-      <div class="leaf p2"><b>Manager portal</b><br>optional in v1</div>
-      <div class="leaf"><b>Admin portal</b><br>super-admin</div>
-      <div class="leaf"><b>Milestones</b><br>auto-updated</div>
-      <div class="leaf"><b>Upsell manager</b><br>Fiverr links</div>
-      <div class="leaf"><b>Team monitor</b><br>activity</div>
-      <div class="leaf"><b>Tiers + roles</b><br>provisioning</div>
-      <div class="leaf"><b>Notifications</b></div>
-      <div class="leaf"><b>Dashboards</b><br>per role</div>
-    </div></div>
-
-    <div class="tcol"><div class="root" style="background:var(--maroon);">POLICY RADAR</div><div class="trunk">
-      <div class="leaf"><b>Watch Google</b><br>official sources</div>
-      <div class="leaf"><b>Change detect</b><br>diff + trigger</div>
-      <div class="leaf"><b>Auto research</b><br>on any change</div>
-      <div class="leaf"><b>Summarize</b><br>+ dedupe</div>
-      <div class="leaf"><b>Severity flag</b><br>crit/major/minor</div>
-      <div class="leaf"><b>Region flag</b><br>global / nation</div>
-      <div class="leaf"><b>Category flag</b><br>algo/policy/tech</div>
-      <div class="leaf"><b>Knowledge base</b><br>versioned</div>
-      <div class="leaf"><b>Recommendations</b><br>baseline + new</div>
-      <div class="leaf"><b>Command Center</b><br>surface</div>
-      <div class="leaf"><b>Closed loop</b><br>checks + advisories</div>
-    </div></div>
-
-    <div class="tcol"><div class="root">REPORTING</div><div class="trunk">
-      <div class="leaf"><b>Sheets sync</b><br>service account</div>
-      <div class="leaf"><b>Audit scores</b></div>
-      <div class="leaf"><b>Content status</b></div>
-      <div class="leaf"><b>Milestone state</b></div>
-      <div class="leaf"><b>Per-client sheet</b></div>
-      <div class="leaf"><b>Master sheet</b></div>
-      <div class="cap" style="margin-top:12px;">Also out / P2</div>
-      <div class="leaf p2"><b>Off-Page module</b></div>
-      <div class="leaf p2"><b>Fiverr import</b></div>
-      <div class="leaf p2"><b>More CMS</b><br>Shopify/Webflow</div>
-      <div class="leaf p2"><b>Payments</b><br>out of scope</div>
-    </div></div>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">03</span></div>
-</section>
-
-<!-- ============ 04 ARCHITECTURE ============ -->
-<section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Architecture - containers</span></div>
-  <div class="eyebrow">Diagram 01</div>
-  <div class="h-sec">System architecture</div>
-  <div class="rule"></div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 560">
-    <!-- users -->
-    <rect class="s-soft" x="270" y="8" width="140" height="42" rx="10"/><text class="t-l" x="340" y="27" text-anchor="middle">Client browser</text><text class="t-s" x="340" y="41" text-anchor="middle">agency + client users</text>
-    <line class="edge" x1="340" y1="50" x2="340" y2="72" marker-end="url(#arw)"/>
-    <text class="t-e" x="352" y="66">HTTPS/TLS</text>
-    <!-- proxy -->
-    <rect class="s-solid" x="240" y="72" width="200" height="38" rx="10"/><text class="t-lw" x="340" y="96" text-anchor="middle">Reverse proxy (Caddy / TLS)</text>
-    <line class="edge" x1="290" y1="110" x2="220" y2="140" marker-end="url(#arw)"/>
-    <line class="edge" x1="390" y1="110" x2="460" y2="140" marker-end="url(#arw)"/>
-    <!-- next + api -->
-    <rect class="s-box" x="110" y="140" width="220" height="44" rx="10"/><text class="t-l" x="220" y="160" text-anchor="middle">Next.js (React)</text><text class="t-s" x="220" y="174" text-anchor="middle">Portal + Admin UI</text>
-    <rect class="s-box" x="350" y="140" width="220" height="44" rx="10"/><text class="t-l" x="460" y="160" text-anchor="middle">FastAPI (Python)</text><text class="t-s" x="460" y="174" text-anchor="middle">API - Auth - Job dispatch</text>
-    <line class="edge" x1="330" y1="162" x2="350" y2="162" marker-end="url(#arw)"/>
-    <line class="edge" x1="460" y1="184" x2="460" y2="212" marker-end="url(#arw)"/>
-    <!-- datastores -->
-    <g>
-      <path class="s-box" d="M60,214 v40 a55,7 0 0 0 110,0 v-40 a55,7 0 0 0 -110,0"/><ellipse cx="115" cy="214" rx="55" ry="7" class="s-box"/><text class="t-l" x="115" y="238" text-anchor="middle">Postgres</text>
-      <path class="s-box" d="M245,214 v40 a55,7 0 0 0 110,0 v-40 a55,7 0 0 0 -110,0"/><ellipse cx="300" cy="214" rx="55" ry="7" class="s-box"/><text class="t-l" x="300" y="238" text-anchor="middle">Redis</text><text class="t-s" x="300" y="250" text-anchor="middle">queue+cache</text>
-      <path class="s-box" d="M430,214 v40 a55,7 0 0 0 110,0 v-40 a55,7 0 0 0 -110,0"/><ellipse cx="485" cy="214" rx="55" ry="7" class="s-box"/><text class="t-l" x="485" y="238" text-anchor="middle">Key vault</text><text class="t-s" x="485" y="250" text-anchor="middle">encrypted</text>
-    </g>
-    <line class="edge" x1="440" y1="184" x2="300" y2="205" marker-end="url(#arw)"/>
-    <line class="edge" x1="420" y1="180" x2="115" y2="205" marker-end="url(#arw)"/>
-    <line class="edge" x1="480" y1="184" x2="485" y2="205" marker-end="url(#arw)"/>
-    <!-- workers -->
-    <line class="edge" x1="300" y1="262" x2="105" y2="300" marker-end="url(#arw)"/>
-    <line class="edge" x1="300" y1="262" x2="263" y2="300" marker-end="url(#arw)"/>
-    <line class="edge" x1="300" y1="262" x2="421" y2="300" marker-end="url(#arw)"/>
-    <text class="t-e" x="300" y="282" text-anchor="middle">dequeue jobs</text>
-    <rect class="s-solid" x="30" y="300" width="150" height="46" rx="10"/><text class="t-lw" x="105" y="320" text-anchor="middle" font-size="11">Audit worker</text><text class="t-sw" x="105" y="335" text-anchor="middle">engine + PDF</text>
-    <rect class="s-solid" x="188" y="300" width="150" height="46" rx="10"/><text class="t-lw" x="263" y="320" text-anchor="middle" font-size="11">Content worker</text><text class="t-sw" x="263" y="335" text-anchor="middle">copy + images</text>
-    <rect class="s-solid" x="346" y="300" width="150" height="46" rx="10"/><text class="t-lw" x="421" y="320" text-anchor="middle" font-size="11">Research worker</text><text class="t-sw" x="421" y="335" text-anchor="middle">Policy Radar</text>
-    <rect class="s-box" x="504" y="300" width="150" height="46" rx="10"/><text class="t-l" x="579" y="320" text-anchor="middle" font-size="11">Scheduler</text><text class="t-s" x="579" y="335" text-anchor="middle">cron + change detect</text>
-    <line class="edge" x1="560" y1="300" x2="330" y2="264" marker-end="url(#arw)"/>
-    <line class="edge" x1="105" y1="346" x2="105" y2="378" marker-end="url(#arw)"/>
-    <line class="edge" x1="263" y1="346" x2="290" y2="378" marker-end="url(#arw)"/>
-    <line class="edge" x1="421" y1="346" x2="500" y2="378" marker-end="url(#arw)"/>
-    <line class="edge" x1="421" y1="346" x2="613" y2="378" marker-end="url(#arw)"/>
-    <!-- externals -->
-    <g>
-      <rect class="s-ext" x="20" y="380" width="100" height="40" rx="9"/><text class="t-l" x="70" y="404" text-anchor="middle" font-size="10">Serper</text>
-      <rect class="s-ext" x="128" y="380" width="100" height="40" rx="9"/><text class="t-l" x="178" y="400" text-anchor="middle" font-size="10">Google</text><text class="t-s" x="178" y="412" text-anchor="middle">PSI/Places/NL</text>
-      <rect class="s-ext" x="236" y="380" width="100" height="40" rx="9"/><text class="t-l" x="286" y="404" text-anchor="middle" font-size="10">Claude API</text>
-      <rect class="s-ext" x="344" y="380" width="96" height="40" rx="9"/><text class="t-l" x="392" y="404" text-anchor="middle" font-size="10">Image gen</text>
-      <rect class="s-ext" x="448" y="380" width="100" height="40" rx="9"/><text class="t-l" x="498" y="404" text-anchor="middle" font-size="10">WordPress</text>
-      <rect class="s-ext" x="556" y="380" width="114" height="40" rx="9"/><text class="t-l" x="613" y="400" text-anchor="middle" font-size="10">Google policy</text><text class="t-s" x="613" y="412" text-anchor="middle">sources</text>
-    </g>
-    <!-- reporting + command center -->
-    <line class="edge-d" x1="115" y1="256" x2="115" y2="472" marker-end="url(#arwr)"/>
-    <line class="edge-d" x1="263" y1="346" x2="240" y2="472" marker-end="url(#arwr)"/>
-    <rect class="s-ext" x="150" y="472" width="180" height="40" rx="9"/><text class="t-l" x="240" y="491" text-anchor="middle" font-size="10.5">Google Sheets API</text><text class="t-s" x="240" y="504" text-anchor="middle">reporting layer</text>
-    <line class="edge" x1="421" y1="346" x2="450" y2="472" marker-end="url(#arw)"/>
-    <rect class="s-solid" x="360" y="472" width="210" height="40" rx="9"/><text class="t-lw" x="465" y="491" text-anchor="middle" font-size="10.5">Command Center</text><text class="t-sw" x="465" y="504" text-anchor="middle">Policy Radar recommendations</text>
-    <rect x="20" y="196" width="520" height="70" rx="10" fill="none" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
-    <text class="t-tag" x="26" y="192">STATE + KB + QUEUE + SECRETS</text>
-    <rect x="14" y="368" width="662" height="60" rx="10" fill="none" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
-    <text class="t-tag" x="20" y="364">EXTERNAL SERVICES (agency keys)</text>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">04</span></div>
-</section>
-
-<!-- ============ 05 AUDIT SWIMLANE ============ -->
-<section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Flow - audit job (swimlane)</span></div>
-  <div class="eyebrow">Flow 01</div>
-  <div class="h-sec">Audit job - swimlane</div>
-  <div class="rule"></div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 560">
-    <!-- lane headers -->
-    <g>
-      <rect class="s-lanehead" x="0" y="0" width="113" height="26" rx="6"/><text class="t-lane" x="56" y="17" text-anchor="middle">PORTAL</text>
-      <rect class="s-lanehead" x="115" y="0" width="113" height="26" rx="6"/><text class="t-lane" x="171" y="17" text-anchor="middle">API</text>
-      <rect class="s-lanehead" x="230" y="0" width="113" height="26" rx="6"/><text class="t-lane" x="286" y="17" text-anchor="middle">QUEUE</text>
-      <rect class="s-lanehead" x="345" y="0" width="113" height="26" rx="6"/><text class="t-lane" x="401" y="17" text-anchor="middle">WORKER</text>
-      <rect class="s-lanehead" x="460" y="0" width="108" height="26" rx="6"/><text class="t-lane" x="514" y="17" text-anchor="middle">ENGINE</text>
-      <rect class="s-lanehead" x="570" y="0" width="110" height="26" rx="6"/><text class="t-lane" x="625" y="17" text-anchor="middle">STORAGE</text>
-    </g>
-    <!-- lane bands -->
-    <rect class="s-band" x="0" y="30" width="113" height="520"/>
-    <rect class="s-band" x="230" y="30" width="113" height="520"/>
-    <rect class="s-band" x="460" y="30" width="108" height="520"/>
-    <!-- steps -->
-    <rect class="s-soft" x="8" y="44" width="97" height="42" rx="8"/><text class="t-l" x="56" y="62" text-anchor="middle" font-size="10">Run audit</text><text class="t-s" x="56" y="76" text-anchor="middle">free / paid</text>
-    <!-- decision paid? -->
-    <polygon class="s-dia" points="171,100 213,128 171,156 129,128"/><text class="t-l" x="171" y="126" text-anchor="middle" font-size="10">paid?</text><text class="t-s" x="171" y="139" text-anchor="middle">tier</text>
-    <rect class="s-box" x="123" y="170" width="97" height="40" rx="8"/><text class="t-l" x="171" y="187" text-anchor="middle" font-size="9.5">Create row</text><text class="t-s" x="171" y="200" text-anchor="middle">+ enqueue</text>
-    <rect class="s-soft" x="238" y="222" width="97" height="40" rx="8"/><text class="t-l" x="286" y="245" text-anchor="middle" font-size="10">Job queued</text>
-    <rect class="s-solid" x="353" y="274" width="97" height="44" rx="8"/><text class="t-lw" x="401" y="291" text-anchor="middle" font-size="9.5">Pick job</text><text class="t-sw" x="401" y="305" text-anchor="middle">load vault keys</text>
-    <rect class="s-box" x="465" y="330" width="98" height="42" rx="8"/><text class="t-l" x="514" y="348" text-anchor="middle" font-size="9.5">Crawl +</text><text class="t-s" x="514" y="361" text-anchor="middle">analyze + score</text>
-    <rect class="s-box" x="465" y="384" width="98" height="40" rx="8"/><text class="t-l" x="514" y="408" text-anchor="middle" font-size="9.5">Generate PDF</text>
-    <rect class="s-soft" x="574" y="436" width="100" height="42" rx="8"/><text class="t-l" x="624" y="454" text-anchor="middle" font-size="9.5">Save JSON</text><text class="t-s" x="624" y="467" text-anchor="middle">+PDF +scores</text>
-    <rect class="s-box" x="123" y="490" width="200" height="42" rx="8"/><text class="t-l" x="223" y="508" text-anchor="middle" font-size="9.5">Milestone++ , Sheets sync, notify client</text><text class="t-s" x="223" y="521" text-anchor="middle">automatic post-run reactions (API)</text>
-    <!-- edges -->
-    <line class="edge" x1="56" y1="86" x2="130" y2="118" marker-end="url(#arw)"/>
-    <line class="edge" x1="171" y1="156" x2="171" y2="170" marker-end="url(#arw)"/>
-    <text class="t-e" x="217" y="124">paid: all APIs</text>
-    <text class="t-e" x="8" y="196">free: structural</text>
-    <line class="edge" x1="220" y1="190" x2="238" y2="238" marker-end="url(#arw)"/>
-    <line class="edge" x1="335" y1="245" x2="353" y2="290" marker-end="url(#arw)"/>
-    <line class="edge" x1="450" y1="300" x2="465" y2="345" marker-end="url(#arw)"/>
-    <line class="edge" x1="514" y1="372" x2="514" y2="384" marker-end="url(#arw)"/>
-    <line class="edge" x1="563" y1="404" x2="574" y2="450" marker-end="url(#arw)"/>
-    <line class="edge" x1="574" y1="470" x2="300" y2="489" marker-end="url(#arw)"/>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">05</span></div>
-</section>
-
-<!-- ============ 06 CONTENT ALGORITHM ============ -->
-<section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Algorithm - content generation</span></div>
-  <div class="eyebrow">Algorithm 01</div>
-  <div class="h-sec">Content generation</div>
-  <div class="rule"></div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 640">
-    <!-- start -->
-    <rect class="s-mar" x="285" y="6" width="110" height="30" rx="15"/><text class="t-lw" x="340" y="26" text-anchor="middle">START</text>
-    <line class="edge" x1="340" y1="36" x2="340" y2="52" marker-end="url(#arw)"/>
-    <rect class="s-box" x="255" y="52" width="170" height="38" rx="9"/><text class="t-l" x="340" y="76" text-anchor="middle">Job: content type + topic</text>
-    <line class="edge" x1="340" y1="90" x2="340" y2="106" marker-end="url(#arw)"/>
-    <!-- research decision -->
-    <polygon class="s-dia" points="340,106 400,138 340,170 280,138"/><text class="t-l" x="340" y="136" text-anchor="middle" font-size="11">Research?</text>
-    <line class="edge" x1="400" y1="138" x2="500" y2="138" marker-end="url(#arw)"/><text class="t-e" x="430" y="130">yes</text>
-    <rect class="s-ext" x="500" y="118" width="150" height="40" rx="9"/><text class="t-l" x="575" y="136" text-anchor="middle" font-size="10">Serper research</text><text class="t-s" x="575" y="150" text-anchor="middle">SERP + entities</text>
-    <line class="edge" x1="575" y1="158" x2="575" y2="196" marker-end="url(#arw)"/>
-    <line class="edge" x1="340" y1="170" x2="340" y2="196" marker-end="url(#arw)"/><text class="t-e" x="348" y="188">no</text>
-    <!-- linear steps -->
-    <rect class="s-box" x="255" y="196" width="170" height="34" rx="9"/><text class="t-l" x="340" y="218" text-anchor="middle">Outline</text>
-    <line class="edge" x1="575" y1="196" x2="425" y2="213" marker-end="url(#arw)"/>
-    <line class="edge" x1="340" y1="230" x2="340" y2="246" marker-end="url(#arw)"/>
-    <rect class="s-box" x="255" y="246" width="170" height="34" rx="9"/><text class="t-l" x="340" y="268" text-anchor="middle">Draft - AIDA framework</text>
-    <line class="edge" x1="340" y1="280" x2="340" y2="296" marker-end="url(#arw)"/>
-    <rect class="s-box" x="255" y="296" width="170" height="34" rx="9"/><text class="t-l" x="340" y="318" text-anchor="middle">Schema markup (JSON-LD)</text>
-    <line class="edge" x1="340" y1="330" x2="340" y2="346" marker-end="url(#arw)"/>
-    <rect class="s-box" x="255" y="346" width="170" height="34" rx="9"/><text class="t-l" x="340" y="368" text-anchor="middle">AI images + alt text</text>
-    <line class="edge" x1="340" y1="380" x2="340" y2="396" marker-end="url(#arw)"/>
-    <rect class="s-soft" x="255" y="396" width="170" height="34" rx="9"/><text class="t-l" x="340" y="418" text-anchor="middle">Assemble package</text>
-    <line class="edge" x1="340" y1="430" x2="340" y2="446" marker-end="url(#arw)"/>
-    <!-- publish path decision -->
-    <polygon class="s-dia" points="340,446 410,480 340,514 270,480"/><text class="t-l" x="340" y="478" text-anchor="middle" font-size="10">Publish path?</text>
-    <line class="edge" x1="270" y1="480" x2="150" y2="480" marker-end="url(#arw)"/><text class="t-e" x="185" y="472">manual</text>
-    <line class="edge" x1="410" y1="480" x2="530" y2="480" marker-end="url(#arw)"/><text class="t-e" x="452" y="472">wordpress</text>
-    <rect class="s-box" x="40" y="460" width="110" height="40" rx="9"/><text class="t-l" x="95" y="478" text-anchor="middle" font-size="10">Manual export</text><text class="t-s" x="95" y="491" text-anchor="middle">PDF / Markdown</text>
-    <rect class="s-box" x="530" y="460" width="120" height="40" rx="9"/><text class="t-l" x="590" y="478" text-anchor="middle" font-size="10">WordPress API</text><text class="t-s" x="590" y="491" text-anchor="middle">body, meta, media</text>
-    <!-- review gate -->
-    <line class="edge" x1="95" y1="500" x2="300" y2="545" marker-end="url(#arw)"/>
-    <line class="edge" x1="590" y1="500" x2="380" y2="545" marker-end="url(#arw)"/>
-    <rect class="s-solid" x="255" y="536" width="170" height="40" rx="9"/><text class="t-lw" x="340" y="554" text-anchor="middle">Human review checkpoint</text><text class="t-sw" x="340" y="568" text-anchor="middle">the deliberate 10%</text>
-    <line class="edge" x1="340" y1="576" x2="340" y2="592" marker-end="url(#arw)"/>
-    <polygon class="s-dia" points="340,592 400,616 340,640 280,616"/><text class="t-l" x="340" y="620" text-anchor="middle" font-size="11">Approved?</text>
-    <!-- loop back to draft on no -->
-    <path class="edge" d="M400,616 H460 V263 H425" marker-end="url(#arw)"/><text class="t-e" x="463" y="440">no - revise (back to draft)</text>
-    <!-- yes to publish/done -->
-    <line class="edge" x1="280" y1="616" x2="150" y2="616" marker-end="url(#arw)"/><text class="t-e" x="200" y="608">yes</text>
-    <rect class="s-mar" x="40" y="598" width="110" height="34" rx="17"/><text class="t-lw" x="95" y="619" text-anchor="middle">PUBLISH / DONE</text>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">06</span></div>
-</section>
-
-<!-- ============ 07 LIFECYCLE + COST ============ -->
-<section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>State machine + cost gate</span></div>
-  <div class="eyebrow">Algorithm 02</div>
-  <div class="h-sec">Job lifecycle &amp; cost gate</div>
-  <div class="rule"></div>
-  <div class="cap">Job state machine</div>
-  <div class="diagwrap mb10">
-  <svg viewBox="0 0 680 180">
-    <rect class="s-soft" x="10" y="70" width="96" height="40" rx="9"/><text class="t-l" x="58" y="94" text-anchor="middle" font-size="10">queued</text>
-    <rect class="s-box" x="150" y="70" width="96" height="40" rx="9"/><text class="t-l" x="198" y="94" text-anchor="middle" font-size="10">running</text>
-    <rect class="s-box" x="290" y="70" width="110" height="40" rx="9"/><text class="t-l" x="345" y="90" text-anchor="middle" font-size="10">needs review</text><text class="t-s" x="345" y="103" text-anchor="middle">content only</text>
-    <rect class="s-box" x="444" y="70" width="96" height="40" rx="9"/><text class="t-l" x="492" y="94" text-anchor="middle" font-size="10">publishing</text>
-    <rect class="s-mar" x="584" y="70" width="86" height="40" rx="9"/><text class="t-lw" x="627" y="94" text-anchor="middle" font-size="10">done</text>
-    <rect class="s-box" x="150" y="140" width="96" height="34" rx="9" stroke="#B85C6B"/><text class="t-l" x="198" y="161" text-anchor="middle" font-size="10">failed</text>
-    <line class="edge" x1="106" y1="90" x2="150" y2="90" marker-end="url(#arw)"/>
-    <line class="edge" x1="246" y1="90" x2="290" y2="90" marker-end="url(#arw)"/>
-    <line class="edge" x1="400" y1="90" x2="444" y2="90" marker-end="url(#arw)"/>
-    <line class="edge" x1="540" y1="90" x2="584" y2="90" marker-end="url(#arw)"/>
-    <path class="edge" d="M345,110 V130 H210 V110" marker-end="url(#arw)"/><text class="t-e" x="250" y="126">rejected</text>
-    <line class="edge" x1="198" y1="110" x2="198" y2="140" marker-end="url(#arw)"/>
-    <path class="edge" d="M150,157 H70 V110" marker-end="url(#arw)"/><text class="t-e" x="72" y="132">retry</text>
-  </svg>
-  </div>
-  <div class="cap">Cost-control gate - every external call</div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 320">
-    <rect class="s-mar" x="285" y="6" width="110" height="30" rx="15"/><text class="t-lw" x="340" y="26" text-anchor="middle">call needed</text>
-    <line class="edge" x1="340" y1="36" x2="340" y2="52" marker-end="url(#arw)"/>
-    <polygon class="s-dia" points="340,52 420,84 340,116 260,84"/><text class="t-l" x="340" y="82" text-anchor="middle" font-size="10">tier allows?</text>
-    <line class="edge" x1="260" y1="84" x2="130" y2="84" marker-end="url(#arw)"/><text class="t-e" x="175" y="76">no</text>
-    <rect class="s-box" x="20" y="64" width="110" height="40" rx="9"/><text class="t-l" x="75" y="82" text-anchor="middle" font-size="10">Skip / stub</text><text class="t-s" x="75" y="95" text-anchor="middle">free tier</text>
-    <line class="edge" x1="340" y1="116" x2="340" y2="132" marker-end="url(#arw)"/><text class="t-e" x="348" y="128">yes</text>
-    <polygon class="s-dia" points="340,132 420,164 340,196 260,164"/><text class="t-l" x="340" y="168" text-anchor="middle" font-size="11">cached?</text>
-    <line class="edge" x1="420" y1="164" x2="545" y2="164" marker-end="url(#arw)"/><text class="t-e" x="455" y="156">yes</text>
-    <rect class="s-soft" x="545" y="144" width="120" height="40" rx="9"/><text class="t-l" x="605" y="162" text-anchor="middle" font-size="10">Use cache</text><text class="t-s" x="605" y="175" text-anchor="middle">Redis, $0</text>
-    <line class="edge" x1="340" y1="196" x2="340" y2="212" marker-end="url(#arw)"/><text class="t-e" x="348" y="208">no</text>
-    <polygon class="s-dia" points="340,212 425,246 340,280 255,246"/><text class="t-l" x="340" y="250" text-anchor="middle" font-size="10">under cap?</text>
-    <line class="edge" x1="255" y1="246" x2="120" y2="246" marker-end="url(#arw)"/><text class="t-e" x="165" y="238">no</text>
-    <rect class="s-box" x="10" y="226" width="110" height="40" rx="9" stroke="#B85C6B"/><text class="t-l" x="65" y="244" text-anchor="middle" font-size="10">Halt / defer</text><text class="t-s" x="65" y="257" text-anchor="middle">budget hit</text>
-    <line class="edge" x1="425" y1="246" x2="555" y2="246" marker-end="url(#arw)"/><text class="t-e" x="460" y="238">yes</text>
-    <rect class="s-mar" x="555" y="226" width="120" height="40" rx="9"/><text class="t-lw" x="615" y="244" text-anchor="middle" font-size="10">Call API</text><text class="t-sw" x="615" y="257" text-anchor="middle">+ log cost</text>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">07</span></div>
-</section>
-
-<!-- ============ 08 POLICY RADAR ALGORITHM ============ -->
-<section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Algorithm - Policy Radar (mandatory core)</span></div>
-  <div class="eyebrow">Algorithm 03 - Module 04</div>
-  <div class="h-sec">Policy Radar - the loop</div>
-  <div class="rule"></div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 618">
-    <!-- entry -->
-    <rect class="s-mar" x="250" y="6" width="180" height="28" rx="14"/><text class="t-lw" x="340" y="25" text-anchor="middle">Scheduler tick</text>
-    <line class="edge" x1="340" y1="34" x2="340" y2="48" marker-end="url(#arw)"/>
-    <rect class="s-box" x="245" y="48" width="190" height="38" rx="9"/><text class="t-l" x="340" y="66" text-anchor="middle" font-size="11">Fetch official sources</text><text class="t-s" x="340" y="79" text-anchor="middle">Search Status, Search Central, QRG</text>
-    <line class="edge" x1="340" y1="86" x2="340" y2="100" marker-end="url(#arw)"/>
-    <!-- changed? -->
-    <polygon class="s-dia" points="340,100 405,132 340,164 275,132"/><text class="t-l" x="340" y="130" text-anchor="middle" font-size="10">changed since</text><text class="t-l" x="340" y="143" text-anchor="middle" font-size="10">last run?</text>
-    <line class="edge" x1="405" y1="132" x2="505" y2="132" marker-end="url(#arw)"/><text class="t-e" x="438" y="124">no</text>
-    <rect class="s-soft" x="505" y="112" width="150" height="40" rx="9"/><text class="t-l" x="580" y="130" text-anchor="middle" font-size="10">Wait / next tick</text><text class="t-s" x="580" y="143" text-anchor="middle">nothing to do</text>
-    <path class="edge-d" d="M580,112 V20 H430" marker-end="url(#arwr)"/>
-    <line class="edge" x1="340" y1="164" x2="340" y2="180" marker-end="url(#arw)"/><text class="t-e" x="348" y="176">yes  (or change detected)</text>
-    <!-- research chain -->
-    <rect class="s-box" x="245" y="180" width="190" height="34" rx="9"/><text class="t-l" x="340" y="201" text-anchor="middle" font-size="11">Research the change</text>
-    <line class="edge" x1="340" y1="214" x2="340" y2="228" marker-end="url(#arw)"/>
-    <rect class="s-box" x="245" y="228" width="190" height="34" rx="9"/><text class="t-l" x="340" y="249" text-anchor="middle" font-size="11">Summarize + dedupe</text>
-    <line class="edge" x1="340" y1="262" x2="340" y2="276" marker-end="url(#arw)"/>
-    <!-- flag = national flagging -->
-    <rect class="s-solid" x="215" y="276" width="250" height="46" rx="9"/><text class="t-lw" x="340" y="295" text-anchor="middle" font-size="11">Flag entry</text><text class="t-sw" x="340" y="310" text-anchor="middle">severity + category + region / nation scope</text>
-    <line class="edge" x1="340" y1="322" x2="340" y2="338" marker-end="url(#arw)"/>
-    <!-- KB -->
-    <ellipse cx="340" cy="340" rx="66" ry="8" class="s-soft"/><path class="s-soft" d="M274,340 v30 a66,8 0 0 0 132,0 v-30"/><text class="t-l" x="340" y="360" text-anchor="middle" font-size="11">Knowledge base</text><text class="t-s" x="340" y="373" text-anchor="middle">versioned</text>
-    <line class="edge" x1="340" y1="378" x2="340" y2="392" marker-end="url(#arw)"/>
-    <rect class="s-box" x="245" y="392" width="190" height="34" rx="9"/><text class="t-l" x="340" y="413" text-anchor="middle" font-size="11">Generate recommendations</text>
-    <line class="edge" x1="340" y1="426" x2="340" y2="440" marker-end="url(#arw)"/>
-    <rect class="s-mar" x="245" y="440" width="190" height="40" rx="9"/><text class="t-lw" x="340" y="459" text-anchor="middle" font-size="11">Command Center</text><text class="t-sw" x="340" y="472" text-anchor="middle">baseline + new recommendations</text>
-    <line class="edge" x1="340" y1="480" x2="340" y2="494" marker-end="url(#arw)"/>
-    <!-- human confirm -->
-    <polygon class="s-dia" points="340,494 405,524 340,554 275,524"/><text class="t-l" x="340" y="528" text-anchor="middle" font-size="10">human confirm?</text>
-    <line class="edge" x1="405" y1="524" x2="505" y2="524" marker-end="url(#arw)"/><text class="t-e" x="438" y="516">no</text>
-    <rect class="s-soft" x="505" y="504" width="150" height="40" rx="9"/><text class="t-l" x="580" y="522" text-anchor="middle" font-size="10">Hold / dismiss</text><text class="t-s" x="580" y="535" text-anchor="middle">logged, cited</text>
-    <line class="edge" x1="340" y1="554" x2="340" y2="568" marker-end="url(#arw)"/><text class="t-e" x="348" y="565">yes - apply</text>
-    <!-- fan out -->
-    <line class="edge" x1="340" y1="568" x2="120" y2="580" marker-end="url(#arw)"/>
-    <line class="edge" x1="340" y1="568" x2="340" y2="580" marker-end="url(#arw)"/>
-    <line class="edge" x1="340" y1="568" x2="560" y2="580" marker-end="url(#arw)"/>
-    <rect class="s-box" x="25" y="580" width="190" height="36" rx="9"/><text class="t-l" x="120" y="598" text-anchor="middle" font-size="10">Update audit checks</text><text class="t-s" x="120" y="610" text-anchor="middle">into the checklist</text>
-    <rect class="s-box" x="245" y="580" width="190" height="36" rx="9"/><text class="t-l" x="340" y="598" text-anchor="middle" font-size="10">Adjust content guidance</text><text class="t-s" x="340" y="610" text-anchor="middle">for the writers</text>
-    <rect class="s-box" x="465" y="580" width="190" height="36" rx="9"/><text class="t-l" x="560" y="598" text-anchor="middle" font-size="10">Client advisory</text><text class="t-s" x="560" y="610" text-anchor="middle">by affected region</text>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">08</span></div>
-</section>
-
-<!-- ============ 09 ROLES TREE + MATRIX ============ -->
-<section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Roles - tree + access matrix</span></div>
-  <div class="eyebrow">Diagram 02</div>
-  <div class="h-sec">Portals &amp; access</div>
-  <div class="rule"></div>
-  <div class="cap">Role hierarchy</div>
-  <div class="diagwrap mb10">
-  <svg viewBox="0 0 680 150">
-    <rect class="s-solid" x="270" y="8" width="140" height="40" rx="10"/><text class="t-lw" x="340" y="26" text-anchor="middle">Super-Admin</text><text class="t-sw" x="340" y="40" text-anchor="middle">agency owner - everything</text>
-    <line class="edge-t" x1="340" y1="48" x2="340" y2="66" marker-end="url(#arwm)"/>
-    <rect class="s-box" x="270" y="66" width="140" height="40" rx="10"/><text class="t-l" x="340" y="84" text-anchor="middle">Manager</text><text class="t-s" x="340" y="97" text-anchor="middle">team + client book (opt)</text>
-    <line class="edge-t" x1="340" y1="106" x2="340" y2="122" marker-end="url(#arwm)"/>
-    <rect class="s-box" x="270" y="122" width="140" height="26" rx="8"/><text class="t-l" x="340" y="139" text-anchor="middle" font-size="11">Team - assigned work</text>
-    <!-- client separate -->
-    <rect class="s-soft" x="500" y="66" width="150" height="40" rx="10"/><text class="t-l" x="575" y="84" text-anchor="middle">Client</text><text class="t-s" x="575" y="97" text-anchor="middle">own site only - isolated</text>
-    <line class="edge-d" x1="410" y1="86" x2="500" y2="86" marker-end="url(#arwr)"/><text class="t-e" x="420" y="78">serves</text>
-  </svg>
-  </div>
-  <div class="cap">Access matrix</div>
-  <table class="mx">
-    <thead><tr><th>Capability</th><th>Client</th><th>Team</th><th>Manager</th><th>Admin</th></tr></thead>
+  <table class="tbl mb18">
+    <thead><tr><th>Cost area</th><th>Typical monthly</th><th>What it covers</th></tr></thead>
     <tbody>
-      <tr><td>View own reports + milestones</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>Run audit (own site)</td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>Click Fiverr upsells</td><td><span class="dot"></span></td><td class="o"><span class="dot o"></span></td><td class="o"><span class="dot o"></span></td><td class="o"><span class="dot o"></span></td></tr>
-      <tr><td>Run + deliver content jobs</td><td><span class="dot o"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>Review / QA checkpoint</td><td><span class="dot o"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>Assign work + team monitor</td><td><span class="dot o"></span></td><td><span class="dot o"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>View all clients + sites</td><td><span class="dot o"></span></td><td><span class="dot o"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>Manage upsells (Fiverr links)</td><td><span class="dot o"></span></td><td><span class="dot o"></span></td><td><span class="dot o"></span></td><td><span class="dot"></span></td></tr>
-      <tr><td>Key vault + tiers + roles</td><td><span class="dot o"></span></td><td><span class="dot o"></span></td><td><span class="dot o"></span></td><td><span class="dot"></span></td></tr>
+      <tr><td>Server &amp; infrastructure</td><td class="mono">~$70–95</td><td>Private server, database, off-site backups, web address &amp; security, email, monitoring.</td></tr>
+      <tr><td>Free Google data</td><td class="mono">$0</td><td>Search Console &amp; Analytics 4 — traffic, search terms, conversions, site health.</td></tr>
+      <tr><td>Rank data (serper.dev)</td><td class="mono">~$30</td><td>Daily Google rank tracking for all 15 clients. Prepaid credits — no subscription.</td></tr>
+      <tr><td>Site audits &amp; backlinks</td><td class="mono">$0</td><td>Audits on your in-house crawler; backlink checks from Semrush/Ahrefs CSV exports.</td></tr>
+      <tr><td>Premium tools (Semrush / Ahrefs)</td><td class="mono">$0 by default</td><td>Manual CSV import keeps these at zero. Switch a single client to live API only when needed.</td></tr>
+      <tr><td>Secure key vault</td><td class="mono">$0</td><td>Encrypted in Supabase Vault (included above).</td></tr>
+      <tr><td>Typical total</td><td class="mono">~$110/mo</td><td>~$7 per client. Moves between ~$95 (lean) and ~$140 at heavy use.</td></tr>
     </tbody>
   </table>
-  <div class="legend mt14"><div class="lg"><span class="dot"></span>&nbsp;allowed</div><div class="lg"><span class="dot o"></span>&nbsp;not allowed</div></div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">09</span></div>
+
+  <div class="cols2 mb14">
+    <div class="card"><h4>Fixed vs. pay-per-use</h4><p>Only the server line is truly fixed. The rank data is pay-per-use — it goes up or down with how many clients you turn on and how often you check rankings.</p></div>
+    <div class="card"><h4>Two safety nets on spending</h4><p>A monthly cap per client, plus an automatic daily stop on every paid service. A runaway job can never turn ~$30 into a surprise bill.</p></div>
+  </div>
+
+  <div class="card alt"><h4>A note on these numbers</h4><p>Every figure is approximate and checked against live provider prices in July 2026. Final prices are confirmed before you buy, and you approve every paid service before it is switched on. Your Claude AI is already paid for, so it is not part of these running costs.</p></div>
+
+  <div class="pfoot"><span>Section 02 · The Full Monthly Picture</span><span class="pn">03</span></div>
 </section>
 
-<!-- ============ 09 ERD ============ -->
+<!-- ============ 04 SERVER & INFRASTRUCTURE ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Data model - ERD</span></div>
-  <div class="eyebrow">Diagram 03</div>
-  <div class="h-sec">Data model (ERD)</div>
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">03</span><span class="eyebrow">Infrastructure</span></div>
+  <div class="h-sec">Server &amp; Infrastructure</div>
   <div class="rule"></div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 580">
-    <!-- entity helper: box with title band -->
-    <!-- users -->
-    <g><rect class="s-box" x="20" y="20" width="150" height="86" rx="8"/><rect class="s-solid" x="20" y="20" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="32" width="150" height="12"/><text class="t-lw" x="30" y="37">users</text>
-      <text class="t-s" x="30" y="60" font-size="9.5">id, role</text><text class="t-s" x="30" y="74" font-size="9.5">email</text><text class="t-s" x="30" y="88" font-size="9.5">password_hash</text><text class="t-s" x="30" y="102" font-size="9.5">4 roles</text></g>
-    <!-- clients -->
-    <g><rect class="s-box" x="265" y="20" width="150" height="72" rx="8"/><rect class="s-solid" x="265" y="20" width="150" height="24" rx="8"/><rect class="s-solid" x="265" y="32" width="150" height="12"/><text class="t-lw" x="275" y="37">clients</text>
-      <text class="t-s" x="275" y="60" font-size="9.5">id, name</text><text class="t-s" x="275" y="74" font-size="9.5">status, tier</text><text class="t-s" x="275" y="88" font-size="9.5">manager_id</text></g>
-    <!-- sites -->
-    <g><rect class="s-box" x="265" y="150" width="150" height="72" rx="8"/><rect class="s-solid" x="265" y="150" width="150" height="24" rx="8"/><rect class="s-solid" x="265" y="162" width="150" height="12"/><text class="t-lw" x="275" y="167">sites</text>
-      <text class="t-s" x="275" y="190" font-size="9.5">id, client_id</text><text class="t-s" x="275" y="204" font-size="9.5">domain, cms_type</text><text class="t-s" x="275" y="218" font-size="9.5">wp_creds (enc)</text></g>
-    <!-- audits -->
-    <g><rect class="s-box" x="60" y="280" width="150" height="86" rx="8"/><rect class="s-solid" x="60" y="280" width="150" height="24" rx="8"/><rect class="s-solid" x="60" y="292" width="150" height="12"/><text class="t-lw" x="70" y="297">audits</text>
-      <text class="t-s" x="70" y="320" font-size="9.5">id, site_id</text><text class="t-s" x="70" y="334" font-size="9.5">type, tier, status</text><text class="t-s" x="70" y="348" font-size="9.5">run_uuid, scores</text><text class="t-s" x="70" y="362" font-size="9.5">artifact_path</text></g>
-    <!-- content_jobs -->
-    <g><rect class="s-box" x="265" y="280" width="150" height="86" rx="8"/><rect class="s-solid" x="265" y="280" width="150" height="24" rx="8"/><rect class="s-solid" x="265" y="292" width="150" height="12"/><text class="t-lw" x="275" y="297">content_jobs</text>
-      <text class="t-s" x="275" y="320" font-size="9.5">id, site_id</text><text class="t-s" x="275" y="334" font-size="9.5">type, framework</text><text class="t-s" x="275" y="348" font-size="9.5">target, status</text><text class="t-s" x="275" y="362" font-size="9.5">published_url, cost</text></g>
-    <!-- milestones -->
-    <g><rect class="s-box" x="470" y="150" width="150" height="72" rx="8"/><rect class="s-solid" x="470" y="150" width="150" height="24" rx="8"/><rect class="s-solid" x="470" y="162" width="150" height="12"/><text class="t-lw" x="480" y="167">milestones</text>
-      <text class="t-s" x="480" y="190" font-size="9.5">id, client_id</text><text class="t-s" x="480" y="204" font-size="9.5">title, status</text><text class="t-s" x="480" y="218" font-size="9.5">auto_source</text></g>
-    <!-- activity_log -->
-    <g><rect class="s-box" x="20" y="150" width="150" height="72" rx="8"/><rect class="s-solid" x="20" y="150" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="162" width="150" height="12"/><text class="t-lw" x="30" y="167">activity_log</text>
-      <text class="t-s" x="30" y="190" font-size="9.5">id, user_id</text><text class="t-s" x="30" y="204" font-size="9.5">action, target</text><text class="t-s" x="30" y="218" font-size="9.5">timestamp</text></g>
-    <!-- upsells -->
-    <g><rect class="s-box" x="470" y="280" width="150" height="72" rx="8"/><rect class="s-solid" x="470" y="280" width="150" height="24" rx="8"/><rect class="s-solid" x="470" y="292" width="150" height="12"/><text class="t-lw" x="480" y="297">upsells</text>
-      <text class="t-s" x="480" y="320" font-size="9.5">id, title</text><text class="t-s" x="480" y="334" font-size="9.5">fiverr_url</text><text class="t-s" x="480" y="348" font-size="9.5">active</text></g>
-    <!-- api_keys -->
-    <g><rect class="s-box" x="470" y="400" width="150" height="72" rx="8"/><rect class="s-solid" x="470" y="400" width="150" height="24" rx="8"/><rect class="s-solid" x="470" y="412" width="150" height="12"/><text class="t-lw" x="480" y="417">api_keys</text>
-      <text class="t-s" x="480" y="440" font-size="9.5">provider</text><text class="t-s" x="480" y="454" font-size="9.5">value (enc)</text><text class="t-s" x="480" y="468" font-size="9.5">agency-level</text></g>
-    <!-- relationships -->
-    <line class="edge-t" x1="340" y1="92" x2="340" y2="150" marker-end="url(#arwm)"/><text class="t-e" x="345" y="122">1 : N</text>
-    <line class="edge-t" x1="290" y1="222" x2="200" y2="280" marker-end="url(#arwm)"/><text class="t-e" x="205" y="255">1 : N</text>
-    <line class="edge-t" x1="360" y1="222" x2="360" y2="280" marker-end="url(#arwm)"/><text class="t-e" x="365" y="255">1 : N</text>
-    <line class="edge-t" x1="415" y1="150" x2="470" y2="175" marker-end="url(#arwm)"/><text class="t-e" x="420" y="150">1 : N</text>
-    <line class="edge-t" x1="170" y1="120" x2="90" y2="150" marker-end="url(#arwm)"/><text class="t-e" x="100" y="140">logs</text>
-    <text class="t-tag" x="470" y="376" font-size="9">upsells + api_keys: agency-global</text>
-    <!-- Policy Radar entities -->
-    <text class="t-tag" x="20" y="390" font-size="9">POLICY RADAR (INTELLIGENCE) ENTITIES</text>
-    <g><rect class="s-box" x="20" y="398" width="150" height="72" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="20" y="398" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="410" width="150" height="12"/><text class="t-lw" x="30" y="415">policy_sources</text>
-      <text class="t-s" x="30" y="438" font-size="9.5">name, url, type</text><text class="t-s" x="30" y="452" font-size="9.5">last_checked</text><text class="t-s" x="30" y="466" font-size="9.5">last_hash</text></g>
-    <g><rect class="s-box" x="200" y="398" width="150" height="86" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="200" y="398" width="150" height="24" rx="8"/><rect class="s-solid" x="200" y="410" width="150" height="12"/><text class="t-lw" x="210" y="415">kb_entries</text>
-      <text class="t-s" x="210" y="438" font-size="9.5">source, category</text><text class="t-s" x="210" y="452" font-size="9.5">severity, region_flags[]</text><text class="t-s" x="210" y="466" font-size="9.5">summary, version</text><text class="t-s" x="210" y="480" font-size="9.5">hash</text></g>
-    <g><rect class="s-box" x="20" y="492" width="150" height="72" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="20" y="492" width="150" height="24" rx="8"/><rect class="s-solid" x="20" y="504" width="150" height="12"/><text class="t-lw" x="30" y="509">change_events</text>
-      <text class="t-s" x="30" y="532" font-size="9.5">source_id</text><text class="t-s" x="30" y="546" font-size="9.5">detected_at, diff_ref</text><text class="t-s" x="30" y="560" font-size="9.5">triggered_job</text></g>
-    <g><rect class="s-box" x="380" y="492" width="150" height="72" rx="8" stroke="#8C1D2E"/><rect class="s-solid" x="380" y="492" width="150" height="24" rx="8"/><rect class="s-solid" x="380" y="504" width="150" height="12"/><text class="t-lw" x="390" y="509">recommendations</text>
-      <text class="t-s" x="390" y="532" font-size="9.5">kb_entry_id, scope</text><text class="t-s" x="390" y="546" font-size="9.5">target_module, action</text><text class="t-s" x="390" y="560" font-size="9.5">status</text></g>
-    <line class="edge-t" x1="95" y1="470" x2="95" y2="492" marker-end="url(#arwm)"/><text class="t-e" x="100" y="486">1:N</text>
-    <line class="edge-t" x1="170" y1="528" x2="200" y2="450" marker-end="url(#arwm)"/><text class="t-e" x="176" y="500">creates</text>
-    <line class="edge-t" x1="350" y1="450" x2="380" y2="510" marker-end="url(#arwm)"/><text class="t-e" x="356" y="474">1:N</text>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">10</span></div>
+  <div class="h-sub mb18">The fixed base that runs the whole platform and every client portal. You own all of it. This total stays about the same whether you have 5 clients or 15.</div>
+
+  <table class="tbl compact mb18">
+    <thead><tr><th>Item</th><th>Provider &amp; plan</th><th>Approx. / mo</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td>Private server (VPS)</td><td>Hetzner Cloud — CPX31 (4 vCPU / 8 GB)</td><td class="mono">~$42</td><td>Runs the platform, all client portals and background jobs. Price shown is the EU region.</td></tr>
+      <tr><td>Database, login &amp; storage</td><td>Supabase Cloud — Pro</td><td class="mono">~$25</td><td>Managed database, user logins, file storage and daily backups.</td></tr>
+      <tr><td>Off-site backups</td><td>Backblaze B2 (pay-as-you-go)</td><td class="mono">~$1–6</td><td>A second copy of your data, kept off the server. First 10 GB free.</td></tr>
+      <tr><td>Domain &amp; SSL</td><td>Registrar + Let's Encrypt</td><td class="mono">~$2</td><td>Your main web address; security certificates renew free, automatically.</td></tr>
+      <tr><td>Automatic emails</td><td>Resend (free tier)</td><td class="mono">~$0</td><td>Sends reports and alerts. Free up to 3,000 emails/mo; about $20 if you send more.</td></tr>
+      <tr><td>Monitoring &amp; alerts</td><td>Sentry · UptimeRobot · Netdata</td><td class="mono">$0</td><td>Error tracking, uptime checks and server health — all free tiers.</td></tr>
+      <tr><td>Secure key vault</td><td>Supabase Vault (in Pro)</td><td class="mono">$0</td><td>Encrypted safe for every API key &amp; Google access. Built into Supabase — no extra cost.</td></tr>
+      <tr><td>Infrastructure subtotal</td><td></td><td class="mono">~$70–95</td><td>Fixed monthly base, no matter how many clients you have.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="hero mb14"><div class="kl">Server region — a cost lever worth knowing</div><p>The server price above is Hetzner's <b>EU region (~$42/mo)</b>, the best value. A <b>US-region</b> server costs more (~$73/mo) after Hetzner's June 2026 price rise, and a smaller server costs less. We'll recommend the right size and region for you before you buy.</p></div>
+
+  <div class="note">Prices exclude local VAT/tax and a small IPv4 address fee (~$0.70/mo). Backups grow with your data — tiny at your size for the first year or two.</div>
+
+  <div class="pfoot"><span>Section 03 · Server &amp; Infrastructure</span><span class="pn">04</span></div>
 </section>
 
-<!-- ============ 10 DEPLOYMENT ============ -->
+<!-- ============ 05 LIVE SEO DATA ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Deployment - VPS / Docker</span></div>
-  <div class="eyebrow">Diagram 04</div>
-  <div class="h-sec">Deployment topology</div>
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">04</span><span class="eyebrow">SEO data</span></div>
+  <div class="h-sec">Live SEO Data (serper.dev)</div>
   <div class="rule"></div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 520">
-    <!-- internet -->
-    <rect class="s-soft" x="270" y="6" width="140" height="34" rx="9"/><text class="t-l" x="340" y="28" text-anchor="middle">Internet (users)</text>
-    <line class="edge" x1="340" y1="40" x2="340" y2="66" marker-end="url(#arw)"/><text class="t-e" x="348" y="58">TLS 443</text>
-    <!-- VPS box -->
-    <rect x="20" y="66" width="510" height="340" rx="14" fill="none" stroke="var(--maroon)" stroke-width="2"/>
-    <text class="t-tag" x="30" y="84" font-size="10">VPS - Ubuntu - Docker Compose</text>
-    <!-- proxy -->
-    <rect class="s-solid" x="180" y="96" width="190" height="34" rx="9"/><text class="t-lw" x="275" y="118" text-anchor="middle">proxy (Caddy, auto-TLS)</text>
-    <line class="edge" x1="240" y1="130" x2="150" y2="160" marker-end="url(#arw)"/>
-    <line class="edge" x1="310" y1="130" x2="400" y2="160" marker-end="url(#arw)"/>
-    <!-- web + api -->
-    <rect class="s-box" x="60" y="160" width="180" height="40" rx="9"/><text class="t-l" x="150" y="178" text-anchor="middle">web</text><text class="t-s" x="150" y="191" text-anchor="middle">Next.js container</text>
-    <rect class="s-box" x="310" y="160" width="180" height="40" rx="9"/><text class="t-l" x="400" y="178" text-anchor="middle">api</text><text class="t-s" x="400" y="191" text-anchor="middle">FastAPI container</text>
-    <line class="edge" x1="240" y1="180" x2="310" y2="180" marker-end="url(#arw)"/>
-    <line class="edge" x1="400" y1="200" x2="400" y2="230" marker-end="url(#arw)"/>
-    <!-- worker -->
-    <rect class="s-solid" x="310" y="230" width="180" height="40" rx="9"/><text class="t-lw" x="400" y="248" text-anchor="middle">worker</text><text class="t-sw" x="400" y="261" text-anchor="middle">audit + content engines</text>
-    <!-- datastores -->
-    <ellipse cx="110" cy="240" rx="50" ry="7" class="s-box"/><path class="s-box" d="M60,240 v40 a50,7 0 0 0 100,0 v-40"/><text class="t-l" x="110" y="266" text-anchor="middle" font-size="11">postgres</text>
-    <ellipse cx="230" cy="240" rx="46" ry="7" class="s-box"/><path class="s-box" d="M184,240 v40 a46,7 0 0 0 92,0 v-40"/><text class="t-l" x="230" y="266" text-anchor="middle" font-size="11">redis</text>
-    <ellipse cx="110" cy="320" rx="50" ry="7" class="s-box"/><path class="s-box" d="M60,320 v34 a50,7 0 0 0 100,0 v-34"/><text class="t-l" x="110" y="344" text-anchor="middle" font-size="11">volume</text><text class="t-s" x="110" y="356" text-anchor="middle">artifacts + backups</text>
-    <line class="edge" x1="360" y1="230" x2="240" y2="248" marker-end="url(#arw)"/>
-    <line class="edge" x1="330" y1="270" x2="150" y2="300" marker-end="url(#arw)"/>
-    <line class="edge" x1="310" y1="250" x2="160" y2="250" marker-end="url(#arw)"/>
-    <!-- external cloud -->
-    <rect x="548" y="120" width="122" height="286" rx="12" fill="none" stroke="var(--rose)" stroke-width="1.5" stroke-dasharray="5 3"/>
-    <text class="t-tag" x="556" y="138" font-size="9">EXTERNAL APIs</text>
-    <rect class="s-ext" x="560" y="150" width="98" height="30" rx="7"/><text class="t-l" x="609" y="169" text-anchor="middle" font-size="10">Serper</text>
-    <rect class="s-ext" x="560" y="188" width="98" height="30" rx="7"/><text class="t-l" x="609" y="207" text-anchor="middle" font-size="10">Google</text>
-    <rect class="s-ext" x="560" y="226" width="98" height="30" rx="7"/><text class="t-l" x="609" y="245" text-anchor="middle" font-size="10">Claude</text>
-    <rect class="s-ext" x="560" y="264" width="98" height="30" rx="7"/><text class="t-l" x="609" y="283" text-anchor="middle" font-size="10">Image gen</text>
-    <rect class="s-ext" x="560" y="302" width="98" height="30" rx="7"/><text class="t-l" x="609" y="321" text-anchor="middle" font-size="10">WordPress</text>
-    <rect class="s-ext" x="560" y="340" width="98" height="30" rx="7"/><text class="t-l" x="609" y="359" text-anchor="middle" font-size="10">Sheets</text>
-    <line class="edge-d" x1="490" y1="250" x2="560" y2="250" marker-end="url(#arwr)"/><text class="t-e" x="498" y="242">agency keys</text>
-  </svg>
+  <div class="h-sub mb18">This is the only pay-per-use line — and it stays small. Free Google data does the everyday work, your in-house crawler runs the audits, and serper.dev checks Google rankings for a tiny fraction of a cent each.</div>
+
+  <div class="lbl">Free data layer — always on, $0</div>
+  <div class="cols3 mb18">
+    <div class="card"><h4>Google Search Console</h4><p>Clicks, impressions, search terms &amp; page performance. Free API.</p></div>
+    <div class="card"><h4>Google Analytics 4</h4><p>Traffic, channels and conversions per client. Free Data API.</p></div>
+    <div class="card"><h4>In-house crawler &amp; AI</h4><p>Runs your site audits and the bulk, repetitive work on your own server at $0 per use.</p></div>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">11</span></div>
+
+  <div class="lbl">Paid data — serper.dev, pay-as-you-go (all 15 clients)</div>
+  <table class="tbl mb18">
+    <thead><tr><th>Job</th><th>How often</th><th>Searches / month</th><th>Approx. / mo</th></tr></thead>
+    <tbody>
+      <tr><td>Rank tracking (page 1)</td><td>Daily</td><td class="mono">~22,500 searches</td><td class="mono">~$22.50</td></tr>
+      <tr><td>Full-position scan (top 100)</td><td>Weekly</td><td class="mono">~3,200 searches</td><td class="mono">~$6.50</td></tr>
+      <tr><td>serper.dev subtotal</td><td></td><td class="mono">~29,000 credits</td><td class="mono">~$30</td></tr>
+    </tbody>
+  </table>
+
+  <div class="cols2 mb14">
+    <div class="card"><h4>Why it's pennies, not seats</h4><p>One rank check costs about $0.001 (a tenth of a cent). Buying only the exact searches you need — instead of a fixed monthly seat — is what keeps all 15 clients near ~$30.</p></div>
+    <div class="card"><h4>Adjusted per client</h4><p>Every job above can be turned off or slowed (daily → weekly) per client. Small clients run mostly on free Google data; only premium clients get the full daily refresh.</p></div>
+  </div>
+
+  <div class="note">serper.dev is prepaid, not a subscription — a $50 pack of 50,000 searches (valid 6 months) covers all 15 clients for roughly a month and a half. A full top-100 scan counts as 2 searches. Audits run on your in-house crawler ($0) and backlink checks come from Semrush/Ahrefs CSV exports ($0), so serper.dev is the only paid data line.</div>
+
+  <div class="pfoot"><span>Section 04 · Live SEO Data</span><span class="pn">05</span></div>
 </section>
 
-<!-- ============ 11 BUILD GANTT ============ -->
+<!-- ============ 06 THE AI BEHIND YOUR DASHBOARD ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Build plan - Gantt</span></div>
-  <div class="eyebrow">Plan 01</div>
-  <div class="h-sec">Build plan - 3 to 5 weeks</div>
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">05</span><span class="eyebrow">AI engine</span></div>
+  <div class="h-sec">The AI Behind Your Dashboard</div>
   <div class="rule"></div>
-  <div class="gantt mb10">
-    <div></div>
-    <div class="gh">W0 pre</div><div class="gh">W1</div><div class="gh">W2</div><div class="gh">W3</div><div class="gh">W4</div><div class="gh">W5</div>
+  <div class="h-sub mb18">Your AIOS dashboard runs on Anthropic's Claude — the AI you already license. Because you own it, it is $0 in your monthly running costs. This page is a plain reference to the models it uses and what each one does.</div>
+
+  <div class="hero mb18"><div class="kl">Already licensed by you — $0 extra per month</div><p>Claude runs on your own Anthropic account, so nothing on this page is added to your ~$110/month running costs. <b>For context:</b> running the same work on a metered API — if you didn't already own it — would be roughly <b>~$140–200/month</b>, so this is real value you already hold.</p></div>
+
+  <div class="lbl">The models your dashboard runs on (price per 1M tokens, ≈ ¾ million words)</div>
+  <table class="tbl compact mb18">
+    <thead><tr><th>Model</th><th>Price in / out</th><th>Context</th><th>What it powers</th></tr></thead>
+    <tbody>
+      <tr><td><b>Claude Haiku 4.5</b> <span class="tag ghost">Bulk</span><br><span style="font-weight:500;color:var(--muted-2);font-size:10px;">claude-haiku-4-5</span></td><td class="mono">~$1 / ~$5</td><td class="mono">200K</td><td>High-volume tidy-up, classification and data cleanup.</td></tr>
+      <tr><td><b>Claude Sonnet 5</b> <span class="tag ghost">Workhorse</span><br><span style="font-weight:500;color:var(--muted-2);font-size:10px;">claude-sonnet-5</span></td><td class="mono">~$3 / ~$15 (intro ~$2/~$10 to Aug 2026)</td><td class="mono">1M</td><td>Audit analysis, on-page recommendations, report writing, content briefs.</td></tr>
+      <tr><td><b>Claude Opus 4.8</b> <span class="tag ghost">Deep</span><br><span style="font-weight:500;color:var(--muted-2);font-size:10px;">claude-opus-4-8</span></td><td class="mono">~$5 / ~$25</td><td class="mono">1M</td><td>Monthly strategy, competitor synthesis and the hardest reasoning.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="lbl">Where it shows up in your dashboard</div>
+  <div class="cols3 mb18">
+    <div class="card"><h4>Audits &amp; Reports</h4><p>Sonnet 5 reads each technical audit and writes the client-facing report, findings and on-page fixes.</p></div>
+    <div class="card"><h4>Strategy &amp; Insights</h4><p>Opus 4.8 produces the monthly strategy and competitor analysis — the deep thinking clients read first.</p></div>
+    <div class="card"><h4>Behind the scenes</h4><p>Haiku 4.5 handles the high-volume, repetitive tidy-up and classification — cheaply and fast.</p></div>
   </div>
-  <div class="gantt" style="gap:6px 6px;">
-    <div class="gtrack">Pre-reqs</div>
-    <div class="gcell gbar deep"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div>
-    <div class="gtrack">Infra + auth</div>
-    <div class="gcell gempty"></div><div class="gcell gbar"></div><div class="gcell gbar soft"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div>
-    <div class="gtrack">Audit module</div>
-    <div class="gcell gempty"></div><div class="gcell gbar"></div><div class="gcell gbar"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div>
-    <div class="gtrack">Content module</div>
-    <div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gbar soft"></div><div class="gcell gbar"></div><div class="gcell gempty"></div><div class="gcell gempty"></div>
-    <div class="gtrack">Portal complete</div>
-    <div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gbar soft"></div><div class="gcell gbar"></div><div class="gcell gempty"></div>
-    <div class="gtrack">Reporting</div>
-    <div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gbar"></div><div class="gcell gempty"></div>
-    <div class="gtrack">Hardening + handoff</div>
-    <div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gempty"></div><div class="gcell gbar soft"></div><div class="gcell gbar deep"></div>
-  </div>
-  <div class="cap mt14">Milestones - exit criteria (diamonds)</div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 120">
-    <line class="edge-t" x1="20" y1="60" x2="660" y2="60"/>
-    <g>
-      <polygon class="s-dia" points="70,44 90,60 70,76 50,60"/><text class="t-e" x="70" y="96" text-anchor="middle">env ready</text>
-      <polygon class="s-dia" points="180,44 200,60 180,76 160,60"/><text class="t-e" x="180" y="96" text-anchor="middle">audit -&gt; PDF</text>
-      <polygon class="s-dia" points="310,44 330,60 310,76 290,60"/><text class="t-e" x="310" y="96" text-anchor="middle">client runs audit</text>
-      <polygon class="s-dia" points="440,44 460,60 440,76 420,60"/><text class="t-e" x="440" y="96" text-anchor="middle">WP publish</text>
-      <polygon class="s-dia" points="560,44 580,60 560,76 540,60"/><text class="t-e" x="560" y="96" text-anchor="middle">journey e2e</text>
-      <polygon class="s-mar" points="650,42 672,60 650,78 628,60"/><text class="t-e" x="650" y="96" text-anchor="middle">production</text>
-    </g>
-  </svg>
-  </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">12</span></div>
+
+  <div class="note">Two built-in levers keep usage efficient even though it's already paid for — caching reuses shared prompt parts at about 90% off, and batching runs non-urgent jobs at half price. Model names, IDs and prices are current as of July 2026 and confirmed on your Anthropic account.</div>
+
+  <div class="pfoot"><span>Section 05 · The AI Behind Your Dashboard</span><span class="pn">06</span></div>
 </section>
 
-<!-- ============ 12 DEPENDENCY DAG + RISK ============ -->
+<!-- ============ 07 TWO WAYS TO RUN IT ============ -->
 <section class="page">
-  <div class="runhead"><span>AIOS - Visual Blueprint</span><span>Dependencies + risk</span></div>
-  <div class="eyebrow">Plan 02</div>
-  <div class="h-sec">Build order &amp; risk</div>
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">06</span><span class="eyebrow">Scenarios</span></div>
+  <div class="h-sec">Two Ways to Run It</div>
   <div class="rule"></div>
-  <div class="cap">Task dependency graph</div>
-  <div class="diagwrap mb10">
-  <svg viewBox="0 0 680 210">
-    <rect class="s-solid" x="10" y="80" width="96" height="42" rx="9"/><text class="t-lw" x="58" y="98" text-anchor="middle" font-size="10">VPS +</text><text class="t-sw" x="58" y="111" text-anchor="middle">Docker</text>
-    <rect class="s-box" x="140" y="80" width="96" height="42" rx="9"/><text class="t-l" x="188" y="98" text-anchor="middle" font-size="10">Foundations</text><text class="t-s" x="188" y="111" text-anchor="middle">auth+DB+queue</text>
-    <rect class="s-box" x="270" y="20" width="96" height="42" rx="9"/><text class="t-l" x="318" y="38" text-anchor="middle" font-size="10">Audit wrap</text><text class="t-s" x="318" y="51" text-anchor="middle">engine job</text>
-    <rect class="s-box" x="270" y="140" width="96" height="42" rx="9"/><text class="t-l" x="318" y="158" text-anchor="middle" font-size="10">Content eng</text><text class="t-s" x="318" y="171" text-anchor="middle">AIDA+schema</text>
-    <rect class="s-box" x="400" y="20" width="96" height="42" rx="9"/><text class="t-l" x="448" y="38" text-anchor="middle" font-size="10">Portal-audit</text><text class="t-s" x="448" y="51" text-anchor="middle">reports UI</text>
-    <rect class="s-box" x="400" y="140" width="96" height="42" rx="9"/><text class="t-l" x="448" y="163" text-anchor="middle" font-size="10">WP connector</text>
-    <rect class="s-box" x="530" y="80" width="96" height="42" rx="9"/><text class="t-l" x="578" y="94" text-anchor="middle" font-size="10">Portal done</text><text class="t-s" x="578" y="107" text-anchor="middle">+ Sheets</text>
-    <rect class="s-mar" x="530" y="150" width="96" height="40" rx="9"/><text class="t-lw" x="578" y="168" text-anchor="middle" font-size="10">Hardening</text><text class="t-sw" x="578" y="181" text-anchor="middle">+ handoff</text>
-    <line class="edge" x1="106" y1="101" x2="140" y2="101" marker-end="url(#arw)"/>
-    <line class="edge" x1="236" y1="90" x2="270" y2="50" marker-end="url(#arw)"/>
-    <line class="edge" x1="236" y1="112" x2="270" y2="155" marker-end="url(#arw)"/>
-    <line class="edge" x1="366" y1="41" x2="400" y2="41" marker-end="url(#arw)"/>
-    <line class="edge" x1="366" y1="161" x2="400" y2="161" marker-end="url(#arw)"/>
-    <line class="edge" x1="496" y1="41" x2="578" y2="80" marker-end="url(#arw)"/>
-    <line class="edge" x1="496" y1="161" x2="578" y2="122" marker-end="url(#arw)"/>
-    <line class="edge" x1="578" y1="122" x2="578" y2="150" marker-end="url(#arw)"/>
-  </svg>
+  <div class="h-sub mb18">The same platform runs cheap or fully loaded — your choice, and you can change it any time. Almost the whole difference is premium tool subscriptions, which the platform lets you avoid by default.</div>
+
+  <div class="cols2 mb18">
+    <div class="hero">
+      <span class="tag on-dark">Recommended</span>
+      <div style="font-size:30px;font-weight:800;color:#fff;letter-spacing:-.02em;margin-top:12px;">Low-Cost</div>
+      <div style="margin-top:6px;"><span style="font-size:52px;font-weight:800;color:#fff;letter-spacing:-.035em;line-height:1;">~$110</span><span style="font-size:15px;font-weight:700;color:var(--lilac);margin-left:5px;">/mo</span></div>
+      <p style="margin-top:11px;">Free Google data + cheap serper.dev ranks + in-house audits + premium tools on manual CSV. Everything the clients see still refreshes automatically. <b>~$7 per client.</b></p>
+    </div>
+    <div class="card">
+      <span class="tag ghost">Maximum automation</span>
+      <div style="font-size:30px;font-weight:800;color:var(--head);letter-spacing:-.02em;margin-top:12px;">All-API</div>
+      <div style="margin-top:6px;"><span style="font-size:52px;font-weight:800;color:var(--head);letter-spacing:-.035em;line-height:1;">~$500</span><span style="font-size:15px;font-weight:700;color:var(--muted);margin-left:5px;">/mo</span></div>
+      <p style="margin-top:11px;">Every data source live, including paid Semrush/Ahrefs seats. No manual export work at all. For when the whole book of clients pays for it. <b>~$33 per client.</b></p>
+    </div>
   </div>
-  <div class="cap">Risk grid - likelihood x impact</div>
-  <div class="diagwrap">
-  <svg viewBox="0 0 680 250">
-    <line class="edge-t" x1="60" y1="10" x2="60" y2="210"/>
-    <line class="edge-t" x1="60" y1="210" x2="660" y2="210"/>
-    <text class="t-e" x="30" y="110" transform="rotate(-90,30,110)" text-anchor="middle">IMPACT -&gt;</text>
-    <text class="t-e" x="360" y="234" text-anchor="middle">LIKELIHOOD -&gt;</text>
-    <line x1="360" y1="10" x2="360" y2="210" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
-    <line x1="60" y1="110" x2="660" y2="110" stroke="#E8D2D7" stroke-width="1" stroke-dasharray="3 3"/>
-    <!-- high impact / high likelihood = top-right = worst -->
-    <g>
-      <circle cx="470" cy="60" r="8" fill="#8C1D2E"/><text class="t-l" x="484" y="55" font-size="10">API cost overrun</text><text class="t-s" x="484" y="68">caps+cache+tiers</text>
-      <circle cx="430" cy="150" r="8" fill="#8C1D2E"/><text class="t-l" x="444" y="145" font-size="10">WP site variance</text><text class="t-s" x="444" y="158">app-pass, fallback</text>
-      <circle cx="250" cy="70" r="8" fill="#B85C6B"/><text class="t-l" x="264" y="65" font-size="10">Content quality</text><text class="t-s" x="264" y="78">review gate</text>
-      <circle cx="520" cy="95" r="8" fill="#8C1D2E"/><text class="t-l" x="534" y="90" font-size="10">Scope creep</text><text class="t-s" x="534" y="103">P2 backlog</text>
-      <circle cx="180" cy="170" r="8" fill="#D89AA3"/><text class="t-l" x="194" y="165" font-size="10">VPS SPOF</text><text class="t-s" x="194" y="178">backups</text>
-      <circle cx="300" cy="150" r="8" fill="#B85C6B"/><text class="t-l" x="314" y="145" font-size="10">Fiverr no API</text><text class="t-s" x="314" y="158">CSV import</text>
-      <circle cx="250" cy="95" r="8" fill="#B85C6B"/><text class="t-l" x="264" y="90" font-size="10">Policy false positive</text><text class="t-s" x="264" y="103">human-confirm + cite</text>
-    </g>
-  </svg>
+
+  <div class="lbl">Line-by-line comparison</div>
+  <table class="tbl mb14">
+    <thead><tr><th>Line item</th><th>Low-cost</th><th class="hi">All-API</th></tr></thead>
+    <tbody>
+      <tr><td>Server &amp; infrastructure</td><td class="mono">~$70–95</td><td class="hi mono">~$70–95</td></tr>
+      <tr><td>Google (Search Console / GA4)</td><td class="mono">$0</td><td class="hi mono">$0</td></tr>
+      <tr><td>serper.dev (rank tracking)</td><td class="mono">~$30</td><td class="hi mono">~$45</td></tr>
+      <tr><td>Site audits &amp; backlinks</td><td>$0 — in-house + CSV</td><td class="hi">via Semrush/Ahrefs</td></tr>
+      <tr><td>Semrush + Ahrefs</td><td>$0 — manual CSV</td><td class="hi">~$250–500 — seats/API</td></tr>
+      <tr><td>Total / month</td><td class="mono">≈ $110</td><td class="hi mono">≈ $500</td></tr>
+      <tr><td>Per client / month</td><td class="mono">≈ $7</td><td class="hi mono">≈ $33</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card alt"><h4>Where the ~$390 gap comes from</h4><p>Almost the entire difference is <b>Semrush/Ahrefs subscriptions</b>, not APIs. Because your team can export a CSV and drop it in — read exactly like the live feed — you only pay for those seats on the specific clients who justify it. AI (Claude) is already yours, so it is $0 in both columns.</p></div>
+
+  <div class="pfoot"><span>Section 06 · Two Ways to Run It</span><span class="pn">07</span></div>
+</section>
+
+<!-- ============ 08 EVERYTHING INCLUDED ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">07</span><span class="eyebrow">All-in total</span></div>
+  <div class="h-sec">Everything Included — The All-In Monthly Total</div>
+  <div class="rule"></div>
+  <div class="h-sub mb18">The complete picture with nothing left out: every line added together, including the server (VPS) and the optional Fathom notetaker. Even fully loaded, all 15 clients run at about ~$145/month.</div>
+
+  <div class="hero mb18"><div class="kl">Two numbers, kept clear</div><p>Your <b>core running total is ~$110/month</b>. This page adds one optional extra — the Fathom notetaker (~$34/mo) — for a complete figure of <b>~$145/month</b>. Claude and the key vault stay $0 (you already own them); leave the notetaker off and you are back to ~$110.</p></div>
+
+  <table class="tbl mb18">
+    <thead><tr><th>Every line item — nothing excluded</th><th>Approx. / mo</th></tr></thead>
+    <tbody>
+      <tr><td>Server &amp; infrastructure — VPS, database, backups, domain, email, monitoring</td><td class="mono">~$70–95</td></tr>
+      <tr><td>serper.dev — rank data, all 15 clients</td><td class="mono">~$30</td></tr>
+      <tr><td>Site audits, backlinks &amp; premium tools — in-house crawler + Semrush/Ahrefs CSV</td><td class="mono">$0</td></tr>
+      <tr><td>AI — Claude — already licensed by you</td><td class="mono">$0</td></tr>
+      <tr><td>Secure key vault — Supabase Vault, all keys encrypted</td><td class="mono">$0</td></tr>
+      <tr><td>Fathom AI notetaker — Business tier, API access</td><td class="mono">~$34</td></tr>
+      <tr><td>All-in total — everything switched on</td><td class="mono">~$145/mo</td></tr>
+      <tr><td>Per client / month</td><td class="mono">~$10</td></tr>
+    </tbody>
+  </table>
+
+  <div class="cols2">
+    <div class="card"><h4>Only three lines carry a charge</h4><p>The server, serper.dev and the notetaker. Everything else is free or already owned (Claude).</p></div>
+    <div class="card"><h4>If you metered the AI too</h4><p>You don't need to — you own Claude. For reference only, metered AI would add ~$140–200/mo, and live Semrush/Ahrefs seats up to ~$250–500.</p></div>
   </div>
-  <div class="pfoot"><span>Xegents AI - Prepared for Danyal - Confidential</span><span class="pn">13</span></div>
+
+  <div class="pfoot"><span>Section 07 · Everything Included</span><span class="pn">08</span></div>
+</section>
+
+<!-- ============ 09 ASSUMPTIONS, ADD-ONS & NEXT STEPS ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Monthly Operating Costs</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">08</span><span class="eyebrow">Notes</span></div>
+  <div class="h-sec">Assumptions, Add-Ons &amp; Next Steps</div>
+  <div class="rule"></div>
+
+  <div class="lbl">What these figures assume</div>
+  <div class="cols2 start mb18">
+    <div>
+      <div class="check"><span class="cb on"></span><span class="ct"><b>~15 clients</b>, about 50 tracked keywords each, on the recommended low-cost setup.</span></div>
+      <div class="check"><span class="cb on"></span><span class="ct">Daily rank tracking (serper.dev), weekly audits (in-house crawler) &amp; backlink checks (CSV), monthly reports.</span></div>
+      <div class="check"><span class="cb on"></span><span class="ct">Premium tools (Semrush/Ahrefs) left on <b>manual CSV import</b> — the $0 default.</span></div>
+      <div class="check"><span class="cb on"></span><span class="ct">All passwords &amp; API keys held in an <b>encrypted key vault (Supabase Vault)</b> — included, no extra cost.</span></div>
+    </div>
+    <div>
+      <div class="check"><span class="cb on"></span><span class="ct">All prices <b>approximate</b>, checked against live provider rates in <b>July 2026</b>.</span></div>
+      <div class="check"><span class="cb on"></span><span class="ct">Figures exclude local tax/VAT and the one-time build &amp; handover project.</span></div>
+      <div class="check"><span class="cb on"></span><span class="ct"><b>Claude AI is already yours</b> and is not counted here; <b>you approve every paid service</b> before it starts.</span></div>
+    </div>
+  </div>
+
+  <div class="lbl">Optional add-on (in the all-in total, not the core ~$110)</div>
+  <table class="tbl mb18">
+    <thead><tr><th>Add-on</th><th>Approx. / mo</th><th>What it adds</th></tr></thead>
+    <tbody>
+      <tr><td>Fathom AI notetaker</td><td class="mono">~$34 (~$25 annual)</td><td>Turns discovery-call recordings into tailored proposals automatically. Needs Fathom's Business tier for API access. A Phase-2 feature you can add later.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="lbl">Next steps</div>
+  <div class="cols2 start mb18">
+    <div class="steps">
+      <div class="step"><span class="sn">1</span><div class="sb"><div class="st">You confirm the setup</div><div class="sd">Low-cost to start, and which clients (if any) get premium data.</div></div></div>
+      <div class="step"><span class="sn">2</span><div class="sb"><div class="st">We set it up &amp; you own it</div><div class="sd">Server and accounts created in your name; we hand over the keys.</div></div></div>
+    </div>
+    <div class="steps">
+      <div class="step"><span class="sn">3</span><div class="sb"><div class="st">Adjust spend per client</div><div class="sd">Start small; turn individual clients up as their budgets grow.</div></div></div>
+      <div class="step"><span class="sn">4</span><div class="sb"><div class="st">Spending stays visible</div><div class="sd">Live per-client cost tracking, caps, and the daily stop, always on.</div></div></div>
+    </div>
+  </div>
+
+  <div class="endband">
+    <div><div class="el">AIOS · Monthly Operating Costs</div><div class="eb">~$110/month, ~$7 per client — a dial you control, not a fixed bill.</div></div>
+    <span class="xlogo"></span>
+  </div>
+
+  <div class="pfoot"><span>Section 08 · Assumptions, Add-Ons &amp; Next Steps</span><span class="pn">09</span></div>
 </section>
 
 </body>
