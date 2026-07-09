@@ -1,9 +1,9 @@
-// Build the Haseeb client-document pack: inject font + base CSS into every
+// Build the Danyal engineering docs: inject font + base CSS into every
 // *.template.html, write the final self-contained HTML next to it.
-// Usage: node build.mjs           (builds all)
+// Usage: node build.mjs           (builds all templates in this dir)
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 
-const DIR  = 'C:/Users/adan/Desktop/danyals-aios/aios/design/haseeb';
+const DIR  = 'C:/Users/adan/Desktop/danyals-aios/aios/design/danyal';
 const FONT = 'C:/Users/adan/.claude/assets/bricolage-grotesque.css';
 
 const font = readFileSync(FONT, 'utf8');

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AIOS — Build Timeline</title>
+<style>/*FONTCSS*/</style>
+<style>/*BASECSS*/</style>
+<style>
+/* ---- owner palette ---- */
+:root{ --adan:#6C5CE0; --huz:#159AAC; --arh:#DB842A; --team:#6A6480; }
+.who{ display:inline-block; font-size:9.5px; font-weight:800; letter-spacing:.02em; padding:3px 9px; border-radius:6px; color:#fff; white-space:nowrap; }
+.who.adan{ background:var(--adan); } .who.huz{ background:var(--huz); } .who.arh{ background:var(--arh); } .who.team{ background:var(--team); }
+.dotk{ display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--ink); }
+.dotk .d{ width:11px; height:11px; border-radius:3px; }
+.d.adan{background:var(--adan)} .d.huz{background:var(--huz)} .d.arh{background:var(--arh)} .d.team{background:var(--team)}
+
+/* ---- calendar strip ---- */
+.cal{ display:grid; grid-template-columns:repeat(15,1fr); border:1px solid var(--line-2); border-radius:11px; overflow:hidden; }
+.cal .cd{ text-align:center; padding:9px 0 8px; border-left:1px solid var(--line); }
+.cal .cd:first-child{ border-left:none; }
+.cal .cd.wk{ border-left:2px solid var(--line-2); }
+.cal .cd .n{ font-size:15px; font-weight:800; color:var(--head); line-height:1; }
+.cal .cd .w{ font-size:8px; font-weight:800; color:var(--muted-2); text-transform:uppercase; letter-spacing:.05em; margin-top:3px; }
+.cal .cd.dld{ background:#EEEAFB; } .cal .cd.dld .n{ color:var(--violet-ink); }
+.cal .cd.dlh{ background:#DFF3F5; } .cal .cd.dlh .n{ color:#0C7C8A; }
+.calwk{ display:grid; grid-template-columns:2fr 5fr 5fr 3fr; margin-bottom:5px; }
+.calwk span{ font-size:9px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); padding-left:2px; }
+
+/* ---- gantt ---- */
+.gt{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.gt .rl{ width:118px; font-size:9px; font-weight:750; color:var(--head); text-align:left; padding:0 8px 0 2px; line-height:1.12; }
+.gt-head th{ text-align:center; vertical-align:bottom; padding:0 0 5px; border-bottom:1.5px solid var(--line-2); }
+.gt-head th.wk{ border-left:1.5px solid var(--line-2); }
+.gt-head th .dn{ display:block; font-size:10.5px; font-weight:800; color:var(--head); line-height:1; }
+.gt-head th .dw{ display:block; font-size:7px; font-weight:700; color:var(--muted-2); letter-spacing:.03em; margin-top:2px; }
+.gt-head th.fd{ background:#EEEAFB; } .gt-head th.fd .dn{ color:var(--violet-ink); }
+.gt-head th.fh{ background:#DFF3F5; } .gt-head th.fh .dn{ color:#0C7C8A; }
+.gt-band td{ padding:9px 0 4px; }
+.gt-band .bt{ font-size:12.5px; font-weight:800; color:var(--head); letter-spacing:.01em; }
+.gt-band .bs{ font-size:9px; font-weight:500; color:var(--muted); margin-left:9px; }
+.gt tbody td{ height:22px; border-bottom:1px solid #EFEBF7; border-left:1px solid #F4F1FA; }
+.gt tbody td.rl{ border-left:none; }
+.gt tbody td.bar{ color:#fff; font-size:8px; font-weight:700; letter-spacing:.01em; padding:0 6px; line-height:22px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-radius:5px; border-left:none; }
+.own-adan{ background:var(--adan) !important; } .own-huz{ background:var(--huz) !important; }
+.own-arh{ background:var(--arh) !important; } .own-team{ background:var(--team) !important; }
+.bar.reuse{ background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.32) 0 3px, transparent 3px 8px) !important; }
+.gt-wrap{ position:relative; }
+.gt-wrap .dline{ position:absolute; top:0; bottom:0; width:2px; z-index:3; pointer-events:none; }
+.gt-wrap .dline.d24{ left:calc(118px + 0.8*(100% - 118px)); background:var(--violet); }
+.gt-wrap .dline.d24.ref{ background:repeating-linear-gradient(180deg,#C3BAEC 0 4px,transparent 4px 9px); }
+.gt-wrap .dline.d29{ left:calc(100% - 2px); background:#16909E; }
+.gt-legend{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:11px; }
+.gt-legend .lg{ display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:600; color:var(--muted); }
+.gt-legend .sw{ width:16px; height:11px; border-radius:3px; }
+.sw.reuse{ background:var(--adan); background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.4) 0 2px, transparent 2px 6px); }
+.sw.dl{ width:3px; height:14px; border-radius:1px; background:var(--violet); }
+
+/* dev card */
+.devcard{ border:1px solid var(--line-2); border-radius:13px; padding:15px 17px; border-top:4px solid var(--team); }
+.devcard.adan{ border-top-color:var(--adan); } .devcard.huz{ border-top-color:var(--huz); } .devcard.arh{ border-top-color:var(--arh); }
+.devcard .dh{ font-size:19px; font-weight:800; color:var(--head); letter-spacing:-.01em; }
+.devcard .dr{ font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; margin-top:3px; }
+.devcard.adan .dr{ color:var(--adan); } .devcard.huz .dr{ color:var(--huz); } .devcard.arh .dr{ color:var(--arh); }
+.devcard ul{ list-style:none; margin-top:11px; }
+.devcard li{ font-size:11.5px; font-weight:440; color:var(--ink); line-height:1.4; padding-left:16px; position:relative; margin-bottom:7px; }
+.devcard li::before{ content:""; position:absolute; left:0; top:6px; width:6px; height:6px; border-radius:2px; background:var(--line-2); }
+.devcard li b{ font-weight:800; color:var(--head); }
+.devcard .load{ font-size:10.5px; font-weight:700; color:var(--muted); margin-top:9px; padding-top:9px; border-top:1px solid var(--line); }
+
+.mstone{ display:grid; grid-template-columns:78px 1fr; gap:12px; align-items:start; margin-bottom:9px; }
+.mstone .mday{ background:var(--badge); color:#fff; border-radius:9px; text-align:center; padding:8px 4px; }
+.mstone .mday .md{ font-size:16px; font-weight:800; line-height:1; } .mstone .mday .mm{ font-size:8px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--violet-soft); margin-top:2px; }
+.mstone .mtxt .mt{ font-size:12.5px; font-weight:800; color:var(--head); } .mstone .mtxt .ms{ font-size:11px; font-weight:440; color:var(--muted); line-height:1.4; margin-top:2px; }
+.mstone.h .mday{ background:#16909E; } .mstone.h .mday .mm{ color:#BdEAF0; }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <div class="cover-bg"></div>
+  <div class="cover-glow"></div>
+  <div class="cover-in">
+    <div class="toprow">
+      <span class="xlogo"></span>
+      <span class="kick">Two systems · three developers · July 2026</span>
+    </div>
+    <div class="brand">
+      <div class="eyeb">Engineering · Delivery Plan</div>
+      <div class="title">Build Timeline</div>
+      <div class="subtitle">Danyal → 24 Jul &nbsp;·&nbsp; Haseeb → 29 Jul</div>
+      <div class="lede">A weekday-by-weekday, module-by-module plan for both AIOS builds — Danyal now spans <b>five modules</b> (Audit · Content · Off-page · Portal · Policy Radar) on a Google-Sheets store — owned by Adan, Huzaifa and Arham, with the critical path, integration gates, cross-system reuse, and an honest capacity read.</div>
+      <div class="tier-strip">
+        <div class="tcard"><div class="th">Adan</div><div class="ts">Backend · Infra · AI · Lead</div></div>
+        <div class="tcard"><div class="th">Huzaifa</div><div class="ts">Frontend · Portals · UI</div></div>
+        <div class="tcard"><div class="th">Arham</div><div class="ts">Database · RLS · Jobs</div></div>
+        <div class="tcard hi"><div class="th">24 &amp; 29 Jul</div><div class="ts">Two ships, 5 days apart</div></div>
+      </div>
+    </div>
+    <div class="meta">
+      <div><div class="mk">Prepared for</div><div class="mv">Engineering<br>Adan · Huzaifa · Arham</div></div>
+      <div><div class="mk">Prepared by</div><div class="mv">Xegents</div></div>
+      <div><div class="mk">Date</div><div class="mv">9 July 2026</div></div>
+      <div><div class="mk">Window</div><div class="mv">Weekdays<br>9 → 29 Jul</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 01 AT A GLANCE ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">01</span><span class="eyebrow">Ground rules</span></div>
+  <div class="h-sec">The plan at a glance</div>
+  <div class="rule"></div>
+
+  <div class="stats mb18">
+    <div class="stat"><div class="n">2</div><div class="l">Systems in flight (separate repos)</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">Developers, role-split by layer</div></div>
+    <div class="stat"><div class="n">12</div><div class="l">Weekdays to Danyal (9→24 Jul)</div></div>
+    <div class="stat dark"><div class="n">15</div><div class="l">Weekdays to Haseeb (9→29 Jul)</div></div>
+  </div>
+
+  <div class="lbl">The working calendar — weekdays only, ~8h/day</div>
+  <div class="calwk"><span>Wk 0</span><span>Week 1</span><span>Week 2</span><span>Week 3</span></div>
+  <div class="cal mb18">
+    <div class="cd"><div class="n">9</div><div class="w">Thu</div></div>
+    <div class="cd"><div class="n">10</div><div class="w">Fri</div></div>
+    <div class="cd wk"><div class="n">13</div><div class="w">Mon</div></div>
+    <div class="cd"><div class="n">14</div><div class="w">Tue</div></div>
+    <div class="cd"><div class="n">15</div><div class="w">Wed</div></div>
+    <div class="cd"><div class="n">16</div><div class="w">Thu</div></div>
+    <div class="cd"><div class="n">17</div><div class="w">Fri</div></div>
+    <div class="cd wk"><div class="n">20</div><div class="w">Mon</div></div>
+    <div class="cd"><div class="n">21</div><div class="w">Tue</div></div>
+    <div class="cd"><div class="n">22</div><div class="w">Wed</div></div>
+    <div class="cd"><div class="n">23</div><div class="w">Thu</div></div>
+    <div class="cd dld"><div class="n">24</div><div class="w">Fri ◆D</div></div>
+    <div class="cd wk"><div class="n">27</div><div class="w">Mon</div></div>
+    <div class="cd"><div class="n">28</div><div class="w">Tue</div></div>
+    <div class="cd dlh"><div class="n">29</div><div class="w">Wed ◆H</div></div>
+  </div>
+
+  <div class="cols2 start">
+    <div>
+      <div class="lbl plain">Ship criterion — Danyal (Fri 24 Jul)</div>
+      <div class="card" style="border-left:4px solid var(--violet);"><p><b>All five v1 modules live on Danyal's VPS:</b> URL-only Audit (existing engine), multi-framework Content (AIDA/PAS/… → schema → AI images → WordPress/PDF, review gate), the new Off-page engine (backlinks · citations · Web 2.0 via official APIs), the four-role Portal (Fiverr upsells, key vault, Free/Paid tiers), and Policy Radar feeding the Command Center — all on the Sheets-as-store spine with cost caps. <b>Free = audit-only; Paid unlocks the rest.</b> A human approves before anything reaches a client.</p></div>
+    </div>
+    <div>
+      <div class="lbl plain">Ship criterion — Haseeb (Wed 29 Jul)</div>
+      <div class="card alt" style="border-left:4px solid #16909E;"><p><b>All 15 clients live with the P0 core + P1 pulled in:</b> dual-mode Ingestion (GSC/GA4 + DataForSEO + CSV), nightly Rank Tracking, freshness-gated branded Reports — then Technical Audit, Backlink analysis, Task board and Keyword Research as the P1 tier. Deployed under Haseeb's domain, used for real.</p></div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Engineering</span><span class="pn">02</span></div>
+</section>
+
+<!-- ============ 02 DANYAL GANTT ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">02</span><span class="eyebrow">Master schedule · 1 of 2</span></div>
+  <div class="h-sec">Danyal — 12 weekdays</div>
+  <div class="rule"></div>
+  <div class="h-sub mb14">The <b>danyals-aios</b> track. Bars are coloured by owner and sized to weekday span; the violet line is the <b>24 Jul</b> ship. Foundations carry the <b>SheetStore</b> spine, then the <b>five</b> modules run overlapped — Portal is the long pole, Off-page (striped) reuses the audit's DataForSEO client, and Policy Radar lands last.</div>
+
+<div class="gt-wrap"><span class="dline d24"></span><table class="gt danyal"><tr class="gt-head"><th class="rl"></th><th class=""><span class="dn">9</span><span class="dw">Th</span></th><th class=""><span class="dn">10</span><span class="dw">Fr</span></th><th class="wk"><span class="dn">13</span><span class="dw">Mo</span></th><th class=""><span class="dn">14</span><span class="dw">Tu</span></th><th class=""><span class="dn">15</span><span class="dw">We</span></th><th class=""><span class="dn">16</span><span class="dw">Th</span></th><th class=""><span class="dn">17</span><span class="dw">Fr</span></th><th class="wk"><span class="dn">20</span><span class="dw">Mo</span></th><th class=""><span class="dn">21</span><span class="dw">Tu</span></th><th class=""><span class="dn">22</span><span class="dw">We</span></th><th class=""><span class="dn">23</span><span class="dw">Th</span></th><th class="fd"><span class="dn">24</span><span class="dw">Fr</span></th><th class="wk"><span class="dn">27</span><span class="dw">Mo</span></th><th class=""><span class="dn">28</span><span class="dw">Tu</span></th><th class=""><span class="dn">29</span><span class="dw">We</span></th></tr><tr class="gt-band"><td colspan="16"><span class="bt">DANYAL</span><span class="bs">danyals-aios · v1: Audit · Content · Off-page · Portal · Policy Radar · deadline Fri 24 Jul</span></td></tr><tr><td class="rl">Foundations + SheetStore</td><td class="bar own-team" colspan="4">auth · RLS · SheetStore · jobs · Docker/Caddy · shell</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M1 Audit — API</td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="4">wrap engine → URL-only cloud job</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M1 Audit — UI</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="3">report web + PDF · Free/Paid gate</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M4 Portal — DB</td><td class="e"></td><td class="e"></td><td class="bar own-arh" colspan="5">schema · RLS · key vault · tiers/roles</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M4 Portal — API</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="4">portal API · vault · Fiverr upsells</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M4 Portal — UI</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="6">client / team / admin portals</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M2 Content — engine</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="4">multi-framework · schema · AI images · WP</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M2 Content — UI</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="2">review + publish</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M3 Off-page — eng</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan reuse" colspan="3">backlinks + citations (DataForSEO) · Web 2.0</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M3 Off-page — UI</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="2">backlink / citation + Web 2.0 tracker</td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M5 Radar — eng</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="3">watch · detect · research</td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">M5 Radar — KB / CC</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-arh" colspan="3">KB tables</td><td class="bar own-huz" colspan="2">Command Center UI</td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">Reporting · Ship</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="2">Sheets · cost caps · UAT · deploy</td><td class="e"></td><td class="e"></td><td class="e"></td></tr></table></div>
+
+  <div class="gt-legend">
+    <span class="lg"><span class="sw own-adan"></span>Adan</span>
+    <span class="lg"><span class="sw own-huz"></span>Huzaifa</span>
+    <span class="lg"><span class="sw own-arh"></span>Arham</span>
+    <span class="lg"><span class="sw own-team"></span>Whole team</span>
+    <span class="lg"><span class="sw reuse"></span>Reuse / port</span>
+    <span class="lg"><span class="sw dl"></span>Ship deadline</span>
+  </div>
+  <div class="hero mt18"><div class="kl">Critical path</div><p>Foundations + SheetStore → <b>M4 Portal</b> (widest surface: three role views + Free/Paid tiers + vault) → Off-page and Policy Radar close the loop. M1 Audit is <b>URL-only</b> and wraps the existing engine, so it lands early and de-risks the demo. The tail piles onto Adan — Content, Off-page and Radar overlap in the final week; that crunch is what the cut-list protects.</p></div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Danyal track</span><span class="pn">03</span></div>
+</section>
+
+<!-- ============ 03 HASEEB GANTT ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">03</span><span class="eyebrow">Master schedule · 2 of 2</span></div>
+  <div class="h-sec">Haseeb — 15 weekdays</div>
+  <div class="rule"></div>
+  <div class="h-sub mb14">The <b>haseebs-aios</b> track. Same team, so this runs behind Danyal: the dashed line marks Danyal's 24 Jul ship, the teal line Haseeb's <b>29 Jul</b>. Ingestion is built first (it's the hardest and everything inherits it); the striped P1 bars reuse Danyal's engine + patterns and are the crunch zone.</div>
+
+<div class="gt-wrap"><span class="dline d24 ref"></span><span class="dline d29"></span><table class="gt haseeb"><tr class="gt-head"><th class="rl"></th><th class=""><span class="dn">9</span><span class="dw">Th</span></th><th class=""><span class="dn">10</span><span class="dw">Fr</span></th><th class="wk"><span class="dn">13</span><span class="dw">Mo</span></th><th class=""><span class="dn">14</span><span class="dw">Tu</span></th><th class=""><span class="dn">15</span><span class="dw">We</span></th><th class=""><span class="dn">16</span><span class="dw">Th</span></th><th class=""><span class="dn">17</span><span class="dw">Fr</span></th><th class="wk"><span class="dn">20</span><span class="dw">Mo</span></th><th class=""><span class="dn">21</span><span class="dw">Tu</span></th><th class=""><span class="dn">22</span><span class="dw">We</span></th><th class=""><span class="dn">23</span><span class="dw">Th</span></th><th class="fd"><span class="dn">24</span><span class="dw">Fr</span></th><th class="wk"><span class="dn">27</span><span class="dw">Mo</span></th><th class=""><span class="dn">28</span><span class="dw">Tu</span></th><th class="fh"><span class="dn">29</span><span class="dw">We</span></th></tr><tr class="gt-band"><td colspan="16"><span class="bt">HASEEB</span><span class="bs">haseebs-aios · v1: Ingestion · Rank · Reporting (+P1) · deadline Wed 29 Jul</span></td></tr><tr><td class="rl">Foundations</td><td class="bar own-team" colspan="3">monorepo · auth · deploy skeleton</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">DB layer</td><td class="e"></td><td class="bar own-arh" colspan="5">Supabase schema · RLS + CI gate · partitions · seed</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">App shell</td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="4">Next.js shell · client switcher · onboarding</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">Ingestion</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="6">Pydantic contracts · normalizer · GSC/GA4 SA</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">DataForSEO / CSV</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="6">DfS Standard adapter · CSV pipeline + wizard</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">Rank Tracker</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="4">nightly DfS positions · history / delta</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">Rank + report UI</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="4">tables · sparklines · filters</td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">Reporting — eng</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan" colspan="5">metric spine · freshness gate · AI narrative</td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">Report templates</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-arh" colspan="4">house-style PDF/HTML</td><td class="e"></td><td class="e"></td><td class="e"></td></tr><tr><td class="rl">P1 Audit</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan reuse" colspan="4">reuse /audit engine (On-Page API)</td><td class="e"></td></tr><tr><td class="rl">P1 Backlinks/KW</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-adan reuse" colspan="4">analysis + keyword — CRUNCH</td></tr><tr><td class="rl">P1 Task board</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-huz" colspan="4">task/workflow board + backlink UI</td></tr><tr><td class="rl">Rollout · SHIP</td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="e"></td><td class="bar own-team" colspan="3">onboard 15 · GSC backfills · harden · ship</td></tr></table></div>
+
+  <div class="gt-legend">
+    <span class="lg"><span class="sw own-adan"></span>Adan</span>
+    <span class="lg"><span class="sw own-huz"></span>Huzaifa</span>
+    <span class="lg"><span class="sw own-arh"></span>Arham</span>
+    <span class="lg"><span class="sw own-team"></span>Whole team</span>
+    <span class="lg"><span class="sw reuse"></span>Reuse / port</span>
+    <span class="lg"><span class="sw dl" style="background:#16909E"></span>29 Jul ship</span>
+  </div>
+  <div class="card alt mt18" style="border-left:4px solid #16909E;"><h4>The linchpin is split, not single-owned</h4><p>Adan freezes the canonical Pydantic contracts + owns the normalizer; Huzaifa wires the DataForSEO adapter and CSV pipeline against them. One integration deep (GSC + DataForSEO Standard + CSV), not five shallow — so a lost day doesn't sink Weeks 3–4. CSV is the primary onboarding path; a client ships the moment GSC-or-CSV + seed keywords land.</p></div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Haseeb track</span><span class="pn">04</span></div>
+</section>
+
+<!-- ============ 04 DANYAL MODULES ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">04</span><span class="eyebrow">Danyal · module by module</span></div>
+  <div class="h-sec">Danyal — build detail</div>
+  <div class="rule"></div>
+  <div class="tbl-wrap">
+  <table class="tbl compact">
+    <thead><tr><th>Module</th><th>Key tasks</th><th>Owner</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Foundations + SheetStore</td><td>Auth + roles, RLS/tenancy wall, Redis + Celery queues, Docker Compose + Caddy TLS, Next.js app shell + client switcher, encrypted key-vault scaffold, CI — plus the <b>SheetStore</b> adapter so operational data lands in per-client Google Sheets (Postgres keeps identity, secrets &amp; the Radar KB).</td><td><span class="who adan">Adan</span> <span class="who arh">Arham</span> <span class="who huz">Huz</span></td><td>Mon 14 Jul</td></tr>
+      <tr><td>M1 · Audit <span class="no" style="color:var(--violet-ink)">◆ URL-only</span></td><td>Wrap the existing <code class="mono">audit_engine</code> as a Celery job + API; <b>URL-only</b> — no logins (GSC/GA4 are optional owner-authorized enrichers); findings → client Sheet + 20–30p house PDF; portal <b>Run audit</b> with the <b>Free/Paid</b> tier gate; report web + PDF view.</td><td><span class="who adan">Adan</span> <span class="who huz">Huz</span></td><td>Thu 16 Jul</td></tr>
+      <tr><td>M2 · Content</td><td><b>Multi-framework</b> (AIDA · PAS · BAB · FAB · 4 Ps · PASTOR · 4 U's) auto-selected by type + intent → JSON-LD schema → AI images + alt → WordPress REST publish + manual-PDF path; human review checkpoint; per-job cost logging.</td><td><span class="who adan">Adan</span> <span class="who huz">Huz</span></td><td>Wed 22 Jul</td></tr>
+      <tr><td>M3 · Off-page <span class="no" style="color:var(--violet-ink)">◆ new in v1</span></td><td>Backlink + citation monitoring (DataForSEO Business Data / CSV → new/lost alerts) and <b>Web 2.0</b> publishing via WordPress.com / Blogger / Tumblr official APIs → verify live → track; human quality gate + footprint diversification. <b>Paid tier</b>; records to Sheets.</td><td><span class="who adan">Adan</span> <span class="who huz">Huz</span></td><td>Thu 23 Jul</td></tr>
+      <tr><td>M4 · Portal <span class="no" style="color:var(--violet-ink)">◆ long pole</span></td><td>Client / team / admin portals; dashboard + reports (web+PDF) + auto-milestones; Fiverr upsell cards; key-vault admin; <b>Free/Paid tiers</b> + role provisioning. Manager view optional.</td><td><span class="who huz">Huz</span> <span class="who adan">Adan</span> <span class="who arh">Arham</span></td><td>Wed 22 Jul</td></tr>
+      <tr><td>M5 · Policy Radar</td><td>Scheduler + source change-detection; research → flagged KB (severity / category / region) in Postgres; Command Center recommendations; human-confirm gate; closed loop into audit checks.</td><td><span class="who adan">Adan</span> <span class="who arh">Arham</span> <span class="who huz">Huz</span></td><td>Thu 23 Jul</td></tr>
+      <tr><td>Reporting · Ship</td><td>Per-client Google-Sheets workbooks (service account, quota-safe batched writes); per-client spend caps + daily kill-switch; security pass; nightly backups; UAT with Danyal; production deploy + handover.</td><td><span class="who adan">Adan</span> <span class="who team">Team</span></td><td>Fri 24 Jul ◆</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="cols2 start mt14">
+    <div class="card"><h4>Reuse, not rebuild</h4><p>M1 is the tested <code class="mono">danyals-audit-system</code> engine wrapped as a job; Off-page's backlink/citation data reuses the same <b>DataForSEO</b> client — the fastest safe path and why the demo lands in Week 1.</p></div>
+    <div class="card"><h4>Freeze contracts early</h4><p>Adan freezes the Portal + Content + SheetStore shapes by Jul 15 so Huzaifa's UI and Arham's schema build against a fixed target — no moving interface mid-week.</p></div>
+  </div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Danyal track</span><span class="pn">05</span></div>
+</section>
+
+<!-- ============ 05 HASEEB MODULES — FOUNDATIONS + P0 ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">05</span><span class="eyebrow">Haseeb · module by module · P0</span></div>
+  <div class="h-sec">Haseeb — foundations &amp; core</div>
+  <div class="rule"></div>
+  <div class="tbl-wrap">
+  <table class="tbl compact">
+    <thead><tr><th>Module</th><th>Key tasks</th><th>Owner</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Foundations</td><td>Monorepo (<code class="mono">/api</code>,<code class="mono">/web</code>); Supabase project; core schema + <b>FORCE RLS + CI gate</b>; pg_cron partition-maker + DEFAULT partition; <b>credential envelope-encryption</b> (AES-GCM, off-DB key); Supabase Auth → Next middleware; Docker/Caddy deploy skeleton; app shell + onboarding form v0.</td><td><span class="who arh">Arham</span> <span class="who adan">Adan</span> <span class="who huz">Huz</span></td><td>Tue 15 Jul</td></tr>
+      <tr><td>Ingestion (11) <span class="no" style="color:#16909E">◆ hardest</span></td><td>Freeze canonical Pydantic contracts (<code class="mono">RankingRow</code>,<code class="mono">BacklinkRow</code>); GSC SA paginated pull (25k/req); GA4 SA staggered pull + 429-backoff; <b>DataForSEO Standard</b> (task-POST → pingback → collect), cost-logged; CSV/XLSX pipeline (upload→sanitize→map→validate→commit); normalizer; mapping-wizard UI; SEMrush/Ahrefs templates.</td><td><span class="who adan">Adan</span> <span class="who huz">Huz</span> <span class="who arh">Arham</span></td><td>Tue 21 Jul</td></tr>
+      <tr><td>Rank Tracker (4)</td><td>Keyword lists; nightly DataForSEO Standard positions; history + delta; freshness stamp; rank UI (tables, sparklines, filters). DataForSEO SERP is the <b>only</b> rank source — GSC is visibility only.</td><td><span class="who adan">Adan</span> <span class="who huz">Huz</span></td><td>Thu 23 Jul</td></tr>
+      <tr><td>Reporting (9)</td><td><code class="mono">metric_daily</code> rollup + <b>freshness gate</b>; per-client house-style PDF/HTML (traffic + rankings + backlinks); AI narrative (Sonnet 5, batch, <code class="mono">json_schema</code>) → <b>draft→approved</b> gate; pg_cron scheduling.</td><td><span class="who adan">Adan</span> <span class="who arh">Arham</span> <span class="who huz">Huz</span></td><td>Mon 27 Jul</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="hero mt14"><div class="kl">Why this order</div><p>Ingestion is built <b>first and early</b> because every module inherits it and it's the highest-risk integration. Rank + Reporting then turn free GSC/GA4 + cheap DataForSEO into the billable, branded deliverable that makes AIOS <i>feel</i> like a product — the P0 three carry the ship; everything after is upside.</p></div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Haseeb track</span><span class="pn">06</span></div>
+</section>
+
+<!-- ============ 06 HASEEB P1 + ROLLOUT + REUSE ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">06</span><span class="eyebrow">Haseeb · P1 tier &amp; ship</span></div>
+  <div class="h-sec">Haseeb — P1 &amp; rollout</div>
+  <div class="rule"></div>
+  <div class="tbl-wrap">
+  <table class="tbl compact">
+    <thead><tr><th>Module</th><th>Key tasks</th><th>Owner</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>P1 · Technical Audit</td><td>On-Page API → pre-summarized findings → <code class="mono">/audit</code> service (hard turn-cap); reuses the <code class="mono">haseeb-ai-audit</code> engine.</td><td><span class="who adan">Adan</span></td><td>Mon 27 Jul</td></tr>
+      <tr><td>P1 · Backlinks</td><td>Analysis / monitor only — inventory, new/lost diff, domain-strength &amp; toxic score. Read-only; no outreach (Phase 3).</td><td><span class="who adan">Adan</span> <span class="who huz">Huz</span></td><td>Tue 28 Jul</td></tr>
+      <tr><td>P1 · Task Board</td><td>Create / assign / track tasks; audit &amp; alert findings land here; board UI.</td><td><span class="who huz">Huz</span> <span class="who arh">Arham</span></td><td>Tue 28 Jul</td></tr>
+      <tr><td>P1 · Keyword Research</td><td>Volume / difficulty ingest + grouping; assign keywords to clients &amp; pages.</td><td><span class="who adan">Adan</span></td><td>Wed 29 Jul</td></tr>
+      <tr><td>Rollout · Ship</td><td>Onboard all 15 (GSC/GA4 SA or CSV; seed keywords; throttled backfills over days); scheduling live; report polish; hardening (RLS/GUC audit, spend dashboard + kill-switch test); docs (user guide + import runbook); UAT with Haseeb.</td><td><span class="who team">Team</span></td><td>Wed 29 Jul ◆</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="lbl mt14">Cross-system reuse — why the second build is a port, not a rebuild</div>
+  <div class="cols2 start">
+    <div class="card"><h4>What Haseeb inherits from Danyal</h4><p>Frozen Pydantic contracts, the auth + FORCE-RLS pattern + CI gate, the Docker/Caddy deploy skeleton, the single <code class="mono">ai/claude.py</code> wrapper, and the house PDF/report stack. Built once on Danyal, ported to the second repo.</p></div>
+    <div class="hero"><div class="kl">What's genuinely net-new for Haseeb</div><p>The dual-mode data layer with no Danyal equivalent: <b>DataForSEO Standard</b>, GSC/GA4 service-account pulls, the CSV/XLSX normalization pipeline, and the 15-client agency ops. That delta is the real Haseeb work — the striped P1 bars.</p></div>
+  </div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Haseeb track</span><span class="pn">07</span></div>
+</section>
+
+<!-- ============ 07 BY DEVELOPER ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">07</span><span class="eyebrow">By developer</span></div>
+  <div class="h-sec">Who owns what, across both</div>
+  <div class="rule"></div>
+  <div class="cols3 start">
+    <div class="devcard adan">
+      <div class="dh">Adan</div><div class="dr">Backend · Infra · AI · Lead</div>
+      <ul>
+        <li><b>Both:</b> FastAPI core, routers/services, Celery workers, the <code class="mono">ai/claude.py</code> wrapper, deploy + CI, spend caps &amp; kill-switch, review gate.</li>
+        <li><b>Danyal:</b> URL-only audit wrap, multi-framework Content, <b>Off-page</b> (DataForSEO backlinks/citations + Web 2.0 publish), Policy Radar, SheetStore + Sheets reporting.</li>
+        <li><b>Haseeb:</b> frozen contracts + normalizer, GSC/GA4, DataForSEO Standard, rank + reporting engine, AI narrative.</li>
+      </ul>
+      <div class="load">Load ~90% · the critical path runs through here — protect it.</div>
+    </div>
+    <div class="devcard huz">
+      <div class="dh">Huzaifa</div><div class="dr">Frontend · Portals</div>
+      <ul>
+        <li><b>Both:</b> Next.js 15 app shell, TanStack Query wiring, all portal/dashboard UI, Recharts.</li>
+        <li><b>Danyal:</b> client/team/admin portals, audit report view, content review UI, <b>backlink / citation + Web 2.0 tracker</b>, Command Center UI.</li>
+        <li><b>Haseeb:</b> onboarding + client switcher, CSV mapping wizard, rank + report UI, backlink/task-board UI.</li>
+      </ul>
+      <div class="load">Builds against Adan's frozen API contracts — never a moving target.</div>
+    </div>
+    <div class="devcard arh">
+      <div class="dh">Arham</div><div class="dr">Database · RLS · Jobs</div>
+      <ul>
+        <li><b>Both:</b> schema + migrations, <b>FORCE RLS + CI gate</b>, pg_cron partitions, seed data, house report templates + QA.</li>
+        <li><b>Danyal:</b> portal/vault/<b>tiers</b> schema, SheetStore workbook templates, Policy-Radar KB tables (severity/region), seed clients.</li>
+        <li><b>Haseeb:</b> tenancy + ranking partition schema, RLS policies, import templates, report templates, data QA.</li>
+      </ul>
+      <div class="load">Owns the tenant wall — no table ships without a policy (CI-enforced).</div>
+    </div>
+  </div>
+  <div class="lbl mt18">Cadence — the same on both tracks</div>
+  <div class="cols4">
+    <div class="card" style="padding:13px 15px;"><h4 style="font-size:14px;">Daily</h4><p style="font-size:12px;">15-min async standup — blockers first.</p></div>
+    <div class="card" style="padding:13px 15px;"><h4 style="font-size:14px;">Monday</h4><p style="font-size:12px;">Plan the week off this board.</p></div>
+    <div class="card" style="padding:13px 15px;"><h4 style="font-size:14px;">Wednesday</h4><p style="font-size:12px;">Integration check — merge, not diverge.</p></div>
+    <div class="card alt" style="padding:13px 15px;"><h4 style="font-size:14px;">Friday</h4><p style="font-size:12px;"><b>Demo-or-die</b> on staging.</p></div>
+  </div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Engineering</span><span class="pn">08</span></div>
+</section>
+
+<!-- ============ 08 MILESTONES & GATES ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">08</span><span class="eyebrow">Milestone gates</span></div>
+  <div class="h-sec">Prove it every Friday</div>
+  <div class="rule"></div>
+  <div class="h-sub mb18">Each gate is a concrete, demoable exit — not a status colour. If a Friday gate misses, the cut-list (next page) triggers on Monday, not on ship day.</div>
+
+  <div class="cols2 start">
+    <div>
+      <div class="lbl plain">Danyal</div>
+      <div class="mstone"><div class="mday"><div class="md">14</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">G1 · Foundations + SheetStore</div><div class="ms">Login → create client → switcher; RLS gate passing; SheetStore writes an audit's findings to a client Sheet; a URL-only audit returns a PDF.</div></div></div>
+      <div class="mstone"><div class="mday"><div class="md">18</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">G2 · Audit + Portal shell</div><div class="ms">A provisioned client logs in, runs a <b>URL-only</b> audit on the <b>Free</b> tier, downloads the report.</div></div></div>
+      <div class="mstone"><div class="mday"><div class="md">22</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">G3 · Content + Off-page + Radar</div><div class="ms">Multi-framework generate → review → publish to WordPress; <b>Paid</b> unlocks Off-page — first backlinks/citations land in the Sheet; Command Center shows a live rec.</div></div></div>
+      <div class="mstone"><div class="mday"><div class="md">24</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">◆ SHIP</div><div class="ms">Full Free/Paid client journey + Off-page + admin oversight live on Danyal's VPS; UAT signed off.</div></div></div>
+    </div>
+    <div>
+      <div class="lbl plain">Haseeb</div>
+      <div class="mstone h"><div class="mday"><div class="md">15</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">M1 · Foundations + RLS</div><div class="ms">Login → client → switcher on staging; RLS CI gate green; partition auto-create proven; 15 clients seeded.</div></div></div>
+      <div class="mstone h"><div class="mday"><div class="md">21</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">M2 · Ingestion works</div><div class="ms">Real Ahrefs CSV → normalized rows; DataForSEO rank tasks pingback-collect for ≥2 pilots; GSC nightly for ≥5.</div></div></div>
+      <div class="mstone h"><div class="mday"><div class="md">24</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">M3 · Report end-to-end</div><div class="ms">One pilot: ingestion → rank → freshness-gated report, generated end-to-end. P1 pulled in only if solid.</div></div></div>
+      <div class="mstone h"><div class="mday"><div class="md">29</div><div class="mm">Jul</div></div><div class="mtxt"><div class="mt">◆ SHIP</div><div class="ms">15 clients live (some manual-mode), nightly jobs running, reports generating, agency trained.</div></div></div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Engineering</span><span class="pn">09</span></div>
+</section>
+
+<!-- ============ 09 RISKS / CAPACITY / CUT-LIST ============ -->
+<section class="page">
+  <div class="runhead"><span class="rl">AIOS · Build Timeline</span><span class="xlogo"></span></div>
+  <div class="sechead"><span class="snum">09</span><span class="eyebrow">Read this honestly</span></div>
+  <div class="h-sec">Capacity, risk &amp; the cut-list</div>
+  <div class="rule"></div>
+
+  <div class="hero mb18"><div class="kl">The capacity reality</div><p>Two full v1 platforms, <b>3 developers, weekdays only</b> — 12 working days to Danyal, 15 to Haseeb, both off the <b>same</b> team. And Danyal's v1 just grew from four modules to <b>five</b>: <b>Off-page</b> (backlinks, citations, Web 2.0) is now in scope on the same 12-day window. That is roughly one senior FTE-month of effective capacity against what the standalone plans each scope at 3–5 weeks. It only closes because the second build <b>ports</b> the first and Off-page <b>reuses</b> the audit's DataForSEO client. Treat Danyal as the reference implementation, its P0 (Audit · Content · Portal · Radar) as mandatory core, and <b>Off-page's Web 2.0 as the first thing the cut-list protects.</b></p></div>
+
+  <div class="cols2 start">
+    <div>
+      <div class="lbl plain">Top risks &amp; the guardrail</div>
+      <table class="tbl compact">
+        <thead><tr><th>Risk</th><th>Guardrail</th></tr></thead>
+        <tbody>
+          <tr><td>Missing RLS on a new table → tenant leak</td><td>FORCE RLS + Week-1 CI gate + service-role GUC wall</td></tr>
+          <tr><td>Off-page added late → Adan's tail overloads</td><td>Reuse the audit's DataForSEO client; Web 2.0 is cut-list-first</td></tr>
+          <tr><td>Sheets API quota during bulk writes</td><td>Redis write-buffer + batched <code class="mono">batchUpdate</code>; PG for joins/secrets</td></tr>
+          <tr><td>Web 2.0 publishing reads as link spam</td><td>Human quality gate + genuine articles + footprint diversification</td></tr>
+          <tr><td>API cost runaway</td><td>Per-client caps + org daily kill-switch (DataForSEO + Claude)</td></tr>
+          <tr><td>Two ships, one team, 5 days apart</td><td>Danyal ships first; Haseeb reuses its spine; features freeze 1 day pre-ship</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <div class="lbl plain">Cut-list — if behind, drop in this order</div>
+      <ul class="clean">
+        <li><b>Off-page Web 2.0 first</b> (Danyal): the WP.com/Blogger/Tumblr publishing pipeline defers to August; keep backlink/citation <b>monitoring</b> only.</li>
+        <li><b>Haseeb P1 tier</b>: Keyword Research → Task board → Backlinks → Technical Audit move to August wholesale.</li>
+        <li><b>GA4</b> — keep GSC (the SEO signal); traffic becomes a manual screenshot in v1.</li>
+        <li><b>Scheduled delivery</b> → on-demand generate + manual send.</li>
+        <li><b>Danyal Policy Radar</b> → ship baseline recommendations only; defer change-detection automation.</li>
+        <li><b>Manager portal</b> (Danyal) folds into Admin; multi-user roles → single shared org for July.</li>
+      </ul>
+      <div class="card alt mt10"><p style="font-size:12px;"><b>The rule:</b> the core three (Haseeb) and the core four (Danyal: Audit · Content · Portal · Radar) carry ship. Off-page and everything else is negotiable before either deadline slips.</p></div>
+    </div>
+  </div>
+
+  <div class="endband mt18">
+    <div><div class="el">The one line to remember</div><div class="eb">Free proves value, Paid runs the platform. Danyal is the reference build; Haseeb is the port. Ship the core, protect Adan's critical path, cut Web 2.0 first.</div></div>
+    <span class="xlogo"></span>
+  </div>
+  <div class="pfoot"><span>AIOS · Build Timeline &nbsp;·&nbsp; Engineering · Prepared 9 Jul 2026</span><span class="pn">10</span></div>
+</section>
+
+</body>
+</html>
