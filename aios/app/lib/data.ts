@@ -429,3 +429,104 @@ export const roleTemplates: RoleTemplate[] = [
     grants: ALL_KEYS,
   },
 ];
+
+// ============================================================
+// Settings module — the admin control panel. Credentials,
+// role/access management and platform-wide policy. Password
+// values are demo-only; in production these live behind the
+// FastAPI auth service + encrypted vault, never in the client
+// bundle. Reuses the RBAC matrix (rolePerms) and members above.
+// ============================================================
+
+// The signed-in operator (agency super-admin). Own-profile tab edits this.
+export type OperatorProfile = {
+  id: string;
+  name: string;
+  init: string;
+  c: string;
+  title: string;
+  email: string;
+  role: TeamRole;
+  twoFA: boolean;
+  phone: string;
+};
+
+export const operatorProfile: OperatorProfile = {
+  id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1,
+  title: "Founder / Super Admin", email: "danyal@xegents.ai", role: "Owner",
+  twoFA: true, phone: "+92 300 1234567",
+};
+
+// Login credentials, keyed by teamMembers.id. The Team Access tab
+// resets these; passwords are shown masked and revealed on demand.
+export type Credential = { pass: string; twoFA: boolean; mustReset: boolean; lastChanged: string };
+export const teamCredentials: Record<string, Credential> = {
+  "u-danyal": { pass: "Xg!Danyal#2026", twoFA: true, mustReset: false, lastChanged: "Jun 2026" },
+  "u-ayesha": { pass: "Ayesha@Content4", twoFA: true, mustReset: false, lastChanged: "May 2026" },
+  "u-bilal": { pass: "Bilal$Tech88", twoFA: false, mustReset: false, lastChanged: "Apr 2026" },
+  "u-hina": { pass: "Hina!Write21", twoFA: false, mustReset: true, lastChanged: "Feb 2026" },
+  "u-usman": { pass: "Usman#Links7", twoFA: true, mustReset: false, lastChanged: "Jun 2026" },
+  "u-zoya": { pass: "Zoya@Local55", twoFA: false, mustReset: false, lastChanged: "Mar 2026" },
+  "u-sara": { pass: "Sara!Ops2026", twoFA: true, mustReset: false, lastChanged: "Jul 2026" },
+  "u-imran": { pass: "Imran@Temp01", twoFA: false, mustReset: true, lastChanged: "—" },
+};
+
+// Platform-wide security policy (Security tab).
+export type SecurityPolicy = {
+  enforce2FA: boolean;
+  strongPasswords: boolean;
+  minPassLength: number;
+  rotationDays: number; // 0 = never
+  sessionTimeout: number; // minutes
+  singleSession: boolean;
+  ipAllowlist: boolean;
+  auditLogging: boolean;
+};
+
+export const securityDefaults: SecurityPolicy = {
+  enforce2FA: true, strongPasswords: true, minPassLength: 12, rotationDays: 90,
+  sessionTimeout: 30, singleSession: false, ipAllowlist: false, auditLogging: true,
+};
+
+export const PASS_LENGTHS = [8, 10, 12, 16] as const;
+export const ROTATION_OPTIONS: { v: number; label: string }[] = [
+  { v: 30, label: "Every 30 days" }, { v: 60, label: "Every 60 days" },
+  { v: 90, label: "Every 90 days" }, { v: 180, label: "Every 180 days" }, { v: 0, label: "Never" },
+];
+export const SESSION_OPTIONS = [15, 30, 60, 120, 480];
+
+// Notification preferences (Notifications tab).
+export type NotifPref = { key: string; label: string; desc: string; icon: string; email: boolean; inApp: boolean };
+export const notificationDefaults: NotifPref[] = [
+  { key: "audit_done", label: "Audit completed", desc: "A free or paid audit finishes and the report is ready", icon: "fact_check", email: true, inApp: true },
+  { key: "content_review", label: "Content ready for review", desc: "A draft hits the review gate awaiting approval", icon: "rocket_launch", email: true, inApp: true },
+  { key: "new_ticket", label: "New support ticket", desc: "A client opens or escalates a support ticket", icon: "confirmation_number", email: true, inApp: true },
+  { key: "past_due", label: "Subscription past due", desc: "A client's renewal payment fails or lapses", icon: "payments", email: true, inApp: false },
+  { key: "member_login", label: "New sign-in", desc: "A team member signs in from a new device or location", icon: "login", email: false, inApp: true },
+  { key: "access_change", label: "Access changed", desc: "Roles or permissions are granted or revoked", icon: "admin_panel_settings", email: true, inApp: true },
+  { key: "weekly_digest", label: "Weekly digest", desc: "Monday summary of audits, jobs and client health", icon: "summarize", email: true, inApp: false },
+];
+
+// General workspace settings (Workspace tab).
+export type WorkspaceSettingsData = {
+  agencyName: string;
+  supportEmail: string;
+  timezone: string;
+  language: string;
+  weekStart: "Monday" | "Sunday";
+  defaultTier: SubTier;
+  brandColor: string;
+};
+
+export const workspaceDefaults: WorkspaceSettingsData = {
+  agencyName: "Xegents AI", supportEmail: "support@xegents.ai",
+  timezone: "Asia/Karachi (PKT)", language: "English (US)", weekStart: "Monday",
+  defaultTier: "Growth", brandColor: SERIES.c1,
+};
+
+export const TIMEZONES = [
+  "Asia/Karachi (PKT)", "Asia/Dubai (GST)", "Europe/London (GMT)",
+  "America/New_York (EST)", "America/Los_Angeles (PST)", "Asia/Singapore (SGT)",
+];
+export const LANGUAGES = ["English (US)", "English (UK)", "Urdu", "Arabic", "French", "Spanish"];
+export const BRAND_COLORS = [SERIES.c1, SERIES.c2, SERIES.c4, SERIES.c3, SERIES.c5];

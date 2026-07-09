@@ -23,6 +23,13 @@ const SECTIONS: Section[] = [
       { icon: "diversity_3", label: "Clients", href: "/clients" },
     ],
   },
+  {
+    title: "Platform",
+    items: [
+      { icon: "backup", label: "Backups", href: "/backups" },
+      { icon: "settings", label: "Settings", href: "/settings" },
+    ],
+  },
 ];
 
 export default function Sidebar() {
