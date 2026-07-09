@@ -1,0 +1,431 @@
+// ============================================================
+// AIOS · mock data layer
+// Swap these arrays for FastAPI / Postgres queries when the
+// backend is wired. Shapes mirror the data model in
+// aios/context-docs/ARCHITECTURE-AND-PLAN.md §8.
+// ============================================================
+
+export type AuditPoint = { w: string; v: number };
+export type TrafficPoint = { m: string; v: number };
+export type TeamMember = { nm: string; init: string; c: string; jobs: number };
+export type Client = { cn: string; cd: string; p: number };
+
+// Validated categorical palette (dark surface #221E46) — see color notes.
+export const SERIES = {
+  c1: "#7B69EE", // violet
+  c2: "#1FA890", // aqua
+  c3: "#C77E14", // amber
+  c4: "#4D8DF0", // blue
+  c5: "#D4568A", // magenta
+} as const;
+
+export const audits: AuditPoint[] = [
+  { w: "W1", v: 64 }, { w: "W2", v: 78 }, { w: "W3", v: 71 }, { w: "W4", v: 92 },
+  { w: "W5", v: 85 }, { w: "W6", v: 104 }, { w: "W7", v: 97 }, { w: "W8", v: 126 },
+  { w: "W9", v: 118 }, { w: "W10", v: 141 }, { w: "W11", v: 133 }, { w: "W12", v: 158 },
+];
+
+export const traffic: TrafficPoint[] = [
+  { m: "Aug", v: 214 }, { m: "Sep", v: 229 }, { m: "Oct", v: 238 }, { m: "Nov", v: 256 },
+  { m: "Dec", v: 247 }, { m: "Jan", v: 271 }, { m: "Feb", v: 284 }, { m: "Mar", v: 279 },
+  { m: "Apr", v: 298 }, { m: "May", v: 307 }, { m: "Jun", v: 312 }, { m: "Jul", v: 318 },
+];
+
+export const team: TeamMember[] = [
+  { nm: "Ayesha", init: "AY", c: SERIES.c1, jobs: 48 },
+  { nm: "Bilal", init: "BI", c: SERIES.c2, jobs: 41 },
+  { nm: "Hina", init: "HI", c: SERIES.c4, jobs: 37 },
+  { nm: "Usman", init: "US", c: SERIES.c3, jobs: 29 },
+  { nm: "Zoya", init: "ZO", c: SERIES.c5, jobs: 22 },
+];
+
+export const clients: Client[] = [
+  { cn: "NorthPeak Dental", cd: "Actionable audit", p: 92 },
+  { cn: "Lumen Realty", cd: "Content sprint", p: 78 },
+  { cn: "Verde Cafe", cd: "Technical audit", p: 64 },
+  { cn: "Atlas Legal", cd: "Onboarding", p: 45 },
+  { cn: "BrightHVAC", cd: "WordPress push", p: 83 },
+  { cn: "Coastline Fit", cd: "Local SEO", p: 57 },
+];
+
+// ============================================================
+// Client Info module — directory, growth, subscriptions,
+// contacts and support activity. Shapes mirror §8 data model
+// (clients, users, activity_log). Mock values are demo-only.
+// ============================================================
+
+export type SubTier = "Starter" | "Growth" | "Scale";
+export type SubStatus = "active" | "trial" | "past_due" | "paused";
+
+export type Contact = {
+  name: string;
+  role: string;
+  email: string;
+  init: string;
+  c: string; // avatar accent (SERIES slot)
+};
+
+// Portal access — the agency-provisioned super/client admin login.
+export type PortalAccess = {
+  admin: string; // admin username / login email
+  pass: string; // admin pass (masked in UI; reveal on demand)
+  seats: number; // provisioned user logins for the account
+  twoFA: boolean;
+  lastLogin: string; // relative
+};
+
+export type ClientRecord = {
+  id: string;
+  cn: string; // client name
+  industry: string;
+  sites: number;
+  since: string; // client since (year)
+  contact: Contact;
+  tier: SubTier;
+  status: SubStatus;
+  renews: string; // next renewal date
+  mrr: number; // monthly recurring revenue (USD)
+  portal: PortalAccess;
+};
+
+// Total active accounts on the platform, month over month.
+export type GrowthPoint = { m: string; v: number };
+export const clientGrowth: GrowthPoint[] = [
+  { m: "Aug", v: 24 }, { m: "Sep", v: 26 }, { m: "Oct", v: 27 }, { m: "Nov", v: 30 },
+  { m: "Dec", v: 31 }, { m: "Jan", v: 33 }, { m: "Feb", v: 35 }, { m: "Mar", v: 36 },
+  { m: "Apr", v: 38 }, { m: "May", v: 40 }, { m: "Jun", v: 41 }, { m: "Jul", v: 42 },
+];
+
+// Plan pricing (USD / month) — drives MRR + subscription mix.
+export const TIER_PRICE: Record<SubTier, number> = { Starter: 290, Growth: 690, Scale: 1490 };
+export const TIER_COLOR: Record<SubTier, string> = { Starter: SERIES.c4, Growth: SERIES.c1, Scale: SERIES.c3 };
+
+// Aggregate subscription mix across the full 42-account base
+// (the directory below lists a featured/recent subset).
+export const subStatusMix: { status: SubStatus; label: string; count: number; c: string }[] = [
+  { status: "active", label: "Active", count: 34, c: "var(--ok)" },
+  { status: "trial", label: "In trial", count: 5, c: SERIES.c4 },
+  { status: "past_due", label: "Past due", count: 2, c: "var(--warn)" },
+  { status: "paused", label: "Paused", count: 1, c: "var(--muted)" },
+];
+export const subTierMix: { tier: SubTier; count: number }[] = [
+  { tier: "Starter", count: 18 },
+  { tier: "Growth", count: 16 },
+  { tier: "Scale", count: 8 },
+];
+
+export const clientDirectory: ClientRecord[] = [
+  {
+    id: "cl-northpeak", cn: "NorthPeak Dental", industry: "Healthcare", sites: 2, since: "2023",
+    contact: { name: "Dr. Sana Malik", role: "Practice Owner", email: "sana@northpeakdental.com", init: "SM", c: SERIES.c1 },
+    tier: "Scale", status: "active", renews: "Aug 14, 2026", mrr: 1490,
+    portal: { admin: "admin@northpeakdental.com", pass: "Np!Dental#2026", seats: 6, twoFA: true, lastLogin: "2h ago" },
+  },
+  {
+    id: "cl-lumen", cn: "Lumen Realty", industry: "Real Estate", sites: 3, since: "2024",
+    contact: { name: "Hamza Iqbal", role: "Marketing Lead", email: "hamza@lumenrealty.co", init: "HI", c: SERIES.c2 },
+    tier: "Growth", status: "active", renews: "Sep 02, 2026", mrr: 690,
+    portal: { admin: "hamza@lumenrealty.co", pass: "Lumen$Realty7", seats: 4, twoFA: true, lastLogin: "1d ago" },
+  },
+  {
+    id: "cl-verde", cn: "Verde Cafe", industry: "Hospitality", sites: 1, since: "2025",
+    contact: { name: "Nadia Rehman", role: "Founder", email: "nadia@verdecafe.pk", init: "NR", c: SERIES.c5 },
+    tier: "Starter", status: "trial", renews: "Jul 21, 2026", mrr: 290,
+    portal: { admin: "nadia@verdecafe.pk", pass: "Verde@Cafe1", seats: 2, twoFA: false, lastLogin: "5h ago" },
+  },
+  {
+    id: "cl-atlas", cn: "Atlas Legal", industry: "Legal Services", sites: 1, since: "2025",
+    contact: { name: "Omar Sheikh", role: "Managing Partner", email: "omar@atlaslegal.com", init: "OS", c: SERIES.c4 },
+    tier: "Growth", status: "past_due", renews: "Jul 05, 2026", mrr: 690,
+    portal: { admin: "omar@atlaslegal.com", pass: "Atlas!Legal9", seats: 3, twoFA: true, lastLogin: "3d ago" },
+  },
+  {
+    id: "cl-brighthvac", cn: "BrightHVAC", industry: "Home Services", sites: 2, since: "2024",
+    contact: { name: "Farah Yousaf", role: "Operations Manager", email: "farah@brighthvac.com", init: "FY", c: SERIES.c3 },
+    tier: "Growth", status: "active", renews: "Oct 18, 2026", mrr: 690,
+    portal: { admin: "farah@brighthvac.com", pass: "Bright#HVAC22", seats: 5, twoFA: true, lastLogin: "6h ago" },
+  },
+  {
+    id: "cl-coastline", cn: "Coastline Fit", industry: "Fitness", sites: 1, since: "2025",
+    contact: { name: "Bilal Anwar", role: "Owner", email: "bilal@coastlinefit.com", init: "BA", c: SERIES.c2 },
+    tier: "Starter", status: "active", renews: "Nov 30, 2026", mrr: 290,
+    portal: { admin: "bilal@coastlinefit.com", pass: "Coast$Fit44", seats: 2, twoFA: false, lastLogin: "12h ago" },
+  },
+  {
+    id: "cl-meridian", cn: "Meridian Wealth", industry: "Finance", sites: 2, since: "2023",
+    contact: { name: "Zara Khan", role: "CMO", email: "zara@meridianwealth.com", init: "ZK", c: SERIES.c1 },
+    tier: "Scale", status: "active", renews: "Aug 27, 2026", mrr: 1490,
+    portal: { admin: "zara@meridianwealth.com", pass: "Merid!an88", seats: 8, twoFA: true, lastLogin: "40m ago" },
+  },
+  {
+    id: "cl-orchard", cn: "Orchard Pediatrics", industry: "Healthcare", sites: 1, since: "2026",
+    contact: { name: "Dr. Imran Ali", role: "Clinic Director", email: "imran@orchardpeds.com", init: "IA", c: SERIES.c5 },
+    tier: "Starter", status: "paused", renews: "—", mrr: 0,
+    portal: { admin: "imran@orchardpeds.com", pass: "Orchard@Peds3", seats: 2, twoFA: false, lastLogin: "18d ago" },
+  },
+];
+
+export type Ticket = {
+  id: string;
+  client: string;
+  subject: string;
+  channel: "Email" | "Portal" | "Call" | "Chat";
+  priority: "urgent" | "high" | "med" | "low";
+  status: "open" | "pending" | "resolved";
+  ago: string;
+};
+
+export const tickets: Ticket[] = [
+  { id: "T-4821", client: "Atlas Legal", subject: "Invoice past due — renewal on hold", channel: "Email", priority: "urgent", status: "open", ago: "22m ago" },
+  { id: "T-4820", client: "NorthPeak Dental", subject: "Audit PDF not generating for second site", channel: "Portal", priority: "high", status: "open", ago: "1h ago" },
+  { id: "T-4818", client: "Verde Cafe", subject: "How to reset admin portal password", channel: "Chat", priority: "med", status: "pending", ago: "3h ago" },
+  { id: "T-4815", client: "Meridian Wealth", subject: "Request: add two team-member logins", channel: "Portal", priority: "med", status: "pending", ago: "5h ago" },
+  { id: "T-4812", client: "BrightHVAC", subject: "Content sprint delivery timeline check", channel: "Call", priority: "low", status: "resolved", ago: "1d ago" },
+  { id: "T-4809", client: "Coastline Fit", subject: "Enable 2FA on the portal login", channel: "Email", priority: "low", status: "resolved", ago: "2d ago" },
+];
+
+// ============================================================
+// Team Management module — roster, task assignment, activity
+// log, per-member performance and role-based access control.
+// Shapes mirror the §8 data model (users, roles, jobs,
+// activity_log). Mock values are demo-only; swap for the
+// FastAPI/Postgres queries when the backend is wired.
+// ============================================================
+
+// --- Roles & access control -------------------------------------------------
+// Ordered most-privileged → least. Owner is the agency super-admin.
+export type TeamRole = "Owner" | "Admin" | "Manager" | "Specialist" | "Analyst" | "Viewer";
+
+export const ROLE_ORDER: TeamRole[] = ["Owner", "Admin", "Manager", "Specialist", "Analyst", "Viewer"];
+
+export const ROLE_META: Record<TeamRole, { desc: string; c: string }> = {
+  Owner: { desc: "Full control across the platform — billing, access & data.", c: SERIES.c1 },
+  Admin: { desc: "Manage team, clients & delivery. No access-control changes.", c: SERIES.c4 },
+  Manager: { desc: "Assign work, run audits & publish across a client book.", c: SERIES.c2 },
+  Specialist: { desc: "Deliver audits & content on assigned jobs.", c: SERIES.c3 },
+  Analyst: { desc: "Run audits and read reports — no publishing.", c: SERIES.c5 },
+  Viewer: { desc: "Read-only access to reports and dashboards.", c: "var(--muted)" },
+};
+
+// Granular capabilities the RBAC matrix toggles per role.
+export type PermKey =
+  | "run_audits" | "publish_content" | "manage_clients" | "assign_tasks"
+  | "manage_team" | "access_control" | "manage_vault" | "view_reports";
+
+export const permissions: { key: PermKey; label: string; desc: string; icon: string }[] = [
+  { key: "run_audits", label: "Run audits", desc: "Trigger free & paid audits", icon: "fact_check" },
+  { key: "publish_content", label: "Publish content", desc: "Push content live past the review gate", icon: "rocket_launch" },
+  { key: "manage_clients", label: "Manage clients", desc: "Edit accounts, contacts & subscriptions", icon: "diversity_3" },
+  { key: "assign_tasks", label: "Assign tasks", desc: "Create & route jobs to the team", icon: "assignment_ind" },
+  { key: "manage_team", label: "Manage team", desc: "Add, edit & deactivate members", icon: "group_add" },
+  { key: "access_control", label: "Access control", desc: "Edit roles & permissions", icon: "admin_panel_settings" },
+  { key: "manage_vault", label: "Key vault", desc: "View & rotate API keys and creds", icon: "key" },
+  { key: "view_reports", label: "View reports", desc: "Open audits, dashboards & metrics", icon: "summarize" },
+];
+
+// Default capability grants per role. Owner is implicitly all-on and locked.
+export const defaultRolePerms: Record<TeamRole, PermKey[]> = {
+  Owner: permissions.map((p) => p.key),
+  Admin: ["run_audits", "publish_content", "manage_clients", "assign_tasks", "manage_team", "manage_vault", "view_reports"],
+  Manager: ["run_audits", "publish_content", "manage_clients", "assign_tasks", "view_reports"],
+  Specialist: ["run_audits", "publish_content", "view_reports"],
+  Analyst: ["run_audits", "view_reports"],
+  Viewer: ["view_reports"],
+};
+
+// --- Members ----------------------------------------------------------------
+export type MemberStatus = "active" | "away" | "invited" | "offline";
+
+export const STATUS_META: Record<MemberStatus, { label: string; c: string }> = {
+  active: { label: "Active", c: "var(--ok)" },
+  away: { label: "Away", c: "var(--warn)" },
+  invited: { label: "Invited", c: SERIES.c4 },
+  offline: { label: "Offline", c: "var(--muted)" },
+};
+
+export type TeamMemberRecord = {
+  id: string;
+  name: string;
+  init: string;
+  c: string; // avatar accent (SERIES slot)
+  title: string; // job title
+  email: string;
+  role: TeamRole;
+  status: MemberStatus;
+  activeTasks: number;
+  completed: number; // jobs delivered this cycle
+  onTime: number; // on-time delivery %
+  utilization: number; // capacity used %
+  quality: number; // QA pass rate %
+  joined: string; // month + year
+};
+
+export const teamMembers: TeamMemberRecord[] = [
+  { id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1, title: "Founder / Super Admin", email: "danyal@xegents.ai", role: "Owner", status: "active", activeTasks: 3, completed: 61, onTime: 98, utilization: 72, quality: 99, joined: "Jan 2023" },
+  { id: "u-ayesha", name: "Ayesha Raza", init: "AY", c: SERIES.c1, title: "Content Lead", email: "ayesha@xegents.ai", role: "Manager", status: "active", activeTasks: 6, completed: 48, onTime: 94, utilization: 88, quality: 96, joined: "Mar 2023" },
+  { id: "u-bilal", name: "Bilal Anwar", init: "BI", c: SERIES.c2, title: "Technical SEO Specialist", email: "bilal@xegents.ai", role: "Specialist", status: "active", activeTasks: 5, completed: 41, onTime: 91, utilization: 84, quality: 93, joined: "May 2023" },
+  { id: "u-hina", name: "Hina Shah", init: "HI", c: SERIES.c4, title: "Content Writer", email: "hina@xegents.ai", role: "Specialist", status: "away", activeTasks: 4, completed: 37, onTime: 89, utilization: 76, quality: 95, joined: "Aug 2023" },
+  { id: "u-usman", name: "Usman Tariq", init: "US", c: SERIES.c3, title: "Backlink Analyst", email: "usman@xegents.ai", role: "Analyst", status: "active", activeTasks: 3, completed: 29, onTime: 92, utilization: 68, quality: 90, joined: "Nov 2023" },
+  { id: "u-zoya", name: "Zoya Kamal", init: "ZO", c: SERIES.c5, title: "Local SEO Specialist", email: "zoya@xegents.ai", role: "Specialist", status: "active", activeTasks: 4, completed: 22, onTime: 88, utilization: 71, quality: 92, joined: "Feb 2024" },
+  { id: "u-sara", name: "Sara Naveed", init: "SN", c: SERIES.c2, title: "Operations Admin", email: "sara@xegents.ai", role: "Admin", status: "active", activeTasks: 2, completed: 34, onTime: 96, utilization: 63, quality: 97, joined: "Jun 2024" },
+  { id: "u-imran", name: "Imran Qureshi", init: "IQ", c: SERIES.c4, title: "Client Success", email: "imran@xegents.ai", role: "Viewer", status: "invited", activeTasks: 0, completed: 0, onTime: 0, utilization: 0, quality: 0, joined: "Jul 2026" },
+];
+
+// --- Tasks ------------------------------------------------------------------
+export type TaskType = "Technical Audit" | "Actionable Audit" | "Content Sprint" | "Backlink Audit" | "Local SEO" | "Publishing";
+export type TaskPriority = "urgent" | "high" | "med" | "low";
+export type TaskStatus = "todo" | "in_progress" | "review" | "done";
+
+export const TASK_STATUS_META: Record<TaskStatus, { label: string; cls: string }> = {
+  todo: { label: "To do", cls: "mut" },
+  in_progress: { label: "In progress", cls: "info" },
+  review: { label: "In review", cls: "warn" },
+  done: { label: "Done", cls: "ok" },
+};
+
+export const TASK_TYPES: TaskType[] = ["Technical Audit", "Actionable Audit", "Content Sprint", "Backlink Audit", "Local SEO", "Publishing"];
+
+export type Task = {
+  id: string;
+  title: string;
+  client: string;
+  type: TaskType;
+  assignee: string; // teamMembers.id
+  priority: TaskPriority;
+  status: TaskStatus;
+  due: string;
+};
+
+export const tasks_seed: Task[] = [
+  { id: "J-2041", title: "Full technical crawl + CWV pass", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "high", status: "in_progress", due: "Jul 12" },
+  { id: "J-2039", title: "Service-page content sprint (6 pages)", client: "Lumen Realty", type: "Content Sprint", assignee: "u-hina", priority: "high", status: "in_progress", due: "Jul 14" },
+  { id: "J-2037", title: "Map-pack + NAP consistency fixes", client: "Verde Cafe", type: "Local SEO", assignee: "u-zoya", priority: "med", status: "todo", due: "Jul 15" },
+  { id: "J-2035", title: "Backlink profile + toxic-link sweep", client: "Meridian Wealth", type: "Backlink Audit", assignee: "u-usman", priority: "med", status: "review", due: "Jul 11" },
+  { id: "J-2032", title: "Actionable audit — per-page fixes", client: "Atlas Legal", type: "Actionable Audit", assignee: "u-bilal", priority: "urgent", status: "todo", due: "Jul 10" },
+  { id: "J-2030", title: "WordPress publish — 4 blog posts", client: "BrightHVAC", type: "Publishing", assignee: "u-ayesha", priority: "low", status: "review", due: "Jul 13" },
+  { id: "J-2028", title: "Local SEO audit + GBP categories", client: "Coastline Fit", type: "Local SEO", assignee: "u-zoya", priority: "low", status: "done", due: "Jul 08" },
+  { id: "J-2025", title: "Technical audit — second site", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "med", status: "done", due: "Jul 07" },
+];
+
+// --- Activity log -----------------------------------------------------------
+export type ActivityKind = "task" | "member" | "audit" | "content" | "access" | "login" | "client";
+
+export const ACTIVITY_META: Record<ActivityKind, { icon: string; c: string }> = {
+  task: { icon: "assignment_turned_in", c: SERIES.c1 },
+  member: { icon: "group_add", c: SERIES.c2 },
+  audit: { icon: "fact_check", c: SERIES.c4 },
+  content: { icon: "article", c: SERIES.c3 },
+  access: { icon: "admin_panel_settings", c: SERIES.c5 },
+  login: { icon: "login", c: "var(--muted)" },
+  client: { icon: "diversity_3", c: SERIES.c2 },
+};
+
+export type Activity = {
+  id: string;
+  kind: ActivityKind;
+  actorInit: string;
+  actorName: string;
+  actorColor: string;
+  action: string; // verb phrase, e.g. "assigned"
+  target: string; // object of the action
+  meta?: string; // client / context
+  ago: string;
+};
+
+export const activity_seed: Activity[] = [
+  { id: "a-01", kind: "audit", actorInit: "BI", actorName: "Bilal Anwar", actorColor: SERIES.c2, action: "started a technical audit", target: "J-2041", meta: "NorthPeak Dental", ago: "8m ago" },
+  { id: "a-02", kind: "content", actorInit: "HI", actorName: "Hina Shah", actorColor: SERIES.c4, action: "submitted for review", target: "Service-page sprint", meta: "Lumen Realty", ago: "26m ago" },
+  { id: "a-03", kind: "access", actorInit: "DA", actorName: "Danyal Ahmed", actorColor: SERIES.c1, action: "granted publish access to", target: "Manager role", meta: "Access control", ago: "1h ago" },
+  { id: "a-04", kind: "task", actorInit: "AY", actorName: "Ayesha Raza", actorColor: SERIES.c1, action: "assigned", target: "J-2030 · Publishing", meta: "BrightHVAC", ago: "2h ago" },
+  { id: "a-05", kind: "member", actorInit: "DA", actorName: "Danyal Ahmed", actorColor: SERIES.c1, action: "invited", target: "Imran Qureshi", meta: "Viewer", ago: "3h ago" },
+  { id: "a-06", kind: "audit", actorInit: "US", actorName: "Usman Tariq", actorColor: SERIES.c3, action: "flagged 3 toxic links on", target: "J-2035", meta: "Meridian Wealth", ago: "4h ago" },
+  { id: "a-07", kind: "task", actorInit: "ZO", actorName: "Zoya Kamal", actorColor: SERIES.c5, action: "completed", target: "J-2028 · Local SEO", meta: "Coastline Fit", ago: "6h ago" },
+  { id: "a-08", kind: "login", actorInit: "SN", actorName: "Sara Naveed", actorColor: SERIES.c2, action: "signed in from", target: "Karachi, PK", ago: "7h ago" },
+  { id: "a-09", kind: "content", actorInit: "AY", actorName: "Ayesha Raza", actorColor: SERIES.c1, action: "approved 4 posts at the review gate for", target: "J-2030", meta: "BrightHVAC", ago: "9h ago" },
+  { id: "a-10", kind: "access", actorInit: "DA", actorName: "Danyal Ahmed", actorColor: SERIES.c1, action: "enabled 2FA requirement for", target: "all Admin logins", meta: "Security", ago: "1d ago" },
+];
+
+// ============================================================
+// Add Team Member — access model
+// Grounded in danyal-AIOS-Roles-and-Access-Control.pdf:
+// 17 switchable features + 3 ready-made role templates
+// (SEO Specialist, Content Creator, Virtual Assistant) plus
+// the all-access Super Admin. Grants below mirror the doc's
+// "Full Access Matrix" (§07) — a feature is granted when the
+// role has any access (Full or View); Off features are ungranted.
+// ============================================================
+
+export type FeatureGroup = "Analytics" | "Content" | "Delivery" | "Admin";
+
+export const GROUP_COLOR: Record<FeatureGroup, string> = {
+  Analytics: SERIES.c4, // blue
+  Content: SERIES.c3, // amber
+  Delivery: SERIES.c1, // violet
+  Admin: SERIES.c5, // magenta — the sensitive, Super-Admin-only tools
+};
+
+export type AccessFeature = {
+  key: string;
+  label: string; // full name
+  short: string; // bubble label
+  icon: string; // Material Symbols
+  group: FeatureGroup;
+  desc: string; // what it unlocks
+};
+
+// The 17 features you switch on or off (doc §01 / §07).
+export const accessFeatures: AccessFeature[] = [
+  { key: "rank_tracker", label: "Rank Tracker", short: "Rank Tracker", icon: "trending_up", group: "Analytics", desc: "Track keyword positions & ranking history" },
+  { key: "technical_audit", label: "Technical Audit", short: "Tech Audit", icon: "troubleshoot", group: "Analytics", desc: "Run site audits, review & mark issues fixed" },
+  { key: "on_page", label: "On-Page Optimizer", short: "On-Page", icon: "tune", group: "Analytics", desc: "Review & apply on-page recommendations" },
+  { key: "keyword_research", label: "Keyword Research", short: "Keywords", icon: "search", group: "Analytics", desc: "Find, group & assign keywords" },
+  { key: "backlink_manager", label: "Backlink Manager", short: "Backlinks", icon: "hub", group: "Analytics", desc: "Monitor profile, flag lost or toxic links" },
+  { key: "competitor_intel", label: "Competitor Intel", short: "Competitors", icon: "insights", group: "Analytics", desc: "Compare clients & read gap analysis" },
+  { key: "local_seo", label: "Local SEO", short: "Local SEO", icon: "storefront", group: "Analytics", desc: "Track local & map-pack rankings" },
+  { key: "content_pipeline", label: "Content Pipeline", short: "Content", icon: "article", group: "Content", desc: "Briefs, AI drafting, edit & review" },
+  { key: "publishing", label: "Publishing", short: "Publishing", icon: "rocket_launch", group: "Content", desc: "Send approved content live to the CMS" },
+  { key: "reporting", label: "Reporting", short: "Reporting", icon: "summarize", group: "Delivery", desc: "Build, schedule & send client reports" },
+  { key: "task_board", label: "Task / Workflow Board", short: "Task Board", icon: "checklist", group: "Delivery", desc: "Create, assign & track team tasks" },
+  { key: "client_onboarding", label: "Client Onboarding", short: "Onboarding", icon: "person_add", group: "Delivery", desc: "Run the onboarding wizard & collect access" },
+  { key: "client_setup", label: "Client & Website Setup", short: "Client Setup", icon: "language", group: "Delivery", desc: "Add & edit clients and their websites" },
+  { key: "data_import", label: "Data Import", short: "Imports", icon: "upload_file", group: "Delivery", desc: "Upload & map CSV/Excel exports" },
+  { key: "key_vault", label: "Integrations & Key Vault", short: "Key Vault", icon: "key", group: "Admin", desc: "API keys & integrations — Super Admin only" },
+  { key: "billing", label: "Billing", short: "Billing", icon: "payments", group: "Admin", desc: "Plans, invoices & payment settings" },
+  { key: "team_access", label: "Team & Access", short: "Team & Access", icon: "admin_panel_settings", group: "Admin", desc: "Manage members, roles & permissions" },
+];
+
+export type RoleTemplate = {
+  key: string;
+  label: string; // dropdown label
+  tagline: string;
+  icon: string;
+  role: TeamRole; // governance role stamped on the roster record
+  color: string; // avatar accent for the new member
+  grants: string[]; // accessFeatures.key[] switched on by this template
+};
+
+const ALL_KEYS = accessFeatures.map((f) => f.key);
+
+// Grants transcribed from the Full Access Matrix (§07). "Off" cells are omitted.
+export const roleTemplates: RoleTemplate[] = [
+  {
+    key: "seo", label: "SEO Specialist", tagline: "Analytics & optimization", icon: "query_stats",
+    role: "Specialist", color: SERIES.c4,
+    grants: ["rank_tracker", "technical_audit", "on_page", "keyword_research", "backlink_manager", "competitor_intel", "local_seo", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
+  },
+  {
+    key: "content", label: "Content Creator", tagline: "Copywriting & publishing", icon: "edit_note",
+    role: "Specialist", color: SERIES.c3,
+    grants: ["rank_tracker", "on_page", "keyword_research", "competitor_intel", "content_pipeline", "publishing", "reporting", "task_board", "client_setup"],
+  },
+  {
+    key: "va", label: "Virtual Assistant", tagline: "Coordination & admin", icon: "support_agent",
+    role: "Manager", color: SERIES.c1,
+    grants: ["rank_tracker", "content_pipeline", "local_seo", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
+  },
+  {
+    key: "super", label: "Super Admin", tagline: "Full access — everything on", icon: "shield_person",
+    role: "Owner", color: SERIES.c1,
+    grants: ALL_KEYS,
+  },
+];
