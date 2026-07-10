@@ -1,0 +1,36 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+<section class="cover">
+  <h1 class="cover-title">Remediation playbook</h1>
+  <p class="cover-domain">{{ domain }}</p>
+  <p class="cover-date">{{ started_at_pkt }}</p>
+</section>
+
+<section class="intro">
+  <p>
+    Items below are ordered by severity then score. Each entry references its
+    check ID so a developer can trace the source and grep the raw findings data.
+  </p>
+</section>
+
+{% if ranked %}
+{% for f in ranked %}
+<section class="remediation-item remediation-{{ f.severity }}">
+  <h2>
+    <span class="severity-badge">{{ f.severity|upper }}</span>
+    <span class="check-id">{{ f.check_id }}</span>
+    {{ f.check_name }}
+  </h2>
+  {% if f.evidence_summary %}
+  <div class="remediation-evidence"><strong>Evidence:</strong> {{ f.evidence_summary }}</div>
+  {% endif %}
+  <div class="remediation-fix"><strong>Fix:</strong> {{ f.remediation }}</div>
+</section>
+{% endfor %}
+{% else %}
+<p class="finding-empty">No remediation items. Clean audit.</p>
+{% endif %}
+
+{% endblock %}

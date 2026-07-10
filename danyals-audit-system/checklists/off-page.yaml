@@ -1,0 +1,750 @@
+# Off-Page SEO Master Checklist
+# Source of truth for Team C (4 agents: C1 Backlink Profile, C2 Anchor/Toxicity, C3 Competitor Gap, C4 Brand Authority)
+# 80 checks (10 local-flavored items moved to local.yaml)
+
+version: 1
+category: off-page
+checks:
+
+  # ----- Authority Baselines (3) -----
+  - id: OFF-001
+    name: Domain authority analysis
+    subcategory: authority
+    owner_agent: C1
+    severity_default: info
+    data_sources: [moz_da]
+    analyzer: audit_engine.analyzers.authority.da
+    automation: full
+
+  - id: OFF-002
+    name: Domain rating analysis
+    subcategory: authority
+    owner_agent: C1
+    severity_default: info
+    data_sources: [moz_da]
+    analyzer: audit_engine.analyzers.authority.dr
+    automation: full
+
+  - id: OFF-003
+    name: Brand authority analysis
+    subcategory: authority
+    owner_agent: C4
+    severity_default: major
+    data_sources: [serper, moz_da, google_nl]
+    analyzer: audit_engine.analyzers.authority.brand
+    automation: ai-assisted
+
+  # ----- Backlink Profile (3) -----
+  - id: OFF-004
+    name: Backlink profile analysis
+    subcategory: backlinks
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.backlinks.profile
+    automation: full
+
+  - id: OFF-005
+    name: Referring domains analysis
+    subcategory: backlinks
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.backlinks.referring_domains
+    automation: full
+
+  - id: OFF-006
+    name: Link velocity analysis
+    subcategory: backlinks
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.backlinks.velocity
+    automation: full
+
+  # ----- Toxicity / Spam (2) -----
+  - id: OFF-007
+    name: Toxic backlink detection
+    subcategory: toxicity
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.toxicity.toxic_backlinks
+    automation: full
+
+  - id: OFF-008
+    name: Spam backlink analysis
+    subcategory: toxicity
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links, moz_spam_score]
+    analyzer: audit_engine.analyzers.toxicity.spam_backlinks
+    automation: full
+
+  # ----- Backlink Lifecycle (2) -----
+  - id: OFF-009
+    name: Lost backlink detection
+    subcategory: backlinks
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links_historical]
+    analyzer: audit_engine.analyzers.backlinks.lost
+    automation: full
+
+  - id: OFF-010
+    name: New backlink detection
+    subcategory: backlinks
+    owner_agent: C1
+    severity_default: info
+    data_sources: [moz_links_historical]
+    analyzer: audit_engine.analyzers.backlinks.new
+    automation: full
+
+  # ----- Link Quality (6) -----
+  - id: OFF-011
+    name: High authority backlink analysis
+    subcategory: link-quality
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_quality.high_authority
+    automation: full
+
+  - id: OFF-012
+    name: Niche relevant backlink analysis
+    subcategory: link-quality
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links, google_nl]
+    analyzer: audit_engine.analyzers.link_quality.niche_relevant
+    automation: ai-assisted
+
+  - id: OFF-013
+    name: Contextual backlink analysis
+    subcategory: link-quality
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.link_quality.contextual
+    automation: ai-assisted
+
+  - id: OFF-014
+    name: Editorial backlink analysis
+    subcategory: link-quality
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.link_quality.editorial
+    automation: ai-assisted
+
+  - id: OFF-015
+    name: Homepage backlink analysis
+    subcategory: link-quality
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_quality.homepage
+    automation: full
+
+  - id: OFF-016
+    name: Deep page backlink analysis
+    subcategory: link-quality
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_quality.deep_page
+    automation: full
+
+  # ----- Anchor Text (7) -----
+  - id: OFF-017
+    name: Anchor text distribution analysis
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.distribution
+    automation: full
+
+  - id: OFF-018
+    name: Over optimized anchor detection
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.over_optimized
+    automation: full
+
+  - id: OFF-019
+    name: Branded anchor ratio analysis
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.branded_ratio
+    automation: full
+
+  - id: OFF-020
+    name: Exact match anchor analysis
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.exact_match
+    automation: full
+
+  - id: OFF-021
+    name: Naked URL anchor analysis
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.naked_url
+    automation: full
+
+  - id: OFF-022
+    name: Generic anchor analysis
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.generic
+    automation: full
+
+  - id: OFF-023
+    name: Link diversity analysis
+    subcategory: anchors
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.anchors.diversity
+    automation: full
+
+  # ----- Link Attributes (4) -----
+  - id: OFF-024
+    name: Dofollow backlink analysis
+    subcategory: link-attributes
+    owner_agent: C1
+    severity_default: info
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_attributes.dofollow
+    automation: full
+
+  - id: OFF-025
+    name: Nofollow backlink analysis
+    subcategory: link-attributes
+    owner_agent: C1
+    severity_default: info
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_attributes.nofollow
+    automation: full
+
+  - id: OFF-026
+    name: Sponsored link analysis
+    subcategory: link-attributes
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_attributes.sponsored
+    automation: full
+
+  - id: OFF-027
+    name: UGC link analysis
+    subcategory: link-attributes
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_attributes.ugc
+    automation: full
+
+  # ----- Network Diversity (4) -----
+  - id: OFF-028
+    name: Referring IP diversity analysis
+    subcategory: diversity
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.diversity.ip
+    automation: full
+
+  - id: OFF-029
+    name: Referring subnet diversity analysis
+    subcategory: diversity
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.diversity.subnet
+    automation: full
+
+  - id: OFF-030
+    name: Country relevance analysis
+    subcategory: diversity
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.diversity.country
+    automation: full
+
+  - id: OFF-031
+    name: TLD distribution analysis
+    subcategory: diversity
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.diversity.tld
+    automation: full
+
+  # ----- Link Placement (4) -----
+  - id: OFF-032
+    name: Link placement analysis
+    subcategory: link-placement
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.placement.overall
+    automation: ai-assisted
+
+  - id: OFF-033
+    name: Sidebar link detection
+    subcategory: link-placement
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.placement.sidebar
+    automation: ai-assisted
+
+  - id: OFF-034
+    name: Footer link detection
+    subcategory: link-placement
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.placement.footer
+    automation: ai-assisted
+
+  - id: OFF-035
+    name: Sitewide backlink detection
+    subcategory: link-placement
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.placement.sitewide
+    automation: full
+
+  # ----- PBN / Spam Networks (5) -----
+  - id: OFF-036
+    name: PBN footprint detection
+    subcategory: pbn
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links, whois, dns]
+    analyzer: audit_engine.analyzers.pbn.footprint
+    automation: ai-assisted
+
+  - id: OFF-037
+    name: Link network analysis
+    subcategory: pbn
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links, whois]
+    analyzer: audit_engine.analyzers.pbn.networks
+    automation: ai-assisted
+
+  - id: OFF-038
+    name: Link farm detection
+    subcategory: pbn
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.pbn.link_farms
+    automation: full
+
+  - id: OFF-039
+    name: Spam score analysis
+    subcategory: toxicity
+    owner_agent: C2
+    severity_default: critical
+    data_sources: [moz_spam_score]
+    analyzer: audit_engine.analyzers.toxicity.spam_score
+    automation: full
+
+  - id: OFF-040
+    name: Disavow recommendation analysis
+    subcategory: toxicity
+    owner_agent: C2
+    severity_default: major
+    data_sources: [moz_links, moz_spam_score]
+    analyzer: audit_engine.analyzers.toxicity.disavow_recommendation
+    automation: ai-assisted
+
+  # ----- Competitor (5) -----
+  - id: OFF-041
+    name: Competitor backlink gap analysis
+    subcategory: competitor
+    owner_agent: C3
+    severity_default: major
+    data_sources: [moz_links, competitor_moz_links]
+    analyzer: audit_engine.analyzers.competitor.backlink_gap
+    automation: full
+
+  - id: OFF-042
+    name: Competitor authority comparison
+    subcategory: competitor
+    owner_agent: C3
+    severity_default: major
+    data_sources: [moz_da, competitor_moz_da]
+    analyzer: audit_engine.analyzers.competitor.authority
+    automation: full
+
+  - id: OFF-043
+    name: Competitor referring domains comparison
+    subcategory: competitor
+    owner_agent: C3
+    severity_default: major
+    data_sources: [moz_links, competitor_moz_links]
+    analyzer: audit_engine.analyzers.competitor.referring_domains
+    automation: full
+
+  - id: OFF-044
+    name: Broken backlink opportunities
+    subcategory: competitor
+    owner_agent: C3
+    severity_default: major
+    data_sources: [moz_links, competitor_moz_links, http_status]
+    analyzer: audit_engine.analyzers.competitor.broken_backlink_opps
+    automation: full
+
+  - id: OFF-045
+    name: Unlinked brand mention detection
+    subcategory: competitor
+    owner_agent: C4
+    severity_default: major
+    data_sources: [serper, google_nl, web_fetch]
+    analyzer: audit_engine.analyzers.competitor.unlinked_mentions
+    automation: ai-assisted
+
+  # ----- Outreach (2) -----
+  - id: OFF-046
+    name: Digital PR backlink opportunities
+    subcategory: outreach
+    owner_agent: C3
+    severity_default: minor
+    data_sources: [serper, moz_links]
+    analyzer: audit_engine.analyzers.outreach.digital_pr
+    automation: ai-assisted
+
+  - id: OFF-047
+    name: HARO style opportunity analysis
+    subcategory: outreach
+    owner_agent: C3
+    severity_default: minor
+    data_sources: [serper, web_fetch]
+    analyzer: audit_engine.analyzers.outreach.haro
+    automation: ai-assisted
+
+  # NOTE: OFF-048 through OFF-057 (local citations, GBP, reviews) are owned by Team D
+  # and live in local.yaml as LOC-001 through LOC-010. See local.yaml.
+
+  # ----- Brand Signals (4) -----
+  - id: OFF-048
+    name: Social signals analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: minor
+    data_sources: [serper, web_fetch]
+    analyzer: audit_engine.analyzers.brand_signals.social
+    automation: ai-assisted
+
+  - id: OFF-049
+    name: Brand mention analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: major
+    data_sources: [serper, google_nl, web_fetch]
+    analyzer: audit_engine.analyzers.brand_signals.mentions
+    automation: ai-assisted
+
+  - id: OFF-050
+    name: Entity authority analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: major
+    data_sources: [wikidata, serper, google_nl]
+    analyzer: audit_engine.analyzers.brand_signals.entity_authority
+    automation: ai-assisted
+
+  - id: OFF-051
+    name: Knowledge Graph presence analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: major
+    data_sources: [serper, wikidata]
+    analyzer: audit_engine.analyzers.brand_signals.knowledge_graph
+    automation: full
+
+  - id: OFF-052
+    name: Branded search volume analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: major
+    data_sources: [moz_keyword, serper]
+    analyzer: audit_engine.analyzers.brand_signals.branded_volume
+    automation: full
+
+  # ----- Topical / Industry Authority (2) -----
+  - id: OFF-053
+    name: Topical authority backlink analysis
+    subcategory: topical-authority
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links, google_nl]
+    analyzer: audit_engine.analyzers.topical_authority.backlinks
+    automation: ai-assisted
+
+  - id: OFF-054
+    name: Industry relevance analysis
+    subcategory: topical-authority
+    owner_agent: C4
+    severity_default: minor
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.topical_authority.industry
+    automation: ai-assisted
+
+  # ----- Specific Link Types (5) -----
+  - id: OFF-055
+    name: Press release backlink analysis
+    subcategory: link-types
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_types.press_release
+    automation: full
+
+  - id: OFF-056
+    name: Guest post backlink analysis
+    subcategory: link-types
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links, web_fetch]
+    analyzer: audit_engine.analyzers.link_types.guest_post
+    automation: ai-assisted
+
+  - id: OFF-057
+    name: Forum backlink analysis
+    subcategory: link-types
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_types.forum
+    automation: full
+
+  - id: OFF-058
+    name: Profile backlink analysis
+    subcategory: link-types
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.link_types.profile
+    automation: full
+
+  - id: OFF-059
+    name: Redirect backlink analysis
+    subcategory: link-types
+    owner_agent: C2
+    severity_default: minor
+    data_sources: [moz_links, http_status]
+    analyzer: audit_engine.analyzers.link_types.redirect_backlinks
+    automation: full
+
+  # ----- Historical (2) -----
+  - id: OFF-060
+    name: Link decay analysis
+    subcategory: historical
+    owner_agent: C1
+    severity_default: major
+    data_sources: [moz_links_historical]
+    analyzer: audit_engine.analyzers.historical.link_decay
+    automation: full
+
+  - id: OFF-061
+    name: Historical backlink trend analysis
+    subcategory: historical
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links_historical]
+    analyzer: audit_engine.analyzers.historical.backlink_trend
+    automation: full
+
+  # ----- Competitor Mentions (5) -----
+  - id: OFF-062
+    name: Competitor mention gap analysis
+    subcategory: competitor
+    owner_agent: C3
+    severity_default: minor
+    data_sources: [serper, google_nl]
+    analyzer: audit_engine.analyzers.competitor.mention_gap
+    automation: ai-assisted
+
+  - id: OFF-063
+    name: Influencer mention analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: minor
+    data_sources: [serper, web_fetch]
+    analyzer: audit_engine.analyzers.brand_signals.influencer_mentions
+    automation: ai-assisted
+
+  - id: OFF-064
+    name: Podcast mention analysis
+    subcategory: brand-signals
+    owner_agent: C4
+    severity_default: minor
+    data_sources: [serper, web_fetch]
+    analyzer: audit_engine.analyzers.brand_signals.podcast_mentions
+    automation: ai-assisted
+
+  - id: OFF-065
+    name: Video backlink analysis
+    subcategory: link-types
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links, serper]
+    analyzer: audit_engine.analyzers.link_types.video
+    automation: full
+
+  - id: OFF-066
+    name: Image backlink analysis
+    subcategory: link-types
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links, serper]
+    analyzer: audit_engine.analyzers.link_types.image
+    automation: full
+
+  # ----- AI / Generative Search Authority (3) -----
+  - id: OFF-067
+    name: AI search authority analysis
+    subcategory: ai-search
+    owner_agent: C4
+    severity_default: major
+    data_sources: [otterly, serper]
+    analyzer: audit_engine.analyzers.ai_search.authority
+    automation: ai-assisted
+
+  - id: OFF-068
+    name: Generative search visibility analysis
+    subcategory: ai-search
+    owner_agent: C4
+    severity_default: major
+    data_sources: [otterly]
+    analyzer: audit_engine.analyzers.ai_search.generative_visibility
+    automation: full
+
+  - id: OFF-069
+    name: Citation trust analysis
+    subcategory: ai-search
+    owner_agent: C4
+    severity_default: major
+    data_sources: [otterly]
+    analyzer: audit_engine.analyzers.ai_search.citation_trust
+    automation: ai-assisted
+
+  # ----- Citation/Trust Flow Metrics (2) -----
+  - id: OFF-070
+    name: Trust flow analysis
+    subcategory: authority
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links, moz_da]
+    analyzer: audit_engine.analyzers.authority.trust_flow
+    automation: full
+
+  - id: OFF-071
+    name: Citation flow analysis
+    subcategory: authority
+    owner_agent: C1
+    severity_default: minor
+    data_sources: [moz_links]
+    analyzer: audit_engine.analyzers.authority.citation_flow
+    automation: full
+
+  # ----- Aggregate Scores (9) -----
+  - id: OFF-072
+    name: Link trust score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.link_trust
+    automation: full
+
+  - id: OFF-073
+    name: Brand trust score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.brand_trust
+    automation: full
+
+  - id: OFF-074
+    name: Authority score (composite)
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.authority_composite
+    automation: full
+
+  - id: OFF-075
+    name: Off page SEO score (sub-rollup)
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.sub_rollup
+    automation: full
+
+  - id: OFF-076
+    name: Toxicity risk score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.toxicity_risk
+    automation: full
+
+  - id: OFF-077
+    name: Link quality score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.link_quality
+    automation: full
+
+  - id: OFF-078
+    name: Backlink relevance score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.backlink_relevance
+    automation: full
+
+  - id: OFF-079
+    name: Brand popularity score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.brand_popularity
+    automation: full
+
+  - id: OFF-080
+    name: Overall off page SEO score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.off_page.overall
+    automation: full

@@ -1,0 +1,75 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+<section class="cover">
+  <h1 class="cover-title">SEO Audit &mdash; Full report</h1>
+  <p class="cover-domain">{{ domain }}</p>
+  <p class="cover-date">{{ started_at_pkt }}</p>
+</section>
+
+<section class="scorecard">
+  <h2>Scorecard</h2>
+  <div class="score-grid">
+    <div class="score-card overall">
+      <div class="score-label">Overall</div>
+      <div class="score-value">{{ scores.overall if scores.overall is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card">
+      <div class="score-label">On-Page</div>
+      <div class="score-value">{{ scores.on_page if scores.on_page is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card">
+      <div class="score-label">Technical</div>
+      <div class="score-value">{{ scores.technical if scores.technical is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card">
+      <div class="score-label">Off-Page</div>
+      <div class="score-value">{{ scores.off_page if scores.off_page is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card local">
+      <div class="score-label">Local SEO</div>
+      <div class="score-value">{{ scores.local if scores.local is not none else "&ndash;" }}</div>
+    </div>
+  </div>
+</section>
+
+{% for cat in categories %}
+<section class="findings-section">
+  <h2>{{ cat.category|title }} ({{ cat.findings|length }})</h2>
+  {% if cat.findings %}
+    {% for f in cat.findings %}
+    <div class="finding-block finding-{{ f.severity }}">
+      <div class="finding-header">
+        <span class="check-id">{{ f.check_id }}</span>
+        <span class="finding-name">{{ f.check_name }}</span>
+        <span class="severity-badge">{{ f.severity|upper }}</span>
+        <span class="status-badge status-{{ f.status }}">{{ f.status }}</span>
+      </div>
+      <table class="finding-meta">
+        <tr><th>Owner</th><td>{{ f.owner_agent }}</td></tr>
+        <tr><th>Score</th><td>{{ f.score if f.score is not none else "&ndash;" }} / 10</td></tr>
+        {% if f.confidence is not none %}<tr><th>Confidence</th><td>{{ "%.2f"|format(f.confidence) }}</td></tr>{% endif %}
+        {% if f.page_id %}<tr><th>Page</th><td>{{ f.page_id }}</td></tr>{% endif %}
+      </table>
+      {% if f.evidence_summary %}
+      <div class="finding-evidence">
+        <h4>Evidence</h4>
+        <p>{{ f.evidence_summary }}</p>
+      </div>
+      {% endif %}
+      {% if f.remediation %}
+      <div class="finding-remediation">
+        <h4>Remediation</h4>
+        <p>{{ f.remediation }}</p>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="finding-empty">No findings in this category.</p>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% endblock %}

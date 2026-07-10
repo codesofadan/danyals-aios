@@ -1,0 +1,948 @@
+# Technical SEO Master Checklist
+# Source of truth for Team B (5 agents: B1 Crawl/Index, B2 Performance/CWV, B3 Rendering/JS, B4 Schema, B5 Security/Infra)
+# 101 checks
+
+version: 1
+category: technical
+checks:
+
+  # ----- Robots & Sitemap (4) -----
+  - id: TECH-001
+    name: Robots.txt validation
+    subcategory: robots-sitemap
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [robots]
+    analyzer: audit_engine.analyzers.robots.validate
+    automation: full
+
+  - id: TECH-002
+    name: XML sitemap validation
+    subcategory: robots-sitemap
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [sitemap]
+    analyzer: audit_engine.analyzers.sitemap.validate
+    automation: full
+
+  - id: TECH-003
+    name: Sitemap indexability check
+    subcategory: robots-sitemap
+    owner_agent: B1
+    severity_default: major
+    data_sources: [sitemap, http_headers, crawled_html]
+    analyzer: audit_engine.analyzers.sitemap.indexability
+    automation: full
+
+  - id: TECH-004
+    name: Sitemap URL status analysis
+    subcategory: robots-sitemap
+    owner_agent: B1
+    severity_default: major
+    data_sources: [sitemap, http_status]
+    analyzer: audit_engine.analyzers.sitemap.url_status
+    automation: full
+
+  # ----- Crawlability & Indexability (5) -----
+  - id: TECH-005
+    name: Crawlability analysis
+    subcategory: crawl
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [robots, crawl_log, internal_links]
+    analyzer: audit_engine.analyzers.crawl.overall
+    automation: full
+
+  - id: TECH-006
+    name: Indexability analysis
+    subcategory: indexability
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawled_html, http_headers, robots]
+    analyzer: audit_engine.analyzers.indexability.overall
+    automation: full
+
+  - id: TECH-007
+    name: Crawl budget optimization
+    subcategory: crawl
+    owner_agent: B1
+    severity_default: major
+    data_sources: [sitemap, crawl_log, internal_links]
+    analyzer: audit_engine.analyzers.crawl.budget
+    automation: full
+
+  - id: TECH-008
+    name: Crawl depth analysis
+    subcategory: crawl
+    owner_agent: B1
+    severity_default: major
+    data_sources: [crawl_graph]
+    analyzer: audit_engine.analyzers.crawl.depth
+    automation: full
+
+  - id: TECH-009
+    name: Orphan URL detection
+    subcategory: crawl
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [sitemap, internal_links]
+    analyzer: audit_engine.analyzers.crawl.orphans
+    automation: full
+
+  # ----- Speed Tests (1) -----
+  - id: TECH-010
+    name: Website speed checker by page speed insight
+    subcategory: performance
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.performance.psi_overall
+    automation: full
+
+  # ----- Broken Pages & Errors (4) -----
+  - id: TECH-011
+    name: Broken page detection
+    subcategory: errors
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.errors.broken_pages
+    automation: full
+
+  - id: TECH-012
+    name: 404 error analysis
+    subcategory: errors
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [http_status, internal_links]
+    analyzer: audit_engine.analyzers.errors.four_oh_four
+    automation: full
+
+  - id: TECH-013
+    name: Soft 404 detection
+    subcategory: errors
+    owner_agent: B1
+    severity_default: major
+    data_sources: [http_status, crawled_html]
+    analyzer: audit_engine.analyzers.errors.soft_404
+    automation: full
+
+  - id: TECH-014
+    name: 5XX server error analysis
+    subcategory: errors
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.errors.five_xx
+    automation: full
+
+  # ----- Redirects (4) -----
+  - id: TECH-015
+    name: Redirect chain detection
+    subcategory: redirects
+    owner_agent: B1
+    severity_default: major
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.redirects.chains
+    automation: full
+
+  - id: TECH-016
+    name: Redirect loop detection
+    subcategory: redirects
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.redirects.loops
+    automation: full
+
+  - id: TECH-017
+    name: 301 redirect validation
+    subcategory: redirects
+    owner_agent: B1
+    severity_default: major
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.redirects.three_oh_one
+    automation: full
+
+  - id: TECH-018
+    name: 302 redirect misuse detection
+    subcategory: redirects
+    owner_agent: B1
+    severity_default: major
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.redirects.three_oh_two_misuse
+    automation: full
+
+  # ----- Canonical (3) -----
+  - id: TECH-019
+    name: Canonical tag validation
+    subcategory: canonical
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.canonical.validate
+    automation: full
+
+  - id: TECH-020
+    name: Canonical chain analysis
+    subcategory: canonical
+    owner_agent: B1
+    severity_default: major
+    data_sources: [crawled_html, http_headers]
+    analyzer: audit_engine.analyzers.canonical.chain
+    automation: full
+
+  - id: TECH-021
+    name: Canonical conflict detection
+    subcategory: canonical
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawled_html, http_headers]
+    analyzer: audit_engine.analyzers.canonical.conflict
+    automation: full
+
+  # ----- URL Parameters & Faceted Nav (6) -----
+  - id: TECH-022
+    name: Duplicate URL detection
+    subcategory: duplication
+    owner_agent: B1
+    severity_default: major
+    data_sources: [sitemap, internal_links]
+    analyzer: audit_engine.analyzers.duplication.urls
+    automation: full
+
+  - id: TECH-023
+    name: URL parameter indexing analysis
+    subcategory: url-parameters
+    owner_agent: B1
+    severity_default: major
+    data_sources: [internal_links, crawl_graph]
+    analyzer: audit_engine.analyzers.url_params.indexing
+    automation: full
+
+  - id: TECH-024
+    name: Faceted navigation issues
+    subcategory: url-parameters
+    owner_agent: B1
+    severity_default: major
+    data_sources: [crawl_graph, internal_links]
+    analyzer: audit_engine.analyzers.url_params.faceted_nav
+    automation: full
+
+  - id: TECH-025
+    name: Pagination optimization
+    subcategory: pagination
+    owner_agent: B1
+    severity_default: minor
+    data_sources: [crawled_html, internal_links]
+    analyzer: audit_engine.analyzers.pagination.optimization
+    automation: full
+
+  - id: TECH-026
+    name: Infinite crawl trap detection
+    subcategory: crawl
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawl_graph]
+    analyzer: audit_engine.analyzers.crawl.infinite_trap
+    automation: full
+
+  - id: TECH-027
+    name: Search page indexing detection
+    subcategory: indexability
+    owner_agent: B1
+    severity_default: major
+    data_sources: [internal_links, crawled_html]
+    analyzer: audit_engine.analyzers.indexability.search_pages
+    automation: full
+
+  # ----- JS Rendering (7) -----
+  - id: TECH-028
+    name: JavaScript rendering analysis
+    subcategory: rendering
+    owner_agent: B3
+    severity_default: major
+    data_sources: [crawled_html_raw, rendered_html]
+    analyzer: audit_engine.analyzers.rendering.js
+    automation: full
+
+  - id: TECH-029
+    name: Render blocking resource detection
+    subcategory: rendering
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.rendering.blocking_resources
+    automation: full
+
+  - id: TECH-030
+    name: Mobile rendering analysis
+    subcategory: rendering
+    owner_agent: B3
+    severity_default: critical
+    data_sources: [rendered_html_mobile, psi_mobile]
+    analyzer: audit_engine.analyzers.rendering.mobile
+    automation: full
+
+  - id: TECH-031
+    name: Client side rendering issues
+    subcategory: rendering
+    owner_agent: B3
+    severity_default: major
+    data_sources: [crawled_html_raw, rendered_html]
+    analyzer: audit_engine.analyzers.rendering.csr_issues
+    automation: full
+
+  - id: TECH-032
+    name: DOM rendered content comparison
+    subcategory: rendering
+    owner_agent: B3
+    severity_default: major
+    data_sources: [crawled_html_raw, rendered_html]
+    analyzer: audit_engine.analyzers.rendering.dom_diff
+    automation: full
+
+  - id: TECH-033
+    name: JS hidden content detection
+    subcategory: rendering
+    owner_agent: B3
+    severity_default: major
+    data_sources: [rendered_html]
+    analyzer: audit_engine.analyzers.rendering.js_hidden
+    automation: full
+
+  - id: TECH-034
+    name: Lazy load indexing analysis
+    subcategory: rendering
+    owner_agent: B3
+    severity_default: minor
+    data_sources: [rendered_html]
+    analyzer: audit_engine.analyzers.rendering.lazy_load_indexing
+    automation: full
+
+  # ----- Structured Data (4) -----
+  - id: TECH-035
+    name: Structured data validation
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.validate
+    automation: full
+
+  - id: TECH-036
+    name: Schema error detection
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.errors
+    automation: full
+
+  - id: TECH-037
+    name: Rich result eligibility analysis (technical)
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [schema_blocks, crawled_html]
+    analyzer: audit_engine.analyzers.schema.rich_result_tech
+    automation: full
+
+  - id: TECH-038
+    name: Breadcrumb schema validation
+    subcategory: schema
+    owner_agent: B4
+    severity_default: minor
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.breadcrumb_validate
+    automation: full
+
+  # ----- Core Web Vitals (5) -----
+  - id: TECH-039
+    name: Core Web Vitals analysis (overall)
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: critical
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.overall
+    automation: full
+
+  - id: TECH-040
+    name: Largest Contentful Paint analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: critical
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.lcp
+    automation: full
+
+  - id: TECH-041
+    name: Cumulative Layout Shift analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: critical
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.cls
+    automation: full
+
+  - id: TECH-042
+    name: Interaction to Next Paint analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: critical
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.inp
+    automation: full
+
+  - id: TECH-043
+    name: Time to First Byte analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi, crux, http_timing]
+    analyzer: audit_engine.analyzers.cwv.ttfb
+    automation: full
+
+  # ----- Page Speed Detail (6) -----
+  - id: TECH-044
+    name: Page speed optimization analysis
+    subcategory: performance
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.performance.optimization
+    automation: full
+
+  - id: TECH-045
+    name: Render blocking CSS detection
+    subcategory: performance
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.performance.blocking_css
+    automation: full
+
+  - id: TECH-046
+    name: Render blocking JS detection
+    subcategory: performance
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.performance.blocking_js
+    automation: full
+
+  - id: TECH-047
+    name: Unused CSS detection
+    subcategory: performance
+    owner_agent: B2
+    severity_default: minor
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.performance.unused_css
+    automation: full
+
+  - id: TECH-048
+    name: Unused JS detection
+    subcategory: performance
+    owner_agent: B2
+    severity_default: minor
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.performance.unused_js
+    automation: full
+
+  - id: TECH-049
+    name: Excessive DOM size analysis
+    subcategory: performance
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi, rendered_html]
+    analyzer: audit_engine.analyzers.performance.dom_size
+    automation: full
+
+  # ----- Compression & Caching (5) -----
+  - id: TECH-050
+    name: Compression analysis
+    subcategory: compression
+    owner_agent: B2
+    severity_default: major
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.compression.overall
+    automation: full
+
+  - id: TECH-051
+    name: GZIP validation
+    subcategory: compression
+    owner_agent: B2
+    severity_default: major
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.compression.gzip
+    automation: full
+
+  - id: TECH-052
+    name: Brotli compression validation
+    subcategory: compression
+    owner_agent: B2
+    severity_default: minor
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.compression.brotli
+    automation: full
+
+  - id: TECH-053
+    name: Browser caching analysis
+    subcategory: caching
+    owner_agent: B2
+    severity_default: major
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.caching.browser
+    automation: full
+
+  - id: TECH-054
+    name: CDN optimization analysis
+    subcategory: caching
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [http_headers, dns]
+    analyzer: audit_engine.analyzers.caching.cdn
+    automation: full
+
+  # ----- HTTPS & SSL (4) -----
+  - id: TECH-055
+    name: HTTPS validation
+    subcategory: security
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [http_resp]
+    analyzer: audit_engine.analyzers.security.https
+    automation: full
+
+  - id: TECH-056
+    name: SSL certificate analysis
+    subcategory: security
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [tls_handshake]
+    analyzer: audit_engine.analyzers.security.ssl_cert
+    automation: full
+
+  - id: TECH-057
+    name: Mixed content detection
+    subcategory: security
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.security.mixed_content
+    automation: full
+
+  - id: TECH-058
+    name: HTTP to HTTPS redirect validation
+    subcategory: security
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.security.http_to_https
+    automation: full
+
+  # ----- Domain Consistency (2) -----
+  - id: TECH-059
+    name: WWW vs non WWW consistency
+    subcategory: domain
+    owner_agent: B5
+    severity_default: major
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.domain.www_consistency
+    automation: full
+
+  - id: TECH-060
+    name: Trailing slash consistency
+    subcategory: domain
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [http_status]
+    analyzer: audit_engine.analyzers.domain.trailing_slash
+    automation: full
+
+  # ----- International / Hreflang (2) -----
+  - id: TECH-061
+    name: Hreflang validation
+    subcategory: international
+    owner_agent: B5
+    severity_default: major
+    data_sources: [crawled_html, http_headers, sitemap]
+    analyzer: audit_engine.analyzers.international.hreflang_validate
+    automation: full
+
+  - id: TECH-062
+    name: International SEO analysis
+    subcategory: international
+    owner_agent: B5
+    severity_default: major
+    data_sources: [crawled_html, sitemap]
+    analyzer: audit_engine.analyzers.international.overall
+    automation: ai-assisted
+
+  # ----- Mobile (4) -----
+  - id: TECH-063
+    name: Mobile friendliness analysis (technical)
+    subcategory: mobile
+    owner_agent: B2
+    severity_default: critical
+    data_sources: [psi_mobile]
+    analyzer: audit_engine.analyzers.mobile.friendliness_tech
+    automation: full
+
+  - id: TECH-064
+    name: Mobile usability issue detection
+    subcategory: mobile
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi_mobile]
+    analyzer: audit_engine.analyzers.mobile.usability
+    automation: full
+
+  - id: TECH-065
+    name: Responsive design validation
+    subcategory: mobile
+    owner_agent: B2
+    severity_default: major
+    data_sources: [rendered_html, screenshot_breakpoints]
+    analyzer: audit_engine.analyzers.mobile.responsive
+    automation: full
+
+  - id: TECH-066
+    name: Viewport configuration analysis
+    subcategory: mobile
+    owner_agent: B2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.mobile.viewport
+    automation: full
+
+  # ----- AMP (1) -----
+  - id: TECH-067
+    name: AMP validation if applicable
+    subcategory: amp
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.amp.validate
+    automation: full
+
+  # ----- Internal Linking (2, technical view) -----
+  - id: TECH-068
+    name: Internal linking crawl analysis
+    subcategory: internal-links
+    owner_agent: B1
+    severity_default: major
+    data_sources: [internal_links, crawl_graph]
+    analyzer: audit_engine.analyzers.internal_links.crawl
+    automation: full
+
+  - id: TECH-069
+    name: Link equity flow analysis
+    subcategory: internal-links
+    owner_agent: B1
+    severity_default: major
+    data_sources: [internal_links, crawl_graph]
+    analyzer: audit_engine.analyzers.internal_links.equity_flow
+    automation: full
+
+  # ----- Log Analysis (2) -----
+  - id: TECH-070
+    name: Crawl log analysis
+    subcategory: crawl-logs
+    owner_agent: B1
+    severity_default: minor
+    data_sources: [server_logs]
+    analyzer: audit_engine.analyzers.crawl_logs.overall
+    automation: full
+
+  - id: TECH-071
+    name: Googlebot activity analysis
+    subcategory: crawl-logs
+    owner_agent: B1
+    severity_default: minor
+    data_sources: [server_logs]
+    analyzer: audit_engine.analyzers.crawl_logs.googlebot
+    automation: full
+
+  # ----- Server (1) -----
+  - id: TECH-072
+    name: Server response analysis
+    subcategory: server
+    owner_agent: B5
+    severity_default: major
+    data_sources: [http_timing, http_headers]
+    analyzer: audit_engine.analyzers.server.response
+    automation: full
+
+  # ----- HTML Validation (2) -----
+  - id: TECH-073
+    name: HTML validation analysis
+    subcategory: html
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [crawled_html, w3c_validator]
+    analyzer: audit_engine.analyzers.html.validate
+    automation: full
+
+  - id: TECH-074
+    name: Semantic HTML structure analysis (technical)
+    subcategory: html
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.html.semantic_tech
+    automation: full
+
+  # ----- Thin / Duplicate / Index Bloat (4) -----
+  - id: TECH-075
+    name: Thin page detection (technical)
+    subcategory: low-quality
+    owner_agent: B1
+    severity_default: major
+    data_sources: [crawled_html, site_pages]
+    analyzer: audit_engine.analyzers.low_quality.thin_pages
+    automation: full
+
+  - id: TECH-076
+    name: Duplicate page detection (technical)
+    subcategory: duplication
+    owner_agent: B1
+    severity_default: major
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.duplication.pages
+    automation: full
+
+  - id: TECH-077
+    name: Duplicate metadata analysis
+    subcategory: duplication
+    owner_agent: B1
+    severity_default: major
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.duplication.metadata
+    automation: full
+
+  - id: TECH-078
+    name: Index bloat detection
+    subcategory: indexability
+    owner_agent: B1
+    severity_default: major
+    data_sources: [sitemap, gsc_coverage]
+    analyzer: audit_engine.analyzers.indexability.bloat
+    automation: full
+
+  # ----- Spam / Penalties (5) -----
+  - id: TECH-079
+    name: Low quality page detection (technical)
+    subcategory: low-quality
+    owner_agent: B1
+    severity_default: major
+    data_sources: [crawled_html, site_pages]
+    analyzer: audit_engine.analyzers.low_quality.overall
+    automation: ai-assisted
+
+  - id: TECH-080
+    name: AI generated spam detection
+    subcategory: spam
+    owner_agent: B1
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.spam.ai_generated
+    automation: ai-assisted
+
+  - id: TECH-081
+    name: Spam page detection
+    subcategory: spam
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.spam.pages
+    automation: ai-assisted
+
+  - id: TECH-082
+    name: Malware detection
+    subcategory: security
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [crawled_html, http_headers]
+    analyzer: audit_engine.analyzers.security.malware
+    automation: full
+
+  - id: TECH-083
+    name: Hidden page detection
+    subcategory: spam
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [robots, sitemap, crawled_html]
+    analyzer: audit_engine.analyzers.spam.hidden_pages
+    automation: full
+
+  - id: TECH-084
+    name: Cloaking detection
+    subcategory: spam
+    owner_agent: B3
+    severity_default: critical
+    data_sources: [crawled_html_googlebot_ua, crawled_html_user_ua]
+    analyzer: audit_engine.analyzers.spam.cloaking
+    automation: full
+
+  # ----- Security Headers (1) -----
+  - id: TECH-085
+    name: Security header analysis
+    subcategory: security
+    owner_agent: B5
+    severity_default: major
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.security.headers
+    automation: full
+
+  # ----- Social Markup (2) -----
+  - id: TECH-086
+    name: Open Graph validation
+    subcategory: social
+    owner_agent: B4
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.social.opengraph
+    automation: full
+
+  - id: TECH-087
+    name: Twitter card validation
+    subcategory: social
+    owner_agent: B4
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.social.twitter_card
+    automation: full
+
+  # ----- Image & Video Indexing (4) -----
+  - id: TECH-088
+    name: Image crawlability analysis
+    subcategory: media
+    owner_agent: B1
+    severity_default: minor
+    data_sources: [crawled_html, robots]
+    analyzer: audit_engine.analyzers.media.image_crawlability
+    automation: full
+
+  - id: TECH-089
+    name: Image indexing analysis
+    subcategory: media
+    owner_agent: B1
+    severity_default: minor
+    data_sources: [crawled_html, sitemap]
+    analyzer: audit_engine.analyzers.media.image_indexing
+    automation: full
+
+  - id: TECH-090
+    name: WebP support analysis
+    subcategory: media
+    owner_agent: B2
+    severity_default: minor
+    data_sources: [crawled_html, http_resp]
+    analyzer: audit_engine.analyzers.media.webp_support
+    automation: full
+
+  - id: TECH-091
+    name: Video indexing analysis
+    subcategory: media
+    owner_agent: B1
+    severity_default: minor
+    data_sources: [crawled_html, sitemap, schema_blocks]
+    analyzer: audit_engine.analyzers.media.video_indexing
+    automation: full
+
+  # ----- Accessibility (1) -----
+  - id: TECH-092
+    name: Accessibility analysis
+    subcategory: accessibility
+    owner_agent: B5
+    severity_default: major
+    data_sources: [rendered_html, axe_results]
+    analyzer: audit_engine.analyzers.accessibility.overall
+    automation: full
+
+  # ----- Broken / XML errors (2) -----
+  - id: TECH-093
+    name: Broken structured data analysis
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.broken
+    automation: full
+
+  - id: TECH-094
+    name: XML errors analysis
+    subcategory: robots-sitemap
+    owner_agent: B1
+    severity_default: major
+    data_sources: [sitemap, schema_blocks]
+    analyzer: audit_engine.analyzers.robots.xml_errors
+    automation: full
+
+  # ----- Header & Content-Type (2) -----
+  - id: TECH-095
+    name: Header response validation
+    subcategory: server
+    owner_agent: B5
+    severity_default: major
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.server.headers
+    automation: full
+
+  - id: TECH-096
+    name: Content type validation
+    subcategory: server
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.server.content_type
+    automation: full
+
+  # ----- HTTP/2, HTTP/3 (2) -----
+  - id: TECH-097
+    name: HTTP/2 validation
+    subcategory: server
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.server.http2
+    automation: full
+
+  - id: TECH-098
+    name: HTTP/3 validation
+    subcategory: server
+    owner_agent: B5
+    severity_default: minor
+    data_sources: [http_headers]
+    analyzer: audit_engine.analyzers.server.http3
+    automation: full
+
+  # ----- Hosting & Latency (2) -----
+  - id: TECH-099
+    name: Server latency analysis
+    subcategory: server
+    owner_agent: B5
+    severity_default: major
+    data_sources: [http_timing]
+    analyzer: audit_engine.analyzers.server.latency
+    automation: full
+
+  - id: TECH-100
+    name: Hosting performance analysis
+    subcategory: server
+    owner_agent: B5
+    severity_default: major
+    data_sources: [http_timing, dns]
+    analyzer: audit_engine.analyzers.server.hosting_performance
+    automation: full
+
+  # ----- Overall Score (1) -----
+  - id: TECH-101
+    name: Overall technical SEO score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.technical_overall
+    automation: full

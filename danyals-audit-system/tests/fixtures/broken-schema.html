@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Test Business - Broken Schema Fixture</title>
+  <meta name="description" content="This fixture deliberately ships malformed JSON-LD plus a LocalBusiness without required address, to exercise the schema validator branch.">
+  <script type="application/ld+json">
+  { not valid json
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "LocalBusiness",
+    "name": "Test Business"
+  }
+  </script>
+</head>
+<body>
+  <h1>Test Business</h1>
+  <p>This page exists to test the schema validator's error path. The first JSON-LD block is malformed; the second is structurally valid JSON but missing the LocalBusiness 'address' required property.</p>
+</body>
+</html>

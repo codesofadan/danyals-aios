@@ -1,0 +1,11 @@
+{
+  "_readme": "Single source of truth for client-facing branding (Danyal build). Fill these in when Danyal sends his details - nothing else needs to change. Read by: scripts/generate_audit_pdf.py (report header + closing CTA), audit_engine reporters (cover/footer brand line), the /audit skill (closing CTA section), and the M5 QA validator (contact-email gate). Placeholder values are safe: reports still render, they just show the placeholders.",
+  "client_name": "Danyal",
+  "brand_name": "Danyal's Agency",
+  "brand_bold": "SEO-AUDIT",
+  "brand_suffix": "· OS Audit Engine",
+  "contact_email": "danyal@example.com",
+  "website": "",
+  "accent_color": "",
+  "logo_path": ""
+}

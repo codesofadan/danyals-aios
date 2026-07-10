@@ -1,0 +1,1328 @@
+# On-Page SEO Master Checklist
+# Source of truth for Team A (5 agents: A1 Content/EEAT, A2 Keyword/Semantic, A3 Headings/Meta, A4 Internal Links, A5 GEO/AI Search)
+# 118 checks (local-specific items extracted to local.yaml; technical schema duplicates live in technical.yaml)
+#
+# Each entry schema:
+#   id, name, subcategory, owner_agent, severity_default, data_sources, analyzer, automation
+# Fields filled progressively in later phases:
+#   evaluation_rubric, score_weight, reference, remediation_template
+
+version: 1
+category: on-page
+checks:
+
+  # ----- Search Intent (5) -----
+  - id: ON-001
+    name: Search intent match analysis
+    subcategory: search-intent
+    owner_agent: A2
+    severity_default: critical
+    data_sources: [crawled_html, serper_top10, gsc_query]
+    analyzer: audit_engine.analyzers.search_intent.match
+    automation: ai-assisted
+
+  - id: ON-002
+    name: User query satisfaction check
+    subcategory: search-intent
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, gsc_query, serper_top10]
+    analyzer: audit_engine.analyzers.search_intent.query_satisfaction
+    automation: ai-assisted
+
+  - id: ON-003
+    name: SERP intent comparison
+    subcategory: search-intent
+    owner_agent: A2
+    severity_default: major
+    data_sources: [serper_top10, crawled_html]
+    analyzer: audit_engine.analyzers.search_intent.serp_compare
+    automation: ai-assisted
+
+  - id: ON-004
+    name: Search intent alignment score
+    subcategory: search-intent
+    owner_agent: A2
+    severity_default: major
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.search_intent.alignment
+    automation: full
+
+  - id: ON-005
+    name: Commercial intent optimization
+    subcategory: search-intent
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, serper_top10]
+    analyzer: audit_engine.analyzers.search_intent.commercial_intent
+    automation: ai-assisted
+
+  # ----- Keyword Optimization (8) -----
+  - id: ON-006
+    name: Primary keyword optimization
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: critical
+    data_sources: [crawled_html, moz_keyword]
+    analyzer: audit_engine.analyzers.keywords.primary
+    automation: full
+
+  - id: ON-007
+    name: Secondary keyword optimization
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, moz_keyword]
+    analyzer: audit_engine.analyzers.keywords.secondary
+    automation: full
+
+  - id: ON-008
+    name: Long tail keyword coverage
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, moz_keyword, gsc_query]
+    analyzer: audit_engine.analyzers.keywords.long_tail
+    automation: ai-assisted
+
+  - id: ON-009
+    name: Semantic keyword relevance
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, google_nl, embeddings]
+    analyzer: audit_engine.analyzers.keywords.semantic_relevance
+    automation: ai-assisted
+
+  - id: ON-010
+    name: NLP keyword coverage
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, google_nl]
+    analyzer: audit_engine.analyzers.keywords.nlp_coverage
+    automation: full
+
+  - id: ON-011
+    name: Keyword stuffing detection
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.keywords.stuffing
+    automation: full
+
+  - id: ON-012
+    name: Semantic over optimization detection
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, google_nl]
+    analyzer: audit_engine.analyzers.keywords.semantic_over_opt
+    automation: ai-assisted
+
+  - id: ON-013
+    name: Keyword cannibalization detection
+    subcategory: keywords
+    owner_agent: A2
+    severity_default: critical
+    data_sources: [site_pages, gsc_query]
+    analyzer: audit_engine.analyzers.keywords.cannibalization
+    automation: full
+
+  # ----- Entities & Topics (7) -----
+  - id: ON-014
+    name: Related entities optimization
+    subcategory: entities
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, google_nl]
+    analyzer: audit_engine.analyzers.entities.related
+    automation: full
+
+  - id: ON-015
+    name: Entity relationship analysis
+    subcategory: entities
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html, google_nl, wikidata]
+    analyzer: audit_engine.analyzers.entities.relationships
+    automation: ai-assisted
+
+  - id: ON-016
+    name: Topic completeness analysis
+    subcategory: topics
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html, serper_top10, embeddings]
+    analyzer: audit_engine.analyzers.topics.completeness
+    automation: ai-assisted
+
+  - id: ON-017
+    name: Missing subtopics detection
+    subcategory: topics
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, serper_top10, embeddings]
+    analyzer: audit_engine.analyzers.topics.missing_subtopics
+    automation: ai-assisted
+
+  - id: ON-018
+    name: Competitor content gap analysis
+    subcategory: topics
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html, serper_top10, competitor_crawl]
+    analyzer: audit_engine.analyzers.topics.competitor_gap
+    automation: ai-assisted
+
+  - id: ON-019
+    name: Topical authority analysis
+    subcategory: topics
+    owner_agent: A1
+    severity_default: major
+    data_sources: [site_pages, moz_keyword, gsc_query]
+    analyzer: audit_engine.analyzers.topics.authority
+    automation: ai-assisted
+
+  - id: ON-020
+    name: Internal topical relevance analysis
+    subcategory: topics
+    owner_agent: A4
+    severity_default: major
+    data_sources: [site_pages, internal_links]
+    analyzer: audit_engine.analyzers.topics.internal_relevance
+    automation: full
+
+  - id: ON-021
+    name: Topic cluster integration
+    subcategory: topics
+    owner_agent: A4
+    severity_default: major
+    data_sources: [site_pages, internal_links, embeddings]
+    analyzer: audit_engine.analyzers.topics.cluster_integration
+    automation: ai-assisted
+
+  # ----- Content Quality & E-E-A-T (12) -----
+  - id: ON-022
+    name: Content depth analysis
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html, serper_top10]
+    analyzer: audit_engine.analyzers.content.depth
+    automation: ai-assisted
+
+  - id: ON-023
+    name: Thin content detection
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.content.thin
+    automation: full
+
+  - id: ON-024
+    name: AI generated fluff detection
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.content.ai_fluff
+    automation: ai-assisted
+
+  - id: ON-025
+    name: Helpful content evaluation
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html, gsc_query]
+    analyzer: audit_engine.analyzers.content.helpful_content
+    automation: ai-assisted
+
+  - id: ON-026
+    name: EEAT optimization analysis
+    subcategory: eeat
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html, site_pages]
+    analyzer: audit_engine.analyzers.eeat.overall
+    automation: ai-assisted
+
+  - id: ON-027
+    name: Expertise signal detection
+    subcategory: eeat
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, site_pages]
+    analyzer: audit_engine.analyzers.eeat.expertise
+    automation: ai-assisted
+
+  - id: ON-028
+    name: Trust signal analysis
+    subcategory: eeat
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html, site_pages]
+    analyzer: audit_engine.analyzers.eeat.trust
+    automation: ai-assisted
+
+  - id: ON-029
+    name: Author credibility analysis
+    subcategory: eeat
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, schema_blocks]
+    analyzer: audit_engine.analyzers.eeat.author
+    automation: ai-assisted
+
+  - id: ON-030
+    name: Content originality check
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, web_search]
+    analyzer: audit_engine.analyzers.content.originality
+    automation: ai-assisted
+
+  - id: ON-031
+    name: Information gain analysis
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, serper_top10]
+    analyzer: audit_engine.analyzers.content.information_gain
+    automation: ai-assisted
+
+  - id: ON-032
+    name: Content freshness analysis
+    subcategory: content-quality
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, schema_blocks]
+    analyzer: audit_engine.analyzers.content.freshness
+    automation: full
+
+  - id: ON-033
+    name: Semantic relevance score
+    subcategory: content-quality
+    owner_agent: A2
+    severity_default: major
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.content.semantic_relevance
+    automation: full
+
+  # ----- Title Tag (4) -----
+  - id: ON-034
+    name: Title tag optimization
+    subcategory: titles
+    owner_agent: A3
+    severity_default: critical
+    data_sources: [crawled_html, serper_top10]
+    analyzer: audit_engine.analyzers.titles.optimization
+    automation: full
+
+  - id: ON-035
+    name: Title CTR optimization
+    subcategory: titles
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html, gsc_ctr]
+    analyzer: audit_engine.analyzers.titles.ctr
+    automation: ai-assisted
+
+  - id: ON-036
+    name: Title uniqueness check
+    subcategory: titles
+    owner_agent: A3
+    severity_default: critical
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.titles.uniqueness
+    automation: full
+
+  - id: ON-037
+    name: Title keyword placement
+    subcategory: titles
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html, moz_keyword]
+    analyzer: audit_engine.analyzers.titles.keyword_placement
+    automation: full
+
+  # ----- Meta Description (3) -----
+  - id: ON-038
+    name: Meta description optimization
+    subcategory: meta-description
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.meta.description_optimization
+    automation: full
+
+  - id: ON-039
+    name: Meta description CTR analysis
+    subcategory: meta-description
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html, gsc_ctr]
+    analyzer: audit_engine.analyzers.meta.description_ctr
+    automation: ai-assisted
+
+  - id: ON-040
+    name: Meta description uniqueness
+    subcategory: meta-description
+    owner_agent: A3
+    severity_default: major
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.meta.description_uniqueness
+    automation: full
+
+  # ----- Headings (5) -----
+  - id: ON-041
+    name: H1 optimization
+    subcategory: headings
+    owner_agent: A3
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.headings.h1_optimization
+    automation: full
+
+  - id: ON-042
+    name: Multiple H1 detection
+    subcategory: headings
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.headings.multiple_h1
+    automation: full
+
+  - id: ON-043
+    name: Heading hierarchy analysis
+    subcategory: headings
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.headings.hierarchy
+    automation: full
+
+  - id: ON-044
+    name: Semantic heading optimization
+    subcategory: headings
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html, google_nl]
+    analyzer: audit_engine.analyzers.headings.semantic
+    automation: ai-assisted
+
+  - id: ON-045
+    name: Question based heading detection
+    subcategory: headings
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.headings.question_based
+    automation: full
+
+  # ----- Featured Snippets, AI Overview, FAQ (5) -----
+  - id: ON-046
+    name: Featured snippet optimization
+    subcategory: snippets
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html, serper_top10]
+    analyzer: audit_engine.analyzers.snippets.featured
+    automation: ai-assisted
+
+  - id: ON-047
+    name: Passage ranking optimization
+    subcategory: snippets
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.snippets.passage
+    automation: ai-assisted
+
+  - id: ON-048
+    name: AI overview optimization
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html, serper_top10, otterly]
+    analyzer: audit_engine.analyzers.ai_search.overview
+    automation: ai-assisted
+
+  - id: ON-049
+    name: Direct answer optimization
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.ai_search.direct_answer
+    automation: ai-assisted
+
+  - id: ON-050
+    name: FAQ optimization
+    subcategory: snippets
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html, schema_blocks]
+    analyzer: audit_engine.analyzers.snippets.faq
+    automation: full
+
+  # ----- Readability & Scannability (7) -----
+  - id: ON-051
+    name: Content readability analysis
+    subcategory: readability
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.readability.flesch
+    automation: full
+
+  - id: ON-052
+    name: Reading flow optimization
+    subcategory: readability
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.readability.flow
+    automation: ai-assisted
+
+  - id: ON-053
+    name: Paragraph length analysis
+    subcategory: readability
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.readability.paragraph_length
+    automation: full
+
+  - id: ON-054
+    name: Sentence complexity analysis
+    subcategory: readability
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.readability.sentence_complexity
+    automation: full
+
+  - id: ON-055
+    name: Content scannability analysis
+    subcategory: readability
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.readability.scannability
+    automation: full
+
+  - id: ON-056
+    name: Intro optimization
+    subcategory: readability
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.readability.intro
+    automation: ai-assisted
+
+  - id: ON-057
+    name: Above the fold optimization
+    subcategory: readability
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html, screenshot]
+    analyzer: audit_engine.analyzers.readability.above_fold
+    automation: ai-assisted
+
+  # ----- Internal Links (7) -----
+  - id: ON-058
+    name: Anchor text optimization
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: major
+    data_sources: [internal_links]
+    analyzer: audit_engine.analyzers.links.anchor_text
+    automation: full
+
+  - id: ON-059
+    name: Internal link relevance
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: major
+    data_sources: [internal_links, embeddings]
+    analyzer: audit_engine.analyzers.links.internal_relevance
+    automation: ai-assisted
+
+  - id: ON-060
+    name: Internal link depth analysis
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: major
+    data_sources: [internal_links, crawl_graph]
+    analyzer: audit_engine.analyzers.links.depth
+    automation: full
+
+  - id: ON-061
+    name: Orphan page detection
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: critical
+    data_sources: [internal_links, sitemap]
+    analyzer: audit_engine.analyzers.links.orphans
+    automation: full
+
+  - id: ON-062
+    name: Link equity distribution analysis
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: major
+    data_sources: [internal_links, crawl_graph]
+    analyzer: audit_engine.analyzers.links.equity_distribution
+    automation: full
+
+  - id: ON-063
+    name: Broken internal links detection
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: critical
+    data_sources: [internal_links, http_status]
+    analyzer: audit_engine.analyzers.links.broken_internal
+    automation: full
+
+  - id: ON-064
+    name: Contextual linking analysis
+    subcategory: internal-links
+    owner_agent: A4
+    severity_default: major
+    data_sources: [internal_links, crawled_html]
+    analyzer: audit_engine.analyzers.links.contextual
+    automation: ai-assisted
+
+  # ----- External Links (2) -----
+  - id: ON-065
+    name: External link quality analysis
+    subcategory: external-links
+    owner_agent: A4
+    severity_default: major
+    data_sources: [crawled_html, moz_da]
+    analyzer: audit_engine.analyzers.links.external_quality
+    automation: full
+
+  - id: ON-066
+    name: Outbound authority link analysis
+    subcategory: external-links
+    owner_agent: A4
+    severity_default: minor
+    data_sources: [crawled_html, moz_da]
+    analyzer: audit_engine.analyzers.links.outbound_authority
+    automation: full
+
+  # ----- Images (6) -----
+  - id: ON-067
+    name: Image alt text optimization
+    subcategory: images
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.images.alt_text
+    automation: full
+
+  - id: ON-068
+    name: Image semantic relevance
+    subcategory: images
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html, google_nl]
+    analyzer: audit_engine.analyzers.images.semantic_relevance
+    automation: ai-assisted
+
+  - id: ON-069
+    name: Image filename optimization
+    subcategory: images
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.images.filename
+    automation: full
+
+  - id: ON-070
+    name: Image compression analysis
+    subcategory: images
+    owner_agent: A3
+    severity_default: major
+    data_sources: [crawled_html, http_resp]
+    analyzer: audit_engine.analyzers.images.compression
+    automation: full
+
+  - id: ON-071
+    name: WebP image usage check
+    subcategory: images
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html, http_resp]
+    analyzer: audit_engine.analyzers.images.webp_usage
+    automation: full
+
+  - id: ON-072
+    name: Lazy loading optimization
+    subcategory: images
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.images.lazy_loading
+    automation: full
+
+  # ----- Schema on-page (6) - validation duplicates also in technical.yaml -----
+  - id: ON-073
+    name: Schema markup validation
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [crawled_html, schema_blocks]
+    analyzer: audit_engine.analyzers.schema.on_page_validation
+    automation: full
+
+  - id: ON-074
+    name: FAQ schema optimization
+    subcategory: schema
+    owner_agent: B4
+    severity_default: minor
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.faq
+    automation: full
+
+  - id: ON-075
+    name: Article schema validation
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.article
+    automation: full
+
+  - id: ON-076
+    name: Service schema optimization
+    subcategory: schema
+    owner_agent: B4
+    severity_default: minor
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.service
+    automation: full
+
+  - id: ON-077
+    name: Breadcrumb schema validation
+    subcategory: schema
+    owner_agent: B4
+    severity_default: minor
+    data_sources: [schema_blocks]
+    analyzer: audit_engine.analyzers.schema.breadcrumb
+    automation: full
+
+  - id: ON-078
+    name: Rich result eligibility analysis
+    subcategory: schema
+    owner_agent: B4
+    severity_default: major
+    data_sources: [schema_blocks, crawled_html]
+    analyzer: audit_engine.analyzers.schema.rich_result_eligibility
+    automation: full
+
+  # ----- Canonical / Indexability (3) -----
+  - id: ON-079
+    name: Canonical tag validation (on-page)
+    subcategory: canonical
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.canonical.on_page
+    automation: full
+
+  - id: ON-080
+    name: Indexability analysis (on-page)
+    subcategory: indexability
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [crawled_html, robots, http_headers]
+    analyzer: audit_engine.analyzers.indexability.on_page
+    automation: full
+
+  - id: ON-081
+    name: Crawlability analysis (on-page)
+    subcategory: crawlability
+    owner_agent: B1
+    severity_default: critical
+    data_sources: [robots, crawled_html]
+    analyzer: audit_engine.analyzers.crawlability.on_page
+    automation: full
+
+  # ----- Mobile (2) -----
+  - id: ON-082
+    name: Mobile friendliness analysis (on-page)
+    subcategory: mobile
+    owner_agent: B2
+    severity_default: critical
+    data_sources: [psi_mobile]
+    analyzer: audit_engine.analyzers.mobile.friendliness
+    automation: full
+
+  - id: ON-083
+    name: Mobile content parity analysis
+    subcategory: mobile
+    owner_agent: B3
+    severity_default: critical
+    data_sources: [crawled_html_mobile, crawled_html_desktop]
+    analyzer: audit_engine.analyzers.mobile.parity
+    automation: full
+
+  # ----- Core Web Vitals impact (6) -----
+  - id: ON-084
+    name: Core Web Vitals impact on SEO
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.seo_impact
+    automation: full
+
+  - id: ON-085
+    name: LCP element analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.cwv.lcp_element
+    automation: full
+
+  - id: ON-086
+    name: CLS issue detection
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi]
+    analyzer: audit_engine.analyzers.cwv.cls_issues
+    automation: full
+
+  - id: ON-087
+    name: INP interaction analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.inp
+    automation: full
+
+  - id: ON-088
+    name: Page speed impact analysis
+    subcategory: cwv
+    owner_agent: B2
+    severity_default: major
+    data_sources: [psi, crux]
+    analyzer: audit_engine.analyzers.cwv.page_speed_impact
+    automation: full
+
+  - id: ON-089
+    name: UX signal analysis
+    subcategory: ux
+    owner_agent: B2
+    severity_default: minor
+    data_sources: [crux, gsc_query]
+    analyzer: audit_engine.analyzers.ux.signals
+    automation: ai-assisted
+
+  # ----- User Engagement & Conversion (5) -----
+  - id: ON-090
+    name: User engagement optimization
+    subcategory: engagement
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html, gsc_query]
+    analyzer: audit_engine.analyzers.engagement.optimization
+    automation: ai-assisted
+
+  - id: ON-091
+    name: Bounce risk detection
+    subcategory: engagement
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.engagement.bounce_risk
+    automation: ai-assisted
+
+  - id: ON-092
+    name: Conversion focused content analysis
+    subcategory: conversion
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.conversion.content_focus
+    automation: ai-assisted
+
+  - id: ON-093
+    name: CTA optimization analysis
+    subcategory: conversion
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.conversion.cta
+    automation: ai-assisted
+
+  - id: ON-094
+    name: Trust element optimization
+    subcategory: conversion
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.conversion.trust_elements
+    automation: ai-assisted
+
+  # ----- Duplicate Content (3) -----
+  - id: ON-095
+    name: Duplicate content detection
+    subcategory: duplication
+    owner_agent: A2
+    severity_default: major
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.duplication.content
+    automation: full
+
+  - id: ON-096
+    name: Semantic duplication analysis
+    subcategory: duplication
+    owner_agent: A2
+    severity_default: major
+    data_sources: [site_pages, embeddings]
+    analyzer: audit_engine.analyzers.duplication.semantic
+    automation: ai-assisted
+
+  # ----- URL Structure (3) -----
+  - id: ON-097
+    name: URL optimization analysis
+    subcategory: url
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.url.optimization
+    automation: full
+
+  - id: ON-098
+    name: SEO friendly slug analysis
+    subcategory: url
+    owner_agent: A3
+    severity_default: minor
+    data_sources: [site_pages]
+    analyzer: audit_engine.analyzers.url.slug
+    automation: full
+
+  - id: ON-099
+    name: HTTPS validation (on-page)
+    subcategory: security
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [http_resp]
+    analyzer: audit_engine.analyzers.security.https_on_page
+    automation: full
+
+  # ----- Structured Content (3) -----
+  - id: ON-100
+    name: Structured content analysis
+    subcategory: structured-content
+    owner_agent: A5
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.structured_content.analysis
+    automation: full
+
+  - id: ON-101
+    name: Table optimization for snippets
+    subcategory: structured-content
+    owner_agent: A5
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.structured_content.tables
+    automation: full
+
+  - id: ON-102
+    name: List optimization for snippets
+    subcategory: structured-content
+    owner_agent: A5
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.structured_content.lists
+    automation: full
+
+  # ----- AI Search Readiness / GEO (5) -----
+  - id: ON-103
+    name: Content extraction optimization for AI search
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.ai_search.extraction
+    automation: ai-assisted
+
+  - id: ON-104
+    name: LLM readability optimization
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.ai_search.llm_readability
+    automation: ai-assisted
+
+  - id: ON-105
+    name: Generative search optimization
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html, otterly]
+    analyzer: audit_engine.analyzers.ai_search.generative
+    automation: ai-assisted
+
+  - id: ON-106
+    name: AI crawl readiness analysis
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [robots, llms_txt, http_headers]
+    analyzer: audit_engine.analyzers.ai_search.crawl_readiness
+    automation: full
+
+  - id: ON-107
+    name: Semantic HTML structure analysis
+    subcategory: ai-search
+    owner_agent: A5
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.ai_search.semantic_html
+    automation: full
+
+  # ----- Penalty / Spam (4) -----
+  - id: ON-108
+    name: Hidden content detection
+    subcategory: penalties
+    owner_agent: B5
+    severity_default: critical
+    data_sources: [crawled_html, rendered_html]
+    analyzer: audit_engine.analyzers.penalties.hidden_content
+    automation: full
+
+  - id: ON-109
+    name: Over optimization penalty detection
+    subcategory: penalties
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.penalties.over_optimization
+    automation: ai-assisted
+
+  - id: ON-110
+    name: Spam signal detection (on-page)
+    subcategory: penalties
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.penalties.spam_signals
+    automation: ai-assisted
+
+  - id: ON-111
+    name: Low quality page detection (on-page)
+    subcategory: penalties
+    owner_agent: A1
+    severity_default: critical
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.penalties.low_quality
+    automation: ai-assisted
+
+  # ----- Scoring (7) -----
+  - id: ON-112
+    name: User value score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.user_value
+    automation: full
+
+  - id: ON-113
+    name: Topical relevance score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.topical_relevance
+    automation: full
+
+  - id: ON-114
+    name: Semantic SEO score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.semantic_seo
+    automation: full
+
+  - id: ON-115
+    name: Content quality scoring (overall)
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.content_quality
+    automation: full
+
+  - id: ON-116
+    name: Title tag overall score (rollup)
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.titles
+    automation: full
+
+  - id: ON-117
+    name: Meta tag overall score (rollup)
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.meta
+    automation: full
+
+  - id: ON-118
+    name: Overall on page SEO score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.on_page_overall
+    automation: full
+
+  # ===========================================================================
+  # MODULE 3 - Semantic SEO + Topical Authority + Koray Framework
+  # All deterministic, no LLM cost. Submodules 3.1 - 3.9 of the Advanced Audit
+  # Tool Features spec. Owned by A2 (Keyword/Semantic) with light A1 overlap.
+  # ===========================================================================
+
+  # ----- 3.1 Central Entity & Knowledge Domain Audit (2) -----
+  - id: ON-119
+    name: Central entity coherence (title / H1 / Organization schema)
+    subcategory: semantic-3.1-central-entity
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_central_entity_coherence
+    automation: full
+
+  - id: ON-120
+    name: Knowledge domain consistency across corpus
+    subcategory: semantic-3.1-central-entity
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_knowledge_domain_consistency
+    automation: full
+
+  # ----- 3.2 Entity Audit (3) -----
+  - id: ON-121
+    name: Entity coverage breadth (proper nouns per page)
+    subcategory: semantic-3.2-entity
+    owner_agent: A2
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_entity_coverage
+    automation: full
+
+  - id: ON-122
+    name: sameAs / external entity link presence
+    subcategory: semantic-3.2-entity
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_sameas_presence
+    automation: full
+
+  - id: ON-123
+    name: Organization schema entity completeness
+    subcategory: semantic-3.2-entity
+    owner_agent: B4
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_organization_schema_completeness
+    automation: full
+
+  # ----- 3.3 Topical Map & Topical Authority Audit (4) -----
+  - id: ON-124
+    name: Topical cluster identification (URL path grouping)
+    subcategory: semantic-3.3-topical-map
+    owner_agent: A2
+    severity_default: major
+    data_sources: [computed]
+    analyzer: audit_engine.analyzers.semantic_seo.check_topical_clusters
+    automation: full
+
+  - id: ON-125
+    name: Cluster depth (pages + words per topical cluster)
+    subcategory: semantic-3.3-topical-map
+    owner_agent: A2
+    severity_default: major
+    data_sources: [computed]
+    analyzer: audit_engine.analyzers.semantic_seo.check_cluster_depth
+    automation: full
+
+  - id: ON-126
+    name: Hub and spoke internal link integrity
+    subcategory: semantic-3.3-topical-map
+    owner_agent: A4
+    severity_default: major
+    data_sources: [computed]
+    analyzer: audit_engine.analyzers.semantic_seo.check_hub_spoke_links
+    automation: full
+
+  - id: ON-127
+    name: Topical breadth completeness (orphan-topic detection)
+    subcategory: semantic-3.3-topical-map
+    owner_agent: A2
+    severity_default: minor
+    data_sources: [computed]
+    analyzer: audit_engine.analyzers.semantic_seo.check_topical_breadth
+    automation: full
+
+  # ----- 3.4 Contextual Structure Audit (2) -----
+  - id: ON-128
+    name: Heading-to-paragraph topical proximity
+    subcategory: semantic-3.4-contextual
+    owner_agent: A2
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_heading_paragraph_proximity
+    automation: full
+
+  - id: ON-129
+    name: Section coherence (entity mention per section)
+    subcategory: semantic-3.4-contextual
+    owner_agent: A2
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_section_coherence
+    automation: full
+
+  # ----- 3.5 Query Semantics & Search Intent Audit (2) -----
+  - id: ON-130
+    name: Search intent classification per page
+    subcategory: semantic-3.5-query-intent
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_intent_classification
+    automation: full
+
+  - id: ON-131
+    name: Intent-content alignment score
+    subcategory: semantic-3.5-query-intent
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_intent_alignment
+    automation: full
+
+  # ----- 3.6 Lexical Semantics Audit (2) -----
+  - id: ON-132
+    name: Lexical diversity (Type-Token Ratio)
+    subcategory: semantic-3.6-lexical
+    owner_agent: A2
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_lexical_diversity
+    automation: full
+
+  - id: ON-133
+    name: Synonym and variation density (keyword-stuffing safeguard)
+    subcategory: semantic-3.6-lexical
+    owner_agent: A2
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_synonym_variation_density
+    automation: full
+
+  # ----- 3.7 N-Gram Audit (2) -----
+  - id: ON-134
+    name: Top n-gram extraction with stuffing detection
+    subcategory: semantic-3.7-ngram
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_ngram_distribution
+    automation: full
+
+  - id: ON-135
+    name: Cross-page n-gram overlap (cannibalization)
+    subcategory: semantic-3.7-ngram
+    owner_agent: A2
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_cross_page_ngram_overlap
+    automation: full
+
+  # ----- 3.8 Koray Framework - Semantic Content Writing Rules (4) -----
+  - id: ON-136
+    name: Macro context connection (opening references parent topic)
+    subcategory: semantic-3.8-koray
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_macro_context_connection
+    automation: full
+
+  - id: ON-137
+    name: Definitional content presence
+    subcategory: semantic-3.8-koray
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_definitional_content
+    automation: full
+
+  - id: ON-138
+    name: Authoritative source citations (external links)
+    subcategory: semantic-3.8-koray
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_authoritative_citations
+    automation: full
+
+  - id: ON-139
+    name: Question-and-answer pair coverage
+    subcategory: semantic-3.8-koray
+    owner_agent: A5
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_qa_pair_coverage
+    automation: full
+
+  # ----- 3.9 Information Quality Audit (3) -----
+  - id: ON-140
+    name: Information density (facts and numbers per 100 words)
+    subcategory: semantic-3.9-info-quality
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_information_density
+    automation: full
+
+  - id: ON-141
+    name: Date freshness (publication / updated)
+    subcategory: semantic-3.9-info-quality
+    owner_agent: A1
+    severity_default: minor
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_date_freshness
+    automation: full
+
+  - id: ON-142
+    name: Author expertise signals rollup
+    subcategory: semantic-3.9-info-quality
+    owner_agent: A1
+    severity_default: major
+    data_sources: [crawled_html]
+    analyzer: audit_engine.analyzers.semantic_seo.check_author_expertise_signals
+    automation: full

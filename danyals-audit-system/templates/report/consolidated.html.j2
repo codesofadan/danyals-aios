@@ -1,0 +1,16 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+<section class="cover">
+  <h1 class="cover-title">SEO Audit Report</h1>
+  <p class="cover-domain">{{ domain }}</p>
+  <p class="cover-date">{{ started_at_pkt }}</p>
+  <p class="cover-date">Prepared by {{ brand_name }}</p>
+</section>
+
+<section class="narrative">
+  {{ narrative_html | safe }}
+</section>
+
+{% endblock %}

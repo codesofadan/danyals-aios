@@ -1,0 +1,373 @@
+# Local SEO Master Checklist - Team D's spec (activates when profile=local)
+# Source of truth for Team D (4 agents: D1 GBP, D2 Citations/NAP, D3 Reviews, D4 Local Pack/Geo)
+# 40 checks: 13 extracted from on-page/off-page user list + 27 local-specific additions
+# These items live ONLY in local.yaml. They do not appear in on-page.yaml or off-page.yaml.
+
+version: 1
+category: local-seo
+checks:
+
+  # ----- GBP Optimization (10) -----
+  - id: LOC-001
+    name: Google Business Profile optimization (overall)
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: critical
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.optimization
+    automation: full
+
+  - id: LOC-002
+    name: GBP category optimization (primary + secondary)
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: critical
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.categories
+    automation: ai-assisted
+
+  - id: LOC-003
+    name: GBP profile completeness
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: critical
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.completeness
+    automation: full
+
+  - id: LOC-004
+    name: GBP photos audit (quantity, quality, geo-tags, freshness)
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: major
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.photos
+    automation: full
+
+  - id: LOC-005
+    name: GBP posts cadence and engagement
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: minor
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.posts
+    automation: full
+
+  - id: LOC-006
+    name: GBP products / services completeness
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: major
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.products_services
+    automation: full
+
+  - id: LOC-007
+    name: GBP attributes optimization
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: minor
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.attributes
+    automation: full
+
+  - id: LOC-008
+    name: GBP hours accuracy and special hours
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: major
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.hours
+    automation: full
+
+  - id: LOC-009
+    name: GBP Q&A health (answered questions, owner responses)
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: minor
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.questions
+    automation: ai-assisted
+
+  - id: LOC-010
+    name: GBP service area definition
+    subcategory: gbp
+    owner_agent: D1
+    severity_default: major
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.gbp.service_area
+    automation: full
+
+  # ----- Citations & NAP (10) -----
+  - id: LOC-011
+    name: Local citation audit (count and presence across tier-1 sources)
+    subcategory: citations
+    owner_agent: D2
+    severity_default: critical
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.citations.audit
+    automation: full
+
+  - id: LOC-012
+    name: Citation consistency analysis
+    subcategory: citations
+    owner_agent: D2
+    severity_default: critical
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.citations.consistency
+    automation: full
+
+  - id: LOC-013
+    name: NAP consistency analysis (name, address, phone uniformity)
+    subcategory: nap
+    owner_agent: D2
+    severity_default: critical
+    data_sources: [serper, crawled_html, google_places]
+    analyzer: audit_engine.analyzers.nap.consistency
+    automation: full
+
+  - id: LOC-014
+    name: Missing citations detection (vs competitor baseline)
+    subcategory: citations
+    owner_agent: D2
+    severity_default: major
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.citations.missing
+    automation: full
+
+  - id: LOC-015
+    name: Duplicate citations detection
+    subcategory: citations
+    owner_agent: D2
+    severity_default: major
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.citations.duplicates
+    automation: full
+
+  - id: LOC-016
+    name: Data aggregator presence (Foursquare, Acxiom, Localeze, Neustar/Data Axle)
+    subcategory: citations
+    owner_agent: D2
+    severity_default: major
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.citations.aggregators
+    automation: full
+
+  - id: LOC-017
+    name: Apple Business Connect presence
+    subcategory: citations
+    owner_agent: D2
+    severity_default: major
+    data_sources: [serper, web_fetch]
+    analyzer: audit_engine.analyzers.citations.apple_business
+    automation: full
+
+  - id: LOC-018
+    name: Bing Places presence and optimization
+    subcategory: citations
+    owner_agent: D2
+    severity_default: minor
+    data_sources: [serper, web_fetch]
+    analyzer: audit_engine.analyzers.citations.bing_places
+    automation: full
+
+  - id: LOC-019
+    name: Industry-specific citations (Yelp, Angi, BBB, vertical directories)
+    subcategory: citations
+    owner_agent: D2
+    severity_default: major
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.citations.industry_specific
+    automation: full
+
+  - id: LOC-020
+    name: Citation NAP exactness vs phonetic match score
+    subcategory: nap
+    owner_agent: D2
+    severity_default: major
+    data_sources: [serper, crawled_html]
+    analyzer: audit_engine.analyzers.nap.exactness
+    automation: full
+
+  # ----- Reviews & Reputation (8) -----
+  - id: LOC-021
+    name: GBP review analysis (count, recency, distribution)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: critical
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.reviews.gbp_overall
+    automation: full
+
+  - id: LOC-022
+    name: Review sentiment analysis (positive/negative/neutral, themes)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: major
+    data_sources: [google_places, google_nl]
+    analyzer: audit_engine.analyzers.reviews.sentiment
+    automation: ai-assisted
+
+  - id: LOC-023
+    name: Review velocity analysis (reviews per month, trend)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: major
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.reviews.velocity
+    automation: full
+
+  - id: LOC-024
+    name: Review response rate and response time
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: major
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.reviews.response_rate
+    automation: full
+
+  - id: LOC-025
+    name: Review response quality (owner reply tone, content, SEO use)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: minor
+    data_sources: [google_places]
+    analyzer: audit_engine.analyzers.reviews.response_quality
+    automation: ai-assisted
+
+  - id: LOC-026
+    name: Keyword-rich review detection (review-as-content signal)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: minor
+    data_sources: [google_places, google_nl]
+    analyzer: audit_engine.analyzers.reviews.keyword_richness
+    automation: ai-assisted
+
+  - id: LOC-027
+    name: Reputation management analysis (cross-platform aggregate)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: major
+    data_sources: [google_places, serper]
+    analyzer: audit_engine.analyzers.reviews.reputation_overall
+    automation: ai-assisted
+
+  - id: LOC-028
+    name: Review competitor benchmark (gap vs map pack peers)
+    subcategory: reviews
+    owner_agent: D3
+    severity_default: major
+    data_sources: [google_places, serper]
+    analyzer: audit_engine.analyzers.reviews.competitor_benchmark
+    automation: full
+
+  # ----- Local Pack & Geo-Ranking (8) -----
+  - id: LOC-029
+    name: Map pack ranking by geo grid (1, 3, 5, 10 mile rings)
+    subcategory: local-pack
+    owner_agent: D4
+    severity_default: critical
+    data_sources: [serper_geo]
+    analyzer: audit_engine.analyzers.local_pack.geo_grid
+    automation: full
+
+  - id: LOC-030
+    name: Geo targeted keyword optimization
+    subcategory: local-keywords
+    owner_agent: D4
+    severity_default: critical
+    data_sources: [crawled_html, moz_keyword]
+    analyzer: audit_engine.analyzers.local_keywords.geo_targeted
+    automation: full
+
+  - id: LOC-031
+    name: Local SEO relevance analysis (page-to-place fit)
+    subcategory: local-pack
+    owner_agent: D4
+    severity_default: critical
+    data_sources: [crawled_html, google_nl, google_places]
+    analyzer: audit_engine.analyzers.local_pack.page_to_place_fit
+    automation: ai-assisted
+
+  - id: LOC-032
+    name: LocalBusiness schema optimization
+    subcategory: schema
+    owner_agent: D4
+    severity_default: critical
+    data_sources: [schema_blocks, crawled_html]
+    analyzer: audit_engine.analyzers.schema.local_business
+    automation: full
+
+  - id: LOC-033
+    name: Local landing page audit (city / neighborhood / service-area pages)
+    subcategory: local-pack
+    owner_agent: D4
+    severity_default: major
+    data_sources: [crawled_html, site_pages]
+    analyzer: audit_engine.analyzers.local_pack.landing_pages
+    automation: ai-assisted
+
+  - id: LOC-034
+    name: Service-area page coverage and uniqueness
+    subcategory: local-pack
+    owner_agent: D4
+    severity_default: major
+    data_sources: [site_pages, crawled_html]
+    analyzer: audit_engine.analyzers.local_pack.service_area_pages
+    automation: ai-assisted
+
+  - id: LOC-035
+    name: Local content depth (service detail, FAQs, local entities)
+    subcategory: local-pack
+    owner_agent: D4
+    severity_default: major
+    data_sources: [crawled_html, google_nl]
+    analyzer: audit_engine.analyzers.local_pack.local_content_depth
+    automation: ai-assisted
+
+  - id: LOC-036
+    name: Local pack competitor analysis (top-3 peers, gap to overtake)
+    subcategory: local-pack
+    owner_agent: D4
+    severity_default: major
+    data_sources: [serper_geo, google_places]
+    analyzer: audit_engine.analyzers.local_pack.competitor_analysis
+    automation: ai-assisted
+
+  # ----- Local Scoring (4) -----
+  - id: LOC-037
+    name: Local prominence score (rollup)
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.local.prominence
+    automation: full
+
+  - id: LOC-038
+    name: GBP health score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.local.gbp_health
+    automation: full
+
+  - id: LOC-039
+    name: Citation strength score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.local.citation_strength
+    automation: full
+
+  - id: LOC-040
+    name: Overall local SEO score
+    subcategory: scoring
+    owner_agent: M2
+    severity_default: info
+    data_sources: [computed]
+    analyzer: audit_engine.scorers.local.overall
+    automation: full

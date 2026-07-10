@@ -1,0 +1,121 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+<section class="cover">
+  <h1 class="cover-title">SEO Audit</h1>
+  <p class="cover-domain">{{ domain }}</p>
+  <p class="cover-date">{{ started_at_pkt }}</p>
+</section>
+
+<section class="scorecard">
+  <h2>Scorecard</h2>
+  <div class="score-grid">
+    <div class="score-card overall">
+      <div class="score-label">Overall</div>
+      <div class="score-value">{{ scores.overall if scores.overall is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card">
+      <div class="score-label">On-Page</div>
+      <div class="score-value">{{ scores.on_page if scores.on_page is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card">
+      <div class="score-label">Technical</div>
+      <div class="score-value">{{ scores.technical if scores.technical is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card">
+      <div class="score-label">Off-Page</div>
+      <div class="score-value">{{ scores.off_page if scores.off_page is not none else "&ndash;" }}</div>
+    </div>
+    <div class="score-card local">
+      <div class="score-label">Local SEO</div>
+      <div class="score-value">{{ scores.local if scores.local is not none else "&ndash;" }}</div>
+    </div>
+  </div>
+</section>
+
+<section class="summary">
+  <h2>Executive summary</h2>
+  <p class="lead">
+    This audit evaluates <strong>{{ domain }}</strong> across {{ findings_total }} checks
+    spanning on-page, technical, off-page, and local SEO. Critical issues are listed
+    below in priority order. The remediation playbook accompanies this report and
+    contains the full step-by-step fix for each item.
+  </p>
+  <ul class="summary-stats">
+    <li><strong>{{ severity_counts.critical or 0 }}</strong> critical</li>
+    <li><strong>{{ severity_counts.major or 0 }}</strong> major</li>
+    <li><strong>{{ severity_counts.minor or 0 }}</strong> minor</li>
+    <li><strong>{{ severity_counts.info or 0 }}</strong> informational</li>
+  </ul>
+</section>
+
+<section class="critical-findings">
+  <h2>Top critical findings</h2>
+  {% if critical_findings %}
+    <ol class="finding-list">
+      {% for f in critical_findings %}
+      <li class="finding finding-{{ f.severity }}">
+        <div class="finding-header">
+          <span class="check-id">{{ f.check_id }}</span>
+          <span class="finding-name">{{ f.check_name }}</span>
+          <span class="severity-badge">{{ f.severity|upper }}</span>
+        </div>
+        {% if f.evidence_summary %}
+        <div class="finding-evidence">Evidence: {{ f.evidence_summary }}</div>
+        {% endif %}
+        {% if f.remediation %}
+        <div class="finding-remediation">{{ f.remediation }}</div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="finding-empty">No critical findings detected.</p>
+  {% endif %}
+</section>
+
+<section class="quick-wins">
+  <h2>Top quick wins</h2>
+  {% if quick_wins %}
+    <table class="quick-wins-table">
+      <thead>
+        <tr><th>Check</th><th>Issue</th><th>Severity</th></tr>
+      </thead>
+      <tbody>
+        {% for f in quick_wins %}
+        <tr>
+          <td class="mono">{{ f.check_id }}</td>
+          <td>{{ f.check_name }}{% if f.evidence_summary %} &mdash; {{ f.evidence_summary }}{% endif %}</td>
+          <td>{{ f.severity|upper }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="finding-empty">No quick wins surfaced in this run.</p>
+  {% endif %}
+</section>
+
+<section class="findings-by-category">
+  <h2>Findings by category</h2>
+  <table class="category-table">
+    <thead>
+      <tr><th>Category</th><th>Total</th><th>Critical</th><th>Major</th><th>Minor</th><th>Info</th></tr>
+    </thead>
+    <tbody>
+      {% for row in category_rows %}
+      <tr>
+        <td>{{ row.category }}</td>
+        <td>{{ row.total }}</td>
+        <td>{{ row.critical }}</td>
+        <td>{{ row.major }}</td>
+        <td>{{ row.minor }}</td>
+        <td>{{ row.info }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% endblock %}

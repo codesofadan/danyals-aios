@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ stylesheet_href }}">
+</head>
+<body>
+
+<header class="page-header">
+  <div class="brand">
+    {% if brand_name %}<span class="brand-name">{{ brand_name }}</span>{% endif %}
+  </div>
+  <div class="meta">SEO Audit &mdash; {{ domain }} &mdash; {{ started_at_pkt }}</div>
+</header>
+
+<main>
+{% block content %}{% endblock %}
+</main>
+
+<footer class="page-footer">
+  <div class="footer-meta">Run {{ run_uuid }} &middot; profile {{ profile }} &middot; {{ pages_crawled }} pages &middot; {{ duration_sec_str }}</div>
+  <div class="footer-disclaimer">Prepared by {{ brand_name }}. All findings cite raw evidence from the audited site. Validation status per finding is available in findings.json.</div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,292 @@
+/* SEO-AUDIT-OS report stylesheet.
+ * Consulting-grade minimal: McKinsey/Bain/iPullRank/Aleyda Solis register.
+ * No marketing aesthetic, no decorative imagery, generous whitespace, strict
+ * typographic hierarchy. Works for both screen and WeasyPrint PDF.
+ */
+
+@page {
+  size: A4;
+  margin: 22mm 18mm 22mm 18mm;
+
+  @top-left {
+    content: element(pageHeaderLeft);
+    font: 9pt "Helvetica Neue", Arial, sans-serif;
+    color: #6b6b6b;
+  }
+  @bottom-center {
+    content: counter(page);
+    font: 9pt "Helvetica Neue", Arial, sans-serif;
+    color: #6b6b6b;
+  }
+}
+
+:root {
+  --ink: #111111;
+  --ink-soft: #444444;
+  --rule: #d9d9d9;
+  --bg: #ffffff;
+  --critical: #b32a2a;
+  --major: #c97a16;
+  --minor: #8b6a14;
+  --info: #4a5a6a;
+  --accent: #1f3a5f;
+  --mono: "SF Mono", "Consolas", "Menlo", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Helvetica Neue", "Inter", Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+main { display: block; }
+
+h1, h2, h3, h4 {
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5em 0;
+}
+h1 { font-size: 28pt; line-height: 1.15; }
+h2 { font-size: 16pt; margin-top: 1.6em; padding-bottom: 0.3em; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 12pt; margin-top: 1.2em; }
+h4 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-soft); margin-top: 1em; margin-bottom: 0.3em; }
+
+p { margin: 0 0 0.8em 0; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+.mono, code { font-family: var(--mono); font-size: 9.5pt; }
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9pt;
+  color: var(--ink-soft);
+  padding-bottom: 12pt;
+  margin-bottom: 24pt;
+  border-bottom: 1px solid var(--rule);
+}
+.brand-name { font-weight: 600; color: var(--ink); }
+
+.page-footer {
+  margin-top: 32pt;
+  padding-top: 12pt;
+  border-top: 1px solid var(--rule);
+  font-size: 9pt;
+  color: var(--ink-soft);
+}
+.footer-disclaimer { margin-top: 4pt; font-style: italic; }
+
+/* ----- Cover ----- */
+.cover {
+  padding: 36pt 0 12pt 0;
+  page-break-after: always;
+}
+.cover-title { font-size: 40pt; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 12pt 0; }
+.cover-domain { font-size: 16pt; color: var(--ink-soft); margin: 0 0 6pt 0; }
+.cover-date { font-size: 11pt; color: var(--ink-soft); margin: 0; }
+
+/* ----- Scorecard ----- */
+.scorecard { margin-bottom: 24pt; }
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10pt;
+  margin-top: 12pt;
+}
+.score-card {
+  border: 1px solid var(--rule);
+  padding: 14pt 10pt;
+  text-align: center;
+}
+.score-card.overall {
+  border-color: var(--accent);
+  border-width: 1.5pt;
+}
+.score-card.local {
+  border-color: var(--ink);
+}
+.score-label {
+  font-size: 9pt;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-soft);
+  margin-bottom: 6pt;
+}
+.score-value {
+  font-size: 24pt;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ----- Summary ----- */
+.summary { margin-bottom: 24pt; }
+.lead { font-size: 11pt; line-height: 1.6; margin-bottom: 1em; }
+.summary-stats {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 24pt;
+  margin: 8pt 0 0 0;
+  font-size: 10pt;
+  color: var(--ink-soft);
+}
+.summary-stats li strong { color: var(--ink); margin-right: 4pt; font-size: 12pt; }
+
+/* ----- Findings ----- */
+.finding-list { list-style: none; padding: 0; counter-reset: finding-counter; }
+.finding {
+  position: relative;
+  padding: 12pt 12pt 12pt 36pt;
+  margin-bottom: 8pt;
+  border-left: 3pt solid var(--info);
+  page-break-inside: avoid;
+}
+.finding-critical { border-left-color: var(--critical); }
+.finding-major    { border-left-color: var(--major); }
+.finding-minor    { border-left-color: var(--minor); }
+.finding-info     { border-left-color: var(--info); }
+
+.finding::before {
+  content: counter(finding-counter, decimal-leading-zero);
+  counter-increment: finding-counter;
+  position: absolute;
+  left: 12pt;
+  top: 12pt;
+  font-family: var(--mono);
+  font-size: 10pt;
+  color: var(--ink-soft);
+}
+
+.finding-header {
+  display: flex;
+  gap: 12pt;
+  align-items: baseline;
+  margin-bottom: 6pt;
+}
+.check-id {
+  font-family: var(--mono);
+  font-size: 9pt;
+  background: #f3f3f3;
+  padding: 2pt 6pt;
+  border-radius: 2pt;
+}
+.finding-name { font-weight: 600; font-size: 11pt; flex: 1; }
+.severity-badge {
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2pt 6pt;
+  border-radius: 2pt;
+  color: #ffffff;
+}
+.finding-critical .severity-badge { background: var(--critical); }
+.finding-major    .severity-badge { background: var(--major); }
+.finding-minor    .severity-badge { background: var(--minor); }
+.finding-info     .severity-badge { background: var(--info); }
+
+.status-badge {
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2pt 6pt;
+  border: 1px solid var(--rule);
+  border-radius: 2pt;
+  color: var(--ink-soft);
+}
+.status-pass { color: #2d6a4f; border-color: #2d6a4f; }
+.status-fail { color: var(--critical); border-color: var(--critical); }
+.status-warn { color: var(--major); border-color: var(--major); }
+.status-n_a  { color: var(--ink-soft); }
+
+.finding-evidence, .finding-remediation {
+  font-size: 10pt;
+  margin-top: 4pt;
+}
+.finding-evidence { color: var(--ink-soft); }
+
+.finding-block {
+  padding: 10pt 12pt;
+  border-left: 3pt solid var(--info);
+  margin-bottom: 12pt;
+  page-break-inside: avoid;
+}
+.finding-block.finding-critical { border-left-color: var(--critical); }
+.finding-block.finding-major    { border-left-color: var(--major); }
+.finding-block.finding-minor    { border-left-color: var(--minor); }
+
+.finding-meta {
+  font-size: 9pt;
+  margin: 4pt 0;
+  border-collapse: collapse;
+}
+.finding-meta th {
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: left;
+  padding: 1pt 8pt 1pt 0;
+}
+.finding-meta td { padding: 1pt 8pt; }
+
+.finding-empty {
+  font-style: italic;
+  color: var(--ink-soft);
+}
+
+/* ----- Tables ----- */
+table.quick-wins-table, table.category-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8pt;
+  font-size: 10pt;
+}
+table.quick-wins-table th, table.category-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 9pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--rule);
+  padding: 6pt 8pt;
+}
+table.quick-wins-table td, table.category-table td {
+  padding: 6pt 8pt;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: top;
+}
+table.category-table td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ----- Remediation playbook ----- */
+.remediation-item {
+  padding: 16pt 0;
+  border-top: 1px solid var(--rule);
+  page-break-inside: avoid;
+}
+.remediation-item h2 {
+  border-bottom: none;
+  margin-top: 0;
+  font-size: 13pt;
+  display: flex;
+  gap: 8pt;
+  align-items: baseline;
+}
+.remediation-evidence, .remediation-fix { font-size: 10pt; margin-top: 6pt; }
+.remediation-fix { color: var(--ink); }
+.remediation-critical h2 .severity-badge { background: var(--critical); }
+.remediation-major h2 .severity-badge { background: var(--major); }
+.remediation-minor h2 .severity-badge { background: var(--minor); }
+.remediation-info h2 .severity-badge { background: var(--info); }
+
+/* Section spacing */
+section { margin-bottom: 18pt; }
