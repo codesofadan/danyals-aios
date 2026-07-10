@@ -1,5 +1,7 @@
 import TopBar from "@/components/TopBar";
 import StatTiles from "@/components/StatTiles";
+import CommandDigest from "@/components/overview/CommandDigest";
+import SpendSnapshot from "@/components/overview/SpendSnapshot";
 import AuditVolumeChart from "@/components/charts/AuditVolumeChart";
 import ClientProgress from "@/components/charts/ClientProgress";
 import TrafficChart from "@/components/charts/TrafficChart";
@@ -15,6 +17,11 @@ export default function CommandCenter() {
       />
 
       <StatTiles />
+
+      <div className="row b">
+        <CommandDigest />
+        <SpendSnapshot />
+      </div>
 
       <div className="row">
         <AuditVolumeChart />

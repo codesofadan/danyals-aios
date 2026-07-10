@@ -17,15 +17,30 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    title: "Agency",
+    title: "SEO Engine",
     items: [
-      { icon: "groups", label: "Team Management", href: "/team" },
+      { icon: "fact_check", label: "Audit", href: "/audit" },
+      { icon: "article", label: "Content", href: "/content" },
+      { icon: "hub", label: "Off-page", href: "/off-page" },
+      { icon: "radar", label: "Policy Radar", href: "/policy-radar", badge: "3" },
+    ],
+  },
+  {
+    title: "Delivery",
+    items: [
       { icon: "diversity_3", label: "Clients", href: "/clients" },
+      { icon: "groups", label: "Team Management", href: "/team" },
+      { icon: "flag", label: "Milestones", href: "/milestones" },
+      { icon: "table_chart", label: "Reports", href: "/reports" },
+      { icon: "sell", label: "Upsells", href: "/upsells" },
     ],
   },
   {
     title: "Platform",
     items: [
+      { icon: "workspace_premium", label: "Service Tiers", href: "/tiers" },
+      { icon: "savings", label: "Cost Controls", href: "/cost" },
+      { icon: "key", label: "Key Vault", href: "/vault" },
       { icon: "backup", label: "Backups", href: "/backups" },
       { icon: "settings", label: "Settings", href: "/settings" },
     ],

@@ -1,0 +1,102 @@
+/* ============================================================
+   REPORTS MODULE — Google Sheets reporting layer.
+   Service-account sync status, per-client workbooks & activity.
+   Built on the shared design tokens only. Prefix: rp-
+   ============================================================ */
+
+.rp-mono { font-family: "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+  letter-spacing: .01em; }
+
+/* last-sync KPI value (text, not a big number) */
+.rp-lastsync { font-size: 28px; }
+
+/* ---- Sheets connection card ---- */
+.rp-conn { display: flex; align-items: center; gap: 13px; padding: 14px 4px; border-top: 1px solid var(--line); }
+.rp-conn:first-of-type { border-top: none; padding-top: 8px; }
+.rp-conn-ic { flex: none; width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center;
+  justify-content: center; color: var(--violet-soft); background: rgba(159, 147, 230, .12); }
+.rp-conn-ic .material-symbols-rounded { font-size: 21px; }
+.rp-conn-ic.ok { color: var(--ok); background: rgba(34, 192, 138, .14); }
+.rp-conn-main { flex: 1; min-width: 0; }
+.rp-conn-lab { font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.rp-conn-val { font-size: 13.5px; font-weight: 700; color: var(--ink); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-conn-val.rp-mono { font-size: 12.5px; color: var(--lilac); }
+.rp-conn-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-conn-meta b { color: var(--body); font-weight: 700; }
+.rp-conn-meta.rp-mono { color: var(--muted-2); }
+.rp-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.rp-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(34, 192, 138, .18); }
+
+.rp-sheet-btn { flex: none; width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center;
+  justify-content: center; text-decoration: none; color: var(--violet-soft);
+  background: rgba(159, 147, 230, .1); border: 1px solid var(--line); transition: .18s; }
+.rp-sheet-btn:hover { color: #fff; background: var(--violet); border-color: var(--violet); }
+.rp-sheet-btn .material-symbols-rounded { font-size: 18px; }
+
+.rp-conn-foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--line); font-size: 11.5px; font-weight: 600; color: var(--muted); line-height: 1.4; }
+.rp-conn-foot .material-symbols-rounded { font-size: 16px; color: var(--violet-soft); flex: none; }
+
+/* ---- Workbooks table ---- */
+.rp-tbl-wrap { margin-top: 12px; }
+.rp-tbl { min-width: 760px; }
+.rp-client { font-size: 13.5px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.rp-rows { color: #fff; font-weight: 800; }
+.rp-last { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.rp-act-col { text-align: right; width: 1%; white-space: nowrap; }
+
+.rp-sheet-link { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; color: var(--body);
+  padding: 5px 9px; border-radius: 9px; border: 1px solid var(--line); background: rgba(0, 0, 0, .18); transition: .18s; }
+.rp-sheet-link:hover { border-color: var(--line-2); color: var(--lilac); background: rgba(159, 147, 230, .1); }
+.rp-sheet-link .material-symbols-rounded { font-size: 17px; color: var(--c2); }
+.rp-sheet-id { font-size: 11.5px; }
+.rp-sheet-link .rp-ext { font-size: 14px; color: var(--muted-2); }
+.rp-sheet-link:hover .rp-ext { color: var(--lilac); }
+
+.rp-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700;
+  padding: 3px 9px 3px 7px; border-radius: 999px; border: 1px solid currentColor;
+  background: rgba(255, 255, 255, .02); }
+.rp-chip .material-symbols-rounded { font-size: 14px; }
+
+.rp-syncbtn { white-space: nowrap; }
+.rp-syncbtn:disabled { opacity: .5; cursor: not-allowed; }
+
+.status-pill .rp-spin { font-size: 14px; margin-right: 3px; vertical-align: -2px;
+  animation: rp-rotate .9s linear infinite; }
+@keyframes rp-rotate { to { transform: rotate(360deg); } }
+
+/* ---- Report types card ---- */
+.rp-types { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.rp-type { display: flex; gap: 13px; padding: 14px; border-radius: 14px; border: 1px solid var(--line);
+  background: rgba(0, 0, 0, .16); }
+.rp-type-ic { flex: none; width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center;
+  justify-content: center; }
+.rp-type-ic .material-symbols-rounded { font-size: 21px; }
+.rp-type-main { min-width: 0; }
+.rp-type-t { font-size: 13.5px; font-weight: 800; color: #fff; }
+.rp-type-d { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+.rp-type-cols { display: flex; align-items: flex-start; gap: 6px; margin-top: 9px; font-size: 11px;
+  color: var(--lilac); line-height: 1.5; }
+.rp-type-cols .material-symbols-rounded { font-size: 15px; color: var(--muted-2); flex: none; margin-top: 1px; }
+
+/* ---- Sync activity log ---- */
+.rp-log { display: flex; flex-direction: column; margin-top: 8px; }
+.rp-log-row { display: flex; align-items: center; gap: 13px; padding: 11px 4px; border-top: 1px solid var(--line); }
+.rp-log-row:first-child { border-top: none; }
+.rp-log-ic { flex: none; width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center;
+  justify-content: center; }
+.rp-log-ic .material-symbols-rounded { font-size: 18px; }
+.rp-log-main { flex: 1; min-width: 0; }
+.rp-log-line { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.rp-log-line b { color: #fff; font-weight: 700; }
+.rp-log-sep { color: var(--muted-2); }
+.rp-log-ds { font-weight: 700; }
+.rp-log-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.rp-log-ago { flex: none; font-size: 11px; color: var(--muted-2); white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .rp-tbl { min-width: 680px; }
+}

@@ -54,7 +54,15 @@ body {
 .brand .wm .s { font-size: 9.5px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: var(--violet-soft); }
 .sidebar:hover .brand .wm { opacity: 1; transform: none; }
 
-.nav { display: flex; flex-direction: column; gap: 3px; }
+/* Scrollable, but the scrollbar stays hidden in the compact rail — it would
+   sit cramped/offset in 76px. A thin one is revealed only when expanded. */
+.nav { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: none; -ms-overflow-style: none; }
+.nav::-webkit-scrollbar { width: 0; height: 0; }
+.sidebar:hover .nav { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.sidebar:hover .nav::-webkit-scrollbar { width: 6px; }
+.sidebar:hover .nav::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+.sidebar:hover .nav::-webkit-scrollbar-thumb:hover { background: var(--violet-soft); }
 .nav .sec { font-size: 9px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
   color: var(--muted-2); padding: 14px 12px 6px; white-space: nowrap; opacity: 0; transition: opacity .2s; }
 .sidebar:hover .nav .sec { opacity: 1; }
@@ -1100,3 +1108,33 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
 @media (max-width: 640px) {
   .bk-usage { flex-direction: column; align-items: flex-start; gap: 2px; }
 }
+
+/* ============================================================
+   COMMAND CENTER OVERVIEW — cross-module digest cards
+   ============================================================ */
+.ov-recs { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
+.ov-rec { display: flex; gap: 11px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: rgba(0, 0, 0, .14); text-decoration: none; transition: border-color .16s, background .16s; }
+.ov-rec:hover { border-color: var(--line-2); background: rgba(159, 147, 230, .06); }
+.ov-rec-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex: none; }
+.ov-rec-main { min-width: 0; flex: 1; }
+.ov-rec-title { font-size: 13px; font-weight: 700; color: var(--ink); }
+.ov-rec-why { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ov-rec-tags { display: flex; align-items: center; gap: 8px; margin-top: 7px; flex-wrap: wrap; }
+.ov-rec-sev { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.ov-rec-region { font-size: 11px; color: var(--muted-2); }
+
+.ov-spend-head { display: flex; align-items: baseline; gap: 10px; margin-top: 12px; }
+.ov-spend-big { font-size: 32px; font-weight: 800; color: #fff; letter-spacing: -.02em; }
+.ov-spend-cap { font-size: 13px; color: var(--muted); }
+.ov-spend-bar { height: 8px; border-radius: 5px; background: rgba(0, 0, 0, .3); overflow: hidden; margin: 11px 0 15px; }
+.ov-spend-bar span { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, var(--violet-2), var(--violet)); }
+.ov-flagged { display: flex; flex-direction: column; gap: 9px; }
+.ov-flag { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.ov-flag-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ov-flag-name { color: var(--ink); font-weight: 600; flex: 1; }
+.ov-flag-spent { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ov-flag-pct { font-size: 11px; font-weight: 800; width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+.ov-spend-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }

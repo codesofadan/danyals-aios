@@ -1,0 +1,108 @@
+/* ============================================================
+   AIOS · Audit module styles — prefix .au-
+   Reuses global .card/.kpi/.tbl/.seg/.chip/.status-pill/.fld.
+   ============================================================ */
+
+/* ---- filters row above the table ---- */
+.au-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.au-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+
+/* ---- queue / history table ---- */
+.au-tbl { min-width: 720px; }
+.au-tbl thead th { white-space: nowrap; }
+.au-client { font-weight: 700; color: var(--ink); font-size: 13px; }
+.au-when { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.au-url { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--body);
+  font-variant-numeric: tabular-nums; }
+.au-url .material-symbols-rounded { font-size: 15px; color: var(--violet-soft); }
+
+.au-types { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; }
+.au-type-tag { font-size: 10px; font-weight: 800; letter-spacing: .01em; color: var(--lilac);
+  background: rgba(159, 147, 230, .12); border: 1px solid var(--line); padding: 2px 7px; border-radius: 999px; }
+
+.au-tier { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
+  padding: 3px 9px; border-radius: 999px; border: 1px solid transparent; }
+.au-tier.paid { color: var(--warn); background: rgba(245, 166, 35, .13); border-color: rgba(245, 166, 35, .3); }
+.au-tier.free { color: var(--muted); background: rgba(159, 147, 230, .1); border-color: var(--line); }
+
+.au-tbl .status-pill { gap: 4px; padding: 4px 10px; border-radius: 999px; }
+.au-tbl .status-pill .material-symbols-rounded { font-size: 14px; }
+
+.au-score { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.au-score.ok { color: var(--ok); }
+.au-score.warn { color: var(--warn); }
+.au-score.crit { color: var(--crit); }
+.au-dash { color: var(--muted-2); font-weight: 700; }
+.au-runtime { color: var(--body); font-variant-numeric: tabular-nums; }
+
+.au-arts { display: inline-flex; gap: 6px; }
+.au-art { display: inline-grid; place-items: center; width: 30px; height: 30px; cursor: pointer;
+  border-radius: 9px; border: 1px solid var(--line); background: rgba(0, 0, 0, .18); color: var(--lilac);
+  transition: border-color .15s, color .15s, background .15s; }
+.au-art:hover:not(:disabled) { color: #fff; border-color: var(--violet-2); background: rgba(108, 92, 224, .2); }
+.au-art:disabled { opacity: .32; cursor: not-allowed; }
+.au-art .material-symbols-rounded { font-size: 17px; }
+
+.au-empty { text-align: center; color: var(--muted); font-size: 12.5px; padding: 26px 0 !important; }
+
+/* running spinner */
+.au-spin { animation: au-rot .9s linear infinite; }
+@keyframes au-rot { to { transform: rotate(360deg); } }
+
+/* ---- run new audit form ---- */
+.au-run .fld:last-of-type { margin-bottom: 16px; }
+.au-tier-seg { width: 100%; }
+.au-tier-seg button { flex: 1; padding: 8px; }
+
+.au-picks { display: flex; flex-wrap: wrap; gap: 7px; }
+.au-pick { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; font-size: 11.5px;
+  font-weight: 700; color: var(--muted); cursor: pointer; padding: 7px 11px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(0, 0, 0, .18); transition: color .15s, border-color .15s, background .15s; }
+.au-pick .material-symbols-rounded { font-size: 16px; }
+.au-pick:hover { color: var(--lilac); border-color: var(--line-2); }
+.au-pick.on { color: #fff; background: rgba(108, 92, 224, .18); border-color: var(--violet-2); }
+.au-pick.gated.on { border-color: rgba(245, 166, 35, .5); }
+.au-pick-lock { font-size: 13px !important; color: var(--warn); }
+
+.au-run-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--line); font-size: 11.5px; font-weight: 600; color: var(--muted); line-height: 1.45; }
+.au-run-note .material-symbols-rounded { font-size: 17px; color: var(--violet-soft); flex: none; margin-top: 1px; }
+
+/* ---- coverage grid ---- */
+.au-cov { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 6px; }
+.au-cov-card { background: linear-gradient(165deg, var(--card), var(--card-2)); border: 1px solid var(--line);
+  border-radius: 14px; padding: 16px; display: flex; flex-direction: column; }
+.au-cov-card.locked { position: relative; border-style: dashed; opacity: .82; }
+
+.au-cov-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.au-cov-ic { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; }
+.au-cov-ic .material-symbols-rounded { font-size: 22px; }
+.au-cov-ic.muted { color: var(--muted-2); background: rgba(159, 147, 230, .08); }
+
+.au-cov-lock { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 800;
+  letter-spacing: .02em; color: var(--muted); background: rgba(159, 147, 230, .1);
+  border: 1px solid var(--line); padding: 3px 8px; border-radius: 999px; }
+.au-cov-lock .material-symbols-rounded { font-size: 13px; }
+
+.au-cov-name { font-size: 14px; font-weight: 800; color: #fff; letter-spacing: -.01em; }
+.au-cov-blurb { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+.au-cov-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.au-cov-list li { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--body); }
+.au-cov-list li .material-symbols-rounded { font-size: 15px; color: var(--violet-soft); flex: none; }
+.au-cov-card.locked .au-cov-list li { color: var(--muted); }
+.au-cov-card.locked .au-cov-list li .material-symbols-rounded { color: var(--muted-2); }
+
+.au-cov-soon { margin-top: 14px; text-align: center; font-size: 11px; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); background: rgba(159, 147, 230, .08);
+  border: 1px dashed var(--line-2); border-radius: 10px; padding: 8px; }
+
+/* ---- responsive ---- */
+@media (max-width: 1100px) {
+  .au-cov { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 720px) {
+  .au-cov { grid-template-columns: 1fr; }
+  .au-chips { margin-left: 0; }
+}
