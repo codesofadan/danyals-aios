@@ -530,3 +530,65 @@ export const TIMEZONES = [
 ];
 export const LANGUAGES = ["English (US)", "English (UK)", "Urdu", "Arabic", "French", "Spanish"];
 export const BRAND_COLORS = [SERIES.c1, SERIES.c2, SERIES.c4, SERIES.c3, SERIES.c5];
+
+// ============================================================
+// Team Portal — the member-facing view (Module 3 · §5).
+// A signed-in specialist sees ONLY their own queue, deliverables,
+// review items, granted features and activity. It reads the same
+// roster + task board the admin Team Management module writes to,
+// scoped to a single teamMembers.id. Swap for the /me + /tasks?
+// assignee=<id> API calls when the backend is wired.
+// ============================================================
+
+// The member currently signed in to the portal (demo default —
+// Bilal, an active Technical SEO Specialist with a live queue).
+// The portal lets you switch this to preview any member's view.
+export const PORTAL_MEMBER_ID = "u-bilal";
+
+// Features each member has been granted by the admin
+// (accessFeatures.key[]) — mirrors the Add-Member wizard output,
+// keyed by teamMembers.id. Drives the "My Access" view honestly.
+export const memberGrants: Record<string, string[]> = {
+  "u-danyal": ALL_KEYS, // Owner — everything on
+  "u-ayesha": ["rank_tracker", "on_page", "keyword_research", "competitor_intel", "content_pipeline", "publishing", "reporting", "task_board", "client_setup", "client_onboarding"], // Content Lead
+  "u-bilal": ["rank_tracker", "technical_audit", "on_page", "keyword_research", "backlink_manager", "competitor_intel", "local_seo", "reporting", "task_board", "data_import"], // Technical SEO
+  "u-hina": ["rank_tracker", "on_page", "keyword_research", "content_pipeline", "reporting", "task_board"], // Content Writer
+  "u-usman": ["rank_tracker", "technical_audit", "backlink_manager", "competitor_intel", "reporting", "task_board"], // Backlink Analyst
+  "u-zoya": ["rank_tracker", "on_page", "keyword_research", "local_seo", "content_pipeline", "reporting", "task_board", "client_setup"], // Local SEO
+  "u-sara": ["reporting", "task_board", "client_onboarding", "client_setup", "data_import", "billing"], // Operations Admin
+  "u-imran": ["reporting"], // Client Success (Viewer, invited)
+};
+
+// Roles allowed to sign off the content review checkpoint.
+export const CAN_REVIEW: TeamRole[] = ["Owner", "Admin", "Manager"];
+
+// The type-appropriate primary action a member runs to deliver a task.
+export const TASK_ACTION: Record<TaskType, { run: string; icon: string; deliver: string }> = {
+  "Technical Audit": { run: "Run crawl", icon: "fact_check", deliver: "Deliver audit" },
+  "Actionable Audit": { run: "Run audit", icon: "checklist_rtl", deliver: "Deliver report" },
+  "Content Sprint": { run: "Open editor", icon: "edit_note", deliver: "Submit for review" },
+  "Backlink Audit": { run: "Run link sweep", icon: "hub", deliver: "Deliver findings" },
+  "Local SEO": { run: "Run local audit", icon: "storefront", deliver: "Deliver report" },
+  "Publishing": { run: "Open publisher", icon: "rocket_launch", deliver: "Publish live" },
+};
+
+// Portal's frame of reference for "due" math — matches the demo
+// clock (today = Jul 10, 2026). Parses the "Mon DD" due strings
+// on tasks_seed into an at-a-glance urgency without a real Date.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const PORTAL_TODAY = { m: 6, d: 10 }; // month index 6 = Jul
+
+export type DueInfo = { label: string; days: number; tone: "overdue" | "today" | "soon" | "ok" };
+
+export function dueInfo(due: string): DueInfo {
+  const [mon, dayStr] = due.trim().split(/\s+/);
+  const m = MONTHS.indexOf(mon);
+  const d = parseInt(dayStr, 10);
+  if (m < 0 || Number.isNaN(d)) return { label: due, days: 99, tone: "ok" };
+  // crude day-of-year delta — fine within the demo's July window.
+  const days = (m - PORTAL_TODAY.m) * 30 + (d - PORTAL_TODAY.d);
+  if (days < 0) return { label: `${Math.abs(days)}d overdue`, days, tone: "overdue" };
+  if (days === 0) return { label: "Due today", days, tone: "today" };
+  if (days <= 2) return { label: `Due in ${days}d`, days, tone: "soon" };
+  return { label: `Due ${due}`, days, tone: "ok" };
+}
