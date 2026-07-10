@@ -54,3 +54,38 @@ create table public.user_feature_grants (
 
 -- RLS helpers (SECURITY DEFINER, bypass RLS to avoid policy recursion):
 --   public.current_app_role() -> app_role,  public.is_staff() -> boolean.
+
+-- ---- 0003_clients_sites ------------------------------------------------------
+-- Enums: sub_tier (Starter/Growth/Scale), sub_status (active/trial/past_due/paused).
+-- No portal password column (client logins are Supabase Auth users).
+
+create table public.clients (
+  id                   uuid primary key default gen_random_uuid(),
+  name                 text not null,
+  industry             text not null default '',
+  since_year           int,
+  contact_name         text not null default '',
+  contact_role         text not null default '',
+  contact_email        text not null default '',
+  contact_color        text not null default '#7B69EE',
+  tier                 public.sub_tier not null default 'Starter',
+  status               public.sub_status not null default 'trial',
+  renews_at            date,
+  mrr                  integer not null default 0,
+  portal_admin         text not null default '',
+  portal_seats         integer not null default 0,
+  portal_two_fa        boolean not null default false,
+  portal_last_login_at timestamptz,
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now()
+);
+
+create table public.sites (
+  id         uuid primary key default gen_random_uuid(),
+  client_id  uuid not null references public.clients (id) on delete cascade,
+  domain     text not null,
+  cms_type   text not null default 'wordpress',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- + triggers; ENABLE + FORCE RLS; select (is_staff), modify (owner/admin/manager).

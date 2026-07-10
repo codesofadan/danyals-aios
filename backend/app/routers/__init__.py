@@ -9,8 +9,10 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.routers.admin_users import router as admin_users_router
+from app.routers.clients import router as clients_router
 from app.routers.rbac import router as rbac_router
 
 api_v1 = APIRouter()
 api_v1.include_router(rbac_router)
 api_v1.include_router(admin_users_router)
+api_v1.include_router(clients_router)

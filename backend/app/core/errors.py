@@ -19,6 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
+from app.db.supabase import SupabaseNotConfiguredError
 from app.logging_setup import get_logger
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -60,6 +61,18 @@ def install_error_handlers(app: FastAPI) -> None:
             error_type="internal_error",
             message="Internal Server Error",
             request_id=rid,
+        )
+
+    @app.exception_handler(SupabaseNotConfiguredError)
+    async def _supabase_not_configured_handler(
+        request: Request, exc: SupabaseNotConfiguredError
+    ) -> JSONResponse:
+        # A dependency needs Supabase but it is unconfigured: 503, not a 500.
+        return _error_response(
+            status_code=503,
+            error_type="service_unavailable",
+            message="A required backend service is not configured",
+            request_id=_request_id(request),
         )
 
     @app.exception_handler(StarletteHTTPException)
