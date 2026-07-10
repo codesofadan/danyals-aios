@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "prod"] = "dev"
     log_level: LogLevel = "INFO"
     api_cors_origins: str = "http://localhost:3000"
+    trusted_hosts: str = "*"
 
     # --- Supabase (server-side). service_role bypasses RLS -> server-only, never logged. ---
     supabase_url: str | None = None
@@ -68,6 +69,12 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
+
+    @property
+    def trusted_hosts_list(self) -> list[str]:
+        """Allowed Host headers for ``TrustedHostMiddleware``; empty -> allow any."""
+        hosts = [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
+        return hosts or ["*"]
 
 
 @lru_cache
