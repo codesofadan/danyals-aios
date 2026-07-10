@@ -1,7 +1,7 @@
 """Health and readiness response models.
 
-``DependencyStatus`` is declared here now (Chunk 3) so the readiness pings built
-in Chunks 5-7 share one contract; ``ReadyResponse`` is added later in Chunk 7.
+``DependencyStatus`` is declared here (Chunk 3) so the readiness pings built in
+Chunks 5-7 share one contract; ``ReadyResponse`` (Chunk 7) aggregates them.
 """
 
 from __future__ import annotations
@@ -25,3 +25,12 @@ class DependencyStatus(BaseModel):
     name: str
     status: Literal["ok", "error", "timeout", "not_configured"]
     detail: str | None = None
+
+
+class ReadyResponse(BaseModel):
+    """Readiness payload for ``GET /health/ready`` (aggregates dependency pings)."""
+
+    status: Literal["ok", "not_ready"]
+    version: str
+    env: str
+    dependencies: list[DependencyStatus]
