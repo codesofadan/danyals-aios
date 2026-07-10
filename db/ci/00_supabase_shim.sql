@@ -24,3 +24,45 @@ create or replace function auth.jwt() returns jsonb
 
 create or replace function auth.role() returns text
   language sql stable as $$ select 'authenticated'::text $$;
+
+-- Supabase's predefined roles (grants in migrations target service_role).
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'anon') then
+    create role anon nologin;
+  end if;
+  if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+    create role authenticated nologin;
+  end if;
+  if not exists (select 1 from pg_roles where rolname = 'service_role') then
+    create role service_role nologin;
+  end if;
+end $$;
+
+-- Supabase Vault shim: a table standing in for the vault.decrypted_secrets view
+-- + the create/update functions our public wrappers call.
+create schema if not exists vault;
+
+create table if not exists vault.decrypted_secrets (
+  id               uuid primary key default gen_random_uuid(),
+  name             text,
+  decrypted_secret text
+);
+
+create or replace function vault.create_secret(
+  new_secret text, new_name text default null, new_description text default ''
+) returns uuid language plpgsql as $$
+declare sid uuid;
+begin
+  insert into vault.decrypted_secrets (name, decrypted_secret)
+  values (new_name, new_secret) returning id into sid;
+  return sid;
+end $$;
+
+create or replace function vault.update_secret(
+  secret_id uuid, new_secret text default null, new_name text default null, new_description text default null
+) returns void language plpgsql as $$
+begin
+  update vault.decrypted_secrets
+  set decrypted_secret = coalesce(new_secret, decrypted_secret)
+  where id = secret_id;
+end $$;

@@ -89,3 +89,24 @@ create table public.sites (
   updated_at timestamptz not null default now()
 );
 -- + triggers; ENABLE + FORCE RLS; select (is_staff), modify (owner/admin/manager).
+
+-- ---- 0004_vault -------------------------------------------------------------
+-- Raw secrets live in Supabase Vault; this table holds only metadata + a masked
+-- preview + the vault secret_id. Reveal/store/rotate go through SECURITY DEFINER
+-- public.vault_* wrappers whose EXECUTE is granted only to service_role.
+
+create table public.vault_keys (
+  id         uuid primary key default gen_random_uuid(),
+  provider   text not null,
+  label      text not null,
+  masked     text not null default '',
+  scope      text not null default 'Agency-global',
+  site       text,
+  secret_id  uuid not null,
+  rotated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- + trigger; ENABLE + FORCE RLS; select + modify restricted to owner/admin
+--   (reveal further restricted to owner in the app). Wrappers:
+--   public.vault_create_secret / vault_update_secret / vault_reveal_secret.
