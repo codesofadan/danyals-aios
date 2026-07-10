@@ -20,3 +20,37 @@ begin
   return new;
 end;
 $$;
+
+-- ---- 0002_identity_rbac ------------------------------------------------------
+-- Enums: app_role (owner/admin/manager/specialist/analyst/viewer), user_status.
+-- Reference data (roles/permissions/features/templates) lives in code
+-- (app/rbac/matrix.py), not tables.
+
+create table public.users (
+  id           uuid primary key references auth.users (id) on delete cascade,
+  email        text not null unique,
+  name         text not null,
+  title        text not null default '',
+  role         public.app_role not null default 'viewer',
+  status       public.user_status not null default 'invited',
+  avatar_color text not null default '#7B69EE',
+  phone        text not null default '',
+  two_fa       boolean not null default false,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+-- + users_set_updated_at trigger; ENABLE + FORCE RLS; policies users_select
+--   (self or staff), users_modify (owner/admin).
+
+create table public.user_feature_grants (
+  user_id     uuid not null references public.users (id) on delete cascade,
+  feature_key text not null,
+  level       text not null default 'full' check (level in ('full', 'view', 'off')),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  primary key (user_id, feature_key)
+);
+-- + trigger; ENABLE + FORCE RLS; policies select (self or staff), modify (owner/admin).
+
+-- RLS helpers (SECURITY DEFINER, bypass RLS to avoid policy recursion):
+--   public.current_app_role() -> app_role,  public.is_staff() -> boolean.

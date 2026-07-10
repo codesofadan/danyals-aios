@@ -56,6 +56,16 @@ The full local gate before committing a change is: **`ruff check .` && `mypy app
 - `from __future__ import annotations` at the top of every module.
 - **Reuse before rewriting.** `app/core/security.py` is ported verbatim from `../danyals-audit-system/audit_engine/security.py`; the async HTTP-client base in that repo's `integrations/base.py` (tenacity retry + circuit breaker + never-log-secrets) is the template for future API clients. The audit engine is later wrapped as a Celery job — invoke its CLI, don't rebuild it; note it **mints its own `run_uuid`** and **doesn't catch its own top-level exceptions**, so the worker must own timeouts and mark failures itself.
 
+## Context discipline (keep the main thread lean)
+
+The main conversation is a coordinator, not a workspace. Push reading, searching, and bulk work off it so its token budget stays low and long tasks don't hit the context limit. Prefer these over `/compact` (which is lossy) and never let the main thread fill with raw file dumps.
+
+1. **Delegate reading and searching to subagents.** When answering means sweeping many files or exploring a subsystem, spawn a subagent (Task/Agent, or the `Explore`/`general-purpose` types). It reads in *its own* context and returns only the conclusion — the main thread grows by a paragraph, not 50k tokens. This is the single biggest lever.
+2. **Externalize state to files, reference by path.** Write plans, findings, and intermediate results to the scratchpad dir or a repo doc, then point back at the path instead of pasting the content inline. Durable facts go to memory (`MEMORY.md` + memory files), which load as a compact index, not full bodies.
+3. **Read narrowly.** Grep/Glob to locate first, then Read only the needed line range (`offset`/`limit`). Don't read whole files when a slice answers the question, and don't re-read a file you just edited — the harness already tracks its state.
+4. **Session hygiene.** One session per distinct task; `/clear` when a task is done (save anything important to files/memory first); start fresh rather than growing one giant thread. Use `/compact` with a focus instruction only as a last resort.
+5. **Keep this file and other always-loaded docs lean.** CLAUDE.md is re-read every turn — every line here is fixed overhead on every request. Add durable operating rules; move transient notes to the scratchpad or memory.
+
 ## Build state
 
 Built in ordered "chunks" on branch **`feat/backend-foundation`**, one commit per chunk (`feat(backend): <desc> (Chunk N)`). **Part 1 (the runnable foundation) is complete — Chunks 1–10 committed and green** (ruff + mypy strict clean; 51 unit tests pass with no external services):
