@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     supabase_service_role_key: SecretStr | None = None
     supabase_anon_key: SecretStr | None = None
 
+    # --- Auth (JWT verification). Supabase signs access tokens with asymmetric
+    # keys (ES256/RS256); the API verifies them against the project's JWKS. No
+    # shared secret is needed. ---
+    supabase_jwt_aud: str = "authenticated"
+    supabase_jwks_url: str | None = None  # defaults to <supabase_url>/auth/v1/.well-known/jwks.json
+
     # --- Redis (app cache + readiness) and Celery (separate logical DBs) ---
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
@@ -61,6 +67,20 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @property
+    def jwks_url(self) -> str | None:
+        """Resolved JWKS endpoint for verifying Supabase access tokens."""
+        if self.supabase_jwks_url:
+            return self.supabase_jwks_url
+        if self.supabase_url:
+            return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        return None
+
+    @property
+    def jwt_issuer(self) -> str | None:
+        """Expected ``iss`` claim on Supabase access tokens."""
+        return f"{self.supabase_url.rstrip('/')}/auth/v1" if self.supabase_url else None
 
     @property
     def docs_enabled(self) -> bool:

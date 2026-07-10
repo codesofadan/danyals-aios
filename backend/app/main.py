@@ -19,6 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
 from app.config import get_settings, validate_settings
+from app.core.auth import JWKSCache
 from app.core.errors import install_error_handlers
 from app.core.middleware import RequestIDMiddleware
 from app.core.observability import init_sentry
@@ -35,6 +36,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
     # Construct only (no ping) so liveness stays independent of Redis being up.
     app.state.redis = create_redis_client(settings)
+    # JWKS verifier for Supabase access tokens; None until Supabase is configured
+    # (keys are fetched lazily on the first authenticated request).
+    app.state.jwks_cache = JWKSCache.from_settings(settings)
     try:
         yield
     finally:
