@@ -1,7 +1,9 @@
 // Inline the base64 Bricolage font into the template, write final HTML.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const DIR = 'C:/Users/adan/Desktop/danyals-aios/aios/design';
+// resolve relative to this script, so the folder can be moved freely
+const DIR = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]+$/, '');
 const FONT = 'C:/Users/adan/.claude/assets/bricolage-grotesque.css';
 
 const tpl = readFileSync(`${DIR}/architecture.template.html`, 'utf8');

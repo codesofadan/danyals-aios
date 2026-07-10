@@ -2,8 +2,10 @@
 // *.template.html, write the final self-contained HTML next to it.
 // Usage: node build.mjs           (builds all templates in this dir)
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const DIR  = 'C:/Users/adan/Desktop/danyals-aios/aios/design/danyal';
+// resolve relative to this script, so the folder can be moved freely
+const DIR  = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]+$/, '');
 const FONT = 'C:/Users/adan/.claude/assets/bricolage-grotesque.css';
 
 const font = readFileSync(FONT, 'utf8');
