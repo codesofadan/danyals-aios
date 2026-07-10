@@ -34,6 +34,7 @@ dev = [
     "asgi-lifespan>=2.1",
     "ruff>=0.4",
     "mypy>=1.10",
+    "psycopg[binary]>=3.2",   # RLS gate + Supabase Postgres integration tests
 ]
 
 [tool.hatch.build.targets.wheel]

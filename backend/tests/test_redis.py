@@ -73,7 +73,9 @@ def test_create_redis_client_does_not_connect() -> None:
 
 @pytest.mark.integration
 async def test_ping_real_redis() -> None:
-    url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    url = os.environ.get("REDIS_URL")
+    if not url:
+        pytest.skip("REDIS_URL not set")
     client = redis_asyncio.Redis.from_url(url, socket_connect_timeout=2, socket_timeout=2)
     try:
         status = await ping(client, timeout=3.0)
