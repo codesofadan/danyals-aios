@@ -1,0 +1,63 @@
+# Dev stack: redis + api + worker. One command:
+#   cp backend/.env.example backend/.env   (one-time)
+#   docker compose -f infra/docker/docker-compose.dev.yml up --build
+#
+# The api and worker share ONE built image (built once by `api`, reused by
+# `worker`). Both get the same Redis overrides via the YAML anchor so they point
+# at the compose `redis` service, not localhost.
+
+x-backend-env: &backend-env
+  # Point the app + Celery at the compose redis service (not localhost). These
+  # override whatever is in backend/.env so the same file works locally and here.
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/backend.Dockerfile
+    image: aios-backend:dev
+    environment: *backend-env
+    env_file:
+      - ../../backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    # --reload for dev; the source bind below makes edits live. The venv is at
+    # /venv (outside /app), so the bind mount does not shadow the installed deps.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../../backend:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  worker:
+    # Reuse the image the api built (do not rebuild).
+    image: aios-backend:dev
+    environment: *backend-env
+    env_file:
+      - ../../backend/.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A workers.celery_app worker --loglevel=info
+    volumes:
+      - ../../backend:/app
