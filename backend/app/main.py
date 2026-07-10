@@ -22,6 +22,7 @@ from app.config import get_settings, validate_settings
 from app.core.errors import install_error_handlers
 from app.core.middleware import RequestIDMiddleware
 from app.core.observability import init_sentry
+from app.core.redis import create_redis_client
 from app.logging_setup import configure_logging, get_logger
 from app.routers import api_v1
 from app.routers.health import router as health_router
@@ -30,13 +31,18 @@ from app.routers.health import router as health_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own process-wide async resources for the app's lifetime."""
+    settings = get_settings()
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
-    # NOTE: the shared redis.asyncio pool is opened here in Chunk 6.
+    # Construct only (no ping) so liveness stays independent of Redis being up.
+    app.state.redis = create_redis_client(settings)
     try:
         yield
     finally:
         await app.state.http_client.aclose()
-        # NOTE: the redis pool is closed here in Chunk 6.
+        # getattr guard: a partial startup may not have reached the redis line.
+        redis_client = getattr(app.state, "redis", None)
+        if redis_client is not None:
+            await redis_client.aclose()
 
 
 def create_app() -> FastAPI:
