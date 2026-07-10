@@ -65,16 +65,23 @@ Liveness: `GET /health` (touches nothing). Readiness: `GET /health/ready` (pings
 Supabase + Redis concurrently within `READINESS_TIMEOUT_SECONDS`; 200 when both
 reachable, 503 naming the down dependency otherwise).
 
-## Run via Docker (api + worker + redis)
+A worker round-trip locally (needs Redis up): enqueue the ping task and read the
+result — `python -c "from workers.tasks.ping import ping; print(ping.delay().get(timeout=10))"` → `pong`.
+
+## Deploy (VPS, systemd — no Docker)
+
+Production runs natively on a single Debian/Ubuntu VPS as two systemd services
+(`aios-api`, `aios-worker`) in front of a native Redis, with Caddy terminating
+TLS. One-time provisioning is a single idempotent script:
 
 ```bash
-cp .env.example .env                                    # one-time (from repo root: backend/.env)
-docker compose -f infra/docker/docker-compose.dev.yml up --build
+sudo git clone <repo-url> /opt/aios
+sudo cp /opt/aios/backend/.env.example /opt/aios/backend/.env   # then edit it
+sudo bash /opt/aios/infra/deploy/install.sh
 ```
 
-Brings up `redis`, `api` (port 8000, `--reload`, non-root), and `worker`. The
-compose file overrides the Redis URLs to the `redis` service for both `api` and
-`worker`, so they never point at localhost.
+See [`infra/deploy/README-deploy.md`](../infra/deploy/README-deploy.md) for the
+full runbook (Caddy config, updates, operating, worker smoke-test).
 
 ## Config
 

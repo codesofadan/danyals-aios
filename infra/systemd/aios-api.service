@@ -1,0 +1,38 @@
+[Unit]
+Description=AIOS backend API (FastAPI / uvicorn)
+# Order after Redis, but only WANT it (not Require): liveness (GET /health) is
+# deliberately independent of Redis, so the API must still start and serve when
+# Redis is down - readiness will simply report Redis as the failing dependency.
+After=network-online.target redis-server.service
+Wants=network-online.target redis-server.service
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios/backend
+# The app loads its own .env from WorkingDirectory via pydantic-settings. We do
+# NOT use systemd EnvironmentFile on purpose: it does not strip inline `# ...`
+# comments, so a .env with trailing comments would corrupt values.
+ExecStart=/opt/aios/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
+# Bind to localhost only; Caddy (see infra/deploy/README-deploy.md) terminates
+# TLS and reverse-proxies public traffic to 127.0.0.1:8000.
+Restart=always
+RestartSec=3
+# uvicorn shuts down gracefully on SIGTERM (systemd's default stop signal).
+TimeoutStopSec=30
+
+# --- Hardening --------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The app writes nothing to disk (logs go to journald), so the read-only
+# filesystem from ProtectSystem=strict needs no ReadWritePaths exception.
+
+[Install]
+WantedBy=multi-user.target

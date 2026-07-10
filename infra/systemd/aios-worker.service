@@ -1,0 +1,33 @@
+[Unit]
+Description=AIOS Celery worker (background jobs)
+After=network-online.target redis-server.service
+Wants=network-online.target redis-server.service
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios/backend
+# App loads its own .env from WorkingDirectory (see the note in aios-api.service).
+ExecStart=/opt/aios/backend/.venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=4
+Restart=always
+RestartSec=5
+# Celery does a WARM shutdown on SIGTERM (waits for running tasks). We allow up
+# to the hard task_time_limit (1800s) so an in-flight job finishes cleanly on a
+# deploy. task_acks_late + visibility_timeout >= task_time_limit make a job that
+# IS killed safe to redeliver (sequential re-run, never a concurrent double-run);
+# ops may lower this to speed deploys, accepting that trade-off.
+TimeoutStopSec=1800
+
+# --- Hardening --------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# Normalize line endings. Shell scripts and Linux service/unit files MUST be LF -
+# a CRLF `#!/usr/bin/env bash\r` shebang fails on the VPS ("bad interpreter").
+*.sh            text eol=lf
+*.service       text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
