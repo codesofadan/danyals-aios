@@ -128,3 +128,12 @@ create table public.activity_log (
   created_at  timestamptz not null default now()
 );
 -- + created_at index; ENABLE + FORCE RLS; select (is_staff) only, no write policy.
+
+-- ---- 0006_cost --------------------------------------------------------------
+-- The cost-control subsystem. dial_mode enum (api/byhand/off).
+--   client_budgets(client_id PK, cap, spent)      - staff read, manage_clients write
+--   cost_dial(feature_key PK, mode)               - staff read, owner/admin write
+--   cost_settings(singleton: daily_stop, halted)  - staff read, owner/admin write
+--   cost_log(client, job, provider, cost, cached) - append-only, staff read
+-- add_budget_spend(client, amount) RPC = atomic spent increment (service_role).
+-- The gate (app/services/cost_gate.py) reads these before any paid call.
