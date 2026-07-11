@@ -137,3 +137,9 @@ create table public.activity_log (
 --   cost_log(client, job, provider, cost, cached) - append-only, staff read
 -- add_budget_spend(client, amount) RPC = atomic spent increment (service_role).
 -- The gate (app/services/cost_gate.py) reads these before any paid call.
+
+-- ---- 0007_delivery_tier -----------------------------------------------------
+-- delivery_tier enum (free/semi/fully) + clients.delivery_tier column. SEPARATE
+-- from the subscription tier (clients.tier = Starter/Growth/Scale). Delivery tier
+-- is a preset over the cost dial; the two are never conflated.
+alter table public.clients add column delivery_tier public.delivery_tier not null default 'free';
