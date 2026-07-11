@@ -18,6 +18,7 @@ from app.schemas.clients import (
     SiteCreate,
     SiteResponse,
 )
+from app.services.activity import record_activity
 
 router = APIRouter(tags=["clients"])
 
@@ -34,8 +35,9 @@ async def list_clients(repo: ClientsRepoDep, _user: CurrentUserDep) -> list[Clie
 
 
 @router.post("/clients", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
-async def create_client(body: ClientCreate, repo: ClientsRepoDep, _user: ManageClients) -> ClientResponse:
+async def create_client(body: ClientCreate, repo: ClientsRepoDep, actor: ManageClients) -> ClientResponse:
     row = await asyncio.to_thread(repo.insert_client, body.to_row())
+    await record_activity(actor, kind="client", action="created client", target=body.cn)
     return ClientResponse.from_row(row, site_count=0)
 
 
@@ -50,7 +52,7 @@ async def get_client(client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep
 
 @router.patch("/clients/{client_id}", response_model=ClientResponse)
 async def update_client(
-    client_id: str, body: ClientUpdate, repo: ClientsRepoDep, _user: ManageClients
+    client_id: str, body: ClientUpdate, repo: ClientsRepoDep, actor: ManageClients
 ) -> ClientResponse:
     changes = body.to_row()
     if not changes:
@@ -58,15 +60,17 @@ async def update_client(
     row = await asyncio.to_thread(repo.update_client, client_id, changes)
     if row is None:
         raise _CLIENT_NOT_FOUND
+    await record_activity(actor, kind="client", action="updated client", target=row.get("name", client_id))
     counts = await asyncio.to_thread(repo.site_counts)
     return ClientResponse.from_row(row, site_count=counts.get(client_id, 0))
 
 
 @router.delete("/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_client(client_id: str, repo: ClientsRepoDep, _user: ManageClients) -> None:
+async def delete_client(client_id: str, repo: ClientsRepoDep, actor: ManageClients) -> None:
     deleted = await asyncio.to_thread(repo.delete_client, client_id)
     if not deleted:
         raise _CLIENT_NOT_FOUND
+    await record_activity(actor, kind="client", action="deleted client", target=client_id)
 
 
 @router.get("/clients/{client_id}/sites", response_model=list[SiteResponse])
@@ -79,16 +83,18 @@ async def list_sites(client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep
     "/clients/{client_id}/sites", response_model=SiteResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_site(
-    client_id: str, body: SiteCreate, repo: ClientsRepoDep, _user: ManageClients
+    client_id: str, body: SiteCreate, repo: ClientsRepoDep, actor: ManageClients
 ) -> SiteResponse:
     row = await asyncio.to_thread(
         repo.insert_site, {"client_id": client_id, "domain": body.domain, "cms_type": body.cms_type}
     )
+    await record_activity(actor, kind="client", action="added a site", target=body.domain)
     return SiteResponse.from_row(row)
 
 
 @router.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_site(site_id: str, repo: ClientsRepoDep, _user: ManageClients) -> None:
+async def delete_site(site_id: str, repo: ClientsRepoDep, actor: ManageClients) -> None:
     deleted = await asyncio.to_thread(repo.delete_site, site_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    await record_activity(actor, kind="client", action="deleted a site", target=site_id)

@@ -110,3 +110,21 @@ create table public.vault_keys (
 -- + trigger; ENABLE + FORCE RLS; select + modify restricted to owner/admin
 --   (reveal further restricted to owner in the app). Wrappers:
 --   public.vault_create_secret / vault_update_secret / vault_reveal_secret.
+
+-- ---- 0005_activity_log ------------------------------------------------------
+-- Append-only audit feed. Actor identity snapshotted. Staff read only; writes
+-- happen solely via the service_role server client (no user can tamper).
+
+create table public.activity_log (
+  id          uuid primary key default gen_random_uuid(),
+  actor_id    uuid references public.users (id) on delete set null,
+  actor_name  text not null default '',
+  actor_init  text not null default '',
+  actor_color text not null default '#7B69EE',
+  kind        text not null,
+  action      text not null,
+  target      text not null default '',
+  meta        text,
+  created_at  timestamptz not null default now()
+);
+-- + created_at index; ENABLE + FORCE RLS; select (is_staff) only, no write policy.

@@ -16,6 +16,7 @@ from app.core.auth import CurrentUser, require_perm
 from app.db.supabase import SupabaseNotConfiguredError, client_for_user, get_admin_client
 from app.logging_setup import get_logger
 from app.schemas.identity import MemberResponse, ProvisionUserRequest
+from app.services.activity import record_activity
 from app.services.provisioning import provision_user
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
@@ -86,4 +87,7 @@ async def create_user(
             detail="Could not create user (email may already exist)",
         ) from exc
 
+    await record_activity(
+        current, kind="member", action="provisioned member", target=body.name, meta=body.role
+    )
     return MemberResponse.from_row(row)

@@ -23,6 +23,7 @@ from app.schemas.vault import (
     VaultKeyCreate,
     VaultKeyResponse,
 )
+from app.services.activity import record_activity
 from app.services.vault import add_key, reveal_secret, rotate_key
 
 router = APIRouter(prefix="/vault", tags=["vault"])
@@ -41,7 +42,7 @@ async def list_keys(repo: VaultRepoDep, _user: ManageVault) -> list[VaultKeyResp
 
 
 @router.post("/keys", response_model=VaultKeyResponse, status_code=status.HTTP_201_CREATED)
-async def add_vault_key(body: VaultKeyCreate, _user: ManageVault) -> VaultKeyResponse:
+async def add_vault_key(body: VaultKeyCreate, actor: ManageVault) -> VaultKeyResponse:
     """Store a new secret in the vault; returns the masked metadata (no secret)."""
     admin = get_admin_client()
     row = await asyncio.to_thread(
@@ -53,24 +54,27 @@ async def add_vault_key(body: VaultKeyCreate, _user: ManageVault) -> VaultKeyRes
         scope=body.scope,
         site=body.site,
     )
+    await record_activity(actor, kind="access", action="added a vault key", target=body.label)
     return VaultKeyResponse.from_row(row)
 
 
 @router.post("/keys/{key_id}/rotate", response_model=VaultKeyResponse)
-async def rotate_vault_key(key_id: str, body: RotateRequest, _user: ManageVault) -> VaultKeyResponse:
+async def rotate_vault_key(key_id: str, body: RotateRequest, actor: ManageVault) -> VaultKeyResponse:
     """Replace a key's secret; returns the refreshed masked metadata."""
     admin = get_admin_client()
     row = await asyncio.to_thread(rotate_key, admin, key_id, body.secret.get_secret_value())
     if row is None:
         raise _KEY_NOT_FOUND
+    await record_activity(actor, kind="access", action="rotated a vault key", target=row.get("label", key_id))
     return VaultKeyResponse.from_row(row)
 
 
 @router.get("/keys/{key_id}/reveal", response_model=RevealResponse)
-async def reveal_vault_key(key_id: str, _user: Owner) -> RevealResponse:
+async def reveal_vault_key(key_id: str, actor: Owner) -> RevealResponse:
     """Decrypt and return a secret. SUPER-ADMIN ONLY."""
     admin = get_admin_client()
     secret = await asyncio.to_thread(reveal_secret, admin, key_id)
     if secret is None:
         raise _KEY_NOT_FOUND
+    await record_activity(actor, kind="access", action="revealed a vault key", target=key_id)
     return RevealResponse(id=key_id, secret=secret)
