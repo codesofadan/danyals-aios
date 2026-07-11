@@ -108,5 +108,7 @@ jobs:
             echo "applying $f"
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
-      - name: RLS gate
+      - name: RLS gate (script)
         run: python -m app.db.rls_check
+      - name: RLS gate (pytest)
+        run: pytest -m integration tests/integration/test_rls_gate.py

@@ -49,6 +49,8 @@ The full local gate before committing a change is: **`ruff check .` && `mypy app
 6. **Readiness ping contract.** Every dependency ping is `async def ping(...) -> DependencyStatus` — **non-raising** (catches its own errors), only true success is `"ok"`, and `detail` is a short **sanitized** reason (never a connection URL, secret, or raw exception). `not_configured` does not fail readiness in dev.
 7. **Redis DB separation.** App cache/health uses `REDIS_URL` (db 0); Celery uses `CELERY_BROKER_URL` (db 1) + `CELERY_RESULT_BACKEND` (db 2), so a cache `FLUSHDB` can never wipe queued jobs.
 8. **Celery long-job safety.** `task_acks_late=True` + `worker_prefetch_multiplier=1`; the Redis broker's `visibility_timeout` **must be ≥ the longest `task_time_limit`**, or a long job is redelivered and **runs twice** (double API spend).
+9. **Auth + RBAC (Part 2).** Access tokens are verified locally against the Supabase **JWKS** (ES256/RS256) — no shared secret, no per-request round-trip (`app/core/auth.py`, keys cached on `app.state`). A valid token → `CurrentUser` loaded via the **RLS** client; there is **no public signup** (a super-admin provisions users). The **17-feature matrix + 6 roles + 4 templates** live as versioned reference data in `app/rbac/matrix.py` (mirrored from `frontend/lib/data.ts`) — enforcement (`require_perm` / `require_role` / `require_owner` / `require_feature`) needs no DB round-trip; **Owner is all-on and locked**.
+10. **Every tenant table has `ENABLE`+`FORCE RLS`** with explicit policies; a CI gate (`app/db/rls_check.py`, the `db-rls` job) fails on any unprotected `public` table. RLS helper functions are `SECURITY DEFINER` with an empty `search_path` to avoid policy recursion. **Vault** raw secrets live only in Supabase Vault (reached via service_role-only wrappers); a list is masked, reveal is owner-only, nothing is logged. The **activity log** is append-only (no write policy; only the server appends). The **cost-gate** (`app/services/cost_gate.py`) runs `dial → cache → client cap → daily spend-stop → call+log` before any paid call; a cached call costs 0.
 
 ## Conventions
 
@@ -79,4 +81,16 @@ Built in ordered "chunks" on branch **`feat/backend-foundation`**, one commit pe
 - 9: **native systemd deploy (Docker was built then removed)** — `infra/systemd/*.service` + `infra/deploy/install.sh` + `README-deploy.md`; Caddy for TLS.
 - 10: CI at `../.github/workflows/backend-ci.yml` (ruff + mypy + tests, matrix 3.11/3.12, Redis integration job) + README.
 
-Integration tests (`-m integration`) need a real Redis/Supabase and auto-skip when `REDIS_URL`/`SUPABASE_URL` are unset, so they don't run in the default unit gate. **Part 2** (Supabase tables + RLS, auth/RBAC, the cost-gate/money-dial, activity log) follows.
+**Part 2 (the Shared Base) is complete — P2-1…P2-10 committed and green** (ruff + mypy strict clean; 136 unit tests, integration auto-skip). DB schema is ordered SQL in `../db/migrations/` (snapshot `../db/schema.sql`); apply with `psql`, then verify RLS with `python -m app.db.rls_check` (needs `DATABASE_URL`). CI's `db-rls` job spins an ephemeral Postgres (with the `../db/ci` Supabase shim), applies the migrations, and runs the gate.
+
+- P2-1: migration tooling + conventions + the RLS coverage gate (`app/db/rls_check.py`).
+- P2-2: identity (`users` ↔ `auth.users`) + `user_feature_grants`; the RBAC matrix (`app/rbac/matrix.py`).
+- P2-3: auth (`app/core/auth.py` — JWKS verify, `CurrentUser`, `require_*`) + super-admin provisioning + `/api/v1/rbac/*` reference endpoints.
+- P2-4: clients + sites CRUD (`app/routers/clients.py`, `app/db/clients_repo.py`) — the portal password is never persisted/revealed.
+- P2-5: Key Vault (`app/services/vault.py`, `app/routers/vault.py`) over Supabase Vault — masked list, owner-only reveal.
+- P2-6: append-only activity log (`app/services/activity.py`) wired into every mutation; `/api/v1/activity` feed.
+- P2-7: cost-gate/money-dial (`app/services/cost_gate.py` + `/api/v1/cost/*`) — budgets, dial, spend-stop, cost log.
+- P2-8: service tiers (`app/routers/tiers.py`) — delivery tier (free/semi/fully) kept separate from the subscription tier.
+- P2-9: E2E + RLS integration tests (auto-skip). P2-10: harden + docs.
+
+Business routers attach to `api_v1` in `app/routers/__init__.py`; each has a `*_repo.py` (RLS user-JWT reads, swappable for an in-memory fake in tests) and, where privileged, a service using the service_role admin client. Integration tests (`-m integration`) need a real Redis/Supabase/Postgres and auto-skip when their env var is unset. **Part 3** (the module operational tables in Google Sheets, the audit-engine worker wrapper, and the business-module endpoints) follows.
