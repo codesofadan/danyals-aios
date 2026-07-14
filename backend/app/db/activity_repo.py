@@ -6,6 +6,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import Depends, Request
 
+from app.core.auth import CurrentUserDep
 from app.db.supabase import client_for_user
 
 _Rows = list[dict[str, Any]]
@@ -27,7 +28,11 @@ class ActivityRepo:
         return cast("_Rows", resp.data or [])
 
 
-def get_activity_repo(request: Request) -> ActivityRepo:
+def get_activity_repo(request: Request, _user: CurrentUserDep) -> ActivityRepo:
+    """Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
+    populates ``request.state.access_token`` before this factory reads it -
+    independent of the sibling-dependency order in a route's signature.
+    """
     token: str = getattr(request.state, "access_token", "")
     return ActivityRepo(token)
 

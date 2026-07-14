@@ -12,6 +12,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import Depends, Request
 
+from app.core.auth import CurrentUserDep
 from app.db.supabase import client_for_user
 
 _Rows = list[dict[str, Any]]
@@ -41,8 +42,13 @@ class AuditsRepo:
         return rows[0]
 
 
-def get_audits_repo(request: Request) -> AuditsRepo:
-    """Dependency: a repo bound to the caller's access token (RLS-scoped)."""
+def get_audits_repo(request: Request, _user: CurrentUserDep) -> AuditsRepo:
+    """Dependency: a repo bound to the caller's access token (RLS-scoped).
+
+    Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
+    populates ``request.state.access_token`` before this factory reads it -
+    independent of the sibling-dependency order in a route's signature.
+    """
     token: str = getattr(request.state, "access_token", "")
     return AuditsRepo(token)
 
