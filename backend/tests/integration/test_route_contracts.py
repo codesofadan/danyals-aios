@@ -35,7 +35,7 @@ import tempfile
 import types as _types
 import uuid
 from pathlib import Path
-from typing import Any, Union, cast, get_args, get_origin
+from typing import Any, Literal, Union, cast, get_args, get_origin
 
 import httpx
 import pytest
@@ -57,7 +57,7 @@ from app.schemas.cost import (
     DialFeatureResponse,
     SpendStopResponse,
 )
-from app.schemas.health import HealthResponse
+from app.schemas.health import HealthResponse, ReadyResponse
 from app.schemas.identity import MemberResponse
 from app.schemas.portal import ClientDashboard
 from app.schemas.rbac import RoleView, TemplateView
@@ -116,6 +116,24 @@ def _expected_keys(model: type[BaseModel]) -> dict[str, Any]:
     return keys
 
 
+def _scalar_ok(val: Any, ann: Any) -> bool:
+    """Whether a JSON scalar matches a simple annotation (gives the type check teeth).
+
+    Catches enum drift (Literal) and int/bool/str/float confusion; lenient for Any.
+    """
+    if get_origin(ann) is Literal:
+        return val in get_args(ann)
+    if ann is bool:
+        return isinstance(val, bool)
+    if ann is int:
+        return isinstance(val, int) and not isinstance(val, bool)
+    if ann is float:
+        return isinstance(val, (int, float)) and not isinstance(val, bool)
+    if ann is str:
+        return isinstance(val, str)
+    return True  # Any / unknown annotation - stay lenient
+
+
 def shape_errors(payload: Any, model: type[BaseModel], path: str = "") -> list[str]:
     """Return shape-mismatch messages (empty list = the payload matches ``model``)."""
     label = path or model.__name__
@@ -133,8 +151,12 @@ def shape_errors(payload: Any, model: type[BaseModel], path: str = "") -> list[s
             continue
         val = payload[key]
         cur = f"{label}.{key}"
+        base_ann, allow_none = _strip_optional(field.annotation)
         if val is None:
-            continue  # Optional / null default; presence already checked above.
+            # A null is a violation UNLESS the field is genuinely Optional.
+            if not allow_none:
+                errs.append(f"{cur}: null for a required (non-Optional) field")
+            continue
         sub, is_list = _nested_model(field.annotation)
         if sub is not None:
             if is_list:
@@ -146,8 +168,7 @@ def shape_errors(payload: Any, model: type[BaseModel], path: str = "") -> list[s
             else:
                 errs.extend(shape_errors(val, sub, cur))
             continue
-        ann, _ = _strip_optional(field.annotation)
-        origin = get_origin(ann)
+        origin = get_origin(base_ann)
         if origin in (list, tuple):
             if not isinstance(val, list):
                 errs.append(f"{cur}: expected list, got {type(val).__name__}")
@@ -156,6 +177,8 @@ def shape_errors(payload: Any, model: type[BaseModel], path: str = "") -> list[s
                 errs.append(f"{cur}: expected object, got {type(val).__name__}")
         elif isinstance(val, (list, dict)):
             errs.append(f"{cur}: expected scalar, got {type(val).__name__}")
+        elif not _scalar_ok(val, base_ann):
+            errs.append(f"{cur}: value {val!r} does not match {base_ann}")
     return errs
 
 
@@ -339,6 +362,22 @@ def env() -> Any:
         task_code = str(_inserted(task_row)["code"])
         cleanup_tasks.append(task_code)
 
+        # --- seed one cost_log + one activity_log row so GET /cost/log and
+        #     GET /activity validate CostEntryResponse / ActivityResponse against
+        #     a REAL item (both tables are otherwise empty in this suite). --------
+        cost_log_id = str(
+            _inserted(
+                admin.table("cost_log").insert(
+                    {"client_id": tenant_id, "client_name": "Contract Test Co", "job_id": "seed",
+                     "job_type": "audit", "provider": "Serper", "cost": 1.5, "cached": False}
+                ).execute()
+            )["id"]
+        )
+        admin.table("activity_log").insert(
+            {"actor_id": staff_uids["owner"], "actor_name": "Contract Owner", "actor_init": "CO",
+             "kind": "audit", "action": "seeded the contract suite", "target": "contract"}
+        ).execute()
+
         # --- the app under test: real settings (NO conftest override), Celery
         #     enqueuer stubbed, artifact store pointed at the temp dir. --------
         app = create_app()
@@ -359,6 +398,7 @@ def env() -> Any:
                 "missing": str(uuid.uuid4()),
             },
             "tag": tag,
+            "cost_log_id": cost_log_id,
             "cleanup_uids": cleanup_uids,
             "cleanup_clients": cleanup_clients,
             "cleanup_audits": cleanup_audits,
@@ -381,6 +421,11 @@ def env() -> Any:
             _safe(lambda aid=aid: admin.table("audits").delete().eq("id", aid).execute())
         for kid in cleanup_vault:
             _safe(lambda kid=kid: admin.table("vault_keys").delete().eq("id", kid).execute())
+        # activity_log is append-only; every Group B mutation appends a row via
+        # record_activity. Remove the seed row + everything the test actors wrote
+        # so reruns do not accumulate orphan feed entries.
+        _safe(lambda: admin.table("cost_log").delete().eq("id", cost_log_id).execute())
+        _safe(lambda: admin.table("activity_log").delete().in_("actor_id", cleanup_uids).execute())
         for cid in cleanup_clients:
             _safe(lambda cid=cid: admin.table("clients").delete().eq("id", cid).execute())
         for uid in cleanup_uids:
@@ -436,8 +481,8 @@ def _matrix_cases(env: Any) -> list[dict[str, Any]]:
         # --- health (public) ---
         c("health.get.owner", "owner", "GET", "/health", 200, shape=HealthResponse),
         c("health.get.unauth", None, "GET", "/health", 200, shape=HealthResponse),
-        c("ready.get.owner", "owner", "GET", "/health/ready", (200, 503)),
-        c("ready.get.unauth", None, "GET", "/health/ready", (200, 503)),
+        c("ready.get.owner", "owner", "GET", "/health/ready", (200, 503), shape=ReadyResponse),
+        c("ready.get.unauth", None, "GET", "/health/ready", (200, 503), shape=ReadyResponse),
         # --- rbac reference (CurrentUserDep) ---
         c("rbac.features.owner", "owner", "GET", f"{v}/rbac/features", 200, shape=FeatureDef, is_list=True),
         c("rbac.features.unauth", None, "GET", f"{v}/rbac/features", 401),
@@ -551,14 +596,19 @@ async def test_contract_matrix(env: Any) -> None:
                 token = env["tokens"].get(case["principal"]) if case["principal"] else None
                 headers = {"Authorization": f"Bearer {token}"} if token else {}
                 exp = case["status"]
-                # Bounded retry ONLY to absorb a transient upstream blip (this suite
-                # makes ~85 sequential cross-region round-trips to a free-tier
-                # Supabase). A DETERMINISTIC contract bug - e.g. the empty-JWT 500
-                # class - returns the wrong status on EVERY attempt, so it still
-                # fails here; retry never hides a real regression.
+                # Bounded retry ONLY on a transient upstream 5xx when we expected a
+                # non-5xx. This suite makes ~85 sequential cross-region round-trips
+                # to a free-tier Supabase; a connection reset / timeout surfaces as
+                # a 500 through the generic error envelope (observed: WinError 10054).
+                # A DETERMINISTIC 5xx - the empty-JWT class - returns 5xx on EVERY
+                # attempt, so it still fails here (proven: reverting the repo-auth
+                # fix keeps clients.list.owner at 500 across all retries). A wrong
+                # NON-5xx status (a broken guard / contract drift) is never retried
+                # -> reported immediately. The only thing absorbed is a self-healing
+                # 5xx->2xx, an acceptable, documented trade for a reliable net.
                 resp = await ac.request(case["method"], case["path"], headers=headers, json=case["body"])
                 for _ in range(2):
-                    if _matches(resp, exp):
+                    if _matches(resp, exp) or resp.status_code < 500:
                         break
                     await asyncio.sleep(1.5)
                     resp = await ac.request(case["method"], case["path"], headers=headers, json=case["body"])
@@ -675,6 +725,7 @@ async def test_cost_writes_with_restore(env: Any) -> None:
         dial = {f["key"]: f["mode"] for f in _body(await _req(app, "GET", "/api/v1/cost/dial", owner))}
         ss = _body(await _req(app, "GET", "/api/v1/cost/spend-stop", owner))
         orig_keywords, orig_stop, orig_halt = dial["keywords"], ss["dailyStop"], ss["halted"]
+        t = env["ids"]["tenant"]
         try:
             r = await _req(app, "PUT", "/api/v1/cost/dial/keywords", owner, {"mode": "api"})
             assert r.status_code == 200, r.text
@@ -686,10 +737,39 @@ async def test_cost_writes_with_restore(env: Any) -> None:
 
             r = await _req(app, "GET", "/api/v1/cost/spend-stop", owner)
             assert _body(r)["dailyStop"] == 42.0 and _body(r)["halted"] is True
+
+            # PUT budget (happy path) validates ClientBudgetResponse against a real row.
+            r = await _req(app, "PUT", f"/api/v1/cost/budgets/{t}", owner, {"cap": 250})
+            assert r.status_code == 200, r.text
+            assert not shape_errors(_body(r), ClientBudgetResponse)
+            assert _body(r)["cap"] == 250
         finally:
-            # Restore the org-wide singletons this test mutated.
+            # Restore the org-wide singletons this test mutated + drop the budget row.
             await _req(app, "PUT", "/api/v1/cost/dial/keywords", owner, {"mode": orig_keywords})
             await _req(app, "PUT", "/api/v1/cost/spend-stop", owner, {"daily_stop": orig_stop, "halted": orig_halt})
+            env["admin"].table("client_budgets").delete().eq("client_id", t).execute()
+
+
+async def test_staff_audit_create_and_tier_update(env: Any) -> None:
+    """Staff run-audit (POST /audits->201) + delivery-tier update (PUT /tiers/clients->200)."""
+    app, owner, t = env["app"], env["tokens"]["owner"], env["ids"]["tenant"]
+    async with LifespanManager(app):
+        r = await _req(app, "POST", "/api/v1/audits", owner,
+                       {"client_id": t, "url": _PUBLIC_URL, "tier": "Free", "types": ["technical"]})
+        assert r.status_code == 201, r.text
+        body = _body(r)
+        assert not shape_errors(body, AuditResponse)
+        assert body["status"] == "queued" and body["tier"] == "Free"
+        env["cleanup_audits"].append(body["id"])
+
+        try:
+            r = await _req(app, "PUT", f"/api/v1/tiers/clients/{t}", owner, {"tier": "semi"})
+            assert r.status_code == 200, r.text
+            assert not shape_errors(_body(r), TierClientResponse)
+            assert _body(r)["tier"] == "semi"
+        finally:
+            # Restore delivery tier: the portal Paid-gate test depends on 'free'.
+            await _req(app, "PUT", f"/api/v1/tiers/clients/{t}", owner, {"tier": "free"})
 
 
 async def test_task_lifecycle_through_review_gate(env: Any) -> None:
