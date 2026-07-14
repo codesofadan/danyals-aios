@@ -33,8 +33,8 @@ backend/
 │   ├── db/supabase.py     # service-role + per-user (anon+JWT) client seams + readiness ping
 │   ├── routers/           # one router per module; health at root, api_v1 under /api/v1
 │   └── schemas/           # pydantic response models
-├── workers/               # Celery app + tasks (workers/celery_app.py, workers/tasks/)
-├── integrations/          # external API clients (added later)
+├── workers/               # Celery app + tasks (celery_app.py; tasks/ping.py, tasks/audit.py)
+├── integrations/          # external clients; audit_engine.py wraps the SEO engine as a subprocess
 └── tests/                 # unit (no external services) + integration (need Redis/Supabase)
 ```
 
