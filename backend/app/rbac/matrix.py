@@ -26,6 +26,11 @@ from pydantic import BaseModel
 # --- Type vocabularies (lowercase-canonical; DB enums match) ------------------
 
 AppRole = Literal["owner", "admin", "manager", "specialist", "analyst", "viewer"]
+# The client-portal login is a 7th role that sits OUTSIDE the governance matrix:
+# it holds NONE of the staff permissions, is scoped to a single clients row, and
+# reads only through the portal_* views. ``AppRole`` stays the 6 staff roles (the
+# frontend mirror); ``UserRole`` is the full set a ``public.users`` row may carry.
+UserRole = Literal["owner", "admin", "manager", "specialist", "analyst", "viewer", "client"]
 PermKey = Literal[
     "run_audits",
     "publish_content",
@@ -42,6 +47,14 @@ AccessLevel = Literal["full", "view", "off"]
 ROLE_ORDER: tuple[AppRole, ...] = get_args(AppRole)
 PERM_KEYS: tuple[PermKey, ...] = get_args(PermKey)
 ACCESS_LEVELS: tuple[AccessLevel, ...] = get_args(AccessLevel)
+
+# The governance (staff) roles - everything a ``client`` is NOT.
+STAFF_ROLES: frozenset[AppRole] = frozenset(get_args(AppRole))
+
+
+def is_staff_role(role: str) -> bool:
+    """Whether ``role`` is a staff (governance) role - i.e. anything but ``client``."""
+    return role != "client"
 
 # Most-privileged -> least; used to compare AccessLevel ("full" satisfies "view").
 _LEVEL_RANK: dict[AccessLevel, int] = {"off": 0, "view": 1, "full": 2}
@@ -183,15 +196,27 @@ TEMPLATES: tuple[RoleTemplateDef, ...] = (
 # --- Enforcement helpers ------------------------------------------------------
 
 
-def perms_for_role(role: AppRole) -> frozenset[PermKey]:
-    """Default permission set for ``role`` (owner is all permissions)."""
+def perms_for_role(role: UserRole) -> frozenset[PermKey]:
+    """Default permission set for ``role`` (owner is all; client holds none).
+
+    ``client`` returns early BEFORE indexing ``DEFAULT_ROLE_PERMS`` (which has no
+    client key): a portal client is outside the governance matrix and holds no
+    staff permission.
+    """
+    if role == "client":
+        return frozenset()
     if role == "owner":
         return frozenset(PERM_KEYS)
     return DEFAULT_ROLE_PERMS[role]
 
 
-def role_has_perm(role: AppRole, perm: PermKey) -> bool:
-    """Whether ``role`` holds ``perm``. Owner is hard-locked to all-on."""
+def role_has_perm(role: UserRole, perm: PermKey) -> bool:
+    """Whether ``role`` holds ``perm``. Owner is all-on; client holds none.
+
+    ``client`` returns early BEFORE indexing ``DEFAULT_ROLE_PERMS``.
+    """
+    if role == "client":
+        return False
     return role == "owner" or perm in DEFAULT_ROLE_PERMS[role]
 
 
@@ -201,12 +226,13 @@ def level_satisfies(have: AccessLevel, required: AccessLevel) -> bool:
 
 
 def effective_feature_level(
-    role: AppRole, overrides: dict[str, AccessLevel], feature_key: str
+    role: UserRole, overrides: dict[str, AccessLevel], feature_key: str
 ) -> AccessLevel:
     """Resolve a user's access to ``feature_key``.
 
     Owner is all-on (``full``). Otherwise a per-user override wins; with no
     override the feature is ``off`` (access is granted explicitly, never implied).
+    A ``client`` has no grants, so it always resolves to ``off``.
     """
     if role == "owner":
         return "full"
@@ -214,7 +240,7 @@ def effective_feature_level(
 
 
 def feature_allows(
-    role: AppRole,
+    role: UserRole,
     overrides: dict[str, AccessLevel],
     feature_key: str,
     required: AccessLevel = "full",

@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from app.config import Settings
 from app.core.deps import HttpClientDep, SettingsDep
 from app.db.supabase import SupabaseNotConfiguredError, client_for_user
-from app.rbac import AccessLevel, AppRole, PermKey, feature_allows, role_has_perm
+from app.rbac import AccessLevel, AppRole, PermKey, UserRole, feature_allows, role_has_perm
 
 # Supabase issues ES256 (default for new projects) or RS256 signing keys.
 _ALLOWED_ALGS = ["ES256", "RS256"]
@@ -55,18 +55,33 @@ class CurrentUser(BaseModel):
 
     id: str
     email: str
-    role: AppRole
+    role: UserRole
     status: str
     name: str
     title: str
     avatar_color: str
     phone: str
     two_fa: bool
+    # Set only for a portal client (role='client'), from the trusted users row;
+    # NULL for staff. NEVER accepted from a request body (see get_current_client).
+    client_id: str | None = None
 
     @property
     def is_owner(self) -> bool:
         """Owner (agency super-admin) is all-on and locked."""
         return self.role == "owner"
+
+
+class CurrentClient(BaseModel):
+    """A verified PORTAL CLIENT caller: the user row + its guaranteed tenant id.
+
+    Built only by :func:`get_current_client`, which 403s unless the caller is a
+    ``client`` with a ``client_id``. So ``client_id`` here is always trustworthy
+    and server-pinned - it is the tenant boundary, never taken from request input.
+    """
+
+    user: CurrentUser
+    client_id: str
 
 
 class JWKSCache:
@@ -196,6 +211,7 @@ async def get_current_user(
             detail="User is not provisioned",
         )
 
+    raw_client_id = row.get("client_id")
     return CurrentUser(
         id=str(row["id"]),
         email=row["email"],
@@ -206,6 +222,7 @@ async def get_current_user(
         avatar_color=row.get("avatar_color", "#7B69EE"),
         phone=row.get("phone", ""),
         two_fa=bool(row.get("two_fa", False)),
+        client_id=str(raw_client_id) if raw_client_id else None,
     )
 
 
@@ -214,6 +231,21 @@ CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 def _forbid(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+async def get_current_client(user: CurrentUserDep) -> CurrentClient:
+    """FastAPI dependency: the caller as a scoped portal client (else 403).
+
+    Guards every ``/portal/*`` route. Any non-client role - or a client somehow
+    missing its ``client_id`` - is rejected. The returned ``client_id`` comes from
+    the trusted users row and is the tenant boundary for all portal reads/writes.
+    """
+    if user.role != "client" or not user.client_id:
+        raise _forbid("Client portal access only")
+    return CurrentClient(user=user, client_id=user.client_id)
+
+
+CurrentClientDep = Annotated[CurrentClient, Depends(get_current_client)]
 
 
 def require_perm(perm: PermKey) -> Any:
