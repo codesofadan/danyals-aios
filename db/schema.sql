@@ -174,3 +174,9 @@ create table public.audits (
 -- + client_id & created_at indexes; ENABLE + FORCE RLS. select (is_staff);
 -- modify by run_audits holders (owner/admin/manager/specialist/analyst). The
 -- worker updates rows via the service_role client (bypasses RLS by design).
+
+-- ---- 0009_app_role_client ---------------------------------------------------
+-- Add a 7th app_role label, 'client', in its OWN committed migration (Postgres
+-- forbids using a new enum label in the txn that adds it - 55P04). 'client' is a
+-- portal login OUTSIDE the 6-role governance matrix; is_staff() excludes it.
+alter type public.app_role add value if not exists 'client';
