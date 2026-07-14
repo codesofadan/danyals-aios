@@ -48,6 +48,29 @@ class Settings(BaseSettings):
     supabase_jwt_aud: str = "authenticated"
     supabase_jwks_url: str | None = None  # defaults to <supabase_url>/auth/v1/.well-known/jwks.json
 
+    # --- Local Postgres (P6A migration; ADDITIVE dual-config window). These sit
+    # alongside SUPABASE_* and are OPTIONAL until the cutover (P6A-8) promotes them
+    # into _REQUIRED_IN_PROD. Nothing here is wired into the running app yet. ---
+    # Authenticated-role DSN -> the per-request RLS pool (RLS binds this connection).
+    database_url: str | None = None
+    # service_role DSN -> the privileged pool (BYPASSRLS); server-only, never logged.
+    database_admin_url: str | None = None
+
+    # --- Local auth (own EdDSA JWT; replaces networked JWKS at cutover). API-only
+    # private key SIGNS at login; the public key VERIFIES. ---
+    jwt_private_key: SecretStr | None = None  # Ed25519 PEM, API-only (signs access tokens)
+    jwt_public_key: str | None = None  # Ed25519 PEM (verifies access tokens)
+    # NOTE: `jwt_issuer` is already a DERIVED PROPERTY (from supabase_url) that
+    # core/auth.py still imports for the live Supabase path. To avoid shadowing it
+    # (a field would break that property + mypy), the local issuer is a distinct
+    # field. At cutover it becomes the sole issuer and the property is retired.
+    local_jwt_issuer: str = "aios"  # expected `iss` on our own EdDSA tokens
+    jwt_audience: str = "authenticated"  # expected `aud` on our own EdDSA tokens
+
+    # --- Vault (app-layer AES-256-GCM; replaces Supabase Vault at cutover). The
+    # master key lives ONLY in process env, NEVER in Postgres. base64 32-byte key. ---
+    vault_master_key: SecretStr | None = None
+
     # --- Redis (app cache + readiness) and Celery (separate logical DBs) ---
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"

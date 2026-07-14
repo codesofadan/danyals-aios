@@ -22,11 +22,14 @@ dependencies = [
     "tenacity>=8.5",
     "celery[redis]>=5.4",
     "redis[hiredis]>=5.0",
-    "supabase>=2.6",
+    "supabase>=2.6",          # legacy transport; removed after the local-Postgres cutover (P6A-8)
     "sentry-sdk[fastapi]>=2.8",
-    "pyjwt[crypto]>=2.9",      # verify Supabase access tokens (ES256/RS256 via JWKS)
+    "pyjwt[crypto]>=2.9",      # verify JWTs (Supabase ES256/RS256 today; own EdDSA after cutover)
     "email-validator>=2.1",    # pydantic EmailStr for user provisioning
     "prometheus-client>=0.20",  # request-rate / latency / in-flight metrics at /metrics
+    "psycopg[binary,pool]>=3.2",  # local-Postgres driver + connection pool (RLS + privileged seams)
+    "argon2-cffi>=23.1",       # Argon2id password hashing for local auth (verifies imported bcrypt too)
+    "cryptography>=43.0",      # app-layer AES-256-GCM vault sealing (master key never in Postgres)
 ]
 
 [project.optional-dependencies]

@@ -19,6 +19,13 @@ _ENV_KEYS = [
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPABASE_ANON_KEY",
+    "DATABASE_URL",
+    "DATABASE_ADMIN_URL",
+    "JWT_PRIVATE_KEY",
+    "JWT_PUBLIC_KEY",
+    "LOCAL_JWT_ISSUER",
+    "JWT_AUDIENCE",
+    "VAULT_MASTER_KEY",
     "REDIS_URL",
     "CELERY_BROKER_URL",
     "CELERY_RESULT_BACKEND",
@@ -76,6 +83,40 @@ def test_secrets_are_masked() -> None:
     assert "topsecret" not in repr(s)
     assert "topsecret" not in str(s.supabase_service_role_key)
     assert s.supabase_service_role_key.get_secret_value() == "topsecret"
+
+
+@pytest.mark.unit
+def test_local_migration_secrets_are_masked() -> None:
+    # P6A dual-config secrets (own-JWT signing key + vault master key) must also
+    # be SecretStr and never render in a repr / log.
+    s = Settings(
+        _env_file=None,
+        jwt_private_key="PRIV_KEY_SECRET",
+        vault_master_key="VAULT_MASTER_SECRET",
+    )
+    assert isinstance(s.jwt_private_key, SecretStr)
+    assert isinstance(s.vault_master_key, SecretStr)
+    dump = repr(s)
+    assert "PRIV_KEY_SECRET" not in dump
+    assert "VAULT_MASTER_SECRET" not in dump
+    assert s.jwt_private_key.get_secret_value() == "PRIV_KEY_SECRET"
+    assert s.vault_master_key.get_secret_value() == "VAULT_MASTER_SECRET"
+
+
+@pytest.mark.unit
+def test_local_migration_settings_default_optional() -> None:
+    # ADDITIVE window: the new local-Postgres settings are optional (not yet in
+    # _REQUIRED_IN_PROD) and the derived Supabase `jwt_issuer` property is intact.
+    s = Settings(_env_file=None)
+    assert s.database_url is None
+    assert s.database_admin_url is None
+    assert s.jwt_private_key is None
+    assert s.jwt_public_key is None
+    assert s.vault_master_key is None
+    assert s.local_jwt_issuer == "aios"
+    assert s.jwt_audience == "authenticated"
+    # the name clash is resolved: `jwt_issuer` stays the Supabase-derived property
+    assert s.jwt_issuer is None  # no supabase_url set -> derived property is None
 
 
 @pytest.mark.unit
