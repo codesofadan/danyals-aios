@@ -30,6 +30,7 @@ clients (tenants A/B), seeds one row per table via service_role, tears all down.
 from __future__ import annotations
 
 import contextlib
+import time
 import uuid
 from typing import Any, cast
 
@@ -66,6 +67,25 @@ _SELECT_ALLOW: dict[str, set[str]] = {
 
 def _data(resp: Any) -> list[dict[str, Any]]:
     return cast("list[dict[str, Any]]", resp.data or [])
+
+
+def _select(client: Any, table: str, columns: str = "*") -> list[dict[str, Any]]:
+    """SELECT, retrying ONLY a transient transport error (never an RLS outcome).
+
+    An RLS decision never raises: a denial returns [] and an allow returns rows.
+    So retrying on a raised ConnectError/timeout absorbs a free-tier connection
+    reset (e.g. WinError 10054) WITHOUT masking any allow/deny result - the
+    boundary this suite asserts is unaffected.
+    """
+    last: Exception | None = None
+    for _ in range(3):
+        try:
+            return _data(client.table(table).select(columns).execute())
+        except Exception as exc:  # transient transport error, retry
+            last = exc
+            time.sleep(1.0)
+    assert last is not None
+    raise last
 
 
 @pytest.fixture(scope="module")
@@ -205,7 +225,7 @@ def test_rls_select_matrix(rls: Any) -> None:
     for table, allow in _SELECT_ALLOW.items():
         for who in principals:
             try:
-                rows = _data(pg[who].table(table).select("*").execute())
+                rows = _select(pg[who], table)
             except Exception as exc:  # a raise (permission denied) is also a "deny"
                 rows = []
                 if who in allow:
@@ -225,29 +245,29 @@ def test_rls_self_row_visibility(rls: Any) -> None:
     """users / user_feature_grants are self-or-staff: a client sees ONLY its own."""
     pg, uids = rls["pg"], rls["uids"]
     # Staff see the whole roster; a client sees only its own users row.
-    assert len(_data(pg["owner"].table("users").select("id").execute())) > 1
-    a_rows = _data(pg["clientA"].table("users").select("id").execute())
+    assert len(_select(pg["owner"], "users", "id")) > 1
+    a_rows = _select(pg["clientA"], "users", "id")
     assert a_rows, "clientA should see its own users row"
     assert all(r["id"] == uids["clientA"] for r in a_rows), "clientA saw a users row that is not its own"
     assert uids["owner"] not in {r["id"] for r in a_rows}, "clientA must not see staff users rows"
     # user_feature_grants: a client sees only its own grants (owner's are hidden).
-    g_rows = _data(pg["clientA"].table("user_feature_grants").select("user_id").execute())
+    g_rows = _select(pg["clientA"], "user_feature_grants", "user_id")
     assert all(r["user_id"] == uids["clientA"] for r in g_rows), "clientA saw another user's grants"
 
 
 def test_client_cross_tenant_isolation_via_views(rls: Any) -> None:
     """A portal client reads ONLY its own tenant through the security-barrier views."""
     pg, tenant = rls["pg"], rls["tenant"]
-    a_audits = _data(pg["clientA"].table("portal_audits").select("*").execute())
+    a_audits = _select(pg["clientA"], "portal_audits")
     assert a_audits, "clientA should see its own audit via the view"
     assert all(r["client_id"] == tenant["A"] for r in a_audits), "clientA saw another tenant's audit"
     assert rls["audit_b"] not in {r["id"] for r in a_audits}, "tenant B's audit leaked to clientA"
 
-    a_client = _data(pg["clientA"].table("portal_client").select("*").execute())
+    a_client = _select(pg["clientA"], "portal_client")
     assert [r["id"] for r in a_client] == [tenant["A"]], "portal_client is not self-scoped"
 
     # clientB is the mirror image: sees B, never A.
-    b_audits = _data(pg["clientB"].table("portal_audits").select("*").execute())
+    b_audits = _select(pg["clientB"], "portal_audits")
     assert all(r["client_id"] == tenant["B"] for r in b_audits)
     assert rls["audit_a"] not in {r["id"] for r in b_audits}
 
@@ -260,11 +280,11 @@ def test_client_cross_tenant_isolation_via_views(rls: Any) -> None:
 def test_sensitive_columns_unreachable_direct(rls: Any) -> None:
     """A tenant JWT cannot read sensitive columns off the base tables (0 rows)."""
     ca = rls["pg"]["clientA"]
-    assert _data(ca.table("clients").select("id,mrr").execute()) == [], "clients.mrr reachable by a client"
-    assert _data(ca.table("audits").select("cost,error,pdf_path,json_path").execute()) == [], (
+    assert _select(ca, "clients", "id,mrr") == [], "clients.mrr reachable by a client"
+    assert _select(ca, "audits", "cost,error,pdf_path,json_path") == [], (
         "audits sensitive columns reachable by a client"
     )
-    assert _data(ca.table("cost_log").select("cost").execute()) == [], "cost_log reachable by a client"
+    assert _select(ca, "cost_log", "cost") == [], "cost_log reachable by a client"
 
 
 def test_rls_write_denial(rls: Any) -> None:
