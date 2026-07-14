@@ -89,7 +89,10 @@ def _count_mutations(tree: ast.AST) -> int:
 def main() -> int:
     module_path = Path(sys.argv[1])
     test_path = sys.argv[2]
-    original = module_path.read_text(encoding="utf-8")
+    # Keep the ORIGINAL bytes so the restore is byte-exact (no CRLF/LF drift on
+    # Windows, which would otherwise leave the target file spuriously modified).
+    original_bytes = module_path.read_bytes()
+    original = original_bytes.decode("utf-8")
     total = _count_mutations(ast.parse(original))
     print(f"module={module_path}  test={test_path}  mutants={total}")
 
@@ -110,7 +113,7 @@ def main() -> int:
             else:
                 killed += 1
     finally:
-        module_path.write_text(original, encoding="utf-8")  # ALWAYS restore
+        module_path.write_bytes(original_bytes)  # ALWAYS restore, byte-exact
 
     score = killed / total * 100 if total else 100.0
     print(f"\nMUTATION SCORE: {killed}/{total} killed = {score:.1f}%")
