@@ -11,6 +11,7 @@ to the engine ``--mode``) and surfaced capitalized to match the frontend.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -108,3 +109,36 @@ class AuditStatsResponse(BaseModel):
     avg_score: int = Field(serialization_alias="avgScore")
     running_now: int = Field(serialization_alias="runningNow")
     turnaround_min: int = Field(serialization_alias="turnaroundMin")
+
+
+def compute_audit_stats(rows: list[dict[str, Any]]) -> AuditStatsResponse:
+    """Derive the ``auditStats`` KPIs from the audit rows (pure, unit-testable).
+
+    thisMonth = runs created this calendar month; avgScore = mean composite of
+    completed runs; runningNow = in-flight runs; turnaroundMin = mean completed
+    runtime in whole minutes.
+    """
+    month_prefix = datetime.now(UTC).strftime("%Y-%m")
+    this_month = 0
+    running = 0
+    scores: list[int] = []
+    runtimes: list[int] = []
+    for r in rows:
+        if str(r.get("created_at", ""))[:7] == month_prefix:
+            this_month += 1
+        status = r.get("status")
+        if status == "running":
+            running += 1
+        elif status == "done":
+            if r.get("score") is not None:
+                scores.append(int(r["score"]))
+            if r.get("runtime_seconds"):
+                runtimes.append(int(r["runtime_seconds"]))
+    avg_score = round(sum(scores) / len(scores)) if scores else 0
+    turnaround = round(sum(runtimes) / len(runtimes) / 60) if runtimes else 0
+    return AuditStatsResponse(
+        this_month=this_month,
+        avg_score=avg_score,
+        running_now=running,
+        turnaround_min=turnaround,
+    )
