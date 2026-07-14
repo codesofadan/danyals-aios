@@ -81,6 +81,11 @@ def test_response_exposes_only_task_fields_with_public_code() -> None:
     assert dumped["client"] == "NorthPeak Dental"
     assert dumped["assignee"] == "u-bilal"
     assert dumped["due"] == "Jul 12"
+    # A VALID non-default priority/status must pass through unchanged (kills the
+    # `in _PRIORITIES` / `in _STATUSES` -> `not in` mutants, which else coerce a
+    # valid value to the "med"/"todo" fallback).
+    assert dumped["priority"] == "high"
+    assert dumped["status"] == "in_progress"
     # none of the internal columns surface, under any name
     assert "cl-secret" not in dumped.values()
     assert "aud-secret" not in dumped.values()

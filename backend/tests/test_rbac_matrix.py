@@ -62,6 +62,30 @@ def test_role_has_perm_examples() -> None:
     assert not m.role_has_perm("viewer", "manage_vault")
     assert m.role_has_perm("manager", "manage_clients")
     assert not m.role_has_perm("manager", "manage_team")
+    # perms_for_role must return the ROLE'S own set, not owner's, for a non-owner
+    # (kills the `role == "owner"` -> `!=` mutant, which else returns all perms).
+    assert m.perms_for_role("viewer") == frozenset({"view_reports"})
+    assert m.perms_for_role("manager") == m.DEFAULT_ROLE_PERMS["manager"]
+
+
+@pytest.mark.unit
+def test_client_role_is_outside_the_governance_matrix() -> None:
+    """SECURITY invariant: a portal client is NOT staff and holds NO permission.
+
+    (Added to kill mutation survivors: flipping ``is_staff_role``'s ``!=``, the
+    ``role == "client"`` early-returns, or the ``return False`` in
+    ``role_has_perm`` previously left every test green.)
+    """
+    assert m.is_staff_role("client") is False
+    assert m.is_staff_role("owner") is True
+    assert m.is_staff_role("viewer") is True
+    assert m.perms_for_role("client") == frozenset()
+    for perm in m.PERM_KEYS:
+        assert m.role_has_perm("client", perm) is False
+    # A client never has grants, so no feature is allowed and every level is off.
+    for feat in m.FEATURE_KEYS:
+        assert m.effective_feature_level("client", {}, feat) == "off"
+        assert not m.feature_allows("client", {}, feat)
 
 
 @pytest.mark.unit
