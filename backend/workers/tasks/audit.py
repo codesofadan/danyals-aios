@@ -22,6 +22,7 @@ from typing import Any, Protocol
 from app.config import Settings, get_settings
 from app.db.supabase import get_admin_client
 from app.logging_setup import get_logger
+from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
 from app.services.cost_gate import GateContext
 from app.services.cost_store import SupabaseCostStore
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult, run_audit
@@ -98,12 +99,28 @@ def _safe_record_cost(store: AuditStore, row: dict[str, Any], cost: float) -> No
         logger.warning("audit_cost_log_failed", audit_id=str(row.get("id", "")))
 
 
+def _store_artifacts(
+    artifacts: ArtifactStore | None, audit_id: str, result: AuditRunResult
+) -> tuple[str | None, str | None]:
+    """Copy the run's PDF + findings into the controlled root; never fatal."""
+    if artifacts is None:
+        return None, None
+    try:
+        return artifacts.store(
+            audit_id, pdf_src=result.pdf_path, findings_src=result.findings_path
+        )
+    except Exception:
+        logger.warning("audit_artifact_store_failed", audit_id=audit_id)
+        return None, None
+
+
 def execute_audit(
     store: AuditStore,
     settings: Settings,
     audit_id: str,
     *,
     runner: _Runner = run_audit,
+    artifacts: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """Run the audit job and drive the row through its state machine.
 
@@ -158,6 +175,7 @@ def execute_audit(
         )
         return {"audit_id": audit_id, "status": "failed", "reason": result.error}
 
+    pdf_key, json_key = _store_artifacts(artifacts, audit_id, result)
     store.update(
         audit_id,
         {
@@ -166,6 +184,8 @@ def execute_audit(
             "artifact_dir": result.artifact_dir,
             "score": result.score,
             "scores": result.scores,
+            "pdf_path": pdf_key,
+            "json_path": json_key,
             "runtime_seconds": result.runtime_seconds,
             "finished_at": finished,
         },
@@ -176,5 +196,8 @@ def execute_audit(
 @celery_app.task(name="run_audit")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
 def run_audit_job(audit_id: str) -> dict[str, Any]:
     """Entry point: wire the concrete store + settings and run the job."""
+    settings = get_settings()
     store = SupabaseAuditStore(get_admin_client())
-    return execute_audit(store, get_settings(), audit_id)
+    return execute_audit(
+        store, settings, audit_id, artifacts=local_store_from_settings(settings)
+    )

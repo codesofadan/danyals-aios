@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     audit_timeout_seconds: int = 1500
     audit_max_pages: int = 100  # default crawl breadth passed to the engine
     audit_profile: str = "general"  # engine --profile
+    # Controlled root the worker copies each run's report PDF + findings.json
+    # into (under <audit_id>/), and the API serves guarded downloads from. On the
+    # single-VPS deploy the API + worker share this filesystem. Unset -> no
+    # artifacts are stored/served (the pdf/json flags stay false).
+    audit_artifact_dir: str | None = None
     # The engine emits no machine-readable spend; a Paid run logs this estimate
     # through the Part-2 cost path (a Free run always logs 0).
     audit_paid_cost_estimate: float = 1.5

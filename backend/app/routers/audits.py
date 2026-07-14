@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 
 from app.core.auth import CurrentUser, CurrentUserDep, require_perm
+from app.core.deps import SettingsDep
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.audits_repo import AuditsRepoDep
 from app.db.clients_repo import ClientsRepoDep
@@ -26,12 +29,44 @@ from app.schemas.audits import (
     tier_to_db,
 )
 from app.services.activity import record_activity
+from app.services.audit_artifacts import LocalArtifactStore, local_store_from_settings
 
 router = APIRouter(tags=["audits"])
 
 RunAudits = Annotated[CurrentUser, Depends(require_perm("run_audits"))]
 
 _AUDIT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit not found")
+_ARTIFACT_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not available"
+)
+
+
+def get_artifact_store(settings: SettingsDep) -> LocalArtifactStore | None:
+    """Dependency: the configured artifact store, or ``None`` when unset."""
+    return local_store_from_settings(settings)
+
+
+ArtifactStoreDep = Annotated["LocalArtifactStore | None", Depends(get_artifact_store)]
+
+
+async def _serve_artifact(
+    repo: AuditsRepoDep,
+    store: LocalArtifactStore | None,
+    audit_id: str,
+    column: str,
+    media_type: str,
+    download_name: str,
+) -> FileResponse:
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    row = await asyncio.to_thread(repo.get_audit, audit_id)
+    if row is None:
+        raise _AUDIT_NOT_FOUND
+    key = row.get(column)
+    path: Path | None = store.resolve(key) if key else None
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type=media_type, filename=download_name)
 
 
 def get_audit_enqueuer() -> Callable[[str], None]:
@@ -70,6 +105,24 @@ async def get_audit(audit_id: str, repo: AuditsRepoDep, _user: CurrentUserDep) -
     if row is None:
         raise _AUDIT_NOT_FOUND
     return AuditResponse.from_row(row)
+
+
+@router.get("/audits/{audit_id}/report.pdf")
+async def download_audit_pdf(
+    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: CurrentUserDep
+) -> FileResponse:
+    return await _serve_artifact(
+        repo, store, audit_id, "pdf_path", "application/pdf", f"audit-{audit_id}.pdf"
+    )
+
+
+@router.get("/audits/{audit_id}/findings.json")
+async def download_audit_findings(
+    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: CurrentUserDep
+) -> FileResponse:
+    return await _serve_artifact(
+        repo, store, audit_id, "json_path", "application/json", f"audit-{audit_id}.json"
+    )
 
 
 @router.post("/audits", response_model=AuditResponse, status_code=status.HTTP_201_CREATED)
