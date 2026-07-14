@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
 
 const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
@@ -11,10 +10,14 @@ const bricolage = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "AIOS · Command Center",
+  title: "AIOS · Xegents",
   description: "SEO automation platform for the agency — audits, content, clients and Policy Radar. Built by Xegents AI.",
 };
 
+// Root shell holds only the document chrome + ambient glow. Each portal
+// brings its OWN navigation: the admin dashboard's Sidebar lives in
+// (admin)/layout.tsx; the team member portal's shell lives in
+// portal/layout.tsx. They are fully separate experiences.
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={bricolage.variable}>
@@ -30,8 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="glow a" />
         <div className="glow b" />
-        <Sidebar />
-        <main className="main">{children}</main>
+        {children}
       </body>
     </html>
   );
