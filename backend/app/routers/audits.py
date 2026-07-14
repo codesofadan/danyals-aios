@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
-from app.core.auth import CurrentUser, CurrentUserDep, require_perm
+from app.core.auth import CurrentUser, require_perm
 from app.core.deps import SettingsDep
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.audits_repo import AuditsRepoDep
@@ -34,6 +34,10 @@ from app.services.audit_artifacts import LocalArtifactStore, local_store_from_se
 router = APIRouter(tags=["audits"])
 
 RunAudits = Annotated[CurrentUser, Depends(require_perm("run_audits"))]
+# All six staff roles hold view_reports; a portal client does NOT (role_has_perm
+# early-returns False for 'client'), so this confines clients out of the staff
+# audit namespace - they use /portal/* instead (finding 7 / D10).
+ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
 
 _AUDIT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit not found")
 _ARTIFACT_NOT_FOUND = HTTPException(
@@ -88,19 +92,19 @@ AuditEnqueuerDep = Annotated[Callable[[str], None], Depends(get_audit_enqueuer)]
 
 
 @router.get("/audits", response_model=list[AuditResponse])
-async def list_audits(repo: AuditsRepoDep, _user: CurrentUserDep) -> list[AuditResponse]:
+async def list_audits(repo: AuditsRepoDep, _user: ViewReports) -> list[AuditResponse]:
     rows = await asyncio.to_thread(repo.list_audits)
     return [AuditResponse.from_row(r) for r in rows]
 
 
 @router.get("/audits/stats", response_model=AuditStatsResponse)
-async def audit_stats(repo: AuditsRepoDep, _user: CurrentUserDep) -> AuditStatsResponse:
+async def audit_stats(repo: AuditsRepoDep, _user: ViewReports) -> AuditStatsResponse:
     rows = await asyncio.to_thread(repo.list_audits)
     return compute_audit_stats(rows)
 
 
 @router.get("/audits/{audit_id}", response_model=AuditResponse)
-async def get_audit(audit_id: str, repo: AuditsRepoDep, _user: CurrentUserDep) -> AuditResponse:
+async def get_audit(audit_id: str, repo: AuditsRepoDep, _user: ViewReports) -> AuditResponse:
     row = await asyncio.to_thread(repo.get_audit, audit_id)
     if row is None:
         raise _AUDIT_NOT_FOUND
@@ -109,7 +113,7 @@ async def get_audit(audit_id: str, repo: AuditsRepoDep, _user: CurrentUserDep) -
 
 @router.get("/audits/{audit_id}/report.pdf")
 async def download_audit_pdf(
-    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: CurrentUserDep
+    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
 ) -> FileResponse:
     return await _serve_artifact(
         repo, store, audit_id, "pdf_path", "application/pdf", f"audit-{audit_id}.pdf"
@@ -118,7 +122,7 @@ async def download_audit_pdf(
 
 @router.get("/audits/{audit_id}/findings.json")
 async def download_audit_findings(
-    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: CurrentUserDep
+    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
 ) -> FileResponse:
     return await _serve_artifact(
         repo, store, audit_id, "json_path", "application/json", f"audit-{audit_id}.json"
