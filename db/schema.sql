@@ -180,3 +180,38 @@ create table public.audits (
 -- forbids using a new enum label in the txn that adds it - 55P04). 'client' is a
 -- portal login OUTSIDE the 6-role governance matrix; is_staff() excludes it.
 alter type public.app_role add value if not exists 'client';
+
+-- ---- 0010_client_portal -----------------------------------------------------
+-- The client trust boundary. users.client_id links a role='client' login to one
+-- clients row (CHECK: client_id is set iff role='client'). is_staff() is
+-- REDEFINED to exclude clients, so every staff-scoped base-table policy
+-- default-denies a client. current_client_id() returns the caller's tenant id.
+-- Clients read ONLY through three SECURITY-BARRIER views (no client select policy
+-- on any base table), each exposing a safe column subset self-filtered by
+-- current_client_id(); the views are owned by a BYPASSRLS role with
+-- security_invoker left default (false), so the view filter is the boundary.
+alter table public.users
+  add column client_id uuid references public.clients (id) on delete cascade;   -- NULL for staff
+-- + users_client_id_idx; CHECK users_client_id_role_chk ((role='client')=(client_id is not null)).
+
+create or replace function public.is_staff() returns boolean
+  language sql stable security definer set search_path = ''
+  as $$ select exists (select 1 from public.users where id = auth.uid() and role <> 'client') $$;
+create or replace function public.current_client_id() returns uuid
+  language sql stable security definer set search_path = ''
+  as $$ select client_id from public.users where id = auth.uid() and role = 'client' $$;
+
+-- portal_audits (excl. cost/error/artifact_dir/run_uuid/pdf_path/json_path;
+-- has_pdf/has_json booleans instead), portal_client (id/name/industry/
+-- delivery_tier), portal_sites (id/domain). All WITH (security_barrier=true),
+-- WHERE ... = current_client_id(); SELECT granted to authenticated, anon.
+create or replace view public.portal_audits with (security_barrier = true) as
+  select id, client_id, url, types, tier, status, score, scores, runtime_seconds,
+         created_at, started_at, finished_at,
+         (pdf_path is not null) as has_pdf, (json_path is not null) as has_json
+  from public.audits where client_id = public.current_client_id();
+create or replace view public.portal_client with (security_barrier = true) as
+  select id, name, industry, delivery_tier
+  from public.clients where id = public.current_client_id();
+create or replace view public.portal_sites with (security_barrier = true) as
+  select id, domain from public.sites where client_id = public.current_client_id();
