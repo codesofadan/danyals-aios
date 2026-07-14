@@ -17,8 +17,10 @@ Two client factories with very different trust levels:
 
 from __future__ import annotations
 
+import ssl
 from functools import lru_cache
 
+import certifi
 import httpx
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
@@ -31,6 +33,31 @@ _DEPENDENCY_NAME = "supabase"
 
 class SupabaseNotConfiguredError(RuntimeError):
     """Raised when a Supabase client is requested but its config is missing."""
+
+
+@lru_cache(maxsize=1)
+def _shared_ssl_context() -> ssl.SSLContext:
+    """One process-wide TLS context (the CA bundle is parsed exactly ONCE).
+
+    Building an ``SSLContext`` from the certifi bundle costs ~300ms (measured on
+    this box), and ``httpx.Client()`` builds a fresh one on EVERY construction.
+    Because ``client_for_user`` builds a client PER REQUEST, the app was paying
+    ~300ms of pure CPU per RLS-backed request just to construct the client -
+    larger than an actual Supabase round-trip. Sharing one context (SSL contexts
+    are designed to be shared safely across connections/threads) cuts per-request
+    client construction from ~300ms to <1ms without changing the trust store.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _pooled_httpx_client() -> httpx.Client:
+    """A fresh httpx client that REUSES the shared TLS context (cheap to build).
+
+    Still per-client (so one request's JWT can never leak into another's headers),
+    but no longer re-parses the CA bundle. A generous read timeout accommodates
+    the free-tier project's occasional slow round-trip.
+    """
+    return httpx.Client(verify=_shared_ssl_context(), timeout=httpx.Timeout(30.0))
 
 
 @lru_cache
@@ -51,7 +78,9 @@ def get_admin_client() -> Client:
         raise SupabaseNotConfiguredError(
             "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for the admin client"
         )
-    options = SyncClientOptions(persist_session=False, auto_refresh_token=False)
+    options = SyncClientOptions(
+        persist_session=False, auto_refresh_token=False, httpx_client=_pooled_httpx_client()
+    )
     return create_client(url, key.get_secret_value(), options)
 
 
@@ -73,6 +102,7 @@ def client_for_user(jwt: str) -> Client:
         headers={"Authorization": f"Bearer {jwt}"},
         persist_session=False,
         auto_refresh_token=False,
+        httpx_client=_pooled_httpx_client(),
     )
     return create_client(url, anon.get_secret_value(), options)
 
