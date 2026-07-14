@@ -40,13 +40,12 @@ class TasksRepo:
         return rows[0] if rows else None
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
-        """Read a user row (id + role) to validate an assignee is staff.
+        """Read a full user row - used to validate an assignee is staff (role)
+        and to load the caller's own member record for GET /me.
 
         Uses the same RLS client; staff may read the whole roster (users_select).
         """
-        resp = (
-            self._client().table("users").select("id, role").eq("id", user_id).limit(1).execute()
-        )
+        resp = self._client().table("users").select("*").eq("id", user_id).limit(1).execute()
         rows = cast("_Rows", resp.data or [])
         return rows[0] if rows else None
 
