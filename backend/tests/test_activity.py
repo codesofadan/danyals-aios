@@ -91,9 +91,13 @@ async def test_record_activity_writes_via_admin(monkeypatch: pytest.MonkeyPatch)
 class _FakeRepo:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
+        self.last_page: tuple[int | None, int] | None = None
 
-    def list_activity(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self._rows[:limit]
+    def list_activity(self, limit: int | None = 50, offset: int = 0) -> list[dict[str, Any]]:
+        self.last_page = (limit, offset)
+        start = offset
+        end = None if limit is None else offset + limit
+        return self._rows[start:end]
 
 
 @pytest.fixture
@@ -127,3 +131,34 @@ async def test_feed_shape(
 async def test_feed_requires_auth(client: httpx.AsyncClient) -> None:
     resp = await client.get("/api/v1/activity")
     assert resp.status_code == 401
+
+
+async def test_feed_default_pagination(
+    client: httpx.AsyncClient, app: FastAPI, as_role: Callable[[str], None]
+) -> None:
+    repo = _FakeRepo([])
+    app.dependency_overrides[get_activity_repo] = lambda: repo
+    as_role("viewer")
+    resp = await client.get("/api/v1/activity")
+    assert resp.status_code == 200
+    assert repo.last_page == (50, 0)  # hard-cap defaults
+
+
+async def test_feed_explicit_pagination(
+    client: httpx.AsyncClient, app: FastAPI, as_role: Callable[[str], None]
+) -> None:
+    repo = _FakeRepo([])
+    app.dependency_overrides[get_activity_repo] = lambda: repo
+    as_role("viewer")
+    resp = await client.get("/api/v1/activity", params={"limit": 5, "offset": 10})
+    assert resp.status_code == 200
+    assert repo.last_page == (5, 10)
+
+
+async def test_feed_cap_enforcement(
+    client: httpx.AsyncClient, app: FastAPI, as_role: Callable[[str], None]
+) -> None:
+    app.dependency_overrides[get_activity_repo] = lambda: _FakeRepo([])
+    as_role("viewer")
+    assert (await client.get("/api/v1/activity", params={"limit": 0})).status_code == 422
+    assert (await client.get("/api/v1/activity", params={"limit": 201})).status_code == 422

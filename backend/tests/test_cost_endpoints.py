@@ -23,7 +23,7 @@ class FakeCostRepo:
         self._clients = {"cl-1": {"name": "NorthPeak Dental", "tier": "Scale", "contact_color": "#7B69EE"}}
         self._budgets: dict[str, int] = {"cl-1": 500}
 
-    def list_budgets(self) -> list[dict[str, Any]]:
+    def list_budgets(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         out = []
         for cid, cap in self._budgets.items():
             c = self._clients[cid]
@@ -43,14 +43,16 @@ class FakeCostRepo:
     def set_dial(self, feature_key: str, mode: str) -> None:
         self.dial[feature_key] = mode
 
-    def list_cost_log(self, limit: int = 50) -> list[dict[str, Any]]:
-        return [
+    def list_cost_log(self, limit: int | None = 50, offset: int = 0) -> list[dict[str, Any]]:
+        rows = [
             {
                 "job_id": "J-2041", "client_name": "NorthPeak Dental", "job_type": "audit",
                 "provider": "DataForSEO", "cost": 0.75, "cached": False,
                 "created_at": datetime.now(UTC).isoformat(),
             }
-        ][:limit]
+        ]
+        end = None if limit is None else offset + limit
+        return rows[offset:end]
 
     def today_spent(self) -> float:
         return 12.5

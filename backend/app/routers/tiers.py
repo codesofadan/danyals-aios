@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, CurrentUserDep, require_perm
+from app.core.pagination import PageDep
 from app.db.tiers_repo import TiersRepoDep
 from app.schemas.tiers import (
     FEATURE_AREAS,
@@ -42,9 +43,11 @@ async def list_feature_areas(_user: CurrentUserDep) -> list[FeatureAreaResponse]
 
 
 @router.get("/clients", response_model=list[TierClientResponse])
-async def list_tier_clients(repo: TiersRepoDep, _user: CurrentUserDep) -> list[TierClientResponse]:
+async def list_tier_clients(
+    repo: TiersRepoDep, page: PageDep, _user: CurrentUserDep
+) -> list[TierClientResponse]:
     """Per-client delivery-tier assignments (frontend tierClients)."""
-    rows = await asyncio.to_thread(repo.list_tier_clients)
+    rows = await asyncio.to_thread(repo.list_tier_clients, limit=page.limit, offset=page.offset)
     return [TierClientResponse.from_row(r) for r in rows]
 
 

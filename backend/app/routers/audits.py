@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 
 from app.core.auth import CurrentUser, require_perm
 from app.core.deps import SettingsDep
+from app.core.pagination import PageDep
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.audits_repo import AuditsRepoDep
 from app.db.clients_repo import ClientsRepoDep
@@ -92,8 +93,8 @@ AuditEnqueuerDep = Annotated[Callable[[str], None], Depends(get_audit_enqueuer)]
 
 
 @router.get("/audits", response_model=list[AuditResponse])
-async def list_audits(repo: AuditsRepoDep, _user: ViewReports) -> list[AuditResponse]:
-    rows = await asyncio.to_thread(repo.list_audits)
+async def list_audits(repo: AuditsRepoDep, page: PageDep, _user: ViewReports) -> list[AuditResponse]:
+    rows = await asyncio.to_thread(repo.list_audits, limit=page.limit, offset=page.offset)
     return [AuditResponse.from_row(r) for r in rows]
 
 

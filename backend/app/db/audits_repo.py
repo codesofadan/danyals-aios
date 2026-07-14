@@ -27,8 +27,11 @@ class AuditsRepo:
     def _client(self) -> Any:
         return client_for_user(self._token)
 
-    def list_audits(self) -> _Rows:
-        resp = self._client().table("audits").select("*").order("created_at", desc=True).execute()
+    def list_audits(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        query = self._client().table("audits").select("*").order("created_at", desc=True)
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
     def get_audit(self, audit_id: str) -> dict[str, Any] | None:

@@ -29,8 +29,11 @@ class ClientsRepo:
         return client_for_user(self._token)
 
     # --- clients --------------------------------------------------------------
-    def list_clients(self) -> _Rows:
-        resp = self._client().table("clients").select("*").order("name").execute()
+    def list_clients(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        query = self._client().table("clients").select("*").order("name")
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
     def get_client(self, client_id: str) -> dict[str, Any] | None:
@@ -61,10 +64,13 @@ class ClientsRepo:
             counts[key] = counts.get(key, 0) + 1
         return counts
 
-    def list_sites(self, client_id: str) -> _Rows:
-        resp = (
-            self._client().table("sites").select("*").eq("client_id", client_id).order("domain").execute()
+    def list_sites(self, client_id: str, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        query = (
+            self._client().table("sites").select("*").eq("client_id", client_id).order("domain")
         )
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
     def insert_site(self, row: dict[str, Any]) -> dict[str, Any]:

@@ -26,6 +26,7 @@ class FakeAuditsRepo:
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, Any]] = {}
         self._seq = 0
+        self.last_page: tuple[int | None, int] | None = None
 
     def seed(self, **over: Any) -> dict[str, Any]:
         self._seq += 1
@@ -47,7 +48,8 @@ class FakeAuditsRepo:
         self.rows[aid] = row
         return row
 
-    def list_audits(self) -> list[dict[str, Any]]:
+    def list_audits(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        self.last_page = (limit, offset)
         return list(self.rows.values())
 
     def get_audit(self, audit_id: str) -> dict[str, Any] | None:
@@ -205,3 +207,29 @@ async def test_stats_shape(
     assert set(body) == {"thisMonth", "avgScore", "runningNow", "turnaroundMin"}
     assert body["runningNow"] == 1
     assert body["thisMonth"] == 3  # the 60-day-old run excluded
+
+
+async def test_list_audits_default_pagination(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("viewer")
+    resp = await client.get("/api/v1/audits")
+    assert resp.status_code == 200
+    assert repo.last_page == (50, 0)  # hard-cap defaults
+
+
+async def test_list_audits_explicit_pagination(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("viewer")
+    resp = await client.get("/api/v1/audits", params={"limit": 5, "offset": 10})
+    assert resp.status_code == 200
+    assert repo.last_page == (5, 10)
+
+
+async def test_list_audits_cap_enforcement(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    wire("viewer")
+    assert (await client.get("/api/v1/audits", params={"limit": 0})).status_code == 422
+    assert (await client.get("/api/v1/audits", params={"limit": 201})).status_code == 422

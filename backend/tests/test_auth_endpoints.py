@@ -151,7 +151,8 @@ async def test_list_users_as_owner(
 ) -> None:
     as_role("owner")
     monkeypatch.setattr(
-        "app.routers.admin_users._fetch_all_users", lambda token: [dict(_CANNED_ROW)]
+        "app.routers.admin_users._fetch_all_users",
+        lambda token, **_kw: [dict(_CANNED_ROW)],
     )
     resp = await client.get("/api/v1/admin/users")
     assert resp.status_code == 200

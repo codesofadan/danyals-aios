@@ -66,7 +66,7 @@ class FakePortalRepo:
     def get_client(self) -> dict[str, Any] | None:
         return self.client_row
 
-    def list_audits(self) -> list[dict[str, Any]]:
+    def list_audits(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         return list(self.audits)
 
     def get_audit(self, audit_id: str) -> dict[str, Any] | None:

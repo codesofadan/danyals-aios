@@ -20,6 +20,7 @@ class FakeRepo:
         self.clients: dict[str, dict[str, Any]] = {}
         self.sites: dict[str, dict[str, Any]] = {}
         self._seq = 0
+        self.last_page: tuple[int | None, int] | None = None
 
     def _id(self, prefix: str) -> str:
         self._seq += 1
@@ -48,7 +49,10 @@ class FakeRepo:
         self.clients[row["id"]] = row
         return row
 
-    def list_clients(self) -> list[dict[str, Any]]:
+    def list_clients(
+        self, *, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        self.last_page = (limit, offset)
         return list(self.clients.values())
 
     def get_client(self, client_id: str) -> dict[str, Any] | None:
@@ -75,7 +79,10 @@ class FakeRepo:
             counts[str(s["client_id"])] = counts.get(str(s["client_id"]), 0) + 1
         return counts
 
-    def list_sites(self, client_id: str) -> list[dict[str, Any]]:
+    def list_sites(
+        self, client_id: str, *, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        self.last_page = (limit, offset)
         return [s for s in self.sites.values() if s["client_id"] == client_id]
 
     def insert_site(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -206,3 +213,29 @@ async def test_sites_crud(
 
     deleted = await client.delete(f"/api/v1/sites/{site['id']}")
     assert deleted.status_code == 204
+
+
+async def test_list_clients_default_pagination(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None]
+) -> None:
+    wire("viewer")
+    resp = await client.get("/api/v1/clients")
+    assert resp.status_code == 200
+    assert repo.last_page == (50, 0)  # hard-cap defaults
+
+
+async def test_list_clients_explicit_pagination(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None]
+) -> None:
+    wire("viewer")
+    resp = await client.get("/api/v1/clients", params={"limit": 5, "offset": 10})
+    assert resp.status_code == 200
+    assert repo.last_page == (5, 10)
+
+
+async def test_list_clients_cap_enforcement(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None]
+) -> None:
+    wire("viewer")
+    assert (await client.get("/api/v1/clients", params={"limit": 0})).status_code == 422
+    assert (await client.get("/api/v1/clients", params={"limit": 201})).status_code == 422

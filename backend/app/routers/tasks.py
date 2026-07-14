@@ -19,6 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
 from app.db.tasks_repo import TasksRepoDep
 from app.schemas.activity import ActivityKind
@@ -79,6 +80,7 @@ def _advance_action(new_status: str) -> str:
 @router.get("/tasks", response_model=list[TaskResponse])
 async def list_tasks(
     repo: TasksRepoDep,
+    page: PageDep,
     _user: ViewReports,
     mine: Annotated[bool, Query()] = False,
     assignee: Annotated[str | None, Query()] = None,
@@ -86,7 +88,7 @@ async def list_tasks(
     """List tasks (created_at desc). ``mine=true`` scopes to the caller; an
     explicit ``assignee`` scopes to that user; otherwise the whole board."""
     scope = _user.id if mine else assignee
-    rows = await asyncio.to_thread(repo.list_tasks, scope)
+    rows = await asyncio.to_thread(repo.list_tasks, scope, limit=page.limit, offset=page.offset)
     return [TaskResponse.from_row(r) for r in rows]
 
 

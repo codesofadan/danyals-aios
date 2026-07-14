@@ -28,11 +28,16 @@ class TasksRepo:
     def _client(self) -> Any:
         return client_for_user(self._token)
 
-    def list_tasks(self, assignee_id: str | None = None) -> _Rows:
+    def list_tasks(
+        self, assignee_id: str | None = None, *, limit: int | None = None, offset: int = 0
+    ) -> _Rows:
         query = self._client().table("tasks").select("*")
         if assignee_id is not None:
             query = query.eq("assignee_id", assignee_id)
-        resp = query.order("created_at", desc=True).execute()
+        query = query.order("created_at", desc=True)
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
     def get_task_by_code(self, code: str) -> dict[str, Any] | None:

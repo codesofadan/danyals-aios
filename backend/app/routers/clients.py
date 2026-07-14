@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, CurrentUserDep, require_owner, require_perm
+from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
 from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
 from app.logging_setup import get_logger
@@ -34,8 +35,10 @@ _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=
 
 
 @router.get("/clients", response_model=list[ClientResponse])
-async def list_clients(repo: ClientsRepoDep, _user: CurrentUserDep) -> list[ClientResponse]:
-    rows = await asyncio.to_thread(repo.list_clients)
+async def list_clients(
+    repo: ClientsRepoDep, page: PageDep, _user: CurrentUserDep
+) -> list[ClientResponse]:
+    rows = await asyncio.to_thread(repo.list_clients, limit=page.limit, offset=page.offset)
     counts = await asyncio.to_thread(repo.site_counts)
     return [ClientResponse.from_row(r, site_count=counts.get(str(r["id"]), 0)) for r in rows]
 
@@ -80,8 +83,10 @@ async def delete_client(client_id: str, repo: ClientsRepoDep, actor: ManageClien
 
 
 @router.get("/clients/{client_id}/sites", response_model=list[SiteResponse])
-async def list_sites(client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep) -> list[SiteResponse]:
-    rows = await asyncio.to_thread(repo.list_sites, client_id)
+async def list_sites(
+    client_id: str, repo: ClientsRepoDep, page: PageDep, _user: CurrentUserDep
+) -> list[SiteResponse]:
+    rows = await asyncio.to_thread(repo.list_sites, client_id, limit=page.limit, offset=page.offset)
     return [SiteResponse.from_row(r) for r in rows]
 
 

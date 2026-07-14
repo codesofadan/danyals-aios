@@ -23,7 +23,9 @@ class FakeTiersRepo:
                      "contact_color": "#7B69EE", "delivery_tier": "fully"},
         }
 
-    def list_tier_clients(self) -> list[dict[str, Any]]:
+    def list_tier_clients(
+        self, *, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         return list(self.clients.values())
 
     def set_delivery_tier(self, client_id: str, tier: str) -> dict[str, Any] | None:

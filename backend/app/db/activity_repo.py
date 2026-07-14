@@ -16,15 +16,12 @@ class ActivityRepo:
     def __init__(self, access_token: str) -> None:
         self._token = access_token
 
-    def list_activity(self, limit: int = 50) -> _Rows:
+    def list_activity(self, limit: int | None = 50, offset: int = 0) -> _Rows:
         client = client_for_user(self._token)
-        resp = (
-            client.table("activity_log")
-            .select("*")
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
+        query = client.table("activity_log").select("*").order("created_at", desc=True)
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
 

@@ -13,6 +13,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.auth import CurrentUser, require_perm
+from app.core.pagination import PageDep
 from app.db.supabase import SupabaseNotConfiguredError, client_for_user, get_admin_client
 from app.logging_setup import get_logger
 from app.schemas.identity import MemberResponse, ProvisionUserRequest
@@ -25,28 +26,34 @@ logger = get_logger("app.admin_users")
 _ELEVATED_ROLES = frozenset({"owner", "admin"})
 
 
-def _fetch_all_users(access_token: str) -> list[dict[str, Any]]:
+def _fetch_all_users(
+    access_token: str, *, limit: int | None = None, offset: int = 0
+) -> list[dict[str, Any]]:
     """Read the STAFF roster via the caller's RLS-scoped client (staff sees all).
 
     Portal clients (role='client') are excluded: they are tenant logins, not
     agency team members, and must never appear in the Team screen.
     """
     client = client_for_user(access_token)
-    resp = (
-        client.table("users").select("*").neq("role", "client").order("created_at").execute()
-    )
+    query = client.table("users").select("*").neq("role", "client").order("created_at")
+    if limit is not None:
+        query = query.range(offset, offset + limit - 1)
+    resp = query.execute()
     return cast("list[dict[str, Any]]", resp.data or [])
 
 
 @router.get("", response_model=list[MemberResponse])
 async def list_users(
     request: Request,
+    page: PageDep,
     _user: Annotated[CurrentUser, Depends(require_perm("manage_team"))],
 ) -> list[MemberResponse]:
     """List the agency roster in the frontend ``TeamMemberRecord`` shape."""
     token: str = getattr(request.state, "access_token", "")
     try:
-        rows = await asyncio.to_thread(_fetch_all_users, token)
+        rows = await asyncio.to_thread(
+            _fetch_all_users, token, limit=page.limit, offset=page.offset
+        )
     except SupabaseNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"

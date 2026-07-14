@@ -20,8 +20,11 @@ class TiersRepo:
     def _client(self) -> Any:
         return client_for_user(self._token)
 
-    def list_tier_clients(self) -> _Rows:
-        resp = self._client().table("clients").select(_COLS).order("name").execute()
+    def list_tier_clients(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        query = self._client().table("clients").select(_COLS).order("name")
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
     def set_delivery_tier(self, client_id: str, tier: str) -> dict[str, Any] | None:

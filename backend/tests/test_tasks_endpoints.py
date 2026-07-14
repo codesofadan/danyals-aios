@@ -43,7 +43,9 @@ class FakeTasksRepo:
         self.tasks[code] = row
         return row
 
-    def list_tasks(self, assignee_id: str | None = None) -> list[dict[str, Any]]:
+    def list_tasks(
+        self, assignee_id: str | None = None, *, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         self.listed_scope = assignee_id
         rows = list(self.tasks.values())
         if assignee_id is not None:

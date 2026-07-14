@@ -41,9 +41,13 @@ class CostRepo:
             "c": client.get("contact_color", "#7B69EE"),
         }
 
-    def list_budgets(self) -> _Rows:
+    def list_budgets(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
         clients = self._client_map()
-        resp = self._client().table("client_budgets").select("*").execute()
+        # client_budgets has no created_at; client_id is its stable per-row key.
+        query = self._client().table("client_budgets").select("*").order("client_id")
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return [self._merge_budget(b, clients) for b in cast("_Rows", resp.data or [])]
 
     def upsert_budget(self, client_id: str, cap: int) -> dict[str, Any] | None:
@@ -70,10 +74,11 @@ class CostRepo:
         ).execute()
 
     # --- cost log -------------------------------------------------------------
-    def list_cost_log(self, limit: int = 50) -> _Rows:
-        resp = (
-            self._client().table("cost_log").select("*").order("created_at", desc=True).limit(limit).execute()
-        )
+    def list_cost_log(self, limit: int | None = 50, offset: int = 0) -> _Rows:
+        query = self._client().table("cost_log").select("*").order("created_at", desc=True)
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+        resp = query.execute()
         return cast("_Rows", resp.data or [])
 
     def today_spent(self) -> float:

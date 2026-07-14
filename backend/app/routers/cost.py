@@ -9,9 +9,10 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, CurrentUserDep, require_perm, require_role
+from app.core.pagination import PageDep
 from app.db.cost_repo import CostRepoDep
 from app.schemas.cost import (
     DIAL_KEYS,
@@ -34,8 +35,10 @@ OrgAdmin = Annotated[CurrentUser, Depends(require_role("admin"))]  # owner passe
 
 # --- budgets -----------------------------------------------------------------
 @router.get("/budgets", response_model=list[ClientBudgetResponse])
-async def list_budgets(repo: CostRepoDep, _user: CurrentUserDep) -> list[ClientBudgetResponse]:
-    rows = await asyncio.to_thread(repo.list_budgets)
+async def list_budgets(
+    repo: CostRepoDep, page: PageDep, _user: CurrentUserDep
+) -> list[ClientBudgetResponse]:
+    rows = await asyncio.to_thread(repo.list_budgets, limit=page.limit, offset=page.offset)
     return [ClientBudgetResponse(**r) for r in rows]
 
 
@@ -73,10 +76,10 @@ async def set_dial(
 @router.get("/log", response_model=list[CostEntryResponse])
 async def list_cost_log(
     repo: CostRepoDep,
+    page: PageDep,
     _user: CurrentUserDep,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[CostEntryResponse]:
-    rows = await asyncio.to_thread(repo.list_cost_log, limit)
+    rows = await asyncio.to_thread(repo.list_cost_log, page.limit, page.offset)
     return [CostEntryResponse.from_row(r) for r in rows]
 
 

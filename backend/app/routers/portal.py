@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from supabase import Client
 
 from app.core.auth import CurrentClientDep
+from app.core.pagination import PageDep
 from app.db.portal_repo import PortalRepo, PortalRepoDep
 from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
 from app.routers.audits import ArtifactStoreDep, AuditEnqueuerDep
@@ -119,9 +120,9 @@ async def portal_dashboard(reader: PortalRepoDep, _client: CurrentClientDep) -> 
 
 @router.get("/audits", response_model=list[PortalAuditResponse])
 async def list_portal_audits(
-    reader: PortalRepoDep, _client: CurrentClientDep
+    reader: PortalRepoDep, page: PageDep, _client: CurrentClientDep
 ) -> list[PortalAuditResponse]:
-    rows = await asyncio.to_thread(reader.list_audits)
+    rows = await asyncio.to_thread(reader.list_audits, limit=page.limit, offset=page.offset)
     return [PortalAuditResponse.from_row(r) for r in rows]
 
 
