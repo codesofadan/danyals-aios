@@ -16,7 +16,7 @@ from typing import Any, cast
 
 from supabase import Client
 
-from app.rbac import AppRole
+from app.rbac import UserRole
 from app.rbac.matrix import TEMPLATES
 
 
@@ -36,17 +36,28 @@ def provision_user(
     email: str,
     password: str,
     name: str,
-    role: AppRole,
+    role: UserRole,
     title: str = "",
     avatar_color: str = "#7B69EE",
     template_key: str | None = None,
+    client_id: str | None = None,
 ) -> dict[str, Any]:
     """Create the auth user + users row (+ template grants); return the new row.
+
+    ``role='client'`` provisions a portal login and REQUIRES ``client_id`` (the
+    tenant it is scoped to); a staff role must leave ``client_id`` None. This
+    mirrors the DB CHECK (client_id set iff role='client') and fails fast before
+    the write rather than surfacing a raw constraint error.
 
     Idempotency is intentionally NOT assumed: a duplicate email fails at the auth
     layer (and the unique constraint on ``users.email``), surfacing as an error
     the router maps to 409/400 rather than silently overwriting an account.
     """
+    if role == "client" and not client_id:
+        raise ValueError("a client login requires client_id")
+    if role != "client" and client_id is not None:
+        raise ValueError("only a client login may set client_id")
+
     created = admin.auth.admin.create_user(
         {"email": email, "password": password, "email_confirm": True}
     )
@@ -62,6 +73,7 @@ def provision_user(
             "title": title,
             "avatar_color": avatar_color,
             "status": "invited",
+            "client_id": client_id,
         }
     ).execute()
 

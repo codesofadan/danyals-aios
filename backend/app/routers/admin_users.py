@@ -26,9 +26,15 @@ _ELEVATED_ROLES = frozenset({"owner", "admin"})
 
 
 def _fetch_all_users(access_token: str) -> list[dict[str, Any]]:
-    """Read the roster via the caller's RLS-scoped client (staff sees all)."""
+    """Read the STAFF roster via the caller's RLS-scoped client (staff sees all).
+
+    Portal clients (role='client') are excluded: they are tenant logins, not
+    agency team members, and must never appear in the Team screen.
+    """
     client = client_for_user(access_token)
-    resp = client.table("users").select("*").order("created_at").execute()
+    resp = (
+        client.table("users").select("*").neq("role", "client").order("created_at").execute()
+    )
     return cast("list[dict[str, Any]]", resp.data or [])
 
 

@@ -110,3 +110,41 @@ def test_provision_super_template_grants_all_features() -> None:
         template_key="super",
     )
     assert len(admin.store["user_feature_grants"]) == 17
+
+
+@pytest.mark.unit
+def test_provision_client_pins_client_id() -> None:
+    admin = _FakeAdmin()
+    row = provision_user(
+        admin,  # type: ignore[arg-type]
+        email="portal@acme.com",
+        password="secret12",
+        name="Acme Portal",
+        role="client",
+        client_id="cl-acme",
+    )
+    assert row["role"] == "client"
+    assert row["client_id"] == "cl-acme"
+    # A client login never gets staff feature grants.
+    assert "user_feature_grants" not in admin.store
+
+
+@pytest.mark.unit
+def test_provision_client_requires_client_id() -> None:
+    admin = _FakeAdmin()
+    with pytest.raises(ValueError, match="client login requires client_id"):
+        provision_user(
+            admin,  # type: ignore[arg-type]
+            email="portal@acme.com", password="secret12", name="Acme", role="client",
+        )
+
+
+@pytest.mark.unit
+def test_provision_staff_rejects_client_id() -> None:
+    admin = _FakeAdmin()
+    with pytest.raises(ValueError, match="only a client login may set client_id"):
+        provision_user(
+            admin,  # type: ignore[arg-type]
+            email="staff@x.com", password="secret12", name="Staff", role="admin",
+            client_id="cl-acme",
+        )

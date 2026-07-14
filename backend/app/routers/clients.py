@@ -9,8 +9,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.auth import CurrentUser, CurrentUserDep, require_perm
+from app.core.auth import CurrentUser, CurrentUserDep, require_owner, require_perm
 from app.db.clients_repo import ClientsRepoDep
+from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
+from app.logging_setup import get_logger
 from app.schemas.clients import (
     ClientCreate,
     ClientResponse,
@@ -18,11 +20,15 @@ from app.schemas.clients import (
     SiteCreate,
     SiteResponse,
 )
+from app.schemas.identity import MemberResponse, PortalUserRequest
 from app.services.activity import record_activity
+from app.services.provisioning import provision_user
 
 router = APIRouter(tags=["clients"])
+logger = get_logger("app.clients")
 
 ManageClients = Annotated[CurrentUser, Depends(require_perm("manage_clients"))]
+OwnerOnly = Annotated[CurrentUser, Depends(require_owner())]
 
 _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
@@ -90,6 +96,59 @@ async def create_site(
     )
     await record_activity(actor, kind="client", action="added a site", target=body.domain)
     return SiteResponse.from_row(row)
+
+
+@router.post(
+    "/clients/{client_id}/portal-users",
+    response_model=MemberResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_portal_user(
+    client_id: str, body: PortalUserRequest, repo: ClientsRepoDep, actor: OwnerOnly
+) -> MemberResponse:
+    """Provision a client PORTAL login scoped to ``client_id`` (owner-only).
+
+    The role is fixed to ``client`` and the tenant is pinned from the path, so
+    this endpoint can neither mint a staff account nor point a login at another
+    client's data. Provisioning uses the service_role admin client (server-only).
+    """
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    try:
+        admin = get_admin_client()
+    except SupabaseNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
+        ) from exc
+    try:
+        row = await asyncio.to_thread(
+            provision_user,
+            admin,
+            email=str(body.email),
+            password=body.password.get_secret_value(),
+            name=body.name,
+            role="client",
+            client_id=client_id,
+        )
+    except Exception as exc:
+        # Duplicate email / auth rejection / write failure. Log server-side (no
+        # secret in the payload) and return a generic client error, never a 500.
+        logger.warning(
+            "provision_portal_user_failed", actor=actor.id, error_type=type(exc).__name__
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not create portal login (email may already exist)",
+        ) from exc
+    await record_activity(
+        actor,
+        kind="client",
+        action="provisioned a portal login",
+        target=body.name,
+        meta=client.get("name", client_id),
+    )
+    return MemberResponse.from_row(row)
 
 
 @router.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)

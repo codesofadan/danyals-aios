@@ -48,6 +48,19 @@ class ProvisionUserRequest(BaseModel):
     template: str | None = None  # optional role template key to seed feature grants
 
 
+class PortalUserRequest(BaseModel):
+    """Payload for provisioning a client PORTAL login (owner-only).
+
+    Carries no role and no client_id: the role is fixed to ``client`` and the
+    tenant comes from the path, so a caller can never provision a staff account
+    or point a login at another client's tenant through this endpoint.
+    """
+
+    email: EmailStr
+    name: str = Field(min_length=1)
+    password: SecretStr = Field(min_length=8)
+
+
 class MemberResponse(BaseModel):
     """A team member in the frontend ``TeamMemberRecord`` shape.
 
