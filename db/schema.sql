@@ -215,3 +215,45 @@ create or replace view public.portal_client with (security_barrier = true) as
   from public.clients where id = public.current_client_id();
 create or replace view public.portal_sites with (security_barrier = true) as
   select id, domain from public.sites where client_id = public.current_client_id();
+
+-- ---- 0011_tasks -------------------------------------------------------------
+-- Part 5 Team Flow: the task / workflow-board ledger. One row per team work
+-- item. Enums: task_type (technical_audit/actionable_audit/content_sprint/
+-- backlink_audit/local_seo/publishing), task_priority (urgent/high/med/low),
+-- task_status (todo/in_progress/review/done). `code` is the PUBLIC J-#### id
+-- rendered in the frontend badge (sequence tasks_code_seq start 2042); never a
+-- UUID. Shapes mirror lib/data.ts (Task) + portal.ts (the lifecycle).
+create sequence if not exists public.tasks_code_seq start 2042;
+
+create table public.tasks (
+  id           uuid primary key default gen_random_uuid(),
+  code         text not null unique
+                 default ('J-' || to_char(nextval('public.tasks_code_seq'), 'FM0000')),
+  title        text not null,
+  client_id    uuid references public.clients (id) on delete set null,
+  client_name  text not null default '',
+  type         public.task_type not null,
+  assignee_id  uuid references public.users (id) on delete set null,
+  priority     public.task_priority not null default 'med',
+  status       public.task_status not null default 'todo',
+  due_date     date,
+  audit_id     uuid references public.audits (id) on delete set null,  -- forward-link, v1-unused
+  created_by   uuid references public.users (id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+-- + assignee_id/status/created_at/client_id indexes; ENABLE + FORCE RLS.
+-- Policies: select (is_staff); insert (owner/admin/manager = assign_tasks);
+-- update (assignee_id = auth.uid() OR owner/admin/manager) - the actor guard.
+-- No delete policy/endpoint in v1.
+--
+-- THE BOUNDARY: the lifecycle + review checkpoint are enforced at the DB, not
+-- only in FastAPI (a specialist could PATCH PostgREST directly with their JWT).
+-- tasks_guard_update() (BEFORE UPDATE, SECURITY DEFINER, empty search_path):
+--   (1) a non-null assignee_id must be a staff user (role <> 'client'), else raise;
+--   (2) a lead (owner/admin/manager) may make any legal edit -> return new;
+--   (3) a non-lead may change ONLY status, and only along a legal transition
+--       (todo->in_progress; in_progress->review iff type=content_sprint;
+--        in_progress->done iff type<>content_sprint) - so entering/leaving
+--       `review` and leaving `done` are lead-only. Any other change raises.
+-- tasks_guard_insert() (BEFORE INSERT) likewise rejects a client-role assignee.
