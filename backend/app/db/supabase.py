@@ -85,8 +85,14 @@ async def ping(client: httpx.AsyncClient, url: str | None, timeout: float) -> De
     """
     if not url:
         return DependencyStatus(name=_DEPENDENCY_NAME, status="not_configured")
+    # Supabase gates /auth/v1/health behind the anon apikey; without it the gateway
+    # returns 401 and readiness would falsely report Supabase as down.
+    headers: dict[str, str] = {}
+    anon = get_settings().supabase_anon_key
+    if anon:
+        headers["apikey"] = anon.get_secret_value()
     try:
-        resp = await client.get(f"{url}/auth/v1/health", timeout=timeout)
+        resp = await client.get(f"{url}/auth/v1/health", headers=headers, timeout=timeout)
     except httpx.TimeoutException:
         return DependencyStatus(name=_DEPENDENCY_NAME, status="timeout", detail="request timed out")
     except httpx.HTTPError:

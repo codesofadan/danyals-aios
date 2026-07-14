@@ -19,9 +19,13 @@ class _FakeClient:
         self._response = response
         self._exc = exc
         self.last_url: str | None = None
+        self.last_headers: dict[str, str] | None = None
 
-    async def get(self, url: str, timeout: float | None = None) -> httpx.Response:
+    async def get(
+        self, url: str, headers: dict[str, str] | None = None, timeout: float | None = None
+    ) -> httpx.Response:
         self.last_url = url
+        self.last_headers = headers
         if self._exc is not None:
             raise self._exc
         assert self._response is not None
@@ -43,6 +47,24 @@ async def test_ping_ok_on_2xx() -> None:
     client = _FakeClient(response=response)
     status = await sb.ping(client, _URL, timeout=1.0)  # type: ignore[arg-type]
     assert status.status == "ok"
+
+
+@pytest.mark.unit
+async def test_ping_sends_anon_apikey_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Supabase gates /auth/v1/health behind the anon apikey; the ping must send it,
+    # or a healthy project returns 401 and readiness falsely reports it down.
+    from pydantic import SecretStr
+
+    class _S:
+        supabase_anon_key = SecretStr("anon-xyz")
+
+    monkeypatch.setattr(sb, "get_settings", lambda: _S())
+    response = httpx.Response(200, request=httpx.Request("GET", f"{_URL}/auth/v1/health"))
+    client = _FakeClient(response=response)
+    status = await sb.ping(client, _URL, timeout=1.0)  # type: ignore[arg-type]
+    assert status.status == "ok"
+    assert client.last_headers is not None
+    assert client.last_headers.get("apikey") == "anon-xyz"
 
 
 @pytest.mark.unit

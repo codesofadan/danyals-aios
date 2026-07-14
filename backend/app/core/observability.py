@@ -13,16 +13,25 @@ logger = get_logger("app.observability")
 
 
 def init_sentry(settings: Settings) -> None:
-    """Initialize Sentry only when a DSN is configured; otherwise do nothing."""
+    """Initialize Sentry only when a DSN is configured; otherwise do nothing.
+
+    Sentry is OPTIONAL: a malformed DSN must never crash app boot - that would turn
+    a typo in an optional field into an outage. On any init failure we log a warning
+    (name only, never the DSN value) and continue with Sentry disabled.
+    """
     if not settings.sentry_dsn:
         return
 
     import sentry_sdk
 
-    sentry_sdk.init(
-        dsn=settings.sentry_dsn.get_secret_value(),
-        environment=settings.app_env,
-        send_default_pii=False,
-        traces_sample_rate=0.0,
-    )
+    try:
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn.get_secret_value(),
+            environment=settings.app_env,
+            send_default_pii=False,
+            traces_sample_rate=0.0,
+        )
+    except Exception as exc:  # an optional feature must not break boot
+        logger.warning("sentry_init_failed", error=type(exc).__name__)
+        return
     logger.info("sentry_initialized", environment=settings.app_env)
