@@ -43,3 +43,40 @@ def format_date(value: date | str | None, *, empty: str = "—") -> str:
         return value.strftime("%b %d, %Y")
     dt = _as_datetime(value if isinstance(value, str) else str(value))
     return dt.strftime("%b %d, %Y") if dt else empty
+
+
+def format_runtime(seconds: int | float | None, *, empty: str = "—") -> str:
+    """Format an elapsed wall-clock duration as the frontend's "6m 12s".
+
+    Returns ``empty`` (an em-dash) while a job is still pending (``None`` or a
+    negative value). Seconds are zero-padded within a minute ("1m 06s").
+    """
+    if seconds is None:
+        return empty
+    total = int(seconds)
+    if total < 0:
+        return empty
+    minutes, secs = divmod(total, 60)
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def format_when(value: datetime | str | None, *, empty: str = "—") -> str:
+    """Format a timestamp as the frontend's "Today · 09:14" / "Jul 08 · 16:10".
+
+    Same calendar day -> "Today", the day before -> "Yesterday", otherwise the
+    calendar date ("Jul 08"); always suffixed with 24-hour ``HH:MM`` (UTC).
+    """
+    dt = _as_datetime(value)
+    if dt is None:
+        return empty
+    now = datetime.now(UTC)
+    delta_days = (now.date() - dt.date()).days
+    if delta_days == 0:
+        day = "Today"
+    elif delta_days == 1:
+        day = "Yesterday"
+    else:
+        day = dt.strftime("%b %d")
+    return f"{day} · {dt.strftime('%H:%M')}"

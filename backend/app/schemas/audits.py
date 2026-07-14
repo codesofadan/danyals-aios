@@ -1,0 +1,110 @@
+"""Audit job request/response models in the frontend shapes (``lib/audit.ts``).
+
+``AuditResponse`` mirrors ``AuditRow`` exactly: ``id, client, url, types[],
+tier`` (Free/Paid), ``status`` (queued/running/done/failed), a 0-100 composite
+``score`` (null while pending), a humanized ``runtime`` + ``when``, and the
+``pdf``/``json`` availability booleans.
+
+The per-audit ``tier`` is stored lowercase (``free``/``paid`` - it maps directly
+to the engine ``--mode``) and surfaced capitalized to match the frontend.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.util.timefmt import format_runtime, format_when
+
+AuditTier = Literal["Free", "Paid"]
+AuditStatus = Literal["queued", "running", "done", "failed"]
+AuditTypeKey = Literal["technical", "actionable", "local", "geo", "backlink"]
+
+# Types that rely on a paid data source (``audit.ts`` ``paid: true``) - gated
+# off on the Free tier so a Free run makes zero paid-provider spend.
+PAID_AUDIT_TYPES: frozenset[str] = frozenset({"local", "geo", "backlink"})
+_ALL_TYPES: frozenset[str] = frozenset(
+    {"technical", "actionable", "local", "geo", "backlink"}
+)
+_DEFAULT_TYPES: tuple[AuditTypeKey, ...] = ("technical", "actionable")
+
+
+def tier_to_db(tier: AuditTier) -> str:
+    """Map the API tier (``Free``/``Paid``) to the stored/engine value."""
+    return "paid" if tier == "Paid" else "free"
+
+
+def tier_from_db(value: str | None) -> AuditTier:
+    """Map the stored tier (``free``/``paid``) back to the frontend shape."""
+    return "Paid" if value == "paid" else "Free"
+
+
+class AuditCreate(BaseModel):
+    """POST /audits body: the client, the target URL, the tier, and the types.
+
+    ``url`` is only shape-validated here; the endpoint runs the SSRF guard
+    (``validate_public_host`` off the event loop) before enqueuing.
+    """
+
+    client_id: str = Field(min_length=1)
+    url: str = Field(min_length=1)
+    tier: AuditTier = "Free"
+    types: list[AuditTypeKey] = Field(default_factory=lambda: list(_DEFAULT_TYPES))
+
+    @field_validator("types")
+    @classmethod
+    def _dedupe_nonempty(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+        seen: list[AuditTypeKey] = []
+        for t in value:
+            if t not in seen:
+                seen.append(t)
+        if not seen:
+            raise ValueError("at least one audit type is required")
+        return seen
+
+    def paid_types(self) -> list[str]:
+        """The requested types that need a paid data source."""
+        return [t for t in self.types if t in PAID_AUDIT_TYPES]
+
+
+class AuditResponse(BaseModel):
+    """One audit row in the frontend ``AuditRow`` shape."""
+
+    id: str
+    client: str
+    url: str
+    types: list[AuditTypeKey]
+    tier: AuditTier
+    status: AuditStatus
+    score: int | None = None  # 0-100 composite; null while pending
+    runtime: str  # "6m 12s" or "—" while pending
+    when: str  # display timestamp, e.g. "Today · 09:14"
+    pdf: bool
+    json_: bool = Field(serialization_alias="json")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> AuditResponse:
+        score = row.get("score")
+        return cls(
+            id=str(row["id"]),
+            client=row.get("client_name", ""),
+            url=row.get("url", ""),
+            types=[t for t in (row.get("types") or []) if t in _ALL_TYPES],
+            tier=tier_from_db(row.get("tier")),
+            status=row.get("status", "queued"),
+            score=int(score) if score is not None else None,
+            runtime=format_runtime(row.get("runtime_seconds")),
+            when=format_when(row.get("created_at")),
+            pdf=bool(row.get("pdf_path")),
+            json_=bool(row.get("json_path")),
+        )
+
+
+class AuditStatsResponse(BaseModel):
+    """Audit KPI headline in the frontend ``auditStats`` shape."""
+
+    this_month: int = Field(serialization_alias="thisMonth")
+    avg_score: int = Field(serialization_alias="avgScore")
+    running_now: int = Field(serialization_alias="runningNow")
+    turnaround_min: int = Field(serialization_alias="turnaroundMin")

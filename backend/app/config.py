@@ -53,6 +53,21 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
+    # --- Audit engine (Module 01). The SEO audit engine (danyals-audit-system)
+    # is a SEPARATE Python product with its OWN dependency set; it is invoked as
+    # an EXTERNAL subprocess using ITS OWN interpreter, never imported here. ---
+    audit_engine_dir: str | None = None  # repo root of danyals-audit-system
+    audit_engine_python: str | None = None  # interpreter inside that repo's venv
+    # Worker-owned hard timeout for one engine run. MUST be < the Celery
+    # task_time_limit (1800) so the worker kills a hung engine (which never
+    # times out itself) and marks the job failed - it never leaves it "running".
+    audit_timeout_seconds: int = 1500
+    audit_max_pages: int = 100  # default crawl breadth passed to the engine
+    audit_profile: str = "general"  # engine --profile
+    # The engine emits no machine-readable spend; a Paid run logs this estimate
+    # through the Part-2 cost path (a Free run always logs 0).
+    audit_paid_cost_estimate: float = 1.5
+
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
 

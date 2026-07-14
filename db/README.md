@@ -43,10 +43,15 @@ CI's `db-rls` job runs this against an ephemeral Postgres on every backend/db ch
 | `0005_activity_log` | append-only `activity_log` |
 | `0006_cost` | `client_budgets`, `cost_dial`, `cost_settings`, `cost_log`, `add_budget_spend()` |
 | `0007_delivery_tier` | `delivery_tier` enum + `clients.delivery_tier` |
+| `0008_audits` | `audits` job ledger (`audit_tier`/`audit_status` enums; run_uuid + artifact refs + scores + cost) |
 
 Roles, permissions, features, templates and the tier/dial metadata are **static
 reference data kept in code** (`backend/app/rbac/matrix.py`, `app/schemas/{cost,tiers}.py`),
 not in tables — a single source of truth, mirrored from `frontend/lib/*.ts`.
 
-The module operational stores (audits, content jobs, backlinks, …) live in
-**Google Sheets**, not Postgres — see `../context/AIOS-Data-Flow-Structure.pdf`.
+The module **operational** stores (content jobs, backlinks, …) and the
+client-facing records live in **Google Sheets** — see
+`../context/AIOS-Data-Flow-Structure.pdf`. Postgres still holds the durable
+**job ledgers** for long-running work: `audits` (0008) tracks each audit run's
+status, the engine's run_uuid, artifact refs, score, cost and runtime so the API
+can report progress and serve results.

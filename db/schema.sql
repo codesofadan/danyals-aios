@@ -143,3 +143,34 @@ create table public.activity_log (
 -- from the subscription tier (clients.tier = Starter/Growth/Scale). Delivery tier
 -- is a preset over the cost dial; the two are never conflated.
 alter table public.clients add column delivery_tier public.delivery_tier not null default 'free';
+
+-- ---- 0008_audits ------------------------------------------------------------
+-- Module 01 Audit job ledger. One row per run against the external audit engine
+-- (invoked as a subprocess by a Celery worker). Enums: audit_tier (free/paid),
+-- audit_status (queued/running/done/failed). Shapes mirror lib/audit.ts.
+create table public.audits (
+  id           uuid primary key default gen_random_uuid(),
+  client_id    uuid references public.clients (id) on delete set null,
+  site_id      uuid references public.sites (id) on delete set null,
+  client_name  text not null default '',
+  url          text not null,
+  types        text[] not null default '{}',       -- technical|actionable|local|geo|backlink
+  tier         public.audit_tier not null default 'free',
+  status       public.audit_status not null default 'queued',
+  run_uuid     text,                                 -- engine mints this; we parse + store it
+  artifact_dir text,
+  pdf_path     text,
+  json_path    text,
+  score        integer,                              -- 0-100 composite; null while pending
+  scores       jsonb not null default '{}',          -- per-category detail from run.json
+  cost         numeric(10, 2) not null default 0,
+  error        text,
+  runtime_seconds integer,
+  started_at   timestamptz,
+  finished_at  timestamptz,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+-- + client_id & created_at indexes; ENABLE + FORCE RLS. select (is_staff);
+-- modify by run_audits holders (owner/admin/manager/specialist/analyst). The
+-- worker updates rows via the service_role client (bypasses RLS by design).
