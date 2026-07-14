@@ -102,6 +102,77 @@ class AuditResponse(BaseModel):
         )
 
 
+class PortalAuditCreate(BaseModel):
+    """POST /portal/audits body: the target URL, the tier, and the types.
+
+    Deliberately has NO ``client_id`` field (contrast ``AuditCreate``): a portal
+    client's tenant is pinned server-side from its authenticated ``users`` row, so
+    a request body can never influence which client an audit is attributed to.
+    """
+
+    url: str = Field(min_length=1)
+    tier: AuditTier = "Free"
+    types: list[AuditTypeKey] = Field(default_factory=lambda: list(_DEFAULT_TYPES))
+
+    @field_validator("types")
+    @classmethod
+    def _dedupe_nonempty(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+        seen: list[AuditTypeKey] = []
+        for t in value:
+            if t not in seen:
+                seen.append(t)
+        if not seen:
+            raise ValueError("at least one audit type is required")
+        return seen
+
+    def paid_types(self) -> list[str]:
+        """The requested types that need a paid data source."""
+        return [t for t in self.types if t in PAID_AUDIT_TYPES]
+
+
+class PortalAuditResponse(BaseModel):
+    """One audit as a portal client sees it - a SAFE column subset.
+
+    Sourced from the ``portal_audits`` security-barrier view (list/get) or the
+    freshly-inserted row (create). It NEVER carries the sensitive columns
+    (cost/error/run_uuid/artifact_dir/paths); PDF/JSON presence is booleans only.
+    """
+
+    id: str
+    url: str
+    types: list[AuditTypeKey]
+    tier: AuditTier
+    status: AuditStatus
+    score: int | None = None  # 0-100 composite; null while pending
+    scores: dict[str, Any] = Field(default_factory=dict)  # per-category detail
+    runtime: str
+    when: str
+    pdf: bool
+    json_: bool = Field(serialization_alias="json")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> PortalAuditResponse:
+        score = row.get("score")
+        # The view exposes has_pdf/has_json booleans; a raw insert row exposes the
+        # *_path columns instead. Accept either so one model serves both sources.
+        pdf = bool(row.get("has_pdf")) or bool(row.get("pdf_path"))
+        json_present = bool(row.get("has_json")) or bool(row.get("json_path"))
+        raw_scores = row.get("scores")
+        return cls(
+            id=str(row["id"]),
+            url=row.get("url", ""),
+            types=[t for t in (row.get("types") or []) if t in _ALL_TYPES],
+            tier=tier_from_db(row.get("tier")),
+            status=row.get("status", "queued"),
+            score=int(score) if score is not None else None,
+            scores=raw_scores if isinstance(raw_scores, dict) else {},
+            runtime=format_runtime(row.get("runtime_seconds")),
+            when=format_when(row.get("created_at")),
+            pdf=pdf,
+            json_=json_present,
+        )
+
+
 class AuditStatsResponse(BaseModel):
     """Audit KPI headline in the frontend ``auditStats`` shape."""
 
