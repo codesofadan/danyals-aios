@@ -19,7 +19,7 @@ celery_app = Celery(
     "aios",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["workers.tasks.ping"],
+    include=["workers.tasks.ping", "workers.tasks.audit"],
 )
 
 celery_app.conf.update(
