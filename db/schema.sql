@@ -255,5 +255,11 @@ create table public.tasks (
 --   (3) a non-lead may change ONLY status, and only along a legal transition
 --       (todo->in_progress; in_progress->review iff type=content_sprint;
 --        in_progress->done iff type<>content_sprint) - so entering/leaving
---       `review` and leaving `done` are lead-only. Any other change raises.
+--       `review` and leaving `done` are lead-only. Any other change raises
+--       (0012 added id + created_at to that lock - immutable for a non-lead).
 -- tasks_guard_insert() (BEFORE INSERT) likewise rejects a client-role assignee.
+
+-- ---- 0012_tasks_guard_hardening ---------------------------------------------
+-- Redefines tasks_guard_update() to also lock `id` and `created_at` against a
+-- non-lead edit (they were omitted from 0011's column-lock). create or replace,
+-- idempotent. No schema shape change.

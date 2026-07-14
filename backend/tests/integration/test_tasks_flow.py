@@ -120,6 +120,15 @@ async def test_task_lifecycle_and_db_review_gate() -> None:
             spec.table("tasks").update({"title": "hijacked"}).eq("code", t1).execute()
         assert _row(t1)["title"] != "hijacked"
 
+        # (A2b) ...nor the normally-immutable created_at, even alongside a no-op
+        # status (0012 hardened the column-lock to include id + created_at).
+        original_created = _row(t1)["created_at"]
+        with pytest.raises(APIError):
+            spec.table("tasks").update(
+                {"status": "in_progress", "created_at": "2000-01-01T00:00:00+00:00"}
+            ).eq("code", t1).execute()
+        assert _row(t1)["created_at"] == original_created
+
         # (A3) the LEGAL submit-for-review move (in_progress -> review) is allowed.
         spec.table("tasks").update({"status": "review"}).eq("code", t1).execute()
         assert _row(t1)["status"] == "review"
