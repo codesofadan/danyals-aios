@@ -39,6 +39,17 @@ class TasksRepo:
         rows = cast("_Rows", resp.data or [])
         return rows[0] if rows else None
 
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        """Read a user row (id + role) to validate an assignee is staff.
+
+        Uses the same RLS client; staff may read the whole roster (users_select).
+        """
+        resp = (
+            self._client().table("users").select("id, role").eq("id", user_id).limit(1).execute()
+        )
+        rows = cast("_Rows", resp.data or [])
+        return rows[0] if rows else None
+
     def insert_task(self, row: dict[str, Any]) -> dict[str, Any]:
         resp = self._client().table("tasks").insert(row).execute()
         rows = cast("_Rows", resp.data or [])

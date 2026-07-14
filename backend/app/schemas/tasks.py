@@ -120,6 +120,15 @@ class TaskUpdate(BaseModel):
     due: date | None = None
 
 
+ReviewAction = Literal["approve", "reject"]
+
+
+class TaskReviewRequest(BaseModel):
+    """POST /tasks/{code}/review body: the reviewer's decision at the gate."""
+
+    action: ReviewAction
+
+
 class TaskResponse(BaseModel):
     """One task in the frontend ``Task`` shape - and ONLY those fields.
 
