@@ -26,6 +26,7 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.8",
     "pyjwt[crypto]>=2.9",      # verify Supabase access tokens (ES256/RS256 via JWKS)
     "email-validator>=2.1",    # pydantic EmailStr for user provisioning
+    "prometheus-client>=0.20",  # request-rate / latency / in-flight metrics at /metrics
 ]
 
 [project.optional-dependencies]

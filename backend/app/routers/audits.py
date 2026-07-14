@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from app.core.auth import CurrentUser, require_perm
 from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
+from app.core.ratelimit import rate_limit
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.audits_repo import AuditsRepoDep
 from app.db.clients_repo import ClientsRepoDep
@@ -130,7 +131,12 @@ async def download_audit_findings(
     )
 
 
-@router.post("/audits", response_model=AuditResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/audits",
+    response_model=AuditResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("audit_create", 30))],
+)
 async def create_audit(
     body: AuditCreate,
     repo: AuditsRepoDep,

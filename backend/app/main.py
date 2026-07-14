@@ -21,6 +21,7 @@ from app import __version__
 from app.config import get_settings, validate_settings
 from app.core.auth import JWKSCache
 from app.core.errors import install_error_handlers
+from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.middleware import RequestIDMiddleware
 from app.core.observability import init_sentry
 from app.core.redis import create_redis_client
@@ -79,11 +80,18 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added before RequestID so RequestID stays the OUTERMOST middleware (every
+    # response keeps its id) while metrics still wrap routing + the handler.
+    app.add_middleware(MetricsMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
     install_error_handlers(app)
     app.include_router(health_router)
     app.include_router(api_v1, prefix="/api/v1")
+
+    # Prometheus scrape endpoint (no auth; restrict to the scrape network at the
+    # edge). Excluded from the OpenAPI schema - it is ops surface, not API.
+    app.add_api_route("/metrics", lambda: metrics_response(), include_in_schema=False)
     return app
 
 

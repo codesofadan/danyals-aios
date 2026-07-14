@@ -22,6 +22,7 @@ from supabase import Client
 
 from app.core.auth import CurrentClientDep
 from app.core.pagination import PageDep
+from app.core.ratelimit import rate_limit
 from app.db.portal_repo import PortalRepo, PortalRepoDep
 from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
 from app.routers.audits import ArtifactStoreDep, AuditEnqueuerDep
@@ -162,7 +163,12 @@ async def download_portal_findings(
     )
 
 
-@router.post("/audits", response_model=PortalAuditResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/audits",
+    response_model=PortalAuditResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("portal_audit_create", 30))],
+)
 async def create_portal_audit(
     body: PortalAuditCreate,
     reader: PortalRepoDep,
