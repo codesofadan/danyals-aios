@@ -22,7 +22,9 @@ from app.routers.policy import router as policy_router
 from app.routers.portal import router as portal_router
 from app.routers.public import router as public_router
 from app.routers.rbac import router as rbac_router
+from app.routers.settings import router as settings_router
 from app.routers.tasks import router as tasks_router
+from app.routers.tickets import router as tickets_router
 from app.routers.tiers import router as tiers_router
 from app.routers.upsells import router as upsells_router
 from app.routers.vault import router as vault_router
@@ -42,6 +44,8 @@ api_v1.include_router(milestones_router)
 api_v1.include_router(offpage_router)
 api_v1.include_router(policy_router)
 api_v1.include_router(upsells_router)
+api_v1.include_router(tickets_router)
+api_v1.include_router(settings_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
 api_v1.include_router(context_router)

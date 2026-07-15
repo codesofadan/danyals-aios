@@ -40,7 +40,9 @@ from app.schemas.policy import (
     RecommendationResponse,
     SourceResponse,
 )
+from app.schemas.settings import SecurityPolicyResponse, WorkspaceSettingsResponse
 from app.schemas.tasks import TaskResponse
+from app.schemas.tickets import TicketResponse
 from app.schemas.tiers import TierClientResponse
 from app.schemas.upsells import UpsellResponse
 from app.schemas.vault import VaultKeyResponse
@@ -72,6 +74,9 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (ChangeEventResponse, "frontend/lib/policy.ts", "ChangeEvent"),
     (KBEntryResponse, "frontend/lib/policy.ts", "KBEntry"),
     (RecommendationResponse, "frontend/lib/policy.ts", "Recommendation"),
+    (TicketResponse, "frontend/lib/data.ts", "Ticket"),
+    (WorkspaceSettingsResponse, "frontend/lib/data.ts", "WorkspaceSettingsData"),
+    (SecurityPolicyResponse, "frontend/lib/data.ts", "SecurityPolicy"),
 ]
 
 
@@ -154,6 +159,10 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (RecommendationResponse, "scope", "frontend/lib/policy.ts", "Scope"),
     (RecommendationResponse, "target", "frontend/lib/policy.ts", "TargetModule"),
     (RecommendationResponse, "status", "frontend/lib/policy.ts", "RecStatus"),
+    # Settings: defaultTier reuses the exported SubTier union (Starter/Growth/Scale).
+    # (Ticket channel/priority/status + weekStart are INLINE unions in data.ts, not
+    # exported types, so they are locked in test_tickets.py / test_settings.py.)
+    (WorkspaceSettingsResponse, "default_tier", "frontend/lib/data.ts", "SubTier"),
 ]
 
 

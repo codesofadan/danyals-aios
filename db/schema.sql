@@ -471,3 +471,46 @@ create table public.tasks (
 --     writes on service_role (BYPASSRLS). Baseline recs are surfaced from a constant
 --     set (list_recommendations dedups by kb_ref) and MATERIALIZED into the table on
 --     a lead's first acknowledge/apply/dismiss. RLS gate: 21 tables, all FORCE.
+
+-- ---- 0024_tickets -----------------------------------------------------------
+-- Part 7 (Support Tickets): the client-support ticket ledger. Staff triage
+-- requests through open -> pending -> resolved across the channel they arrived on.
+-- Shapes mirror frontend/lib/data.ts (Ticket): `id` = the PUBLIC T-#### badge (never
+-- a UUID); client_name is a display SNAPSHOT; `ago` is the humanized time since
+-- opened_at (derived in the schema layer, not stored).
+--   enums ticket_channel(Email|Portal|Call|Chat), ticket_priority(urgent|high|med|
+--     low - DISTINCT type from task_priority though same labels), ticket_status(open|
+--     pending|resolved).
+--   support_tickets(id uuid, code text unique 'T-####' (seq tickets_code_seq start
+--     4822), client_id fk->clients on delete set null, client_name snapshot, subject
+--     text, channel ticket_channel 'Portal', priority ticket_priority 'med', status
+--     ticket_status 'open', opened_at timestamptz, created_by fk->users set null,
+--     created_at/updated_at) + set_updated_at; client_id/status/opened_at(desc) idx.
+--   ENABLE + FORCE RLS: select is_staff() (any staff read); insert/update owner/
+--     admin/manager (leads triage). NO client select policy (clients can't read/
+--     triage); NO delete. The client "open a ticket" path lands here via the server.
+
+-- ---- 0025_settings ----------------------------------------------------------
+-- Part 7 (Settings): the net-new persistence behind the admin control panel's
+-- Workspace / Security / Notifications tabs (account profile reuses users; client/
+-- team credentials reuse vault/provisioning; RBAC matrix reuses rbac). Shapes mirror
+-- frontend/lib/data.ts (WorkspaceSettingsData / SecurityPolicy / NotifPref). The
+-- static NotifPref label/desc/icon live in code (app/schemas/settings.py NOTIF_EVENTS).
+--   enum week_start(Monday|Sunday); default_tier reuses sub_tier (0003).
+--   workspace_settings(id int pk pinned =1, agency_name (contract `agencyName`),
+--     support_email (`supportEmail`), timezone, language, week_start (`weekStart`),
+--     default_tier sub_tier (`defaultTier`), brand_color (`brandColor`), updated_at)
+--     + set_updated_at; SEEDED id=1 with the frontend defaults.
+--   security_policy(id int pk pinned =1, enforce_2fa (`enforce2FA`), strong_passwords
+--     (`strongPasswords`), min_pass_length (`minPassLength`), rotation_days
+--     (`rotationDays`, 0=never), session_timeout (`sessionTimeout`, min), single_session
+--     (`singleSession`), ip_allowlist (`ipAllowlist`), audit_logging (`auditLogging`),
+--     updated_at) + set_updated_at; SEEDED id=1 with the frontend defaults.
+--   notification_prefs(user_id fk->users on delete cascade, event_key text, email bool,
+--     in_app bool (`inApp`), created_at/updated_at, pk (user_id, event_key)) +
+--     set_updated_at; user_id idx.
+--   All three ENABLE + FORCE RLS. Singletons: select is_staff(); insert/update owner/
+--     admin. notification_prefs: select/insert/update is_staff() AND user_id=auth.uid()
+--     (per-user - a caller only ever touches their OWN toggles). NO delete policies;
+--     the danger-zone reset/purge runs server-side (purge_activity on service_role,
+--     owner-gated at the router). RLS gate: 24 tables, all FORCE.
