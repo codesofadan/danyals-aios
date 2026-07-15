@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
@@ -105,10 +106,13 @@ def install_error_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         rid = _request_id(request)
+        # jsonable_encoder mirrors FastAPI's own default handler: a validator that
+        # raises ValueError leaves the raw exception in each error's ``ctx``, which
+        # plain ``json.dumps`` cannot serialize - encode it to primitives first.
         return _error_response(
             status_code=422,
             error_type=ErrorCode.VALIDATION,
             message="Request validation failed",
             request_id=rid,
-            extra={"details": exc.errors()},
+            extra={"details": jsonable_encoder(exc.errors())},
         )

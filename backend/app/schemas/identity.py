@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field, SecretStr
+from pydantic import BaseModel, EmailStr, Field, SecretStr, field_validator
 
-from app.rbac import AppRole
+from app.rbac import FEATURE_KEYS, TEMPLATES, AccessLevel, AppRole
+
+_FEATURE_KEY_SET = frozenset(FEATURE_KEYS)
+_TEMPLATE_KEYS = frozenset(t.key for t in TEMPLATES)
 
 
 def to_team_role(role: str) -> str:
@@ -69,9 +72,10 @@ class PortalUserRequest(BaseModel):
 class MemberResponse(BaseModel):
     """A team member in the frontend ``TeamMemberRecord`` shape.
 
-    Performance metrics (activeTasks/completed/onTime/utilization/quality) are
-    derived from job data (Google Sheets) in a later part; the identity service
-    returns zeros so the shape is complete today.
+    The identity row supplies the profile fields; the performance metrics
+    (activeTasks/completed/onTime/utilization/quality) default to 0 here and are
+    overlaid by the routers from :mod:`app.services.team_metrics` (7F-3), computed
+    from the tasks + activity ledgers.
     """
 
     id: str
@@ -105,3 +109,86 @@ class MemberResponse(BaseModel):
             status=row.get("status", "invited"),
             joined=_joined(row.get("created_at")),
         )
+
+
+# --- Feature-grant editing (7F-4) --------------------------------------------
+
+
+class UpdateGrantsRequest(BaseModel):
+    """PUT body: set a user's per-feature access levels (the 17-feature toggles).
+
+    ``grants`` maps a feature key -> ``full`` | ``view`` | ``off``. Every key MUST
+    be one of the 17 canonical ``accessFeatures`` keys (unknown keys are rejected
+    before any write); levels are validated by the ``AccessLevel`` literal. The
+    map may be partial (only the listed features are changed).
+    """
+
+    grants: dict[str, AccessLevel] = Field(default_factory=dict)
+
+    @field_validator("grants")
+    @classmethod
+    def _known_feature_keys(cls, value: dict[str, AccessLevel]) -> dict[str, AccessLevel]:
+        unknown = sorted(set(value) - _FEATURE_KEY_SET)
+        if unknown:
+            raise ValueError(f"unknown feature key(s): {', '.join(unknown)}")
+        return value
+
+
+class UserGrantsResponse(BaseModel):
+    """A user's effective access level for every one of the 17 features.
+
+    ``grants`` always carries ALL 17 keys (resolved via ``effective_feature_level``):
+    an owner reads back all ``full`` (all-on and locked), otherwise a per-user
+    override wins and any un-granted feature resolves to ``off``.
+    """
+
+    grants: dict[str, AccessLevel]
+
+
+# --- Add-Member invite (generated credentials) (7F-4) ------------------------
+
+
+class InviteMemberRequest(BaseModel):
+    """Payload for the Add-Member wizard: pick access + identity, server mints creds.
+
+    Mirrors the wizard's output (``NewMember``): a ``template`` role-template key
+    seeds the feature grants, OR an explicit ``features`` list (custom toggles)
+    overrides it; ``role`` is the governance role stamped on the roster row. No
+    password is supplied - the server generates a one-time username + password.
+    """
+
+    email: EmailStr
+    name: str = Field(min_length=1)
+    role: AppRole = "specialist"
+    title: str = ""
+    avatar_color: str = "#7B69EE"
+    template: str | None = None  # role-template key (seo|content|va|super)
+    features: list[str] | None = None  # explicit granted feature keys (custom)
+
+    @field_validator("template")
+    @classmethod
+    def _known_template(cls, value: str | None) -> str | None:
+        if value is not None and value not in _TEMPLATE_KEYS:
+            raise ValueError(f"unknown role template: {value}")
+        return value
+
+    @field_validator("features")
+    @classmethod
+    def _known_features(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None:
+            unknown = sorted(set(value) - _FEATURE_KEY_SET)
+            if unknown:
+                raise ValueError(f"unknown feature key(s): {', '.join(unknown)}")
+        return value
+
+
+class MemberInviteResponse(BaseModel):
+    """The created member + the one-time credentials, returned to the admin ONCE.
+
+    ``tempPassword`` is the plaintext generated password; it is shown here a single
+    time and is NEVER persisted (only its argon2id hash lives in ``auth.users``).
+    """
+
+    member: MemberResponse
+    username: str
+    temp_password: str = Field(serialization_alias="tempPassword")
