@@ -22,6 +22,7 @@ celery_app = Celery(
     include=[
         "workers.tasks.ping",
         "workers.tasks.audit",
+        "workers.tasks.content",
         "workers.tasks.context",
         "workers.tasks.context_reconcile",
         # 7B-3: the Web 2.0 publish drivers (web2_write / web2_publish) + the backlink/
