@@ -29,6 +29,11 @@ from app.schemas.milestones import (
     ClientProjectResponse,
     StageResponse,
 )
+from app.schemas.offpage import (
+    BacklinkResponse,
+    CitationResponse,
+    Web2PropertyResponse,
+)
 from app.schemas.policy import (
     ChangeEventResponse,
     KBEntryResponse,
@@ -60,6 +65,9 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (StageResponse, "frontend/lib/milestones.ts", "Stage"),
     (AutoAdvanceResponse, "frontend/lib/milestones.ts", "AutoAdvance"),
     (UpsellResponse, "frontend/lib/upsells.ts", "Upsell"),
+    (BacklinkResponse, "frontend/lib/offpage.ts", "Backlink"),
+    (CitationResponse, "frontend/lib/offpage.ts", "Citation"),
+    (Web2PropertyResponse, "frontend/lib/offpage.ts", "Web2Property"),
     (SourceResponse, "frontend/lib/policy.ts", "Source"),
     (ChangeEventResponse, "frontend/lib/policy.ts", "ChangeEvent"),
     (KBEntryResponse, "frontend/lib/policy.ts", "KBEntry"),
@@ -131,6 +139,12 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (StageResponse, "key", "frontend/lib/milestones.ts", "StageKey"),
     (StageResponse, "status", "frontend/lib/milestones.ts", "StageStatus"),
     (ClientProjectResponse, "health", "frontend/lib/milestones.ts", "Health"),
+    # Off-page: every union pinned verbatim - esp. Web2Platform MUST include 'Medium'.
+    (BacklinkResponse, "status", "frontend/lib/offpage.ts", "BacklinkStatus"),
+    (CitationResponse, "nap", "frontend/lib/offpage.ts", "NapStatus"),
+    (CitationResponse, "action", "frontend/lib/offpage.ts", "CitationAction"),
+    (Web2PropertyResponse, "platform", "frontend/lib/offpage.ts", "Web2Platform"),
+    (Web2PropertyResponse, "verified", "frontend/lib/offpage.ts", "Web2Verified"),
     # Policy Radar: all seven enums locked (one representative field each). Several
     # unions share a label (scope 'global' vs region 'global') but are DISTINCT.
     (SourceResponse, "status", "frontend/lib/policy.ts", "SourceStatus"),

@@ -366,6 +366,30 @@ create table public.tasks (
 --     content_jobs_guard_insert() rejects a client-role assignee. RLS gate: 17
 --     tables, all FORCE.
 
+-- ---- 0018_offpage -----------------------------------------------------------
+-- Part 7 Module 03 (Off-page): backlink + citation MONITORING and the Web 2.0
+-- property ledger. Three read-mostly, client-scoped ledgers; shapes mirror
+-- frontend/lib/offpage.ts (Backlink/Citation/Web2Property). The internal client_id
+-- never leaks (client_name is a display SNAPSHOT). §3 enum fidelity: web2_platform
+-- MUST include 'Medium'. The Web 2.0 PUBLISH pipeline is a later chunk; only the
+-- table + read endpoints exist now.
+--   enums backlink_status(new|lost|toxic), nap_status(consistent|inconsistent|
+--     missing), citation_action(Submit|Update), web2_platform(WordPress.com|Blogger|
+--     Tumblr|Medium), web2_verified(verified|pending).
+--   backlinks(id uuid, client_id fk->clients on delete cascade, client_name snapshot,
+--     ref_domain, anchor, authority int 0-100, spam int 0-100, first_seen date,
+--     status 'new'; created_at/updated_at) + set_updated_at; client_id & status idx.
+--   citations(id uuid, client_id fk->clients cascade, client_name snapshot, directory,
+--     nap_status 'missing', action citation_action 'Submit', note text; created_at/
+--     updated_at) + set_updated_at; client_id & nap_status idx.
+--   web2_properties(id uuid, client_id fk->clients cascade, client_name snapshot,
+--     platform web2_platform, post_url, anchor, verified 'pending', published_at date;
+--     created_at/updated_at) + set_updated_at; client_id & platform idx.
+--   All three ENABLE + FORCE RLS: select is_staff(); insert/update leads (owner/admin/
+--     manager). NO client select policy; NO delete policy. Paid-tier gate lives at the
+--     service layer, not RLS; the monitoring ingest path runs on service_role
+--     (BYPASSRLS). RLS gate: 20 tables, all FORCE.
+
 -- ---- 0021_milestones --------------------------------------------------------
 -- Part 7 Module (Milestones): the client-facing project timeline. Every project
 -- moves through a FIXED 5-stage lifecycle, AUTO-ADVANCED from job/audit/publish/
