@@ -174,6 +174,19 @@ class Settings(BaseSettings):
     # Per-URL bounded fetch timeout + how many ranking pages to tear down.
     content_teardown_timeout_seconds: float = 8.0
     content_teardown_max_pages: int = 10
+    # --- Content WORKER + PUBLISH tuning (P7A-7/8). The pipeline worker composes
+    # the merged content services; the publish path renders PDF/Markdown to a
+    # controlled artifact root (traversal-guarded, like the audit store) when the
+    # target is PDF/Markdown OR WordPress is credential-degraded. Unset -> falls
+    # back to ``audit_artifact_dir``; if BOTH are unset no artifact is written. ---
+    content_artifact_dir: str | None = None
+    # Coarse R5 cost-precheck fan-out factors: the worker estimates the FULL job
+    # spend upfront (research fan-out + generation) against the client budget +
+    # daily spend-stop BEFORE it starts, and defers a job that would breach. These
+    # multiply the per-call estimates; conservative (over-estimating) is the safe
+    # side (defers a borderline job rather than half-spending then blocking).
+    content_precheck_research_calls: int = 10  # ~ serp + up-to-8 metrics + teardown
+    content_precheck_writer_calls: int = 14    # ~ one writer call per drafted section
 
     # --- Off-page module provider seams (7B). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic fakes
