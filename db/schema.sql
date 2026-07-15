@@ -365,3 +365,42 @@ create table public.tasks (
 --     any legal edit; (3) a NON-LEAD assignee may NOT modify a job at all. Plus
 --     content_jobs_guard_insert() rejects a client-role assignee. RLS gate: 17
 --     tables, all FORCE.
+
+-- ---- 0021_milestones --------------------------------------------------------
+-- Part 7 Module (Milestones): the client-facing project timeline. Every project
+-- moves through a FIXED 5-stage lifecycle, AUTO-ADVANCED from job/audit/publish/
+-- payment events - never edited by a client. Shapes mirror frontend/lib/
+-- milestones.ts (ClientProject + Stage + AutoAdvance). §3 enum fidelity:
+-- project_health is SEPARATE from stage_status (share the label 'completed', are
+-- DISTINCT types).
+--   enums stage_key(onboarding|baseline|content|authority|reporting - lifecycle
+--     ORDER = enum definition order), stage_status(completed|in_progress|upcoming|
+--     blocked), project_health(on_track|at_risk|completed).
+--   client_projects(id uuid, client_id fk->clients on delete cascade, client_name/
+--     init/accent display SNAPSHOTS (accent = contract key `c`), site text,
+--     health project_health 'on_track', created_at/updated_at) + set_updated_at;
+--     client_id & created_at indexes.
+--   project_stages(id uuid, project_id fk->client_projects on delete cascade,
+--     stage_key, status stage_status 'upcoming', auto_source text, created_at/
+--     updated_at, unique (project_id, stage_key)) + set_updated_at; project_id &
+--     updated_at(desc) indexes. Exactly 5 stages per project; `order by stage_key`
+--     yields the timeline order.
+--   Both ENABLE + FORCE RLS: select is_staff(); insert/update leads (owner/admin/
+--     manager). NO client select policy (clients can't read/edit stages); NO delete
+--     policy. The auto-advance write path advances one stage row (service_role /
+--     BYPASSRLS for the system/worker event path); the feed = recently-touched
+--     stages (status <> 'upcoming') newest-first.
+
+-- ---- 0022_upsells -----------------------------------------------------------
+-- Part 7 Module (Upsells): the Fiverr upsell catalogue. Cards link OUT to the
+-- agency's Fiverr gigs; admin curates them, the active ones render in the client
+-- portal. Shapes mirror frontend/lib/upsells.ts (Upsell). AGENCY-GLOBAL (no
+-- client_id - one shared catalogue).
+--   upsells(id uuid, title text, description text, fiverr_url text '#' (contract
+--     key `fiverrUrl`), active bool true, clicks30d int (portal-tracked), price
+--     numeric, rating numeric, reviews int, icon text, color text, sort_order int,
+--     created_at/updated_at) + set_updated_at; index (sort_order, created_at).
+--   ENABLE + FORCE RLS: select is_staff() (any staff read/render); insert/update
+--     owner/admin only (manage). Clients never touch the table (is_staff excludes
+--     them, no client select policy); the portal renders active cards via the
+--     server. No delete policy.
