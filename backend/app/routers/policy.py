@@ -9,10 +9,14 @@ the ``recommendations`` RLS so the app-layer 403 and the DB boundary agree.
 Responses are the frontend ``policy.ts`` shapes. Every mutation offloads the blocking
 psycopg call with ``asyncio.to_thread`` and records an activity entry.
 
-DEFERRED (later chunks, by design): the change-detection WATCHER that fills sources /
-changes / KB, and the CLOSED LOOP an 'applied' recommendation writes to (an audit /
-content-guidance overlay). See the ``apply`` branch below - and the Part-3 HARD RULE:
-the ``danyals-audit-system`` engine is NEVER mutated; the overlay is separate.
+R3 CLOSED LOOP (7C-3): an ``apply`` now writes the recommendation into an
+``audit_overlay`` row (``app/services/policy_radar.py``) that the presentation layer
+lays ON TOP of the untouched engine output. Part-3 HARD RULE: the
+``danyals-audit-system`` engine is NEVER mutated; the overlay is SEPARATE. Staff can
+read the active overlay via ``GET /policy/overlay``.
+
+DEFERRED (later chunk, by design): the change-detection WATCHER that fills sources /
+changes / KB.
 """
 
 from __future__ import annotations
@@ -28,12 +32,14 @@ from app.db.policy_repo import PolicyRepoDep
 from app.schemas.policy import (
     ChangeEventResponse,
     KBEntryResponse,
+    OverlayResponse,
     RecommendationAction,
     RecommendationResponse,
     SourceResponse,
     action_to_status,
 )
 from app.services.activity import record_activity
+from app.services.policy_radar import apply_recommendation
 
 router = APIRouter(tags=["policy"])
 
@@ -118,11 +124,11 @@ async def transition_recommendation(
     ``apply`` -> applied, ``dismiss`` -> dismissed. A baseline rec is materialized into
     the DB on its first transition so the decision persists.
 
-    R3 / TODO (LATER CHUNK): ``apply`` currently only sets status='applied' + records
-    activity. The CLOSED LOOP - writing the recommendation into an ``audit_overlay`` /
-    content-guidance overlay so the change actually reaches the modules - lands in a
-    later chunk. Part-3 HARD RULE: that overlay is SEPARATE; the ``danyals-audit-system``
-    engine is NEVER mutated.
+    R3 CLOSED LOOP: an ``apply`` ALSO writes the (now-materialized) recommendation
+    into an ``audit_overlay`` row via ``apply_recommendation`` - the change the
+    presentation layer lays ON TOP of the untouched engine. Part-3 HARD RULE: that
+    overlay is SEPARATE; the ``danyals-audit-system`` engine is NEVER mutated. The
+    human CONFIRM is the ``require_role`` on this route (owner/admin/manager).
     """
     new_status = action_to_status(action)
     updated = await asyncio.to_thread(repo.transition_recommendation, rec_id, new_status)
@@ -130,6 +136,10 @@ async def transition_recommendation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found"
         )
+    if action == "apply":
+        # Close the loop: the applied rec becomes an overlay laid on top of the
+        # UNTOUCHED engine (never a mutation of danyals-audit-system).
+        await apply_recommendation(actor, updated, repo)
     await record_activity(
         actor,
         kind="content",
@@ -137,3 +147,26 @@ async def transition_recommendation(
         target=updated.get("title", ""),
     )
     return RecommendationResponse.from_row(updated)
+
+
+@router.get("/policy/overlay", response_model=list[OverlayResponse])
+async def list_overlay(
+    repo: PolicyRepoDep,
+    page: PageDep,
+    _user: ViewReports,
+    target: Annotated[str | None, Query()] = None,
+    audit_type: Annotated[str | None, Query(alias="auditType")] = None,
+    region: Annotated[str | None, Query()] = None,
+) -> list[OverlayResponse]:
+    """The ACTIVE closed-loop overlay rows (newest first) - what an ``apply``
+    produced, laid ON TOP of the untouched engine by the presentation layer.
+    Optionally scoped to a target module / a keyed audit type / a region."""
+    rows = await asyncio.to_thread(
+        repo.list_active_overlay,
+        target_module=target,
+        audit_type=audit_type,
+        region=region,
+        limit=page.limit,
+        offset=page.offset,
+    )
+    return [OverlayResponse.from_row(r) for r in rows]

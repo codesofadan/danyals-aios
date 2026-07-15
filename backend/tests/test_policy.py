@@ -211,6 +211,7 @@ class FakePolicyRepo:
         self.changes: list[dict[str, Any]] = []
         self.kb: list[dict[str, Any]] = []
         self.recs: dict[str, dict[str, Any]] = {}
+        self.overlays: list[dict[str, Any]] = []  # R3 closed-loop overlay writes
         self._seq = 0
 
     def list_sources(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
@@ -255,6 +256,13 @@ class FakePolicyRepo:
         base["status"] = new_status
         self.recs[base["id"]] = base
         return base
+
+    def insert_overlay(self, row: dict[str, Any]) -> dict[str, Any]:
+        # R3 closed loop: an 'apply' transition writes one overlay row here.
+        self._seq += 1
+        stored = {**row, "id": f"ov-{self._seq}"}
+        self.overlays.append(stored)
+        return stored
 
 
 def _user(role: str, uid: str = "u-1") -> CurrentUser:

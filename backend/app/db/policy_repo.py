@@ -25,6 +25,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import Depends
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import rls_connection
@@ -167,6 +168,58 @@ class PolicyRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute(stmt, list(base.values()))
             return cast("dict[str, Any]", cur.fetchone())
+
+    # --- closed-loop overlay (R3) -------------------------------------------- #
+    def insert_overlay(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Insert one ``audit_overlay`` row and return it (RLS: lead-only INSERT).
+
+        This is the ONLY writer of the R3 closed loop; it touches NOTHING outside
+        Postgres - the ``danyals-audit-system`` engine is never mutated. ``payload``
+        is wrapped in ``Jsonb`` so a dict binds cleanly into the jsonb column; every
+        other value is a bound param and the column list is server-built + quoted."""
+        row = {**row, "payload": Jsonb(row.get("payload") or {})}
+        cols = list(row.keys())
+        stmt = sql.SQL(
+            "insert into public.audit_overlay ({cols}) values ({vals}) returning *"
+        ).format(
+            cols=sql.SQL(", ").join(map(sql.Identifier, cols)),
+            vals=sql.SQL(", ").join([sql.Placeholder()] * len(cols)),
+        )
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, list(row.values()))
+            return cast("dict[str, Any]", cur.fetchone())
+
+    def list_active_overlay(
+        self,
+        *,
+        target_module: str | None = None,
+        audit_type: str | None = None,
+        region: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> _Rows:
+        """The ACTIVE overlay rows (newest first) the presentation layer lays on top
+        of the untouched engine output. Optional filters scope to a module / a keyed
+        audit-type / a region; ``active = true`` is always applied (retired overlays
+        never surface)."""
+        query = "select * from public.audit_overlay where active = true"
+        params: list[Any] = []
+        if target_module is not None:
+            query += " and target_module = %s"
+            params.append(target_module)
+        if audit_type is not None:
+            query += " and audit_type = %s"
+            params.append(audit_type)
+        if region is not None:
+            query += " and region = %s"
+            params.append(region)
+        query += " order by created_at desc"
+        if limit is not None:
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
 
 
 def get_policy_repo(user: CurrentUserDep) -> PolicyRepo:
