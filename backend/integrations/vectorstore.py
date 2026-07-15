@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -52,11 +53,15 @@ class VectorStore(Protocol):
     """Namespaced vector index: upsert, similarity query, delete-by-id.
 
     ``namespace`` is always ``entity_type:entity_id`` - the per-entity partition.
+    ``list_items`` enumerates a whole namespace (id + metadata) - the reconcile
+    sweep (P6B-6) needs it to detect vectors present in the store but absent from
+    the Postgres ledger (orphans); it is never on the hot retrieval path.
     """
 
     def upsert(self, namespace: str, items: list[VectorItem]) -> None: ...
     def query(self, namespace: str, vector: list[float], top_k: int) -> list[Match]: ...
     def delete(self, namespace: str, ids: list[str]) -> None: ...
+    def list_items(self, namespace: str) -> list[VectorItem]: ...
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -97,6 +102,9 @@ class InMemoryVectorStore:
             return
         for id_ in ids:
             bucket.pop(id_, None)
+
+    def list_items(self, namespace: str) -> list[VectorItem]:
+        return list(self._namespaces.get(namespace, {}).values())
 
 
 class PineconeVectorStore:
@@ -163,3 +171,24 @@ class PineconeVectorStore:
         if not ids:
             return
         self._run(lambda: self._index.delete(ids=ids, namespace=namespace))
+
+    def list_items(self, namespace: str) -> list[VectorItem]:  # pragma: no cover - needs live Pinecone
+        # ``index.list`` paginates ids for a namespace; ``fetch`` then returns each
+        # vector's values + metadata. Batched by 1000 (Pinecone's fetch ceiling);
+        # ``partial`` binds the batch so no loop variable is captured in a closure.
+        ids: list[str] = []
+        for page in self._index.list(namespace=namespace):
+            ids.extend(page)
+        items: list[VectorItem] = []
+        for start in range(0, len(ids), 1000):
+            batch = ids[start : start + 1000]
+            response = self._run(partial(self._index.fetch, ids=batch, namespace=namespace))
+            for vec_id, record in (response.vectors or {}).items():
+                items.append(
+                    VectorItem(
+                        id=vec_id,
+                        vector=list(record.values or []),
+                        metadata=dict(record.metadata or {}),
+                    )
+                )
+        return items
