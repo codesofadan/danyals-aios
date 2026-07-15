@@ -8,8 +8,7 @@ Database schema and migrations for the AIOS platform (Supabase Postgres).
 db/
 ├── migrations/     # ordered NNNN_*.sql, applied in lexical order (source of truth)
 ├── schema.sql      # human-readable snapshot, kept in sync per migration
-├── seed/           # optional seed/fixture data (see seed/README.md)
-└── ci/             # CI-only Supabase shim (auth/vault/roles) - never used in prod
+└── seed/           # optional seed/fixture data (see seed/README.md)
 ```
 
 ## Apply
@@ -18,8 +17,12 @@ db/
 for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
 ```
 
-In production the `auth` schema + Supabase Vault already exist. Locally/CI they
-are stubbed by `ci/00_supabase_shim.sql` (applied **before** the migrations).
+`0000_local_platform.sql` sorts first and is the self-hosted substrate: it creates
+the `auth` schema + `auth.uid()/role()/jwt()` GUC readers and the
+`anon`/`authenticated`/`service_role` roles, so every later migration applies
+byte-for-byte on plain PostgreSQL (no Supabase, no CI shim). Migrations **MUST** be
+applied by a BYPASSRLS superuser owner (locally `postgres`) so the SECURITY DEFINER
+RLS helpers don't recurse.
 
 ## RLS gate
 
@@ -39,7 +42,7 @@ CI's `db-rls` job runs this against an ephemeral Postgres on every backend/db ch
 | `0001_conventions` | `pgcrypto`, `set_updated_at()` trigger fn, conventions |
 | `0002_identity_rbac` | `users` (↔ `auth.users`), `user_feature_grants`; `current_app_role()` / `is_staff()` |
 | `0003_clients_sites` | `clients` (subscription + contact + portal metadata), `sites` |
-| `0004_vault` | `vault_keys` metadata + `vault_*` service_role-only Vault wrappers |
+| `0004_vault` | `vault_keys` (app-layer AES-256-GCM: `secret_sealed` + `key_version`) |
 | `0005_activity_log` | append-only `activity_log` |
 | `0006_cost` | `client_budgets`, `cost_dial`, `cost_settings`, `cost_log`, `add_budget_spend()` |
 | `0007_delivery_tier` | `delivery_tier` enum + `clients.delivery_tier` |

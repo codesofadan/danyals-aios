@@ -1,22 +1,24 @@
--- 0004_vault.sql - Key Vault metadata + service_role-only Supabase Vault wrappers.
+-- 0004_vault.sql - Key Vault: agency API keys encrypted at rest.
 --
--- The raw secret NEVER lives in a public table: it is stored in Supabase Vault
--- (encrypted at rest). public.vault_keys holds only non-sensitive metadata plus
--- a masked preview and the vault secret_id. Reveal/store/rotate go through
--- SECURITY DEFINER wrappers whose EXECUTE is granted ONLY to service_role, so no
--- browser/anon/authenticated caller can reach the vault - only the server.
+-- Secrets are sealed with AES-256-GCM IN THE APPLICATION (app/services/vault.py)
+-- using VAULT_MASTER_KEY, which is held ONLY in the process environment - NEVER in
+-- Postgres. The DB stores nonce||ciphertext||tag (secret_sealed) + key_version +
+-- masked metadata, so a database dump yields nothing usable and there is NO
+-- decrypt path in SQL. Reveal is owner-only, enforced in the router + service
+-- (the ciphertext never leaves the server and is never decrypted in SQL). This
+-- replaces the former Supabase-Vault design (the `vault` schema wrappers + the
+-- `secret_id` column are gone), so 0000->0012 apply on plain PostgreSQL.
 
 create table public.vault_keys (
-  id         uuid primary key default gen_random_uuid(),
-  provider   text not null,
-  label      text not null,
-  masked     text not null default '',
-  scope      text not null default 'Agency-global',
-  site       text,
-  secret_id  uuid not null,   -- FK into vault.secrets (managed by Supabase Vault)
-  rotated_at timestamptz not null default now(),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  provider      text not null,
+  label         text not null default '',
+  masked        text not null default '',        -- e.g. "sk-...4cb6" for the list UI
+  secret_sealed bytea not null,                   -- 12-byte nonce || ciphertext || 16-byte tag
+  key_version   int  not null default 1,          -- for master-key rotation
+  created_by    uuid references public.users (id) on delete set null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
 create trigger vault_keys_set_updated_at
@@ -26,8 +28,9 @@ create trigger vault_keys_set_updated_at
 alter table public.vault_keys enable row level security;
 alter table public.vault_keys force row level security;
 
--- Only manage_vault holders (owner/admin) can read the masked list; reveal of the
--- raw secret is further restricted to the super-admin in the application layer.
+-- manage_vault holders (owner/admin) see the masked list + manage; the owner-only
+-- REVEAL decrypts server-side in vault.py behind require_owner (the raw secret is
+-- never exposed by RLS, never decrypted in SQL).
 create policy vault_keys_select on public.vault_keys
   for select using (public.current_app_role() in ('owner', 'admin'));
 
@@ -35,23 +38,3 @@ create policy vault_keys_modify on public.vault_keys
   for all
   using (public.current_app_role() in ('owner', 'admin'))
   with check (public.current_app_role() in ('owner', 'admin'));
-
--- --- Vault wrappers (service_role only) --------------------------------------
-create or replace function public.vault_create_secret(p_secret text, p_name text)
-returns uuid language sql security definer set search_path = ''
-as $$ select vault.create_secret(p_secret, p_name) $$;
-
-create or replace function public.vault_update_secret(p_id uuid, p_secret text)
-returns void language sql security definer set search_path = ''
-as $$ select vault.update_secret(p_id, p_secret) $$;
-
-create or replace function public.vault_reveal_secret(p_id uuid)
-returns text language sql security definer set search_path = ''
-as $$ select decrypted_secret from vault.decrypted_secrets where id = p_id $$;
-
-revoke execute on function public.vault_create_secret(text, text) from public;
-revoke execute on function public.vault_update_secret(uuid, text) from public;
-revoke execute on function public.vault_reveal_secret(uuid) from public;
-grant execute on function public.vault_create_secret(text, text) to service_role;
-grant execute on function public.vault_update_secret(uuid, text) to service_role;
-grant execute on function public.vault_reveal_secret(uuid) to service_role;

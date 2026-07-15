@@ -10,6 +10,15 @@
 -- table ENABLE + FORCE row level security with explicit policies.
 -- ============================================================================
 
+-- ---- 0000_local_platform -----------------------------------------------------
+-- The self-hosted-Postgres SUBSTRATE (replaces the Supabase built-ins; sorts
+-- FIRST). Roles anon (nologin) / authenticated (login, RLS binds) / service_role
+-- (login, BYPASSRLS); schema auth + auth.users (id/email/password_hash, locked to
+-- service_role); auth.uid()/role()/jwt() as GUC readers over app.user_id /
+-- app.user_role / app.jwt_claims, STABLE with search_path pinned to pg_catalog.
+-- MUST be applied by a BYPASSRLS superuser owner so the SECURITY DEFINER RLS
+-- helpers do not recurse. See db/migrations/0000_local_platform.sql for the DDL.
+
 -- ---- 0001_conventions --------------------------------------------------------
 create extension if not exists pgcrypto;
 
@@ -91,25 +100,25 @@ create table public.sites (
 -- + triggers; ENABLE + FORCE RLS; select (is_staff), modify (owner/admin/manager).
 
 -- ---- 0004_vault -------------------------------------------------------------
--- Raw secrets live in Supabase Vault; this table holds only metadata + a masked
--- preview + the vault secret_id. Reveal/store/rotate go through SECURITY DEFINER
--- public.vault_* wrappers whose EXECUTE is granted only to service_role.
+-- Agency API keys encrypted at rest with app-layer AES-256-GCM (VAULT_MASTER_KEY
+-- in env, NEVER in Postgres). The DB stores nonce||ciphertext||tag + key_version +
+-- masked metadata; there is NO SQL decrypt path (a dump yields nothing usable).
+-- Reveal is owner-only, enforced in the router/service. Replaces the former
+-- Supabase-Vault design (the vault schema wrappers + secret_id column are gone).
 
 create table public.vault_keys (
-  id         uuid primary key default gen_random_uuid(),
-  provider   text not null,
-  label      text not null,
-  masked     text not null default '',
-  scope      text not null default 'Agency-global',
-  site       text,
-  secret_id  uuid not null,
-  rotated_at timestamptz not null default now(),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  provider      text not null,
+  label         text not null default '',
+  masked        text not null default '',
+  secret_sealed bytea not null,               -- 12-byte nonce || ciphertext || 16-byte tag
+  key_version   int  not null default 1,
+  created_by    uuid references public.users (id) on delete set null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 -- + trigger; ENABLE + FORCE RLS; select + modify restricted to owner/admin
---   (reveal further restricted to owner in the app). Wrappers:
---   public.vault_create_secret / vault_update_secret / vault_reveal_secret.
+--   (reveal further restricted to owner in app/services/vault.py, not SQL).
 
 -- ---- 0005_activity_log ------------------------------------------------------
 -- Append-only audit feed. Actor identity snapshotted. Staff read only; writes

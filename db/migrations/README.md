@@ -1,12 +1,12 @@
 # migrations
 
-Ordered SQL migrations for the AIOS Postgres schema (Supabase). Files are named
-`NNNN_name.sql` and **applied in lexical order**. They are the source of truth;
-`../schema.sql` is a synced snapshot.
+Ordered SQL migrations for the AIOS Postgres schema (self-hosted PostgreSQL 16).
+Files are named `NNNN_name.sql` and **applied in lexical order**. They are the
+source of truth; `../schema.sql` is a synced snapshot.
 
 ## Apply
 
-Against a Supabase project (or any Postgres) via `psql`:
+Against any PostgreSQL 16 server via `psql`, as a BYPASSRLS superuser owner:
 
 ```bash
 for f in db/migrations/*.sql; do
@@ -14,10 +14,12 @@ for f in db/migrations/*.sql; do
 done
 ```
 
-`DATABASE_URL` is the Postgres connection string (Supabase: Project Settings →
-Database → Connection string). In production the `auth` schema already exists
-(Supabase Auth); locally/CI it is stubbed by `../ci/00_supabase_shim.sql`,
-which is applied **before** these migrations and never in production.
+`0000_local_platform.sql` sorts first and provisions the substrate the rest depend
+on: the `auth` schema + `auth.uid()/role()/jwt()` GUC readers and the
+`anon`/`authenticated`/`service_role` roles. No Supabase and no CI shim are needed.
+Migrations **MUST** be applied by a superuser/BYPASSRLS owner (locally `postgres`)
+so the SECURITY DEFINER RLS helpers (`is_staff`/`current_app_role`/
+`current_client_id`) read `public.users` without recursing through RLS.
 
 ## RLS gate
 

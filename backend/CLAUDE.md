@@ -81,7 +81,7 @@ Built in ordered "chunks" on branch **`feat/backend-foundation`**, one commit pe
 - 9: **native systemd deploy (Docker was built then removed)** — `infra/systemd/*.service` + `infra/deploy/install.sh` + `README-deploy.md`; Caddy for TLS.
 - 10: CI at `../.github/workflows/backend-ci.yml` (ruff + mypy + tests, matrix 3.11/3.12, Redis integration job) + README.
 
-**Part 2 (the Shared Base) is complete — P2-1…P2-10 committed and green** (ruff + mypy strict clean; 136 unit tests, integration auto-skip). DB schema is ordered SQL in `../db/migrations/` (snapshot `../db/schema.sql`); apply with `psql`, then verify RLS with `python -m app.db.rls_check` (needs `DATABASE_URL`). CI's `db-rls` job spins an ephemeral Postgres (with the `../db/ci` Supabase shim), applies the migrations, and runs the gate.
+**Part 2 (the Shared Base) is complete — P2-1…P2-10 committed and green** (ruff + mypy strict clean; 136 unit tests, integration auto-skip). DB schema is ordered SQL in `../db/migrations/` (snapshot `../db/schema.sql`); apply with `psql`, then verify RLS with `python -m app.db.rls_check` (needs `DATABASE_URL`). CI's `db-rls` job spins an ephemeral Postgres, applies the migrations (`0000_local_platform.sql` provisions the substrate — no Supabase shim), and runs the gate.
 
 - P2-1: migration tooling + conventions + the RLS coverage gate (`app/db/rls_check.py`).
 - P2-2: identity (`users` ↔ `auth.users`) + `user_feature_grants`; the RBAC matrix (`app/rbac/matrix.py`).
