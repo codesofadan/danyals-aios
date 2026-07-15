@@ -25,6 +25,7 @@ from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.middleware import RequestIDMiddleware
 from app.core.observability import init_sentry
 from app.core.redis import create_redis_client
+from app.db.database import build_admin_pool, build_rls_pool, clear_pools, set_pools
 from app.logging_setup import configure_logging, get_logger
 from app.routers import api_v1
 from app.routers.health import router as health_router
@@ -40,6 +41,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # JWKS verifier for Supabase access tokens; None until Supabase is configured
     # (keys are fetched lazily on the first authenticated request).
     app.state.jwks_cache = JWKSCache.from_settings(settings)
+    # Local-Postgres pools (P6A-3), one per trust level. Constructed None when the
+    # DSN is absent (dual-config window) and OPENED non-blocking so liveness stays
+    # independent of the DB being reachable. ``set_pools`` also registers them as
+    # the process-wide singletons the RLS/privileged seams reach through.
+    app.state.rls_pool = build_rls_pool(settings.database_url)
+    app.state.admin_pool = build_admin_pool(settings.database_admin_url)
+    if app.state.rls_pool is not None:
+        app.state.rls_pool.open()
+    if app.state.admin_pool is not None:
+        app.state.admin_pool.open()
+    set_pools(app.state.rls_pool, app.state.admin_pool)
     try:
         yield
     finally:
@@ -48,6 +60,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         redis_client = getattr(app.state, "redis", None)
         if redis_client is not None:
             await redis_client.aclose()
+        # Close both DB pools behind getattr guards (partial startup may not have
+        # reached the pool lines), then clear the module singletons.
+        for _attr in ("rls_pool", "admin_pool"):
+            pool = getattr(app.state, _attr, None)
+            if pool is not None:
+                pool.close()
+        clear_pools()
 
 
 def create_app() -> FastAPI:

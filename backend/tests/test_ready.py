@@ -33,26 +33,42 @@ def _stub_redis(status: DependencyStatus) -> None:
     health_module.redis_ping = _stub  # type: ignore[assignment]
 
 
+def _stub_db(status: DependencyStatus) -> None:
+    async def _stub(*_args: object, **_kwargs: object) -> DependencyStatus:
+        return status
+
+    health_module.db_ping = _stub  # type: ignore[assignment]
+
+
 @pytest.fixture(autouse=True)
 def _restore_pings() -> Iterator[None]:
-    """Restore the real ping functions after any test that stubs them."""
+    """Restore the real ping functions after any test that stubs them.
+
+    ``db_ping`` is default-stubbed to ``not_configured`` so these readiness tests
+    stay hermetic: the app lifespan reads the real ``.env`` (which may carry a
+    live DATABASE_URL), but a unit test must not depend on Postgres being up.
+    """
     real_supabase = health_module.supabase_ping
     real_redis = health_module.redis_ping
+    real_db = health_module.db_ping
+    _stub_db(DependencyStatus(name="postgres", status="not_configured"))
     yield
     health_module.supabase_ping = real_supabase
     health_module.redis_ping = real_redis
+    health_module.db_ping = real_db
 
 
 @pytest.mark.unit
 async def test_ready_ok_when_all_dependencies_ok(client: httpx.AsyncClient) -> None:
     _stub_supabase(_ok("supabase"))
     _stub_redis(_ok("redis"))
+    _stub_db(_ok("postgres"))
     resp = await client.get("/health/ready")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     statuses = {d["name"]: d["status"] for d in body["dependencies"]}
-    assert statuses == {"supabase": "ok", "redis": "ok"}
+    assert statuses == {"supabase": "ok", "redis": "ok", "postgres": "ok"}
 
 
 @pytest.mark.unit
