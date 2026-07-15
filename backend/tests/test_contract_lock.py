@@ -40,6 +40,11 @@ from app.schemas.policy import (
     RecommendationResponse,
     SourceResponse,
 )
+from app.schemas.reports import (
+    ReportTypeResponse,
+    SyncEventResponse,
+    WorkbookResponse,
+)
 from app.schemas.tasks import TaskResponse
 from app.schemas.tiers import TierClientResponse
 from app.schemas.upsells import UpsellResponse
@@ -72,6 +77,9 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (ChangeEventResponse, "frontend/lib/policy.ts", "ChangeEvent"),
     (KBEntryResponse, "frontend/lib/policy.ts", "KBEntry"),
     (RecommendationResponse, "frontend/lib/policy.ts", "Recommendation"),
+    (WorkbookResponse, "frontend/lib/reports.ts", "Workbook"),
+    (ReportTypeResponse, "frontend/lib/reports.ts", "ReportType"),
+    (SyncEventResponse, "frontend/lib/reports.ts", "SyncEvent"),
 ]
 
 
@@ -154,6 +162,8 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (RecommendationResponse, "scope", "frontend/lib/policy.ts", "Scope"),
     (RecommendationResponse, "target", "frontend/lib/policy.ts", "TargetModule"),
     (RecommendationResponse, "status", "frontend/lib/policy.ts", "RecStatus"),
+    # Reports: the sync-status lifecycle union pinned verbatim.
+    (WorkbookResponse, "status", "frontend/lib/reports.ts", "SyncStatus"),
 ]
 
 

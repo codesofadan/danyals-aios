@@ -471,3 +471,28 @@ create table public.tasks (
 --     writes on service_role (BYPASSRLS). Baseline recs are surfaced from a constant
 --     set (list_recommendations dedups by kb_ref) and MATERIALIZED into the table on
 --     a lead's first acknowledge/apply/dismiss. RLS gate: 21 tables, all FORCE.
+
+-- ---- 0020_reports -----------------------------------------------------------
+-- Part 7 Module 04 (Reports): the operational-store layer - per-client + master
+-- Google Sheets workbooks, written through a quota-safe Redis write-buffer. The
+-- audit/content/milestone modules push datasets here; the SheetStore
+-- (app/services/sheetstore.py) buffers rows in Redis and, on flush, emits ONE batched
+-- Sheets `batchUpdate` per workbook (integrations/sheets.py, KEY-GATED on
+-- GOOGLE_SHEETS_SA_JSON, degrades to a fake/None with no key). Shapes mirror
+-- frontend/lib/reports.ts (Workbook / SyncEvent / ReportType). The internal client_id
+-- NEVER leaks (client_name is a snapshot).
+--   enum sync_status(synced|syncing|error).
+--   report_workbooks(id uuid, client_id fk->clients cascade (NULL for master),
+--     client_name snapshot, sheet_id text (contract `sheet`), tabs jsonb (contract
+--     `tabs`, a Dataset[] subset audit|content|milestones), status sync_status
+--     'synced', rows_synced_today int (contract `rows`), last_sync timestamptz
+--     (contract `lastSync`), is_master bool, created_at/updated_at) + set_updated_at;
+--     client_id/last_sync idx + a PARTIAL UNIQUE index (is_master where is_master) so
+--     exactly one master-rollup ref row exists. Seeds that master row (idempotent).
+--   report_sync_events(id uuid, workbook_id fk->report_workbooks cascade, client_name
+--     snapshot (contract `client`), dataset text check in(audit|content|milestones),
+--     rows int, synced_at timestamptz (contract `ago`), created_at/updated_at) +
+--     set_updated_at; workbook_id & synced_at(desc) idx.
+--   Both ENABLE + FORCE RLS: select is_staff(); insert/update owner/admin/manager
+--     (the leads; sync is lead-only). NO client select policy; NO delete. RLS gate:
+--     23 tables, all FORCE.
