@@ -514,3 +514,25 @@ create table public.tasks (
 --     (per-user - a caller only ever touches their OWN toggles). NO delete policies;
 --     the danger-zone reset/purge runs server-side (purge_activity on service_role,
 --     owner-gated at the router). RLS gate: 24 tables, all FORCE.
+
+-- ---- 0027_audit_overlay -----------------------------------------------------
+-- Part 7 Module 05 (Policy Radar), chunk 7C-3: the CLOSED-LOOP overlay a human-
+-- CONFIRMED recommendation writes into. HARD RULE (Part 3): the danyals-audit-system
+-- ENGINE is NEVER mutated - an 'apply' records the change HERE, in a SEPARATE table,
+-- laid ON TOP of the untouched engine output by the presentation layer (deleting the
+-- rows / active=false reverts to pure-engine behaviour). ONE table serves both
+-- overlay kinds via target_module (reused 0019 enum): 'audit' = an extra check/weight,
+-- 'content'/'portal' = an advisory. payload jsonb carries structured extra without a
+-- migration.
+--   audit_overlay(id uuid, target_module policy_target_module 'audit', audit_type text
+--     '' (keyed axis; '' = all types), region policy_region 'global' (keyed axis), title,
+--     guidance text, weight numeric (0 for an advisory), payload jsonb '{}', source_kb_ref
+--     text (rec kbId snapshot), source_rec_id text (materialized rec id snapshot, NOT an
+--     FK), action text (applied action snapshot), version int 1, active bool true,
+--     created_by fk->users set null, created_at/updated_at) + set_updated_at; target/
+--     active/created_at(desc) idx.
+--   ENABLE + FORCE RLS: select is_staff() (the presentation layer reads active rows);
+--     insert/update owner/admin/manager (the SAME lead set the router's require_role
+--     enforces on 'apply'). NO client select policy; NO delete. RLS gate: 25 tables, all
+--     FORCE. (7C-4's Command Center aggregate adds a read-only GET /command-center that
+--     REUSES existing repos - no new table.)

@@ -14,6 +14,10 @@ Every camelCase wire key is produced from a snake_case attribute via
 SNAPSHOTS). The seven enum unions are pinned verbatim from ``policy.ts`` and locked
 field-for-field by ``test_contract_lock``. Relative-time fields (``lastChecked`` /
 ``detected``) are humanized from their ``*_at`` timestamps by the ``from_row`` maps.
+
+``OverlayResponse`` (R3 closed loop) is INTERNAL - it has no ``lib/*.ts`` mirror,
+so it is deliberately OUTSIDE the contract-lock; it surfaces the applied-overlay
+rows the presentation layer lays on top of the untouched engine.
 """
 
 from __future__ import annotations
@@ -198,6 +202,48 @@ class RecommendationResponse(BaseModel):
             region_label=row.get("region_label", ""),
             status=status if status in _REC_STATUSES else "new",
             clients=row.get("affected_clients", ""),
+        )
+
+
+class OverlayResponse(BaseModel):
+    """One active CLOSED-LOOP overlay row (R3): the applied recommendation, laid ON
+    TOP of the UNTOUCHED engine by the presentation layer.
+
+    This is NOT a frontend-mirrored contract type - there is no ``lib/*.ts``
+    Overlay type, so it is deliberately ABSENT from the contract-lock. It is the
+    internal read the audit/report renderer + content-guidance surface use to learn
+    what an ``apply`` produced. ``kbId`` is the source recommendation's public KB
+    snapshot; ``auditType`` is the keyed audit-type axis (``""`` = every type)."""
+
+    id: str
+    target: TargetModule
+    audit_type: str = Field(serialization_alias="auditType")
+    region: Region
+    title: str
+    guidance: str
+    weight: float
+    kb_id: str = Field(serialization_alias="kbId")
+    action: str
+    version: int
+    active: bool
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> OverlayResponse:
+        target = row.get("target_module")
+        region = row.get("region")
+        weight = row.get("weight")
+        return cls(
+            id=str(row["id"]),
+            target=target if target in _TARGETS else "audit",
+            audit_type=row.get("audit_type", ""),
+            region=region if region in _REGIONS else "global",
+            title=row.get("title", ""),
+            guidance=row.get("guidance", ""),
+            weight=float(weight) if weight is not None else 0.0,
+            kb_id=row.get("source_kb_ref", ""),
+            action=row.get("action", ""),
+            version=int(row.get("version", 1) or 1),
+            active=bool(row.get("active", True)),
         )
 
 
