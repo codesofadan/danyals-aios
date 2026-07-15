@@ -315,6 +315,23 @@ create table public.tasks (
 --     current_client_id() (mirrors 0010 portal_*); granted to authenticated, anon.
 --     No vectors, no watermark, no foreign tenant, no base-table access.
 
+-- ---- 0015_public_audits -----------------------------------------------------
+-- The PUBLIC no-login "Free Audit" funnel (P6C-1). ONE free audit per email
+-- (lead capture); the report is fetched by an opaque token; a Fiverr upsell link
+-- is shown on it. ISOLATED from ALL tenant data: written ONLY by the server
+-- (service_role via the privileged path) - NO client_id, NO tenant read path.
+--   public_audits(id, email text not null, url text not null, status audit_status
+--     'queued', score int, scores jsonb '{}', run_uuid text, artifact_dir text,
+--     pdf_path text, json_path text, report_token text not null unique default
+--     encode(gen_random_bytes(24),'hex'), source text 'landing', error text,
+--     created_at, updated_at) + set_updated_at() trigger. Reuses the audit_status
+--     enum (0008); carries no cost/runtime/started_at/client columns.
+--   unique index public_audits_email_key on lower(email) - the "one per email"
+--     rule; index public_audits_created_at_idx on (created_at desc).
+--   ENABLE + FORCE RLS; policy public_audits_select for select using is_staff()
+--     ONLY - staff review the leads list; the anonymous tokenized read goes
+--     through the privileged path filtered to one report_token, never via RLS.
+
 -- ---- 0016_user_login --------------------------------------------------------
 -- AUTH CUTOVER (P6A-7): adds public.users.username (nullable) + a partial unique
 -- index users_username_key on lower(username) where username is not null. The
