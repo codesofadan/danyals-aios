@@ -535,3 +535,20 @@ create table public.tasks (
 --     (per-user - a caller only ever touches their OWN toggles). NO delete policies;
 --     the danger-zone reset/purge runs server-side (purge_activity on service_role,
 --     owner-gated at the router). RLS gate: 24 tables, all FORCE.
+
+-- ---- 0026_web2_publish ------------------------------------------------------
+-- Part 7 (7B-3): the Web 2.0 PUBLISH pipeline's persistence. ADDITIVELY extends the
+-- existing web2_properties ledger (0018) - NO new table, NO new RLS policy (the 0018
+-- policies already gate it: staff read; leads insert/update; clients excluded; the
+-- worker publish/track path runs on service_role BYPASSRLS). The frontend contract
+-- (Web2Property, 7 keys) is UNCHANGED - these internal pipeline columns never leak.
+--   enum web2_status(draft|needs_review|publishing|published|failed|rejected).
+--   alter web2_properties add: status web2_status default 'published' (existing rows
+--     stay published; new plan rows insert 'draft'), topic, page_type, framework,
+--     target_url (the client page the anchor links BACK to), body_md (the drafted
+--     article persisted between the write + post-approval publish stages), external_id
+--     (provider post id for idempotent re-publish), error. + status idx.
+--   State machine: draft -> (write worker) needs_review -> (lead approve) publishing
+--     -> (publish worker) published | failed; a lead may reject -> rejected. The
+--     article is NEVER auto-published: needs_review is a human quality gate. RLS gate:
+--     24 tables, all FORCE (unchanged - web2_properties already counted).

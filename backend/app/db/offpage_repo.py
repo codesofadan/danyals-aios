@@ -15,13 +15,14 @@ column lists come from server-built dicts quoted via ``psycopg.sql.Identifier``.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import Depends
 from psycopg import sql
 
 from app.core.auth import CurrentUserDep
-from app.db.database import rls_connection
+from app.db.database import privileged_connection, rls_connection
 
 _Rows = list[dict[str, Any]]
 
@@ -190,6 +191,71 @@ class OffpageRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
+    def client_name_for(self, client_id: str) -> str | None:
+        """The display name of a client the caller can see (RLS-scoped), or ``None`` if
+        it does not exist / is not visible - used to SNAPSHOT client_name on a new
+        placement so the internal client_id never has to be surfaced."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select name from public.clients where id = %s limit 1", (client_id,)
+            )
+            row = cur.fetchone()
+            return str(row["name"]) if row else None
+
+    def create_web2(
+        self,
+        *,
+        client_id: str,
+        client_name: str,
+        platform: str,
+        anchor: str,
+        target_url: str,
+        topic: str,
+        page_type: str,
+        framework: str,
+    ) -> dict[str, Any] | None:
+        """Insert a PLANNED Web 2.0 placement (status ``draft``) and return the row.
+
+        Lead-only by RLS (the web2_properties insert policy). ``client_name`` is a
+        display SNAPSHOT; the write worker fills the drafted body + flips the status."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "insert into public.web2_properties "
+                "(client_id, client_name, platform, anchor, target_url, topic, "
+                "page_type, framework, status) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, 'draft') returning *",
+                (
+                    client_id, client_name, platform, anchor, target_url, topic,
+                    page_type, framework,
+                ),
+            )
+            return cur.fetchone()
+
+    def get_web2(self, web2_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.web2_properties where id = %s limit 1", (web2_id,)
+            )
+            return cur.fetchone()
+
+    def update_web2_status(
+        self, web2_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Update one Web 2.0 placement by id (lead-only by RLS), returning the row.
+
+        Column names are static ``sql.Identifier``s (never a bound param); values are
+        always bound - the impersonation-review SQL rule."""
+        cols = list(changes.keys())
+        assignments = sql.SQL(", ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(c)) for c in cols
+        )
+        stmt = sql.SQL(
+            "update public.web2_properties set {sets} where id = %s returning *"
+        ).format(sets=assignments)
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, [*changes.values(), web2_id])
+            return cur.fetchone()
+
 
 def get_offpage_repo(user: CurrentUserDep) -> OffpageRepo:
     """Dependency: a repo bound to the caller's verified user id (RLS-scoped)."""
@@ -197,3 +263,116 @@ def get_offpage_repo(user: CurrentUserDep) -> OffpageRepo:
 
 
 OffpageRepoDep = Annotated[OffpageRepo, Depends(get_offpage_repo)]
+
+
+# --------------------------------------------------------------------------- #
+# Privileged (service_role, BYPASSRLS) store for the WORKERS.
+# --------------------------------------------------------------------------- #
+# The publish + monitoring workers have no user JWT, so - exactly like the audit /
+# context workers - they read/write the off-page ledgers on the privileged connection
+# (service_role bypasses the RLS policies by design; 0018's header notes the monitoring
+# ingest path runs here). Each method opens its own privileged connection, so the store
+# is stateless and safe to instantiate per call. It satisfies ``web2_pipeline.Web2Store``
+# structurally (load_web2 / update_web2).
+class ServiceOffpageStore:
+    """Concrete off-page store over ``privileged_connection`` (BYPASSRLS)."""
+
+    # --- web 2.0 (the publish pipeline's Web2Store) ---------------------------
+    def load_web2(self, web2_id: str) -> dict[str, Any] | None:
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.web2_properties where id = %s limit 1", (web2_id,)
+            )
+            return cur.fetchone()
+
+    def update_web2(self, web2_id: str, fields: dict[str, Any]) -> None:
+        if not fields:
+            return
+        cols = list(fields.keys())
+        assignments = sql.SQL(", ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(c)) for c in cols
+        )
+        stmt = sql.SQL(
+            "update public.web2_properties set {sets} where id = %s"
+        ).format(sets=assignments)
+        with privileged_connection() as cur:
+            cur.execute(stmt, [*fields.values(), web2_id])
+
+    # --- backlinks (monitoring diff/apply) ------------------------------------
+    def list_backlinks_for_client(self, client_id: str) -> _Rows:
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.backlinks where client_id = %s", (client_id,)
+            )
+            return cur.fetchall()
+
+    def insert_backlink(
+        self,
+        *,
+        client_id: str | None,
+        client_name: str,
+        ref_domain: str,
+        anchor: str,
+        authority: int,
+        spam: int,
+        first_seen: date | None,
+        status: str,
+    ) -> None:
+        with privileged_connection() as cur:
+            cur.execute(
+                "insert into public.backlinks "
+                "(client_id, client_name, ref_domain, anchor, authority, spam, "
+                "first_seen, status) values (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    client_id, client_name, ref_domain, anchor, authority, spam,
+                    first_seen, status,
+                ),
+            )
+
+    def set_backlink_status(self, backlink_id: str, status: str) -> None:
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.backlinks set status = %s where id = %s",
+                (status, backlink_id),
+            )
+
+    # --- citations (monitoring diff/apply) ------------------------------------
+    def list_citations_for_client(self, client_id: str) -> _Rows:
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.citations where client_id = %s", (client_id,)
+            )
+            return cur.fetchall()
+
+    def insert_citation(
+        self,
+        *,
+        client_id: str | None,
+        client_name: str,
+        directory: str,
+        nap_status: str,
+        action: str,
+        note: str,
+    ) -> None:
+        with privileged_connection() as cur:
+            cur.execute(
+                "insert into public.citations "
+                "(client_id, client_name, directory, nap_status, action, note) "
+                "values (%s, %s, %s, %s, %s, %s)",
+                (client_id, client_name, directory, nap_status, action, note),
+            )
+
+    def update_citation_status(
+        self, citation_id: str, *, nap_status: str, action: str, note: str
+    ) -> None:
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.citations set nap_status = %s, action = %s, note = %s "
+                "where id = %s",
+                (nap_status, action, note, citation_id),
+            )
+
+
+def service_offpage_store() -> ServiceOffpageStore:
+    """The privileged off-page store the workers use (service_role, BYPASSRLS)."""
+    return ServiceOffpageStore()

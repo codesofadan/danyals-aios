@@ -28,9 +28,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.util.timefmt import format_date
+
+# Web 2.0 article page type - mirrors content.ts PageType (service|blog|local); a
+# branded property defaults to a blog post.
+Web2PageType = Literal["service", "blog", "local"]
+Web2ReviewAction = Literal["approve", "reject"]
 
 # Unions verbatim from offpage.ts. Same values front + back - no display remapping.
 BacklinkStatus = Literal["new", "lost", "toxic"]
@@ -189,3 +194,33 @@ class FlagToxicRequest(BaseModel):
     """
 
     spam_threshold: int = Field(default=60, ge=0, le=100)
+
+
+class Web2PlanRequest(BaseModel):
+    """POST /offpage/web2/plan body: queue a new Web 2.0 property (lead-only).
+
+    The article is drafted about ``topic`` (defaults to the ``anchor``) and carries ONE
+    editorial backlink: ``anchor`` -> ``target_url`` (the client page). ``framework``
+    accepts the ``"Auto"`` sentinel (the writer resolves it per page type). Nothing is
+    published: the write worker parks it at ``needs_review`` for a lead to approve.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str = Field(min_length=1, alias="clientId")
+    platform: Web2Platform
+    anchor: str = Field(min_length=1)
+    target_url: str = Field(min_length=1, alias="targetUrl")
+    topic: str | None = None
+    page_type: Web2PageType = Field(default="blog", alias="pageType")
+    framework: str = "Auto"
+
+
+class Web2ReviewRequest(BaseModel):
+    """POST /offpage/web2/{id}/approve body: the lead's decision at the review gate.
+
+    ``approve`` -> publishing (enqueues the publish worker); ``reject`` -> rejected.
+    Defaults to ``approve`` (the endpoint's name).
+    """
+
+    action: Web2ReviewAction = "approve"
