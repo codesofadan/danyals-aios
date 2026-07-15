@@ -39,6 +39,13 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # context spend can bypass the budget caps / daily spend-stop.
     DialFeatureMeta(key="context", label="Client Context", icon="psychology", provider="Anthropic", note="Living-summary prose (Claude)", default_mode="api"),
     DialFeatureMeta(key="context_embed", label="Context Embeddings", icon="memory", provider="Voyage", note="Context vectors (Voyage)", default_mode="api"),
+    # Part 7 (P7A-3) — the Content module's SERP keyword & intent RESEARCH spend
+    # (the top-10 teardown + keyword metrics). It flows through the SAME gate as
+    # every other paid call (the GatedResearcher wrapper), so ops can throttle
+    # content research to off/byhand/api on the money-dial; a block DEGRADES the
+    # brief (partial / low-confidence) rather than crashing. Aggressively cached
+    # by (keyword, geo, serp_date), so a cluster/city sprint reuses one pull.
+    DialFeatureMeta(key="content_research", label="Content Research", icon="manage_search", provider="Serper", note="SERP + top-10 teardown (Serper)", default_mode="api"),
 )
 
 DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)

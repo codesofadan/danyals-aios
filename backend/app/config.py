@@ -160,6 +160,20 @@ class Settings(BaseSettings):
     # Per-call cost estimates for the money-dial (a later chunk wires these in).
     content_research_cost_estimate: float = 0.01
     content_generate_cost_estimate: float = 0.15
+    # --- Content RESEARCH service tuning (P7A-3). Operational knobs for the
+    # keyword/intent research brief; additive + optional (never required in prod). ---
+    # DA assumed when the client is un-audited / Moz DA is missing (winnability
+    # falls back to this NEUTRAL authority and the brief is marked low_confidence).
+    content_research_neutral_da: float = 30.0
+    # How far above a client's DA a keyword's difficulty may sit and still be
+    # judged winnable (a realistic stretch, on the 0-100 scale).
+    content_research_winnable_stretch: float = 15.0
+    # N1 SERP + top-10-teardown Redis cache TTL (seconds); 24h so a cluster/city
+    # sprint reuses one pull. The gate serves a cache hit at ~$0.
+    content_research_cache_ttl_seconds: int = 86_400
+    # Per-URL bounded fetch timeout + how many ranking pages to tear down.
+    content_teardown_timeout_seconds: float = 8.0
+    content_teardown_max_pages: int = 10
 
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
