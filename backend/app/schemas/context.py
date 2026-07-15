@@ -101,8 +101,16 @@ class ContextHealth(BaseModel):
 
 class ContextChunk(BaseModel):
     """One ranked retrieval hit: a stable chunk id, its text, and a similarity
-    score (higher = closer). Returned by the retrieval API (P6B-8)."""
+    score (higher = closer). Returned by the retrieval API (P6B-8).
+
+    ``content_checksum`` is the sha256 of ``content``, stamped by the compaction
+    engine (P6B-5) so the embed/upsert pipeline (P6B-6) can detect unchanged
+    chunks and skip re-embedding. It is ``exclude``d from serialization - a
+    checksum is a ledger detail and never rides the retrieval wire; retrieval hits
+    leave it empty.
+    """
 
     chunk_key: str
     content: str
     score: float = Field(default=0.0)
+    content_checksum: str = Field(default="", exclude=True)
