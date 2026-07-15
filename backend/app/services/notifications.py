@@ -226,3 +226,30 @@ async def raise_alert(
         await asyncio.to_thread(notifier.post, f"[{severity}] {title} - {detail}")
     except Exception:
         logger.warning("raise_alert_slack_failed", type=type)
+
+
+# --------------------------------------------------------------------------- #
+# Off-page monitoring seam (wires the 7B-3 backlink/citation monitor -> alerts).
+# The off-page worker (workers/tasks/offpage.py) is a SYNC Celery task that
+# guarded-imports this; a LOST backlink is the actionable negative signal, so it
+# raises a ``lost_link`` staff alert; NEW links are a positive signal (logged, not
+# alerted - the ``alert_type`` taxonomy has no ``new_link``). Sync + best-effort:
+# a monitoring sweep must never fail because the alert channel hiccups.
+# --------------------------------------------------------------------------- #
+def notify_offpage_changes(
+    *,
+    client_id: str | None,
+    client_name: str,
+    new_links: list[Any],
+    lost_links: list[Any],
+) -> None:
+    """Deliver alerts for an off-page monitoring diff. Never raises."""
+    if new_links:
+        logger.info("offpage_new_links", client=client_name, count=len(new_links))
+    if not lost_links or not client_id:
+        return
+    detail = f"{len(lost_links)} backlink(s) lost for {client_name}".strip()
+    try:
+        asyncio.run(raise_alert(client_id, "lost_link", "warning", detail))
+    except Exception:
+        logger.warning("offpage_alert_failed", client=client_name)
