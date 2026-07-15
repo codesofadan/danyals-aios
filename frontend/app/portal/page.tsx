@@ -6,7 +6,7 @@ import DashboardHome from "@/components/portal/DashboardHome";
 export default function PortalDashboard() {
   return (
     <>
-      <TopBar eyebrow="Team Portal · My Workspace" title="Dashboard" searchPlaceholder="Search my tasks, clients…" />
+      <TopBar eyebrow="Team Portal · My Workspace" title="Team Dashboard" searchPlaceholder="Search my tasks, clients…" />
       <DashboardHome />
     </>
   );

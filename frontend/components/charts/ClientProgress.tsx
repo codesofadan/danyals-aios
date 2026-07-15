@@ -6,7 +6,7 @@ import { clients } from "@/lib/data";
 
 const R = 44;
 const CIRC = 2 * Math.PI * R;
-const RAMP = ["#CDC4F6", "#AEA0F2", "#8F7FEA", "#7161DE", "#5B4FC4"]; // violet ordinal
+const RAMP = ["#EBFFB8", "#D6FF6B", "#C6FF3C", "#A6E62A", "#7FB814"]; // lime ordinal
 const colorFor = (p: number) => RAMP[Math.min(RAMP.length - 1, Math.floor((p / 100) * RAMP.length))];
 
 // Active client progress — animated SVG rings + counting % (anime.js).

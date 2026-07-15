@@ -32,7 +32,7 @@ export default function FeaturePage({ params }: Params) {
       />
 
       <nav className="feat-crumbs" aria-label="Breadcrumb">
-        <Link href="/">Command Center</Link>
+        <Link href="/">Admin Dashboard</Link>
         <span>/</span>
         <Link href="/features">Features</Link>
         <span>/</span>

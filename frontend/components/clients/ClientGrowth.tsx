@@ -55,7 +55,7 @@ export default function ClientGrowth() {
          <stop offset="1" stop-color="#1FA890" stop-opacity="0"/>
        </linearGradient>
        <linearGradient id="cline" x1="0" y1="0" x2="1" y2="0">
-         <stop offset="0" stop-color="#7B69EE"/><stop offset="1" stop-color="#1FA890"/>
+         <stop offset="0" stop-color="#C6FF3C"/><stop offset="1" stop-color="#22E0C0"/>
        </linearGradient>`;
     svg.appendChild(defs);
 
@@ -100,10 +100,10 @@ export default function ClientGrowth() {
     }
 
     const li = clientGrowth.length - 1;
-    svg.appendChild(mk("circle", { cx: X(li), cy: Y(clientGrowth[li].v), r: 5.5, fill: "#141033", stroke: "#1FA890", "stroke-width": 2.4 }));
+    svg.appendChild(mk("circle", { cx: X(li), cy: Y(clientGrowth[li].v), r: 5.5, fill: "#0A0A0B", stroke: "#22E0C0", "stroke-width": 2.4 }));
 
     const cross = mk("line", { x1: 0, y1: padT, x2: 0, y2: padT + innerH, stroke: "rgba(159,147,230,.26)", "stroke-width": 1, opacity: 0 });
-    const dot = mk("circle", { r: 5, fill: "#8F7FEA", stroke: "#141033", "stroke-width": 2, opacity: 0 });
+    const dot = mk("circle", { r: 5, fill: "#D6FF6B", stroke: "#0A0A0B", "stroke-width": 2, opacity: 0 });
     svg.appendChild(cross);
     svg.appendChild(dot);
 

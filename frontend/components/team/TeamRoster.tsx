@@ -15,6 +15,8 @@ export type NewMember = {
   color: string;
   template?: string; // role template label, or "Custom"
   features?: string[]; // granted accessFeatures.key[]
+  username?: string; // one-time portal login shown in the wizard
+  password?: string; // one-time portal password shown in the wizard
 };
 
 function RoleChip({ role }: { role: TeamRole }) {

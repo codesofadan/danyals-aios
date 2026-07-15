@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import { teamMembers, tasks_seed } from "@/lib/data";
+import { useStore } from "@/lib/store";
 
 type Tile = {
   icon: string;
@@ -14,20 +14,6 @@ type Tile = {
   note: string;
   hero?: boolean;
 };
-
-// Derived from the roster + task board so the tiles stay honest.
-const active = teamMembers.filter((m) => m.status !== "invited");
-const headcount = teamMembers.length;
-const openTasks = tasks_seed.filter((t) => t.status !== "done").length;
-const avgUtil = Math.round(active.reduce((s, m) => s + m.utilization, 0) / active.length);
-const avgOnTime = Math.round(active.reduce((s, m) => s + m.onTime, 0) / active.length);
-
-const TILES: Tile[] = [
-  { icon: "groups", label: "Team members", value: headcount, delta: "1", deltaDir: "up", note: "invited this week", hero: true },
-  { icon: "assignment", label: "Active tasks", value: openTasks, delta: "3", deltaDir: "up", note: "across the board" },
-  { icon: "bolt", label: "Avg. utilization", value: avgUtil, unit: "%", delta: "4.1%", deltaDir: "up", note: "capacity in use" },
-  { icon: "schedule", label: "On-time delivery", value: avgOnTime, unit: "%", delta: "1.3%", deltaDir: "up", note: "rolling 30 days" },
-];
 
 function useCountUp(target: number) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -62,6 +48,23 @@ function Value({ value, unit }: { value: number; unit?: string }) {
 }
 
 export default function TeamStats() {
+  const { members, tasks } = useStore();
+
+  // Derived live from the shared roster + task board so the tiles stay honest
+  // as members are invited and tasks are assigned during the demo.
+  const active = members.filter((m) => m.status !== "invited");
+  const headcount = members.length;
+  const openTasks = tasks.filter((t) => t.status !== "done").length;
+  const avgUtil = active.length ? Math.round(active.reduce((s, m) => s + m.utilization, 0) / active.length) : 0;
+  const avgOnTime = active.length ? Math.round(active.reduce((s, m) => s + m.onTime, 0) / active.length) : 0;
+
+  const TILES: Tile[] = [
+    { icon: "groups", label: "Team members", value: headcount, delta: "1", deltaDir: "up", note: "on the roster", hero: true },
+    { icon: "assignment", label: "Active tasks", value: openTasks, delta: "3", deltaDir: "up", note: "across the board" },
+    { icon: "bolt", label: "Avg. utilization", value: avgUtil, unit: "%", delta: "4.1%", deltaDir: "up", note: "capacity in use" },
+    { icon: "schedule", label: "On-time delivery", value: avgOnTime, unit: "%", delta: "1.3%", deltaDir: "up", note: "rolling 30 days" },
+  ];
+
   return (
     <section className="kpis">
       {TILES.map((t) => (

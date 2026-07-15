@@ -5,12 +5,13 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import ToolWorkspace from "@/components/portal/ToolWorkspace";
 import { usePortal } from "@/components/portal/PortalContext";
+import { useStore } from "@/lib/store";
 import { getToolBySlug } from "@/lib/tools";
-import { memberGrants } from "@/lib/data";
 
 export default function ToolPage() {
   const { slug } = useParams<{ slug: string }>();
   const { me } = usePortal();
+  const { memberGrants } = useStore();
   const tool = getToolBySlug(String(slug));
 
   // Unknown tool.

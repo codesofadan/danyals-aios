@@ -1,9 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { clientDirectory, TIER_COLOR, type ClientRecord, type SubStatus } from "@/lib/data";
+import { useMemo, useState } from "react";
+import {
+  clientReports, REPORT_GROUP_COLOR, TIER_COLOR,
+  type ClientRecord, type SubStatus, type NewClient,
+} from "@/lib/data";
+import { useStore } from "@/lib/store";
+import AddClientWizard from "./AddClientWizard";
+import ClientAccessEditor from "./ClientAccessEditor";
 
-type Mode = "info" | "portal";
+type Mode = "info" | "portal" | "access";
 
 const STATUS_META: Record<SubStatus, { label: string; cls: string }> = {
   active: { label: "Active", cls: "ok" },
@@ -11,6 +17,8 @@ const STATUS_META: Record<SubStatus, { label: string; cls: string }> = {
   past_due: { label: "Past due", cls: "warn" },
   paused: { label: "Paused", cls: "mut" },
 };
+
+const REPORT_BY_KEY = new Map(clientReports.map((r) => [r.key, r] as const));
 
 function ContactCell({ c }: { c: ClientRecord["contact"] }) {
   return (
@@ -41,39 +49,77 @@ function PassCell({ pass }: { pass: string }) {
   );
 }
 
+// Granted-report chips (colour-coded by area), truncated with a "+N".
+function ReportChips({ keys }: { keys: string[] }) {
+  if (keys.length === 0) {
+    return <span className="cd-noaccess">No reports shared</span>;
+  }
+  const shown = keys.slice(0, 4);
+  const extra = keys.length - shown.length;
+  return (
+    <div className="cd-chips">
+      {shown.map((k) => {
+        const r = REPORT_BY_KEY.get(k);
+        if (!r) return null;
+        const c = REPORT_GROUP_COLOR[r.group];
+        return (
+          <span key={k} className="cd-chip" style={{ color: c, borderColor: c }}>
+            <span className="material-symbols-rounded">{r.icon}</span>{r.short}
+          </span>
+        );
+      })}
+      {extra > 0 && <span className="cd-chip more">+{extra}</span>}
+    </div>
+  );
+}
+
 export default function ClientDirectory() {
   const [mode, setMode] = useState<Mode>("info");
+  const { clients, clientGrants: grants, addClient, saveClientGrants } = useStore();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+
+  const editClient = useMemo(() => clients.find((c) => c.id === editId) ?? null, [clients, editId]);
+
+  function handleAddClient(input: NewClient) {
+    addClient(input);
+    setAddOpen(false);
+    setMode("access");
+  }
+
+  function handleSaveGrants(reports: string[]) {
+    if (!editId) return;
+    saveClientGrants(editId, reports);
+    setEditId(null);
+  }
+
+  const subtitle =
+    mode === "info" ? "Account details, primary contact & subscription"
+    : mode === "portal" ? "Portal logins & admin credentials · handle with care"
+    : "What each client is allowed to see — charts, graphs & reports";
 
   return (
     <section className="card">
       <div className="card-h">
         <div>
           <div className="ct">Client Directory</div>
-          <div className="cs">
-            {mode === "info"
-              ? "Account details, primary contact & subscription"
-              : "Portal logins & admin credentials · handle with care"}
-          </div>
+          <div className="cs">{subtitle}</div>
         </div>
         <div className="tools">
           <div className="seg" role="tablist" aria-label="Directory view">
-            <button
-              role="tab"
-              aria-selected={mode === "info"}
-              className={mode === "info" ? "on" : undefined}
-              onClick={() => setMode("info")}
-            >
+            <button role="tab" aria-selected={mode === "info"} className={mode === "info" ? "on" : undefined} onClick={() => setMode("info")}>
               Client Info
             </button>
-            <button
-              role="tab"
-              aria-selected={mode === "portal"}
-              className={mode === "portal" ? "on" : undefined}
-              onClick={() => setMode("portal")}
-            >
+            <button role="tab" aria-selected={mode === "portal"} className={mode === "portal" ? "on" : undefined} onClick={() => setMode("portal")}>
               Portal Access
             </button>
+            <button role="tab" aria-selected={mode === "access"} className={mode === "access" ? "on" : undefined} onClick={() => setMode("access")}>
+              Report Access
+            </button>
           </div>
+          <button className="primary-btn" onClick={() => setAddOpen(true)}>
+            <span className="material-symbols-rounded">person_add</span>Add client
+          </button>
         </div>
       </div>
 
@@ -83,9 +129,15 @@ export default function ClientDirectory() {
           Admin passes are masked by default — reveal only when needed. Actions are recorded in the activity log.
         </div>
       )}
+      {mode === "access" && (
+        <div className="sec-note">
+          <span className="material-symbols-rounded">visibility</span>
+          A client sees only the reports granted here — anything else is hidden and its data is never sent. Update it any time with Manage.
+        </div>
+      )}
 
       <div className="cd-wrap">
-        {mode === "info" ? (
+        {mode === "info" && (
           <table className="cd-table">
             <thead>
               <tr>
@@ -97,7 +149,7 @@ export default function ClientDirectory() {
               </tr>
             </thead>
             <tbody>
-              {clientDirectory.map((c) => {
+              {clients.map((c) => {
                 const sm = STATUS_META[c.status];
                 return (
                   <tr key={c.id}>
@@ -122,7 +174,9 @@ export default function ClientDirectory() {
               })}
             </tbody>
           </table>
-        ) : (
+        )}
+
+        {mode === "portal" && (
           <table className="cd-table">
             <thead>
               <tr>
@@ -135,7 +189,7 @@ export default function ClientDirectory() {
               </tr>
             </thead>
             <tbody>
-              {clientDirectory.map((c) => (
+              {clients.map((c) => (
                 <tr key={c.id}>
                   <td>
                     <div className="cd-client">
@@ -159,12 +213,61 @@ export default function ClientDirectory() {
             </tbody>
           </table>
         )}
+
+        {mode === "access" && (
+          <table className="cd-table">
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Reports the client can see</th>
+                <th className="num">Visible</th>
+                <th className="num">Manage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients.map((c) => {
+                const keys = grants[c.id] ?? [];
+                return (
+                  <tr key={c.id}>
+                    <td>
+                      <div className="cd-client">
+                        <div className="cd-name">{c.cn}</div>
+                        <div className="cd-meta">{c.contact.name}</div>
+                      </div>
+                    </td>
+                    <td><ReportChips keys={keys} /></td>
+                    <td className="num">{keys.length} / {clientReports.length}</td>
+                    <td className="num">
+                      <button className="cd-manage" onClick={() => setEditId(c.id)}>
+                        <span className="material-symbols-rounded">tune</span>Manage
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="cd-foot">
-        <span>{clientDirectory.length} featured accounts</span>
-        <span className="cd-foot-hint">Toggle to {mode === "info" ? "Portal Access" : "Client Info"} for {mode === "info" ? "admin credentials" : "account details"}</span>
+        <span>{clients.length} accounts</span>
+        <span className="cd-foot-hint">
+          {mode === "access"
+            ? "Grant or revoke report visibility per client — updates apply instantly."
+            : `Toggle to ${mode === "info" ? "Portal Access or Report Access" : "Client Info"} for ${mode === "info" ? "credentials & visibility" : "account details"}`}
+        </span>
       </div>
+
+      {addOpen && <AddClientWizard onClose={() => setAddOpen(false)} onAdd={handleAddClient} />}
+      {editClient && (
+        <ClientAccessEditor
+          client={editClient}
+          current={grants[editClient.id] ?? []}
+          onClose={() => setEditId(null)}
+          onSave={handleSaveGrants}
+        />
+      )}
     </section>
   );
 }

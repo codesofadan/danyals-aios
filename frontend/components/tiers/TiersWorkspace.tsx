@@ -10,9 +10,9 @@ import ClientAssignment from "./ClientAssignment";
 import FeatureMatrix from "./FeatureMatrix";
 
 const KPI: { key: TierKey; label: string; icon: string; c: string }[] = [
-  { key: "free", label: "Clients on Free", icon: "toll", c: "#22C08A" },
-  { key: "semi", label: "Clients on Semi-Auto", icon: "tune", c: "#4D8DF0" },
-  { key: "fully", label: "Clients on Fully-Auto", icon: "bolt", c: "#7B69EE" },
+  { key: "free", label: "Clients on Free", icon: "toll", c: "#3DE68A" },
+  { key: "semi", label: "Clients on Semi-Auto", icon: "tune", c: "#4CC9F0" },
+  { key: "fully", label: "Clients on Fully-Auto", icon: "bolt", c: "#C6FF3C" },
 ];
 
 export default function TiersWorkspace() {

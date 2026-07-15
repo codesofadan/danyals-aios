@@ -13,6 +13,7 @@ import {
 } from "@/lib/audit";
 import AuditStats from "./AuditStats";
 import AuditCoverage from "./AuditCoverage";
+import AuditScoreHistogram from "./AuditScoreHistogram";
 
 const STATUS_META: Record<JobStatus, { pill: string; label: string; icon: string }> = {
   queued: { pill: "mut", label: "Queued", icon: "schedule" },
@@ -262,6 +263,10 @@ export default function AuditWorkspace() {
             On completion: PDF + JSON + scores, the milestone auto-advances and the client is notified.
           </div>
         </section>
+      </div>
+
+      <div className="row-single">
+        <AuditScoreHistogram rows={rows} />
       </div>
 
       <div className="row-single">

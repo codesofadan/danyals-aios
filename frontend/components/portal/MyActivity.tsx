@@ -1,9 +1,10 @@
 "use client";
 
 import {
-  activity_seed, ACTIVITY_META, TASK_STATUS_META, SERIES,
+  ACTIVITY_META, TASK_STATUS_META, SERIES,
   type Task, type TeamMemberRecord,
 } from "@/lib/data";
+import { useStore } from "@/lib/store";
 
 // Verb + icon for each task state, from the member's point of view.
 const STATE_FEED: Record<Task["status"], { verb: string; icon: string; c: string }> = {
@@ -14,7 +15,8 @@ const STATE_FEED: Record<Task["status"], { verb: string; icon: string; c: string
 };
 
 export default function MyActivity({ me, myTasks }: { me: TeamMemberRecord; myTasks: Task[] }) {
-  const myEvents = activity_seed.filter((a) => a.actorInit === me.init);
+  const { activity } = useStore();
+  const myEvents = activity.filter((a) => a.actorInit === me.init);
 
   return (
     <div className="panel-in">

@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque } from "next/font/google";
 import "./globals.css";
+import { AiosStoreProvider } from "@/lib/store";
+import { AuthProvider } from "@/lib/auth";
+import { LoaderProvider } from "@/components/loader/LoaderProvider";
+import DemoSwitcher from "@/components/DemoSwitcher";
+import ClickFX from "@/components/ClickFX";
 
 const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
@@ -27,13 +32,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
         />
       </head>
       <body>
         <div className="glow a" />
         <div className="glow b" />
-        {children}
+        <AiosStoreProvider>
+          <AuthProvider>
+            <LoaderProvider>
+              {children}
+              <DemoSwitcher />
+              <ClickFX />
+            </LoaderProvider>
+          </AuthProvider>
+        </AiosStoreProvider>
       </body>
     </html>
   );

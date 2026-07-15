@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import {
-  accessFeatures, memberGrants, GROUP_COLOR, ROLE_META,
+  accessFeatures, GROUP_COLOR, ROLE_META,
   type FeatureGroup, type TeamMemberRecord,
 } from "@/lib/data";
+import { useStore } from "@/lib/store";
 import { toolSlug } from "@/lib/tools";
 
 const GROUPS: FeatureGroup[] = ["Analytics", "Content", "Delivery", "Admin"];
 
 export default function MyAccess({ me }: { me: TeamMemberRecord }) {
+  const { memberGrants } = useStore();
   const granted = new Set(memberGrants[me.id] ?? []);
   const role = ROLE_META[me.role];
   const total = accessFeatures.length;

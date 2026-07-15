@@ -8,6 +8,7 @@ import {
 import ClientTimeline from "./ClientTimeline";
 import AutoAdvanceFeed from "./AutoAdvanceFeed";
 import StagePipeline from "./StagePipeline";
+import ProjectGantt from "./ProjectGantt";
 
 const LEGEND: { status: keyof typeof STAGE_STATUS_META }[] = [
   { status: "completed" }, { status: "in_progress" }, { status: "upcoming" }, { status: "blocked" },
@@ -30,6 +31,10 @@ export default function MilestonesWorkspace() {
 
   return (
     <>
+      <div className="row-single">
+        <ProjectGantt />
+      </div>
+
       <section className="card ms-board">
         <div className="card-h">
           <div>

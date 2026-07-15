@@ -119,6 +119,8 @@ export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => voi
       color: tpl ? tpl.color : GROUP_COLOR.Analytics,
       template: tpl ? tpl.label : "Custom",
       features: [...granted],
+      username, // one-time credentials so they can sign into the portal
+      password,
     });
   }
 
@@ -292,8 +294,8 @@ function Bubble({ feature, index, granted, popping, onClick }: {
       <span className="bubble-core">
         <span className="bubble-sheen" />
         <span className="bubble-ic material-symbols-rounded">{granted ? "check" : feature.icon}</span>
-        <span className="bubble-lbl">{feature.short}</span>
       </span>
+      <span className="bubble-lbl">{feature.short}</span>
       <span className="burst" aria-hidden />
       {SHARDS.map((s, i) => (
         <span key={i} className="shard" aria-hidden style={{ ["--sx" as string]: `${s.x}px`, ["--sy" as string]: `${s.y}px` }} />

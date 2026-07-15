@@ -1,0 +1,93 @@
+/*!*****************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[3]!./app/tiers/tiers.css ***!
+  \*****************************************************************************************************************************************************************************************************************************************************************/
+/* ============================================================
+   SERVICE TIERS MODULE
+   Presets over a per-client, per-feature cost dial.
+   Built on the shared design tokens only. Prefix: tr-
+   ============================================================ */
+.tr-card { margin-top: 16px; }
+
+/* KPI extras */
+.tr-swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.tr-cur-lg { font-size: 22px; color: var(--violet-soft); font-weight: 800; margin-right: 1px; }
+.tr-sub-ic { font-size: 15px !important; color: var(--violet-soft); }
+
+/* ---- Tier comparison cards ---- */
+.tr-plans { display: grid; grid-template-columns: repeat(3, 1fr); grid-gap: 16px; gap: 16px; margin-top: 14px; }
+.tr-plan { position: relative; display: flex; flex-direction: column;
+  background: linear-gradient(168deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .006));
+  border: 1px solid var(--line); border-radius: 16px; padding: 20px 20px 22px; transition: border-color .2s, transform .2s; }
+.tr-plan:hover { transform: translateY(-3px); border-color: var(--line-2); }
+.tr-plan.pop { border-color: color-mix(in srgb, var(--tc) 55%, transparent);
+  background: linear-gradient(168deg, color-mix(in srgb, var(--tc) 16%, transparent), rgba(255, 255, 255, .01));
+  box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--tc) 90%, transparent); }
+.tr-ribbon { position: absolute; top: -10px; right: 16px; font-size: 9.5px; font-weight: 800; letter-spacing: .1em;
+  text-transform: uppercase; color: #fff; padding: 4px 11px; border-radius: 999px;
+  background: var(--tc); box-shadow: 0 6px 16px -6px var(--tc); }
+
+.tr-plan-h { display: flex; align-items: center; gap: 11px; }
+.tr-dot { width: 34px; height: 34px; flex: none; border-radius: 10px; background: color-mix(in srgb, var(--tc) 20%, transparent);
+  position: relative; }
+.tr-dot::after { content: ""; position: absolute; inset: 11px; border-radius: 50%; background: var(--tc);
+  box-shadow: 0 0 12px var(--tc); }
+.tr-name { font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -.01em; }
+.tr-tag { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--tc); margin-top: 1px; }
+
+.tr-price { display: flex; align-items: flex-end; gap: 2px; margin-top: 18px; font-size: 42px; font-weight: 800;
+  color: #fff; letter-spacing: -.03em; line-height: 1; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+.tr-cur { font-size: 22px; color: var(--violet-soft); font-weight: 800; margin-bottom: 4px; }
+.tr-per { font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 5px; margin-left: 3px; }
+.tr-blurb { font-size: 12px; color: var(--muted); margin-top: 9px; line-height: 1.45; }
+
+.tr-count { margin-top: 14px; padding: 9px 12px; border-radius: 10px; font-size: 12px; color: var(--body);
+  background: rgba(0, 0, 0, .2); border: 1px solid var(--line); }
+.tr-count b { color: #fff; font-weight: 800; font-size: 14px; }
+
+.tr-feat { list-style: none; margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.tr-feat li { position: relative; display: flex; gap: 9px; font-size: 12.5px; color: var(--body); line-height: 1.4; }
+.tr-feat li .material-symbols-rounded { font-size: 17px; color: var(--tc); flex: none; margin-top: 1px; }
+
+/* ---- Per-client assignment table ---- */
+.tr-cli { display: flex; align-items: center; gap: 11px; }
+.tr-av { width: 32px; height: 32px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: #fff; }
+.tr-cli-name { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.tr-cli-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.tr-tier-pill { letter-spacing: .01em; }
+.tr-cost { color: #fff !important; }
+.tr-cost .tr-free { color: var(--ok); }
+
+/* the switcher — a tighter .seg */
+.tr-seg { width: max-content; }
+.tr-seg button { min-width: 46px; transition: background .16s, color .16s; }
+.tr-seg button.on { color: #fff; }
+
+/* ---- Feature matrix ---- */
+.tr-matrix .tbl { min-width: 620px; }
+.tr-matrix thead th.tr-mcol { text-align: center; }
+.tr-mdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.tr-area { display: flex; align-items: center; gap: 12px; }
+.tr-area-ic { width: 34px; height: 34px; flex: none; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  color: var(--violet-soft); background: rgba(159, 147, 230, .12); }
+.tr-area-ic .material-symbols-rounded { font-size: 19px; }
+.tr-area-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+.tr-area-name b { color: var(--violet-soft); font-weight: 800; }
+.tr-area-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.tr-mcell { text-align: center; }
+
+/* mode pills (shared by matrix cells + legend) */
+.tr-mode { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
+  padding: 4px 12px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.tr-mode.off { color: var(--muted); background: rgba(159, 147, 230, .08); border-color: var(--line); }
+.tr-mode.byhand { color: var(--warn); background: rgba(245, 166, 35, .13); border-color: rgba(245, 166, 35, .28); }
+.tr-mode.api { color: var(--c2); background: rgba(31, 168, 144, .16); border-color: rgba(31, 168, 144, .34); }
+.tr-legend { gap: 6px; }
+
+@media (max-width: 1100px) {
+  .tr-plans { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .tr-legend { display: none; }
+}
+

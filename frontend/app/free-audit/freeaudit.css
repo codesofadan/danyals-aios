@@ -1,0 +1,355 @@
+/* ============================================================
+   FREE AUDIT — standalone public lead-gen page, no shell.
+   Consumes the shared design tokens from globals.css so it
+   auto-adapts to all five themes. The only literal color is the
+   deliberate Fiverr brand green, matching the Upsells module.
+   ============================================================ */
+.fa-wrap {
+  --fa-fiverr: #1dbf73;
+  --fa-fiverr-ink: #0f2e20;
+  position: relative;
+  z-index: 5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Top bar (brand + Fiverr CTA) ---------- */
+.fa-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px clamp(16px, 5vw, 40px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.fa-brand { display: flex; align-items: center; gap: 11px; }
+.fa-brand-logo {
+  width: 34px; height: 34px; flex: none; border-radius: 10px; position: relative;
+  background: linear-gradient(150deg, var(--violet-2), var(--hero-2));
+  box-shadow: 0 8px 20px -6px color-mix(in srgb, var(--violet) 70%, transparent);
+}
+.fa-brand-logo::after {
+  content: ""; position: absolute; inset: 9px; border-radius: 3px;
+  border: 2.4px solid #fff; border-right-color: transparent; transform: rotate(-45deg);
+}
+.fa-brand-n { font-size: 16px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.02em; line-height: 1; }
+.fa-brand-s { font-size: 9.5px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--violet-soft); margin-top: 3px; }
+.fa-topbar-actions { display: flex; align-items: center; gap: 12px; }
+
+.fa-fiverr-link {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 40px; padding: 0 16px; border-radius: 11px;
+  font-size: 13px; font-weight: 800; text-decoration: none; letter-spacing: -.01em;
+  color: #fff; background: var(--fa-fiverr);
+  box-shadow: 0 10px 26px -12px var(--fa-fiverr); transition: .16s;
+}
+.fa-fiverr-link:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.fa-fiverr-link .material-symbols-rounded { font-size: 18px; }
+.fa-fiverr-link .material-symbols-rounded:last-child { font-size: 15px; opacity: .85; }
+
+/* ---------- Landing hero ---------- */
+.fa-hero {
+  flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center;
+  justify-content: center; gap: 18px; padding: clamp(40px, 8vh, 90px) 20px 70px; max-width: 760px; margin: 0 auto;
+}
+.fa-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--violet-soft); background: var(--violet-soft-bg, color-mix(in srgb, var(--violet) 12%, transparent));
+  border: 1px solid var(--line-2);
+}
+.fa-eyebrow .material-symbols-rounded { font-size: 16px; }
+.fa-hero-h {
+  font-size: clamp(32px, 6vw, 56px); font-weight: 800; letter-spacing: -.035em; line-height: 1.04;
+  color: var(--fg-strong); max-width: 15ch;
+}
+.fa-hero-h .fa-hi {
+  background: linear-gradient(120deg, var(--violet-2), var(--lilac));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.fa-hero-sub { font-size: clamp(15px, 2vw, 18px); line-height: 1.55; color: var(--muted); max-width: 54ch; }
+.fa-trust {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 2px;
+  font-size: 13px; font-weight: 600; color: var(--body);
+}
+.fa-trust span { display: inline-flex; align-items: center; gap: 6px; }
+.fa-trust .material-symbols-rounded { font-size: 18px; color: var(--ok); }
+
+.fa-fiverr-line {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 8px;
+  padding: 9px 15px; border-radius: 999px; text-decoration: none;
+  font-size: 13px; font-weight: 700; color: var(--body);
+  background: var(--well); border: 1px solid var(--line); transition: .16s;
+}
+.fa-fiverr-line:hover { border-color: var(--fa-fiverr); color: var(--fg-strong); }
+.fa-fiverr-line .material-symbols-rounded { font-size: 17px; color: var(--fa-fiverr); }
+.fa-fiverr-line .material-symbols-rounded:last-child { font-size: 14px; color: var(--muted); }
+
+.fa-cta {
+  margin-top: 10px; height: 54px; padding: 0 30px; font-size: 15.5px; border-radius: 14px;
+  box-shadow: 0 18px 40px -16px var(--violet);
+}
+.fa-cta .material-symbols-rounded { font-size: 21px; }
+
+/* ---------- Form ---------- */
+.fa-form-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px 70px; }
+.fa-card {
+  width: 100%; max-width: 460px; padding: 30px 32px 24px; border-radius: 22px;
+  background: linear-gradient(168deg, var(--elev-1), var(--elev-2)); border: 1px solid var(--line-2);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .6);
+}
+.fa-back {
+  display: inline-flex; align-items: center; gap: 5px; margin-bottom: 16px; padding: 5px 10px 5px 6px;
+  border-radius: 8px; background: none; border: none; cursor: pointer; font-family: inherit;
+  font-size: 12.5px; font-weight: 700; color: var(--muted); transition: .14s;
+}
+.fa-back:hover { color: var(--fg-strong); background: var(--hover); }
+.fa-back .material-symbols-rounded { font-size: 18px; }
+.fa-card-h { font-size: 23px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.02em; }
+.fa-card-sub { font-size: 13.5px; color: var(--muted); margin-top: 7px; line-height: 1.5; }
+.fa-form { margin-top: 22px; display: flex; flex-direction: column; gap: 15px; }
+.fa-fld { display: flex; flex-direction: column; gap: 7px; }
+.fa-fld > span { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.fa-input {
+  display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border-radius: 12px;
+  background: var(--well); border: 1px solid var(--line); transition: .16s;
+}
+.fa-input:focus-within { border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); }
+.fa-input .material-symbols-rounded { font-size: 20px; color: var(--muted); flex: none; }
+.fa-input input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--ink); font-family: inherit; font-size: 14.5px; }
+.fa-input input::placeholder { color: var(--muted-2); }
+.fa-form .primary-btn.wide { height: 48px; margin-top: 6px; font-size: 14px; }
+
+.fa-note, .fa-report-note {
+  display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; padding: 12px 14px; border-radius: 12px;
+  background: var(--well); border: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.5;
+}
+.fa-note .material-symbols-rounded, .fa-report-note .material-symbols-rounded { font-size: 17px; color: var(--c4); flex: none; }
+
+/* ---------- Generating · immersive 3D stage ---------- */
+.fa-gen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px; padding: clamp(20px, 4vh, 44px) clamp(16px, 5vw, 40px) 70px; }
+
+/* The WebGL stage — a dark "3D space" that reads on every theme (the neon
+   scene is additive-blended, so it needs a dark backdrop regardless of the
+   active light/dark theme). */
+.fa-viz {
+  position: relative; width: 100%; max-width: 860px; aspect-ratio: 16 / 10;
+  max-height: min(60vh, 540px); border-radius: 24px; overflow: hidden;
+  background:
+    radial-gradient(120% 100% at 50% 8%, #1a2410 0%, #0e1208 44%, #070805 100%);
+  border: 1px solid color-mix(in srgb, var(--violet) 28%, transparent);
+  box-shadow: 0 40px 120px -40px rgba(0, 0, 0, .8), inset 0 0 90px -30px color-mix(in srgb, var(--violet) 50%, transparent);
+}
+.fa-viz-canvas { position: absolute; inset: 0; }
+.fa-viz-canvas canvas { display: block; }
+
+/* Soft vignette + faint tech grid layered over the canvas for depth. */
+.fa-viz-vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 45%, transparent 52%, rgba(4, 5, 3, .78) 100%);
+}
+.fa-viz-grid {
+  position: absolute; inset: 0; pointer-events: none; opacity: .18;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--violet) 50%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--violet) 50%, transparent) 1px, transparent 1px);
+  background-size: 46px 46px; background-position: center;
+  mask-image: radial-gradient(120% 90% at 50% 40%, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 40%, #000 30%, transparent 78%);
+}
+
+/* HUD overlay — status tag, live caption, segmented progress. */
+.fa-viz-hud {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: clamp(14px, 3vw, 22px);
+}
+.fa-viz-tag {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink); background: rgba(14, 16, 10, .6); border: 1px solid color-mix(in srgb, var(--violet) 32%, transparent);
+  backdrop-filter: blur(6px);
+}
+.fa-viz-dot { width: 8px; height: 8px; border-radius: 50%; background: #38e08f; box-shadow: 0 0 10px #38e08f; animation: fa-pulse 1.4s ease-in-out infinite; }
+
+/* Bottom console: caption bar + progress, docked at the base of the stage
+   so the centered animation is never covered. */
+.fa-viz-console { display: flex; flex-direction: column; gap: 12px; }
+
+.fa-viz-caption {
+  align-self: stretch; display: flex; align-items: center; gap: 13px; text-align: left;
+  padding: 11px 14px; border-radius: 15px;
+  background: linear-gradient(180deg, rgba(16, 19, 11, .48), rgba(9, 11, 6, .72));
+  border: 1px solid color-mix(in srgb, var(--violet) 26%, transparent);
+  box-shadow: 0 16px 44px -20px rgba(0, 0, 0, .75), inset 0 1px 0 rgba(255, 255, 255, .05);
+  backdrop-filter: blur(14px);
+}
+.fa-viz-step {
+  width: 40px; height: 40px; flex: none; display: grid; place-items: center;
+  border-radius: 12px; color: var(--violet-soft);
+  background: color-mix(in srgb, var(--violet) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--violet) 34%, transparent);
+  box-shadow: inset 0 0 18px -6px color-mix(in srgb, var(--violet) 80%, transparent);
+}
+.fa-viz-step .material-symbols-rounded { font-size: 22px; }
+.fa-viz-caption-txt { flex: 1; min-width: 0; }
+.fa-viz-label { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: -.01em; }
+.fa-viz-sub { font-size: 12.5px; color: var(--body); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fa-viz-count { flex: none; font-size: 13px; font-weight: 800; color: #fff; letter-spacing: -.01em; }
+.fa-viz-count i { font-style: normal; font-weight: 700; color: var(--muted); margin-left: 2px; }
+
+.fa-viz-track { display: flex; gap: 8px; }
+.fa-viz-seg { flex: 1; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--violet) 22%, transparent); overflow: hidden; position: relative; }
+.fa-viz-seg.done { background: #38e08f; box-shadow: 0 0 12px -2px rgba(56, 224, 143, .8); }
+.fa-viz-seg.on::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(90deg, var(--violet), var(--lilac));
+  animation: fa-fill 1.9s ease-in-out infinite;
+}
+
+.fa-gen-h { font-size: clamp(20px, 3vw, 25px); font-weight: 800; color: var(--fg-strong); letter-spacing: -.02em; }
+.fa-gen-sub { font-size: 14px; color: var(--muted); max-width: 52ch; }
+
+@keyframes fa-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes fa-fill { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(0); } }
+
+/* ---------- Report ---------- */
+/* Perspective on the wrap + preserve-3d on the report gives the assembly
+   its parallax depth: sections glide in from different Z-planes (see the
+   .fa-layer animation in FreeAuditReport.tsx). */
+.fa-report-wrap { flex: 1; width: 100%; max-width: 960px; margin: 0 auto; padding: 28px clamp(16px, 5vw, 40px) 80px; perspective: 1400px; }
+.fa-report { display: flex; flex-direction: column; gap: 18px; transform-style: preserve-3d; }
+.fa-layer, .fa-reveal, .fa-gig { opacity: 0; } /* JS reveals these (or snaps to 1 under reduced-motion) */
+
+.fa-score-hero {
+  --fa-band: var(--muted);
+  display: flex; align-items: center; gap: clamp(18px, 4vw, 34px); flex-wrap: wrap;
+  padding: clamp(22px, 4vw, 34px); border-radius: 22px;
+  background: linear-gradient(150deg, var(--elev-1), var(--elev-2)); border: 1px solid var(--line-2);
+  box-shadow: 0 30px 80px -34px rgba(0, 0, 0, .55);
+}
+.fa-score-hero.band-ok { --fa-band: var(--ok); }
+.fa-score-hero.band-warn { --fa-band: var(--warn); }
+.fa-score-hero.band-crit { --fa-band: var(--crit); }
+.fa-score-ring {
+  flex: none; width: 128px; height: 128px; border-radius: 50%; display: grid; place-items: center; position: relative;
+  background:
+    radial-gradient(closest-side, var(--card) 79%, transparent 80% 100%),
+    conic-gradient(var(--fa-band) calc(var(--pct, 0) * 1%), var(--line) 0);
+  border: 1px solid var(--line);
+}
+.fa-score-num { font-size: 46px; font-weight: 800; letter-spacing: -.04em; color: var(--fa-band); line-height: 1; }
+.fa-score-out { position: absolute; bottom: 30px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.fa-score-meta { flex: 1; min-width: 260px; }
+.fa-score-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--body); }
+.fa-score-eyebrow .material-symbols-rounded { font-size: 17px; color: var(--muted); }
+.fa-score-when { color: var(--muted-2); font-weight: 600; }
+.fa-score-title { font-size: clamp(22px, 3.4vw, 30px); font-weight: 800; letter-spacing: -.02em; color: var(--fg-strong); margin-top: 8px; }
+.fa-score-verdict { font-size: 15px; line-height: 1.5; color: var(--muted); margin-top: 8px; max-width: 52ch; }
+
+.fa-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.fa-kpi {
+  position: relative; padding: 18px 18px 16px; border-radius: 16px;
+  background: linear-gradient(160deg, var(--card), var(--card-2)); border: 1px solid var(--line);
+}
+.fa-kpi-ic { position: absolute; top: 16px; right: 16px; font-size: 22px; color: var(--muted-2); }
+.fa-kpi.warn .fa-kpi-ic { color: var(--warn); }
+.fa-kpi.ok .fa-kpi-ic { color: var(--ok); }
+.fa-kpi-val { font-size: 34px; font-weight: 800; letter-spacing: -.03em; color: var(--fg-strong); line-height: 1; }
+.fa-kpi-lab { font-size: 12px; font-weight: 700; color: var(--muted); margin-top: 9px; }
+
+.fa-cats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.fa-cat { padding: 20px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); }
+.fa-cat-h { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+.fa-cat-ic { width: 38px; height: 38px; flex: none; border-radius: 11px; display: grid; place-items: center; }
+.fa-cat-ic .material-symbols-rounded { font-size: 21px; }
+.fa-cat-title { flex: 1; font-size: 15.5px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.01em; }
+.fa-cat-score { font-size: 17px; font-weight: 800; padding: 3px 11px; border-radius: 9px; }
+.fa-cat-score.band-ok { color: var(--ok); background: rgba(34, 192, 138, .14); }
+.fa-cat-score.band-warn { color: var(--warn); background: rgba(245, 166, 35, .15); }
+.fa-cat-score.band-crit { color: var(--crit); background: rgba(239, 68, 68, .15); }
+
+.fa-checks { display: flex; flex-direction: column; gap: 2px; }
+.fa-check { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 10px; transition: .14s; }
+.fa-check:hover { background: var(--hover); }
+.fa-check-pill { width: 26px; height: 26px; flex: none; border-radius: 8px; display: grid; place-items: center; }
+.fa-check-pill .material-symbols-rounded { font-size: 18px; }
+.fa-check-pill.ok { color: var(--ok); background: rgba(34, 192, 138, .14); }
+.fa-check-pill.warn { color: var(--warn); background: rgba(245, 166, 35, .15); }
+.fa-check-pill.crit { color: var(--crit); background: rgba(239, 68, 68, .15); }
+.fa-check-body { flex: 1; min-width: 0; }
+.fa-check-label { font-size: 13.5px; font-weight: 700; color: var(--body); }
+.fa-check-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.fa-check-tag { font-size: 10.5px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; padding: 3px 9px; border-radius: 7px; flex: none; }
+.fa-check-tag.ok { color: var(--ok); background: rgba(34, 192, 138, .12); }
+.fa-check-tag.warn { color: var(--warn); background: rgba(245, 166, 35, .12); }
+.fa-check-tag.crit { color: var(--crit); background: rgba(239, 68, 68, .12); }
+
+/* ---------- Fiverr upsells (post-report) ---------- */
+.fa-upsell { margin-top: 34px; }
+.fa-upsell-h { display: flex; align-items: center; gap: 13px; margin-bottom: 18px; }
+.fa-fiverr-badge {
+  width: 42px; height: 42px; flex: none; border-radius: 12px; display: grid; place-items: center;
+  color: #fff; background: var(--fa-fiverr); box-shadow: 0 12px 28px -12px var(--fa-fiverr);
+}
+.fa-fiverr-badge .material-symbols-rounded { font-size: 24px; }
+.fa-upsell-t { font-size: 21px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.02em; }
+.fa-upsell-s { font-size: 13.5px; color: var(--muted); margin-top: 3px; }
+
+.fa-gig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; }
+.fa-gig {
+  display: flex; flex-direction: column; padding: 18px; border-radius: 16px; text-decoration: none;
+  background: var(--card); border: 1px solid var(--line); transition: transform .18s, border-color .18s, box-shadow .18s;
+}
+.fa-gig:hover { transform: translateY(-4px); border-color: var(--fa-fiverr); box-shadow: 0 22px 44px -24px rgba(0, 0, 0, .5); }
+.fa-gig-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+.fa-gig-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; }
+.fa-gig-ic .material-symbols-rounded { font-size: 22px; }
+.fa-gig-rating { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 800; color: var(--fg-strong); }
+.fa-gig-rating .material-symbols-rounded { font-size: 16px; color: #f5a623; font-variation-settings: "FILL" 1; }
+.fa-gig-reviews { font-size: 11.5px; font-weight: 600; color: var(--muted-2); }
+.fa-gig-title { font-size: 15px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.01em; }
+.fa-gig-desc { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin-top: 6px; flex: 1; }
+.fa-gig-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; }
+.fa-gig-price { font-size: 12.5px; color: var(--muted); }
+.fa-gig-price strong { font-size: 16px; font-weight: 800; color: var(--fg-strong); }
+.fa-fiverr-cta {
+  display: inline-flex; align-items: center; gap: 5px; padding: 8px 13px; border-radius: 10px;
+  font-size: 12.5px; font-weight: 800; color: #fff; background: var(--fa-fiverr); transition: .16s;
+}
+.fa-gig:hover .fa-fiverr-cta { filter: brightness(1.07); }
+.fa-fiverr-cta .material-symbols-rounded { font-size: 15px; }
+
+.fa-report-foot { margin-top: 30px; text-align: center; font-size: 12.5px; color: var(--muted-2); }
+.fa-report-foot a { color: var(--fa-fiverr); font-weight: 700; text-decoration: none; }
+.fa-report-foot a:hover { text-decoration: underline; }
+
+@keyframes fa-rot { to { transform: rotate(360deg); } }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .fa-cats { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .fa-kpis { grid-template-columns: 1fr; }
+  .fa-fiverr-link span:not(.material-symbols-rounded) { display: none; }
+  .fa-fiverr-link { padding: 0 12px; }
+  .fa-score-hero { justify-content: center; text-align: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fa-viz-dot,
+  .fa-viz-seg.on::after { animation: none; }
+  .fa-viz-seg.on::after { transform: none; }
+}
+
+@media (max-width: 560px) {
+  .fa-viz { aspect-ratio: 4 / 5; max-height: 66vh; }
+  .fa-viz-caption { max-width: none; }
+}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { defaultRolePerms, type TeamRole, type PermKey } from "@/lib/data";
+import { type TeamRole, type PermKey } from "@/lib/data";
+import { useStore } from "@/lib/store";
 import AccessControl from "@/components/team/AccessControl";
 import AccountSettings from "./AccountSettings";
 import ClientCredentials from "./ClientCredentials";
@@ -24,7 +25,9 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
 
 export default function SettingsWorkspace() {
   const [tab, setTab] = useState<TabKey>("account");
-  const [rolePerms, setRolePerms] = useState<Record<TeamRole, PermKey[]>>(defaultRolePerms);
+  // Roles & permissions come from the shared store, so changes here and in
+  // Team Management → Access Control stay in lock-step.
+  const { rolePerms, togglePerm } = useStore();
   const [toast, setToast] = useState<{ n: number; text: string } | null>(null);
 
   // Shared audit-trail hook — every panel reports admin actions here.
@@ -33,12 +36,8 @@ export default function SettingsWorkspace() {
   }
 
   function handleTogglePerm(role: TeamRole, key: PermKey) {
-    let granted = false;
-    setRolePerms((prev) => {
-      const has = prev[role].includes(key);
-      granted = !has;
-      return { ...prev, [role]: has ? prev[role].filter((k) => k !== key) : [...prev[role], key] };
-    });
+    const granted = !rolePerms[role].includes(key);
+    togglePerm(role, key);
     onLog(granted ? "granted" : "revoked", key.replace(/_/g, " "), `${role} role`);
   }
 

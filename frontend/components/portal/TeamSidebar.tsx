@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePortal } from "./PortalContext";
-import { memberGrants } from "@/lib/data";
+import { useStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { toolForKey } from "@/lib/tools";
 
 type Item = { icon: string; label: string; href: string; badge?: number };
@@ -11,9 +12,11 @@ type Item = { icon: string; label: string; href: string; badge?: number };
 export default function TeamSidebar() {
   const pathname = usePathname();
   const { me, members, memberId, setMemberId, openCount, reviewCount } = usePortal();
+  const { memberGrants } = useStore();
+  const { logout } = useAuth();
 
   const items: Item[] = [
-    { icon: "space_dashboard", label: "Dashboard", href: "/portal" },
+    { icon: "space_dashboard", label: "Team Dashboard", href: "/portal" },
     { icon: "view_kanban", label: "My Queue", href: "/portal/queue", badge: openCount },
     { icon: "play_circle", label: "Deliver", href: "/portal/deliver" },
     { icon: "how_to_reg", label: "Review", href: "/portal/review", badge: reviewCount },
@@ -88,9 +91,9 @@ export default function TeamSidebar() {
             <div className="nm">{me.name}</div>
             <div className="rl">{me.title}</div>
           </div>
-          <Link href="/login" className="ts-logout" title="Sign out" aria-label="Sign out">
+          <button type="button" onClick={logout} className="ts-logout" title="Sign out" aria-label="Sign out">
             <span className="material-symbols-rounded">logout</span>
-          </Link>
+          </button>
         </div>
       </div>
     </aside>

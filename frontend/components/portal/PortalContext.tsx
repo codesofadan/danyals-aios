@@ -1,11 +1,10 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
-import { teamMembers, tasks_seed, PORTAL_MEMBER_ID, type Task, type TeamMemberRecord } from "@/lib/data";
-import { nextStatus, type ReviewAction } from "@/lib/portal";
-
-// Members who can actually sign in — invited members have no portal yet.
-export const signedInMembers = teamMembers.filter((m) => m.status !== "invited");
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { PORTAL_MEMBER_ID, type Task, type TeamMemberRecord } from "@/lib/data";
+import { type ReviewAction } from "@/lib/portal";
+import { useStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 
 type PortalState = {
   me: TeamMemberRecord;
@@ -21,43 +20,35 @@ type PortalState = {
 
 const Ctx = createContext<PortalState | null>(null);
 
-// Holds the signed-in member + their task board for the whole team
-// portal, so mutations (start / deliver / approve) persist as you move
-// between the sidebar pages. This is the seam the real backend plugs
-// into: swap the seed + local mutations for /me and /tasks API calls.
+// Reads the shared roster + task board from the global store and scopes it
+// to the signed-in member, so tasks the admin assigns land here live and a
+// member's actions (start / deliver / approve) flow back to the admin
+// activity log. Any member — including one just invited from the admin
+// dashboard — can be previewed via the sidebar switcher.
 export function PortalProvider({ children }: { children: React.ReactNode }) {
-  const [memberId, setMemberId] = useState<string>(PORTAL_MEMBER_ID);
-  const [tasks, setTasks] = useState<Task[]>(tasks_seed);
+  const { members, tasks, advanceTask, reviewTask } = useStore();
+  const { session } = useAuth();
+  const [memberId, setMemberId] = useState<string>(
+    session?.role === "team" ? session.id : PORTAL_MEMBER_ID,
+  );
+
+  // When the signed-in team member resolves (or changes), scope the portal
+  // to them. The sidebar switcher can still preview any member afterwards.
+  useEffect(() => {
+    if (session?.role === "team") setMemberId(session.id);
+  }, [session?.role, session?.id]);
 
   const me = useMemo(
-    () => teamMembers.find((m) => m.id === memberId) ?? signedInMembers[0],
-    [memberId],
+    () => members.find((m) => m.id === memberId) ?? members[0],
+    [members, memberId],
   );
   const myTasks = useMemo(() => tasks.filter((t) => t.assignee === me.id), [tasks, me.id]);
   const openCount = myTasks.filter((t) => t.status !== "done").length;
   const reviewCount = myTasks.filter((t) => t.status === "review").length;
 
-  function advance(id: string) {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        const next = nextStatus(t);
-        return next ? { ...t, status: next } : t;
-      }),
-    );
-  }
-
-  function review(id: string, action: ReviewAction) {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, status: action === "approve" ? "done" : "in_progress" } : t,
-      ),
-    );
-  }
-
   const value: PortalState = {
-    me, members: signedInMembers, memberId, setMemberId,
-    myTasks, openCount, reviewCount, advance, review,
+    me, members, memberId, setMemberId,
+    myTasks, openCount, reviewCount, advance: advanceTask, review: reviewTask,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

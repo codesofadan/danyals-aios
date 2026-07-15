@@ -6,6 +6,7 @@ import { offpageKpis } from "@/lib/offpage";
 import BacklinksTab from "./BacklinksTab";
 import CitationsTab from "./CitationsTab";
 import Web2Tab from "./Web2Tab";
+import BacklinkScatter from "@/components/charts/BacklinkScatter";
 
 type TabKey = "backlinks" | "citations" | "web2";
 
@@ -117,6 +118,12 @@ export default function OffpageWorkspace() {
           {tab === "web2" && <Web2Tab />}
         </div>
       </section>
+
+      {tab === "backlinks" && (
+        <div className="row-single">
+          <BacklinkScatter />
+        </div>
+      )}
     </>
   );
 }

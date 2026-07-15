@@ -12,6 +12,7 @@ import CostDial from "./CostDial";
 import BudgetTable from "./BudgetTable";
 import CostLog from "./CostLog";
 import ProviderBreakdown from "./ProviderBreakdown";
+import SpendHeatmap from "./SpendHeatmap";
 
 export default function CostWorkspace() {
   const [armed, setArmed] = useState(true);
@@ -60,6 +61,10 @@ export default function CostWorkspace() {
       <div className="row">
         <CostLog log={costLog_seed} />
         <ProviderBreakdown data={providerSpend_seed} total={providerTotal} />
+      </div>
+
+      <div className="row-single">
+        <SpendHeatmap />
       </div>
     </div>
   );

@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { clientDirectory } from "@/lib/data";
+import { useStore } from "@/lib/store";
 import { Switch, PasswordField } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
 type Cred = { admin: string; pass: string; twoFA: boolean };
 
 export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
+  const { clients } = useStore();
   const [creds, setCreds] = useState<Record<string, Cred>>(() =>
-    Object.fromEntries(clientDirectory.map((c) => [c.id, { admin: c.portal.admin, pass: c.portal.pass, twoFA: c.portal.twoFA }]))
+    Object.fromEntries(clients.map((c) => [c.id, { admin: c.portal.admin, pass: c.portal.pass, twoFA: c.portal.twoFA }]))
   );
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">key</span>
-          {clientDirectory.length} client portals · edit the login username &amp; admin password
+          {clients.length} client portals · edit the login username &amp; admin password
         </div>
         <div className="sec-note inline">
           <span className="material-symbols-rounded">lock</span>
@@ -40,7 +41,7 @@ export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
       </div>
 
       <div className="cc-list">
-        {clientDirectory.map((c) => {
+        {clients.map((c) => {
           const cr = creds[c.id];
           const isDirty = dirty[c.id];
           return (

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 type Item = { icon: string; label: string; href: string; badge?: string };
 type Section = { title: string; items: Item[] };
@@ -12,7 +14,7 @@ const SECTIONS: Section[] = [
   {
     title: "Overview",
     items: [
-      { icon: "space_dashboard", label: "Command Center", href: "/" },
+      { icon: "space_dashboard", label: "Admin Dashboard", href: "/" },
       { icon: "grid_view", label: "Features", href: "/features" },
     ],
   },
@@ -31,7 +33,7 @@ const SECTIONS: Section[] = [
       { icon: "diversity_3", label: "Clients", href: "/clients" },
       { icon: "groups", label: "Team Management", href: "/team" },
       { icon: "flag", label: "Milestones", href: "/milestones" },
-      { icon: "table_chart", label: "Reports", href: "/reports" },
+      { icon: "summarize", label: "Reports", href: "/reports" },
       { icon: "sell", label: "Upsells", href: "/upsells" },
     ],
   },
@@ -49,9 +51,30 @@ const SECTIONS: Section[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { logout } = useAuth();
+  // At rest the nav is a thin docked handle; hovering floats it out (pure CSS).
+  // `pinned` holds the floated/expanded state open and reflows the page content.
+  const [pinned, setPinned] = useState(false);
+
+  // Only a pinned nav reserves space — hover is a transient overlay, so peeking
+  // never shifts the page. The class drives `.main`'s left margin.
+  useEffect(() => {
+    document.body.classList.toggle("nav-pinned", pinned);
+    return () => document.body.classList.remove("nav-pinned");
+  }, [pinned]);
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${pinned ? "pinned" : ""}`}>
+      <button
+        type="button"
+        className="fn-arrow"
+        onClick={() => setPinned((p) => !p)}
+        aria-label={pinned ? "Unpin navigation" : "Pin navigation open"}
+        aria-pressed={pinned}
+      >
+        <span className="material-symbols-rounded">chevron_right</span>
+      </button>
+
       <div className="brand">
         <div className="logo" />
         <div className="wm">
@@ -87,6 +110,9 @@ export default function Sidebar() {
             <div className="nm">Danyal</div>
             <div className="rl">Super&nbsp;Admin</div>
           </div>
+          <button type="button" onClick={logout} className="ts-logout" title="Sign out" aria-label="Sign out">
+            <span className="material-symbols-rounded">logout</span>
+          </button>
         </div>
       </div>
     </aside>

@@ -256,10 +256,10 @@ const EXTRAS: Record<string, ToolExtra> = {
       { label: "Websites", value: "61" },
       { label: "Pending setup", value: "2", delta: "1", dir: "down" },
     ],
-    primary: { label: "Add website", icon: "language" },
+    primary: { label: "Add website", icon: "add_business" },
     bullets: ["Add & edit clients", "Register websites & CMS", "Set up tracking & integrations"],
     table: {
-      title: "Websites", icon: "language",
+      title: "Websites", icon: "add_business",
       cols: ["Website", "Client", "CMS", "Status"],
       rows: [
         ["northpeakdental.com", "NorthPeak Dental", "WordPress", { v: "Active", tone: "ok" }],

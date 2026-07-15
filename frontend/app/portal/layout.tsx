@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PortalProvider } from "@/components/portal/PortalContext";
 import TeamSidebar from "@/components/portal/TeamSidebar";
+import AuthGuard from "@/components/auth/AuthGuard";
 import "./portal.css";
 
 export const metadata: Metadata = {
@@ -13,9 +14,11 @@ export const metadata: Metadata = {
 // scope. Admin modules are never reachable from here.
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <PortalProvider>
-      <TeamSidebar />
-      <main className="main">{children}</main>
-    </PortalProvider>
+    <AuthGuard role="team">
+      <PortalProvider>
+        <TeamSidebar />
+        <main className="main">{children}</main>
+      </PortalProvider>
+    </AuthGuard>
   );
 }

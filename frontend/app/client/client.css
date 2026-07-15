@@ -1,0 +1,360 @@
+/* ============================================================
+   CLIENT DASHBOARD — the client-facing workspace.
+   A third, fully-separate shell (alongside the admin dashboard
+   and the team portal). Scoped to .cl / .client-side; reuses the
+   shared design tokens + the .card / .kpi / .status-pill families
+   from globals.css, so it re-skins with every theme for free.
+
+   Signature interaction: locked report cards behind a padlock that
+   the client "pops" — a green unlock wash sweeps the card, then the
+   real, themed chart data draws in.
+   ============================================================ */
+.cl { margin-top: 16px; }
+
+/* ---- client sidebar footer (switcher + logout) ---- */
+.client-side .side-foot { display: flex; flex-direction: column; gap: 10px; }
+.client-side .ts-switch { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 11px;
+  border: 1px solid var(--rail-line); background: var(--rail-raise); white-space: nowrap;
+  opacity: 0; transition: opacity .2s; }
+.sidebar:hover .client-side .ts-switch { opacity: 1; }
+.client-side .ts-switch-l { font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--rail-sec); }
+.client-side .ts-switch select { font-family: inherit; font-size: 12px; font-weight: 700; color: var(--rail-hover); appearance: none; cursor: pointer;
+  background: transparent; border: none; outline: none; padding-right: 16px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%2383837A' stroke-width='3' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat; background-position: right center; }
+.client-side .ts-switch select option { background: var(--navy-2); color: var(--ink); }
+.client-side .userchip .who { flex: 1; min-width: 0; }
+.client-side .ts-logout { flex: none; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; color: var(--rail-idle); border: 1px solid var(--rail-line); background: var(--rail-raise);
+  opacity: 0; transition: opacity .2s, color .16s, background .16s; text-decoration: none; }
+.sidebar:hover .client-side .ts-logout { opacity: 1; }
+.client-side .ts-logout:hover { color: #fff; background: rgba(229, 85, 92, .2); border-color: rgba(229, 85, 92, .4); }
+.client-side .ts-logout .material-symbols-rounded { font-size: 17px; }
+.cl-side-access { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 11px;
+  color: var(--rail-idle); }
+.cl-side-access .material-symbols-rounded { font-size: 23px; flex: none; width: 24px; text-align: center; color: var(--ok); }
+.cl-side-access .lbl { font-size: 12.5px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity .2s; }
+.cl-side-access .lbl b { color: var(--rail-hover); }
+.sidebar:hover .cl-side-access .lbl { opacity: 1; }
+
+/* ---- shared hero ---- */
+.cl-hero { display: flex; align-items: center; gap: 18px; padding: 20px 22px; margin-bottom: 16px;
+  border-radius: 18px; border: 1px solid var(--line-2);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--violet) 20%, transparent), rgba(31, 168, 144, .05) 62%, var(--card-2));
+  position: relative; overflow: hidden; }
+.cl-hero-av { width: 58px !important; height: 58px !important; font-size: 20px !important; flex: none;
+  box-shadow: 0 10px 26px -10px rgba(0, 0, 0, .6), inset 0 0 0 2px rgba(255, 255, 255, .14); }
+.cl-hero-id { min-width: 0; flex: 1; }
+.cl-hero-hi { font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--violet-soft); }
+.cl-hero-name { font-size: 25px; font-weight: 800; letter-spacing: -.025em; color: var(--fg-strong); margin-top: 2px; }
+.cl-hero-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 9px; }
+.cl-hero-plan { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--violet-soft);
+  background: color-mix(in srgb, var(--violet) 14%, transparent); border: 1px solid var(--line-2); padding: 3px 10px; border-radius: 999px; }
+.cl-hero-title { font-size: 12.5px; font-weight: 600; color: var(--body); }
+.cl-hero .status-pill { gap: 4px; }
+.cl-hero-side { display: flex; align-items: stretch; gap: 12px; flex: none; }
+.cl-hero-focus { display: flex; flex-direction: column; gap: 3px; justify-content: center; min-width: 190px; max-width: 280px;
+  padding: 12px 16px; border-radius: 13px; background: var(--well); border: 1px solid var(--line); }
+.cl-focus-k { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.cl-focus-v { font-size: 13.5px; font-weight: 700; color: var(--fg-strong); line-height: 1.3; }
+.cl-focus-note { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: var(--c2); margin-top: 2px; }
+.cl-focus-note .material-symbols-rounded { font-size: 15px; }
+
+/* ---- dashboard legend ---- */
+.cl-legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; padding: 11px 16px;
+  border-radius: 13px; border: 1px solid var(--line); background: var(--well); }
+.cl-legend-item { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.cl-legend-sw { width: 11px; height: 11px; border-radius: 4px; flex: none; }
+.cl-legend-sw.ready { background: var(--violet); }
+.cl-legend-sw.live { background: var(--ok); }
+.cl-legend-sw.locked { background: var(--muted-2); }
+.cl-legend-count { margin-left: auto; font-size: 12px; font-weight: 800; color: var(--body); }
+
+/* ---- dashboard grid ---- */
+.cl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 16px; }
+
+/* ============================================================
+   LOCKABLE REPORT CARD — locked · unlockable · unlocking · unlocked
+   ============================================================ */
+.cl-chart { position: relative; display: flex; flex-direction: column; border-radius: 16px; padding: 16px;
+  border: 1px solid var(--line); background: linear-gradient(165deg, var(--card), var(--card-2));
+  min-height: 268px; transition: border-color .2s, box-shadow .2s, transform .2s; }
+
+.cl-chart-h { display: flex; align-items: center; gap: 11px; }
+/* Compound selector (.cl-chart-h descendant) so `display: flex` + font-size
+   outrank Google's single-class `.material-symbols-rounded { display: inline-block;
+   font-size: 24px }`, which the icon span also carries — otherwise the glyph
+   falls back to baseline alignment and reads as off-centre in its box. */
+.cl-chart-h .cl-chart-ic { flex: none; width: 38px; height: 38px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+  font-size: 21px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  /* clip the ligature word during icon-font load so it can never bleed onto the title */
+  overflow: hidden; }
+.cl-chart-tt { flex: 1; min-width: 0; }
+.cl-chart-t { font-size: 14px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.01em; }
+.cl-chart-grp { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-top: 1px; }
+
+.cl-chart-badge { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800;
+  letter-spacing: .03em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; }
+.cl-chart-badge .material-symbols-rounded { font-size: 13px; }
+.cl-chart-badge.locked { color: var(--muted); background: var(--hover); }
+.cl-chart-badge.ready { color: var(--violet-soft); background: color-mix(in srgb, var(--violet) 16%, transparent); }
+.cl-chart-badge.unlocking { color: var(--ok); background: rgba(34, 192, 138, .14); }
+.cl-chart-badge.live { color: var(--ok); background: rgba(34, 192, 138, .14); }
+.cl-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 var(--ok);
+  animation: cl-pulse 1.8s ease-out infinite; }
+@keyframes cl-pulse { 0% { box-shadow: 0 0 0 0 rgba(34, 192, 138, .5); } 70% { box-shadow: 0 0 0 6px rgba(34, 192, 138, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 192, 138, 0); } }
+
+/* --- unlocked / live face --- */
+.cl-chart-live { margin-top: 12px; display: flex; flex-direction: column; flex: 1; animation: cl-fade-up .5s ease both; }
+.cl-chart-read { display: flex; align-items: baseline; gap: 10px; }
+.cl-chart-num { font-size: 30px; font-weight: 800; letter-spacing: -.03em; color: var(--fg-strong); line-height: 1; font-variant-numeric: tabular-nums; }
+.cl-chart-num .u { font-size: 15px; color: var(--muted); font-weight: 700; margin-left: 1px; }
+.cl-chart-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 800; }
+.cl-chart-delta .material-symbols-rounded { font-size: 15px; }
+.cl-chart-delta.up { color: var(--ok); } .cl-chart-delta.down { color: var(--crit); }
+.cl-chart-cap { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.35; }
+.cl-chart-live .mc-wrap { margin-top: auto; }
+
+/* --- locked / unlockable face --- */
+.cl-chart-locked { position: relative; margin-top: 12px; flex: 1; display: flex; align-items: center; justify-content: center;
+  border-radius: 13px; overflow: hidden; min-height: 176px; }
+.cl-lock-skeleton { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 8px; padding: 22px 18px;
+  filter: blur(3px); opacity: .5; }
+.cl-lock-skeleton span { flex: 1; border-radius: 5px 5px 0 0; background: linear-gradient(var(--muted-2), transparent); }
+.cl-lock-skeleton span:nth-child(1) { height: 40%; } .cl-lock-skeleton span:nth-child(2) { height: 66%; }
+.cl-lock-skeleton span:nth-child(3) { height: 52%; } .cl-lock-skeleton span:nth-child(4) { height: 82%; }
+.cl-lock-skeleton span:nth-child(5) { height: 60%; } .cl-lock-skeleton span:nth-child(6) { height: 92%; }
+
+.cl-lock { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
+  width: 100%; height: 100%; padding: 18px; cursor: pointer; background: none; border: none; font-family: inherit;
+  justify-content: center; }
+.cl-lock-badge { display: flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 16px;
+  color: var(--muted); background: var(--well-2); border: 1px solid var(--line-2); transition: .25s; }
+.cl-lock-icon { font-size: 27px; }
+.cl-lock-txt { font-size: 13.5px; font-weight: 800; color: var(--body); margin-top: 4px; }
+.cl-lock-sub { font-size: 11px; color: var(--muted); max-width: 220px; line-height: 1.35; }
+
+/* backdrop desaturates locked cards; a faint scrim sits over the skeleton */
+.cl-chart.locked .cl-chart-locked::before,
+.cl-chart.unlockable .cl-chart-locked::before,
+.cl-chart.unlocking .cl-chart-locked::before {
+  content: ""; position: absolute; inset: 0; z-index: 1; background: var(--well); }
+
+/* never-granted: fully muted, no invitation to click */
+.cl-chart.locked { opacity: .92; }
+.cl-chart.locked .cl-chart-ic { color: var(--muted-2); background: var(--hover); border-color: var(--line); }
+.cl-chart.locked .cl-lock { cursor: pointer; }
+.cl-chart.locked:hover { border-color: var(--line-2); }
+
+/* granted-not-yet-open: the accent-tinted, invitational state */
+.cl-chart.unlockable { border-color: color-mix(in srgb, var(--violet) 30%, var(--line-2)); }
+.cl-chart.unlockable:hover { transform: translateY(-3px);
+  box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--violet) 80%, transparent); border-color: var(--violet); }
+.cl-chart.unlockable .cl-lock-badge { color: var(--violet-soft);
+  background: color-mix(in srgb, var(--violet) 16%, transparent); border-color: color-mix(in srgb, var(--violet) 40%, transparent);
+  animation: cl-bob 2.4s ease-in-out infinite; }
+.cl-chart.unlockable:hover .cl-lock-badge { transform: scale(1.06) rotate(-4deg);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--violet) 16%, transparent); }
+.cl-chart.unlockable .cl-lock-txt { color: var(--fg-strong); }
+@keyframes cl-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
+/* the moment of unlock — green wash, spring, then handoff to the chart */
+.cl-chart.unlocking { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok), 0 20px 46px -20px rgba(34, 192, 138, .7);
+  animation: cl-flash 1.5s ease; }
+.cl-chart.unlocking .cl-chart-locked { background: rgba(34, 192, 138, .06); }
+.cl-chart.unlocking .cl-lock-badge { color: var(--ok); background: rgba(34, 192, 138, .18);
+  border-color: var(--ok); animation: cl-pop-open .6s cubic-bezier(.34, 1.56, .64, 1) both; }
+.cl-chart.unlocking .cl-lock-txt { color: var(--ok); }
+@keyframes cl-flash {
+  0% { background-image: linear-gradient(165deg, var(--card), var(--card-2)); }
+  22% { background-image: linear-gradient(165deg, color-mix(in srgb, var(--ok) 26%, var(--card)), var(--card-2)); }
+  100% { background-image: linear-gradient(165deg, var(--card), var(--card-2)); }
+}
+@keyframes cl-pop-open { 0% { transform: scale(.8) rotate(-8deg); } 55% { transform: scale(1.14) rotate(4deg); } 100% { transform: scale(1) rotate(0); } }
+
+/* expanding green rings + success check that sweep the card on unlock */
+.cl-unlock-fx { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.cl-unlock-ring { position: absolute; width: 60px; height: 60px; border-radius: 50%; border: 2px solid var(--ok);
+  animation: cl-ring 1.2s ease-out forwards; }
+.cl-unlock-ring.d2 { animation-delay: .28s; }
+@keyframes cl-ring { 0% { transform: scale(.5); opacity: .8; } 100% { transform: scale(3.4); opacity: 0; } }
+.cl-unlock-check { position: absolute; font-size: 40px; color: var(--ok); font-weight: 700;
+  animation: cl-check .7s .5s cubic-bezier(.34, 1.56, .64, 1) both; }
+@keyframes cl-check { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes cl-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ============================================================
+   MINI CHART — the themed visualization inside an unlocked card
+   ============================================================ */
+.mc-wrap { position: relative; margin-top: 12px; }
+.mc-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.mc-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; }
+.mc-xlab { fill: var(--muted); font-size: 9px; font-weight: 700; font-family: inherit; }
+.mc-area { animation: mc-fade 1s ease both; }
+.mc-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: mc-draw 1.15s ease forwards; }
+.mc-end { animation: mc-fade 1s .8s ease both; }
+.mc-cross { stroke: color-mix(in srgb, var(--accent) 40%, transparent); stroke-width: 1; }
+@keyframes mc-draw { to { stroke-dashoffset: 0; } }
+@keyframes mc-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.mc-bar { transform-box: fill-box; transform-origin: bottom; transform: scaleY(0);
+  animation: mc-grow .5s ease forwards; animation-delay: calc(var(--bi, 0) * 55ms); transition: opacity .16s; }
+@keyframes mc-grow { to { transform: scaleY(1); } }
+
+.mc-tip { position: absolute; z-index: 6; transform: translate(-50%, -128%); pointer-events: none; white-space: nowrap;
+  background: var(--pop-bg); border: 1px solid var(--pop-line); border-radius: 9px; padding: 5px 9px;
+  display: flex; flex-direction: column; box-shadow: 0 10px 24px -10px rgba(0, 0, 0, .6); }
+.mc-tip.mc-tip-bar { top: 8px; transform: translate(-50%, 0); }
+.mc-tip-k { color: var(--pop-fg-dim); font-size: 10px; font-weight: 700; }
+.mc-tip-v { color: var(--pop-fg-strong); font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* gauges (core web vitals) */
+.mc-gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.mc-gauge { position: relative; display: flex; align-items: center; justify-content: center; }
+.mc-gauge-svg { width: 100%; max-width: 84px; height: auto; }
+.mc-gauge-track { fill: none; stroke: var(--well-2); stroke-width: 7; }
+.mc-gauge-arc { fill: none; stroke-width: 7; stroke-linecap: round; stroke-dashoffset: var(--to);
+  animation: mc-arc 1s ease forwards; }
+@keyframes mc-arc { from { stroke-dashoffset: var(--circ); } }
+.mc-gauge-c { position: absolute; text-align: center; }
+.mc-gauge-v { font-size: 14px; font-weight: 800; color: var(--fg-strong); line-height: 1; font-variant-numeric: tabular-nums; }
+.mc-gauge-l { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+
+/* single progress ring */
+.mc-progress { position: relative; display: flex; align-items: center; justify-content: center; margin-top: 12px; }
+.mc-progress-svg { width: 128px; height: 128px; }
+.mc-progress-c { position: absolute; text-align: center; }
+.mc-progress-v { font-size: 30px; font-weight: 800; letter-spacing: -.02em; color: var(--fg-strong); line-height: 1; }
+.mc-progress-l { font-size: 11px; font-weight: 700; color: var(--muted); margin-top: 3px; }
+
+/* stat tiles */
+.mc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-top: 14px; }
+.mc-stat { padding: 13px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--well); text-align: center;
+  animation: cl-fade-up .5s ease both; }
+.mc-stat-v { font-size: 18px; font-weight: 800; color: var(--fg-strong); line-height: 1; }
+.mc-stat-v.up { color: var(--ok); }
+.mc-stat-l { font-size: 10px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+
+/* ============================================================
+   MILESTONES
+   ============================================================ */
+.cl-ms-head { margin-bottom: 16px; }
+.cl-ms-progress-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.cl-ms-progress-l { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cl-ms-progress-v { font-size: 34px; font-weight: 800; letter-spacing: -.03em; color: var(--fg-strong); line-height: 1; margin-top: 4px; }
+.cl-ms-current { text-align: right; }
+.cl-ms-current-l { display: block; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cl-ms-current-v { font-size: 15px; font-weight: 800; color: var(--violet-soft); margin-top: 4px; }
+.cl-ms-bar { margin-top: 14px; height: 10px; border-radius: 999px; background: var(--well-2); overflow: hidden; }
+.cl-ms-bar span { display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--violet-2), var(--c2)); animation: cl-bar-grow 1s ease both; }
+@keyframes cl-bar-grow { from { width: 0 !important; } }
+
+.cl-steps { margin-top: 8px; }
+.cl-step { display: flex; gap: 14px; }
+.cl-step-rail { display: flex; flex-direction: column; align-items: center; flex: none; }
+.cl-step-node { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--well); border: 2px solid currentColor; }
+.cl-step-node .material-symbols-rounded { font-size: 18px; }
+.cl-step-line { flex: 1; width: 2px; min-height: 26px; background: var(--line-2); margin: 4px 0; }
+.cl-step-body { flex: 1; min-width: 0; padding-bottom: 22px; }
+.cl-step-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.cl-step-ic { font-size: 19px; color: var(--muted); }
+.cl-step-t { font-size: 14.5px; font-weight: 800; color: var(--fg-strong); }
+.cl-step-src { font-size: 12px; color: var(--body); margin-top: 5px; line-height: 1.4; }
+.cl-step-time { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 6px; }
+.cl-step-time .material-symbols-rounded { font-size: 14px; }
+.cl-step.completed .cl-step-ic { color: var(--ok); }
+.cl-step.in_progress .cl-step-t { color: var(--violet-soft); }
+
+/* ============================================================
+   REPORTS
+   ============================================================ */
+.cl-rp-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.cl-rp-row { display: flex; align-items: center; gap: 14px; padding: 13px 14px; border-radius: 13px; border: 1px solid var(--line);
+  background: var(--well); transition: border-color .16s, transform .16s; }
+.cl-rp-row:hover { border-color: var(--line-2); transform: translateX(2px); }
+.cl-rp-row.gen { opacity: .8; }
+.cl-rp-ic { flex: none; width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 28%, transparent); }
+.cl-rp-ic .material-symbols-rounded { font-size: 22px; }
+.cl-rp-main { flex: 1; min-width: 0; }
+.cl-rp-t { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.cl-rp-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.cl-rp-kind { font-weight: 800; }
+.cl-rp-actions { flex: none; display: flex; align-items: center; gap: 9px; }
+.cl-rp-size { font-size: 11px; font-weight: 700; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.cl-rp-gen { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--warn); }
+.cl-rp-locked { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.cl-rp-lockrow { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 13px;
+  border: 1px dashed var(--line-2); background: var(--well); opacity: .75; }
+.cl-rp-lockic { flex: none; width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  font-size: 21px; color: var(--muted); background: var(--hover); }
+
+.spin { animation: cl-spin 1s linear infinite; }
+@keyframes cl-spin { to { transform: rotate(360deg); } }
+.dot-sep { color: var(--muted-2); }
+
+/* ============================================================
+   REQUESTS
+   ============================================================ */
+.cl-req-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.cl-req-form { margin-top: 4px; }
+.cl-req-form textarea { width: 100%; font-family: inherit; font-size: 13px; color: var(--ink); line-height: 1.5;
+  background: var(--well); border: 1px solid var(--line-2); border-radius: 11px; padding: 11px 13px; resize: vertical; }
+.cl-req-form textarea::placeholder { color: var(--muted-2); }
+.cl-req-form textarea:focus { outline: none; border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); }
+.cl-opt { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--muted-2); }
+.cl-kinds { display: flex; flex-wrap: wrap; gap: 8px; }
+.cl-kind { display: inline-flex; align-items: center; gap: 7px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  color: var(--muted); background: var(--well); border: 1px solid var(--line-2); border-radius: 10px; padding: 8px 12px; transition: .16s; }
+.cl-kind .material-symbols-rounded { font-size: 17px; }
+.cl-kind:hover { color: var(--body); border-color: var(--muted-2); }
+.cl-kind.on { color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent);
+  border-color: color-mix(in srgb, var(--c) 46%, transparent); }
+.cl-req-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+.cl-req-sent { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 800; color: var(--ok); }
+.cl-req-sent .material-symbols-rounded { font-size: 16px; }
+
+.cl-req-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.cl-req-row { display: flex; gap: 12px; padding: 13px 14px; border-radius: 13px; border: 1px solid var(--line); background: var(--well); }
+.cl-req-ic { flex: none; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.cl-req-ic .material-symbols-rounded { font-size: 19px; }
+.cl-req-main { flex: 1; min-width: 0; }
+.cl-req-top { display: flex; align-items: center; gap: 9px; justify-content: space-between; }
+.cl-req-subj { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.cl-req-top .status-pill { gap: 3px; }
+.cl-req-meta { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.cl-req-detail { font-size: 12.5px; color: var(--body); margin-top: 8px; line-height: 1.45; }
+.cl-req-reply { display: flex; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--c2) 8%, var(--well)); border: 1px solid var(--line); font-size: 12px; color: var(--body); line-height: 1.45; }
+.cl-req-reply .material-symbols-rounded { flex: none; font-size: 17px; color: var(--c2); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 1100px) {
+  .cl-req-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 780px) {
+  .cl-hero { flex-wrap: wrap; }
+  .cl-hero-side { width: 100%; }
+  .cl-hero-focus { flex: 1; max-width: none; }
+  .cl-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .cl-chart.unlockable .cl-lock-badge,
+  .cl-live-dot,
+  .mc-line, .mc-area, .mc-end, .mc-bar, .mc-gauge-arc,
+  .cl-chart-live, .mc-stat, .cl-ms-bar span,
+  .cl-chart.unlocking, .cl-chart.unlocking .cl-lock-badge,
+  .cl-unlock-ring, .cl-unlock-check { animation: none !important; }
+  .mc-line { stroke-dashoffset: 0; }
+  .mc-bar { transform: scaleY(1); }
+  .mc-gauge-arc { stroke-dashoffset: var(--to); }
+}

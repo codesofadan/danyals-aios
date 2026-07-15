@@ -1,11 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  teamMembers, tasks_seed, activity_seed, defaultRolePerms,
-  SERIES,
-  type TeamMemberRecord, type Task, type Activity, type TeamRole, type PermKey, type TaskStatus,
-} from "@/lib/data";
+import { useState } from "react";
+import type { TeamRole, PermKey, TaskStatus } from "@/lib/data";
+import { useStore } from "@/lib/store";
 import TeamRoster, { type NewMember } from "./TeamRoster";
 import AssignTasks, { type NewTask } from "./AssignTasks";
 import TeamPerformance from "./TeamPerformance";
@@ -22,91 +19,29 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "access", label: "Access Control", icon: "admin_panel_settings" },
 ];
 
-// The signed-in operator — every admin action is attributed to them in the log.
-const OPERATOR = { init: "DA", name: "Danyal Ahmed", c: SERIES.c1 };
-
-let idSeq = 0;
-const nextId = (p: string) => `${p}-${Date.now().toString(36)}${idSeq++}`;
-
 export default function TeamWorkspace() {
   const [tab, setTab] = useState<TabKey>("roster");
-  const [members, setMembers] = useState<TeamMemberRecord[]>(teamMembers);
-  const [tasks, setTasks] = useState<Task[]>(tasks_seed);
-  const [log, setLog] = useState<Activity[]>(activity_seed);
-  const [rolePerms, setRolePerms] = useState<Record<TeamRole, PermKey[]>>(defaultRolePerms);
-
-  const nameById = useMemo(() => {
-    const m = new Map(members.map((x) => [x.id, x] as const));
-    return m;
-  }, [members]);
-
-  function pushLog(entry: Omit<Activity, "id" | "ago">) {
-    setLog((prev) => [{ ...entry, id: nextId("a"), ago: "just now" }, ...prev]);
-  }
+  const {
+    members, tasks, activity, rolePerms,
+    addMember, assignTask, setTaskStatus, togglePerm,
+  } = useStore();
 
   function handleAddMember(input: NewMember) {
-    const id = nextId("u");
-    const init = input.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
-    const member: TeamMemberRecord = {
-      id, name: input.name, init, c: input.color, title: input.title, email: input.email,
-      role: input.role, status: "invited",
-      activeTasks: 0, completed: 0, onTime: 0, utilization: 0, quality: 0,
-      joined: "Jul 2026",
-    };
-    setMembers((prev) => [member, ...prev]);
-    const tpl = input.template ?? input.role;
-    const fcount = input.features?.length ?? 0;
-    pushLog({
-      kind: "member", actorInit: OPERATOR.init, actorName: OPERATOR.name, actorColor: OPERATOR.c,
-      action: "invited", target: input.name, meta: `${tpl} · ${fcount} features granted`,
-    });
+    addMember(input);
     setTab("roster");
   }
 
   function handleAssign(input: NewTask) {
-    const id = nextId("J");
-    const task: Task = {
-      id, title: input.title, client: input.client, type: input.type,
-      assignee: input.assignee, priority: input.priority, status: "todo", due: input.due,
-    };
-    setTasks((prev) => [task, ...prev]);
-    setMembers((prev) => prev.map((m) => m.id === input.assignee ? { ...m, activeTasks: m.activeTasks + 1 } : m));
-    const who = nameById.get(input.assignee);
-    pushLog({
-      kind: "task", actorInit: OPERATOR.init, actorName: OPERATOR.name, actorColor: OPERATOR.c,
-      action: "assigned", target: `${id} · ${input.type}`, meta: `${who?.name ?? "—"} · ${input.client}`,
-    });
+    assignTask(input);
     setTab("assign");
   }
 
   function handleStatusChange(taskId: string, status: TaskStatus) {
-    let moved: Task | undefined;
-    setTasks((prev) => prev.map((t) => {
-      if (t.id === taskId) { moved = { ...t, status }; return moved; }
-      return t;
-    }));
-    if (moved) {
-      const who = nameById.get(moved.assignee);
-      pushLog({
-        kind: "task", actorInit: who?.init ?? "?", actorName: who?.name ?? "—", actorColor: who?.c ?? "var(--muted)",
-        action: status === "done" ? "completed" : `moved to ${status.replace("_", " ")}`,
-        target: `${moved.id}`, meta: moved.client,
-      });
-    }
+    setTaskStatus(taskId, status);
   }
 
   function handleTogglePerm(role: TeamRole, key: PermKey) {
-    let granted = false;
-    setRolePerms((prev) => {
-      const has = prev[role].includes(key);
-      granted = !has;
-      const next = has ? prev[role].filter((k) => k !== key) : [...prev[role], key];
-      return { ...prev, [role]: next };
-    });
-    pushLog({
-      kind: "access", actorInit: OPERATOR.init, actorName: OPERATOR.name, actorColor: OPERATOR.c,
-      action: granted ? "granted" : "revoked", target: key.replace(/_/g, " "), meta: `${role} role`,
-    });
+    togglePerm(role, key);
   }
 
   return (
@@ -139,7 +74,7 @@ export default function TeamWorkspace() {
           <AssignTasks tasks={tasks} members={members} onAssign={handleAssign} onStatusChange={handleStatusChange} />
         )}
         {tab === "performance" && <TeamPerformance members={members} />}
-        {tab === "activity" && <ActivityLog log={log} />}
+        {tab === "activity" && <ActivityLog log={activity} />}
         {tab === "access" && <AccessControl rolePerms={rolePerms} onToggle={handleTogglePerm} />}
       </div>
     </section>

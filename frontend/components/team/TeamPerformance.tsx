@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { type TeamMemberRecord } from "@/lib/data";
+import TeamMetricBox from "./TeamMetricBox";
 
 // Small inline donut for the headline quality score.
 function Donut({ value, color }: { value: number; color: string }) {
@@ -50,6 +51,10 @@ export default function TeamPerformance({ members }: { members: TeamMemberRecord
 
   return (
     <div className="panel-in">
+      <div className="tm-box-slot">
+        <TeamMetricBox members={members} />
+      </div>
+
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">insights</span>

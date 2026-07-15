@@ -10,13 +10,14 @@ export type TrafficPoint = { m: string; v: number };
 export type TeamMember = { nm: string; init: string; c: string; jobs: number };
 export type Client = { cn: string; cd: string; p: number };
 
-// Validated categorical palette (dark surface #221E46) — see color notes.
+// Categorical palette — mirrors the Avant-Garde theme tokens (--c1…--c5)
+// so JS-drawn charts match the CSS-driven surfaces.
 export const SERIES = {
-  c1: "#7B69EE", // violet
-  c2: "#1FA890", // aqua
-  c3: "#C77E14", // amber
-  c4: "#4D8DF0", // blue
-  c5: "#D4568A", // magenta
+  c1: "#C6FF3C", // acid-lime (accent)
+  c2: "#22E0C0", // teal
+  c3: "#FF9F1C", // amber
+  c4: "#4CC9F0", // cyan
+  c5: "#FF4D9D", // magenta
 } as const;
 
 export const audits: AuditPoint[] = [
@@ -183,6 +184,115 @@ export const tickets: Ticket[] = [
   { id: "T-4812", client: "BrightHVAC", subject: "Content sprint delivery timeline check", channel: "Call", priority: "low", status: "resolved", ago: "1d ago" },
   { id: "T-4809", client: "Coastline Fit", subject: "Enable 2FA on the portal login", channel: "Email", priority: "low", status: "resolved", ago: "2d ago" },
 ];
+
+// ============================================================
+// Client report access — what each client is allowed to SEE.
+// Unlike team members (who get feature/role grants), a client
+// is granted visibility into specific charts, graphs & reports.
+// The client portal renders ONLY the reports whose key is in
+// clientReportGrants[clientId]; everything else is hidden and
+// its data is never sent. The admin can revise these grants at
+// any time from the Client Directory → Report Access view.
+// Mock values are demo-only — swap for the FastAPI/Postgres
+// row-level-security policy when the backend is wired.
+// ============================================================
+
+// Reports are grouped for the grant grid, colour-coded by area.
+export type ReportGroup = "Performance" | "Off-Page" | "Content" | "Delivery";
+
+export const REPORT_GROUP_COLOR: Record<ReportGroup, string> = {
+  Performance: SERIES.c4, // blue
+  "Off-Page": SERIES.c5, // magenta
+  Content: SERIES.c3, // amber
+  Delivery: SERIES.c1, // lime
+};
+
+// A single grantable chart / graph / report surface.
+export type ClientReport = {
+  key: string;
+  label: string; // full name
+  short: string; // bubble / chip label
+  icon: string; // Material Symbols
+  group: ReportGroup;
+  desc: string; // what the client sees when it's granted
+};
+
+// The reports & graphs an admin can expose to a client. Each maps
+// to a dashboard surface the client portal would render.
+export const clientReports: ClientReport[] = [
+  { key: "audit_scores", label: "Audit Scores", short: "Audit Scores", icon: "fact_check", group: "Performance", desc: "Site-health scores per category, trended over time" },
+  { key: "rank_tracker", label: "Keyword Rankings", short: "Rankings", icon: "trending_up", group: "Performance", desc: "Tracked keyword positions & ranking history" },
+  { key: "traffic", label: "Organic Traffic", short: "Traffic", icon: "show_chart", group: "Performance", desc: "Organic sessions & clicks month over month" },
+  { key: "core_web_vitals", label: "Core Web Vitals", short: "Web Vitals", icon: "speed", group: "Performance", desc: "LCP / INP / CLS field data per page" },
+  { key: "backlinks", label: "Backlink Profile", short: "Backlinks", icon: "hub", group: "Off-Page", desc: "Referring domains, new & lost links, toxicity" },
+  { key: "competitor", label: "Competitor Benchmark", short: "Competitors", icon: "insights", group: "Off-Page", desc: "Share-of-voice & gap analysis vs rivals" },
+  { key: "local_seo", label: "Local & Map Pack", short: "Local SEO", icon: "storefront", group: "Off-Page", desc: "Local grid rankings & map-pack visibility" },
+  { key: "content_status", label: "Content Status", short: "Content", icon: "article", group: "Content", desc: "Content pipeline — drafts, review & published" },
+  { key: "keyword_map", label: "Keyword Coverage", short: "Keywords", icon: "search", group: "Content", desc: "Target keywords mapped to pages & intent" },
+  { key: "milestones", label: "Milestones & Delivery", short: "Milestones", icon: "flag", group: "Delivery", desc: "Onboarding & delivery milestone timeline" },
+  { key: "progress_dashboard", label: "Progress Dashboard", short: "Progress", icon: "donut_large", group: "Delivery", desc: "At-a-glance engagement progress rings" },
+  { key: "monthly_report", label: "Monthly SEO Report", short: "Monthly Report", icon: "summarize", group: "Delivery", desc: "The branded monthly performance report" },
+  { key: "roi_summary", label: "ROI & Growth Summary", short: "ROI Summary", icon: "payments", group: "Delivery", desc: "Revenue-attributed growth & ROI headline" },
+];
+
+const ALL_REPORT_KEYS = clientReports.map((r) => r.key);
+
+// Ready-made access bundles — a starting point the admin can then
+// customise per client (mirrors the team role templates).
+export type ReportBundle = {
+  key: string;
+  label: string; // dropdown label
+  tagline: string;
+  icon: string;
+  color: string;
+  grants: string[]; // clientReports.key[] switched on
+};
+
+export const reportBundles: ReportBundle[] = [
+  {
+    key: "full", label: "Full Dashboard", tagline: "Every chart & report", icon: "dashboard",
+    color: SERIES.c1, grants: ALL_REPORT_KEYS,
+  },
+  {
+    key: "performance", label: "Performance Only", tagline: "Rankings, traffic & audits", icon: "monitoring",
+    color: SERIES.c4, grants: ["audit_scores", "rank_tracker", "traffic", "core_web_vitals", "local_seo"],
+  },
+  {
+    key: "exec", label: "Executive Summary", tagline: "Headline progress & ROI", icon: "summarize",
+    color: SERIES.c1, grants: ["progress_dashboard", "monthly_report", "roi_summary", "milestones"],
+  },
+  {
+    key: "content", label: "Content Client", tagline: "Content pipeline & keywords", icon: "edit_note",
+    color: SERIES.c3, grants: ["content_status", "keyword_map", "rank_tracker", "monthly_report"],
+  },
+];
+
+// Per-client report visibility, keyed by clientDirectory.id. This is
+// the map the client portal reads to decide what to render — a report
+// NOT in this list is hidden and its data is never returned.
+export const clientReportGrants: Record<string, string[]> = {
+  "cl-northpeak": ["audit_scores", "rank_tracker", "traffic", "core_web_vitals", "content_status", "milestones", "progress_dashboard", "monthly_report", "roi_summary"],
+  "cl-lumen": ["audit_scores", "rank_tracker", "traffic", "content_status", "keyword_map", "milestones", "monthly_report"],
+  "cl-verde": ["audit_scores", "rank_tracker", "local_seo", "monthly_report"],
+  "cl-atlas": ["progress_dashboard", "monthly_report", "milestones"],
+  "cl-brighthvac": ["audit_scores", "rank_tracker", "traffic", "content_status", "milestones", "progress_dashboard", "monthly_report"],
+  "cl-coastline": ["audit_scores", "rank_tracker", "local_seo", "monthly_report"],
+  "cl-meridian": ALL_REPORT_KEYS,
+  "cl-orchard": ["milestones", "monthly_report"],
+};
+
+// The payload the Add-Client wizard emits back to the directory.
+export type NewClient = {
+  cn: string; // client name
+  industry: string;
+  tier: SubTier;
+  contactName: string;
+  contactEmail: string;
+  adminLogin: string;
+  adminPass: string;
+  bundle: string; // bundle label, or "Custom"
+  reports: string[]; // clientReports.key[] granted
+};
 
 // ============================================================
 // Team Management module — roster, task assignment, activity
@@ -360,7 +470,7 @@ export type FeatureGroup = "Analytics" | "Content" | "Delivery" | "Admin";
 export const GROUP_COLOR: Record<FeatureGroup, string> = {
   Analytics: SERIES.c4, // blue
   Content: SERIES.c3, // amber
-  Delivery: SERIES.c1, // violet
+  Delivery: SERIES.c1, // lime
   Admin: SERIES.c5, // magenta — the sensitive, Super-Admin-only tools
 };
 
@@ -387,7 +497,7 @@ export const accessFeatures: AccessFeature[] = [
   { key: "reporting", label: "Reporting", short: "Reporting", icon: "summarize", group: "Delivery", desc: "Build, schedule & send client reports" },
   { key: "task_board", label: "Task / Workflow Board", short: "Task Board", icon: "checklist", group: "Delivery", desc: "Create, assign & track team tasks" },
   { key: "client_onboarding", label: "Client Onboarding", short: "Onboarding", icon: "person_add", group: "Delivery", desc: "Run the onboarding wizard & collect access" },
-  { key: "client_setup", label: "Client & Website Setup", short: "Client Setup", icon: "language", group: "Delivery", desc: "Add & edit clients and their websites" },
+  { key: "client_setup", label: "Client & Website Setup", short: "Client Setup", icon: "add_business", group: "Delivery", desc: "Add & edit clients and their websites" },
   { key: "data_import", label: "Data Import", short: "Imports", icon: "upload_file", group: "Delivery", desc: "Upload & map CSV/Excel exports" },
   { key: "key_vault", label: "Integrations & Key Vault", short: "Key Vault", icon: "key", group: "Admin", desc: "API keys & integrations — Super Admin only" },
   { key: "billing", label: "Billing", short: "Billing", icon: "payments", group: "Admin", desc: "Plans, invoices & payment settings" },

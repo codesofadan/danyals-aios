@@ -5,14 +5,24 @@ import { recommendations, kbEntries, SEV_META, MODULE_META, REC_OPEN } from "@/l
 // recommendations awaiting the Super Admin's confirmation. Read-only digest —
 // full acknowledge/apply/dismiss actions live in /policy-radar.
 export default function CommandDigest() {
-  const open = recommendations.filter((r) => REC_OPEN.includes(r.status)).slice(0, 4);
+  const open = recommendations
+    .filter((r) => REC_OPEN.includes(r.status))
+    .slice(0, 4)
+    .map((r) => ({ r, sev: kbEntries.find((k) => k.id === r.kbId)?.severity ?? "info" }));
+  const critical = open.filter((x) => x.sev === "critical").length;
 
   return (
-    <section className="card">
+    <section className="card pr-digest">
       <div className="card-h">
-        <div>
-          <div className="ct">Command Center · Policy Radar</div>
-          <div className="cs">{open.length} recommendations awaiting confirmation</div>
+        <div className="pr-head">
+          <span className="pr-pulse" aria-hidden />
+          <div>
+            <div className="ct">Policy Radar</div>
+            <div className="cs">
+              {open.length} awaiting confirmation
+              {critical > 0 && <span className="pr-crit-note"> · {critical} critical</span>}
+            </div>
+          </div>
         </div>
         <div className="tools">
           <Link href="/policy-radar" className="ghostbtn">
@@ -21,28 +31,33 @@ export default function CommandDigest() {
         </div>
       </div>
 
-      <div className="ov-recs">
-        {open.map((r) => {
-          const sev = kbEntries.find((k) => k.id === r.kbId)?.severity ?? "info";
+      <ul className="pr-list">
+        {open.map(({ r, sev }) => {
           const sm = SEV_META[sev];
           const mod = MODULE_META[r.target];
           return (
-            <Link key={r.id} href="/policy-radar" className="ov-rec">
-              <span className="ov-rec-dot" style={{ background: sm.color, boxShadow: `0 0 8px ${sm.color}` }} />
-              <div className="ov-rec-main">
-                <div className="ov-rec-title">{r.title}</div>
-                <div className="ov-rec-why">{r.why}</div>
-                <div className="ov-rec-tags">
-                  <span className="pill-tag sm"><span className="material-symbols-rounded">{mod.icon}</span>{mod.label}</span>
-                  <span className="ov-rec-sev" style={{ color: sm.color }}>{sm.label}</span>
-                  <span className="ov-rec-region">· {r.regionLabel}</span>
+            <li key={r.id} className="pr-item" data-sev={sev} style={{ ["--sev" as any]: sm.color }}>
+              <Link href="/policy-radar" className="pr-link">
+                <span className="pr-spine" />
+                <span className="pr-medallion">
+                  <span className="material-symbols-rounded">{mod.icon}</span>
+                </span>
+                <div className="pr-body">
+                  <div className="pr-meta">
+                    <span className="pr-sev">{sm.label}</span>
+                    <span className="pr-mod">{mod.label}</span>
+                    <span className="pr-region">{r.regionLabel}</span>
+                    <span className={`pr-status pr-status-${r.status}`}>{r.status}</span>
+                  </div>
+                  <div className="pr-title">{r.title}</div>
+                  <div className="pr-why">{r.why}</div>
                 </div>
-              </div>
-              <span className="status-pill mut">{r.status}</span>
-            </Link>
+                <span className="pr-go material-symbols-rounded">chevron_right</span>
+              </Link>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 }

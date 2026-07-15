@@ -2,18 +2,24 @@
 
 import { Fragment, useState } from "react";
 import {
-  teamMembers, teamCredentials, ROLE_ORDER, ROLE_META, STATUS_META,
+  teamCredentials, ROLE_ORDER, ROLE_META, STATUS_META,
   type TeamRole,
 } from "@/lib/data";
+import { useStore } from "@/lib/store";
 import { Switch, PasswordField, generatePassword } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
 type Row = { pass: string; twoFA: boolean; mustReset: boolean; role: TeamRole; active: boolean };
 
+// Members invited during the demo have no seeded credential yet — surface a
+// safe placeholder that prompts a first-sign-in reset.
+const NEW_CRED = { pass: "Set at first sign-in", twoFA: false, mustReset: true, lastChanged: "—" };
+
 export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
+  const { members } = useStore();
   const [rows, setRows] = useState<Record<string, Row>>(() =>
-    Object.fromEntries(teamMembers.map((m) => {
-      const c = teamCredentials[m.id];
+    Object.fromEntries(members.map((m) => {
+      const c = teamCredentials[m.id] ?? NEW_CRED;
       return [m.id, { pass: c.pass, twoFA: c.twoFA, mustReset: c.mustReset, role: m.role, active: m.status !== "offline" }];
     }))
   );
@@ -44,7 +50,7 @@ export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">manage_accounts</span>
-          {teamMembers.length} members · reset passwords, change roles &amp; manage access
+          {members.length} members · reset passwords, change roles &amp; manage access
         </div>
         <div className="sec-note inline">
           <span className="material-symbols-rounded">shield</span>
@@ -64,8 +70,8 @@ export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
             </tr>
           </thead>
           <tbody>
-            {teamMembers.map((m) => {
-              const r = rows[m.id];
+            {members.map((m) => {
+              const r = rows[m.id] ?? { pass: NEW_CRED.pass, twoFA: false, mustReset: true, role: m.role, active: true };
               const isOwner = m.role === "Owner";
               const open = openId === m.id;
               const status = STATUS_META[m.status];

@@ -12,7 +12,7 @@ export default function CommandCenter() {
     <>
       <TopBar
         eyebrow="SEO Automation · Agency Overview"
-        title="Command Center"
+        title="Admin Dashboard"
         searchPlaceholder="Search clients, sites, audits…"
       />
 

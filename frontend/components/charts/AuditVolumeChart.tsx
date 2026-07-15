@@ -39,10 +39,10 @@ export default function AuditVolumeChart() {
     const defs = mk("defs", {});
     defs.innerHTML =
       `<linearGradient id="barg" x1="0" y1="0" x2="0" y2="1">
-         <stop offset="0" stop-color="#9585F0"/><stop offset="1" stop-color="#5B4FC4"/>
+         <stop offset="0" stop-color="#A6E62A"/><stop offset="1" stop-color="#6FA30F"/>
        </linearGradient>
        <linearGradient id="barg-hi" x1="0" y1="0" x2="0" y2="1">
-         <stop offset="0" stop-color="#B9AEF7"/><stop offset="1" stop-color="#7B69EE"/>
+         <stop offset="0" stop-color="#E6FF9E"/><stop offset="1" stop-color="#C6FF3C"/>
        </linearGradient>`;
     svg.appendChild(defs);
 
