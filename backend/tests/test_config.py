@@ -16,9 +16,6 @@ _ENV_KEYS = [
     "LOG_LEVEL",
     "API_CORS_ORIGINS",
     "TRUSTED_HOSTS",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "SUPABASE_ANON_KEY",
     "DATABASE_URL",
     "DATABASE_ADMIN_URL",
     "JWT_PRIVATE_KEY",
@@ -32,6 +29,15 @@ _ENV_KEYS = [
     "READINESS_TIMEOUT_SECONDS",
     "SENTRY_DSN",
 ]
+
+# A complete set of the prod-required config, for the validate_settings tests.
+_PROD_REQUIRED = {
+    "database_url": "postgresql://authenticated:pw@localhost:5432/aios",
+    "database_admin_url": "postgresql://service_role:pw@localhost:5432/aios",
+    "jwt_private_key": "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n",
+    "jwt_public_key": "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----\n",
+    "vault_master_key": "dmF1bHQtbWFzdGVyLWtleS0zMi1ieXRlcy1sb25nISE=",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -56,12 +62,12 @@ def test_defaults_load_without_env() -> None:
 @pytest.mark.unit
 def test_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "prod")
-    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
-    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "svc")
-    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://authenticated:pw@localhost:5432/aios")
+    monkeypatch.setenv("LOCAL_JWT_ISSUER", "aios-prod")
     s = Settings(_env_file=None)
     assert s.is_prod is True
-    assert s.supabase_url == "https://x.supabase.co"
+    assert s.database_url == "postgresql://authenticated:pw@localhost:5432/aios"
+    assert s.local_jwt_issuer == "aios-prod"
 
 
 @pytest.mark.unit
@@ -78,11 +84,11 @@ def test_log_level_is_normalized() -> None:
 
 @pytest.mark.unit
 def test_secrets_are_masked() -> None:
-    s = Settings(_env_file=None, supabase_service_role_key="topsecret")
-    assert isinstance(s.supabase_service_role_key, SecretStr)
+    s = Settings(_env_file=None, vault_master_key="topsecret")
+    assert isinstance(s.vault_master_key, SecretStr)
     assert "topsecret" not in repr(s)
-    assert "topsecret" not in str(s.supabase_service_role_key)
-    assert s.supabase_service_role_key.get_secret_value() == "topsecret"
+    assert "topsecret" not in str(s.vault_master_key)
+    assert s.vault_master_key.get_secret_value() == "topsecret"
 
 
 @pytest.mark.unit
@@ -104,9 +110,9 @@ def test_local_migration_secrets_are_masked() -> None:
 
 
 @pytest.mark.unit
-def test_local_migration_settings_default_optional() -> None:
-    # ADDITIVE window: the new local-Postgres settings are optional (not yet in
-    # _REQUIRED_IN_PROD) and the derived Supabase `jwt_issuer` property is intact.
+def test_local_settings_default_to_none() -> None:
+    # The local-Postgres + auth settings default to None (a dev app boots without
+    # them; validate_settings only fails on absence in prod).
     s = Settings(_env_file=None)
     assert s.database_url is None
     assert s.database_admin_url is None
@@ -115,8 +121,6 @@ def test_local_migration_settings_default_optional() -> None:
     assert s.vault_master_key is None
     assert s.local_jwt_issuer == "aios"
     assert s.jwt_audience == "authenticated"
-    # the name clash is resolved: `jwt_issuer` stays the Supabase-derived property
-    assert s.jwt_issuer is None  # no supabase_url set -> derived property is None
 
 
 @pytest.mark.unit
@@ -129,13 +133,7 @@ def test_validate_prod_missing_raises() -> None:
 @pytest.mark.unit
 def test_validate_prod_blank_secret_raises() -> None:
     # blank env arrives as "" / SecretStr("") -> falsiness (not `is None`) must catch it
-    s = Settings(
-        _env_file=None,
-        app_env="prod",
-        supabase_url="https://x.supabase.co",
-        supabase_service_role_key="",
-        supabase_anon_key="anon",
-    )
+    s = Settings(_env_file=None, app_env="prod", **{**_PROD_REQUIRED, "jwt_private_key": ""})
     with pytest.raises(ConfigError):
         validate_settings(s)
 
@@ -148,13 +146,7 @@ def test_validate_dev_missing_does_not_raise() -> None:
 
 @pytest.mark.unit
 def test_validate_prod_complete_ok() -> None:
-    s = Settings(
-        _env_file=None,
-        app_env="prod",
-        supabase_url="https://x.supabase.co",
-        supabase_service_role_key="svc",
-        supabase_anon_key="anon",
-    )
+    s = Settings(_env_file=None, app_env="prod", **_PROD_REQUIRED)
     validate_settings(s)  # does not raise
 
 
@@ -183,8 +175,8 @@ def test_console_logging_does_not_error(capsys: pytest.CaptureFixture[str]) -> N
 
 @pytest.mark.unit
 def test_secret_never_appears_in_log(capsys: pytest.CaptureFixture[str]) -> None:
-    s = Settings(_env_file=None, app_env="prod", supabase_service_role_key="SUPERSECRETVALUE")
+    s = Settings(_env_file=None, app_env="prod", vault_master_key="SUPERSECRETVALUE")
     configure_logging(s)
     # even if someone logs the masked secret, the plaintext must never reach stdout
-    get_logger("test.secret").info("boot", service_role=str(s.supabase_service_role_key))
+    get_logger("test.secret").info("boot", vault_key=str(s.vault_master_key))
     assert "SUPERSECRETVALUE" not in capsys.readouterr().out

@@ -3,11 +3,11 @@
 ``GET /health`` is a pure liveness probe - it touches no external service and
 answers only "is this process up and serving?".
 
-``GET /health/ready`` is readiness - it pings Supabase and Redis concurrently
-under a shared time budget and reports each dependency. It returns 503 (naming the
-down dependency) if any dependency is in error/timeout, and 200 otherwise; a
-``not_configured`` dependency does NOT make the app not-ready (decision D: a dev
-app without Supabase keys still serves).
+``GET /health/ready`` is readiness - it pings local Postgres and Redis
+concurrently under a shared time budget and reports each dependency. It returns
+503 (naming the down dependency) if any dependency is in error/timeout, and 200
+otherwise; a ``not_configured`` dependency does NOT make the app not-ready
+(decision D: a dev app without a DB DSN still serves).
 """
 
 from __future__ import annotations
@@ -17,10 +17,9 @@ import asyncio
 from fastapi import APIRouter, Request, Response
 
 from app import __version__
-from app.core.deps import HttpClientDep, RedisDep, SettingsDep
+from app.core.deps import RedisDep, SettingsDep
 from app.core.redis import ping as redis_ping
 from app.db.database import db_ping
-from app.db.supabase import ping as supabase_ping
 from app.schemas.health import DependencyStatus, HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
@@ -44,29 +43,26 @@ async def health_ready(
     request: Request,
     response: Response,
     settings: SettingsDep,
-    http_client: HttpClientDep,
     redis: RedisDep,
 ) -> ReadyResponse:
-    """Readiness: ping Supabase + Redis + local Postgres concurrently in one budget.
+    """Readiness: ping local Postgres + Redis concurrently in one budget.
 
     The pings are already self-bounded and non-raising; ``return_exceptions=True``
     is defense-in-depth - any leaked exception is mapped to an ``error`` status so
-    the probe still returns within its budget and never crashes. The Supabase ping
-    stays until the P6A-8 cutover (the app still reads via Supabase); the Postgres
-    ping is the new local-DB readiness (``not_configured`` in the dual-config
-    window does NOT make the app not-ready - decision D).
+    the probe still returns within its budget and never crashes. A pool whose DSN
+    is unset reports ``not_configured``, which does NOT make the app not-ready
+    (decision D).
     """
     budget = settings.readiness_timeout_seconds
     # Owned by the lifespan; getattr guard keeps the probe safe on a partial startup.
     rls_pool = getattr(request.app.state, "rls_pool", None)
     results = await asyncio.gather(
-        supabase_ping(http_client, settings.supabase_url, budget),
-        redis_ping(redis, budget),
         db_ping(rls_pool, budget),
+        redis_ping(redis, budget),
         return_exceptions=True,
     )
 
-    names = ("supabase", "redis", "postgres")
+    names = ("postgres", "redis")
     dependencies: list[DependencyStatus] = []
     for name, result in zip(names, results, strict=True):
         if isinstance(result, DependencyStatus):

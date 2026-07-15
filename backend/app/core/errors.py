@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
-from app.db.supabase import SupabaseNotConfiguredError
+from app.db.database import DatabaseNotConfiguredError
 from app.logging_setup import get_logger
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -77,11 +77,12 @@ def install_error_handlers(app: FastAPI) -> None:
             request_id=rid,
         )
 
-    @app.exception_handler(SupabaseNotConfiguredError)
-    async def _supabase_not_configured_handler(
-        request: Request, exc: SupabaseNotConfiguredError
+    @app.exception_handler(DatabaseNotConfiguredError)
+    async def _db_not_configured_handler(
+        request: Request, exc: DatabaseNotConfiguredError
     ) -> JSONResponse:
-        # A dependency needs Supabase but it is unconfigured: 503, not a 500.
+        # A dependency needs the local Postgres pool but its DSN is unconfigured:
+        # 503, not a 500.
         return _error_response(
             status_code=503,
             error_type=ErrorCode.SERVICE_UNAVAILABLE,

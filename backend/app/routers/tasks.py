@@ -133,7 +133,10 @@ async def advance_task(code: str, repo: TasksRepoDep, actor: ViewReports) -> Tas
     task = await asyncio.to_thread(repo.get_task_by_code, code)
     if task is None:
         raise _TASK_NOT_FOUND
-    if task.get("assignee_id") != actor.id and not _is_lead(actor):
+    # assignee_id comes back from psycopg as a uuid.UUID; actor.id is a str -> compare
+    # as strings so the assignee is correctly recognised (a raw != would always differ).
+    assignee_id = task.get("assignee_id")
+    if (str(assignee_id) if assignee_id is not None else None) != actor.id and not _is_lead(actor):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only the assignee or a lead may advance"
         )

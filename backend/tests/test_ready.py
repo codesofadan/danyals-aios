@@ -1,4 +1,8 @@
-"""Chunk 7 gate: /health/ready is concurrent, bounded, and non-short-circuiting."""
+"""Chunk 7 gate: /health/ready is concurrent, bounded, and non-short-circuiting.
+
+Readiness pings local Postgres (``db_ping``) + Redis (``redis_ping``) only - the
+Supabase ping was removed at the P6A-8 cutover.
+"""
 
 from __future__ import annotations
 
@@ -17,13 +21,6 @@ from app.schemas.health import DependencyStatus
 
 def _ok(name: str) -> DependencyStatus:
     return DependencyStatus(name=name, status="ok")
-
-
-def _stub_supabase(status: DependencyStatus) -> None:
-    async def _stub(*_args: object, **_kwargs: object) -> DependencyStatus:
-        return status
-
-    health_module.supabase_ping = _stub  # type: ignore[assignment]
 
 
 def _stub_redis(status: DependencyStatus) -> None:
@@ -48,19 +45,16 @@ def _restore_pings() -> Iterator[None]:
     stay hermetic: the app lifespan reads the real ``.env`` (which may carry a
     live DATABASE_URL), but a unit test must not depend on Postgres being up.
     """
-    real_supabase = health_module.supabase_ping
     real_redis = health_module.redis_ping
     real_db = health_module.db_ping
     _stub_db(DependencyStatus(name="postgres", status="not_configured"))
     yield
-    health_module.supabase_ping = real_supabase
     health_module.redis_ping = real_redis
     health_module.db_ping = real_db
 
 
 @pytest.mark.unit
 async def test_ready_ok_when_all_dependencies_ok(client: httpx.AsyncClient) -> None:
-    _stub_supabase(_ok("supabase"))
     _stub_redis(_ok("redis"))
     _stub_db(_ok("postgres"))
     resp = await client.get("/health/ready")
@@ -68,12 +62,12 @@ async def test_ready_ok_when_all_dependencies_ok(client: httpx.AsyncClient) -> N
     body = resp.json()
     assert body["status"] == "ok"
     statuses = {d["name"]: d["status"] for d in body["dependencies"]}
-    assert statuses == {"supabase": "ok", "redis": "ok", "postgres": "ok"}
+    assert statuses == {"postgres": "ok", "redis": "ok"}
 
 
 @pytest.mark.unit
 async def test_ready_503_when_redis_down(client: httpx.AsyncClient) -> None:
-    _stub_supabase(_ok("supabase"))
+    _stub_db(_ok("postgres"))
     _stub_redis(DependencyStatus(name="redis", status="error", detail="connection failed"))
     resp = await client.get("/health/ready")
     assert resp.status_code == 503
@@ -86,14 +80,14 @@ async def test_ready_503_when_redis_down(client: httpx.AsyncClient) -> None:
 @pytest.mark.unit
 async def test_ready_not_configured_does_not_fail(client: httpx.AsyncClient) -> None:
     # decision D: a missing-config dependency is reported but does NOT block readiness
-    _stub_supabase(DependencyStatus(name="supabase", status="not_configured"))
+    _stub_db(DependencyStatus(name="postgres", status="not_configured"))
     _stub_redis(_ok("redis"))
     resp = await client.get("/health/ready")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    supabase_dep = next(d for d in body["dependencies"] if d["name"] == "supabase")
-    assert supabase_dep["status"] == "not_configured"
+    postgres_dep = next(d for d in body["dependencies"] if d["name"] == "postgres")
+    assert postgres_dep["status"] == "not_configured"
 
 
 @pytest.mark.unit
@@ -102,13 +96,13 @@ async def test_ready_maps_leaked_exception_to_error(client: httpx.AsyncClient) -
     async def _boom(*_args: object, **_kwargs: object) -> DependencyStatus:
         raise RuntimeError("should have been caught")
 
-    health_module.supabase_ping = _boom  # type: ignore[assignment]
+    health_module.db_ping = _boom  # type: ignore[assignment]
     _stub_redis(_ok("redis"))
     resp = await client.get("/health/ready")
     assert resp.status_code == 503
     body = resp.json()
-    supabase_dep = next(d for d in body["dependencies"] if d["name"] == "supabase")
-    assert supabase_dep["status"] == "error"
+    postgres_dep = next(d for d in body["dependencies"] if d["name"] == "postgres")
+    assert postgres_dep["status"] == "error"
     assert "should have been caught" not in resp.text
 
 
@@ -132,7 +126,7 @@ async def test_ready_is_bounded_and_reports_sibling(app: FastAPI) -> None:
 
     Uses the REAL redis_ping (self-bounded via asyncio.wait_for) against a redis
     client that sleeps 5x the budget. The endpoint must return at ~budget, report
-    redis as "timeout", and STILL return supabase's real "ok" result.
+    redis as "timeout", and STILL return postgres's real (stubbed "ok") result.
     """
     budget = 0.2
 
@@ -140,7 +134,7 @@ async def test_ready_is_bounded_and_reports_sibling(app: FastAPI) -> None:
         return Settings(_env_file=None, app_env="dev", readiness_timeout_seconds=budget)
 
     app.dependency_overrides[get_settings] = _small_budget_settings
-    _stub_supabase(_ok("supabase"))  # real redis_ping is left in place
+    _stub_db(_ok("postgres"))  # real redis_ping is left in place
 
     from asgi_lifespan import LifespanManager
 
@@ -158,7 +152,7 @@ async def test_ready_is_bounded_and_reports_sibling(app: FastAPI) -> None:
     body = resp.json()
     deps = {d["name"]: d for d in body["dependencies"]}
     assert deps["redis"]["status"] == "timeout"
-    assert deps["supabase"]["status"] == "ok"  # sibling result survived
+    assert deps["postgres"]["status"] == "ok"  # sibling result survived
     # sanitized: no redis URL/password leaked in the timeout detail
     assert "6379" not in resp.text
     assert "redis://" not in resp.text

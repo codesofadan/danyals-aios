@@ -18,13 +18,11 @@ dependencies = [
     "python-dotenv>=1.0",
     "structlog>=24.1",
     "httpx[http2]>=0.27",
-    "certifi>=2024.2.2",       # shared TLS trust store for the per-request Supabase client
     "tenacity>=8.5",
     "celery[redis]>=5.4",
     "redis[hiredis]>=5.0",
-    "supabase>=2.6",          # legacy transport; removed after the local-Postgres cutover (P6A-8)
     "sentry-sdk[fastapi]>=2.8",
-    "pyjwt[crypto]>=2.9",      # verify JWTs (Supabase ES256/RS256 today; own EdDSA after cutover)
+    "pyjwt[crypto]>=2.9",      # sign + verify our own EdDSA (Ed25519) access tokens
     "email-validator>=2.1",    # pydantic EmailStr for user provisioning
     "prometheus-client>=0.20",  # request-rate / latency / in-flight metrics at /metrics
     "psycopg[binary,pool]>=3.2",  # local-Postgres driver + connection pool (RLS + privileged seams)
@@ -41,7 +39,7 @@ dev = [
     "asgi-lifespan>=2.1",
     "ruff>=0.4",
     "mypy>=1.10",
-    "psycopg[binary]>=3.2",   # RLS gate + Supabase Postgres integration tests
+    "psycopg[binary]>=3.2",   # RLS gate + local-Postgres integration tests
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -66,5 +64,5 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "unit: fast tests with no external services",
-    "integration: tests that require Redis and/or Supabase",
+    "integration: tests that require Redis and/or local Postgres",
 ]

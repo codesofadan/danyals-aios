@@ -1,29 +1,30 @@
 """End-to-end HTTP CONTRACT suite - the test class that would have caught the
-empty-JWT critical bug (commit e53fc05).
+empty-identity critical bug (commit e53fc05).
 
 Every case drives the REAL app (``create_app()`` under ``LifespanManager``, so the
-JWKS cache + shared clients exist) over ``httpx.ASGITransport`` with a REAL
-Supabase access token minted by the password grant - i.e. through the ACTUAL
-route dependency graph, not a faked repo and not PostgREST-direct. It asserts
-BOTH the HTTP status AND the response SHAPE (keys + structural types, derived from
-each route's declared Pydantic ``response_model``, recursing into nested models)
-for all 51 endpoints, including the negatives (specialist->POST /clients = 403,
-client->GET /audits = 403, unauthenticated = 401).
+DB pools + shared clients exist) over ``httpx.ASGITransport`` with a REAL, locally
+minted EdDSA access token - i.e. through the ACTUAL route dependency graph, not a
+faked repo and not a direct-DB probe. It asserts BOTH the HTTP status AND the
+response SHAPE (keys + structural types, derived from each route's declared
+Pydantic ``response_model``, recursing into nested models) for all 51 endpoints,
+including the negatives (specialist->POST /clients = 403, client->GET /audits =
+403, unauthenticated = 401).
 
 Why this exists: units inject fake repos (never exercise the real token wiring)
-and the other integration tests drive PostgREST directly (bypass the route graph),
-so NO test ever hit HTTP -> route -> repo -> DB with a real token. On pre-e53fc05
-code the RLS repo factories resolved before ``get_current_user`` set the token, so
-``client_for_user("")`` -> PGRST301 -> 500 on 34 routes. The ``test_contract_matrix``
-below re-hits every RLS-backed route as a real owner and asserts 200; it fails hard
-on that regression class.
+and the other integration tests drive the DB directly (bypass the route graph),
+so NO test otherwise hits HTTP -> route -> repo -> DB with a real token. On
+pre-e53fc05 code the RLS repo factories resolved before ``get_current_user``, so
+the repo opened a connection with no verified identity -> 500 on 34 routes. The
+``test_contract_matrix`` below re-hits every RLS-backed route as a real owner and
+asserts 200; it fails hard on that regression class.
 
-Hermetic: provisions its own principals + seed rows (service_role), overrides the
-Celery enqueuer (no broker dependency) and the artifact store (a temp dir, so the
-download 200-path is exercised without touching ``AUDIT_ARTIFACT_DIR``), restores
-the org-wide cost singletons it writes, and tears everything down. Auto-skips
-unless SUPABASE_URL + service_role + anon keys are configured and migrations
-applied.
+Hermetic: provisions its own principals into LOCAL Postgres + seed rows
+(service_role via ``privileged_connection``), mints its own EdDSA tokens
+(``issue_access_token``), overrides the Celery enqueuer (no broker dependency) and
+the artifact store (a temp dir, so the download 200-path is exercised without
+touching ``AUDIT_ARTIFACT_DIR``), restores the org-wide cost singletons it writes,
+and tears everything down. Auto-skips unless DATABASE_URL + DATABASE_ADMIN_URL and
+the signing keypair are configured and migrations applied.
 """
 
 from __future__ import annotations
@@ -40,11 +41,17 @@ from typing import Any, Literal, Union, cast, get_args, get_origin
 import httpx
 import pytest
 from asgi_lifespan import LifespanManager
+from psycopg.types.json import Json
 from pydantic import BaseModel
-from supabase import create_client
 
 from app.config import get_settings
-from app.db.supabase import get_admin_client
+from app.db.database import (
+    build_admin_pool,
+    build_rls_pool,
+    clear_pools,
+    privileged_connection,
+    set_pools,
+)
 from app.main import create_app
 from app.rbac.matrix import FeatureDef, PermissionDef
 from app.routers.audits import get_artifact_store, get_audit_enqueuer
@@ -66,18 +73,9 @@ from app.schemas.tiers import FeatureAreaResponse, TierClientResponse, TierRespo
 from app.schemas.vault import VaultKeyResponse
 from app.services.audit_artifacts import LocalArtifactStore
 from app.services.provisioning import provision_user
+from app.services.tokens import issue_access_token
 
 pytestmark = pytest.mark.integration
-
-# Superseded by the P6A-7 local auth cutover; reworked in P6A-8. This E2E contract
-# suite provisions + signs in via Supabase and drives the app with Supabase JWTs;
-# after the cutover the app accepts only its OWN EdDSA tokens and provision_user
-# writes to LOCAL Postgres (new signature). The local-token contract rewrite is
-# P6A-8's job; the local login E2E is covered now by test_auth_login.py.
-pytest.skip(
-    "Superseded by P6A-7 local auth cutover; Supabase-token contract suite reworked in P6A-8.",
-    allow_module_level=True,
-)
 
 # A public IP literal: the POST /audits SSRF guard resolves the host off-loop; an
 # IP avoids DNS and never reaches a private range (reused from the portal test).
@@ -219,16 +217,21 @@ def _body(resp: httpx.Response) -> Any:
 @pytest.fixture(scope="module")
 def env() -> Any:
     settings = get_settings()
-    if not (
-        settings.supabase_url
-        and settings.supabase_service_role_key
-        and settings.supabase_anon_key
-    ):
-        pytest.skip("Supabase not configured (SUPABASE_URL + service_role + anon keys)")
+    if not (settings.database_url and settings.database_admin_url):
+        pytest.skip("local Postgres not configured (DATABASE_URL + DATABASE_ADMIN_URL)")
+    if not (settings.jwt_private_key_pem and settings.jwt_public_key_pem):
+        pytest.skip("signing keypair not configured (JWT_PRIVATE_KEY + JWT_PUBLIC_KEY)")
 
-    admin = get_admin_client()
-    anon = create_client(settings.supabase_url, settings.supabase_anon_key.get_secret_value())
     tag = uuid.uuid4().hex[:10]
+    # Build + register the module pools so provision_user / privileged_connection
+    # (which reach the singleton with no pool arg) work during setup + teardown,
+    # independent of the per-test app lifespan (which sets/clears its own pools).
+    rls_pool = build_rls_pool(settings.database_url)
+    admin_pool = build_admin_pool(settings.database_admin_url)
+    assert rls_pool is not None and admin_pool is not None
+    rls_pool.open()
+    admin_pool.open()
+    set_pools(rls_pool, admin_pool)
 
     tokens: dict[str, str] = {}
     staff_uids: dict[str, str] = {}
@@ -239,154 +242,112 @@ def env() -> Any:
     cleanup_vault: list[str] = []
     artifact_root = tempfile.mkdtemp(prefix="aios-contract-artifacts-")
 
-    def _signin(email: str) -> str:
-        session = anon.auth.sign_in_with_password({"email": email, "password": _PASSWORD})
-        assert session.session is not None, f"sign-in failed for {email}"
-        return session.session.access_token
-
-    def _inserted(resp: Any) -> dict[str, Any]:
-        """The first inserted row from a supabase insert (loosely typed .data)."""
-        return cast("dict[str, Any]", resp.data[0])
+    def _token(uid: str, role: str) -> str:
+        return issue_access_token(uid, cast("Any", role), settings=settings)
 
     try:
         # --- staff principals (all 6 governance roles minus client) ---------
         for role in _STAFF_ROLES:
-            email = f"contract-{role}-{tag}@example.com"
             row = provision_user(
-                admin,
-                email=email,
+                email=f"contract-{role}-{tag}@example.com",
                 password=_PASSWORD,
                 name=f"Contract {role.title()}",
-                role=role,  # type: ignore[arg-type]
+                role=cast("Any", role),
+                username=f"contract_{role}_{tag}",
                 template_key="super" if role == "owner" else None,
             )
-            staff_uids[role] = row["id"]
-            cleanup_uids.append(row["id"])
-            tokens[role] = _signin(email)
+            staff_uids[role] = str(row["id"])
+            cleanup_uids.append(str(row["id"]))
+            tokens[role] = _token(str(row["id"]), role)
 
-        # --- seed tenant T (service_role bypasses RLS) ----------------------
-        client_row = (
-            admin.table("clients")
-            .insert(
-                {
-                    "name": "Contract Test Co",
-                    "industry": "Testing",
-                    "since_year": 2020,
-                    "tier": "Starter",
-                    "status": "trial",
-                    "delivery_tier": "free",
-                    "mrr": 1200,
-                    "contact_name": "Jane Contact",
-                    "contact_role": "CMO",
-                    "contact_email": "jane@contract-test.example",
-                    "contact_color": "#7B69EE",
-                    "portal_admin": "jane@contract-test.example",
-                    "portal_seats": 3,
-                    "portal_two_fa": False,
-                }
+        with privileged_connection() as cur:
+            # --- seed tenant T (service_role bypasses RLS) ------------------
+            cur.execute(
+                "insert into public.clients "
+                "(name, industry, since_year, tier, status, delivery_tier, mrr, "
+                " contact_name, contact_role, contact_email, contact_color, "
+                " portal_admin, portal_seats, portal_two_fa) "
+                "values (%s,'Testing',2020,'Starter','trial','free',1200,"
+                "'Jane Contact','CMO','jane@contract-test.example','#7B69EE',"
+                "'jane@contract-test.example',3,false) returning id",
+                ("Contract Test Co",),
             )
-            .execute()
-        )
-        tenant_id = str(_inserted(client_row)["id"])
-        cleanup_clients.append(tenant_id)
+            tenant_id = str(cur.fetchone()["id"])
+            cleanup_clients.append(tenant_id)
 
-        # --- seed site S ----------------------------------------------------
-        site_row = (
-            admin.table("sites")
-            .insert({"client_id": tenant_id, "domain": "contract-test.example", "cms_type": "wordpress"})
-            .execute()
-        )
-        site_id = str(_inserted(site_row)["id"])
+            # --- seed site S --------------------------------------------------
+            cur.execute(
+                "insert into public.sites (client_id, domain, cms_type) "
+                "values (%s, 'contract-test.example', 'wordpress') returning id",
+                (tenant_id,),
+            )
+            site_id = str(cur.fetchone()["id"])
 
-        # --- portal client principal (tenant pinned) ------------------------
-        client_email = f"contract-client-{tag}@example.com"
+            # --- seed audit A (queued; no artifacts -> the 404 branch) -------
+            cur.execute(
+                "insert into public.audits (client_id, client_name, url, types, tier, status) "
+                "values (%s, 'Contract Test Co', %s, %s, 'free', 'queued') returning id",
+                (tenant_id, _PUBLIC_URL, ["technical", "actionable"]),
+            )
+            audit_a_id = str(cur.fetchone()["id"])
+            cleanup_audits.append(audit_a_id)
+
+            # --- seed audit A2 (done + artifacts on disk -> the 200 download) -
+            audit_a2_id = str(uuid.uuid4())  # precomputed so pdf/json keys embed it
+            (artifact_dir := Path(artifact_root) / audit_a2_id).mkdir(parents=True, exist_ok=True)
+            (artifact_dir / "report.pdf").write_bytes(b"%PDF-1.4 contract-test\n%%EOF\n")
+            (artifact_dir / "findings.json").write_text('{"findings": []}', encoding="utf-8")
+            cur.execute(
+                "insert into public.audits "
+                "(id, client_id, client_name, url, types, tier, status, score, scores, "
+                " runtime_seconds, pdf_path, json_path) "
+                "values (%s, %s, 'Contract Test Co', %s, %s, 'free', 'done', 88, %s, 372, %s, %s)",
+                (
+                    audit_a2_id, tenant_id, _PUBLIC_URL, ["technical"],
+                    Json({"overall": 88, "technical": 90}),
+                    f"{audit_a2_id}/report.pdf", f"{audit_a2_id}/findings.json",
+                ),
+            )
+            cleanup_audits.append(audit_a2_id)
+
+            # --- seed task J (content_sprint, assigned to the specialist) ----
+            cur.execute(
+                "insert into public.tasks "
+                "(title, client_id, client_name, type, assignee_id, created_by, priority, status) "
+                "values ('Contract seed task', %s, 'Contract Test Co', 'content_sprint', "
+                "%s, %s, 'med', 'todo') returning code",
+                (tenant_id, staff_uids["specialist"], staff_uids["owner"]),
+            )
+            task_code = str(cur.fetchone()["code"])
+            cleanup_tasks.append(task_code)
+
+            # --- one cost_log + one activity_log row so GET /cost/log and GET
+            #     /activity validate their response models against a REAL item. -
+            cur.execute(
+                "insert into public.cost_log "
+                "(client_id, client_name, job_id, job_type, provider, cost, cached) "
+                "values (%s, 'Contract Test Co', 'seed', 'audit', 'Serper', 1.5, false) returning id",
+                (tenant_id,),
+            )
+            cost_log_id = str(cur.fetchone()["id"])
+            cur.execute(
+                "insert into public.activity_log "
+                "(actor_id, actor_name, actor_init, kind, action, target) "
+                "values (%s, 'Contract Owner', 'CO', 'audit', 'seeded the contract suite', 'contract')",
+                (staff_uids["owner"],),
+            )
+
+        # --- portal client principal (tenant pinned) --------------------------
         client_user = provision_user(
-            admin,
-            email=client_email,
+            email=f"contract-client-{tag}@example.com",
             password=_PASSWORD,
             name="Contract Client",
             role="client",
+            username=f"contract_client_{tag}",
             client_id=tenant_id,
         )
-        cleanup_uids.append(client_user["id"])
-        tokens["client"] = _signin(client_email)
-
-        # --- seed audit A (queued; no artifacts -> exercises the 404 branch) -
-        audit_a = (
-            admin.table("audits")
-            .insert(
-                {
-                    "client_id": tenant_id,
-                    "client_name": "Contract Test Co",
-                    "url": _PUBLIC_URL,
-                    "types": ["technical", "actionable"],
-                    "tier": "free",
-                    "status": "queued",
-                }
-            )
-            .execute()
-        )
-        audit_a_id = str(_inserted(audit_a)["id"])
-        cleanup_audits.append(audit_a_id)
-
-        # --- seed audit A2 (done + artifacts on disk -> the 200 download path)
-        audit_a2_id = str(uuid.uuid4())  # precomputed so pdf/json keys embed it
-        (artifact_dir := Path(artifact_root) / audit_a2_id).mkdir(parents=True, exist_ok=True)
-        (artifact_dir / "report.pdf").write_bytes(b"%PDF-1.4 contract-test\n%%EOF\n")
-        (artifact_dir / "findings.json").write_text('{"findings": []}', encoding="utf-8")
-        admin.table("audits").insert(
-            {
-                "id": audit_a2_id,
-                "client_id": tenant_id,
-                "client_name": "Contract Test Co",
-                "url": _PUBLIC_URL,
-                "types": ["technical"],
-                "tier": "free",
-                "status": "done",
-                "score": 88,
-                "scores": {"overall": 88, "technical": 90},
-                "runtime_seconds": 372,
-                "pdf_path": f"{audit_a2_id}/report.pdf",
-                "json_path": f"{audit_a2_id}/findings.json",
-            }
-        ).execute()
-        cleanup_audits.append(audit_a2_id)
-
-        # --- seed task J (content_sprint, assigned to the specialist) -------
-        task_row = (
-            admin.table("tasks")
-            .insert(
-                {
-                    "title": "Contract seed task",
-                    "client_id": tenant_id,
-                    "client_name": "Contract Test Co",
-                    "type": "content_sprint",
-                    "assignee_id": staff_uids["specialist"],
-                    "created_by": staff_uids["owner"],
-                    "priority": "med",
-                    "status": "todo",
-                }
-            )
-            .execute()
-        )
-        task_code = str(_inserted(task_row)["code"])
-        cleanup_tasks.append(task_code)
-
-        # --- seed one cost_log + one activity_log row so GET /cost/log and
-        #     GET /activity validate CostEntryResponse / ActivityResponse against
-        #     a REAL item (both tables are otherwise empty in this suite). --------
-        cost_log_id = str(
-            _inserted(
-                admin.table("cost_log").insert(
-                    {"client_id": tenant_id, "client_name": "Contract Test Co", "job_id": "seed",
-                     "job_type": "audit", "provider": "Serper", "cost": 1.5, "cached": False}
-                ).execute()
-            )["id"]
-        )
-        admin.table("activity_log").insert(
-            {"actor_id": staff_uids["owner"], "actor_name": "Contract Owner", "actor_init": "CO",
-             "kind": "audit", "action": "seeded the contract suite", "target": "contract"}
-        ).execute()
+        cleanup_uids.append(str(client_user["id"]))
+        tokens["client"] = _token(str(client_user["id"]), "client")
 
         # --- the app under test: real settings (NO conftest override), Celery
         #     enqueuer stubbed, artifact store pointed at the temp dir. --------
@@ -396,7 +357,7 @@ def env() -> Any:
 
         ctx = {
             "app": app,
-            "admin": admin,
+            "admin_pool": admin_pool,
             "tokens": tokens,
             "staff_uids": staff_uids,
             "ids": {
@@ -417,29 +378,31 @@ def env() -> Any:
         }
         yield ctx
     finally:
-        # Teardown in FK-safe order. audits/tasks SET NULL on client delete (they
-        # orphan, not cascade) so remove them explicitly; clients delete cascades
-        # sites/budgets/portal-user public.users rows; deleting an auth user
-        # cascades its public.users row (+ grants).
-        def _safe(fn: Any) -> None:
-            with contextlib.suppress(Exception):  # best-effort cleanup
-                fn()
+        # Teardown in FK-safe order. audits/tasks SET NULL on client delete so
+        # remove them explicitly; deleting an auth user cascades its public.users
+        # row (+ grants + portal user); clients delete cascades sites/budgets.
+        def _safe(sql: str, params: tuple[Any, ...]) -> None:
+            with contextlib.suppress(Exception), privileged_connection(pool=admin_pool) as cur:
+                cur.execute(sql, params)
 
         for code in cleanup_tasks:
-            _safe(lambda code=code: admin.table("tasks").delete().eq("code", code).execute())
+            _safe("delete from public.tasks where code = %s", (code,))
         for aid in cleanup_audits:
-            _safe(lambda aid=aid: admin.table("audits").delete().eq("id", aid).execute())
+            _safe("delete from public.audits where id = %s", (aid,))
         for kid in cleanup_vault:
-            _safe(lambda kid=kid: admin.table("vault_keys").delete().eq("id", kid).execute())
-        # activity_log is append-only; every Group B mutation appends a row via
-        # record_activity. Remove the seed row + everything the test actors wrote
-        # so reruns do not accumulate orphan feed entries.
-        _safe(lambda: admin.table("cost_log").delete().eq("id", cost_log_id).execute())
-        _safe(lambda: admin.table("activity_log").delete().in_("actor_id", cleanup_uids).execute())
-        for cid in cleanup_clients:
-            _safe(lambda cid=cid: admin.table("clients").delete().eq("id", cid).execute())
+            _safe("delete from public.vault_keys where id = %s", (kid,))
+        # activity_log is append-only; every Group B mutation appends a row. Remove
+        # everything the test actors wrote so reruns do not accumulate feed rows.
+        _safe("delete from public.cost_log where id = %s", (cost_log_id,))
+        if cleanup_uids:
+            _safe("delete from public.activity_log where actor_id = any(%s)", (cleanup_uids,))
         for uid in cleanup_uids:
-            _safe(lambda uid=uid: admin.auth.admin.delete_user(uid))
+            _safe("delete from auth.users where id = %s", (uid,))
+        for cid in cleanup_clients:
+            _safe("delete from public.clients where id = %s", (cid,))
+        clear_pools()
+        rls_pool.close()
+        admin_pool.close()
         shutil.rmtree(artifact_root, ignore_errors=True)
 
 
@@ -678,15 +641,16 @@ async def test_admin_user_create_and_escalation_guard(env: Any) -> None:
     email = f"contract-made-{env['tag']}@example.com"
     async with LifespanManager(app):
         r = await _req(app, "POST", "/api/v1/admin/users", env["tokens"]["owner"],
-                       {"email": email, "name": "Made By API", "password": _PASSWORD, "role": "viewer"})
+                       {"email": email, "username": f"contract_made_{env['tag']}",
+                        "name": "Made By API", "password": _PASSWORD, "role": "viewer"})
         assert r.status_code == 201, r.text
         assert not shape_errors(_body(r), MemberResponse)
         env["cleanup_uids"].append(_body(r)["id"])
 
         # An admin may NOT mint an owner/admin (handler-layer privilege guard).
         r = await _req(app, "POST", "/api/v1/admin/users", env["tokens"]["admin"],
-                       {"email": f"esc-{env['tag']}@example.com", "name": "Esc",
-                        "password": _PASSWORD, "role": "owner"})
+                       {"email": f"esc-{env['tag']}@example.com", "username": f"contract_esc_{env['tag']}",
+                        "name": "Esc", "password": _PASSWORD, "role": "owner"})
         assert r.status_code == 403, r.text
 
 
@@ -695,7 +659,8 @@ async def test_portal_user_creation(env: Any) -> None:
     email = f"contract-portal-{env['tag']}@example.com"
     async with LifespanManager(app):
         r = await _req(app, "POST", f"/api/v1/clients/{t}/portal-users", env["tokens"]["owner"],
-                       {"email": email, "name": "Portal Login", "password": _PASSWORD})
+                       {"email": email, "username": f"contract_portal_{env['tag']}",
+                        "name": "Portal Login", "password": _PASSWORD})
         assert r.status_code == 201, r.text
         assert not shape_errors(_body(r), MemberResponse)
         env["cleanup_uids"].append(_body(r)["id"])
@@ -757,7 +722,8 @@ async def test_cost_writes_with_restore(env: Any) -> None:
             # Restore the org-wide singletons this test mutated + drop the budget row.
             await _req(app, "PUT", "/api/v1/cost/dial/keywords", owner, {"mode": orig_keywords})
             await _req(app, "PUT", "/api/v1/cost/spend-stop", owner, {"daily_stop": orig_stop, "halted": orig_halt})
-            env["admin"].table("client_budgets").delete().eq("client_id", t).execute()
+            with privileged_connection(pool=env["admin_pool"]) as cur:
+                cur.execute("delete from public.client_budgets where client_id = %s", (t,))
 
 
 async def test_staff_audit_create_and_tier_update(env: Any) -> None:

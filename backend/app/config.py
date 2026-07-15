@@ -16,7 +16,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 # Config that must be present for the app to actually function in production.
-_REQUIRED_IN_PROD = ("supabase_url", "supabase_service_role_key", "supabase_anon_key")
+# The data plane (both DB pools), the token-signing keypair, and the vault master
+# key: without any one of these the app cannot authenticate, read/write, or seal.
+_REQUIRED_IN_PROD = (
+    "database_url",
+    "database_admin_url",
+    "jwt_private_key",
+    "jwt_public_key",
+    "vault_master_key",
+)
 
 
 class ConfigError(RuntimeError):
@@ -37,33 +45,16 @@ class Settings(BaseSettings):
     api_cors_origins: str = "http://localhost:3000"
     trusted_hosts: str = "*"
 
-    # --- Supabase (server-side). service_role bypasses RLS -> server-only, never logged. ---
-    supabase_url: str | None = None
-    supabase_service_role_key: SecretStr | None = None
-    supabase_anon_key: SecretStr | None = None
-
-    # --- Auth (JWT verification). Supabase signs access tokens with asymmetric
-    # keys (ES256/RS256); the API verifies them against the project's JWKS. No
-    # shared secret is needed. ---
-    supabase_jwt_aud: str = "authenticated"
-    supabase_jwks_url: str | None = None  # defaults to <supabase_url>/auth/v1/.well-known/jwks.json
-
-    # --- Local Postgres (P6A migration; ADDITIVE dual-config window). These sit
-    # alongside SUPABASE_* and are OPTIONAL until the cutover (P6A-8) promotes them
-    # into _REQUIRED_IN_PROD. Nothing here is wired into the running app yet. ---
+    # --- Local Postgres (the data plane). Two DSNs, one per trust level. ---
     # Authenticated-role DSN -> the per-request RLS pool (RLS binds this connection).
     database_url: str | None = None
     # service_role DSN -> the privileged pool (BYPASSRLS); server-only, never logged.
     database_admin_url: str | None = None
 
-    # --- Local auth (own EdDSA JWT; replaces networked JWKS at cutover). API-only
-    # private key SIGNS at login; the public key VERIFIES. ---
+    # --- Local auth (own EdDSA JWT). API-only private key SIGNS at login; the
+    # public key VERIFIES every request. No networked JWKS, no shared secret. ---
     jwt_private_key: SecretStr | None = None  # Ed25519 PEM, API-only (signs access tokens)
     jwt_public_key: str | None = None  # Ed25519 PEM (verifies access tokens)
-    # NOTE: `jwt_issuer` is already a DERIVED PROPERTY (from supabase_url) that
-    # core/auth.py still imports for the live Supabase path. To avoid shadowing it
-    # (a field would break that property + mypy), the local issuer is a distinct
-    # field. At cutover it becomes the sole issuer and the property is retired.
     local_jwt_issuer: str = "aios"  # expected `iss` on our own EdDSA tokens
     jwt_audience: str = "authenticated"  # expected `aud` on our own EdDSA tokens
     # Access-token lifetime (seconds). Short by default: a leaked token expires fast.
@@ -120,20 +111,6 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
-
-    @property
-    def jwks_url(self) -> str | None:
-        """Resolved JWKS endpoint for verifying Supabase access tokens."""
-        if self.supabase_jwks_url:
-            return self.supabase_jwks_url
-        if self.supabase_url:
-            return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
-        return None
-
-    @property
-    def jwt_issuer(self) -> str | None:
-        """Expected ``iss`` claim on Supabase access tokens."""
-        return f"{self.supabase_url.rstrip('/')}/auth/v1" if self.supabase_url else None
 
     @staticmethod
     def _pem(raw: str | None) -> str | None:
