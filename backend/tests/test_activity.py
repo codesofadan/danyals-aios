@@ -6,7 +6,8 @@ Covers: log_activity writes a snapshotted row, record_activity is best-effort
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,31 +22,21 @@ from app.services.activity import log_activity, record_activity
 pytestmark = pytest.mark.unit
 
 
-class _Exec:
-    def __init__(self, data: Any) -> None:
-        self.data = data
+class _FakeCursor:
+    """Captures the (query, params) of each ``execute`` so a test can assert on
+    the snapshotted row without a real privileged connection."""
 
-
-class _Table:
-    def __init__(self, store: list[dict[str, Any]]) -> None:
-        self._store = store
-        self._payload: Any = None
-
-    def insert(self, row: dict[str, Any]) -> _Table:
-        self._payload = row
-        return self
-
-    def execute(self) -> _Exec:
-        self._store.append(self._payload)
-        return _Exec([self._payload])
-
-
-class _FakeAdmin:
     def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
+        self.calls: list[tuple[Any, Any]] = []
 
-    def table(self, _name: str) -> _Table:
-        return _Table(self.rows)
+    def execute(self, query: Any, params: Any = None) -> None:
+        self.calls.append((query, params))
+
+
+@contextmanager
+def _fake_privileged(cur: _FakeCursor) -> Iterator[_FakeCursor]:
+    """Stand-in for ``privileged_connection()`` that yields a capturing cursor."""
+    yield cur
 
 
 def _user(role: str = "owner") -> CurrentUser:
@@ -56,36 +47,42 @@ def _user(role: str = "owner") -> CurrentUser:
 
 
 @pytest.mark.unit
-def test_log_activity_snapshots_actor() -> None:
-    admin = _FakeAdmin()
+def test_log_activity_snapshots_actor(monkeypatch: pytest.MonkeyPatch) -> None:
+    cur = _FakeCursor()
+    monkeypatch.setattr(
+        "app.services.activity.privileged_connection", lambda: _fake_privileged(cur)
+    )
     log_activity(
-        admin,  # type: ignore[arg-type]
         actor_id="u-danyal", actor_name="Danyal Ahmed", actor_color="#7B69EE",
         kind="client", action="created client", target="Verde Cafe",
     )
-    row = admin.rows[0]
-    assert row["actor_init"] == "DA"  # derived initials
-    assert row["kind"] == "client"
-    assert row["target"] == "Verde Cafe"
+    _query, params = cur.calls[0]
+    assert params["actor_init"] == "DA"  # derived initials
+    assert params["kind"] == "client"
+    assert params["target"] == "Verde Cafe"
 
 
 @pytest.mark.unit
 async def test_record_activity_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    # get_admin_client raising must be swallowed (logging can't break a mutation).
+    # An unreachable/unconfigured privileged pool raises, and it must be swallowed
+    # (logging can't break the mutation it records).
     def _boom() -> Any:
-        raise RuntimeError("no supabase")
+        raise RuntimeError("no privileged pool")
 
-    monkeypatch.setattr("app.services.activity.get_admin_client", _boom)
+    monkeypatch.setattr("app.services.activity.privileged_connection", _boom)
     await record_activity(_user(), kind="client", action="created client", target="X")  # no raise
 
 
 @pytest.mark.unit
-async def test_record_activity_writes_via_admin(monkeypatch: pytest.MonkeyPatch) -> None:
-    admin = _FakeAdmin()
-    monkeypatch.setattr("app.services.activity.get_admin_client", lambda: admin)
+async def test_record_activity_writes_via_privileged(monkeypatch: pytest.MonkeyPatch) -> None:
+    cur = _FakeCursor()
+    monkeypatch.setattr(
+        "app.services.activity.privileged_connection", lambda: _fake_privileged(cur)
+    )
     await record_activity(_user(), kind="member", action="provisioned member", target="New Hire", meta="viewer")
-    assert admin.rows[0]["action"] == "provisioned member"
-    assert admin.rows[0]["meta"] == "viewer"
+    _query, params = cur.calls[0]
+    assert params["action"] == "provisioned member"
+    assert params["meta"] == "viewer"
 
 
 class _FakeRepo:

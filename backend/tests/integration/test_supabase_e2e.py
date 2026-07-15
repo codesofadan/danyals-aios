@@ -1,9 +1,11 @@
 """Integration: the full shared-base flow against a real Supabase project.
 
-Skips unless SUPABASE_URL + service_role + anon keys are set AND the migrations
-have been applied. Exercises: provision -> login (JWT) -> RLS-scoped reads ->
-create client -> budget -> cost-gate blocks over-cap -> activity logged ->
-RLS denies a non-provisioned token. Cleans up everything it creates.
+SUPERSEDED by the Part 6 psycopg migration and skipped (see the test body): the
+cost + activity writes it asserts on now target the LOCAL Postgres data plane
+(``privileged_connection``, P6A-5) while this whole-stack flow still provisions
+and authenticates against Supabase cloud -- the two no longer share a database,
+so the over-cap / activity-feed assertions can no longer hold. It is reworked or
+removed with provisioning (P6A-7) and the ``supabase.py`` deletion (P6A-8).
 """
 
 from __future__ import annotations
@@ -39,6 +41,12 @@ def _require_supabase() -> Any:
 
 @pytest.mark.integration
 def test_shared_base_end_to_end() -> None:
+    pytest.skip(
+        "Superseded by P6A-5: cost + activity writes moved to the local Postgres "
+        "data plane (privileged_connection), while this flow still provisions and "
+        "authenticates against Supabase cloud -- the two data planes no longer share "
+        "a database. Reworked/removed with provisioning (P6A-7) + supabase.py (P6A-8)."
+    )
     settings = _require_supabase()
     admin = get_admin_client()
     anon = create_client(settings.supabase_url, settings.supabase_anon_key.get_secret_value())
@@ -71,7 +79,7 @@ def test_shared_base_end_to_end() -> None:
         ).execute()
         admin.table("cost_dial").upsert({"feature_key": "tech_audit", "mode": "api"}, on_conflict="feature_key").execute()
 
-        gate = CostGate(SupabaseCostStore(admin), _NoCache())
+        gate = CostGate(SupabaseCostStore(), _NoCache())
         decision = gate.evaluate(
             GateContext(feature_key="tech_audit", client_id=client_id, provider="DataForSEO", estimated_cost=5.0)
         )
@@ -79,7 +87,7 @@ def test_shared_base_end_to_end() -> None:
 
         # activity is written server-side and visible to staff via RLS
         log_activity(
-            admin, actor_id=user_id, actor_name="E2E Admin", actor_color="#000",
+            actor_id=user_id, actor_name="E2E Admin", actor_color="#000",
             kind="client", action="created client", target="E2E Client",
         )
         feed = me.table("activity_log").select("*").limit(5).execute().data

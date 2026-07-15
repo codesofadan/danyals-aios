@@ -10,7 +10,6 @@ client is 403'd out of the staff /audits namespace.
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -20,7 +19,7 @@ from fastapi import FastAPI
 from app.core.auth import CurrentUser, get_current_user
 from app.db.portal_repo import get_portal_repo
 from app.routers.audits import get_artifact_store, get_audit_enqueuer
-from app.routers.portal import get_portal_admin, get_portal_audit_loader
+from app.routers.portal import get_portal_audit_inserter, get_portal_audit_loader
 
 pytestmark = pytest.mark.unit
 
@@ -76,27 +75,16 @@ class FakePortalRepo:
         return list(self.sites)
 
 
-class _T:
-    def __init__(self, admin: FakeAdmin) -> None:
-        self._admin = admin
-        self._row: dict[str, Any] | None = None
+class FakeInserter:
+    """Stand-in for the privileged ``insert_audit_row`` dependency: records the
+    row and returns the persisted representation the DB would echo back."""
 
-    def insert(self, row: dict[str, Any]) -> _T:
-        self._row = row
-        return self
-
-    def execute(self) -> SimpleNamespace:
-        assert self._row is not None
-        self._admin.inserted.append(self._row)
-        return SimpleNamespace(data=[{"id": "aud-new", "created_at": "2026-07-14T10:00:00Z", "scores": {}, **self._row}])
-
-
-class FakeAdmin:
     def __init__(self) -> None:
         self.inserted: list[dict[str, Any]] = []
 
-    def table(self, _name: str) -> _T:
-        return _T(self)
+    def __call__(self, row: dict[str, Any]) -> dict[str, Any]:
+        self.inserted.append(row)
+        return {"id": "aud-new", "created_at": "2026-07-14T10:00:00Z", "scores": {}, **row}
 
 
 @pytest.fixture
@@ -182,15 +170,15 @@ async def test_dashboard_shape(
 async def test_create_pins_tenant(
     app: FastAPI, client: httpx.AsyncClient, enqueued: list[str], wire: Any
 ) -> None:
-    admin = FakeAdmin()
-    app.dependency_overrides[get_portal_admin] = lambda: admin
+    inserter = FakeInserter()
+    app.dependency_overrides[get_portal_audit_inserter] = lambda: inserter
     wire(_client_user("cl-A"))
     resp = await client.post(
         "/api/v1/portal/audits",
         json={"url": _PUBLIC_URL, "tier": "Free", "types": ["technical"], "client_id": "cl-EVIL"},
     )
     assert resp.status_code == 201, resp.text
-    assert admin.inserted[0]["client_id"] == "cl-A"  # body's cl-EVIL ignored
+    assert inserter.inserted[0]["client_id"] == "cl-A"  # body's cl-EVIL ignored
     assert set(resp.json()) == _SAFE_AUDIT_KEYS
     assert enqueued == ["aud-new"]
 

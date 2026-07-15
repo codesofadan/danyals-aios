@@ -8,12 +8,14 @@ The trust rules that make this safe:
 * **Paid gating (D5).** A client may run a Paid audit only when its
   ``delivery_tier`` is not ``free``; a ``free`` client is Free-only. The delivery
   tier is read from the client's OWN row through the RLS ``portal_client`` view.
-* **Insert via the service_role admin client (D6).** Clients have no base-table
-  SELECT policy, so a user-JWT insert could not read its row back; the admin
-  path mirrors the worker/provisioning pattern and pins ``client_id`` explicitly.
+* **Insert on the privileged path (D6).** Clients have no base-table SELECT
+  policy, so a user-JWT insert could not read its row back; the insert runs on
+  ``privileged_connection`` (service_role, BYPASSRLS) -- mirroring the worker --
+  and pins ``client_id`` explicitly. The privileged inserter is injected so the
+  router can wire the real psycopg write while unit tests pass a fake.
 
-All Supabase / DNS calls are blocking and offloaded with ``asyncio.to_thread`` so
-the event loop is never blocked. Gating failures raise ``HTTPException`` for the
+All DB / DNS calls are blocking and offloaded with ``asyncio.to_thread`` so the
+event loop is never blocked. Gating failures raise ``HTTPException`` for the
 router to surface unchanged.
 """
 
@@ -21,29 +23,44 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from fastapi import HTTPException, status
-from supabase import Client
+from psycopg import sql
 
 from app.core.auth import CurrentClient
 from app.core.security import PrivateAddressError, validate_public_host
+from app.db.database import privileged_connection
 from app.schemas.audits import PortalAuditCreate, tier_to_db
 from app.services.activity import record_activity
 
+# The seam the create flow inserts through: a row dict in, the persisted row out.
+AuditInserter = Callable[[dict[str, Any]], dict[str, Any]]
 
-def _insert_audit(admin: Client, row: dict[str, Any]) -> dict[str, Any]:
-    """Insert one audit row via the service_role client (blocking)."""
-    resp = admin.table("audits").insert(row).execute()
-    rows = cast("list[dict[str, Any]]", resp.data or [])
-    if not rows:  # pragma: no cover - insert returns the representation
+
+def insert_audit_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Insert one audit row via ``privileged_connection`` and return it (blocking).
+
+    Runs on the service_role (BYPASSRLS) path because clients have no base-table
+    SELECT policy. Column names come from the row's keys as static
+    ``sql.Identifier``s; every value is a bound parameter.
+    """
+    cols = list(row.keys())
+    stmt = sql.SQL("insert into public.audits ({cols}) values ({vals}) returning *").format(
+        cols=sql.SQL(", ").join(map(sql.Identifier, cols)),
+        vals=sql.SQL(", ").join([sql.Placeholder()] * len(cols)),
+    )
+    with privileged_connection() as cur:
+        cur.execute(stmt, list(row.values()))
+        inserted = cur.fetchone()
+    if inserted is None:  # pragma: no cover - ``returning *`` always yields the row
         raise RuntimeError("audit row could not be read back after insert")
-    return rows[0]
+    return inserted
 
 
 async def create_client_audit(
     *,
-    admin: Client,
+    insert_audit: AuditInserter,
     reader: Any,
     scoped: CurrentClient,
     body: PortalAuditCreate,
@@ -51,8 +68,9 @@ async def create_client_audit(
 ) -> dict[str, Any]:
     """Create + enqueue an audit for the caller's own client. Returns the row.
 
-    ``reader`` is the RLS-scoped ``PortalRepo`` (used only to read the caller's
-    own client row for the name snapshot + delivery-tier gate).
+    ``insert_audit`` is the privileged (service_role) inserter; ``reader`` is the
+    RLS-scoped ``PortalRepo`` (used only to read the caller's own client row for
+    the name snapshot + delivery-tier gate).
     """
     # Free tier makes zero paid-provider spend: reject paid audit types up front
     # (same base rule as the staff endpoint).
@@ -84,8 +102,7 @@ async def create_client_audit(
         ) from exc
 
     row = await asyncio.to_thread(
-        _insert_audit,
-        admin,
+        insert_audit,
         {
             "client_id": scoped.client_id,  # pinned server-side; never from the body
             "client_name": client_row.get("name", ""),

@@ -9,9 +9,10 @@ stuck ``running``. The task never re-raises (with ``task_acks_late`` a raised
 exception would redeliver the job and run the engine twice = double spend); it
 always acks and returns a small result dict.
 
-The DB + cost writes go through an injected ``AuditStore`` (service_role admin
-client, which bypasses RLS by design) so the core is unit-tested with a fake
-store and a mocked engine runner - no Supabase, no real subprocess.
+The DB + cost writes go through an injected ``AuditStore`` (backed by the
+privileged ``service_role`` psycopg connection, which bypasses RLS by design) so
+the core is unit-tested with a fake store and a mocked engine runner - no DB, no
+real subprocess.
 """
 
 from __future__ import annotations
@@ -19,8 +20,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from psycopg import sql
+from psycopg.types.json import Jsonb
+
 from app.config import Settings, get_settings
-from app.db.supabase import get_admin_client
+from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
 from app.services.cost_gate import GateContext
@@ -39,7 +43,7 @@ _ERROR_MAX = 500  # cap the stored error string; it is server-side only
 
 
 class AuditStore(Protocol):
-    """The DB/cost seam the task needs (backed by the service_role client)."""
+    """The DB/cost seam the task needs (backed by the privileged connection)."""
 
     def load(self, audit_id: str) -> dict[str, Any] | None: ...
     def update(self, audit_id: str, fields: dict[str, Any]) -> None: ...
@@ -51,18 +55,30 @@ class _Runner(Protocol):
 
 
 class SupabaseAuditStore:
-    """Concrete ``AuditStore`` over the service_role admin client."""
+    """Concrete ``AuditStore`` over ``privileged_connection`` (service_role, BYPASSRLS).
 
-    def __init__(self, admin: Any) -> None:
-        self._admin = admin
+    Stateless: each method opens its own privileged connection, so the store
+    takes no construction arguments.
+    """
 
     def load(self, audit_id: str) -> dict[str, Any] | None:
-        resp = self._admin.table("audits").select("*").eq("id", audit_id).limit(1).execute()
-        rows = resp.data or []
-        return rows[0] if rows else None
+        with privileged_connection() as cur:
+            cur.execute("select * from public.audits where id = %s limit 1", (audit_id,))
+            return cur.fetchone()
 
     def update(self, audit_id: str, fields: dict[str, Any]) -> None:
-        self._admin.table("audits").update(fields).eq("id", audit_id).execute()
+        if not fields:
+            return
+        # Dynamic assignment list: column names as static ``sql.Identifier``s,
+        # values bound. A dict value (``scores``) is wrapped for the jsonb column;
+        # a list (none here) would adapt to a Postgres array automatically.
+        assignments = sql.SQL(", ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(col)) for col in fields
+        )
+        stmt = sql.SQL("update public.audits set {sets} where id = %s").format(sets=assignments)
+        params = [Jsonb(v) if isinstance(v, dict) else v for v in fields.values()]
+        with privileged_connection() as cur:
+            cur.execute(stmt, [*params, audit_id])
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         ctx = GateContext(
@@ -74,7 +90,7 @@ class SupabaseAuditStore:
             job_type=_COST_JOB_TYPE,
             client_name=row.get("client_name", ""),
         )
-        SupabaseCostStore(self._admin).record_cost(ctx, cost, cached=False)
+        SupabaseCostStore().record_cost(ctx, cost, cached=False)
 
 
 def _utcnow() -> datetime:
@@ -197,7 +213,7 @@ def execute_audit(
 def run_audit_job(audit_id: str) -> dict[str, Any]:
     """Entry point: wire the concrete store + settings and run the job."""
     settings = get_settings()
-    store = SupabaseAuditStore(get_admin_client())
+    store = SupabaseAuditStore()
     return execute_audit(
         store, settings, audit_id, artifacts=local_store_from_settings(settings)
     )

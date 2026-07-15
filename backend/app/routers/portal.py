@@ -14,22 +14,21 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from supabase import Client
 
 from app.core.auth import CurrentClientDep
 from app.core.pagination import PageDep
 from app.core.ratelimit import rate_limit
+from app.db.database import DatabaseNotConfiguredError, get_admin_pool, privileged_connection
 from app.db.portal_repo import PortalRepo, PortalRepoDep
-from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
 from app.routers.audits import ArtifactStoreDep, AuditEnqueuerDep
 from app.schemas.audits import PortalAuditCreate, PortalAuditResponse
 from app.schemas.portal import ClientDashboard
 from app.services.audit_artifacts import LocalArtifactStore
-from app.services.client_audits import create_client_audit
+from app.services.client_audits import AuditInserter, create_client_audit, insert_audit_row
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -42,19 +41,26 @@ _DB_NOT_CONFIGURED = HTTPException(
 )
 
 
-def get_portal_admin() -> Client:
-    """Dependency: the service_role admin client for the tenant-pinned insert."""
+def get_portal_audit_inserter() -> AuditInserter:
+    """Dependency: the privileged (service_role) inserter for the tenant-pinned insert.
+
+    Clients have no base-table SELECT policy, so the create runs on the
+    privileged (BYPASSRLS) path; ``client_id`` is pinned server-side in
+    :func:`create_client_audit`. Resolving the admin pool here surfaces an
+    unconfigured DB as a 503 up front. Overridable in tests.
+    """
     try:
-        return get_admin_client()
-    except SupabaseNotConfiguredError as exc:
+        get_admin_pool()
+    except DatabaseNotConfiguredError as exc:
         raise _DB_NOT_CONFIGURED from exc
+    return insert_audit_row
 
 
-PortalAdminDep = Annotated[Client, Depends(get_portal_admin)]
+PortalAuditInserterDep = Annotated[AuditInserter, Depends(get_portal_audit_inserter)]
 
 
 def get_portal_audit_loader() -> Callable[[str], dict[str, Any] | None]:
-    """Dependency: load an audit's artifact PATHS by id via the admin client.
+    """Dependency: load an audit's artifact PATHS by id via the privileged connection.
 
     The ``portal_audits`` view deliberately hides ``pdf_path``/``json_path``, so
     resolving a file for download needs a server-side (service_role) read. Callers
@@ -63,16 +69,12 @@ def get_portal_audit_loader() -> Callable[[str], dict[str, Any] | None]:
     """
 
     def _load(audit_id: str) -> dict[str, Any] | None:
-        admin = get_admin_client()
-        resp = (
-            admin.table("audits")
-            .select("pdf_path, json_path")
-            .eq("id", audit_id)
-            .limit(1)
-            .execute()
-        )
-        rows = cast("list[dict[str, Any]]", resp.data or [])
-        return rows[0] if rows else None
+        with privileged_connection() as cur:
+            cur.execute(
+                "select pdf_path, json_path from public.audits where id = %s limit 1",
+                (audit_id,),
+            )
+            return cur.fetchone()
 
     return _load
 
@@ -100,7 +102,7 @@ async def _serve_portal_artifact(
     # Resolve the path server-side (the view hid it); never returned to the client.
     try:
         row = await asyncio.to_thread(loader, audit_id)
-    except SupabaseNotConfiguredError as exc:
+    except DatabaseNotConfiguredError as exc:
         raise _DB_NOT_CONFIGURED from exc
     key = row.get(column) if row else None
     path: Path | None = store.resolve(key) if key else None
@@ -172,11 +174,11 @@ async def download_portal_findings(
 async def create_portal_audit(
     body: PortalAuditCreate,
     reader: PortalRepoDep,
-    admin: PortalAdminDep,
+    insert_audit: PortalAuditInserterDep,
     enqueue: AuditEnqueuerDep,
     client: CurrentClientDep,
 ) -> PortalAuditResponse:
     row = await create_client_audit(
-        admin=admin, reader=reader, scoped=client, body=body, enqueue=enqueue
+        insert_audit=insert_audit, reader=reader, scoped=client, body=body, enqueue=enqueue
     )
     return PortalAuditResponse.from_row(row)
