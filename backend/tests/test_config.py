@@ -28,6 +28,17 @@ _ENV_KEYS = [
     "CELERY_RESULT_BACKEND",
     "READINESS_TIMEOUT_SECONDS",
     "SENTRY_DSN",
+    # P6B context / AI-memory provider config (cleared so tests stay hermetic).
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL_SUMMARY",
+    "ANTHROPIC_MODEL_HEAVY",
+    "EMBEDDINGS_PROVIDER",
+    "EMBEDDINGS_API_KEY",
+    "EMBEDDINGS_MODEL",
+    "EMBEDDINGS_DIM",
+    "PINECONE_API_KEY",
+    "PINECONE_INDEX",
+    "PINECONE_HOST",
 ]
 
 # A complete set of the prod-required config, for the validate_settings tests.
@@ -107,6 +118,49 @@ def test_local_migration_secrets_are_masked() -> None:
     assert "VAULT_MASTER_SECRET" not in dump
     assert s.jwt_private_key.get_secret_value() == "PRIV_KEY_SECRET"
     assert s.vault_master_key.get_secret_value() == "VAULT_MASTER_SECRET"
+
+
+@pytest.mark.unit
+def test_context_provider_secrets_are_masked() -> None:
+    # P6B context AI keys (Anthropic / embeddings / Pinecone) must all be SecretStr
+    # and never render in a repr / log - same guarantee as the vault + JWT keys.
+    s = Settings(
+        _env_file=None,
+        anthropic_api_key="ANTHROPIC_SECRET",
+        embeddings_api_key="EMBEDDINGS_SECRET",
+        pinecone_api_key="PINECONE_SECRET",
+    )
+    assert isinstance(s.anthropic_api_key, SecretStr)
+    assert isinstance(s.embeddings_api_key, SecretStr)
+    assert isinstance(s.pinecone_api_key, SecretStr)
+    dump = repr(s)
+    assert "ANTHROPIC_SECRET" not in dump
+    assert "EMBEDDINGS_SECRET" not in dump
+    assert "PINECONE_SECRET" not in dump
+    assert s.anthropic_api_key.get_secret_value() == "ANTHROPIC_SECRET"
+    assert s.embeddings_api_key.get_secret_value() == "EMBEDDINGS_SECRET"
+    assert s.pinecone_api_key.get_secret_value() == "PINECONE_SECRET"
+
+
+@pytest.mark.unit
+def test_context_provider_defaults() -> None:
+    # Optional context config defaults: keys None, sane model tiering + dims.
+    s = Settings(_env_file=None)
+    assert s.anthropic_api_key is None
+    assert s.embeddings_api_key is None
+    assert s.pinecone_api_key is None and s.pinecone_index is None
+    assert s.anthropic_model_summary == "claude-haiku-4-5"
+    assert s.anthropic_model_heavy == "claude-sonnet-5"
+    assert s.embeddings_provider == "voyage"
+    assert s.embeddings_dim == 1024
+    assert s.context_topk == 6
+
+
+@pytest.mark.unit
+def test_context_config_not_required_in_prod() -> None:
+    # The context keys must NOT gate prod boot (module is key-gated / degrades).
+    s = Settings(_env_file=None, app_env="prod", **_PROD_REQUIRED)
+    validate_settings(s)  # does not raise despite every context key being absent
 
 
 @pytest.mark.unit

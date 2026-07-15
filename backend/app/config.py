@@ -97,6 +97,36 @@ class Settings(BaseSettings):
     # through the Part-2 cost path (a Free run always logs 0).
     audit_paid_cost_estimate: float = 1.5
 
+    # --- Context / AI-memory module (P6B). ALL optional and NOT in
+    # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic
+    # fakes and ACTIVATES when these keys land (mirrors the audit-engine
+    # key-gating). A keyless deploy runs the context pipeline in 'degraded' mode,
+    # holding the freshness watermark until the keys arrive. ---
+    # Summarizer (Anthropic - Haiku default / Sonnet for large folds). NOTE:
+    # Anthropic has NO embeddings API, so the Embedder below is a SEPARATE
+    # provider. Key is a SecretStr (never logged / never in a repr).
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model_summary: str = "claude-haiku-4-5"  # cheap default fold
+    anthropic_model_heavy: str = "claude-sonnet-5"  # heavier model for large folds
+    # Embedder (Voyage AI - Anthropic has no embeddings API). embeddings_dim MUST
+    # match the Pinecone index dimension AND the FakeEmbedder so real<->fake are
+    # drop-in swappable (voyage-3 -> 1024).
+    embeddings_provider: str = "voyage"
+    embeddings_api_key: SecretStr | None = None
+    embeddings_model: str = "voyage-3"
+    embeddings_dim: int = 1024
+    # Vector store (Pinecone; namespaced per entity 'entity_type:entity_id').
+    pinecone_api_key: SecretStr | None = None
+    pinecone_index: str | None = None
+    pinecone_host: str | None = None  # optional index host override
+    # Pipeline tuning: debounce window, bounded summary token budget, retrieval breadth.
+    context_debounce_seconds: int = 30
+    context_summary_token_budget: int = 1200
+    context_topk: int = 6
+    # Per-call cost estimates for the money-dial (P6B-4 wires these into the cost path).
+    context_summarize_cost_estimate: float = 0.02
+    context_embed_cost_estimate: float = 0.001
+
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
 

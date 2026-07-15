@@ -31,6 +31,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Context AI provider SDKs (P6B). Kept OUT of the core runtime deps so the base
+# install + gate stay light: the seams lazy-import these and the unit suite runs
+# on deterministic fakes. Install with `pip install -e .[ai]` + set the keys to
+# activate the real Summarizer / Embedder / VectorStore.
+ai = [
+    "anthropic>=0.40",   # Summarizer (Claude Haiku/Sonnet); lazy-imported
+    "voyageai>=0.2",     # Embedder (Voyage AI - Anthropic has NO embeddings API)
+    "pinecone>=5",       # VectorStore (Pinecone; namespaced per entity)
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
