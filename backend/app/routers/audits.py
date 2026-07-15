@@ -179,5 +179,8 @@ async def create_audit(
         },
     )
     enqueue(str(row["id"]))
-    await record_activity(actor, kind="audit", action="ran an audit", target=body.url)
+    await record_activity(
+        actor, kind="audit", action="ran an audit", target=body.url,
+        entity_type="client", entity_id=body.client_id,
+    )
     return AuditResponse.from_row(row)

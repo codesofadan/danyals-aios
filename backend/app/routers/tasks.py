@@ -68,6 +68,19 @@ async def _require_staff_assignee(repo: TasksRepoDep, assignee_id: str) -> None:
         )
 
 
+def _task_entity(task: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The context entity a task mutation should track. A task's work lands on a
+    CLIENT's world, so prefer the client_id; a client-less task (client removed)
+    falls back to the assignee (a user entity) so the event is still linked."""
+    client_id = task.get("client_id")
+    if client_id is not None:
+        return "client", str(client_id)
+    assignee_id = task.get("assignee_id")
+    if assignee_id is not None:
+        return "user", str(assignee_id)
+    return None, None
+
+
 def _advance_action(new_status: str) -> str:
     """The activity verb for a lifecycle advance."""
     if new_status == "in_progress":
@@ -121,7 +134,8 @@ async def create_task(
         },
     )
     await record_activity(
-        actor, kind="task", action="assigned a task", target=client.get("name", "")
+        actor, kind="task", action="assigned a task", target=client.get("name", ""),
+        entity_type="client", entity_id=body.client_id,
     )
     return TaskResponse.from_row(row)
 
@@ -162,8 +176,10 @@ async def advance_task(code: str, repo: TasksRepoDep, actor: ViewReports) -> Tas
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task changed concurrently")
 
     kind: ActivityKind = "content" if needs_review(type_canonical) else "task"
+    ent_type, ent_id = _task_entity(task)
     await record_activity(
-        actor, kind=kind, action=_advance_action(nxt), target=task.get("client_name", "")
+        actor, kind=kind, action=_advance_action(nxt), target=task.get("client_name", ""),
+        entity_type=ent_type, entity_id=ent_id,
     )
     return TaskResponse.from_row(updated)
 
@@ -190,8 +206,10 @@ async def review_task(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task changed concurrently")
 
     action = "approved for delivery" if body.action == "approve" else "sent back for changes"
+    ent_type, ent_id = _task_entity(task)
     await record_activity(
-        actor, kind="content", action=action, target=task.get("client_name", "")
+        actor, kind="content", action=action, target=task.get("client_name", ""),
+        entity_type=ent_type, entity_id=ent_id,
     )
     return TaskResponse.from_row(updated)
 
@@ -223,7 +241,9 @@ async def patch_task(
     updated = await asyncio.to_thread(repo.update_task_by_code, code, patch)
     if updated is None:
         raise _TASK_NOT_FOUND
+    ent_type, ent_id = _task_entity(task)
     await record_activity(
-        actor, kind="task", action="updated a task", target=task.get("client_name", "")
+        actor, kind="task", action="updated a task", target=task.get("client_name", ""),
+        entity_type=ent_type, entity_id=ent_id,
     )
     return TaskResponse.from_row(updated)

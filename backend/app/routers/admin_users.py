@@ -99,6 +99,7 @@ async def create_user(
         ) from exc
 
     await record_activity(
-        current, kind="member", action="provisioned member", target=body.name, meta=body.role
+        current, kind="member", action="provisioned member", target=body.name, meta=body.role,
+        entity_type="user", entity_id=str(row["id"]),
     )
     return MemberResponse.from_row(row)

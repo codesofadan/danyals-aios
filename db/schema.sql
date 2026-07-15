@@ -140,6 +140,7 @@ create table public.activity_log (
   created_at  timestamptz not null default now()
 );
 -- + created_at index; ENABLE + FORCE RLS; select (is_staff) only, no write policy.
+-- 0013 adds seq/entity_type/entity_id + the enqueue trigger (see that section).
 
 -- ---- 0006_cost --------------------------------------------------------------
 -- The cost-control subsystem. dial_mode enum (api/byhand/off).
@@ -275,6 +276,23 @@ create table public.tasks (
 -- Redefines tasks_guard_update() to also lock `id` and `created_at` against a
 -- non-lead edit (they were omitted from 0011's column-lock). create or replace,
 -- idempotent. No schema shape change.
+
+-- ---- 0013_context_events ----------------------------------------------------
+-- Context / AI-memory EVENT BACKBONE (P6B-1). Additive on the append-only
+-- activity_log (no new write policy): links every event to a typed entity and
+-- gives it a monotonic total order; a trigger coalesces affected entities into a
+-- debounced dirty-queue the compaction worker drains.
+--   type context_entity as enum ('client','user','site')
+--   activity_log += seq bigint (default nextval public.activity_seq, not null,
+--     unique; backfilled in created_at,id order), entity_type context_entity,
+--     entity_id uuid; partial index (entity_type, entity_id, seq) where linked.
+--   context_dirty(entity_type, entity_id [PK], last_seq, event_count,
+--     first_dirty_at, next_eligible_at, status check in ('pending','processing'))
+--     - ENABLE+FORCE RLS; select is_staff() only; NO write policy.
+--   activity_enqueue_context() AFTER INSERT on activity_log (SECURITY DEFINER,
+--     empty search_path): NULL entity -> skip; else upsert ONE context_dirty row
+--     per entity - debounce next_eligible_at = least(existing, now()+30s),
+--     coalesce event_count, last_seq = greatest(...), re-arm processing->pending.
 
 -- ---- 0016_user_login --------------------------------------------------------
 -- AUTH CUTOVER (P6A-7): adds public.users.username (nullable) + a partial unique

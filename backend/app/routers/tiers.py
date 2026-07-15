@@ -59,6 +59,7 @@ async def set_delivery_tier(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
     await record_activity(
-        actor, kind="client", action="set delivery tier", target=row.get("name", client_id), meta=body.tier
+        actor, kind="client", action="set delivery tier", target=row.get("name", client_id), meta=body.tier,
+        entity_type="client", entity_id=client_id,
     )
     return TierClientResponse.from_row(row)

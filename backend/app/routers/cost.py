@@ -49,7 +49,10 @@ async def set_budget(
     row = await asyncio.to_thread(repo.upsert_budget, client_id, body.cap)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
-    await record_activity(actor, kind="client", action="set budget cap", target=row["cn"], meta=f"${body.cap}")
+    await record_activity(
+        actor, kind="client", action="set budget cap", target=row["cn"], meta=f"${body.cap}",
+        entity_type="client", entity_id=client_id,
+    )
     return ClientBudgetResponse(**row)
 
 

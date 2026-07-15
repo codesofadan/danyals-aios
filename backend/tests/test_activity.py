@@ -85,6 +85,53 @@ async def test_record_activity_writes_via_privileged(monkeypatch: pytest.MonkeyP
     assert params["meta"] == "viewer"
 
 
+@pytest.mark.unit
+async def test_record_activity_threads_entity_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A linked event carries entity_type/entity_id into the INSERT (the trigger
+    # then coalesces it into context_dirty). The enum is cast in SQL.
+    cur = _FakeCursor()
+    monkeypatch.setattr(
+        "app.services.activity.privileged_connection", lambda: _fake_privileged(cur)
+    )
+    await record_activity(
+        _user(), kind="client", action="created client", target="Verde Cafe",
+        entity_type="client", entity_id="c-123",
+    )
+    query, params = cur.calls[0]
+    assert "entity_type" in query and "entity_id" in query
+    assert "::public.context_entity" in query  # enum cast so a text bind assigns
+    assert params["entity_type"] == "client"
+    assert params["entity_id"] == "c-123"
+
+
+@pytest.mark.unit
+async def test_record_activity_unlinked_event_passes_nulls(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An unlinked event (no concrete entity) still writes, with NULL entity cols;
+    # the trigger ignores it. The params are present and None (never omitted).
+    cur = _FakeCursor()
+    monkeypatch.setattr(
+        "app.services.activity.privileged_connection", lambda: _fake_privileged(cur)
+    )
+    await record_activity(_user(), kind="access", action="changed the cost dial", target="context")
+    _query, params = cur.calls[0]
+    assert params["entity_type"] is None
+    assert params["entity_id"] is None
+
+
+@pytest.mark.unit
+async def test_record_activity_never_raises_with_entity(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Passing entity params must not change the never-raises contract when the
+    # privileged pool is unreachable (a bad/unknown entity can't break a mutation).
+    def _boom() -> Any:
+        raise RuntimeError("no privileged pool")
+
+    monkeypatch.setattr("app.services.activity.privileged_connection", _boom)
+    await record_activity(
+        _user(), kind="client", action="created client", target="X",
+        entity_type="client", entity_id="not-a-real-uuid",
+    )  # no raise
+
+
 class _FakeRepo:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
