@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from app.schemas.activity import ActivityResponse
 from app.schemas.audits import AuditResponse
+from app.schemas.backups import ProtectedStoreResponse, SnapshotResponse
 from app.schemas.clients import ClientResponse
 from app.schemas.content import ContentJobResponse
 from app.schemas.cost import ClientBudgetResponse, CostEntryResponse, DialFeatureResponse
@@ -85,6 +86,8 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (WorkbookResponse, "frontend/lib/reports.ts", "Workbook"),
     (ReportTypeResponse, "frontend/lib/reports.ts", "ReportType"),
     (SyncEventResponse, "frontend/lib/reports.ts", "SyncEvent"),
+    (SnapshotResponse, "frontend/lib/backups.ts", "Snapshot"),
+    (ProtectedStoreResponse, "frontend/lib/backups.ts", "ProtectedStore"),
 ]
 
 
@@ -173,6 +176,10 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (WorkspaceSettingsResponse, "default_tier", "frontend/lib/data.ts", "SubTier"),
     # Reports: the sync-status lifecycle union pinned verbatim.
     (WorkbookResponse, "status", "frontend/lib/reports.ts", "SyncStatus"),
+    # Backups: the snapshot status + type unions pinned verbatim (SnapType keeps the
+    # capitalized Nightly/Manual labels).
+    (SnapshotResponse, "status", "frontend/lib/backups.ts", "SnapStatus"),
+    (SnapshotResponse, "type", "frontend/lib/backups.ts", "SnapType"),
 ]
 
 

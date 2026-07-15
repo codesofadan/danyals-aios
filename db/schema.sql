@@ -557,6 +557,29 @@ create table public.tasks (
 --     staff read); update owner/admin/manager (leads acknowledge); NO insert policy
 --     (service_role writes via raise_alert); NO delete. RLS gate: 26 tables, all FORCE.
 
+-- ---- 0026_backups -----------------------------------------------------------
+-- Part 7 (7G-1 Backups): nightly/manual Postgres snapshots + guarded restore +
+-- OPTIONAL Backblaze B2 offsite. Agency-global INFRA (no client_id - backups protect
+-- the whole platform). Shapes mirror frontend/lib/backups.ts (Snapshot / backupConfig);
+-- ts/size/duration are DERIVED in the schema layer from created_at + size_bytes +
+-- duration_seconds. The B2 offsite is a key-gated seam (integrations/b2.py); pg_dump/
+-- pg_restore run as a subprocess owned by app/services/backups.py.
+--   enums snapshot_status(success|running|failed), snapshot_type(Nightly|Manual) -
+--     values verbatim from backups.ts (SS3 fidelity; note capitalized SnapType).
+--   backup_snapshots(id uuid pk (public API id), type snapshot_type 'Manual', scope
+--     text 'Database' ("Database" | "Full (DB + files)"), size_bytes bigint 0 (0 ->
+--     "—"), duration_seconds int 0, status snapshot_status 'running', artifact_ref text
+--     (controlled-root RELATIVE key), offsite_synced bool, created_at/updated_at) +
+--     set_updated_at; created_at(desc) + status idx.
+--   backup_config(id int pk pinned =1, nightly_time text '02:00 UTC' (`nightlyTime`),
+--     retention_days int 30 (`retentionDays`), nightly_enabled bool true (`nightlyOn`),
+--     offsite_enabled bool false (`offsiteOn`), last_backup/next_backup/restore_tested_at
+--     timestamptz (drive derived lastBackupAgoH/nextBackupInH/restoreTested), updated_at)
+--     + set_updated_at; SEEDED id=1 with the frontend defaults.
+--   Both ENABLE + FORCE RLS: select is_staff() (any staff read); insert/update owner/
+--     admin (leads manage). NO delete policies (retention prune + guarded restore run
+--     server-side / owner-gated at the router). RLS gate: 26 tables, all FORCE.
+
 -- ---- 0027_audit_overlay -----------------------------------------------------
 -- Part 7 Module 05 (Policy Radar), chunk 7C-3: the CLOSED-LOOP overlay a human-
 -- CONFIRMED recommendation writes into. HARD RULE (Part 3): the danyals-audit-system

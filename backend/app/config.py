@@ -204,6 +204,24 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr | None = None  # Resend transactional-email API key
     resend_from_email: str = "AIOS <notifications@xegents.ai>"  # verified Resend sender
     slack_webhook_url: SecretStr | None = None  # Slack incoming-webhook URL (embeds a token)
+    # --- Backups module (7G-1). Nightly/manual Postgres snapshots via pg_dump, a
+    # guarded restore via pg_restore, and an OPTIONAL Backblaze B2 offsite copy. ALL
+    # optional and NOT in _REQUIRED_IN_PROD: the module builds + unit-tests NOW
+    # (subprocess mocked) and ACTIVATES as each piece lands. Without a dump root /
+    # pg_dump binary a run DEGRADES to a recorded 'failed' snapshot, never a crash. ---
+    backup_artifact_dir: str | None = None  # controlled root snapshots are written under
+    pg_dump_bin: str = "pg_dump"  # pg_dump binary (on PATH or an absolute path)
+    pg_restore_bin: str = "pg_restore"  # pg_restore binary (the guarded restore)
+    # Worker-owned hard timeout for one dump/restore (pg_dump never times out itself).
+    backup_timeout_seconds: int = 1800
+    # Backblaze B2 offsite (S3-compatible). KEY-GATED on the full triple: without all
+    # of key_id + application_key + bucket the offsite sync degrades to None (the local
+    # snapshot still succeeds). The login-style key_id is not a secret (mirrors the
+    # DataForSEO login); the application_key is a SecretStr (never logged / in a repr).
+    b2_key_id: str | None = None  # B2 application keyID (Basic-style id)
+    b2_application_key: SecretStr | None = None  # B2 application key (secret)
+    b2_bucket: str | None = None  # destination bucket name
+    b2_endpoint_url: str | None = None  # optional S3 endpoint override (region host)
 
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
