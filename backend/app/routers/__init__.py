@@ -13,6 +13,7 @@ from app.routers.admin_users import router as admin_users_router
 from app.routers.audits import router as audits_router
 from app.routers.auth import router as auth_router
 from app.routers.clients import router as clients_router
+from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.me import router as me_router
 from app.routers.portal import router as portal_router
@@ -34,3 +35,4 @@ api_v1.include_router(audits_router)
 api_v1.include_router(tasks_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
+api_v1.include_router(context_router)

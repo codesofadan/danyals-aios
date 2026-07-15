@@ -95,6 +95,43 @@ class ContextRepo:
             cur.execute("select * from public.portal_context limit 1")
             return cur.fetchone()
 
+    def latest_seq(self, entity_type: str, entity_id: str) -> int:
+        """The entity's highest ``activity_log.seq`` (0 when it has no events).
+
+        The freshness signal ``lag = latest_seq - event_watermark`` keys off this.
+        RLS-scoped (staff via ``is_staff()``, mirroring ``activity_log_select``); it
+        rides the ``activity_log_entity_seq_idx`` partial index. Enum cast in-SQL so a
+        text bind assigns.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select coalesce(max(seq), 0) as latest from public.activity_log "
+                "where entity_type = %s::public.context_entity and entity_id = %s",
+                (entity_type, entity_id),
+            )
+            row = cur.fetchone()
+        return int(row["latest"]) if row and row.get("latest") is not None else 0
+
+    def latest_seqs(self) -> dict[tuple[str, str], int]:
+        """Per-entity highest activity seq across every linked event (staff-scoped).
+
+        ONE grouped read that powers the org-wide freshness rollup: it is joined in
+        Python against ``list_contexts`` so the health summary costs two queries, not
+        ``N + 1``. Unlinked (entity-less) events are excluded.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select entity_type, entity_id, max(seq) as latest "
+                "from public.activity_log where entity_type is not null "
+                "group by entity_type, entity_id"
+            )
+            rows = cur.fetchall()
+        return {
+            (str(r["entity_type"]), str(r["entity_id"])): int(r["latest"])
+            for r in rows
+            if r.get("latest") is not None
+        }
+
     # --------------------------------------------------------------------- #
     # service_role writes (BYPASSRLS; the compaction worker owns these)
     # --------------------------------------------------------------------- #

@@ -11,7 +11,7 @@ model, token internals) never appear on the wire.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,10 @@ ContextStatus = Literal["pending", "summarized", "degraded", "error"]
 
 _ENTITY_TYPES: frozenset[str] = frozenset({"client", "user", "site"})
 _STATUSES: frozenset[str] = frozenset({"pending", "summarized", "degraded", "error"})
+# A context in any of these states is HONESTLY stale regardless of the lag arithmetic:
+# 'pending' was never folded, 'degraded'/'error' holds its watermark on a failed fold.
+# Only a clean 'summarized' with a caught-up watermark reads as fresh.
+_STALE_STATUSES: frozenset[str] = frozenset({"pending", "degraded", "error"})
 
 
 class EntityContextResponse(BaseModel):
@@ -63,10 +67,11 @@ class ContextHealth(BaseModel):
     """Per-entity freshness signal - the concrete "how you check" surface.
 
     ``lag = latest_seq - event_watermark`` is the number of events not yet folded
-    into the context; ``stale`` is ``lag > 0``. For ``status='summarized'`` the
-    invariant ``event_watermark >= latest_seq`` holds, so ``lag <= 0`` and
-    ``stale`` is false. A ``degraded`` row HOLDS its watermark, so lag stays
-    visible until provider keys land and it catches up.
+    into the context; ``stale`` is ``lag > 0`` OR a non-``summarized`` status. For
+    ``status='summarized'`` the invariant ``event_watermark >= latest_seq`` holds,
+    so ``lag == 0`` and ``stale`` is false. A ``degraded``/``error`` row HOLDS its
+    watermark (lag stays visible) and a ``pending`` row was never folded, so all
+    three read as stale until they catch up - never a false "fresh".
     """
 
     entity_type: ContextEntityType
@@ -85,16 +90,19 @@ class ContextHealth(BaseModel):
         watermark = int(row.get("event_watermark", 0) or 0)
         lag = max(latest_seq - watermark, 0)
         entity_type = row.get("entity_type")
-        status = row.get("status")
+        raw_status = row.get("status")
+        status: ContextStatus = cast(
+            ContextStatus, raw_status if raw_status in _STATUSES else "pending"
+        )
         return cls(
             entity_type=entity_type if entity_type in _ENTITY_TYPES else "client",
             entity_id=str(row["entity_id"]),
-            status=status if status in _STATUSES else "pending",
+            status=status,
             version=int(row.get("version", 0) or 0),
             event_watermark=watermark,
             latest_seq=latest_seq,
             lag=lag,
-            stale=lag > 0,
+            stale=lag > 0 or status in _STALE_STATUSES,
             updated_at=row.get("updated_at"),
         )
 
@@ -114,3 +122,70 @@ class ContextChunk(BaseModel):
     content: str
     score: float = Field(default=0.0)
     content_checksum: str = Field(default="", exclude=True)
+
+
+class ContextView(BaseModel):
+    """The CONTEXT RETRIEVAL contract (P6B-8): an entity's CURRENT context plus an
+    explicit freshness signal and the top-k relevant chunks.
+
+    This is the fast, RLS-scoped shape the AI layer (Content, audit-narrative, the
+    assistant) reads via ``context_service.get_context``: the living ``summary`` +
+    folded ``facts``, the ranked ``chunks`` (empty unless a ``query`` was given AND
+    providers are live AND the context is ``summarized``), and the freshness fields
+    ``event_watermark`` / ``latest_seq`` / ``lag`` / ``stale`` so the caller ALWAYS
+    knows whether it is reading current context. Ledger internals (checksum, model,
+    token counts, pinecone ids) never appear here.
+    """
+
+    entity_type: ContextEntityType
+    entity_id: str
+    summary: str
+    facts: dict[str, Any]
+    chunks: list[ContextChunk] = Field(default_factory=list)
+    version: int
+    status: ContextStatus
+    event_watermark: int
+    latest_seq: int
+    lag: int
+    stale: bool
+    updated_at: datetime | None = None
+
+
+class OrgContextHealth(BaseModel):
+    """The org-wide freshness rollup (P6B-8): one glance at how caught-up the whole
+    context store is.
+
+    ``worst_lag`` is the largest per-entity lag (the most-behind context); ``stale``
+    / ``degraded`` / ``error`` count contexts in those states; ``total`` is every
+    context a staff caller may see. Powers the ops monitor at ``/context/health``.
+    """
+
+    total: int
+    stale: int
+    degraded: int
+    error: int
+    worst_lag: int
+
+
+class PortalContextResponse(BaseModel):
+    """The CLIENT-facing projection: the caller's OWN client-level summary + facts.
+
+    Served from the ``portal_context`` security-barrier view, so it is self-filtered
+    to the caller's tenant - never another client, never the vector ledger, never a
+    watermark/version/internal. Empty strings/dict when the client has no context yet.
+    """
+
+    summary: str = ""
+    facts: dict[str, Any] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any] | None) -> PortalContextResponse:
+        if row is None:
+            return cls()
+        facts = row.get("facts")
+        return cls(
+            summary=str(row.get("summary", "") or ""),
+            facts=facts if isinstance(facts, dict) else {},
+            updated_at=row.get("updated_at"),
+        )

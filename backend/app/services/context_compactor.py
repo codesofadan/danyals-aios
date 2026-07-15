@@ -281,6 +281,18 @@ def _build_chunks(summary: str, facts: Mapping[str, Any]) -> list[ContextChunk]:
     return chunks
 
 
+def build_context_chunks(summary: str, facts: Mapping[str, Any]) -> list[ContextChunk]:
+    """Public: rebuild the deterministic retrieval chunks (the ``summary`` chunk +
+    one ``facts:<group>`` chunk per fact group) for a STORED context.
+
+    Vectors carry no text (only ``chunk_key`` + checksum + version), so the
+    retrieval API (P6B-8) maps a vector hit's ``chunk_key`` back to its CURRENT
+    content by rebuilding the chunks from the persisted ``summary`` + ``facts`` -
+    the same, deterministic function the embed pipeline (P6B-6) chunked.
+    """
+    return _build_chunks(summary, facts)
+
+
 def _checksum(summary: str, facts: Mapping[str, Any]) -> str:
     """A stable digest over (summary + sorted facts). Identical inputs -> identical
     checksum, so an idempotent re-run is detectable and the worker skips a version
