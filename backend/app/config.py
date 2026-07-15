@@ -161,6 +161,17 @@ class Settings(BaseSettings):
     content_research_cost_estimate: float = 0.01
     content_generate_cost_estimate: float = 0.15
 
+    # --- Off-page module provider seams (7B). ALL optional and NOT in
+    # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic fakes
+    # and ACTIVATES per key as they land (mirrors the content/context key-gating).
+    # DataForSEO (backlink monitoring) uses HTTP Basic login+password; without them
+    # live monitoring degrades to None and the keyless CSV-import path remains
+    # available. BrightLocal (citation / NAP monitoring) uses an api-key. Keys are
+    # SecretStr (never logged / never in a repr); the login is not a secret. ---
+    dataforseo_login: str | None = None  # DataForSEO account login (Basic auth user)
+    dataforseo_password: SecretStr | None = None  # DataForSEO API password (Basic auth)
+    brightlocal_api_key: SecretStr | None = None  # BrightLocal citation-tracker key
+
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
 
