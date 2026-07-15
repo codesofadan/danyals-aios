@@ -24,8 +24,14 @@ from app.schemas.clients import ClientResponse
 from app.schemas.content import ContentJobResponse
 from app.schemas.cost import ClientBudgetResponse, CostEntryResponse, DialFeatureResponse
 from app.schemas.identity import MemberResponse
+from app.schemas.milestones import (
+    AutoAdvanceResponse,
+    ClientProjectResponse,
+    StageResponse,
+)
 from app.schemas.tasks import TaskResponse
 from app.schemas.tiers import TierClientResponse
+from app.schemas.upsells import UpsellResponse
 from app.schemas.vault import VaultKeyResponse
 
 # Repo root: backend/tests/ -> backend/ -> repo root.
@@ -44,6 +50,10 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (ActivityResponse, "frontend/lib/data.ts", "Activity"),
     (TierClientResponse, "frontend/lib/tiers.ts", "TierClient"),
     (ContentJobResponse, "frontend/lib/content.ts", "ContentJob"),
+    (ClientProjectResponse, "frontend/lib/milestones.ts", "ClientProject"),
+    (StageResponse, "frontend/lib/milestones.ts", "Stage"),
+    (AutoAdvanceResponse, "frontend/lib/milestones.ts", "AutoAdvance"),
+    (UpsellResponse, "frontend/lib/upsells.ts", "Upsell"),
 ]
 
 
@@ -107,6 +117,10 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (ContentJobResponse, "framework", "frontend/lib/content.ts", "Framework"),
     (ContentJobResponse, "target", "frontend/lib/content.ts", "PublishTarget"),
     (ContentJobResponse, "status", "frontend/lib/content.ts", "JobStatus"),
+    # Milestones: Health is SEPARATE from StageStatus (§3) - both are locked.
+    (StageResponse, "key", "frontend/lib/milestones.ts", "StageKey"),
+    (StageResponse, "status", "frontend/lib/milestones.ts", "StageStatus"),
+    (ClientProjectResponse, "health", "frontend/lib/milestones.ts", "Health"),
 ]
 
 

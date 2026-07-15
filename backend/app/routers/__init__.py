@@ -16,11 +16,13 @@ from app.routers.clients import router as clients_router
 from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.me import router as me_router
+from app.routers.milestones import router as milestones_router
 from app.routers.portal import router as portal_router
 from app.routers.public import router as public_router
 from app.routers.rbac import router as rbac_router
 from app.routers.tasks import router as tasks_router
 from app.routers.tiers import router as tiers_router
+from app.routers.upsells import router as upsells_router
 from app.routers.vault import router as vault_router
 
 api_v1 = APIRouter()
@@ -34,6 +36,8 @@ api_v1.include_router(cost_router)
 api_v1.include_router(tiers_router)
 api_v1.include_router(audits_router)
 api_v1.include_router(tasks_router)
+api_v1.include_router(milestones_router)
+api_v1.include_router(upsells_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
 api_v1.include_router(context_router)
