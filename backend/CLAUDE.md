@@ -26,7 +26,7 @@ cp .env.example .env                                         # one-time: require
 
 The full local gate before committing a change is: **`ruff check .` && `mypy app workers` && `pytest -m unit`** (all green; the unit subset needs no Redis/Postgres). CI at `../.github/workflows/backend-ci.yml` runs ruff + mypy + unit tests on 3.11/3.12 plus a Redis-service integration job.
 
-**Deployment is native (no Docker):** production runs on a single VPS via systemd — `aios-api` (uvicorn) + `aios-worker` (celery) in front of a native Redis, behind Caddy (auto-TLS). Provision with `sudo bash ../infra/deploy/install.sh`; see `../infra/deploy/README-deploy.md`.
+**Deployment is native (no Docker, no Supabase):** production runs on a single VPS via systemd — `aios-api` (uvicorn) + `aios-worker` (celery) + `aios-beat` (celery beat) in front of a native **PostgreSQL 16** + native Redis, behind Caddy (auto-TLS). All config is one root-owned `/etc/aios/aios.env` (`EnvironmentFile`). Provision with `sudo bash ../infra/deploy/install.sh` (installs PG16+Redis, applies migrations, runs the RLS gate, seeds the owner, starts the 3 units); see `../infra/deploy/README-deploy.md`.
 
 ## Architecture (big picture)
 

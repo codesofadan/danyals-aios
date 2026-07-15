@@ -1,0 +1,44 @@
+[Unit]
+Description=AIOS Celery beat (schedule dispatcher: context compaction + reconcile, and future policy/report/backup schedules)
+Documentation=file:///opt/aios/infra/deploy/README-deploy.md
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios/backend
+EnvironmentFile=/etc/aios/aios.env
+# Beat only ENQUEUES on a timer (workers.celery_app.beat_schedule): it fans out the
+# context-compaction dispatcher every debounce window and the slower reconcile
+# sweep, and is the single place future policy/report/backup schedules attach. It
+# runs NO task itself, so the visibility_timeout >= task_time_limit invariant is a
+# worker concern, not a beat one.
+#
+# EXACTLY ONE beat may run cluster-wide (a second would double-enqueue every tick).
+# On this single-VPS deploy that is guaranteed by this being the only beat unit.
+#
+# Beat persists its schedule to a shelve DB. Under ProtectSystem=strict the working
+# tree is read-only, so write it into StateDirectory (/var/lib/aios, RW).
+ExecStart=/opt/aios/backend/.venv/bin/celery -A workers.celery_app beat --loglevel=info --schedule /var/lib/aios/celerybeat-schedule --pidfile=
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# --- Hardening --------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Writable state for the beat schedule shelve (shared /var/lib/aios with the worker).
+StateDirectory=aios
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
