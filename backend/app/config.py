@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     context_debounce_seconds: int = 30
     context_summary_token_budget: int = 1200
     context_topk: int = 6
+    # Compaction-worker knobs (P6B-7). max_facts caps the folded fact set; the
+    # backoff is how far the worker pushes a dirty row's next_eligible_at when it
+    # DEGRADES (keys absent / spend blocked) or ERRORS, so it retries later without
+    # hot-spinning; the dispatch batch caps how many due entities one beat tick claims.
+    context_max_facts: int = 64
+    context_backoff_seconds: int = 300
+    context_dispatch_batch: int = 100
     # Per-call cost estimates for the money-dial (P6B-4 wires these into the cost path).
     context_summarize_cost_estimate: float = 0.02
     context_embed_cost_estimate: float = 0.001

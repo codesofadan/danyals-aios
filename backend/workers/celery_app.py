@@ -19,7 +19,7 @@ celery_app = Celery(
     "aios",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["workers.tasks.ping", "workers.tasks.audit"],
+    include=["workers.tasks.ping", "workers.tasks.audit", "workers.tasks.context"],
 )
 
 celery_app.conf.update(
@@ -42,3 +42,15 @@ celery_app.conf.update(
     # visibility_timeout and task_time_limit together, keeping this invariant.
     broker_transport_options={"visibility_timeout": 3600},
 )
+
+# Beat schedule (P6B-7): the context-compaction dispatcher runs every debounce
+# window; it CLAIMS due context_dirty rows (FOR UPDATE SKIP LOCKED) and fans out a
+# compact_context task per claim. This is CONFIG ONLY - a beat process must be
+# started separately (celery -A workers.celery_app beat); no beat runs here. The
+# visibility_timeout >= task_time_limit invariant above still holds for these tasks.
+celery_app.conf.beat_schedule = {
+    "dispatch-context": {
+        "task": "dispatch_context",
+        "schedule": float(settings.context_debounce_seconds),
+    },
+}

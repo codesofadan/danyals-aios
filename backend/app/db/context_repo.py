@@ -173,6 +173,100 @@ class ContextRepo:
             )
             return cast("dict[str, Any]", cur.fetchone())
 
+    # --------------------------------------------------------------------- #
+    # Compaction-worker helpers (P6B-7; service_role, privileged path)
+    # --------------------------------------------------------------------- #
+    def events_after(self, entity_type: str, entity_id: str, watermark: int) -> _Rows:
+        """The entity's activity events with ``seq > watermark``, oldest first.
+
+        This is the fold input: everything the context has NOT yet absorbed, in
+        total ``seq`` order. Uses the ``activity_log_entity_seq_idx`` partial index.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select seq, kind, action, target, meta, created_at "
+                "from public.activity_log "
+                "where entity_type = %s::public.context_entity and entity_id = %s "
+                "and seq > %s order by seq",
+                (entity_type, entity_id, watermark),
+            )
+            return cur.fetchall()
+
+    def dirty_last_seq(self, entity_type: str, entity_id: str) -> int | None:
+        """The entity's current ``context_dirty.last_seq`` (the highest seq the
+        trigger has coalesced), or ``None`` when no dirty row exists.
+
+        The re-dirty check reads this AFTER a fold: if it exceeds the watermark just
+        folded, a new event landed mid-compaction and the row must stay ``pending``.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select last_seq from public.context_dirty "
+                "where entity_type = %s::public.context_entity and entity_id = %s limit 1",
+                (entity_type, entity_id),
+            )
+            row = cur.fetchone()
+        return int(row["last_seq"]) if row is not None else None
+
+    def clear_dirty(self, entity_type: str, entity_id: str) -> None:
+        """Delete the entity's dirty row - the claim is fully drained (all events
+        folded). A later event re-creates it via the AFTER-INSERT trigger."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "delete from public.context_dirty "
+                "where entity_type = %s::public.context_entity and entity_id = %s",
+                (entity_type, entity_id),
+            )
+
+    def rearm_dirty(
+        self, entity_type: str, entity_id: str, *, last_seq: int, backoff_seconds: int
+    ) -> None:
+        """Re-arm the entity's dirty row ``pending`` with a pushed-out eligibility.
+
+        Upsert (never lost): a ``backoff_seconds`` of 0 makes it eligible NOW (the
+        re-dirty fast-path), a positive value pushes ``next_eligible_at`` out so a
+        degraded/errored entity retries LATER without hot-spinning. ``last_seq`` only
+        ever advances (``greatest``); ``event_count`` is left untouched on conflict.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "insert into public.context_dirty as d "
+                "(entity_type, entity_id, last_seq, event_count, first_dirty_at, "
+                " next_eligible_at, status) "
+                "values (%(et)s::public.context_entity, %(eid)s, %(last_seq)s, 0, now(), "
+                " now() + make_interval(secs => %(backoff)s), 'pending') "
+                "on conflict (entity_type, entity_id) do update set "
+                " status           = 'pending', "
+                " last_seq         = greatest(d.last_seq, excluded.last_seq), "
+                " next_eligible_at = now() + make_interval(secs => %(backoff)s)",
+                {"et": entity_type, "eid": entity_id, "last_seq": last_seq, "backoff": backoff_seconds},
+            )
+
+    def claim_due_dirty(self, limit: int) -> _Rows:
+        """Atomically claim up to ``limit`` DUE dirty rows for compaction.
+
+        One statement: a ``FOR UPDATE SKIP LOCKED`` CTE selects ``pending`` rows
+        whose ``next_eligible_at`` has passed (skipping any a concurrent beat tick
+        already holds), and the outer ``UPDATE`` flips them to ``processing`` and
+        returns them. SKIP LOCKED means two dispatchers never claim the same row -
+        the exactly-once-ish backbone. Returns ``entity_type/entity_id/last_seq``.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "with due as ( "
+                "  select entity_type, entity_id from public.context_dirty "
+                "  where status = 'pending' and next_eligible_at <= now() "
+                "  order by next_eligible_at "
+                "  for update skip locked "
+                "  limit %s "
+                ") "
+                "update public.context_dirty d set status = 'processing' "
+                "from due where d.entity_type = due.entity_type and d.entity_id = due.entity_id "
+                "returning d.entity_type, d.entity_id, d.last_seq",
+                (limit,),
+            )
+            return cur.fetchall()
+
     def list_vectors(self, entity_type: str, entity_id: str) -> _Rows:
         """The entity's live vector ledger (drives reconcile/GC/consistency)."""
         with privileged_connection() as cur:
@@ -248,6 +342,23 @@ class ContextRepo:
                 (entity_type, entity_id, chunk_key),
             )
             return cur.fetchone()
+
+
+# The compaction worker holds NO user JWT: it only ever calls the service_role
+# (privileged) methods above, which ignore ``user_id`` entirely. This nil identity
+# makes that explicit; the RLS-read methods MUST NOT be called on a worker repo
+# (they would reject the nil uuid at ``rls_connection`` - by design).
+_SERVICE_NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+def service_context_repo() -> ContextRepo:
+    """A ``ContextRepo`` for the service_role compaction worker (privileged writes).
+
+    The worker uses only the ``get_context_for_update`` / ``upsert_context`` /
+    ``events_after`` / dirty-queue / vector-ledger methods - all on the privileged
+    (BYPASSRLS) connection - so it carries the nil identity, never a real user.
+    """
+    return ContextRepo(_SERVICE_NIL_UUID)
 
 
 def get_context_repo(user: CurrentUserDep) -> ContextRepo:

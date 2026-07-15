@@ -40,3 +40,19 @@ def test_ping_task_is_registered() -> None:
     # do the same here so registration is proven without a running broker
     celery_app.loader.import_default_modules()
     assert "ping" in celery_app.tasks
+
+
+@pytest.mark.unit
+def test_context_worker_tasks_are_registered() -> None:
+    celery_app.loader.import_default_modules()
+    assert "dispatch_context" in celery_app.tasks
+    assert "compact_context" in celery_app.tasks
+
+
+@pytest.mark.unit
+def test_context_dispatch_is_on_the_beat_schedule() -> None:
+    # the debounced dispatcher runs every context_debounce_seconds (config only;
+    # no beat process is started here)
+    entry = celery_app.conf.beat_schedule["dispatch-context"]
+    assert entry["task"] == "dispatch_context"
+    assert entry["schedule"] > 0
