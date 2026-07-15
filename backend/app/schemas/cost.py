@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.util.timefmt import relative_ago
 
-Provider = Literal["Serper", "DataForSEO", "Anthropic", "PageSpeed", "Places"]
+Provider = Literal["Serper", "DataForSEO", "Anthropic", "PageSpeed", "Places", "Voyage"]
 DialMode = Literal["api", "byhand", "off"]
 JobType = Literal["audit", "content", "backlinks"]
 
@@ -33,6 +33,12 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     DialFeatureMeta(key="backlinks", label="Backlink Manager", icon="hub", provider="Serper", note="Paid — review before pull", default_mode="byhand"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
     DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),
+    # Part 6B — the Client-Context / AI-memory module's two AI spends. Both flow
+    # through the SAME gate as every other paid call (P6B-4's Gated* wrappers), so
+    # ops can throttle context AI to off/byhand/api on the money-dial and no
+    # context spend can bypass the budget caps / daily spend-stop.
+    DialFeatureMeta(key="context", label="Client Context", icon="psychology", provider="Anthropic", note="Living-summary prose (Claude)", default_mode="api"),
+    DialFeatureMeta(key="context_embed", label="Context Embeddings", icon="memory", provider="Voyage", note="Context vectors (Voyage)", default_mode="api"),
 )
 
 DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)
