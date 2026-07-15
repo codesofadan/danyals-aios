@@ -40,6 +40,11 @@ from app.schemas.policy import (
     RecommendationResponse,
     SourceResponse,
 )
+from app.schemas.reports import (
+    ReportTypeResponse,
+    SyncEventResponse,
+    WorkbookResponse,
+)
 from app.schemas.settings import SecurityPolicyResponse, WorkspaceSettingsResponse
 from app.schemas.tasks import TaskResponse
 from app.schemas.tickets import TicketResponse
@@ -77,6 +82,9 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (TicketResponse, "frontend/lib/data.ts", "Ticket"),
     (WorkspaceSettingsResponse, "frontend/lib/data.ts", "WorkspaceSettingsData"),
     (SecurityPolicyResponse, "frontend/lib/data.ts", "SecurityPolicy"),
+    (WorkbookResponse, "frontend/lib/reports.ts", "Workbook"),
+    (ReportTypeResponse, "frontend/lib/reports.ts", "ReportType"),
+    (SyncEventResponse, "frontend/lib/reports.ts", "SyncEvent"),
 ]
 
 
@@ -163,6 +171,8 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     # (Ticket channel/priority/status + weekStart are INLINE unions in data.ts, not
     # exported types, so they are locked in test_tickets.py / test_settings.py.)
     (WorkspaceSettingsResponse, "default_tier", "frontend/lib/data.ts", "SubTier"),
+    # Reports: the sync-status lifecycle union pinned verbatim.
+    (WorkbookResponse, "status", "frontend/lib/reports.ts", "SyncStatus"),
 ]
 
 

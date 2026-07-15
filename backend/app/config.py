@@ -186,6 +186,15 @@ class Settings(BaseSettings):
     dataforseo_password: SecretStr | None = None  # DataForSEO API password (Basic auth)
     brightlocal_api_key: SecretStr | None = None  # BrightLocal citation-tracker key
 
+    # --- Reports module: the Google Sheets operational store (7D). OPTIONAL and NOT
+    # in _REQUIRED_IN_PROD: the SheetStore buffers writes in Redis and unit-tests NOW
+    # with a fake client, and ACTIVATES when this credential lands (mirrors the
+    # content/off-page key-gating). A keyless deploy runs the store HELD (buffer
+    # retained, sync optimistic) until the key arrives. The value is the full
+    # service-account credential JSON (it carries a private key) - a SecretStr so it
+    # is never logged / never in a repr. ---
+    google_sheets_sa_json: SecretStr | None = None  # service-account credential JSON
+
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
 

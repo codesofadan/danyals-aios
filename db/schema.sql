@@ -472,6 +472,27 @@ create table public.tasks (
 --     set (list_recommendations dedups by kb_ref) and MATERIALIZED into the table on
 --     a lead's first acknowledge/apply/dismiss. RLS gate: 21 tables, all FORCE.
 
+-- ---- 0020_reports -----------------------------------------------------------
+-- Part 7 Module 04 (Reports): the operational-store layer - per-client + master
+-- Google Sheets workbooks, written through a quota-safe Redis write-buffer. The
+-- audit/content/milestone modules push datasets here; the SheetStore
+-- (app/services/sheetstore.py) buffers rows in Redis and, on flush, emits ONE batched
+-- Sheets `batchUpdate` per workbook (integrations/sheets.py, KEY-GATED on
+-- GOOGLE_SHEETS_SA_JSON, degrades to a fake/None with no key). Shapes mirror
+-- frontend/lib/reports.ts (Workbook / SyncEvent / ReportType). The internal client_id
+-- NEVER leaks (client_name is a snapshot).
+--   enum sync_status(synced|syncing|error).
+--   report_workbooks(id uuid, client_id fk->clients cascade (NULL for master),
+--     client_name snapshot, sheet_id text, tabs jsonb (a Dataset[] subset), status
+--     sync_status 'synced', rows_synced_today int, last_sync timestamptz, is_master
+--     bool, created_at/updated_at) + set_updated_at; client_id/last_sync idx + a
+--     PARTIAL UNIQUE index (is_master) so exactly one master-rollup ref row exists.
+--   report_sync_events(id uuid, workbook_id fk->report_workbooks cascade, client_name
+--     snapshot, dataset text check in(audit|content|milestones), rows int, synced_at
+--     timestamptz, created_at/updated_at) + set_updated_at; workbook_id/synced_at idx.
+--   Both ENABLE + FORCE RLS: select is_staff(); insert/update owner/admin/manager
+--     (sync is lead-only). NO client select policy; NO delete.
+
 -- ---- 0024_tickets -----------------------------------------------------------
 -- Part 7 (Support Tickets): the client-support ticket ledger. Staff triage
 -- requests through open -> pending -> resolved across the channel they arrived on.
