@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     # through the Part-2 cost path (a Free run always logs 0).
     audit_paid_cost_estimate: float = 1.5
 
+    # Fiverr upsell link shown on the PUBLIC free-audit report (P6C). Not a secret
+    # (it is rendered to anonymous visitors); trivial to change per campaign.
+    fiverr_upsell_url: str = "https://www.fiverr.com/danyalseo"
+
     # --- Context / AI-memory module (P6B). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic
     # fakes and ACTIVATES when these keys land (mirrors the audit-engine

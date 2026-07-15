@@ -17,6 +17,7 @@ from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.me import router as me_router
 from app.routers.portal import router as portal_router
+from app.routers.public import router as public_router
 from app.routers.rbac import router as rbac_router
 from app.routers.tasks import router as tasks_router
 from app.routers.tiers import router as tiers_router
@@ -36,3 +37,7 @@ api_v1.include_router(tasks_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
 api_v1.include_router(context_router)
+# The public free-audit funnel: the ONLY unauthenticated routes. Its endpoints
+# declare NO auth dependency (the aggregator itself carries none), so mounting it
+# here yields /api/v1/public/* as unauthenticated - see app/routers/public.py.
+api_v1.include_router(public_router)

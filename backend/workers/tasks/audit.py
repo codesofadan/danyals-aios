@@ -39,7 +39,29 @@ logger = get_logger("workers.audit")
 _COST_FEATURE = "tech_audit"
 _COST_PROVIDER = "audit_engine"
 _COST_JOB_TYPE = "audit"
+_PUBLIC_COST_JOB_TYPE = "public_audit"
 _ERROR_MAX = 500  # cap the stored error string; it is server-side only
+
+
+def _dynamic_update(table: str, row_id: str, fields: dict[str, Any]) -> None:
+    """UPDATE ``public.<table>`` SET the given fields WHERE id = row_id (privileged).
+
+    Column names are static ``sql.Identifier``s (never a bound param); values are
+    always bound. A dict value (``scores``) is wrapped for its jsonb column. Shared
+    by the tenant-audit and public-audit stores so the injection-safe assignment
+    builder lives in exactly one place.
+    """
+    if not fields:
+        return
+    assignments = sql.SQL(", ").join(
+        sql.SQL("{} = %s").format(sql.Identifier(col)) for col in fields
+    )
+    stmt = sql.SQL("update {tbl} set {sets} where id = %s").format(
+        tbl=sql.Identifier("public", table), sets=assignments
+    )
+    params = [Jsonb(v) if isinstance(v, dict) else v for v in fields.values()]
+    with privileged_connection() as cur:
+        cur.execute(stmt, [*params, row_id])
 
 
 class AuditStore(Protocol):
@@ -67,18 +89,7 @@ class SupabaseAuditStore:
             return cur.fetchone()
 
     def update(self, audit_id: str, fields: dict[str, Any]) -> None:
-        if not fields:
-            return
-        # Dynamic assignment list: column names as static ``sql.Identifier``s,
-        # values bound. A dict value (``scores``) is wrapped for the jsonb column;
-        # a list (none here) would adapt to a Postgres array automatically.
-        assignments = sql.SQL(", ").join(
-            sql.SQL("{} = %s").format(sql.Identifier(col)) for col in fields
-        )
-        stmt = sql.SQL("update public.audits set {sets} where id = %s").format(sets=assignments)
-        params = [Jsonb(v) if isinstance(v, dict) else v for v in fields.values()]
-        with privileged_connection() as cur:
-            cur.execute(stmt, [*params, audit_id])
+        _dynamic_update("audits", audit_id, fields)
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         ctx = GateContext(
@@ -216,4 +227,124 @@ def run_audit_job(audit_id: str) -> dict[str, Any]:
     store = SupabaseAuditStore()
     return execute_audit(
         store, settings, audit_id, artifacts=local_store_from_settings(settings)
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Public free-audit funnel (P6C): the SAME lifecycle over public.public_audits.
+# There is NO tenant linkage - a public run is ALWAYS the Free tier ($0), so it
+# has no client_id/tier/cost columns and never makes paid-provider spend. The
+# store + engine adapter are reused; only the table + the always-free cost differ.
+# --------------------------------------------------------------------------- #
+class PublicAuditStore:
+    """Concrete store for ``public.public_audits`` over ``privileged_connection``.
+
+    The public leads table is written ONLY by the server (service_role), so the
+    worker owns its state exactly like the tenant store - but the row has no
+    tier/client/cost/timing columns, so ``update`` only ever touches columns that
+    exist on ``public_audits`` (status, error, run_uuid, artifact_dir, results).
+    """
+
+    def load(self, public_audit_id: str) -> dict[str, Any] | None:
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.public_audits where id = %s limit 1", (public_audit_id,)
+            )
+            return cur.fetchone()
+
+    def update(self, public_audit_id: str, fields: dict[str, Any]) -> None:
+        _dynamic_update("public_audits", public_audit_id, fields)
+
+    def record_cost(self, row: dict[str, Any], cost: float) -> None:
+        # No tenant: client_id is None (the money-dial handles a global/no-client
+        # feature spend). A public run is Free, so cost is always 0.
+        ctx = GateContext(
+            feature_key=_COST_FEATURE,
+            client_id=None,
+            provider=_COST_PROVIDER,
+            estimated_cost=cost,
+            job_id=str(row.get("id", "")),
+            job_type=_PUBLIC_COST_JOB_TYPE,
+            client_name="",
+        )
+        SupabaseCostStore().record_cost(ctx, cost, cached=False)
+
+
+def execute_public_audit(
+    store: AuditStore,
+    settings: Settings,
+    public_audit_id: str,
+    *,
+    runner: _Runner = run_audit,
+    artifacts: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    """Run a PUBLIC free-audit job and drive its row through the state machine.
+
+    Mirrors ``execute_audit`` (queued -> running -> done|failed; never stuck,
+    never re-raises, idempotent on redelivery) but over ``public_audits`` and
+    ALWAYS at the Free tier ($0). Injected store + runner keep it unit-testable
+    with fakes. The live engine run is DEFERRED exactly like the tenant worker:
+    with no engine env the adapter returns ``ok=False`` (run_uuid None) and the
+    row is marked ``failed`` without any spend.
+    """
+    row = store.load(public_audit_id)
+    if row is None:
+        logger.warning("public_audit_job_missing", public_audit_id=public_audit_id)
+        return {"public_audit_id": public_audit_id, "status": "failed", "reason": "not found"}
+    if row.get("status") == "done":
+        # Idempotency: a redelivered job (acks_late) must not re-run the engine.
+        return {"public_audit_id": public_audit_id, "status": "done", "reason": "already complete"}
+
+    store.update(public_audit_id, {"status": "running"})
+
+    try:
+        # Public = Free tier: zero paid-provider spend by construction.
+        result = runner(_config_from_settings(settings), url=row["url"], tier="free")
+    except Exception as exc:  # the engine/adapter should not raise, but never trust it
+        logger.exception("public_audit_job_crashed", public_audit_id=public_audit_id)
+        store.update(
+            public_audit_id,
+            {"status": "failed", "error": f"worker error: {exc!r}"[:_ERROR_MAX]},
+        )
+        return {"public_audit_id": public_audit_id, "status": "failed", "reason": "worker error"}
+
+    # Log the run through the cost path once the engine actually started (Free -> $0).
+    if result.run_uuid is not None:
+        _safe_record_cost(store, row, 0.0)
+
+    if not result.ok:
+        store.update(
+            public_audit_id,
+            {
+                "status": "failed",
+                "error": (result.error or "audit failed")[:_ERROR_MAX],
+                "run_uuid": result.run_uuid,
+                "artifact_dir": result.artifact_dir,
+            },
+        )
+        return {"public_audit_id": public_audit_id, "status": "failed", "reason": result.error}
+
+    pdf_key, json_key = _store_artifacts(artifacts, str(public_audit_id), result)
+    store.update(
+        public_audit_id,
+        {
+            "status": "done",
+            "run_uuid": result.run_uuid,
+            "artifact_dir": result.artifact_dir,
+            "score": result.score,
+            "scores": result.scores,
+            "pdf_path": pdf_key,
+            "json_path": json_key,
+        },
+    )
+    return {"public_audit_id": public_audit_id, "status": "done", "score": result.score}
+
+
+@celery_app.task(name="run_public_audit")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
+def run_public_audit_job(public_audit_id: str) -> dict[str, Any]:
+    """Entry point: wire the public store + settings and run the public job."""
+    settings = get_settings()
+    store = PublicAuditStore()
+    return execute_public_audit(
+        store, settings, public_audit_id, artifacts=local_store_from_settings(settings)
     )

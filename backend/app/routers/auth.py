@@ -22,10 +22,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, SecretStr
 
 from app.core.deps import SettingsDep
+from app.core.ratelimit import rate_limit_ip
 from app.db.database import DatabaseNotConfiguredError, privileged_connection
 from app.rbac import UserRole
 from app.services.passwords import hash_password, verify_password
@@ -98,7 +99,11 @@ def _lookup_credentials(username: str) -> dict[str, Any] | None:
         return cur.fetchone()
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    dependencies=[Depends(rate_limit_ip("auth_login", 10))],
+)
 async def login(body: LoginRequest, settings: SettingsDep) -> LoginResponse:
     """Verify username/password and mint an EdDSA access token (else generic 401)."""
     try:

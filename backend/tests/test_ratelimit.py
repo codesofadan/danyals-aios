@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.auth import CurrentUser
-from app.core.ratelimit import rate_limit
+from app.core.ratelimit import rate_limit, rate_limit_ip
 
 
 def _user(uid: str = "u1") -> CurrentUser:
@@ -16,6 +16,13 @@ def _user(uid: str = "u1") -> CurrentUser:
         id=uid, email="u@x.z", role="owner", status="active", name="U",
         title="", avatar_color="#fff", phone="", two_fa=False,
     )
+
+
+class _FakeRequest:
+    """Minimal stand-in for starlette.Request exposing ``.client.host``."""
+
+    def __init__(self, host: str | None) -> None:
+        self.client = type("C", (), {"host": host})() if host is not None else None
 
 
 class _FakeRedis:
@@ -71,3 +78,44 @@ async def test_first_hit_sets_expiry() -> None:
     redis = _FakeRedis()
     await dep(user=_user(), redis=redis)  # type: ignore[call-arg]
     assert list(redis.expires.values()) == [45]
+
+
+# --- per-IP limiter (unauthenticated routes: public funnel + login) ---------
+
+
+@pytest.mark.unit
+async def test_ip_limiter_allows_up_to_limit_then_429() -> None:
+    dep = rate_limit_ip("public_audit", limit=2, per_seconds=60)
+    redis = _FakeRedis()
+    req: Any = _FakeRequest("1.2.3.4")
+    for _ in range(2):
+        assert await dep(request=req, redis=redis) is None  # type: ignore[call-arg]
+    with pytest.raises(HTTPException) as exc:
+        await dep(request=req, redis=redis)  # type: ignore[call-arg]
+    assert exc.value.status_code == 429
+
+
+@pytest.mark.unit
+async def test_ip_limiter_is_per_ip() -> None:
+    dep = rate_limit_ip("public_audit", limit=1, per_seconds=60)
+    redis = _FakeRedis()
+    assert await dep(request=_FakeRequest("1.1.1.1"), redis=redis) is None  # type: ignore[call-arg]
+    # A different source IP has its own window - not throttled by the first.
+    assert await dep(request=_FakeRequest("2.2.2.2"), redis=redis) is None  # type: ignore[call-arg]
+
+
+@pytest.mark.unit
+async def test_ip_limiter_fails_open_when_redis_unavailable() -> None:
+    dep = rate_limit_ip("auth_login", limit=1, per_seconds=60)
+    redis: Any = _FakeRedis(raise_on="incr")
+    req: Any = _FakeRequest("9.9.9.9")
+    for _ in range(5):
+        assert await dep(request=req, redis=redis) is None  # type: ignore[call-arg]
+
+
+@pytest.mark.unit
+async def test_ip_limiter_handles_missing_client() -> None:
+    dep = rate_limit_ip("public_audit", limit=5, per_seconds=60)
+    redis = _FakeRedis()
+    # A request with no ``.client`` (e.g. a test transport) must not error.
+    assert await dep(request=_FakeRequest(None), redis=redis) is None  # type: ignore[call-arg]
