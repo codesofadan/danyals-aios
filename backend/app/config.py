@@ -130,6 +130,15 @@ class Settings(BaseSettings):
     context_max_facts: int = 64
     context_backoff_seconds: int = 300
     context_dispatch_batch: int = 100
+    # Reconcile sweep (P6B-9): a slow BEAT that walks every entity with vectors and
+    # runs the ledger-vs-store drift detector (orphan/missing/mismatch), logging the
+    # counts. It runs at a lazy cadence (default hourly) because Postgres is the
+    # source of truth and sync_vectors already keeps the two in step per fold - the
+    # sweep is a safety net for residual drift (a lost Pinecone write, a manual edit),
+    # not a hot path. ``context_reconcile_repair`` (default OFF) turns the sweep from a
+    # pure detector into a self-healer (delete orphans, re-embed missing/mismatched).
+    context_reconcile_seconds: int = 3600
+    context_reconcile_repair: bool = False
     # Per-call cost estimates for the money-dial (P6B-4 wires these into the cost path).
     context_summarize_cost_estimate: float = 0.02
     context_embed_cost_estimate: float = 0.001

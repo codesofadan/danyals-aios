@@ -304,6 +304,38 @@ class ContextRepo:
             )
             return cur.fetchall()
 
+    def get_context_admin(self, entity_type: str, entity_id: str) -> dict[str, Any] | None:
+        """The entity's context row on the privileged path WITHOUT a row lock.
+
+        Unlike ``get_context_for_update`` (which holds ``FOR UPDATE`` for a compaction
+        fold), this is a lock-free service_role read the reconcile sweep uses to rebuild
+        the CURRENT chunks (summary + facts) when re-embedding drifted vectors, so a
+        slow full-table sweep never contends with the compaction worker's locks.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.entity_context "
+                "where entity_type = %s::public.context_entity and entity_id = %s limit 1",
+                (entity_type, entity_id),
+            )
+            return cur.fetchone()
+
+    def distinct_vector_entities(self) -> list[tuple[str, str]]:
+        """Every entity that currently has at least one vector-ledger row.
+
+        The reconcile sweep (P6B-9) iterates this to run the drift detector per entity
+        namespace. Ordered for a stable, resumable walk; service_role (the sweep holds
+        no user JWT). An entity with no vectors has nothing to reconcile, so it is
+        correctly absent.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select distinct entity_type, entity_id from public.context_vectors "
+                "order by entity_type, entity_id"
+            )
+            rows = cur.fetchall()
+        return [(str(r["entity_type"]), str(r["entity_id"])) for r in rows]
+
     def list_vectors(self, entity_type: str, entity_id: str) -> _Rows:
         """The entity's live vector ledger (drives reconcile/GC/consistency)."""
         with privileged_connection() as cur:

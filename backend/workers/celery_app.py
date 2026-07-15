@@ -19,7 +19,12 @@ celery_app = Celery(
     "aios",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["workers.tasks.ping", "workers.tasks.audit", "workers.tasks.context"],
+    include=[
+        "workers.tasks.ping",
+        "workers.tasks.audit",
+        "workers.tasks.context",
+        "workers.tasks.context_reconcile",
+    ],
 )
 
 celery_app.conf.update(
@@ -48,9 +53,18 @@ celery_app.conf.update(
 # compact_context task per claim. This is CONFIG ONLY - a beat process must be
 # started separately (celery -A workers.celery_app beat); no beat runs here. The
 # visibility_timeout >= task_time_limit invariant above still holds for these tasks.
+#
+# The reconcile sweep (P6B-9) runs at a much slower cadence (default hourly): it
+# walks every entity with vectors and detects/logs (optionally repairs) ledger-vs-
+# store drift. It is a safety net, not a hot path - Postgres is the source of truth
+# and sync_vectors keeps the two in step per fold - so it deliberately runs rarely.
 celery_app.conf.beat_schedule = {
     "dispatch-context": {
         "task": "dispatch_context",
         "schedule": float(settings.context_debounce_seconds),
+    },
+    "reconcile-context-vectors": {
+        "task": "reconcile_context_vectors",
+        "schedule": float(settings.context_reconcile_seconds),
     },
 }
