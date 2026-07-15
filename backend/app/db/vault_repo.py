@@ -1,4 +1,4 @@
-"""Read access to vault key METADATA via the RLS-scoped user-JWT client.
+"""Read access to vault key METADATA via the RLS-scoped ``rls_connection`` seam.
 
 Only the masked list is read here (RLS restricts it to owner/admin). The raw
 secret is never touched on this path - reveal goes through the service layer.
@@ -6,33 +6,31 @@ secret is never touched on this path - reveal goes through the service layer.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
-from fastapi import Depends, Request
+from fastapi import Depends
 
 from app.core.auth import CurrentUserDep
-from app.db.supabase import client_for_user
+from app.db.database import rls_connection
 
 _Rows = list[dict[str, Any]]
 
 
 class VaultRepo:
-    def __init__(self, access_token: str) -> None:
-        self._token = access_token
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
 
     def list_keys(self) -> _Rows:
-        client = client_for_user(self._token)
-        resp = client.table("vault_keys").select("*").order("created_at").execute()
-        return cast("_Rows", resp.data or [])
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.vault_keys order by created_at")
+            return cur.fetchall()
 
 
-def get_vault_repo(request: Request, _user: CurrentUserDep) -> VaultRepo:
-    """Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
-    populates ``request.state.access_token`` before this factory reads it -
-    independent of the sibling-dependency order in a route's signature.
+def get_vault_repo(user: CurrentUserDep) -> VaultRepo:
+    """Depends on ``get_current_user`` (via ``user``) so auth resolves first; the
+    repo carries ``user.id`` and opens ``rls_connection`` per method.
     """
-    token: str = getattr(request.state, "access_token", "")
-    return VaultRepo(token)
+    return VaultRepo(user.id)
 
 
 VaultRepoDep = Annotated[VaultRepo, Depends(get_vault_repo)]

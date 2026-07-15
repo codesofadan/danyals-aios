@@ -8,13 +8,14 @@ accounts (privilege-escalation guard).
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, require_perm
 from app.core.pagination import PageDep
-from app.db.supabase import SupabaseNotConfiguredError, client_for_user, get_admin_client
+from app.db.database import DatabaseNotConfiguredError, rls_connection
+from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
 from app.logging_setup import get_logger
 from app.schemas.identity import MemberResponse, ProvisionUserRequest
 from app.services.activity import record_activity
@@ -27,34 +28,35 @@ _ELEVATED_ROLES = frozenset({"owner", "admin"})
 
 
 def _fetch_all_users(
-    access_token: str, *, limit: int | None = None, offset: int = 0
+    user_id: str, *, limit: int | None = None, offset: int = 0
 ) -> list[dict[str, Any]]:
-    """Read the STAFF roster via the caller's RLS-scoped client (staff sees all).
+    """Read the STAFF roster via the RLS-scoped ``rls_connection`` (staff sees all).
 
-    Portal clients (role='client') are excluded: they are tenant logins, not
-    agency team members, and must never appear in the Team screen.
+    Portal clients (role='client') are excluded in SQL (``role <> 'client'``):
+    they are tenant logins, not agency team members, and must never appear in the
+    Team screen. Blocking; the caller offloads with ``to_thread``.
     """
-    client = client_for_user(access_token)
-    query = client.table("users").select("*").neq("role", "client").order("created_at")
+    query = "select * from public.users where role <> 'client' order by created_at"
+    params: list[Any] = []
     if limit is not None:
-        query = query.range(offset, offset + limit - 1)
-    resp = query.execute()
-    return cast("list[dict[str, Any]]", resp.data or [])
+        query += " limit %s offset %s"
+        params += [limit, offset]
+    with rls_connection(user_id) as cur:
+        cur.execute(query, params)
+        return cur.fetchall()
 
 
 @router.get("", response_model=list[MemberResponse])
 async def list_users(
-    request: Request,
     page: PageDep,
-    _user: Annotated[CurrentUser, Depends(require_perm("manage_team"))],
+    user: Annotated[CurrentUser, Depends(require_perm("manage_team"))],
 ) -> list[MemberResponse]:
     """List the agency roster in the frontend ``TeamMemberRecord`` shape."""
-    token: str = getattr(request.state, "access_token", "")
     try:
         rows = await asyncio.to_thread(
-            _fetch_all_users, token, limit=page.limit, offset=page.offset
+            _fetch_all_users, user.id, limit=page.limit, offset=page.offset
         )
-    except SupabaseNotConfiguredError as exc:
+    except DatabaseNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
         ) from exc

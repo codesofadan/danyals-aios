@@ -6,8 +6,10 @@ token locally (signature + ``aud`` + ``iss`` + ``exp``) - no per-request network
 call to Supabase, and no shared secret on the server.
 
 The verified ``sub`` claim (the Supabase auth uid) is used to load the caller's
-row from ``public.users`` through an RLS-respecting user-JWT client, yielding a
-:class:`CurrentUser`. There is no public signup: a user exists only if a
+row from ``public.users`` through the RLS-scoped ``rls_connection`` seam (the sub
+is bound as the RLS identity), yielding a :class:`CurrentUser`. Token
+verification stays JWKS-based; only the DB read moved off supabase-py. There is
+no public signup: a user exists only if a
 super-admin provisioned it (see ``app/services/provisioning.py``).
 
 Verification is split so it is testable without a network or a database:
@@ -20,7 +22,7 @@ Verification is split so it is testable without a network or a database:
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 import httpx
 import jwt
@@ -31,7 +33,7 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.core.deps import HttpClientDep, SettingsDep
-from app.db.supabase import SupabaseNotConfiguredError, client_for_user
+from app.db.database import DatabaseNotConfiguredError, rls_connection
 from app.rbac import AccessLevel, AppRole, PermKey, UserRole, feature_allows, role_has_perm
 
 # Supabase issues ES256 (default for new projects) or RS256 signing keys.
@@ -151,15 +153,16 @@ def decode_and_validate(
     return claims
 
 
-def _load_user_row(user_id: str, access_token: str) -> dict[str, Any] | None:
-    """Load the caller's ``public.users`` row via an RLS-respecting client.
+def _load_user_row(user_id: str) -> dict[str, Any] | None:
+    """Load the caller's ``public.users`` row via the RLS-scoped ``rls_connection``.
 
-    Blocking (supabase-py is sync); callers must offload with ``to_thread``.
+    A bootstrap self-read: ``user_id`` is the verified JWT ``sub``, bound as the
+    RLS identity AND the row filter (users_select permits ``auth.uid() = id``).
+    Blocking (psycopg is sync); callers must offload with ``to_thread``.
     """
-    client = client_for_user(access_token)
-    resp = client.table("users").select("*").eq("id", user_id).limit(1).execute()
-    rows = cast("list[dict[str, Any]]", resp.data or [])
-    return rows[0] if rows else None
+    with rls_connection(user_id) as cur:
+        cur.execute("select * from public.users where id = %s limit 1", (user_id,))
+        return cur.fetchone()
 
 
 async def get_current_user(
@@ -192,13 +195,13 @@ async def get_current_user(
         raise _UNAUTHORIZED from exc
 
     user_id = str(claims["sub"])
-    # Stash the token so downstream deps (require_feature) can reuse the same
-    # RLS-scoped client without re-parsing the header.
+    # Stash the token so downstream deps can reuse the verified bearer if needed
+    # (RLS access itself now flows through rls_connection off the verified sub).
     request.state.access_token = token
 
     try:
-        row = await asyncio.to_thread(_load_user_row, user_id, token)
-    except SupabaseNotConfiguredError as exc:
+        row = await asyncio.to_thread(_load_user_row, user_id)
+    except DatabaseNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication is not configured",
@@ -285,16 +288,19 @@ def require_owner() -> Any:
     return _dep
 
 
-def _load_feature_grants(user_id: str, access_token: str) -> dict[str, AccessLevel]:
-    """Load a user's per-feature grant overrides (blocking; offload with to_thread)."""
-    client = client_for_user(access_token)
-    resp = (
-        client.table("user_feature_grants")
-        .select("feature_key, level")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    rows = cast("list[dict[str, Any]]", resp.data or [])
+def _load_feature_grants(user_id: str) -> dict[str, AccessLevel]:
+    """Load a user's per-feature grant overrides via the RLS-scoped ``rls_connection``.
+
+    A bootstrap self-read (``user_id`` = the verified JWT ``sub``, bound as the
+    RLS identity; user_feature_grants_select permits ``user_id = auth.uid()``).
+    Blocking (psycopg is sync); offload with ``to_thread``.
+    """
+    with rls_connection(user_id) as cur:
+        cur.execute(
+            "select feature_key, level from public.user_feature_grants where user_id = %s",
+            (user_id,),
+        )
+        rows = cur.fetchall()
     return {r["feature_key"]: r["level"] for r in rows}
 
 
@@ -309,10 +315,10 @@ def require_feature(feature_key: str, level: AccessLevel = "full") -> Any:
     async def _dep(request: Request, user: CurrentUserDep) -> CurrentUser:
         if user.is_owner:
             return user
-        token: str | None = getattr(request.state, "access_token", None)
-        overrides: dict[str, AccessLevel] = {}
-        if token is not None:
-            overrides = await asyncio.to_thread(_load_feature_grants, user.id, token)
+        # RLS access flows off the verified sub (user.id), not the raw token; the
+        # `request` param is retained so this dep still short-circuits on owner
+        # without any DB/pool dependency.
+        overrides = await asyncio.to_thread(_load_feature_grants, user.id)
         if not feature_allows(user.role, overrides, feature_key, level):
             raise _forbid(f"Missing feature access: {feature_key}")
         return user

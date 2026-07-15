@@ -1,7 +1,9 @@
-"""Data access for the ``tasks`` ledger via the RLS-respecting user-JWT client.
+"""Data access for the ``tasks`` ledger via the RLS-scoped ``rls_connection`` seam.
 
 Every read + mutation is tenant/actor-scoped by Postgres RLS AND the
 ``tasks_guard_*`` triggers (the lifecycle boundary lives at the DB, not here).
+Writes MUST stay on this authenticated path: the triggers read
+``current_app_role()`` off ``auth.uid()``, which is NULL on the privileged pool.
 Methods are synchronous - the router offloads them with ``asyncio.to_thread`` -
 and the single ``get_tasks_repo`` dependency makes the layer trivially
 replaceable with an in-memory fake in tests.
@@ -11,54 +13,61 @@ from __future__ import annotations
 
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, Request
+from fastapi import Depends
+from psycopg import sql
 
 from app.core.auth import CurrentUserDep
-from app.db.supabase import client_for_user
+from app.db.database import rls_connection
 
 _Rows = list[dict[str, Any]]
 
 
 class TasksRepo:
-    """Thin repository over the ``tasks`` table (user-JWT, RLS-scoped)."""
+    """Thin repository over the ``tasks`` table (RLS-scoped)."""
 
-    def __init__(self, access_token: str) -> None:
-        self._token = access_token
-
-    def _client(self) -> Any:
-        return client_for_user(self._token)
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
 
     def list_tasks(
         self, assignee_id: str | None = None, *, limit: int | None = None, offset: int = 0
     ) -> _Rows:
-        query = self._client().table("tasks").select("*")
+        query = "select * from public.tasks"
+        params: list[Any] = []
         if assignee_id is not None:
-            query = query.eq("assignee_id", assignee_id)
-        query = query.order("created_at", desc=True)
+            query += " where assignee_id = %s"
+            params.append(assignee_id)
+        query += " order by created_at desc"
         if limit is not None:
-            query = query.range(offset, offset + limit - 1)
-        resp = query.execute()
-        return cast("_Rows", resp.data or [])
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
 
     def get_task_by_code(self, code: str) -> dict[str, Any] | None:
-        resp = self._client().table("tasks").select("*").eq("code", code).limit(1).execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.tasks where code = %s limit 1", (code,))
+            return cur.fetchone()
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         """Read a full user row - used to validate an assignee is staff (role)
         and to load the caller's own member record for GET /me.
 
-        Uses the same RLS client; staff may read the whole roster (users_select).
+        Uses the same RLS-scoped path; staff may read the whole roster (users_select).
         """
-        resp = self._client().table("users").select("*").eq("id", user_id).limit(1).execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.users where id = %s limit 1", (user_id,))
+            return cur.fetchone()
 
     def insert_task(self, row: dict[str, Any]) -> dict[str, Any]:
-        resp = self._client().table("tasks").insert(row).execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0]
+        cols = list(row.keys())
+        stmt = sql.SQL("insert into public.tasks ({cols}) values ({vals}) returning *").format(
+            cols=sql.SQL(", ").join(map(sql.Identifier, cols)),
+            vals=sql.SQL(", ").join([sql.Placeholder()] * len(cols)),
+        )
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, list(row.values()))
+            return cast("dict[str, Any]", cur.fetchone())
 
     def update_task_by_code(
         self, code: str, patch: dict[str, Any], expect_status: str | None = None
@@ -70,23 +79,30 @@ class TasksRepo:
         moved the row matches 0 rows, so the caller can raise 409 instead of
         silently double-advancing.
         """
-        query = self._client().table("tasks").update(patch).eq("code", code)
+        cols = list(patch.keys())
+        assignments = sql.SQL(", ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(c)) for c in cols
+        )
+        where = sql.SQL("code = %s")
+        params: list[Any] = [*patch.values(), code]
         if expect_status is not None:
-            query = query.eq("status", expect_status)
-        resp = query.execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+            where = sql.SQL("code = %s and status = %s")
+            params.append(expect_status)
+        stmt = sql.SQL("update public.tasks set {sets} where {where} returning *").format(
+            sets=assignments, where=where
+        )
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, params)
+            return cur.fetchone()
 
 
-def get_tasks_repo(request: Request, _user: CurrentUserDep) -> TasksRepo:
-    """Dependency: a repo bound to the caller's access token (RLS-scoped).
+def get_tasks_repo(user: CurrentUserDep) -> TasksRepo:
+    """Dependency: a repo bound to the caller's verified user id (RLS-scoped).
 
-    Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
-    populates ``request.state.access_token`` before this factory reads it -
-    independent of the sibling-dependency order in a route's signature.
+    Depends on ``get_current_user`` (via ``user``) so auth resolves first; the
+    repo carries ``user.id`` and opens ``rls_connection`` per method.
     """
-    token: str = getattr(request.state, "access_token", "")
-    return TasksRepo(token)
+    return TasksRepo(user.id)
 
 
 TasksRepoDep = Annotated[TasksRepo, Depends(get_tasks_repo)]

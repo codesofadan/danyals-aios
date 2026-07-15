@@ -223,7 +223,7 @@ async def test_require_feature_owner_short_circuits() -> None:
 @pytest.mark.unit
 async def test_require_feature_consults_grants(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "app.core.auth._load_feature_grants", lambda uid, tok: {"technical_audit": "full"}
+        "app.core.auth._load_feature_grants", lambda uid: {"technical_audit": "full"}
     )
     dep = require_feature("technical_audit")
     req = SimpleNamespace(state=SimpleNamespace(access_token="tok"))

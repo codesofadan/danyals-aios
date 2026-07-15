@@ -7,6 +7,7 @@ happy path pinning role='client' + client_id from the path).
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import httpx
@@ -29,47 +30,40 @@ def _user(role: str) -> CurrentUser:
 # --- D9: the roster query filters out clients --------------------------------
 
 
-class _RosterTable:
-    """Records the query chain and applies a .neq filter over seeded rows."""
+def test_roster_query_excludes_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The roster read issues the ``role <> 'client'`` filter in SQL (not in Python)
+    and returns the cursor's rows unchanged.
 
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self._rows = rows
-        self._excl: tuple[str, str] | None = None
-
-    def select(self, *_cols: str) -> _RosterTable:
-        return self
-
-    def neq(self, key: str, value: str) -> _RosterTable:
-        self._excl = (key, value)
-        return self
-
-    def order(self, _key: str) -> _RosterTable:
-        return self
-
-    def execute(self) -> Any:
-        data = self._rows
-        if self._excl:
-            k, v = self._excl
-            data = [r for r in data if str(r.get(k)) != v]
-        return type("R", (), {"data": list(data)})()
-
-
-def test_roster_excludes_client_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    The exclusion is now enforced by the DB query itself; that it truly filters
+    is proven live in ``tests/integration/test_repo_sql_parity.py``. Here we lock
+    the seam: ``_fetch_all_users`` binds the caller as the RLS identity and runs
+    the staff-only, client-excluding, created_at-ordered query.
+    """
     from app.routers import admin_users
 
-    rows = [
-        {"id": "s1", "role": "admin", "name": "Staffer"},
-        {"id": "c1", "role": "client", "name": "Portal Login"},
-    ]
+    captured: dict[str, Any] = {}
+    staff_rows = [{"id": "s1", "role": "admin", "name": "Staffer"}]
 
-    class _FakeClient:
-        def table(self, _name: str) -> _RosterTable:
-            return _RosterTable(rows)
+    class _FakeCur:
+        def execute(self, query: Any, params: Any = None) -> None:
+            captured["query"] = str(query)
+            captured["params"] = params
 
-    monkeypatch.setattr(admin_users, "client_for_user", lambda _t: _FakeClient())
-    fetched = admin_users._fetch_all_users("tok")
-    assert [r["id"] for r in fetched] == ["s1"]
-    assert all(r["role"] != "client" for r in fetched)
+        def fetchall(self) -> list[dict[str, Any]]:
+            return staff_rows
+
+    @contextlib.contextmanager
+    def _fake_conn(user_id: str) -> Any:
+        captured["user_id"] = user_id
+        yield _FakeCur()
+
+    monkeypatch.setattr(admin_users, "rls_connection", _fake_conn)
+    fetched = admin_users._fetch_all_users("u-1")
+
+    assert fetched == staff_rows  # passthrough; no Python-side filtering
+    assert captured["user_id"] == "u-1"  # caller bound as the RLS identity
+    assert "role <> 'client'" in captured["query"]
+    assert "order by created_at" in captured["query"]
 
 
 # --- Owner-only portal-user endpoint -----------------------------------------

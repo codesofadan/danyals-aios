@@ -1,6 +1,6 @@
-"""Data access for the ``audits`` job ledger via the RLS-respecting user-JWT
-client. Reads + the queued-row insert are tenant-scoped by Postgres RLS; the
-worker's status updates use the service_role client instead (see
+"""Data access for the ``audits`` job ledger via the RLS-scoped ``rls_connection``
+seam. Reads + the queued-row insert are tenant-scoped by Postgres RLS; the
+worker's status updates use the service_role path instead (see
 ``workers/tasks/audit.py``). Methods are synchronous - the router offloads them
 with ``asyncio.to_thread`` - and the single ``get_audits_repo`` dependency makes
 the layer trivially replaceable with an in-memory fake in tests.
@@ -10,50 +10,54 @@ from __future__ import annotations
 
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, Request
+from fastapi import Depends
+from psycopg import sql
 
 from app.core.auth import CurrentUserDep
-from app.db.supabase import client_for_user
+from app.db.database import rls_connection
 
 _Rows = list[dict[str, Any]]
 
 
 class AuditsRepo:
-    """Thin repository over the ``audits`` table (user-JWT, RLS-scoped)."""
+    """Thin repository over the ``audits`` table (RLS-scoped)."""
 
-    def __init__(self, access_token: str) -> None:
-        self._token = access_token
-
-    def _client(self) -> Any:
-        return client_for_user(self._token)
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
 
     def list_audits(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
-        query = self._client().table("audits").select("*").order("created_at", desc=True)
+        query = "select * from public.audits order by created_at desc"
+        params: list[Any] = []
         if limit is not None:
-            query = query.range(offset, offset + limit - 1)
-        resp = query.execute()
-        return cast("_Rows", resp.data or [])
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
 
     def get_audit(self, audit_id: str) -> dict[str, Any] | None:
-        resp = self._client().table("audits").select("*").eq("id", audit_id).limit(1).execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.audits where id = %s limit 1", (audit_id,))
+            return cur.fetchone()
 
     def insert_audit(self, row: dict[str, Any]) -> dict[str, Any]:
-        resp = self._client().table("audits").insert(row).execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0]
+        cols = list(row.keys())
+        stmt = sql.SQL("insert into public.audits ({cols}) values ({vals}) returning *").format(
+            cols=sql.SQL(", ").join(map(sql.Identifier, cols)),
+            vals=sql.SQL(", ").join([sql.Placeholder()] * len(cols)),
+        )
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, list(row.values()))
+            return cast("dict[str, Any]", cur.fetchone())
 
 
-def get_audits_repo(request: Request, _user: CurrentUserDep) -> AuditsRepo:
-    """Dependency: a repo bound to the caller's access token (RLS-scoped).
+def get_audits_repo(user: CurrentUserDep) -> AuditsRepo:
+    """Dependency: a repo bound to the caller's verified user id (RLS-scoped).
 
-    Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
-    populates ``request.state.access_token`` before this factory reads it -
-    independent of the sibling-dependency order in a route's signature.
+    Depends on ``get_current_user`` (via ``user``) so auth resolves first; the
+    repo carries ``user.id`` and opens ``rls_connection`` per method.
     """
-    token: str = getattr(request.state, "access_token", "")
-    return AuditsRepo(token)
+    return AuditsRepo(user.id)
 
 
 AuditsRepoDep = Annotated[AuditsRepo, Depends(get_audits_repo)]

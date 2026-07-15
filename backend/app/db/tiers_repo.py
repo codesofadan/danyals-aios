@@ -1,47 +1,46 @@
-"""Per-client delivery-tier data access via the RLS-scoped user-JWT client."""
+"""Per-client delivery-tier data access via the RLS-scoped ``rls_connection`` seam."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
-from fastapi import Depends, Request
+from fastapi import Depends
 
 from app.core.auth import CurrentUserDep
-from app.db.supabase import client_for_user
+from app.db.database import rls_connection
 
 _Rows = list[dict[str, Any]]
-_COLS = "id,name,industry,contact_color,delivery_tier"
+_COLS = "id, name, industry, contact_color, delivery_tier"
 
 
 class TiersRepo:
-    def __init__(self, access_token: str) -> None:
-        self._token = access_token
-
-    def _client(self) -> Any:
-        return client_for_user(self._token)
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
 
     def list_tier_clients(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
-        query = self._client().table("clients").select(_COLS).order("name")
+        query = f"select {_COLS} from public.clients order by name"
+        params: list[Any] = []
         if limit is not None:
-            query = query.range(offset, offset + limit - 1)
-        resp = query.execute()
-        return cast("_Rows", resp.data or [])
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
 
     def set_delivery_tier(self, client_id: str, tier: str) -> dict[str, Any] | None:
-        resp = (
-            self._client().table("clients").update({"delivery_tier": tier}).eq("id", client_id).execute()
-        )
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.clients set delivery_tier = %s where id = %s returning *",
+                (tier, client_id),
+            )
+            return cur.fetchone()
 
 
-def get_tiers_repo(request: Request, _user: CurrentUserDep) -> TiersRepo:
-    """Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
-    populates ``request.state.access_token`` before this factory reads it -
-    independent of the sibling-dependency order in a route's signature.
+def get_tiers_repo(user: CurrentUserDep) -> TiersRepo:
+    """Depends on ``get_current_user`` (via ``user``) so auth resolves first; the
+    repo carries ``user.id`` and opens ``rls_connection`` per method.
     """
-    token: str = getattr(request.state, "access_token", "")
-    return TiersRepo(token)
+    return TiersRepo(user.id)
 
 
 TiersRepoDep = Annotated[TiersRepo, Depends(get_tiers_repo)]

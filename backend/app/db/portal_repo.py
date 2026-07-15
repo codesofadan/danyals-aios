@@ -1,70 +1,68 @@
 """Data access for the CLIENT PORTAL over the ``portal_*`` security-barrier views.
 
-Every read uses ``client_for_user`` (anon key + the client's JWT), so PostgreSQL
-RLS - via the views' ``current_client_id()`` self-filter - is the boundary: a
-client can only ever see its OWN client, sites, and audits, and only the safe
-column subset the views expose (no cost/error/paths/mrr/contacts). The repo holds
-only the caller's token; methods are synchronous (supabase-py is sync) and the
-router offloads them with ``asyncio.to_thread``. A single ``get_portal_repo``
-dependency makes the layer trivially replaceable with an in-memory fake in tests.
+Every read opens ``rls_connection(self._user_id)`` for the client's verified user
+id, so PostgreSQL RLS - via the views' ``current_client_id()`` self-filter - is
+the boundary: a client can only ever see its OWN client, sites, and audits, and
+only the safe column subset the views expose (no cost/error/paths/mrr/contacts).
+The repo holds only the caller's user id; methods are synchronous (psycopg is
+sync) and the router offloads them with ``asyncio.to_thread``. A single
+``get_portal_repo`` dependency makes the layer trivially replaceable with an
+in-memory fake in tests.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
-from fastapi import Depends, Request
+from fastapi import Depends
 
 from app.core.auth import CurrentUserDep
-from app.db.supabase import client_for_user
+from app.db.database import rls_connection
 
 _Rows = list[dict[str, Any]]
 
 
 class PortalRepo:
     """Thin repository over the ``portal_audits`` / ``portal_client`` /
-    ``portal_sites`` views (user-JWT, RLS-scoped to the calling client)."""
+    ``portal_sites`` views (RLS-scoped to the calling client)."""
 
-    def __init__(self, access_token: str) -> None:
-        self._token = access_token
-
-    def _client(self) -> Any:
-        return client_for_user(self._token)
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
 
     def list_audits(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
-        query = self._client().table("portal_audits").select("*").order("created_at", desc=True)
+        query = "select * from public.portal_audits order by created_at desc"
+        params: list[Any] = []
         if limit is not None:
-            query = query.range(offset, offset + limit - 1)
-        resp = query.execute()
-        return cast("_Rows", resp.data or [])
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
 
     def get_audit(self, audit_id: str) -> dict[str, Any] | None:
-        resp = (
-            self._client().table("portal_audits").select("*").eq("id", audit_id).limit(1).execute()
-        )
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.portal_audits where id = %s limit 1", (audit_id,))
+            return cur.fetchone()
 
     def get_client(self) -> dict[str, Any] | None:
         """The caller's own client row (the view returns exactly one row)."""
-        resp = self._client().table("portal_client").select("*").limit(1).execute()
-        rows = cast("_Rows", resp.data or [])
-        return rows[0] if rows else None
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.portal_client limit 1")
+            return cur.fetchone()
 
     def list_sites(self) -> _Rows:
-        resp = self._client().table("portal_sites").select("*").order("domain").execute()
-        return cast("_Rows", resp.data or [])
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.portal_sites order by domain")
+            return cur.fetchall()
 
 
-def get_portal_repo(request: Request, _user: CurrentUserDep) -> PortalRepo:
-    """Dependency: a repo bound to the caller's access token (RLS-scoped).
+def get_portal_repo(user: CurrentUserDep) -> PortalRepo:
+    """Dependency: a repo bound to the caller's verified user id (RLS-scoped).
 
-    Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
-    populates ``request.state.access_token`` before this factory reads it -
-    independent of the sibling-dependency order in a route's signature.
+    Depends on ``get_current_user`` (via ``user``) so auth resolves first; the
+    repo carries ``user.id`` and opens ``rls_connection`` per method.
     """
-    token: str = getattr(request.state, "access_token", "")
-    return PortalRepo(token)
+    return PortalRepo(user.id)
 
 
 PortalRepoDep = Annotated[PortalRepo, Depends(get_portal_repo)]

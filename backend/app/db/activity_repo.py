@@ -1,37 +1,37 @@
-"""Read access to the activity feed via the RLS-scoped user-JWT client (staff)."""
+"""Read access to the activity feed via the RLS-scoped ``rls_connection`` seam (staff)."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
-from fastapi import Depends, Request
+from fastapi import Depends
 
 from app.core.auth import CurrentUserDep
-from app.db.supabase import client_for_user
+from app.db.database import rls_connection
 
 _Rows = list[dict[str, Any]]
 
 
 class ActivityRepo:
-    def __init__(self, access_token: str) -> None:
-        self._token = access_token
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
 
     def list_activity(self, limit: int | None = 50, offset: int = 0) -> _Rows:
-        client = client_for_user(self._token)
-        query = client.table("activity_log").select("*").order("created_at", desc=True)
+        query = "select * from public.activity_log order by created_at desc"
+        params: list[Any] = []
         if limit is not None:
-            query = query.range(offset, offset + limit - 1)
-        resp = query.execute()
-        return cast("_Rows", resp.data or [])
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
 
 
-def get_activity_repo(request: Request, _user: CurrentUserDep) -> ActivityRepo:
-    """Depends on ``get_current_user`` (via ``_user``) so auth resolves first and
-    populates ``request.state.access_token`` before this factory reads it -
-    independent of the sibling-dependency order in a route's signature.
+def get_activity_repo(user: CurrentUserDep) -> ActivityRepo:
+    """Depends on ``get_current_user`` (via ``user``) so auth resolves first; the
+    repo carries ``user.id`` and opens ``rls_connection`` per method.
     """
-    token: str = getattr(request.state, "access_token", "")
-    return ActivityRepo(token)
+    return ActivityRepo(user.id)
 
 
 ActivityRepoDep = Annotated[ActivityRepo, Depends(get_activity_repo)]
