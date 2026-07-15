@@ -34,6 +34,7 @@ class ContentRepo:
         self,
         *,
         assignee_id: str | None = None,
+        client_id: str | None = None,
         status: str | None = None,
         limit: int | None = None,
         offset: int = 0,
@@ -44,6 +45,9 @@ class ContentRepo:
         if assignee_id is not None:
             clauses.append("assignee_id = %s")
             params.append(assignee_id)
+        if client_id is not None:
+            clauses.append("client_id = %s")
+            params.append(client_id)
         if status is not None:
             clauses.append("status = %s")
             params.append(status)

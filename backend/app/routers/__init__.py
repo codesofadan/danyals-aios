@@ -15,6 +15,7 @@ from app.routers.auth import router as auth_router
 from app.routers.backups import router as backups_router
 from app.routers.clients import router as clients_router
 from app.routers.command_center import router as command_center_router
+from app.routers.content import router as content_router
 from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.me import router as me_router
@@ -43,6 +44,7 @@ api_v1.include_router(activity_router)
 api_v1.include_router(cost_router)
 api_v1.include_router(tiers_router)
 api_v1.include_router(audits_router)
+api_v1.include_router(content_router)
 api_v1.include_router(tasks_router)
 api_v1.include_router(milestones_router)
 api_v1.include_router(offpage_router)

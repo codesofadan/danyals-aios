@@ -18,11 +18,19 @@ The two server rules the router will reuse live here as pure helpers:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.util.timefmt import relative_ago
+
+# Statuses that count as "in the automated pipeline" (pre-terminal, pre-review-exit)
+# for the board KPI. Mirrors ``ContentKpis.tsx`` (queued|drafting|needs_review|
+# publishing). ``done``/``failed``/``rejected`` are terminal and excluded.
+_IN_PIPELINE: frozenset[str] = frozenset(
+    {"queued", "drafting", "needs_review", "publishing"}
+)
 
 # Unions verbatim from content.ts (note the spaces / apostrophes in the
 # frameworks). These are the SAME values front + back - no display remapping.
@@ -96,6 +104,69 @@ class ContentReviewRequest(BaseModel):
     """
 
     action: ReviewAction
+
+
+class ContentJobUpdate(BaseModel):
+    """PATCH /content/jobs/{code} body: a LEAD's limited edit of a job's inputs.
+
+    Deliberately narrow: only the ``topic`` (the content brief line) and the
+    server-only ``brief`` (extra instructions) are editable here. Status is NEVER
+    touched on this path - the lifecycle moves only via /review and the worker, and
+    the DB guard would reject a non-lead edit anyway. Every field is optional; an
+    empty patch is a no-op.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    topic: str | None = Field(default=None, min_length=1)
+    brief: str | None = None
+
+
+class ContentStatsResponse(BaseModel):
+    """Content-board KPI headline (frontend ``ContentKpis`` shape).
+
+    ``inPipeline`` = jobs still moving through the automated pipeline;
+    ``awaitingReview`` = jobs parked at the human review gate; ``publishedThisMonth``
+    = jobs completed this calendar month; ``avgCost`` = mean per-page cost over the
+    priced (cost > 0) jobs, in dollars.
+    """
+
+    in_pipeline: int = Field(serialization_alias="inPipeline")
+    awaiting_review: int = Field(serialization_alias="awaitingReview")
+    published_this_month: int = Field(serialization_alias="publishedThisMonth")
+    avg_cost: float = Field(serialization_alias="avgCost")
+
+
+def compute_content_stats(rows: list[dict[str, Any]]) -> ContentStatsResponse:
+    """Derive the content KPIs from the job rows (pure, unit-testable).
+
+    inPipeline = jobs in {queued, drafting, needs_review, publishing}; awaitingReview
+    = jobs in needs_review; publishedThisMonth = ``done`` jobs created this calendar
+    month; avgCost = mean cost of jobs with cost > 0 (0 when none are priced).
+    """
+    month_prefix = datetime.now(UTC).strftime("%Y-%m")
+    in_pipeline = 0
+    awaiting = 0
+    published = 0
+    costs: list[float] = []
+    for r in rows:
+        status = str(r.get("status") or "")
+        if status in _IN_PIPELINE:
+            in_pipeline += 1
+        if status == "needs_review":
+            awaiting += 1
+        if status == "done" and str(r.get("created_at", ""))[:7] == month_prefix:
+            published += 1
+        cost = float(r.get("cost", 0) or 0)
+        if cost > 0:
+            costs.append(cost)
+    avg_cost = round(sum(costs) / len(costs), 2) if costs else 0.0
+    return ContentStatsResponse(
+        in_pipeline=in_pipeline,
+        awaiting_review=awaiting,
+        published_this_month=published,
+        avg_cost=avg_cost,
+    )
 
 
 class ContentJobResponse(BaseModel):
