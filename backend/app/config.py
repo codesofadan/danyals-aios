@@ -195,6 +195,16 @@ class Settings(BaseSettings):
     # is never logged / never in a repr. ---
     google_sheets_sa_json: SecretStr | None = None  # service-account credential JSON
 
+    # --- Delivery layer: email + Slack (7F-1). OPTIONAL and NOT in _REQUIRED_IN_PROD:
+    # the notifications/alerts service builds + unit-tests NOW with fakes and lights up
+    # the email/Slack legs per key as they land (mirrors the content/sheets key-gating).
+    # A keyless deploy still delivers IN-APP notifications + persists alert rows; only
+    # the email + Slack legs are skipped until the keys arrive. Keys are SecretStr
+    # (never logged / never in a repr); the ``from`` sender address is not a secret. ---
+    resend_api_key: SecretStr | None = None  # Resend transactional-email API key
+    resend_from_email: str = "AIOS <notifications@xegents.ai>"  # verified Resend sender
+    slack_webhook_url: SecretStr | None = None  # Slack incoming-webhook URL (embeds a token)
+
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
 
