@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from app.schemas.activity import ActivityResponse
 from app.schemas.audits import AuditResponse
 from app.schemas.clients import ClientResponse
+from app.schemas.content import ContentJobResponse
 from app.schemas.cost import ClientBudgetResponse, CostEntryResponse, DialFeatureResponse
 from app.schemas.identity import MemberResponse
 from app.schemas.tasks import TaskResponse
@@ -42,6 +43,7 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (DialFeatureResponse, "frontend/lib/cost.ts", "DialFeature"),
     (ActivityResponse, "frontend/lib/data.ts", "Activity"),
     (TierClientResponse, "frontend/lib/tiers.ts", "TierClient"),
+    (ContentJobResponse, "frontend/lib/content.ts", "ContentJob"),
 ]
 
 
@@ -89,3 +91,76 @@ def test_contract_lock_covers_the_core_response_models() -> None:
     # Guard against silently dropping a mapping (e.g. a refactor renames a model).
     assert len(_CONTRACT) >= 10
     assert len({m for m, _, _ in _CONTRACT}) == len(_CONTRACT)
+
+
+# --------------------------------------------------------------------------- #
+# ENUM-LOCK (§3 / N3): field NAMES matching isn't enough - a model whose
+# ``Literal`` values drift from the frontend union (e.g. dropping ``"Medium"`` or
+# writing ``"4Ps"`` for ``"4 Ps"``) would still pass the field-name lock above but
+# break the dashboard. This turns that discipline into a GATE: for each enum field
+# we assert the Python ``Literal`` value set EQUALS the ``lib/*.ts`` union set.
+# --------------------------------------------------------------------------- #
+
+# (model, python field name, TS file, exported union type name)
+_ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
+    (ContentJobResponse, "page_type", "frontend/lib/content.ts", "PageType"),
+    (ContentJobResponse, "framework", "frontend/lib/content.ts", "Framework"),
+    (ContentJobResponse, "target", "frontend/lib/content.ts", "PublishTarget"),
+    (ContentJobResponse, "status", "frontend/lib/content.ts", "JobStatus"),
+]
+
+
+def _ts_union_literals(ts_path: Path, type_name: str) -> set[str]:
+    """The string literals of ``export type <type_name> = "a" | "b" | ...;``.
+
+    Handles single- and multi-line unions (a leading ``|`` and line breaks are
+    fine - we just harvest every double-quoted literal in the RHS up to the ``;``).
+    """
+    src = ts_path.read_text(encoding="utf-8")
+    match = re.search(rf"export type {type_name}\s*=\s*(.*?);", src, re.DOTALL)
+    assert match, f"TS union {type_name} not found in {ts_path}"
+    literals = set(re.findall(r'"([^"]*)"', match.group(1)))
+    assert literals, f"no literals parsed for union {type_name}"
+    return literals
+
+
+def _model_literal_values(model: type[BaseModel], field_name: str) -> set[str]:
+    """The ``Literal`` value set of a model field (unwraps ``X | None`` too)."""
+    import typing
+
+    ann = model.model_fields[field_name].annotation
+    args = typing.get_args(ann)
+    # A bare Literal[...]: get_args are the values. A union (e.g. Optional) may nest
+    # the Literal; harvest string values from any depth.
+    values: set[str] = set()
+
+    def _harvest(t: object) -> None:
+        for a in typing.get_args(t):
+            if isinstance(a, str):
+                values.add(a)
+            else:
+                _harvest(a)
+
+    if args and all(isinstance(a, str) for a in args):
+        values.update(a for a in args if isinstance(a, str))
+    else:
+        _harvest(ann)
+    assert values, f"no Literal values on {model.__name__}.{field_name}"
+    return values
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("model", "field", "ts_file", "ts_union"),
+    _ENUM_CONTRACT,
+    ids=[f"{m.__name__}.{f}<->{u}" for m, f, _, u in _ENUM_CONTRACT],
+)
+def test_enum_field_matches_frontend_union(
+    model: type[BaseModel], field: str, ts_file: str, ts_union: str
+) -> None:
+    ts = _ts_union_literals(_REPO_ROOT / ts_file, ts_union)
+    py = _model_literal_values(model, field)
+    assert py == ts, (
+        f"{model.__name__}.{field} enum drifted from {ts_union} ({ts_file}): "
+        f"model-only={sorted(py - ts)} ts-only={sorted(ts - py)}"
+    )

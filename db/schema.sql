@@ -337,3 +337,31 @@ create table public.tasks (
 -- index users_username_key on lower(username) where username is not null. The
 -- username is the human login key for all 3 portals; the uuid PK is unchanged and
 -- stays the RLS/auth.uid() identity. Not a tenant boundary; RLS gate unaffected.
+
+-- ---- 0017_content -----------------------------------------------------------
+-- Part 7 Module 02 (Content): the content-job ledger (P7A-1). A content job = a
+-- content type + topic pushed through an ~90% AUTOMATED pipeline (queued ->
+-- drafting -> needs_review -> publishing -> done) with a HUMAN review gate off
+-- needs_review (approve -> publishing, reject -> rejected, edit -> drafting).
+-- Shapes mirror frontend/lib/content.ts (ContentJob).
+--   enums content_page_type(service|blog|local), content_target(WordPress|
+--     'PDF/Markdown'), content_framework(AIDA|PAS|BAB|FAB|'4 Ps'|PASTOR|'4 U''s'),
+--     content_status(queued|drafting|needs_review|publishing|done|failed|rejected).
+--   content_code_seq (start 4200) -> the public CJ-#### badge (never a UUID).
+--   content_jobs(id uuid, code text unique CJ-####, client_id fk->clients set null,
+--     client_name/color snapshots, page_type, topic, framework, auto bool, target,
+--     status 'queued', cost numeric, words int, schema_type text (contract key
+--     `schema`), images int, stage text; + server-only rich cols brief, source_pack/
+--     keyword_map/outline/entity_coverage/qa_score/json_ld/internal_links jsonb,
+--     draft_md, wp_post_id, artifact_dir/pdf_path/md_path, assignee_id fk->users,
+--     created_by, context_watermark bigint; created_at/updated_at) + set_updated_at.
+--   ENABLE + FORCE RLS: select is_staff(); insert owner/admin/manager; update
+--     (assignee_id=auth.uid() OR lead).
+--   THE LIFECYCLE GATE - content_jobs_guard_update() BEFORE UPDATE (SECURITY
+--     DEFINER, empty search_path) binds ALL THREE actors (service_role bypasses
+--     POLICIES but NOT TRIGGERS): (1) WORKER/system (auth.uid() IS NULL) may only
+--     do queued->drafting, drafting->needs_review, publishing->done, any->failed,
+--     and same-status streaming writes; (2) LEADS own the review decisions +
+--     any legal edit; (3) a NON-LEAD assignee may NOT modify a job at all. Plus
+--     content_jobs_guard_insert() rejects a client-role assignee. RLS gate: 17
+--     tables, all FORCE.
