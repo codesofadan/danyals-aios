@@ -294,6 +294,27 @@ create table public.tasks (
 --     per entity - debounce next_eligible_at = least(existing, now()+30s),
 --     coalesce event_count, last_seq = greatest(...), re-arm processing->pending.
 
+-- ---- 0014_entity_context ----------------------------------------------------
+-- CANONICAL CONTEXT STORE + Pinecone ledger (P6B-2). Postgres = source of truth;
+-- Pinecone = a derived index reconstructable from context_vectors.
+--   type context_status as enum ('pending','summarized','degraded','error')
+--   entity_context(id, entity_type context_entity, entity_id uuid, summary text,
+--     facts jsonb '{}', token_budget int 1200, token_count int 0, version int 0,
+--     event_watermark bigint 0, status context_status 'pending', model text,
+--     checksum text, created_at, updated_at; unique (entity_type, entity_id))
+--     + set_updated_at() trigger. The living-context row per entity; the worker
+--     upserts on (entity_type, entity_id) and bumps version/watermark/status.
+--   context_vectors(id, entity_type, entity_id, chunk_key text, pinecone_id text,
+--     content_checksum text, version int, dim int, model text, embedded_at;
+--     unique (entity_type, entity_id, chunk_key)) + index (entity_type, entity_id).
+--     The Pinecone vector-sync LEDGER (dedupe/GC/consistency by checksum).
+--   Both ENABLE + FORCE RLS; select is_staff() only; NO write policy (the
+--     compaction worker writes via service_role).
+--   view portal_context (security_barrier=true): a portal client reads ONLY its
+--     own client-level summary/facts/updated_at, self-filtered by
+--     current_client_id() (mirrors 0010 portal_*); granted to authenticated, anon.
+--     No vectors, no watermark, no foreign tenant, no base-table access.
+
 -- ---- 0016_user_login --------------------------------------------------------
 -- AUTH CUTOVER (P6A-7): adds public.users.username (nullable) + a partial unique
 -- index users_username_key on lower(username) where username is not null. The
