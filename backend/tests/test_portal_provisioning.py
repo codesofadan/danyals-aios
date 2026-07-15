@@ -90,7 +90,7 @@ async def test_portal_user_requires_owner(client: httpx.AsyncClient, wire: Any) 
     wire("admin")  # manage_team but not owner
     resp = await client.post(
         "/api/v1/clients/cl-1/portal-users",
-        json={"email": "p@acme.com", "name": "P", "password": "secret12"},
+        json={"email": "p@acme.com", "name": "P", "username": "acmeportal", "password": "secret12"},
     )
     assert resp.status_code == 403
 
@@ -99,7 +99,7 @@ async def test_portal_user_unknown_client_404(client: httpx.AsyncClient, wire: A
     wire("owner", client_exists=False)
     resp = await client.post(
         "/api/v1/clients/nope/portal-users",
-        json={"email": "p@acme.com", "name": "P", "password": "secret12"},
+        json={"email": "p@acme.com", "name": "P", "username": "acmeportal", "password": "secret12"},
     )
     assert resp.status_code == 404
 
@@ -111,7 +111,7 @@ async def test_portal_user_happy_path_pins_tenant(
 
     calls: dict[str, Any] = {}
 
-    def _fake_provision(_admin: Any, **kwargs: Any) -> dict[str, Any]:
+    def _fake_provision(**kwargs: Any) -> dict[str, Any]:
         calls.update(kwargs)
         return {
             "id": "u-new", "email": kwargs["email"], "name": kwargs["name"],
@@ -119,17 +119,18 @@ async def test_portal_user_happy_path_pins_tenant(
             "client_id": kwargs["client_id"], "created_at": "2026-07-14T00:00:00Z",
         }
 
-    monkeypatch.setattr(clients_router, "get_admin_client", lambda: object())
+    # provision_user now writes to local PG (no admin client); it is keyword-only.
     monkeypatch.setattr(clients_router, "provision_user", _fake_provision)
     wire("owner")
 
     resp = await client.post(
         "/api/v1/clients/cl-acme/portal-users",
-        json={"email": "p@acme.com", "name": "Portal", "password": "secret12"},
+        json={"email": "p@acme.com", "name": "Portal", "username": "acmeportal", "password": "secret12"},
     )
     assert resp.status_code == 201, resp.text
     # Role is fixed to client and client_id is pinned from the PATH, not the body.
     assert calls["role"] == "client"
     assert calls["client_id"] == "cl-acme"
+    assert calls["username"] == "acmeportal"
     body = resp.json()
     assert body["role"] == "Client"

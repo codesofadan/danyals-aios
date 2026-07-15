@@ -1,150 +1,124 @@
-"""P2-3 gate: provision_user creates auth user + users row + template grants."""
+"""P6A-7 gate: provision_user writes the credential + identity to LOCAL Postgres.
+
+Since the cutover, provisioning inserts ``auth.users`` (argon2id hash) +
+``public.users`` (+ template grants) in one ``privileged_connection`` transaction.
+Here the connection is faked (a recording cursor) so the WRITES are asserted
+without a database: the credential is argon2id, the identity carries role/status/
+username/client_id, and the template drives the grant count. The atomic write is
+proven live in ``tests/integration/test_auth_login.py`` (local-login E2E).
+"""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import contextlib
 from typing import Any
 
 import pytest
 
+from app.services import provisioning
 from app.services.provisioning import provision_user
 
-
-class _Exec:
-    def __init__(self, data: Any) -> None:
-        self.data = data
+pytestmark = pytest.mark.unit
 
 
-class _Table:
-    def __init__(self, store: dict[str, list[dict[str, Any]]], name: str) -> None:
-        self._store = store
-        self._name = name
-        self._select = False
-        self._filter: tuple[str, str] | None = None
+class _RecordingCursor:
+    """Captures execute/executemany calls and serves the final row-read back."""
 
-    def insert(self, rows: Any) -> _Table:
-        items = rows if isinstance(rows, list) else [rows]
-        self._store.setdefault(self._name, []).extend(items)
-        return self
-
-    def select(self, *_cols: str) -> _Table:
-        self._select = True
-        return self
-
-    def eq(self, key: str, value: str) -> _Table:
-        self._filter = (key, str(value))
-        return self
-
-    def limit(self, _n: int) -> _Table:
-        return self
-
-    def order(self, _key: str) -> _Table:
-        return self
-
-    def execute(self) -> _Exec:
-        if not self._select:
-            return _Exec(None)
-        data = self._store.get(self._name, [])
-        if self._filter:
-            key, value = self._filter
-            data = [r for r in data if str(r.get(key)) == value]
-        return _Exec(list(data))
-
-
-class _AuthAdmin:
-    def create_user(self, params: dict[str, Any]) -> SimpleNamespace:
-        return SimpleNamespace(user=SimpleNamespace(id="uid-123", email=params["email"]))
-
-
-class _FakeAdmin:
     def __init__(self) -> None:
-        self.store: dict[str, list[dict[str, Any]]] = {}
-        self.auth = SimpleNamespace(admin=_AuthAdmin())
+        self.executes: list[tuple[str, Any]] = []
+        self.many: list[tuple[str, list[Any]]] = []
+        self._user_row: dict[str, Any] | None = None
 
-    def table(self, name: str) -> _Table:
-        return _Table(self.store, name)
+    def execute(self, query: Any, params: Any = None) -> None:
+        q = str(query)
+        self.executes.append((q, params))
+        if "insert into public.users" in q:
+            # params: (id, email, username, name, role, title, avatar_color, client_id)
+            uid, email, username, name, role, title, color, client_id = params
+            self._user_row = {
+                "id": uid, "email": email, "username": username, "name": name,
+                "role": role, "title": title, "avatar_color": color,
+                "status": "invited", "client_id": client_id,
+            }
+
+    def executemany(self, query: Any, seq: Any) -> None:
+        self.many.append((str(query), list(seq)))
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._user_row
 
 
-@pytest.mark.unit
-def test_provision_creates_row_and_template_grants() -> None:
-    admin = _FakeAdmin()
+@pytest.fixture
+def cur(monkeypatch: pytest.MonkeyPatch) -> _RecordingCursor:
+    recorder = _RecordingCursor()
+
+    @contextlib.contextmanager
+    def _fake_priv() -> Any:
+        yield recorder
+
+    monkeypatch.setattr(provisioning, "privileged_connection", _fake_priv)
+    return recorder
+
+
+def _auth_insert(cur: _RecordingCursor) -> tuple[str, Any]:
+    return next(e for e in cur.executes if "insert into auth.users" in e[0])
+
+
+def test_provision_writes_argon2_credential_and_identity(cur: _RecordingCursor) -> None:
     row = provision_user(
-        admin,  # type: ignore[arg-type]
-        email="jane@x.com",
-        password="secret12",
-        name="Jane Doe",
-        role="specialist",
-        template_key="seo",
+        email="jane@x.com", password="secret12", name="Jane Doe",
+        role="specialist", username="jane", template_key="seo",
     )
-    assert row["id"] == "uid-123"
     assert row["role"] == "specialist"
     assert row["status"] == "invited"
-    grants = admin.store["user_feature_grants"]
-    assert len(grants) == 13  # SEO Specialist template grant count
-    assert all(g["level"] == "full" and g["user_id"] == "uid-123" for g in grants)
+    assert row["username"] == "jane"
+    # The credential is an argon2id hash of the plaintext, NOT the plaintext.
+    _q, params = _auth_insert(cur)
+    _uid, email, password_hash = params
+    assert email == "jane@x.com"
+    assert password_hash.startswith("$argon2id$")
+    assert "secret12" not in password_hash
+    # Template grants seeded via executemany (SEO Specialist = 13 features).
+    assert len(cur.many[0][1]) == 13
 
 
-@pytest.mark.unit
-def test_provision_without_template_seeds_no_grants() -> None:
-    admin = _FakeAdmin()
+def test_provision_without_template_seeds_no_grants(cur: _RecordingCursor) -> None:
     provision_user(
-        admin,  # type: ignore[arg-type]
-        email="v@x.com",
-        password="secret12",
-        name="Vic",
-        role="viewer",
-        template_key=None,
+        email="v@x.com", password="secret12", name="Vic", role="viewer",
+        username="vic", template_key=None,
     )
-    assert "user_feature_grants" not in admin.store
+    assert cur.many == []  # no executemany call
 
 
-@pytest.mark.unit
-def test_provision_super_template_grants_all_features() -> None:
-    admin = _FakeAdmin()
+def test_provision_super_template_grants_all_features(cur: _RecordingCursor) -> None:
     provision_user(
-        admin,  # type: ignore[arg-type]
-        email="boss@x.com",
-        password="secret12",
-        name="The Boss",
-        role="owner",
-        template_key="super",
+        email="boss@x.com", password="secret12", name="The Boss", role="owner",
+        username="boss", template_key="super",
     )
-    assert len(admin.store["user_feature_grants"]) == 17
+    assert len(cur.many[0][1]) == 17
 
 
-@pytest.mark.unit
-def test_provision_client_pins_client_id() -> None:
-    admin = _FakeAdmin()
+def test_provision_client_pins_client_id(cur: _RecordingCursor) -> None:
     row = provision_user(
-        admin,  # type: ignore[arg-type]
-        email="portal@acme.com",
-        password="secret12",
-        name="Acme Portal",
-        role="client",
-        client_id="cl-acme",
+        email="portal@acme.com", password="secret12", name="Acme Portal",
+        role="client", username="acme", client_id="cl-acme",
     )
     assert row["role"] == "client"
     assert row["client_id"] == "cl-acme"
-    # A client login never gets staff feature grants.
-    assert "user_feature_grants" not in admin.store
+    assert cur.many == []  # a client login never gets staff feature grants
 
 
-@pytest.mark.unit
-def test_provision_client_requires_client_id() -> None:
-    admin = _FakeAdmin()
+def test_provision_client_requires_client_id(cur: _RecordingCursor) -> None:
     with pytest.raises(ValueError, match="client login requires client_id"):
         provision_user(
-            admin,  # type: ignore[arg-type]
-            email="portal@acme.com", password="secret12", name="Acme", role="client",
+            email="portal@acme.com", password="secret12", name="Acme",
+            role="client", username="acme",
         )
 
 
-@pytest.mark.unit
-def test_provision_staff_rejects_client_id() -> None:
-    admin = _FakeAdmin()
+def test_provision_staff_rejects_client_id(cur: _RecordingCursor) -> None:
     with pytest.raises(ValueError, match="only a client login may set client_id"):
         provision_user(
-            admin,  # type: ignore[arg-type]
-            email="staff@x.com", password="secret12", name="Staff", role="admin",
-            client_id="cl-acme",
+            email="staff@x.com", password="secret12", name="Staff",
+            role="admin", username="staff", client_id="cl-acme",
         )

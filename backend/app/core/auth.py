@@ -1,22 +1,22 @@
-"""Authentication: verify Supabase access tokens and resolve the current user.
+"""Authentication: verify our own EdDSA access tokens and resolve the current user.
 
-Supabase signs access tokens with asymmetric keys (ES256/RS256). The API fetches
-the project's JWKS once, caches the public keys by ``kid``, and verifies each
-token locally (signature + ``aud`` + ``iss`` + ``exp``) - no per-request network
-call to Supabase, and no shared secret on the server.
+Since the P6A-7 cutover the API signs and verifies its OWN tokens - Supabase
+GoTrue/JWKS is gone. Login (``app/routers/auth.py``) signs a short-lived token
+with the Ed25519 PRIVATE key; every request verifies it here with the STATIC
+PUBLIC key. No network round-trip and, crucially, a HARD algorithm allow-list of
+``["EdDSA"]`` - which defeats alg-confusion and the ``none`` attack, since a token
+asking for HS256/RS256/none can never match the list.
 
-The verified ``sub`` claim (the Supabase auth uid) is used to load the caller's
-row from ``public.users`` through the RLS-scoped ``rls_connection`` seam (the sub
-is bound as the RLS identity), yielding a :class:`CurrentUser`. Token
-verification stays JWKS-based; only the DB read moved off supabase-py. There is
-no public signup: a user exists only if a
-super-admin provisioned it (see ``app/services/provisioning.py``).
+The verified ``sub`` claim (the user uuid) loads the caller's row from
+``public.users`` through the RLS-scoped ``rls_connection`` seam (the sub is bound
+as the RLS identity), yielding a :class:`CurrentUser`. There is no public signup:
+a user exists only if a super-admin provisioned it (see
+``app/services/provisioning.py``).
 
 Verification is split so it is testable without a network or a database:
 
-* :func:`decode_and_validate` is pure crypto given a key.
-* :class:`JWKSCache` resolves ``kid`` -> key (the only networked part).
-* :func:`get_current_user` composes them and adds the DB lookup.
+* :func:`decode_and_validate` is pure crypto given the public key.
+* :func:`get_current_user` composes it with the DB lookup.
 """
 
 from __future__ import annotations
@@ -24,32 +24,33 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt import PyJWK, PyJWKSet
 from pydantic import BaseModel
 
-from app.config import Settings
-from app.core.deps import HttpClientDep, SettingsDep
+from app.core.deps import SettingsDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
 from app.rbac import AccessLevel, AppRole, PermKey, UserRole, feature_allows, role_has_perm
 
-# Supabase issues ES256 (default for new projects) or RS256 signing keys.
-_ALLOWED_ALGS = ["ES256", "RS256"]
+# The ONE algorithm we accept. A single-entry allow-list is the whole defense
+# against alg-confusion and `none`: PyJWT rejects any token whose header `alg` is
+# not in this list BEFORE selecting a verifier, so an attacker cannot downgrade to
+# HS256 (and try the public key as an HMAC secret) or to `none` (no signature).
+_ALLOWED_ALGS = ["EdDSA"]
 
-_bearer = HTTPBearer(auto_error=False, description="Supabase access token")
+_bearer = HTTPBearer(auto_error=False, description="Local EdDSA access token")
+
+_AUTH_NOT_CONFIGURED = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail="Authentication is not configured",
+)
 
 _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Missing, invalid, or expired credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
-
-
-class AuthError(Exception):
-    """Internal signal that a token could not be verified (mapped to 401)."""
 
 
 class CurrentUser(BaseModel):
@@ -86,65 +87,21 @@ class CurrentClient(BaseModel):
     client_id: str
 
 
-class JWKSCache:
-    """Caches a project's JWKS public keys by ``kid``, refreshing on a miss.
-
-    One instance lives on ``app.state`` for the app's lifetime. Refresh uses the
-    shared async ``httpx`` client so it never blocks the event loop.
-    """
-
-    def __init__(self, jwks_url: str) -> None:
-        self._url = jwks_url
-        self._keys: dict[str, PyJWK] = {}
-        self._lock = asyncio.Lock()
-
-    @classmethod
-    def from_settings(cls, settings: Settings) -> JWKSCache | None:
-        """Build a cache from settings, or ``None`` when Supabase is unconfigured."""
-        url = settings.jwks_url
-        return cls(url) if url else None
-
-    def load_keys(self, keys: dict[str, PyJWK]) -> None:
-        """Test seam: preload keys so verification needs no network."""
-        self._keys = dict(keys)
-
-    async def signing_key(self, token: str, http_client: httpx.AsyncClient) -> PyJWK:
-        """Return the key that signed ``token``, refreshing the JWKS on a miss."""
-        try:
-            kid = jwt.get_unverified_header(token).get("kid")
-        except jwt.PyJWTError as exc:
-            raise AuthError("malformed token header") from exc
-        if not kid:
-            raise AuthError("token header has no kid")
-        if kid not in self._keys:
-            await self._refresh(http_client)
-        key = self._keys.get(kid)
-        if key is None:
-            raise AuthError("no matching signing key")
-        return key
-
-    async def _refresh(self, http_client: httpx.AsyncClient) -> None:
-        async with self._lock:
-            try:
-                resp = await http_client.get(self._url, timeout=5.0)
-                resp.raise_for_status()
-                jwks = PyJWKSet.from_dict(resp.json())
-            except (httpx.HTTPError, jwt.PyJWTError, ValueError, KeyError) as exc:
-                raise AuthError("could not fetch signing keys") from exc
-            self._keys = {k.key_id: k for k in jwks.keys if k.key_id}
-
-
 def decode_and_validate(
-    token: str, signing_key: Any, *, audience: str, issuer: str | None
+    token: str, public_key: Any, *, audience: str, issuer: str | None
 ) -> dict[str, Any]:
-    """Verify signature + registered claims and return the token payload.
+    """Verify signature + registered claims against ``public_key`` and return the payload.
 
-    Raises ``jwt.PyJWTError`` on any failure (bad signature, wrong audience/
-    issuer, expiry, or a missing required claim).
+    ``public_key`` is the Ed25519 PUBLIC key (a PEM string or key object). The
+    algorithm allow-list is fixed to ``["EdDSA"]`` (alg-confusion/``none`` defense),
+    and ``aud``/``iss``/``exp``/``sub`` are all verified - ``exp``/``sub``/``aud``
+    are additionally REQUIRED to be present. Raises ``jwt.PyJWTError`` on any
+    failure (bad signature, wrong alg, wrong audience/issuer, expiry, or a missing
+    required claim).
     """
     claims: dict[str, Any] = jwt.decode(
         token,
-        signing_key,
+        public_key,
         algorithms=_ALLOWED_ALGS,
         audience=audience,
         issuer=issuer,
@@ -168,7 +125,6 @@ def _load_user_row(user_id: str) -> dict[str, Any] | None:
 async def get_current_user(
     request: Request,
     settings: SettingsDep,
-    http_client: HttpClientDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> CurrentUser:
     """FastAPI dependency: the verified, provisioned caller (else 401/403)."""
@@ -176,22 +132,20 @@ async def get_current_user(
         raise _UNAUTHORIZED
     token = credentials.credentials
 
-    cache: JWKSCache | None = getattr(request.app.state, "jwks_cache", None)
-    if cache is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication is not configured",
-        )
+    public_key = settings.jwt_public_key_pem
+    if not public_key:
+        # No verification key configured -> we cannot trust any token. 503, never
+        # a silent accept.
+        raise _AUTH_NOT_CONFIGURED
 
     try:
-        signing_key = await cache.signing_key(token, http_client)
         claims = decode_and_validate(
             token,
-            signing_key.key,
-            audience=settings.supabase_jwt_aud,
-            issuer=settings.jwt_issuer,
+            public_key,
+            audience=settings.jwt_audience,
+            issuer=settings.local_jwt_issuer,
         )
-    except (AuthError, jwt.PyJWTError) as exc:
+    except jwt.PyJWTError as exc:
         raise _UNAUTHORIZED from exc
 
     user_id = str(claims["sub"])
@@ -202,10 +156,7 @@ async def get_current_user(
     try:
         row = await asyncio.to_thread(_load_user_row, user_id)
     except DatabaseNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication is not configured",
-        ) from exc
+        raise _AUTH_NOT_CONFIGURED from exc
 
     if row is None:
         # Valid token, but no agency user exists for it (no public signup).

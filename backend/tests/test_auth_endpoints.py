@@ -99,7 +99,8 @@ _CANNED_ROW = {
 
 
 def _stub_provisioning(monkeypatch: pytest.MonkeyPatch, row: dict[str, Any] | None = None) -> None:
-    monkeypatch.setattr("app.routers.admin_users.get_admin_client", lambda: object())
+    # provision_user now writes to local PG directly (no admin client arg) and is
+    # keyword-only; the stub captures nothing and returns a canned member row.
     monkeypatch.setattr(
         "app.routers.admin_users.provision_user", lambda *a, **k: dict(row or _CANNED_ROW)
     )
@@ -112,7 +113,8 @@ async def test_provision_as_owner_returns_member_shape(
     _stub_provisioning(monkeypatch)
     resp = await client.post(
         "/api/v1/admin/users",
-        json={"email": "new@x.com", "name": "New Person", "password": "secret12", "role": "viewer"},
+        json={"email": "new@x.com", "name": "New Person", "username": "newperson",
+              "password": "secret12", "role": "viewer"},
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -129,7 +131,8 @@ async def test_provision_requires_manage_team(
     _stub_provisioning(monkeypatch)
     resp = await client.post(
         "/api/v1/admin/users",
-        json={"email": "new@x.com", "name": "New Person", "password": "secret12", "role": "viewer"},
+        json={"email": "new@x.com", "name": "New Person", "username": "newperson",
+              "password": "secret12", "role": "viewer"},
     )
     assert resp.status_code == 403
 
@@ -141,7 +144,8 @@ async def test_non_owner_cannot_create_elevated_role(
     _stub_provisioning(monkeypatch)
     resp = await client.post(
         "/api/v1/admin/users",
-        json={"email": "boss@x.com", "name": "Big Boss", "password": "secret12", "role": "admin"},
+        json={"email": "boss@x.com", "name": "Big Boss", "username": "bigboss",
+              "password": "secret12", "role": "admin"},
     )
     assert resp.status_code == 403
 

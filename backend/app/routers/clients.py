@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.auth import CurrentUser, CurrentUserDep, require_owner, require_perm
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
-from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
+from app.db.database import DatabaseNotConfiguredError
 from app.logging_setup import get_logger
 from app.schemas.clients import (
     ClientCreate,
@@ -121,21 +121,19 @@ async def create_portal_user(
     if client is None:
         raise _CLIENT_NOT_FOUND
     try:
-        admin = get_admin_client()
-    except SupabaseNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
-        ) from exc
-    try:
         row = await asyncio.to_thread(
             provision_user,
-            admin,
             email=str(body.email),
             password=body.password.get_secret_value(),
             name=body.name,
             role="client",
+            username=body.username,
             client_id=client_id,
         )
+    except DatabaseNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
+        ) from exc
     except Exception as exc:
         # Duplicate email / auth rejection / write failure. Log server-side (no
         # secret in the payload) and return a generic client error, never a 500.

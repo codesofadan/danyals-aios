@@ -43,6 +43,16 @@ from app.services.provisioning import provision_user
 
 pytestmark = pytest.mark.integration
 
+# Superseded by the P6A-7 local auth cutover; reworked in P6A-8. This suite mints
+# Supabase JWTs (client_for_user) and asserts RLS via Supabase PostgREST directly.
+# After the cutover, tokens are local EdDSA and RLS is proven against LOCAL
+# Postgres by test_db_identity / test_repo_sql_parity / test_service_writes /
+# test_rls_gate; the PostgREST-matrix rewrite for local is P6A-8's job.
+pytest.skip(
+    "Superseded by P6A-7 local auth cutover; Supabase-PostgREST matrix reworked in P6A-8.",
+    allow_module_level=True,
+)
+
 _PASSWORD = "Passw0rd!rls-matrix-1"
 _STAFF = ("owner", "admin", "manager", "specialist", "analyst", "viewer")
 _CLIENTS = ("clientA", "clientB")

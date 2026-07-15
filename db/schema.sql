@@ -45,11 +45,14 @@ create table public.users (
   avatar_color text not null default '#7B69EE',
   phone        text not null default '',
   two_fa       boolean not null default false,
+  username     text,   -- (0016) local login key for the 3 portals; uuid stays the PK
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
 -- + users_set_updated_at trigger; ENABLE + FORCE RLS; policies users_select
 --   (self or staff), users_modify (owner/admin).
+-- (0016) partial unique index users_username_key on (lower(username))
+--   where username is not null - case-insensitive uniqueness; not an RLS boundary.
 
 create table public.user_feature_grants (
   user_id     uuid not null references public.users (id) on delete cascade,
@@ -272,3 +275,9 @@ create table public.tasks (
 -- Redefines tasks_guard_update() to also lock `id` and `created_at` against a
 -- non-lead edit (they were omitted from 0011's column-lock). create or replace,
 -- idempotent. No schema shape change.
+
+-- ---- 0016_user_login --------------------------------------------------------
+-- AUTH CUTOVER (P6A-7): adds public.users.username (nullable) + a partial unique
+-- index users_username_key on lower(username) where username is not null. The
+-- username is the human login key for all 3 portals; the uuid PK is unchanged and
+-- stays the RLS/auth.uid() identity. Not a tenant boundary; RLS gate unaffected.

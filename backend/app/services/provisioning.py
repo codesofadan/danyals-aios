@@ -1,23 +1,29 @@
 """User provisioning - the ONLY path that creates a login (no public signup).
 
-A super-admin calls this to mint a Supabase Auth user *and* the matching
-``public.users`` row (plus any per-feature grants seeded from a template). It
-uses the service_role admin client because creating an auth user and writing the
-initial identity row are privileged system operations that must bypass RLS. The
-service_role key stays server-side and is never returned or logged.
+Since the P6A-7 cutover this writes to LOCAL Postgres, not Supabase GoTrue. A
+super-admin calls it to mint the credential row (``auth.users`` with an argon2id
+``password_hash``) AND the matching ``public.users`` identity row (plus any
+per-feature grants seeded from a template) in ONE atomic ``privileged_connection``
+transaction (service_role, BYPASSRLS - creating an account is a privileged system
+operation). The plaintext password never leaves this call and is never logged.
 
-All calls here are blocking (supabase-py is sync); the caller offloads them with
+Future path (NOT implemented): importing existing bcrypt hashes would insert the
+``$2b$`` hash directly and let ``verify_password`` re-hash to argon2id on first
+login. This is a fresh local start, so only argon2id is produced here.
+
+All calls here are blocking (psycopg is sync); the caller offloads them with
 ``asyncio.to_thread``.
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+import uuid
+from typing import Any
 
-from supabase import Client
-
+from app.db.database import privileged_connection
 from app.rbac import UserRole
 from app.rbac.matrix import TEMPLATES
+from app.services.passwords import hash_password
 
 
 def _template_grants(template_key: str | None) -> tuple[str, ...]:
@@ -31,60 +37,63 @@ def _template_grants(template_key: str | None) -> tuple[str, ...]:
 
 
 def provision_user(
-    admin: Client,
     *,
     email: str,
     password: str,
     name: str,
     role: UserRole,
+    username: str | None = None,
     title: str = "",
     avatar_color: str = "#7B69EE",
     template_key: str | None = None,
     client_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create the auth user + users row (+ template grants); return the new row.
+    """Create the credential + identity rows (+ template grants); return the new row.
 
     ``role='client'`` provisions a portal login and REQUIRES ``client_id`` (the
     tenant it is scoped to); a staff role must leave ``client_id`` None. This
     mirrors the DB CHECK (client_id set iff role='client') and fails fast before
     the write rather than surfacing a raw constraint error.
 
-    Idempotency is intentionally NOT assumed: a duplicate email fails at the auth
-    layer (and the unique constraint on ``users.email``), surfacing as an error
-    the router maps to 409/400 rather than silently overwriting an account.
+    Idempotency is intentionally NOT assumed: a duplicate email or username fails
+    on the unique constraint, surfacing as an error the router maps to 400 rather
+    than silently overwriting an account. The whole write is one transaction, so a
+    failure on any statement rolls back the credential AND the identity together -
+    never a half-created user.
     """
     if role == "client" and not client_id:
         raise ValueError("a client login requires client_id")
     if role != "client" and client_id is not None:
         raise ValueError("only a client login may set client_id")
 
-    created = admin.auth.admin.create_user(
-        {"email": email, "password": password, "email_confirm": True}
-    )
-    auth_user: Any = getattr(created, "user", None) or created
-    uid = str(auth_user.id)
-
-    admin.table("users").insert(
-        {
-            "id": uid,
-            "email": email,
-            "name": name,
-            "role": role,
-            "title": title,
-            "avatar_color": avatar_color,
-            "status": "invited",
-            "client_id": client_id,
-        }
-    ).execute()
-
+    uid = str(uuid.uuid4())
+    password_hash = hash_password(password)
     grants = _template_grants(template_key)
-    if grants:
-        admin.table("user_feature_grants").insert(
-            [{"user_id": uid, "feature_key": key, "level": "full"} for key in grants]
-        ).execute()
 
-    resp = admin.table("users").select("*").eq("id", uid).limit(1).execute()
-    rows = cast("list[dict[str, Any]]", resp.data or [])
-    if not rows:  # pragma: no cover - the insert above just wrote this row
+    with privileged_connection() as cur:
+        # 1) credential (argon2id) -> auth.users. 2) identity -> public.users
+        # (same id, FK-linked). Both inside one txn: atomic all-or-nothing.
+        cur.execute(
+            "insert into auth.users (id, email, password_hash) values (%s, %s, %s)",
+            (uid, email, password_hash),
+        )
+        cur.execute(
+            """
+            insert into public.users
+                (id, email, username, name, role, title, avatar_color, status, client_id)
+            values (%s, %s, %s, %s, %s, %s, %s, 'invited', %s)
+            """,
+            (uid, email, username, name, role, title, avatar_color, client_id),
+        )
+        if grants:
+            cur.executemany(
+                "insert into public.user_feature_grants (user_id, feature_key, level) "
+                "values (%s, %s, 'full')",
+                [(uid, key) for key in grants],
+            )
+        cur.execute("select * from public.users where id = %s limit 1", (uid,))
+        row = cur.fetchone()
+
+    if not row:  # pragma: no cover - the insert above just wrote this row
         raise RuntimeError("provisioned user row could not be read back")
-    return rows[0]
+    return row

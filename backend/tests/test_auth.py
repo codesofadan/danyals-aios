@@ -1,27 +1,26 @@
-"""P2-3 gate: JWT verification (JWKS/ES256) + the require_* guards.
+"""P6A-7 gate: local EdDSA JWT verification + the require_* guards.
 
-Tokens are minted with a throwaway EC key and verified against the matching
-public JWK, so nothing here touches a network or a database.
+Tokens are minted with a throwaway Ed25519 keypair and verified against the
+matching public key, so nothing here touches a network or a database. The
+negative-security cases are the point of this file: a forged token, an expired
+token, the wrong issuer/audience, and (critically) the alg-confusion / ``none``
+attacks must ALL be rejected by the fixed ``["EdDSA"]`` allow-list.
 """
 
 from __future__ import annotations
 
-import json
 import time
 from types import SimpleNamespace
 from typing import Any
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import HTTPException
-from jwt import PyJWK
-from jwt.algorithms import ECAlgorithm
 
 from app.core.auth import (
-    AuthError,
     CurrentUser,
-    JWKSCache,
     decode_and_validate,
     require_feature,
     require_owner,
@@ -29,30 +28,38 @@ from app.core.auth import (
     require_role,
 )
 
-_ISSUER = "https://proj.supabase.co/auth/v1"
+_ISSUER = "aios"
 _AUD = "authenticated"
-_KID = "test-kid-1"
 
 
-def _keypair() -> tuple[ec.EllipticCurvePrivateKey, dict[str, Any]]:
-    priv = ec.generate_private_key(ec.SECP256R1())
-    pub_jwk: dict[str, Any] = json.loads(ECAlgorithm.to_jwk(priv.public_key()))
-    pub_jwk.update({"kid": _KID, "alg": "ES256", "use": "sig"})
-    return priv, pub_jwk
+def _keypair() -> tuple[str, str]:
+    """Return (private_pem, public_pem) for a fresh Ed25519 keypair."""
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    pub_pem = (
+        priv.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
+    return priv_pem, pub_pem
 
 
-def _token(priv: ec.EllipticCurvePrivateKey, **over: Any) -> str:
+def _token(priv_pem: str, **over: Any) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
         "sub": "11111111-1111-1111-1111-111111111111",
         "aud": _AUD,
         "iss": _ISSUER,
-        "email": "u@x.com",
+        "role": "viewer",
         "iat": now,
         "exp": now + 3600,
     }
     payload.update(over)
-    return jwt.encode(payload, priv, algorithm="ES256", headers={"kid": _KID})
+    return jwt.encode(payload, priv_pem, algorithm="EdDSA")
 
 
 def _user(role: str = "viewer") -> CurrentUser:
@@ -62,125 +69,125 @@ def _user(role: str = "viewer") -> CurrentUser:
     )
 
 
-# --- decode_and_validate (pure crypto) ---------------------------------------
+# --- decode_and_validate: happy path -----------------------------------------
 
 
 @pytest.mark.unit
 def test_valid_token_decodes() -> None:
     priv, pub = _keypair()
-    key = PyJWK.from_dict(pub).key
-    claims = decode_and_validate(_token(priv), key, audience=_AUD, issuer=_ISSUER)
+    claims = decode_and_validate(_token(priv), pub, audience=_AUD, issuer=_ISSUER)
     assert claims["sub"] == "11111111-1111-1111-1111-111111111111"
-    assert claims["email"] == "u@x.com"
+    assert claims["role"] == "viewer"
+
+
+@pytest.mark.unit
+def test_issue_then_verify_round_trip() -> None:
+    """A token minted by app.services.tokens verifies under the same public key."""
+    from app.config import Settings
+    from app.services.tokens import issue_access_token
+
+    priv, pub = _keypair()
+    settings = Settings(
+        _env_file=None,
+        jwt_private_key=priv.replace("\n", "\\n"),
+        jwt_public_key=pub.replace("\n", "\\n"),
+    )
+    token = issue_access_token("22222222-2222-2222-2222-222222222222", "admin", settings=settings)
+    claims = decode_and_validate(
+        token, settings.jwt_public_key_pem, audience=_AUD, issuer=_ISSUER
+    )
+    assert claims["sub"] == "22222222-2222-2222-2222-222222222222"
+    assert claims["role"] == "admin"
+
+
+# --- decode_and_validate: negative security ----------------------------------
 
 
 @pytest.mark.unit
 def test_wrong_audience_rejected() -> None:
     priv, pub = _keypair()
-    key = PyJWK.from_dict(pub).key
     with pytest.raises(jwt.PyJWTError):
-        decode_and_validate(_token(priv, aud="other"), key, audience=_AUD, issuer=_ISSUER)
+        decode_and_validate(_token(priv, aud="other"), pub, audience=_AUD, issuer=_ISSUER)
 
 
 @pytest.mark.unit
 def test_wrong_issuer_rejected() -> None:
     priv, pub = _keypair()
-    key = PyJWK.from_dict(pub).key
     with pytest.raises(jwt.PyJWTError):
-        decode_and_validate(_token(priv, iss="https://evil/"), key, audience=_AUD, issuer=_ISSUER)
+        decode_and_validate(_token(priv, iss="evil"), pub, audience=_AUD, issuer=_ISSUER)
 
 
 @pytest.mark.unit
 def test_expired_token_rejected() -> None:
     priv, pub = _keypair()
-    key = PyJWK.from_dict(pub).key
     with pytest.raises(jwt.PyJWTError):
-        decode_and_validate(_token(priv, exp=int(time.time()) - 10), key, audience=_AUD, issuer=_ISSUER)
+        decode_and_validate(
+            _token(priv, exp=int(time.time()) - 10), pub, audience=_AUD, issuer=_ISSUER
+        )
 
 
 @pytest.mark.unit
-def test_signature_from_other_key_rejected() -> None:
+def test_forged_token_signed_with_other_key_rejected() -> None:
+    """A token signed by a DIFFERENT private key must fail signature verification."""
     priv, _ = _keypair()
-    _, other_pub = _keypair()  # different key
-    other_key = PyJWK.from_dict(other_pub).key
+    _, other_pub = _keypair()  # verify against a key that did NOT sign it
     with pytest.raises(jwt.PyJWTError):
-        decode_and_validate(_token(priv), other_key, audience=_AUD, issuer=_ISSUER)
+        decode_and_validate(_token(priv), other_pub, audience=_AUD, issuer=_ISSUER)
 
 
 @pytest.mark.unit
 def test_missing_required_claim_rejected() -> None:
     priv, pub = _keypair()
-    key = PyJWK.from_dict(pub).key
-    # a token without exp fails the require=[...] check
     now = int(time.time())
+    # No exp -> the options={"require":["exp",...]} check fails.
     token = jwt.encode(
-        {"sub": "x", "aud": _AUD, "iss": _ISSUER, "iat": now}, priv, algorithm="ES256", headers={"kid": _KID}
+        {"sub": "x", "aud": _AUD, "iss": _ISSUER, "iat": now}, priv, algorithm="EdDSA"
     )
     with pytest.raises(jwt.PyJWTError):
-        decode_and_validate(token, key, audience=_AUD, issuer=_ISSUER)
-
-
-# --- JWKSCache (kid resolution + lazy refresh) -------------------------------
-
-
-class _FakeResp:
-    def __init__(self, data: dict[str, Any]) -> None:
-        self._data = data
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict[str, Any]:
-        return self._data
-
-
-class _FakeHttp:
-    def __init__(self, data: dict[str, Any]) -> None:
-        self._data = data
-        self.calls = 0
-
-    async def get(self, url: str, timeout: float | None = None) -> _FakeResp:
-        self.calls += 1
-        return _FakeResp(self._data)
+        decode_and_validate(token, pub, audience=_AUD, issuer=_ISSUER)
 
 
 @pytest.mark.unit
-async def test_cache_returns_preloaded_key_without_network() -> None:
-    priv, pub = _keypair()
-    cache = JWKSCache(_ISSUER)
-    cache.load_keys({_KID: PyJWK.from_dict(pub)})
-    http = _FakeHttp({"keys": []})
-    key = await cache.signing_key(_token(priv), http)  # type: ignore[arg-type]
-    assert key.key_id == _KID
-    assert http.calls == 0  # no refresh needed
+def test_alg_none_rejected() -> None:
+    """An unsigned ``alg=none`` token must be rejected by the allow-list."""
+    now = int(time.time())
+    payload = {"sub": "x", "aud": _AUD, "iss": _ISSUER, "exp": now + 3600, "iat": now}
+    # PyJWT emits an unsigned token when key is None + algorithm="none".
+    none_token = jwt.encode(payload, None, algorithm="none")  # type: ignore[arg-type]
+    _, pub = _keypair()
+    with pytest.raises(jwt.PyJWTError):
+        decode_and_validate(none_token, pub, audience=_AUD, issuer=_ISSUER)
 
 
 @pytest.mark.unit
-async def test_cache_refreshes_on_unknown_kid() -> None:
-    priv, pub = _keypair()
-    cache = JWKSCache(_ISSUER)  # empty; must fetch
-    http = _FakeHttp({"keys": [pub]})
-    key = await cache.signing_key(_token(priv), http)  # type: ignore[arg-type]
-    assert key.key_id == _KID
-    assert http.calls == 1
+def test_alg_confusion_hs256_with_public_key_rejected() -> None:
+    """The classic attack: sign HS256 using the PUBLIC key BYTES as the HMAC secret.
 
+    A verifier that allowed HS256 would accept it (it "knows" the public key). We
+    hand-craft the token (PyJWT's own encode refuses a PEM as an HMAC secret), so
+    the token really IS validly HS256-signed - and our fixed ["EdDSA"] allow-list
+    still rejects it on its ``alg`` before any key material is used.
+    """
+    import base64
+    import hashlib
+    import hmac
+    import json
 
-@pytest.mark.unit
-async def test_cache_raises_when_kid_absent_after_refresh() -> None:
-    priv, _ = _keypair()
-    cache = JWKSCache(_ISSUER)
-    http = _FakeHttp({"keys": []})  # refresh yields nothing
-    with pytest.raises(AuthError):
-        await cache.signing_key(_token(priv), http)  # type: ignore[arg-type]
+    _priv, pub = _keypair()
+    now = int(time.time())
+    payload = {"sub": "x", "aud": _AUD, "iss": _ISSUER, "exp": now + 3600, "iat": now}
 
+    def _b64(raw: bytes) -> bytes:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=")
 
-@pytest.mark.unit
-async def test_cache_rejects_token_without_kid() -> None:
-    priv, _ = _keypair()
-    cache = JWKSCache(_ISSUER)
-    token = jwt.encode({"sub": "x"}, priv, algorithm="ES256")  # no kid header
-    with pytest.raises(AuthError):
-        await cache.signing_key(token, _FakeHttp({"keys": []}))  # type: ignore[arg-type]
+    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = _b64(json.dumps(payload).encode())
+    signing_input = header + b"." + body
+    sig = _b64(hmac.new(pub.encode(), signing_input, hashlib.sha256).digest())
+    forged = (signing_input + b"." + sig).decode()
+
+    with pytest.raises(jwt.PyJWTError):
+        decode_and_validate(forged, pub, audience=_AUD, issuer=_ISSUER)
 
 
 # --- require_* guards --------------------------------------------------------
@@ -216,7 +223,6 @@ async def test_require_owner() -> None:
 async def test_require_feature_owner_short_circuits() -> None:
     dep = require_feature("billing")
     req = SimpleNamespace(state=SimpleNamespace(access_token="tok"))
-    # owner never touches the DB loader
     assert await dep(req, _user("owner"))  # type: ignore[arg-type]
 
 

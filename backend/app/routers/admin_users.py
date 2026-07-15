@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.auth import CurrentUser, require_perm
 from app.core.pagination import PageDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
-from app.db.supabase import SupabaseNotConfiguredError, get_admin_client
 from app.logging_setup import get_logger
 from app.schemas.identity import MemberResponse, ProvisionUserRequest
 from app.services.activity import record_activity
@@ -68,31 +67,28 @@ async def create_user(
     body: ProvisionUserRequest,
     current: Annotated[CurrentUser, Depends(require_perm("manage_team"))],
 ) -> MemberResponse:
-    """Provision a Supabase Auth user + identity row (owner-only for owner/admin)."""
+    """Provision a local credential + identity row (owner-only for owner/admin)."""
     if body.role in _ELEVATED_ROLES and not current.is_owner:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only a super-admin can create owner/admin users",
         )
     try:
-        admin = get_admin_client()
-    except SupabaseNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
-        ) from exc
-
-    try:
         row = await asyncio.to_thread(
             provision_user,
-            admin,
             email=str(body.email),
             password=body.password.get_secret_value(),
             name=body.name,
             role=body.role,
+            username=body.username,
             title=body.title,
             avatar_color=body.avatar_color,
             template_key=body.template,
         )
+    except DatabaseNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
+        ) from exc
     except Exception as exc:
         # Duplicate email / auth rejection / write failure. Log server-side (no
         # secret in the payload) and return a generic client error, never a 500.

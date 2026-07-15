@@ -38,6 +38,17 @@ from app.services.provisioning import provision_user
 _PASSWORD = "Passw0rd!tasks-flow-123"
 
 
+# Superseded by the P6A-7 local auth cutover; reworked in P6A-8. This whole-stack
+# suite signs in via Supabase GoTrue and drives Supabase PostgREST directly with
+# the returned JWT; after the cutover the API accepts only its OWN EdDSA tokens
+# against LOCAL Postgres and provision_user writes locally (new signature). The
+# local-token rewrite of the elevated suites is P6A-8's job.
+pytest.skip(
+    "Superseded by P6A-7 local auth cutover; Supabase-token flow reworked in P6A-8.",
+    allow_module_level=True,
+)
+
+
 def _require_supabase() -> Any:
     settings = get_settings()
     if not (

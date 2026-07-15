@@ -66,6 +66,16 @@ class Settings(BaseSettings):
     # field. At cutover it becomes the sole issuer and the property is retired.
     local_jwt_issuer: str = "aios"  # expected `iss` on our own EdDSA tokens
     jwt_audience: str = "authenticated"  # expected `aud` on our own EdDSA tokens
+    # Access-token lifetime (seconds). Short by default: a leaked token expires fast.
+    jwt_access_ttl_seconds: int = 3600
+
+    # --- Seed owner (dev/test bootstrap ONLY; never a prod login path). The
+    # provision_owner CLI reads these to mint the first local OWNER so the app +
+    # integration tests are usable. The password is a SecretStr (never logged). ---
+    seed_owner_username: str | None = None
+    seed_owner_password: SecretStr | None = None
+    seed_owner_email: str = "owner@local.aios"
+    seed_owner_name: str = "AIOS Owner"
 
     # --- Vault (app-layer AES-256-GCM; replaces Supabase Vault at cutover). The
     # master key lives ONLY in process env, NEVER in Postgres. base64 32-byte key. ---
@@ -124,6 +134,28 @@ class Settings(BaseSettings):
     def jwt_issuer(self) -> str | None:
         """Expected ``iss`` claim on Supabase access tokens."""
         return f"{self.supabase_url.rstrip('/')}/auth/v1" if self.supabase_url else None
+
+    @staticmethod
+    def _pem(raw: str | None) -> str | None:
+        """Normalize a PEM stored single-line in .env into real multi-line PEM.
+
+        The keypair ships in ``.env`` as one quoted, ``\\n``-escaped line so
+        pydantic-settings/dotenv can read it. dotenv keeps the literal ``\\n``, so
+        we restore real newlines here (a no-op if the value already has them).
+        Blank/absent -> ``None`` (falsiness, mirroring ``validate_settings``).
+        """
+        return raw.replace("\\n", "\n") if raw else None
+
+    @property
+    def jwt_private_key_pem(self) -> str | None:
+        """The Ed25519 PRIVATE-key PEM used to SIGN access tokens (API-only)."""
+        secret = self.jwt_private_key
+        return self._pem(secret.get_secret_value()) if secret else None
+
+    @property
+    def jwt_public_key_pem(self) -> str | None:
+        """The Ed25519 PUBLIC-key PEM used to VERIFY access tokens."""
+        return self._pem(self.jwt_public_key)
 
     @property
     def docs_enabled(self) -> bool:

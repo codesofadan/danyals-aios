@@ -19,7 +19,6 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
 from app.config import get_settings, validate_settings
-from app.core.auth import JWKSCache
 from app.core.errors import install_error_handlers
 from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.middleware import RequestIDMiddleware
@@ -38,9 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
     # Construct only (no ping) so liveness stays independent of Redis being up.
     app.state.redis = create_redis_client(settings)
-    # JWKS verifier for Supabase access tokens; None until Supabase is configured
-    # (keys are fetched lazily on the first authenticated request).
-    app.state.jwks_cache = JWKSCache.from_settings(settings)
+    # Auth is now local: tokens are verified against the STATIC Ed25519 public key
+    # from settings (app/core/auth.py), so there is no JWKS cache to own here.
     # Local-Postgres pools (P6A-3), one per trust level. Constructed None when the
     # DSN is absent (dual-config window) and OPENED non-blocking so liveness stays
     # independent of the DB being reachable. ``set_pools`` also registers them as

@@ -39,6 +39,16 @@ from app.services.client_audits import create_client_audit
 from app.services.provisioning import provision_user
 
 # A public IP literal: passes the SSRF guard with NO DNS lookup (offline-safe).
+# Superseded by the P6A-7 local auth cutover; reworked in P6A-8. This suite proves
+# tenant isolation by hitting Supabase PostgREST directly with each client's
+# Supabase JWT. After the cutover, tokens are local EdDSA and the tenant boundary
+# is proven against LOCAL Postgres by the other integration suites; the direct-
+# PostgREST isolation rewrite for local is P6A-8's job.
+pytest.skip(
+    "Superseded by P6A-7 local auth cutover; Supabase-PostgREST isolation reworked in P6A-8.",
+    allow_module_level=True,
+)
+
 _PUBLIC_URL = "http://93.184.216.34"
 _PASSWORD = "Passw0rd!portal-iso-123"
 

@@ -69,6 +69,16 @@ from app.services.provisioning import provision_user
 
 pytestmark = pytest.mark.integration
 
+# Superseded by the P6A-7 local auth cutover; reworked in P6A-8. This E2E contract
+# suite provisions + signs in via Supabase and drives the app with Supabase JWTs;
+# after the cutover the app accepts only its OWN EdDSA tokens and provision_user
+# writes to LOCAL Postgres (new signature). The local-token contract rewrite is
+# P6A-8's job; the local login E2E is covered now by test_auth_login.py.
+pytest.skip(
+    "Superseded by P6A-7 local auth cutover; Supabase-token contract suite reworked in P6A-8.",
+    allow_module_level=True,
+)
+
 # A public IP literal: the POST /audits SSRF guard resolves the host off-loop; an
 # IP avoids DNS and never reaches a private range (reused from the portal test).
 _PUBLIC_URL = "http://93.184.216.34"

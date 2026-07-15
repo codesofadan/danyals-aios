@@ -41,6 +41,9 @@ class ProvisionUserRequest(BaseModel):
 
     email: EmailStr
     name: str = Field(min_length=1)
+    # The staff login key (case-insensitively unique). Required so the account can
+    # actually sign in via POST /auth/login after the P6A-7 cutover.
+    username: str = Field(min_length=3, max_length=254)
     password: SecretStr = Field(min_length=8)
     role: AppRole = "viewer"
     title: str = ""
@@ -58,6 +61,8 @@ class PortalUserRequest(BaseModel):
 
     email: EmailStr
     name: str = Field(min_length=1)
+    # The portal login key (case-insensitively unique) the client signs in with.
+    username: str = Field(min_length=3, max_length=254)
     password: SecretStr = Field(min_length=8)
 
 
