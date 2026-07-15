@@ -18,6 +18,7 @@ The Web 2.0 PUBLISH pipeline is a later chunk - only the read endpoints exist no
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -35,7 +36,9 @@ from app.schemas.offpage import (
     FlagToxicRequest,
     NapStatus,
     OffpageKpisResponse,
+    Web2PlanRequest,
     Web2PropertyResponse,
+    Web2ReviewRequest,
     action_for,
 )
 from app.services.activity import record_activity
@@ -52,6 +55,41 @@ Lead = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))
 _CITATION_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Citation not found"
 )
+_WEB2_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Web 2.0 property not found"
+)
+_CLIENT_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+)
+
+
+def get_web2_write_enqueuer() -> Callable[[str], None]:
+    """Dependency: enqueue the Web 2.0 WRITE worker (overridable in tests).
+
+    The worker task is imported lazily so the API process never pulls in the Celery
+    task modules just to import this router (mirrors ``get_audit_enqueuer``)."""
+
+    def _enqueue(web2_id: str) -> None:
+        from workers.tasks.offpage import web2_write_job
+
+        web2_write_job.delay(web2_id)
+
+    return _enqueue
+
+
+def get_web2_publish_enqueuer() -> Callable[[str], None]:
+    """Dependency: enqueue the Web 2.0 PUBLISH worker (overridable in tests)."""
+
+    def _enqueue(web2_id: str) -> None:
+        from workers.tasks.offpage import web2_publish_job
+
+        web2_publish_job.delay(web2_id)
+
+    return _enqueue
+
+
+Web2WriteEnqueuerDep = Annotated[Callable[[str], None], Depends(get_web2_write_enqueuer)]
+Web2PublishEnqueuerDep = Annotated[Callable[[str], None], Depends(get_web2_publish_enqueuer)]
 
 
 class FlagToxicResponse(BaseModel):
@@ -199,12 +237,100 @@ async def list_web2(
     _user: ViewReports,
     client_id: Annotated[str | None, Query(alias="clientId")] = None,
 ) -> list[Web2PropertyResponse]:
-    """The Web 2.0 property ledger (newest-published first). The PUBLISH pipeline
-    lands in a later chunk; this endpoint reads the existing placements."""
+    """The Web 2.0 property ledger (newest-published first). Reads every placement -
+    drafts, ones awaiting review, and live posts (status is internal; the UI sees the
+    same 7 fields regardless)."""
     rows = await asyncio.to_thread(
         repo.list_web2, client_id=client_id, limit=page.limit, offset=page.offset
     )
     return [Web2PropertyResponse.from_row(r) for r in rows]
+
+
+@router.post(
+    "/offpage/web2/plan",
+    response_model=Web2PropertyResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def plan_web2(
+    body: Web2PlanRequest,
+    repo: OffpageRepoDep,
+    actor: Lead,
+    enqueue: Web2WriteEnqueuerDep,
+) -> Web2PropertyResponse:
+    """Queue a new Web 2.0 property (lead-only). Creates a ``draft`` placement and hands
+    it to the write worker, which drafts the branded article and parks it at
+    ``needs_review`` for a lead to approve - it is NEVER auto-published. 404s if the
+    client is unknown/invisible; ``client_name`` is snapshotted so client_id never leaks."""
+    name = await asyncio.to_thread(repo.client_name_for, body.client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    row = await asyncio.to_thread(
+        repo.create_web2,
+        client_id=body.client_id,
+        client_name=name,
+        platform=body.platform,
+        anchor=body.anchor,
+        target_url=body.target_url,
+        topic=(body.topic or body.anchor),
+        page_type=body.page_type,
+        framework=body.framework,
+    )
+    if row is None:  # RLS/insert rejected (should not happen for a lead)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Could not create the placement"
+        )
+    enqueue(str(row["id"]))
+    await record_activity(
+        actor, kind="content", action="planned a Web 2.0 property", target=name,
+        entity_type="client", entity_id=body.client_id,
+    )
+    return Web2PropertyResponse.from_row(row)
+
+
+@router.post("/offpage/web2/{web2_id}/approve", response_model=Web2PropertyResponse)
+async def approve_web2(
+    web2_id: str,
+    body: Web2ReviewRequest,
+    repo: OffpageRepoDep,
+    actor: Lead,
+    enqueue: Web2PublishEnqueuerDep,
+) -> Web2PropertyResponse:
+    """The human quality gate (lead-only). ``approve`` moves a ``needs_review`` draft to
+    ``publishing`` and enqueues the publish worker (publish -> verify -> track);
+    ``reject`` moves it to ``rejected``. 404 if unknown; 409 if it is not awaiting review
+    (only a drafted, human-reviewed article may be published)."""
+    row = await asyncio.to_thread(repo.get_web2, web2_id)
+    if row is None:
+        raise _WEB2_NOT_FOUND
+    current = str(row.get("status") or "")
+    if current != "needs_review":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Placement is not awaiting review (status={current})",
+        )
+
+    ent_type, ent_id = _client_entity(row)
+    if body.action == "reject":
+        updated = await asyncio.to_thread(
+            repo.update_web2_status, web2_id, {"status": "rejected"}
+        )
+        await record_activity(
+            actor, kind="content", action="rejected a Web 2.0 property",
+            target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
+        )
+        return Web2PropertyResponse.from_row(updated or row)
+
+    updated = await asyncio.to_thread(
+        repo.update_web2_status, web2_id, {"status": "publishing"}
+    )
+    if updated is None:
+        raise _WEB2_NOT_FOUND
+    enqueue(web2_id)
+    await record_activity(
+        actor, kind="content", action="approved a Web 2.0 property",
+        target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
+    )
+    return Web2PropertyResponse.from_row(updated)
 
 
 # --- KPIs ---------------------------------------------------------------------

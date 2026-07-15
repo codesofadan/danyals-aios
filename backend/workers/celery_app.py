@@ -24,6 +24,11 @@ celery_app = Celery(
         "workers.tasks.audit",
         "workers.tasks.context",
         "workers.tasks.context_reconcile",
+        # 7B-3: the Web 2.0 publish drivers (web2_write / web2_publish) + the backlink/
+        # citation monitoring sweep (monitor_offpage). All are event-driven plain tasks
+        # (the publish is enqueued on a lead's approval; monitoring is enqueued per
+        # client), so no beat entry / R6 overlap-lock is needed.
+        "workers.tasks.offpage",
     ],
 )
 

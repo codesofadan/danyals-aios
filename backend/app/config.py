@@ -186,6 +186,17 @@ class Settings(BaseSettings):
     dataforseo_password: SecretStr | None = None  # DataForSEO API password (Basic auth)
     brightlocal_api_key: SecretStr | None = None  # BrightLocal citation-tracker key
 
+    # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
+    # Additive + optional (never required in prod). The write stage (Claude drafting
+    # of the branded article) rides the EXISTING `content` money-dial; the publish +
+    # backlink/citation monitoring pulls ride the EXISTING `backlinks` (off-page) dial
+    # - no new dial feature. Per-account Web 2.0 OAuth tokens (WordPress.com / Blogger
+    # / Tumblr) are per-property and live in the VAULT (like WordPress app passwords),
+    # NOT here; the service layer builds a real publisher per publish, so the worker's
+    # publisher factory degrades to 'hold at the review gate' until that wiring lands. ---
+    web2_publish_cost_estimate: float = 0.0  # marginal cost of one blog-API publish
+    offpage_monitor_cost_estimate: float = 0.05  # one backlink/citation provider pull
+
     # --- Reports module: the Google Sheets operational store (7D). OPTIONAL and NOT
     # in _REQUIRED_IN_PROD: the SheetStore buffers writes in Redis and unit-tests NOW
     # with a fake client, and ACTIVATES when this credential lands (mirrors the

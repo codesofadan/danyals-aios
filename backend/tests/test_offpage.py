@@ -305,6 +305,9 @@ class FakeOffpageRepo:
         self.flagged: list[dict[str, Any]] = []
         self.list_backlinks_kwargs: dict[str, Any] | None = None
         self.bulk_ids: list[str] | None = None
+        self.web2_by_id: dict[str, dict[str, Any]] = {}
+        self.client_names: dict[str, str] = {}
+        self.created_web2: list[dict[str, Any]] = []
 
     def list_backlinks(
         self, *, status: str | None = None, client_id: str | None = None,
@@ -363,6 +366,36 @@ class FakeOffpageRepo:
         limit: int | None = None, offset: int = 0,
     ) -> list[dict[str, Any]]:
         return self.web2
+
+    def client_name_for(self, client_id: str) -> str | None:
+        return self.client_names.get(client_id)
+
+    def create_web2(
+        self, *, client_id: str, client_name: str, platform: str, anchor: str,
+        target_url: str, topic: str, page_type: str, framework: str,
+    ) -> dict[str, Any]:
+        row = {
+            "id": f"w2-{len(self.web2_by_id) + 1}", "client_id": client_id,
+            "client_name": client_name, "platform": platform, "anchor": anchor,
+            "target_url": target_url, "topic": topic, "page_type": page_type,
+            "framework": framework, "status": "draft", "post_url": "",
+            "verified": "pending", "published_at": None,
+        }
+        self.web2_by_id[row["id"]] = row
+        self.created_web2.append(row)
+        return row
+
+    def get_web2(self, web2_id: str) -> dict[str, Any] | None:
+        return self.web2_by_id.get(web2_id)
+
+    def update_web2_status(
+        self, web2_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        row = self.web2_by_id.get(web2_id)
+        if row is None:
+            return None
+        row.update(changes)
+        return row
 
 
 def _user(role: str, uid: str = "u-1") -> CurrentUser:
@@ -548,3 +581,120 @@ async def test_kpis_assemble_from_counts(
         "lostLinks30d": 23,
         "toxicFlagged": 8,
     }
+
+
+# --- web 2.0 publish endpoints (7B-3) -----------------------------------------
+
+
+@pytest.fixture
+def web2_enqueues(app: FastAPI) -> tuple[list[str], list[str]]:
+    """Override the two Web 2.0 enqueuer deps with recorders (no Celery)."""
+    from app.routers.offpage import get_web2_publish_enqueuer, get_web2_write_enqueuer
+
+    writes: list[str] = []
+    publishes: list[str] = []
+    app.dependency_overrides[get_web2_write_enqueuer] = lambda: writes.append
+    app.dependency_overrides[get_web2_publish_enqueuer] = lambda: publishes.append
+    return writes, publishes
+
+
+def _plan_body(**over: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "clientId": "cl-1", "platform": "WordPress.com", "anchor": "roof repair",
+        "targetUrl": "https://acme.example/roof-repair",
+    }
+    body.update(over)
+    return body
+
+
+async def test_web2_plan_is_lead_only(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    wire("specialist")  # holds view_reports but is not a lead
+    resp = await client.post("/api/v1/offpage/web2/plan", json=_plan_body())
+    assert resp.status_code == 403
+
+
+async def test_web2_plan_creates_draft_and_enqueues_write(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    writes, _publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/plan", json=_plan_body())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert set(body) == _WEB2_KEYS  # only the 7 contract keys; no client_id/status leak
+    assert body["client"] == "Acme Roofing"
+    assert body["platform"] == "WordPress.com"
+    assert body["verified"] == "pending"
+    assert repo.created_web2 and repo.created_web2[0]["status"] == "draft"
+    assert writes == [repo.created_web2[0]["id"]]  # the write worker was enqueued
+
+
+async def test_web2_plan_unknown_client_is_404(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    wire("manager", "u-lead")  # no client_names registered -> unknown
+    resp = await client.post("/api/v1/offpage/web2/plan", json=_plan_body())
+    assert resp.status_code == 404
+
+
+async def test_web2_approve_transitions_to_publishing_and_enqueues(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.web2_by_id = {
+        "w2-1": _web2_row(id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review")
+    }
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={"action": "approve"})
+    assert resp.status_code == 200
+    assert repo.web2_by_id["w2-1"]["status"] == "publishing"
+    assert publishes == ["w2-1"]  # the publish worker was enqueued
+
+
+async def test_web2_approve_reject_does_not_publish(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.web2_by_id = {"w2-1": _web2_row(id="w2-1", status="needs_review")}
+    _writes, publishes = web2_enqueues
+    wire("admin", "u-admin")
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={"action": "reject"})
+    assert resp.status_code == 200
+    assert repo.web2_by_id["w2-1"]["status"] == "rejected"
+    assert publishes == []  # a rejected draft is never published
+
+
+async def test_web2_approve_conflicts_when_not_needs_review(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.web2_by_id = {"w2-1": _web2_row(id="w2-1", status="draft")}
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={})
+    assert resp.status_code == 409  # only a needs_review draft may be approved
+
+
+async def test_web2_approve_is_lead_only(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.web2_by_id = {"w2-1": _web2_row(id="w2-1", status="needs_review")}
+    wire("analyst")  # not a lead
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={})
+    assert resp.status_code == 403
+
+
+async def test_web2_approve_missing_is_404(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/nope/approve", json={})
+    assert resp.status_code == 404
