@@ -1,0 +1,42 @@
+# AIOS backend - Caddy reverse proxy with automatic TLS.
+#
+# Caddy terminates HTTPS (Let's Encrypt / ZeroSSL, auto-obtained + auto-renewed)
+# and reverse-proxies public 443 traffic to the loopback-only uvicorn (aios-api on
+# 127.0.0.1:8000). It is the ONLY process facing the network - Postgres, Redis, and
+# the API itself all bind localhost.
+#
+# Install:
+#   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+#   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+#   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+#   sudo apt-get update && sudo apt-get install -y caddy
+#
+# Deploy: copy this file to /etc/caddy/Caddyfile, replace api.example.com with your
+# real API hostname (its DNS A/AAAA record must already point at this VPS), then:
+#   sudo systemctl reload caddy
+#
+# Keep the hostnames in sync with aios.env: set TRUSTED_HOSTS=api.example.com and
+# API_CORS_ORIGINS=https://app.example.com so TrustedHostMiddleware + CORS match.
+
+api.example.com {
+	reverse_proxy 127.0.0.1:8000
+
+	# Compress responses.
+	encode zstd gzip
+
+	# Baseline security headers (Caddy already sets HSTS-friendly TLS).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Do not advertise the server software.
+		-Server
+	}
+
+	# Structured access logs to journald (view: journalctl -u caddy).
+	log {
+		output stderr
+		format json
+	}
+}

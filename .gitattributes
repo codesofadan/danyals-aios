@@ -3,5 +3,7 @@
 *.sh            text eol=lf
 *.service       text eol=lf
 *.sql           text eol=lf
+*.env.example   text eol=lf
+Caddyfile       text eol=lf
 Dockerfile      text eol=lf
 *.Dockerfile    text eol=lf
