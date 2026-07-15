@@ -1,9 +1,10 @@
-"""P5-4 gate: GET /me returns the caller's TeamMemberRecord with LIVE task
-counts (activeTasks = not-done, completed = done), RLS-scoped to the caller."""
+"""P5-4 / 7F-3 gate: GET /me returns the caller's TeamMemberRecord with LIVE
+metrics overlaid (activeTasks/completed + real onTime/utilization/quality from
+:mod:`app.services.team_metrics`), RLS-scoped to the caller."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
@@ -12,6 +13,7 @@ from fastapi import FastAPI
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.tasks_repo import get_tasks_repo
+from app.services.team_metrics import MemberMetrics, get_team_metrics
 
 pytestmark = pytest.mark.unit
 
@@ -28,15 +30,21 @@ class FakeMeRepo:
             "title": "SEO Specialist", "email": "bilal@x.com", "role": "specialist",
             "status": "active", "created_at": "2023-05-01T00:00:00Z",
         }
-        self.tasks: list[dict[str, Any]] = []
-        self.scoped: str | None = None
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         return self.user_row
 
-    def list_tasks(self, assignee_id: str | None = None) -> list[dict[str, Any]]:
-        self.scoped = assignee_id
-        return self.tasks
+
+class FakeMetrics:
+    """Stub metrics reader recording the ids it was asked to score."""
+
+    def __init__(self) -> None:
+        self.scored: dict[str, MemberMetrics] = {}
+        self.asked: Sequence[str] | None = None
+
+    def member_metrics(self, member_ids: Sequence[str] | None = None) -> dict[str, MemberMetrics]:
+        self.asked = member_ids
+        return self.scored
 
 
 def _user(role: str = "specialist", uid: str = "u-1") -> CurrentUser:
@@ -53,8 +61,14 @@ def repo() -> FakeMeRepo:
 
 
 @pytest.fixture
-def wire(app: FastAPI, repo: FakeMeRepo) -> Callable[..., None]:
+def metrics() -> FakeMetrics:
+    return FakeMetrics()
+
+
+@pytest.fixture
+def wire(app: FastAPI, repo: FakeMeRepo, metrics: FakeMetrics) -> Callable[..., None]:
     app.dependency_overrides[get_tasks_repo] = lambda: repo
+    app.dependency_overrides[get_team_metrics] = lambda: metrics
 
     def _as(role: str = "specialist", uid: str = "u-1") -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role, uid)
@@ -62,34 +76,37 @@ def wire(app: FastAPI, repo: FakeMeRepo) -> Callable[..., None]:
     return _as
 
 
-async def test_me_shape_and_live_counts(
-    client: httpx.AsyncClient, repo: FakeMeRepo, wire: Callable[..., None]
+async def test_me_shape_and_live_metrics(
+    client: httpx.AsyncClient, metrics: FakeMetrics, wire: Callable[..., None]
 ) -> None:
-    repo.tasks = [
-        {"status": "todo"}, {"status": "in_progress"}, {"status": "review"},
-        {"status": "done"}, {"status": "done"},
-    ]
+    metrics.scored = {
+        "u-1": MemberMetrics(
+            active_tasks=3, completed=2, on_time=94, utilization=75, quality=88
+        )
+    }
     wire("specialist", "u-1")
     resp = await client.get("/api/v1/me")
     assert resp.status_code == 200
     body = resp.json()
     assert set(body) == _MEMBER_FIELDS
-    assert repo.scoped == "u-1"  # counts are scoped to the caller
-    assert body["activeTasks"] == 3  # todo + in_progress + review
+    assert list(metrics.asked or []) == ["u-1"]  # scoped to the caller
+    assert body["activeTasks"] == 3
     assert body["completed"] == 2
+    assert body["onTime"] == 94
+    assert body["utilization"] == 75
+    assert body["quality"] == 88
     assert body["role"] == "Specialist"  # capitalized TeamRole
     assert body["joined"] == "May 2023"
-    # deferred metrics stay at defaults
-    assert body["onTime"] == 0 and body["utilization"] == 0 and body["quality"] == 0
 
 
-async def test_me_zero_when_no_tasks(
-    client: httpx.AsyncClient, repo: FakeMeRepo, wire: Callable[..., None]
+async def test_me_zero_when_no_metrics(
+    client: httpx.AsyncClient, wire: Callable[..., None]
 ) -> None:
-    wire("manager", "u-lead")
+    wire("manager", "u-lead")  # metrics.scored empty -> ZERO_METRICS fallback
     body = (await client.get("/api/v1/me")).json()
     assert body["activeTasks"] == 0
     assert body["completed"] == 0
+    assert body["onTime"] == 0 and body["utilization"] == 0 and body["quality"] == 0
 
 
 async def test_me_forbidden_for_client(

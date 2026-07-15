@@ -33,12 +33,14 @@ class _RecordingCursor:
         q = str(query)
         self.executes.append((q, params))
         if "insert into public.users" in q:
-            # params: (id, email, username, name, role, title, avatar_color, client_id)
-            uid, email, username, name, role, title, color, client_id = params
+            # params: (id, email, username, name, role, title, avatar_color,
+            #          must_reset, must_setup_2fa, client_id)  -- status is a literal
+            uid, email, username, name, role, title, color, must_reset, must_2fa, client_id = params
             self._user_row = {
                 "id": uid, "email": email, "username": username, "name": name,
                 "role": role, "title": title, "avatar_color": color,
-                "status": "invited", "client_id": client_id,
+                "status": "invited", "must_reset": must_reset,
+                "must_setup_2fa": must_2fa, "client_id": client_id,
             }
 
     def executemany(self, query: Any, seq: Any) -> None:
@@ -122,3 +124,30 @@ def test_provision_staff_rejects_client_id(cur: _RecordingCursor) -> None:
             email="staff@x.com", password="secret12", name="Staff",
             role="admin", username="staff", client_id="cl-acme",
         )
+
+
+def test_provision_flags_default_off(cur: _RecordingCursor) -> None:
+    row = provision_user(
+        email="v@x.com", password="secret12", name="Vic", role="viewer", username="vic",
+    )
+    # The plain (explicit-password) path never forces first-login onboarding.
+    assert row["must_reset"] is False
+    assert row["must_setup_2fa"] is False
+
+
+def test_provision_explicit_grants_override_template(cur: _RecordingCursor) -> None:
+    # An explicit feature_grants map WINS over a template; 'off' entries are dropped.
+    provision_user(
+        email="c@x.com", password="secret12", name="Cus Tom", role="specialist",
+        username="custom", template_key="super",  # would be all 17...
+        feature_grants={"rank_tracker": "full", "reporting": "view", "billing": "off"},
+        must_reset=True, must_setup_2fa=True,
+    )
+    seeded = cur.many[0][1]
+    assert {(k, lvl) for _uid, k, lvl in seeded} == {
+        ("rank_tracker", "full"), ("reporting", "view"),
+    }
+    # The onboarding flags reach the identity insert.
+    users_insert = next(e for e in cur.executes if "insert into public.users" in e[0])
+    *_, must_reset, must_2fa, _client = users_insert[1]
+    assert must_reset is True and must_2fa is True

@@ -151,15 +151,27 @@ async def test_non_owner_cannot_create_elevated_role(
 
 
 async def test_list_users_as_owner(
-    client: httpx.AsyncClient, as_role: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
+    app: FastAPI,
+    client: httpx.AsyncClient,
+    as_role: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     as_role("owner")
     monkeypatch.setattr(
         "app.routers.admin_users._fetch_all_users",
         lambda token, **_kw: [dict(_CANNED_ROW)],
     )
+    # The roster overlays team metrics; inject a stub so no DB is touched here.
+    from app.services.team_metrics import get_team_metrics
+
+    class _NoMetrics:
+        def member_metrics(self, _ids: Any = None) -> dict[str, Any]:
+            return {}
+
+    app.dependency_overrides[get_team_metrics] = lambda: _NoMetrics()
     resp = await client.get("/api/v1/admin/users")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 1
     assert body[0]["role"] == "Viewer"
+    assert body[0]["onTime"] == 0  # no metrics -> zeroed overlay
