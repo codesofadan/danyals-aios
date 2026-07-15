@@ -404,3 +404,46 @@ create table public.tasks (
 --     owner/admin only (manage). Clients never touch the table (is_staff excludes
 --     them, no client select policy); the portal renders active cards via the
 --     server. No delete policy.
+
+-- ---- 0019_policy ------------------------------------------------------------
+-- Part 7 Module 05 (Policy Radar): the always-on SEO/algorithm intelligence brain
+-- (Watch -> Detect -> Research -> Flag KB (3-axis) -> Recommend -> human-confirm ->
+-- closed loop). Shapes mirror frontend/lib/policy.ts (Source + ChangeEvent + KBEntry
+-- + Recommendation). Chunk 7C-1 = FOUNDATION: data + read/transition surface + a
+-- BASELINE recommendation set (app/services/policy_baseline.py) so the Command
+-- Center is populated PRE-LIVE. DEFERRED (tables shaped to receive them): the
+-- change-detection WATCHER (service_role, fills last_hash + change_events + kb) and
+-- the 'applied' CLOSED-LOOP overlay (a later chunk; Part-3 HARD RULE: the
+-- danyals-audit-system engine is NEVER mutated - the overlay is separate).
+--   enums policy_severity(critical|major|minor|info), policy_category(algorithm|
+--     policy|technical|content|local|geo), policy_region(global|national),
+--     policy_target_module(audit|content|portal), policy_scope(global|client|site),
+--     rec_status(new|acknowledged|applied|dismissed), source_status(ok|change).
+--   policy_sources(id uuid, name, kind text (contract `kind`), url, icon,
+--     last_checked timestamptz (contract `lastChecked` relative; null pre-live),
+--     last_hash text (contract `lastHash`, the diff anchor), status source_status
+--     'ok', note, created_at/updated_at) + set_updated_at; status & created_at idx.
+--   change_events(id uuid, source_id fk->policy_sources set null, source_name
+--     snapshot (contract `sourceName`), summary, severity policy_severity 'info',
+--     detected_at (contract `detected`), diff_ref text + triggered_job text (WATCHER
+--     hooks, null now), created_at/updated_at) + set_updated_at; source_id &
+--     detected_at(desc) idx.
+--   kb_entries(id uuid, source_id fk->policy_sources set null, title, summary, the 3
+--     AXES severity policy_severity/category policy_category/region policy_region +
+--     region_flags text[] (specific national markets), region_label (contract
+--     `regionLabel`), source_name/source_url citation snapshots, version text 'v1',
+--     hash text (dedupe/version anchor), detected_at (contract `detected`),
+--     created_at/updated_at) + set_updated_at; source_id/severity/category/
+--     detected_at(desc) idx.
+--   recommendations(id uuid, kb_entry_id fk->kb_entries set null (null for
+--     baseline), kb_ref text (public kbId snapshot; synthetic kb-base-* for
+--     baseline), title, why, action, scope policy_scope, target_module
+--     policy_target_module (contract `target`), region policy_region, region_label
+--     (contract `regionLabel`), status rec_status 'new', affected_clients text
+--     (contract `clients`), created_at/updated_at) + set_updated_at; kb_entry_id/
+--     status/created_at(desc) idx.
+--   All four ENABLE + FORCE RLS: select is_staff(); insert/update owner/admin/
+--     manager (the leads). NO client select policy; NO delete. The deferred WATCHER
+--     writes on service_role (BYPASSRLS). Baseline recs are surfaced from a constant
+--     set (list_recommendations dedups by kb_ref) and MATERIALIZED into the table on
+--     a lead's first acknowledge/apply/dismiss. RLS gate: 21 tables, all FORCE.

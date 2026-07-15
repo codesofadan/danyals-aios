@@ -29,6 +29,12 @@ from app.schemas.milestones import (
     ClientProjectResponse,
     StageResponse,
 )
+from app.schemas.policy import (
+    ChangeEventResponse,
+    KBEntryResponse,
+    RecommendationResponse,
+    SourceResponse,
+)
 from app.schemas.tasks import TaskResponse
 from app.schemas.tiers import TierClientResponse
 from app.schemas.upsells import UpsellResponse
@@ -54,6 +60,10 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (StageResponse, "frontend/lib/milestones.ts", "Stage"),
     (AutoAdvanceResponse, "frontend/lib/milestones.ts", "AutoAdvance"),
     (UpsellResponse, "frontend/lib/upsells.ts", "Upsell"),
+    (SourceResponse, "frontend/lib/policy.ts", "Source"),
+    (ChangeEventResponse, "frontend/lib/policy.ts", "ChangeEvent"),
+    (KBEntryResponse, "frontend/lib/policy.ts", "KBEntry"),
+    (RecommendationResponse, "frontend/lib/policy.ts", "Recommendation"),
 ]
 
 
@@ -121,6 +131,15 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (StageResponse, "key", "frontend/lib/milestones.ts", "StageKey"),
     (StageResponse, "status", "frontend/lib/milestones.ts", "StageStatus"),
     (ClientProjectResponse, "health", "frontend/lib/milestones.ts", "Health"),
+    # Policy Radar: all seven enums locked (one representative field each). Several
+    # unions share a label (scope 'global' vs region 'global') but are DISTINCT.
+    (SourceResponse, "status", "frontend/lib/policy.ts", "SourceStatus"),
+    (ChangeEventResponse, "severity", "frontend/lib/policy.ts", "Severity"),
+    (KBEntryResponse, "category", "frontend/lib/policy.ts", "Category"),
+    (KBEntryResponse, "region", "frontend/lib/policy.ts", "Region"),
+    (RecommendationResponse, "scope", "frontend/lib/policy.ts", "Scope"),
+    (RecommendationResponse, "target", "frontend/lib/policy.ts", "TargetModule"),
+    (RecommendationResponse, "status", "frontend/lib/policy.ts", "RecStatus"),
 ]
 
 
