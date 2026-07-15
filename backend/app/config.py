@@ -147,6 +147,20 @@ class Settings(BaseSettings):
     context_summarize_cost_estimate: float = 0.02
     context_embed_cost_estimate: float = 0.001
 
+    # --- Content module provider seams (P7A-2). ALL optional and NOT in
+    # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic
+    # fakes and ACTIVATES per key as they land (mirrors the context key-gating).
+    # The WRITER reuses the Anthropic summarizer above; these add the SERP-research
+    # + image-generation keys. WordPress app-passwords are per-site and live in the
+    # vault (NOT here) - the service layer decrypts them. Keys are SecretStr (never
+    # logged / never in a repr). ---
+    serper_api_key: SecretStr | None = None  # Serper.dev SERP research
+    image_gen_api_key: SecretStr | None = None  # OpenAI-compatible image generation
+    image_gen_model: str = "gpt-image-1"  # image model (provider-configurable)
+    # Per-call cost estimates for the money-dial (a later chunk wires these in).
+    content_research_cost_estimate: float = 0.01
+    content_generate_cost_estimate: float = 0.15
+
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0
 
