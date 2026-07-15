@@ -17,6 +17,7 @@ from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.me import router as me_router
 from app.routers.milestones import router as milestones_router
+from app.routers.notifications import router as notifications_router
 from app.routers.offpage import router as offpage_router
 from app.routers.policy import router as policy_router
 from app.routers.portal import router as portal_router
@@ -47,6 +48,7 @@ api_v1.include_router(reports_router)
 api_v1.include_router(policy_router)
 api_v1.include_router(upsells_router)
 api_v1.include_router(tickets_router)
+api_v1.include_router(notifications_router)
 api_v1.include_router(settings_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)

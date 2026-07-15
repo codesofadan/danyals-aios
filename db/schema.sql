@@ -535,3 +535,24 @@ create table public.tasks (
 --     (per-user - a caller only ever touches their OWN toggles). NO delete policies;
 --     the danger-zone reset/purge runs server-side (purge_activity on service_role,
 --     owner-gated at the router). RLS gate: 24 tables, all FORCE.
+
+-- ---- 0023_notifications -----------------------------------------------------
+-- Part 7 (7F-1): the DELIVERY layer - two stores beside the append-only activity_log
+-- (0013) that CONSUME the per-user notification_prefs (0025). (Numbered 0023, a slot
+-- reserved earlier; documented here at the tail of the snapshot.) The WRITE path is
+-- server-side on the privileged pool (app/services/notifications.py), like log_activity,
+-- because a notification/alert is addressed to someone OTHER than the actor.
+--   enum alert_type(rank_drop|lost_link|budget).
+--   notifications(id uuid, user_id fk->users on delete cascade (the recipient), kind
+--     text (matches a notification_prefs event_key when known, else in-app-only), title
+--     text, body text, read bool, created_at/updated_at) + set_updated_at; (user_id,
+--     created_at desc) idx.
+--   alerts(id uuid, client_id fk->clients on delete cascade, type alert_type, severity
+--     text (info|warning|critical - a display hint, never an RLS predicate), detail text,
+--     acknowledged bool, created_at/updated_at) + set_updated_at; client_id +
+--     created_at(desc) idx.
+--   Both ENABLE + FORCE RLS. notifications: select/update user_id=auth.uid() (per-user;
+--     works for a portal client too - they just have no rows); NO insert policy
+--     (service_role writes via notify()); NO delete. alerts: select is_staff() (any
+--     staff read); update owner/admin/manager (leads acknowledge); NO insert policy
+--     (service_role writes via raise_alert); NO delete. RLS gate: 26 tables, all FORCE.
