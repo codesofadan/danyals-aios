@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     context_summarize_cost_estimate: float = 0.02
     context_embed_cost_estimate: float = 0.001
 
+    # --- Web in-product AI-assist surface (P9-5). The dashboard/portal calls OUR
+    # backend, which calls Claude through the EXISTING summarizer seam
+    # (integrations/llm.py) wrapped in the EXISTING cost gate (the `ai_assist`
+    # money-dial feature) - the client NEVER holds an Anthropic key. Reuses the
+    # SAME optional ``anthropic_api_key`` above: keyless OR a dial/budget block ->
+    # a degraded stub (200), never a crash. Both knobs are additive + optional. ---
+    ai_assist_cost_estimate: float = 0.02  # per-call estimate logged through the gate
+    ai_assist_max_tokens: int = 700  # bound the assist prose to a small reply
+
     # --- Content module provider seams (P7A-2). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic
     # fakes and ACTIVATES per key as they land (mirrors the context key-gating).

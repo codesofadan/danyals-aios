@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.routers.activity import router as activity_router
 from app.routers.admin_users import router as admin_users_router
+from app.routers.ai_assist import router as ai_assist_router
 from app.routers.audits import router as audits_router
 from app.routers.auth import router as auth_router
 from app.routers.backups import router as backups_router
@@ -61,6 +62,7 @@ api_v1.include_router(backups_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
 api_v1.include_router(context_router)
+api_v1.include_router(ai_assist_router)
 # The public free-audit funnel: the ONLY unauthenticated routes. Its endpoints
 # declare NO auth dependency (the aggregator itself carries none), so mounting it
 # here yields /api/v1/public/* as unauthenticated - see app/routers/public.py.

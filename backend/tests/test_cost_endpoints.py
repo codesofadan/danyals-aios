@@ -116,7 +116,7 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     resp = await client.get("/api/v1/cost/dial")
     assert resp.status_code == 200
     dial = {d["key"]: d for d in resp.json()}
-    assert len(dial) == 9
+    assert len(dial) == 10
     assert dial["keywords"]["mode"] == "off"  # default
     assert dial["tech_audit"]["mode"] == "api"
     # P6B-4: the context module's two AI spends are dial-controllable.
@@ -126,6 +126,9 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     # P7A-3: the content RESEARCH spend is dial-controllable (Serper).
     assert dial["content_research"]["provider"] == "Serper"
     assert dial["content_research"]["mode"] == "api"  # default
+    # P9-5: the web in-product AI-assist spend is dial-controllable (Anthropic).
+    assert dial["ai_assist"]["provider"] == "Anthropic"
+    assert dial["ai_assist"]["mode"] == "api"  # default
 
 
 async def test_set_dial_owner_admin_only(client: httpx.AsyncClient, repo: FakeCostRepo, wire: Callable[[str], None]) -> None:

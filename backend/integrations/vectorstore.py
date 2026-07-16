@@ -178,7 +178,9 @@ class PineconeVectorStore:
         # ``partial`` binds the batch so no loop variable is captured in a closure.
         ids: list[str] = []
         for page in self._index.list(namespace=namespace):
-            ids.extend(page)
+            # A page is a ListResponse iterating to ListItem (id: str | None); pull
+            # the ids, skipping any null entry (newer Pinecone SDK shape).
+            ids.extend(item.id for item in page if item.id is not None)
         items: list[VectorItem] = []
         for start in range(0, len(ids), 1000):
             batch = ids[start : start + 1000]

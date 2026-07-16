@@ -46,6 +46,11 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # brief (partial / low-confidence) rather than crashing. Aggressively cached
     # by (keyword, geo, serp_date), so a cluster/city sprint reuses one pull.
     DialFeatureMeta(key="content_research", label="Content Research", icon="manage_search", provider="Serper", note="SERP + top-10 teardown (Serper)", default_mode="api"),
+    # Part 9 (P9-5) - the web Dashboard/Portal IN-PRODUCT AI assist. The dashboard
+    # calls OUR backend, which calls Claude through the summarizer seam wrapped in
+    # THIS gate (the client never holds a key), so ops throttle it off/byhand/api on
+    # the money-dial exactly like context; a block DEGRADES the reply, never crashes.
+    DialFeatureMeta(key="ai_assist", label="In-Product AI", icon="assistant", provider="Anthropic", note="Dashboard AI assist (Claude)", default_mode="api"),
 )
 
 DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)

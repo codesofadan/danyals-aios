@@ -122,13 +122,27 @@ def cmd_get(a: argparse.Namespace) -> None:
 
 
 def cmd_post(a: argparse.Namespace) -> None:
-    body = None
-    if a.json:
-        try:
-            body = json.loads(a.json)
-        except json.JSONDecodeError as exc:
-            _fail({"error": f"--json is not valid JSON: {exc}"}, 5)
-    print(json.dumps(_req("POST", _norm(a.path), body)))
+    print(json.dumps(_req("POST", _norm(a.path), _parse_json_body(a.json))))
+
+
+def cmd_patch(a: argparse.Namespace) -> None:
+    """A partial update of any /api/v1 path (mirrors POST: bearer header, --json
+    body, the same HTTP error/exit-code mapping). Skills that edit-in-place -
+    /upsells, /tasks/{id}/assign-task, the content PATCH - reach the backend
+    through THIS verb rather than an ad-hoc curl."""
+    print(json.dumps(_req("PATCH", _norm(a.path), _parse_json_body(a.json))))
+
+
+def _parse_json_body(raw: str) -> dict | None:
+    """Parse a ``--json`` request body, or ``None`` when omitted. A malformed body
+    is a local usage error (exit 5), never a silent empty POST/PATCH."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _fail({"error": f"--json is not valid JSON: {exc}"}, 5)
+        return None  # unreachable (_fail exits); satisfies the type checker
 
 
 def _norm(path: str) -> str:
@@ -272,6 +286,11 @@ def _build_parser() -> argparse.ArgumentParser:
     po.add_argument("path")
     po.add_argument("--json", default="", help="JSON request body")
     po.set_defaults(fn=cmd_post)
+
+    pa = sub.add_parser("patch", help="authenticated PATCH (partial update) of any /api/v1 path")
+    pa.add_argument("path")
+    pa.add_argument("--json", default="", help="JSON request body")
+    pa.set_defaults(fn=cmd_patch)
 
     rc = sub.add_parser("resolve-client", help="match a client by name -> id + fresh context + health")
     rc.add_argument("--client", required=True)
