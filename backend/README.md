@@ -1,29 +1,92 @@
-# backend
+# AIOS backend
 
-FastAPI service for the AIOS platform. **Not implemented yet** - this folder is
-a placeholder so the intended structure is clear to the team and to AI tools.
+FastAPI API + Celery workers for the AIOS SEO-automation platform (Xegents AI).
+This is the **Part 1 foundation**: a runnable, tested skeleton (config, logging,
+request-id + error envelope, liveness/readiness, Supabase + Redis seams, a Celery
+worker, dev Docker, CI). Business logic (auth, DB tables, the module endpoints)
+lands in later parts.
 
-## Responsibility (planned)
+## Responsibility
 
 - REST / JSON API consumed by `../frontend`
-- Orchestrates the SEO modules: Audit, Content, Off-page, Portal, Policy Radar
-- Job queue (Celery + Redis) for long-running work: crawls, content generation, publishing
+- Orchestrates the SEO modules (Audit, Content, Off-page, Portal, Policy Radar)
+  via a Celery + Redis job queue
 - Talks to the audit engine, Claude, Serper, Google, and the Google Sheets store
-- Auth, per-client key vault, and tier / role enforcement
+- Auth, a per-client encrypted key vault, and tier / role enforcement
 - Per-client API budget caps and a daily spend-stop
 
-## Stack (planned)
-
-Python 3.11+, FastAPI, Celery, Redis, Supabase / SQLAlchemy, Anthropic SDK.
-
-## Layout (when built)
+## Layout
 
 ```
 backend/
-├── app/            # FastAPI app, one router per module
-├── workers/        # Celery tasks
-├── integrations/   # Serper, Google, Sheets, Claude clients
-└── tests/
+├── app/
+│   ├── main.py            # create_app() factory + module-level `app`; lifespan owns shared clients
+│   ├── config.py          # Settings (pydantic-settings), get_settings(), validate_settings()
+│   ├── logging_setup.py   # structlog: console in dev, JSON in prod, request-id aware
+│   ├── core/
+│   │   ├── deps.py        # FastAPI deps: settings, shared httpx client, shared redis client
+│   │   ├── middleware.py  # RequestIDMiddleware (X-Request-ID + structlog contextvars)
+│   │   ├── errors.py      # global error envelope {"error": {type, message, request_id}}
+│   │   ├── observability.py  # Sentry (DSN-gated)
+│   │   ├── security.py    # SSRF guard (ported from the audit engine)
+│   │   └── redis.py       # shared async redis client + readiness ping
+│   ├── db/supabase.py     # service-role + per-user (anon+JWT) client seams + readiness ping
+│   ├── routers/           # one router per module; health at root, api_v1 under /api/v1
+│   └── schemas/           # pydantic response models
+├── workers/               # Celery app + tasks (celery_app.py; tasks/ping.py, tasks/audit.py)
+├── integrations/          # external clients; audit_engine.py wraps the SEO engine as a subprocess
+└── tests/                 # unit (no external services) + integration (need Redis/Supabase)
 ```
 
-See `../context/ARCHITECTURE-AND-PLAN.md` for the full design.
+## Run locally
+
+Everything runs through the local venv at `backend/.venv` (Windows + Git Bash).
+Invoke tools as `./.venv/Scripts/python -m <tool>` (do not use bare `python`).
+
+```bash
+# one-time
+cp .env.example .env                                    # required for /health/ready + Docker
+./.venv/Scripts/python -m pip install -e ".[dev]"
+
+# gate before committing (all must be green)
+./.venv/Scripts/python -m ruff check .
+./.venv/Scripts/python -m mypy app workers
+./.venv/Scripts/python -m pytest -m unit -q             # unit only (no Redis/Supabase)
+./.venv/Scripts/python -m pytest -q                     # everything (integration needs Redis)
+
+# run the API (http://localhost:8000 ; docs at /docs in dev)
+./.venv/Scripts/python -m uvicorn app.main:app --reload
+
+# run a worker (needs Redis up)
+./.venv/Scripts/python -m celery -A workers.celery_app worker -l info
+```
+
+Liveness: `GET /health` (touches nothing). Readiness: `GET /health/ready` (pings
+Supabase + Redis concurrently within `READINESS_TIMEOUT_SECONDS`; 200 when both
+reachable, 503 naming the down dependency otherwise).
+
+A worker round-trip locally (needs Redis up): enqueue the ping task and read the
+result — `python -c "from workers.tasks.ping import ping; print(ping.delay().get(timeout=10))"` → `pong`.
+
+## Deploy (VPS, systemd — no Docker)
+
+Production runs natively on a single Debian/Ubuntu VPS as two systemd services
+(`aios-api`, `aios-worker`) in front of a native Redis, with Caddy terminating
+TLS. One-time provisioning is a single idempotent script:
+
+```bash
+sudo git clone <repo-url> /opt/aios
+sudo cp /opt/aios/backend/.env.example /opt/aios/backend/.env   # then edit it
+sudo bash /opt/aios/infra/deploy/install.sh
+```
+
+See [`infra/deploy/README-deploy.md`](../infra/deploy/README-deploy.md) for the
+full runbook (Caddy config, updates, operating, worker smoke-test).
+
+## Config
+
+All settings come from the environment (12-factor); see `.env.example` for every
+key. Secrets are `SecretStr` and never logged. In **prod** a missing required
+secret fails fast at boot; in **dev** it warns and the dependent feature reports
+`not_configured`. Redis uses separate logical DBs (app cache `/0`, Celery broker
+`/1`, results `/2`) so a cache flush can never wipe queued jobs.

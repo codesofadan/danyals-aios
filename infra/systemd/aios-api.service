@@ -1,0 +1,47 @@
+[Unit]
+Description=AIOS backend API (FastAPI / uvicorn)
+Documentation=file:///opt/aios/infra/deploy/README-deploy.md
+# The data plane is local PostgreSQL; the cache/queue is local Redis. Order after
+# both and Require them so the API is only started once its local dependencies are
+# up. NOTE (invariant #1, liveness != readiness): Requires only gates START-TIME
+# ordering here - it does NOT keep the API bound to Redis at runtime (that would be
+# BindsTo). Liveness (GET /health) stays independent of Redis; if Redis is down at
+# runtime, GET /health/ready simply reports Redis as the failing dependency.
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios/backend
+# 12-factor config: all secrets/DSNs come from one root-owned env file. systemd
+# reads this as root before dropping to User=aios, so /etc/aios/aios.env can stay
+# 0600 root:root. FOOTGUN: systemd does NOT strip trailing inline `# ...` comments
+# from a value line, so aios.env keeps every comment on its OWN line (see the
+# template at infra/deploy/aios.env.example). pydantic-settings reads these from the
+# process environment (env vars win over any stray .env in WorkingDirectory).
+EnvironmentFile=/etc/aios/aios.env
+# Bind to localhost only; Caddy (see infra/deploy/README-deploy.md + Caddyfile)
+# terminates TLS and reverse-proxies public 443 traffic to 127.0.0.1:8000.
+ExecStart=/opt/aios/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=3
+# uvicorn shuts down gracefully on SIGTERM (systemd's default stop signal).
+TimeoutStopSec=30
+
+# --- Hardening --------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The API writes nothing to disk (structured logs go to journald), so the
+# read-only filesystem from ProtectSystem=strict needs no ReadWritePaths exception.
+
+[Install]
+WantedBy=multi-user.target

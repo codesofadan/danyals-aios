@@ -1,0 +1,59 @@
+# Prometheus alerting rules for the AIOS backend.
+#
+# Fed by the metrics the API exposes at /metrics (app/core/metrics.py):
+#   http_requests_total{method,route,status}
+#   http_request_duration_seconds{method,route,status}
+#   http_requests_in_flight
+#
+# Wire into Prometheus:  rule_files: [ "/opt/aios/infra/alerts/backend-alerts.yml" ]
+# and point a scrape job at the API's /metrics (restricted to the scrape network).
+groups:
+  - name: aios-backend
+    rules:
+      # THE headline alert. The empty-JWT outage (commit e53fc05) 500'd 34 of 51
+      # routes at once -> the 5xx ratio jumps to ~0.67, tripping this within 2m.
+      # This is the concrete proof that "observability would page on a 5xx spike".
+      - alert: Backend5xxSpike
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_requests_total[5m])), 1e-9) > 0.05
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Backend 5xx ratio > 5% for 2m"
+          description: "{{ $value | humanizePercentage }} of requests are 5xx - a broad outage (auth/DB wiring, dependency down)."
+
+      # A single route failing (e.g. one repo's auth wiring regressed) even if the
+      # global ratio stays low - catches a localized version of the empty-JWT bug.
+      - alert: BackendRoute5xx
+        expr: |
+          sum by (route) (rate(http_requests_total{status=~"5.."}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Route {{ $labels.route }} is emitting 5xx"
+          description: "{{ $labels.route }} has sustained 5xx errors for 5m."
+
+      # Latency regression (p99 over the histogram). Tune the threshold to the
+      # deployed region - a co-located app should be well under 1s.
+      - alert: BackendLatencyP99High
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Backend p99 latency > 2s"
+          description: "p99 request latency is {{ $value }}s over the last 5m."
+
+      # Nothing is being scraped / the API is down (no request samples at all).
+      - alert: BackendNoTraffic
+        expr: sum(rate(http_requests_total[5m])) == 0
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Backend is serving no requests"
+          description: "No http_requests_total increments for 10m - API down or scrape broken."

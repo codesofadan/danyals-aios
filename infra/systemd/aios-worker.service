@@ -1,0 +1,45 @@
+[Unit]
+Description=AIOS Celery worker (background jobs: audits, content, off-page, context, backups)
+Documentation=file:///opt/aios/infra/deploy/README-deploy.md
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios/backend
+# Same root-owned env file as the API (see aios-api.service for the footgun note).
+EnvironmentFile=/etc/aios/aios.env
+ExecStart=/opt/aios/backend/.venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=4
+Restart=always
+RestartSec=5
+# Celery does a WARM shutdown on SIGTERM (waits for running tasks). We allow up to
+# the hard task_time_limit (1800s) so an in-flight job finishes cleanly on a deploy.
+# INVARIANT #8: task_acks_late=True + the Redis broker's visibility_timeout >=
+# task_time_limit make a job that IS killed safe to redeliver (a sequential re-run,
+# never a concurrent double-run / double API spend). Ops may lower this to speed
+# deploys, accepting that a long in-flight job is then redelivered after restart.
+TimeoutStopSec=1800
+
+# --- Hardening --------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The worker writes artifacts to disk: audit report PDFs/findings, content
+# deliverables, and pg_dump backup snapshots. StateDirectory creates + owns
+# /var/lib/aios (mode 0750, aios:aios) and makes it writable under
+# ProtectSystem=strict. Point AUDIT_ARTIFACT_DIR / CONTENT_ARTIFACT_DIR /
+# BACKUP_ARTIFACT_DIR under /var/lib/aios in aios.env so they are covered. If you
+# put any artifact dir ELSEWHERE, add it here as an extra ReadWritePaths= line.
+StateDirectory=aios
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

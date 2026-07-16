@@ -1,0 +1,18 @@
+# gitleaks config for the CI secret scan (see .github/workflows/backend-ci.yml).
+# Extends the built-in rule set and allowlists things that are provably NOT real
+# secrets: the fake fixture passwords in the test suites and the blank-valued
+# .env.example. Real .env files are gitignored and never committed.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures + example env (no real secrets)"
+paths = [
+  '''backend/tests/.*''',
+  '''.*\.env\.example$''',
+]
+regexes = [
+  # Deterministic fake passwords used by the integration fixtures.
+  '''Passw0rd![A-Za-z0-9!-]+''',
+]

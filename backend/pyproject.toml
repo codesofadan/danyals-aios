@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aios-backend"
+version = "0.1.0"
+description = "AIOS platform backend - FastAPI API + Celery workers (Xegents AI)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Xegents AI", email = "business.zainsaeed@gmail.com" }]
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    "structlog>=24.1",
+    "httpx[http2]>=0.27",
+    "tenacity>=8.5",
+    "celery[redis]>=5.4",
+    "redis[hiredis]>=5.0",
+    "sentry-sdk[fastapi]>=2.8",
+    "pyjwt[crypto]>=2.9",      # sign + verify our own EdDSA (Ed25519) access tokens
+    "email-validator>=2.1",    # pydantic EmailStr for user provisioning
+    "prometheus-client>=0.20",  # request-rate / latency / in-flight metrics at /metrics
+    "psycopg[binary,pool]>=3.2",  # local-Postgres driver + connection pool (RLS + privileged seams)
+    "argon2-cffi>=23.1",       # Argon2id password hashing for local auth (verifies imported bcrypt too)
+    "cryptography>=43.0",      # app-layer AES-256-GCM vault sealing (master key never in Postgres)
+]
+
+[project.optional-dependencies]
+# Context AI provider SDKs (P6B). Kept OUT of the core runtime deps so the base
+# install + gate stay light: the seams lazy-import these and the unit suite runs
+# on deterministic fakes. Install with `pip install -e .[ai]` + set the keys to
+# activate the real Summarizer / Embedder / VectorStore.
+ai = [
+    "anthropic>=0.40",   # Summarizer (Claude Haiku/Sonnet); lazy-imported
+    "voyageai>=0.2",     # Embedder (Voyage AI - Anthropic has NO embeddings API)
+    "pinecone>=5",       # VectorStore (Pinecone; namespaced per entity)
+]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.12",
+    "asgi-lifespan>=2.1",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "psycopg[binary]>=3.2",   # RLS gate + local-Postgres integration tests
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "workers", "integrations"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: fast tests with no external services",
+    "integration: tests that require Redis and/or local Postgres",
+]
