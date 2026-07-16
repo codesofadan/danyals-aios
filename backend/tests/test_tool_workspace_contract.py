@@ -153,8 +153,37 @@ def _wire_keyword_research(app: FastAPI) -> None:
     app.dependency_overrides[get_keyword_repo] = _FakeKeywordRepo
 
 
+def _wire_client_onboarding(app: FastAPI) -> None:
+    """Fake onboarding repo: two LIVE runs' worth of steps + non-zero stats (so the
+    board + KPI tiles are actually populated - an empty adapter would pass the col
+    lock vacuously). The rows carry a ``client_id`` on purpose: the sweep's envelope
+    assertions would not notice a leak, so the module's own router test pins that."""
+    from app.modules.client_onboarding.repo import get_onboarding_repo
+
+    class _FakeOnboardingRepo:
+        def onboarding_stats(self) -> dict[str, Any]:
+            return {"in_onboarding": 3, "steps_pending": 7, "completed_30d": 12}
+
+        def live_run_steps(self) -> list[dict[str, Any]]:
+            return [
+                {"id": "s1", "run_id": "r1", "client_id": "cl-1",
+                 "client_name": "Orchard Pediatrics", "step_key": "collect_gbp",
+                 "label": "Collect GBP access", "status": "pending", "owner_name": "Sara",
+                 "sort_order": 2},
+                {"id": "s2", "run_id": "r2", "client_id": "cl-2",
+                 "client_name": "Coastline Fit", "step_key": "kickoff",
+                 "label": "Kickoff call & goals", "status": "in_progress",
+                 "owner_name": "Ayesha", "sort_order": 1},
+            ]
+
+    app.dependency_overrides[get_onboarding_repo] = _FakeOnboardingRepo
+
+
 _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("keyword_research", "/api/v1/keyword-research/workspace", _wire_keyword_research),
+    ToolAdapter(
+        "client_onboarding", "/api/v1/client-onboarding/workspace", _wire_client_onboarding
+    ),
 ]
 
 _IDS = [a.tool_key for a in _TOOL_ADAPTERS]
@@ -308,3 +337,22 @@ def test_keyword_research_service_constant_matches_tools_ts() -> None:
     from app.modules.keyword_research.service import WORKSPACE_TABLE_COLS
 
     assert read_tool_extra("keyword_research").table_cols == WORKSPACE_TABLE_COLS
+
+
+# --------------------------------------------------------------------------- #
+# 4. client_onboarding: the pinned literals (Part 8 Phase 2F).
+# --------------------------------------------------------------------------- #
+def test_client_onboarding_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("client_onboarding")
+    assert ts.table_cols == ["Client", "Step", "Owner", "Status"]
+    assert ts.kpi_labels == ["In onboarding", "Steps pending", "Completed (30d)"]
+    assert ts.primary_label == "Start onboarding"
+    assert ts.primary_icon == "person_add"
+    assert ts.table_title == "Onboarding"
+    assert ts.table_icon == "person_add"
+
+
+def test_client_onboarding_service_constant_matches_tools_ts() -> None:
+    from app.modules.client_onboarding.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("client_onboarding").table_cols == WORKSPACE_TABLE_COLS

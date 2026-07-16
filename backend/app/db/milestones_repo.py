@@ -76,6 +76,24 @@ class MilestonesRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
+    def project_id_for_client(self, client_id: str) -> str | None:
+        """The project timeline id for a client (RLS-scoped), or ``None`` when the
+        client has no project yet / is invisible to the caller.
+
+        The lookup an EVENT source needs: a delivery event knows which CLIENT it
+        happened to, while ``advance_stage`` addresses a PROJECT. Newest project wins
+        if a client was ever re-engaged, so an event advances the live timeline rather
+        than a historical one.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id from public.client_projects where client_id = %s "
+                "order by created_at desc, id limit 1",
+                (client_id,),
+            )
+            row = cur.fetchone()
+            return str(row["id"]) if row else None
+
     def advance_stage(
         self,
         project_id: str,
