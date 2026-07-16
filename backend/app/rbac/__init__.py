@@ -14,6 +14,7 @@ from app.rbac.matrix import (
     DEFAULT_ROLE_PERMS,
     FEATURE_KEYS,
     FEATURES,
+    MODULE_PERM_ROLES,
     PERM_KEYS,
     PERMISSIONS,
     ROLE_META,
@@ -23,6 +24,7 @@ from app.rbac.matrix import (
     AccessLevel,
     AppRole,
     FeatureDef,
+    ModulePermKey,
     PermissionDef,
     PermKey,
     RoleMetaDef,
@@ -33,6 +35,7 @@ from app.rbac.matrix import (
     is_staff_role,
     level_satisfies,
     perms_for_role,
+    role_has_module_perm,
     role_has_perm,
 )
 
@@ -41,6 +44,7 @@ __all__ = [
     "DEFAULT_ROLE_PERMS",
     "FEATURES",
     "FEATURE_KEYS",
+    "MODULE_PERM_ROLES",
     "PERMISSIONS",
     "PERM_KEYS",
     "ROLE_META",
@@ -50,6 +54,7 @@ __all__ = [
     "AccessLevel",
     "AppRole",
     "FeatureDef",
+    "ModulePermKey",
     "PermKey",
     "PermissionDef",
     "RoleMetaDef",
@@ -60,5 +65,6 @@ __all__ = [
     "is_staff_role",
     "level_satisfies",
     "perms_for_role",
+    "role_has_module_perm",
     "role_has_perm",
 ]

@@ -31,7 +31,16 @@ from pydantic import BaseModel
 
 from app.core.deps import SettingsDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
-from app.rbac import AccessLevel, AppRole, PermKey, UserRole, feature_allows, role_has_perm
+from app.rbac import (
+    AccessLevel,
+    AppRole,
+    ModulePermKey,
+    PermKey,
+    UserRole,
+    feature_allows,
+    role_has_module_perm,
+    role_has_perm,
+)
 
 # The ONE algorithm we accept. A single-entry allow-list is the whole defense
 # against alg-confusion and `none`: PyJWT rejects any token whose header `alg` is
@@ -207,6 +216,25 @@ def require_perm(perm: PermKey) -> Any:
 
     async def _dep(user: CurrentUserDep) -> CurrentUser:
         if not role_has_perm(user.role, perm):
+            raise _forbid(f"Missing permission: {perm}")
+        return user
+
+    return _dep
+
+
+def require_module_perm(perm: ModulePermKey) -> Any:
+    """Dependency factory: require the caller's role to hold the MODULE perm ``perm``.
+
+    The Part-8 tool modules' finer-grained gate, kept SEPARATE from ``require_perm``:
+    ``ModulePermKey`` is an additive, backend-only vocabulary that sits alongside the
+    8 frontend-mirrored governance perms, so the Team-screen matrix stays byte-for-byte
+    in sync with ``data.ts`` while a module can still gate a paid action. Holder roles
+    live in ``MODULE_PERM_ROLES`` and MIRROR the owning migration's RLS write policies
+    (owner is all-on and locked - see ``role_has_module_perm``).
+    """
+
+    async def _dep(user: CurrentUserDep) -> CurrentUser:
+        if not role_has_module_perm(user.role, perm):
             raise _forbid(f"Missing permission: {perm}")
         return user
 

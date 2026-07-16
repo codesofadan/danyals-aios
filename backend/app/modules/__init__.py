@@ -20,10 +20,12 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.modules.keyword_research import router as keyword_research_router
+from app.modules.local_seo import router as local_seo_router
 
 # Every module's public router, in include order. ``app/routers/__init__.py``
 # includes each entry into the ``api_v1`` aggregator, so a new module needs exactly
 # one line here (plus one in ``workers/celery_app.py`` if it owns Celery tasks).
 MODULE_ROUTERS: list[APIRouter] = [
     keyword_research_router,
+    local_seo_router,
 ]
