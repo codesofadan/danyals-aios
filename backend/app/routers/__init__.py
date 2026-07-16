@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.modules import MODULE_ROUTERS
 from app.routers.activity import router as activity_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.ai_assist import router as ai_assist_router
@@ -63,6 +64,11 @@ api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
 api_v1.include_router(context_router)
 api_v1.include_router(ai_assist_router)
+# Feature modules (app/modules/) self-register here. Included BEFORE the public
+# funnel so module routes are authenticated-by-default like every other business
+# router; iterating an empty MODULE_ROUTERS is a no-op.
+for _module_router in MODULE_ROUTERS:
+    api_v1.include_router(_module_router)
 # The public free-audit funnel: the ONLY unauthenticated routes. Its endpoints
 # declare NO auth dependency (the aggregator itself carries none), so mounting it
 # here yields /api/v1/public/* as unauthenticated - see app/routers/public.py.
