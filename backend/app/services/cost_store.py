@@ -19,7 +19,7 @@ from app.services.cost_gate import DialMode, GateContext
 _DEFAULT_MODE: dict[str, DialMode] = {f.key: f.default_mode for f in DIAL_FEATURES}
 
 
-class SupabaseCostStore:
+class PostgresCostStore:
     """``CostStore`` over ``privileged_connection`` (service_role, BYPASSRLS).
 
     Stateless: each method opens its own privileged connection, so the store

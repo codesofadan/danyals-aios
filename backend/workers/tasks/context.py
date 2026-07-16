@@ -51,7 +51,7 @@ from app.services.context_cost import (
 )
 from app.services.context_vectorsync import sync_vectors
 from app.services.cost_gate import CostGate
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 from integrations.context_providers import ContextProviders, context_providers_from_settings
 
 logger = get_logger("workers.context")
@@ -451,7 +451,7 @@ def gated_providers_for(
     if bundle is None:
         return None
     client_id = resolve_budget_client(entity_type, entity_id)
-    gate = CostGate(SupabaseCostStore(), _NullCostCache())
+    gate = CostGate(PostgresCostStore(), _NullCostCache())
     entity = (entity_type, entity_id)
     gated_summarizer = GatedSummarizer(
         bundle.summarizer, gate, settings=settings, client_id=client_id, entity=entity

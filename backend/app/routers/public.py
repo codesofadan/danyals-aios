@@ -38,7 +38,7 @@ from app.logging_setup import get_logger
 from app.schemas.audits import PAID_AUDIT_TYPES, AuditTypeKey
 from app.services.audit_artifacts import LocalArtifactStore, local_store_from_settings
 from app.services.cost_gate import GateContext
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 
 logger = get_logger("app.public")
 
@@ -192,7 +192,7 @@ def get_public_cost_logger() -> Callable[[str], None]:
             job_type=_COST_JOB_TYPE,
             client_name="",
         )
-        SupabaseCostStore().record_cost(ctx, 0.0, cached=False)
+        PostgresCostStore().record_cost(ctx, 0.0, cached=False)
 
     return _log
 

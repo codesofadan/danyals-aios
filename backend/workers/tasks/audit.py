@@ -28,7 +28,7 @@ from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
 from app.services.cost_gate import GateContext
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult, run_audit
 from workers.celery_app import celery_app
 
@@ -101,7 +101,7 @@ class SupabaseAuditStore:
             job_type=_COST_JOB_TYPE,
             client_name=row.get("client_name", ""),
         )
-        SupabaseCostStore().record_cost(ctx, cost, cached=False)
+        PostgresCostStore().record_cost(ctx, cost, cached=False)
 
 
 def _utcnow() -> datetime:
@@ -267,7 +267,7 @@ class PublicAuditStore:
             job_type=_PUBLIC_COST_JOB_TYPE,
             client_name="",
         )
-        SupabaseCostStore().record_cost(ctx, cost, cached=False)
+        PostgresCostStore().record_cost(ctx, cost, cached=False)
 
 
 def execute_public_audit(

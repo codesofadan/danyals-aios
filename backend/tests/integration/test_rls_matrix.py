@@ -341,3 +341,82 @@ def test_rls_write_allow(rls: dict[str, Any]) -> None:
     assert code.startswith("J-"), "manager is a lead and should be able to insert a task"
     with privileged_connection(pool=admin_pool) as cur:
         cur.execute("delete from public.tasks where code = %s", (code,))
+
+
+# --------------------------------------------------------------------------- #
+# Auto-discovering policy oracle (covers the Part-7 modules WITHOUT hand-listing
+# every table). The matrix above hand-curates the Part-2 tables; this reads the
+# LIVE ``pg_policies`` at runtime, so every base table a migration ships -
+# content_jobs, backlinks, citations, web2_properties, policy_sources /
+# change_events / kb_entries / recommendations, report_workbooks /
+# report_sync_events, client_projects / project_stages, upsells, notifications,
+# alerts, support_tickets, workspace_settings / security_policy /
+# notification_prefs, backup_snapshots / backup_config, audit_overlay - and any
+# FUTURE module falls under it automatically.
+#
+# The crown-jewel invariant: under FORCE RLS, NO base-table policy may admit the
+# portal ``client`` through an unconditional door. Every policy's predicate
+# (USING and/or WITH CHECK, for every command) must reference at least one
+# PRINCIPAL primitive - ``public.is_staff()`` (false for a client),
+# ``public.current_app_role()`` (never a staff role for a client) or
+# ``auth.uid()`` (self-scope only). A policy whose predicate is ``true`` / NULL /
+# references no principal is a cross-tenant leak; this fails the moment one ships.
+# --------------------------------------------------------------------------- #
+_PRINCIPAL_PREDICATES = ("is_staff", "current_app_role", "auth.uid")
+
+
+def _base_tables_and_policies(
+    dsn: str,
+) -> tuple[list[str], dict[str, list[tuple[str, str]]]]:
+    """Return (base tables, {table: [(cmd, using-plus-withcheck-expr), ...]})."""
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "select c.relname from pg_class c "
+            "join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'public' and c.relkind = 'r' order by c.relname"
+        )
+        tables = [str(r[0]) for r in cur.fetchall()]
+        cur.execute(
+            "select tablename, cmd, "
+            "coalesce(qual, '') || ' ' || coalesce(with_check, '') "
+            "from pg_policies where schemaname = 'public'"
+        )
+        by_table: dict[str, list[tuple[str, str]]] = {}
+        for tname, cmd, expr in cur.fetchall():
+            by_table.setdefault(str(tname), []).append((str(cmd), str(expr)))
+    return tables, by_table
+
+
+def test_no_base_table_has_a_client_open_policy() -> None:
+    """Every public base table (incl. all Part-7 modules) gates the portal client out.
+
+    Auto-discovered from ``pg_policies`` so new modules need no manual registration.
+    """
+    settings = get_settings()
+    dsn = settings.database_admin_url or settings.database_url
+    if not dsn:
+        pytest.skip("local Postgres not configured (DATABASE_ADMIN_URL / DATABASE_URL)")
+
+    tables, by_table = _base_tables_and_policies(dsn)
+    assert tables, "no public base tables found - are the migrations applied?"
+
+    open_doors: list[str] = []
+    no_read_policy: list[str] = []
+    for table in tables:
+        policies = by_table.get(table, [])
+        if not any(cmd in ("SELECT", "ALL") for cmd, _ in policies):
+            # A FORCE-RLS table with no SELECT/ALL policy denies everyone (staff too)
+            # -> a module that forgot its read policy. Flag it.
+            no_read_policy.append(table)
+        for cmd, expr in policies:
+            if not any(pred in expr for pred in _PRINCIPAL_PREDICATES):
+                open_doors.append(f"{table}.{cmd}: `{expr.strip()[:120]}` references no principal predicate")
+
+    assert not open_doors, (
+        "CLIENT-OPEN RLS POLICIES (a portal client could satisfy the predicate):\n"
+        + "\n".join(open_doors)
+    )
+    assert not no_read_policy, (
+        "base tables with FORCE RLS but no SELECT/ALL policy (unreadable even by staff): "
+        f"{no_read_policy}"
+    )

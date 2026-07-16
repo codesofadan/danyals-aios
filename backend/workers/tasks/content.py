@@ -89,7 +89,7 @@ from app.services.content_schema import (
     validate_json_ld,
 )
 from app.services.cost_gate import CostGate, GateContext
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import ImageGenerator
 from integrations.llm import LLMResult, Summarizer
@@ -1048,7 +1048,7 @@ from workers.celery_app import celery_app  # noqa: E402 - after the pure core, p
 
 
 def _build_gate() -> MeteredCostGate:
-    return MeteredCostGate(SupabaseCostStore(), _NullCostCache())
+    return MeteredCostGate(PostgresCostStore(), _NullCostCache())
 
 
 @celery_app.task(name="run_content_job")  # type: ignore[untyped-decorator]  # celery's decorator is untyped

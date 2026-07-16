@@ -55,19 +55,34 @@ jobs:
           --health-retries 5
         ports:
           - 6379:6379
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aios_test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     env:
       REDIS_URL: redis://localhost:6379/0
       CELERY_BROKER_URL: redis://localhost:6379/1
       CELERY_RESULT_BACKEND: redis://localhost:6379/2
-      # Supabase-needing integration tests (the route contract suite + the RLS
-      # correctness matrix) auto-skip when these are empty, so CI stays green with
-      # no secrets; wiring a DEDICATED TEST project's secrets here activates the
-      # full live net (real-JWT contract + RLS role x table x op) in CI. Never
-      # point these at production - the suites provision + delete users and rows.
-      SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
-      DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+      # Post-Supabase (P6A): the DB-backed integration suites - the RLS role x
+      # table x op correctness matrix (+ the auto-discovering pg_policies oracle),
+      # the real-token route-contract suite, portal isolation, repo/SQL parity and
+      # the vault round-trip - run against an EPHEMERAL local Postgres with the
+      # migrations applied. Both DSNs point at the throwaway superuser DB (the RLS
+      # pool SETs ROLE authenticated per request; the admin pool is BYPASSRLS),
+      # mirroring the local dev stack. The signing keypair + vault master key are
+      # minted fresh below. Nothing here is a real secret - the DB is created and
+      # dropped with the job; live-provider suites (Serper / Anthropic / Voyage /
+      # Pinecone / audit-engine) still auto-skip since their keys are unset.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/aios_test
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/aios_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -77,8 +92,26 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Install
         run: pip install -e ".[dev]"
-      # The redis-backed tests always run; the Supabase-backed suites run only
-      # when the TEST_SUPABASE_* secrets are set (else they auto-skip).
+      - name: Apply migrations (0000 is the substrate; superuser owner = BYPASSRLS)
+        run: |
+          for f in ../db/migrations/*.sql; do
+            echo "applying $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Mint an ephemeral EdDSA keypair + vault key (test-only, never a prod secret)
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives import serialization as s
+          k = Ed25519PrivateKey.generate()
+          priv = k.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8, s.NoEncryption()).decode().strip()
+          pub = k.public_key().public_bytes(s.Encoding.PEM, s.PublicFormat.SubjectPublicKeyInfo).decode().strip()
+          print("JWT_PRIVATE_KEY<<PEM_EOF"); print(priv); print("PEM_EOF")
+          print("JWT_PUBLIC_KEY<<PEM_EOF"); print(pub); print("PEM_EOF")
+          PY
+          echo "VAULT_MASTER_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+      # The DB-, redis-, JWT- and vault-backed suites now all run in CI; the
+      # live-provider suites still auto-skip (their keys are intentionally unset).
       - name: Integration tests
         run: pytest -m integration
 

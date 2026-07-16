@@ -36,7 +36,7 @@ from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
 from app.schemas.offpage import action_for
 from app.services.cost_gate import CostGate, GateContext
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 from app.services.web2_pipeline import Web2Client, Web2Outcome, run_publish, run_write
 from integrations.backlinks import BacklinkProvider, BacklinkRecord, backlink_provider_from_settings
 from integrations.citations import CitationProvider, CitationRecord, citation_provider_from_settings
@@ -67,7 +67,7 @@ class _NullCostCache:
 
 
 def _gate() -> CostGate:
-    return CostGate(SupabaseCostStore(), _NullCostCache())
+    return CostGate(PostgresCostStore(), _NullCostCache())
 
 
 # --------------------------------------------------------------------------- #

@@ -24,7 +24,7 @@ from app.db.database import privileged_connection
 from app.main import create_app
 from app.services.activity import log_activity
 from app.services.cost_gate import CostGate, GateContext
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 from app.services.provisioning import provision_user
 
 pytestmark = pytest.mark.integration
@@ -99,7 +99,7 @@ async def test_shared_base_end_to_end() -> None:
                     (dial_key,),
                 )
 
-            gate = CostGate(SupabaseCostStore(), _NoCache())
+            gate = CostGate(PostgresCostStore(), _NoCache())
             decision = gate.evaluate(
                 GateContext(
                     feature_key=dial_key, client_id=client_id, provider="DataForSEO",

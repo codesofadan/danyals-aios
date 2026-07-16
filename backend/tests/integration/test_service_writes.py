@@ -8,7 +8,7 @@ BYPASSRLS) psycopg connection:
 
   * ``activity.log_activity`` appends one snapshotted row, and
     ``activity.record_activity`` is best-effort (a bad actor FK never raises),
-  * ``cost_store.SupabaseCostStore.record_cost`` writes a cost_log row AND
+  * ``cost_store.PostgresCostStore.record_cost`` writes a cost_log row AND
     atomically increments the client's month-to-date spend via
     ``add_budget_spend``,
   * ``client_audits.insert_audit_row`` lands a queued audit with client_id pinned,
@@ -45,7 +45,7 @@ from app.routers.portal import get_portal_audit_loader
 from app.services.activity import log_activity, record_activity
 from app.services.client_audits import insert_audit_row
 from app.services.cost_gate import GateContext
-from app.services.cost_store import SupabaseCostStore
+from app.services.cost_store import PostgresCostStore
 from workers.tasks.audit import SupabaseAuditStore
 
 pytestmark = pytest.mark.integration
@@ -177,9 +177,9 @@ async def test_record_activity_never_raises_on_bad_actor(seed: dict[str, Any]) -
         assert cur.fetchone()["n"] == 0  # the bad-FK insert never landed
 
 
-# --- cost_store.SupabaseCostStore.record_cost ---------------------------------
+# --- cost_store.PostgresCostStore.record_cost ---------------------------------
 def test_record_cost_logs_and_increments_budget(seed: dict[str, Any]) -> None:
-    store = SupabaseCostStore()
+    store = PostgresCostStore()
     ctx = GateContext(
         feature_key="tech_audit", client_id=seed["tenant_a"], provider="audit_engine",
         estimated_cost=4.0, job_id="job-1", job_type="audit",
@@ -205,7 +205,7 @@ def test_record_cost_logs_and_increments_budget(seed: dict[str, Any]) -> None:
 
 
 def test_record_cost_cached_does_not_touch_budget(seed: dict[str, Any]) -> None:
-    store = SupabaseCostStore()
+    store = PostgresCostStore()
     with privileged_connection(pool=seed["admin_pool"]) as cur:
         cur.execute("select spent from public.client_budgets where client_id = %s", (seed["tenant_a"],))
         before = float(cur.fetchone()["spent"])
