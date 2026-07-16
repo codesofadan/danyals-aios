@@ -31,7 +31,16 @@ from pydantic import BaseModel
 
 from app.core.deps import SettingsDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
-from app.rbac import AccessLevel, AppRole, PermKey, UserRole, feature_allows, role_has_perm
+from app.rbac import (
+    AccessLevel,
+    AppRole,
+    ModulePermKey,
+    PermKey,
+    UserRole,
+    feature_allows,
+    role_has_module_perm,
+    role_has_perm,
+)
 
 # The ONE algorithm we accept. A single-entry allow-list is the whole defense
 # against alg-confusion and `none`: PyJWT rejects any token whose header `alg` is
@@ -207,6 +216,25 @@ def require_perm(perm: PermKey) -> Any:
 
     async def _dep(user: CurrentUserDep) -> CurrentUser:
         if not role_has_perm(user.role, perm):
+            raise _forbid(f"Missing permission: {perm}")
+        return user
+
+    return _dep
+
+
+def require_module_perm(perm: ModulePermKey) -> Any:
+    """Dependency factory: require the caller's role to hold the MODULE perm ``perm``.
+
+    The module-perm twin of :func:`require_perm` (a Part-8 tool's finer paid-action
+    gate). It MUST be used instead of ``require_perm`` for a ``ModulePermKey``: those
+    keys are not in ``DEFAULT_ROLE_PERMS``, so ``require_perm`` would deny every
+    non-owner role. Note ``require_perm(<module perm>)`` is also a static type error
+    that mypy cannot see, because these factories are called inside ``Annotated[...]``
+    metadata, which mypy leaves unanalyzed - hence the separate, correctly-typed door.
+    """
+
+    async def _dep(user: CurrentUserDep) -> CurrentUser:
+        if not role_has_module_perm(user.role, perm):
             raise _forbid(f"Missing permission: {perm}")
         return user
 
