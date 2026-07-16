@@ -28,6 +28,7 @@ from app.routers.public import router as public_router
 from app.routers.rbac import router as rbac_router
 from app.routers.reports import router as reports_router
 from app.routers.settings import router as settings_router
+from app.routers.skills import router as skills_router
 from app.routers.tasks import router as tasks_router
 from app.routers.tickets import router as tickets_router
 from app.routers.tiers import router as tiers_router
@@ -55,6 +56,7 @@ api_v1.include_router(upsells_router)
 api_v1.include_router(tickets_router)
 api_v1.include_router(notifications_router)
 api_v1.include_router(settings_router)
+api_v1.include_router(skills_router)
 api_v1.include_router(backups_router)
 api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
