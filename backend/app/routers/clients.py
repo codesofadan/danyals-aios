@@ -15,6 +15,7 @@ from app.db.clients_repo import ClientsRepoDep
 from app.db.database import DatabaseNotConfiguredError
 from app.db.report_grants_repo import ReportGrantsRepoDep
 from app.logging_setup import get_logger
+from app.modules.client_onboarding.service import seed_onboarding_for_client
 from app.schemas.clients import (
     ClientCreate,
     ClientResponse,
@@ -47,10 +48,21 @@ async def list_clients(
 
 @router.post("/clients", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
 async def create_client(body: ClientCreate, repo: ClientsRepoDep, actor: ManageClients) -> ClientResponse:
+    """Create a client and immediately give it an onboarding run.
+
+    The onboarding seed is BEST-EFFORT and never raises (it is written to that
+    contract, like ``record_activity``): a new client must not be able to exist
+    without an activation checklist - that is how onboarding gets forgotten and how a
+    client goes missing from the onboarding KPI - but a seeding hiccup must never
+    fail, or roll back, a client creation that has otherwise succeeded.
+    """
     row = await asyncio.to_thread(repo.insert_client, body.to_row())
     await record_activity(
         actor, kind="client", action="created client", target=body.cn,
         entity_type="client", entity_id=str(row["id"]),
+    )
+    await asyncio.to_thread(
+        seed_onboarding_for_client, actor.id, str(row["id"]), body.cn, actor.id, actor.name
     )
     return ClientResponse.from_row(row, site_count=0)
 

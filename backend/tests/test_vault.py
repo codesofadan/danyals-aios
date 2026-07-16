@@ -152,15 +152,21 @@ class _Cur:
 
     def execute(self, sql: str, params: tuple[Any, ...]) -> None:
         assert sql.strip().lower().startswith("insert")  # add_key is the only unit path
-        provider, label, masked, sealed, key_version, created_by = params
+        # `kind` (0041) is ADDITIVE and defaults to 'api_key', so this unpack widened
+        # by one while every assertion below is unchanged - the point of that
+        # migration being additive. The unpack stays POSITIONAL on purpose: if the
+        # column list and the bound values ever drift apart, this blows up rather
+        # than silently sealing a secret into the wrong column.
+        provider, label, masked, sealed, key_version, created_by, kind = params
         key_id = f"vk-{len(self._store) + 1}"
         self._store[key_id] = {
             "id": key_id, "provider": provider, "label": label, "masked": masked,
             "secret_sealed": bytes(sealed), "key_version": key_version,
-            "created_by": created_by, "created_at": datetime.now(UTC),
+            "created_by": created_by, "kind": kind, "created_at": datetime.now(UTC),
         }
         self._row = {
-            k: self._store[key_id][k] for k in ("id", "provider", "label", "masked", "created_at")
+            k: self._store[key_id][k]
+            for k in ("id", "provider", "label", "masked", "kind", "created_at")
         }
 
     def fetchone(self) -> dict[str, Any] | None:
@@ -189,6 +195,16 @@ def test_add_seals_secret_not_plaintext(fake_conn: dict[str, dict[str, Any]]) ->
     stored = next(iter(fake_conn.values()))
     assert stored["secret_sealed"] != _REAL.encode()  # column holds sealed bytes, not plaintext
     assert _open(stored["secret_sealed"]) == _REAL  # ... which decrypt back to the original
+
+
+def test_add_defaults_to_the_api_key_kind(fake_conn: dict[str, dict[str, Any]]) -> None:
+    """0041 added a `kind` DIMENSION (api_key | client_access) so a client's collected
+    login is distinguishable from the agency's own API keys. It is additive: this
+    caller passes no `kind` at all - exactly like the vault router - and must keep
+    behaving precisely as it did before, i.e. storing an agency API key."""
+    row = vault_svc.add_key(provider="serper", label="Prod", secret=_REAL, created_by=None)
+    assert row["kind"] == "api_key"
+    assert next(iter(fake_conn.values()))["kind"] == "api_key"
 
 
 # --- endpoints ---------------------------------------------------------------

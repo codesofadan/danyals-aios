@@ -23,6 +23,13 @@ Security guardrails (read before touching this file):
 Writes/reads run on ``privileged_connection`` (role ``service_role``, BYPASSRLS):
 the raw secret lives only behind this server-only seam. All calls are blocking
 (psycopg is sync); the router offloads with ``asyncio.to_thread``.
+
+``kind`` (0041) classifies WHAT SPECIES of secret a row holds -- ``api_key`` (an
+agency integration credential; the default every pre-0041 row carries) or
+``client_access`` (a client's own login, collected by the client_onboarding
+module). It is orthogonal metadata: it classifies, it GRANTS NOTHING. Every
+guardrail above applies identically to both kinds -- same master key, same
+sealing, same masked list, same single owner-only reveal path.
 """
 
 from __future__ import annotations
@@ -30,7 +37,7 @@ from __future__ import annotations
 import base64
 import os
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -43,6 +50,11 @@ from app.db.database import privileged_connection
 # ``nonce(12) || ciphertext || tag(16)``; the tag is appended by AESGCM.encrypt.
 _NONCE_BYTES = 12
 _KEY_BYTES = 32  # AES-256
+
+# The vault_kind enum (0041) verbatim. ``api_key`` is the DEFAULT in both Python
+# and Postgres, so every existing caller and every existing row keeps its exact
+# current meaning without passing or storing anything new.
+VaultKind = Literal["api_key", "client_access"]
 
 
 class VaultNotConfiguredError(RuntimeError):
@@ -124,20 +136,30 @@ def add_key(
     label: str,
     secret: str,
     created_by: str | None = None,
+    kind: VaultKind = "api_key",
 ) -> dict[str, Any]:
     """Seal a secret and insert its masked metadata row; returns masked metadata.
 
     The response carries ONLY masked metadata -- never the plaintext or the
     sealed bytes. Column names are static; every value is a bound parameter.
+
+    ``kind`` classifies the secret (``api_key`` -- an agency integration
+    credential, the default -- or ``client_access``, a client login collected by
+    the onboarding module). It changes NOTHING about how the secret is handled:
+    both kinds are sealed with the same master key and the same AES-256-GCM
+    construction, land in the same ``secret_sealed`` bytea, are listed equally
+    masked, and are openable only through the one owner-only ``reveal_secret``
+    path. It is returned in the masked metadata so a caller can tell the two
+    populations apart WITHOUT any new access to the sealed bytes.
     """
     sealed = _seal(secret)
     with privileged_connection() as cur:
         cur.execute(
             "insert into public.vault_keys "
-            "(provider, label, masked, secret_sealed, key_version, created_by) "
-            "values (%s, %s, %s, %s, %s, %s) "
-            "returning id, provider, label, masked, created_at",
-            (provider, label, mask_secret(secret), sealed, 1, created_by),
+            "(provider, label, masked, secret_sealed, key_version, created_by, kind) "
+            "values (%s, %s, %s, %s, %s, %s, %s) "
+            "returning id, provider, label, masked, kind, created_at",
+            (provider, label, mask_secret(secret), sealed, 1, created_by, kind),
         )
         row = cur.fetchone()
     if row is None:  # pragma: no cover - ``returning`` always yields the row
@@ -149,7 +171,10 @@ def rotate_key(key_id: str, new_secret: str) -> dict[str, Any] | None:
     """Re-seal a key's secret and refresh its masked preview; returns metadata.
 
     ``key_version`` (the master-key version) is unchanged: rotating the SECRET
-    does not rotate the master key. Returns ``None`` for a missing/malformed id.
+    does not rotate the master key. ``kind`` is likewise unchanged and for the
+    same reason: replacing a secret's VALUE does not change its SPECIES -- a
+    rotated client login is still a client login. It is only read back into the
+    returned metadata. Returns ``None`` for a missing/malformed id.
     """
     parsed = _as_uuid(key_id)
     if parsed is None:
@@ -160,7 +185,7 @@ def rotate_key(key_id: str, new_secret: str) -> dict[str, Any] | None:
             "update public.vault_keys "
             "set secret_sealed = %s, masked = %s, updated_at = now() "
             "where id = %s "
-            "returning id, provider, label, masked, created_at",
+            "returning id, provider, label, masked, kind, created_at",
             (sealed, mask_secret(new_secret), parsed),
         )
         row = cur.fetchone()
