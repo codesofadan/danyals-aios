@@ -38,6 +38,7 @@ from app.schemas.reports import (
     WorkbookResponse,
 )
 from app.services.activity import record_activity
+from app.services.deliverables import emit_deliverable
 from app.services.sheetstore import DATASET_TAB, FlushResult, SheetStore
 from integrations.sheets import connection_info_from_settings, sheets_client_from_settings
 
@@ -117,6 +118,22 @@ async def _sync_one(
         )
 
     updated = await asyncio.to_thread(repo.mark_synced, workbook_id, rows_added=total_added)
+
+    # Publish a Monthly-report deliverable for the client whose workbook just synced
+    # (best-effort; the emit never raises). An unlinked/master workbook is skipped.
+    client_id = wb.get("client_id")
+    if client_id:
+        await asyncio.to_thread(
+            emit_deliverable,
+            client_id=str(client_id),
+            client_name=client_name,
+            title="Monthly SEO Report",
+            kind="Monthly",
+            requires="monthly_report",
+            source_kind="report",
+            source_id=workbook_id,
+            icon="summarize",
+        )
     return updated if updated is not None else wb
 
 

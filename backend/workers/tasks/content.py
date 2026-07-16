@@ -90,6 +90,7 @@ from app.services.content_schema import (
 )
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
+from app.services.deliverables import emit_deliverable
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import ImageGenerator
 from integrations.llm import LLMResult, Summarizer
@@ -964,7 +965,7 @@ def publish_content_job(
     try:
         if target == "WordPress":
             return _publish_wordpress(store, code, row, draft_md, title, settings, artifacts, resolve_wp)
-        return _publish_artifact(store, code, draft_md, title, artifacts, degraded=False)
+        return _publish_artifact(store, code, row, draft_md, title, artifacts, degraded=False)
     except PublishBlocked:
         raise
     except Exception as exc:  # never crash the publish; mark failed (publishing->failed is legal)
@@ -990,7 +991,7 @@ def _publish_wordpress(
     if wp is None:
         # Credential-degraded: artifact-only + a degraded-publish marker (job still
         # completes so the client gets a deliverable), never a crash.
-        return _publish_artifact(store, code, draft_md, title, artifacts, degraded=True)
+        return _publish_artifact(store, code, row, draft_md, title, artifacts, degraded=True)
 
     existing = row.get("wp_post_id")
     wp_post_id = int(existing) if existing is not None and str(existing).isdigit() else None
@@ -1003,6 +1004,7 @@ def _publish_wordpress(
     )
     result: PublishResult = wp.publisher.publish(wp.site_url, post)
     store.update(code, {"status": "done", "stage": "Published", "wp_post_id": str(result.post_id)})
+    _emit_content_deliverable(row, artifact_key=None)  # published to WP; no local artifact
     logger.info("content_published_wp", code=code, wp_post_id=result.post_id)
     return PublishOutcome(
         code, "done", "published", reason="published to WordPress", wp_post_id=result.post_id, url=result.url
@@ -1012,6 +1014,7 @@ def _publish_wordpress(
 def _publish_artifact(
     store: ContentStore,
     code: str,
+    row: dict[str, Any],
     draft_md: str,
     title: str,
     artifacts: ContentArtifactStore | None,
@@ -1026,6 +1029,7 @@ def _publish_artifact(
         return PublishOutcome(code, "publishing", "degraded", reason="no artifact store configured")
     stage = "Published (artifact-only — WordPress credentials pending)" if degraded else "Published"
     store.update(code, {"status": "done", "stage": stage, "pdf_path": pdf_key, "md_path": md_key})
+    _emit_content_deliverable(row, artifact_key=pdf_key or md_key)
     reason = "degraded: artifact-only (no WordPress credentials)" if degraded else "rendered PDF/Markdown"
     logger.info("content_published_artifact", code=code, degraded=degraded)
     return PublishOutcome(
@@ -1039,6 +1043,27 @@ def _safe_stage(store: ContentStore, code: str, stage: str) -> None:
         store.update(code, {"stage": stage})
     except Exception:
         logger.warning("content_stage_write_failed", code=code)
+
+
+def _emit_content_deliverable(row: dict[str, Any], *, artifact_key: str | None) -> None:
+    """Publish a client deliverable for a PUBLISHED content job (best-effort; the
+    emit itself never raises). An unlinked job (no client) is skipped."""
+    client_id = row.get("client_id")
+    if not client_id:
+        return
+    source_id = row.get("id")
+    emit_deliverable(
+        client_id=str(client_id),
+        client_name=row.get("client_name", ""),
+        title=str(row.get("topic") or "Content"),
+        kind="Content",
+        requires="content_status",
+        source_kind="content",
+        source_id=str(source_id) if source_id else None,
+        icon="article",
+        artifact_key=artifact_key,
+        media_type="application/pdf",
+    )
 
 
 # --------------------------------------------------------------------------- #

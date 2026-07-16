@@ -13,11 +13,13 @@ from app.core.auth import CurrentUser, CurrentUserDep, require_owner, require_pe
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
 from app.db.database import DatabaseNotConfiguredError
+from app.db.report_grants_repo import ReportGrantsRepoDep
 from app.logging_setup import get_logger
 from app.schemas.clients import (
     ClientCreate,
     ClientResponse,
     ClientUpdate,
+    ReportGrantsUpdate,
     SiteCreate,
     SiteResponse,
 )
@@ -89,6 +91,39 @@ async def delete_client(client_id: str, repo: ClientsRepoDep, actor: ManageClien
         actor, kind="client", action="deleted client", target=client_id,
         entity_type="client", entity_id=client_id,
     )
+
+
+@router.get("/clients/{client_id}/report-grants", response_model=list[str])
+async def get_report_grants(
+    client_id: str, repo: ClientsRepoDep, grants: ReportGrantsRepoDep, _user: CurrentUserDep
+) -> list[str]:
+    """The report keys a client is granted to see in its portal (sorted)."""
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    return await asyncio.to_thread(grants.list_keys, client_id)
+
+
+@router.put("/clients/{client_id}/report-grants", response_model=list[str])
+async def put_report_grants(
+    client_id: str,
+    body: ReportGrantsUpdate,
+    repo: ClientsRepoDep,
+    grants: ReportGrantsRepoDep,
+    actor: ManageClients,
+) -> list[str]:
+    """Replace a client's report-access set (the full grant list). Lead-only; the
+    replace runs atomically. Records an ``access`` activity entry."""
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    keys = await asyncio.to_thread(grants.replace_keys, client_id, body.reports)
+    await record_activity(
+        actor, kind="access", action="updated report access",
+        target=client.get("name", client_id),
+        entity_type="client", entity_id=client_id,
+    )
+    return keys
 
 
 @router.get("/clients/{client_id}/sites", response_model=list[SiteResponse])

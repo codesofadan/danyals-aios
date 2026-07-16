@@ -37,6 +37,7 @@ from app.logging_setup import get_logger
 from app.schemas.offpage import action_for
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
+from app.services.deliverables import emit_deliverable
 from app.services.web2_pipeline import Web2Client, Web2Outcome, run_publish, run_write
 from integrations.backlinks import BacklinkProvider, BacklinkRecord, backlink_provider_from_settings
 from integrations.citations import CitationProvider, CitationRecord, citation_provider_from_settings
@@ -224,6 +225,18 @@ def run_backlink_monitor(
         store.set_backlink_status(str(row["id"]), "lost")
     if diff.new or diff.lost:
         notify(client_id, client_name, diff.new, diff.lost)
+        # Publish a refreshed Backlink-Profile deliverable when the profile actually
+        # changed (best-effort; the emit never raises).
+        emit_deliverable(
+            client_id=client_id,
+            client_name=client_name,
+            title="Backlink Profile",
+            kind="Backlinks",
+            requires="backlinks",
+            source_kind="offpage",
+            source_id=None,
+            icon="hub",
+        )
     logger.info(
         "backlink_monitor_done", domain=domain, new=len(diff.new), lost=len(diff.lost)
     )

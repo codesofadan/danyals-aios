@@ -41,6 +41,9 @@ from app.schemas.policy import (
     RecommendationResponse,
     SourceResponse,
 )
+from app.schemas.portal_deliverables import ClientDeliverableResponse
+from app.schemas.portal_reports import ReportVizResponse
+from app.schemas.portal_requests import ClientRequestResponse
 from app.schemas.reports import (
     ReportTypeResponse,
     SyncEventResponse,
@@ -88,6 +91,11 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (SyncEventResponse, "frontend/lib/reports.ts", "SyncEvent"),
     (SnapshotResponse, "frontend/lib/backups.ts", "Snapshot"),
     (ProtectedStoreResponse, "frontend/lib/backups.ts", "ProtectedStore"),
+    # Part 8 client portal. GaugeDatum/StatDatum are SINGLE-LINE TS types the shared
+    # multi-line regex cannot parse, so they are locked bespoke in test_portal_part8.py.
+    (ClientDeliverableResponse, "frontend/lib/client.ts", "ClientDeliverable"),
+    (ClientRequestResponse, "frontend/lib/client.ts", "ClientRequest"),
+    (ReportVizResponse, "frontend/lib/client.ts", "ReportViz"),
 ]
 
 
@@ -180,6 +188,11 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     # capitalized Nightly/Manual labels).
     (SnapshotResponse, "status", "frontend/lib/backups.ts", "SnapStatus"),
     (SnapshotResponse, "type", "frontend/lib/backups.ts", "SnapType"),
+    # Part 8 client portal: the exported request + viz unions pinned verbatim.
+    # (ClientDeliverable's kind/status are INLINE unions, locked in test_portal_part8.py.)
+    (ClientRequestResponse, "kind", "frontend/lib/client.ts", "RequestKind"),
+    (ClientRequestResponse, "status", "frontend/lib/client.ts", "RequestStatus"),
+    (ReportVizResponse, "kind", "frontend/lib/client.ts", "VizKind"),
 ]
 
 

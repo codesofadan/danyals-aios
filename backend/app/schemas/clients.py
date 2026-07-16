@@ -159,6 +159,13 @@ class ClientUpdate(BaseModel):
         return row
 
 
+class ReportGrantsUpdate(BaseModel):
+    """PUT /clients/{id}/report-grants body: the full replace-set of report keys a
+    client is granted (mirrors the Add-Client wizard's ``reports``)."""
+
+    reports: list[str] = Field(default_factory=list)
+
+
 class SiteCreate(BaseModel):
     domain: str = Field(min_length=1)
     cms_type: str = "wordpress"

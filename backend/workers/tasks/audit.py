@@ -29,6 +29,7 @@ from app.logging_setup import get_logger
 from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
 from app.services.cost_gate import GateContext
 from app.services.cost_store import PostgresCostStore
+from app.services.deliverables import emit_deliverable
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult, run_audit
 from workers.celery_app import celery_app
 
@@ -106,6 +107,14 @@ class SupabaseAuditStore:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _month_label(iso: str) -> str:
+    """A "July 2026" period label from an isoformat timestamp (empty if unparseable)."""
+    try:
+        return datetime.fromisoformat(iso).strftime("%B %Y")
+    except ValueError:
+        return ""
 
 
 def _config_from_settings(settings: Settings) -> AuditEngineConfig:
@@ -217,6 +226,22 @@ def execute_audit(
             "finished_at": finished,
         },
     )
+    # Publish a client deliverable for a completed audit that produced a PDF
+    # (best-effort; never fails the job). Public/unlinked audits have no client.
+    if pdf_key and row.get("client_id"):
+        emit_deliverable(
+            client_id=str(row["client_id"]),
+            client_name=row.get("client_name", ""),
+            title="Technical SEO Audit",
+            kind="Audit",
+            requires="audit_scores",
+            source_kind="audit",
+            source_id=str(audit_id),
+            icon="fact_check",
+            artifact_key=pdf_key,
+            media_type="application/pdf",
+            period=_month_label(finished),
+        )
     return {"audit_id": audit_id, "status": "done", "score": result.score}
 
 
