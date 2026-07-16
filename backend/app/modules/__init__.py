@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.modules.billing import router as billing_router
 from app.modules.keyword_research import router as keyword_research_router
 
 # Every module's public router, in include order. ``app/routers/__init__.py``
@@ -26,4 +27,5 @@ from app.modules.keyword_research import router as keyword_research_router
 # one line here (plus one in ``workers/celery_app.py`` if it owns Celery tasks).
 MODULE_ROUTERS: list[APIRouter] = [
     keyword_research_router,
+    billing_router,
 ]

@@ -31,7 +31,16 @@ from pydantic import BaseModel
 
 from app.core.deps import SettingsDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
-from app.rbac import AccessLevel, AppRole, PermKey, UserRole, feature_allows, role_has_perm
+from app.rbac import (
+    AccessLevel,
+    AppRole,
+    ModulePermKey,
+    PermKey,
+    UserRole,
+    feature_allows,
+    role_has_module_perm,
+    role_has_perm,
+)
 
 # The ONE algorithm we accept. A single-entry allow-list is the whole defense
 # against alg-confusion and `none`: PyJWT rejects any token whose header `alg` is
@@ -207,6 +216,24 @@ def require_perm(perm: PermKey) -> Any:
 
     async def _dep(user: CurrentUserDep) -> CurrentUser:
         if not role_has_perm(user.role, perm):
+            raise _forbid(f"Missing permission: {perm}")
+        return user
+
+    return _dep
+
+
+def require_module_perm(perm: ModulePermKey) -> Any:
+    """Dependency factory: require the caller's role to hold the MODULE perm ``perm``.
+
+    Deliberately separate from :func:`require_perm`. A module perm is NOT in
+    ``DEFAULT_ROLE_PERMS`` (that map mirrors ``data.ts`` verbatim), so routing one
+    through ``role_has_perm`` would resolve it to owner-only for every other role -
+    silently locking out the leads the RLS policies do permit. See
+    ``app.rbac.matrix.MODULE_PERM_ROLES``.
+    """
+
+    async def _dep(user: CurrentUserDep) -> CurrentUser:
+        if not role_has_module_perm(user.role, perm):
             raise _forbid(f"Missing permission: {perm}")
         return user
 
