@@ -213,6 +213,14 @@ class Settings(BaseSettings):
     dataforseo_password: SecretStr | None = None  # DataForSEO API password (Basic auth)
     brightlocal_api_key: SecretStr | None = None  # BrightLocal citation-tracker key
 
+    # --- Keyword-research module (Part 8). The DataForSEO login/password ABOVE are
+    # reused for the keyword-metrics pull (volume / difficulty / CPC that Serper
+    # can't supply - the deliberate provider exception); without them the module
+    # degrades to a deterministic fake provider (never None). Additive + optional
+    # (never required in prod). The per-call cost estimate is logged through the
+    # cost gate against the `keyword_research` money-dial (R5 pre-check). ---
+    keyword_research_cost_estimate: float = 0.02  # one DataForSEO keyword pull
+
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting
     # of the branded article) rides the EXISTING `content` money-dial; the publish +

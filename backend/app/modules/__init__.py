@@ -19,6 +19,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-# Every module's public router, in include order. Empty until the first module
-# lands; iterating an empty list is a no-op, so the scaffold changes no behaviour.
-MODULE_ROUTERS: list[APIRouter] = []
+from app.modules.keyword_research import router as keyword_research_router
+
+# Every module's public router, in include order. ``app/routers/__init__.py``
+# includes each entry into the ``api_v1`` aggregator, so a new module needs exactly
+# one line here (plus one in ``workers/celery_app.py`` if it owns Celery tasks).
+MODULE_ROUTERS: list[APIRouter] = [
+    keyword_research_router,
+]

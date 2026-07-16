@@ -30,6 +30,9 @@ celery_app = Celery(
         # (the publish is enqueued on a lead's approval; monitoring is enqueued per
         # client), so no beat entry / R6 overlap-lock is needed.
         "workers.tasks.offpage",
+        # Part 8: the keyword-research worker (research_keywords). Event-driven (enqueued
+        # per research request), so no beat entry / overlap-lock is needed.
+        "app.modules.keyword_research.tasks",
     ],
 )
 

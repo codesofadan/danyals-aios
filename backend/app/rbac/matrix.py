@@ -41,6 +41,13 @@ PermKey = Literal[
     "manage_vault",
     "view_reports",
 ]
+# Module (Part-8 tool) permissions: an ADDITIVE, backend-only vocabulary that sits
+# ALONGSIDE the 8 frontend-mirrored governance perms above (which stay byte-for-byte
+# in sync with ``data.ts``). A tool module that needs a finer paid-action gate than a
+# governance role adds a key here + its holder roles in ``MODULE_PERM_ROLES``; it is
+# NOT part of ``PermKey``/``PERMISSIONS`` (so the Team-screen matrix is unchanged).
+# ``run_research`` gates the paid keyword research + all keyword-bank mutations.
+ModulePermKey = Literal["run_research"]
 FeatureGroup = Literal["Analytics", "Content", "Delivery", "Admin"]
 AccessLevel = Literal["full", "view", "off"]
 
@@ -140,6 +147,20 @@ DEFAULT_ROLE_PERMS: dict[AppRole, frozenset[PermKey]] = {
     "viewer": frozenset({"view_reports"}),
 }
 
+# Holder roles per MODULE permission (see ``ModulePermKey``). Kept SEPARATE from
+# ``DEFAULT_ROLE_PERMS`` so the frontend-mirrored 8x6 matrix stays byte-for-byte in
+# sync with ``data.ts``. Owner is all-on and locked (enforced in
+# ``role_has_module_perm``), so it need not be listed.
+#
+# ``run_research`` = the LEADS (owner/admin/manager). This MIRRORS the keyword-bank
+# RLS insert/update policies in ``0035_keyword_research.sql``
+# (``current_app_role() in ('owner', 'admin', 'manager')``) exactly: the app gate and
+# the database must agree, or a caller who passes the app gate would be rejected by
+# Postgres with an opaque RLS error instead of a clean 403.
+MODULE_PERM_ROLES: dict[ModulePermKey, frozenset[AppRole]] = {
+    "run_research": frozenset({"owner", "admin", "manager"}),
+}
+
 # --- The 17 features (verbatim from ``accessFeatures``) ------------------------
 
 FEATURES: tuple[FeatureDef, ...] = (
@@ -218,6 +239,20 @@ def role_has_perm(role: UserRole, perm: PermKey) -> bool:
     if role == "client":
         return False
     return role == "owner" or perm in DEFAULT_ROLE_PERMS[role]
+
+
+def role_has_module_perm(role: UserRole, perm: ModulePermKey) -> bool:
+    """Whether ``role`` holds the MODULE permission ``perm``. Owner is all-on;
+    client holds none.
+
+    Deliberately separate from :func:`role_has_perm`: a module perm is NOT in
+    ``DEFAULT_ROLE_PERMS`` (that map mirrors ``data.ts`` verbatim), so routing a
+    module perm through ``role_has_perm`` would resolve it to owner-only for every
+    other role - silently locking out the leads the RLS policies do permit.
+    """
+    if role == "client":
+        return False
+    return role == "owner" or role in MODULE_PERM_ROLES[perm]
 
 
 def level_satisfies(have: AccessLevel, required: AccessLevel) -> bool:
