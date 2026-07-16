@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     jwt_audience: str = "authenticated"  # expected `aud` on our own EdDSA tokens
     # Access-token lifetime (seconds). Short by default: a leaked token expires fast.
     jwt_access_ttl_seconds: int = 3600
+    # --- Skills gateway (Part 9). A skill token is a SEPARATE, scoped credential
+    # the MCP gateway authenticates (app/services/skill_tokens.py). Default TTL is
+    # long-lived (30 days) since it drives standing local automation, but it is
+    # per-token overridable at mint and always revocable. NOT a required secret. ---
+    skill_token_ttl_seconds: int = 2_592_000  # 30 days
 
     # --- Seed owner (dev/test bootstrap ONLY; never a prod login path). The
     # provision_owner CLI reads these to mint the first local OWNER so the app +
