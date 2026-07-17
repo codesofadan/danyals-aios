@@ -252,6 +252,18 @@ class Settings(BaseSettings):
     gbp_oauth_client_id: str | None = None
     gbp_oauth_client_secret: SecretStr | None = None
 
+    # --- On-page optimizer module (Part 8 Phase 2D). Additive + optional (never
+    # required in prod). The analysis worker's only PAID call is one Serper SERP pull
+    # (the content score's entity-coverage dimension); it is logged through the cost
+    # gate against the `on_page` money-dial with an R5 pre-check, and a block DEGRADES
+    # the score to its deterministic dimensions rather than failing the analysis. The
+    # per-site WordPress app passwords the APPLY path needs are per-site secrets and
+    # live in the VAULT (never here) - the worker reveals them server-side. ---
+    onpage_analyze_cost_estimate: float = 0.01  # one Serper SERP pull per analysis
+    # Per-page bounded fetch timeout. The fetch follows redirects MANUALLY, re-
+    # validating the host at every hop, so this bounds each hop's request.
+    onpage_fetch_timeout_seconds: float = 10.0
+
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting
     # of the branded article) rides the EXISTING `content` money-dial; the publish +

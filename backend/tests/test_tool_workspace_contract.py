@@ -177,6 +177,8 @@ def _wire_client_onboarding(app: FastAPI) -> None:
             ]
 
     app.dependency_overrides[get_onboarding_repo] = _FakeOnboardingRepo
+
+
 def _wire_billing(app: FastAPI) -> None:
     """Fake billing repo: a two-row ledger + non-zero tiles (so the table + KPI tiles
     are actually populated - an empty adapter would pass the col lock vacuously).
@@ -203,6 +205,8 @@ def _wire_billing(app: FastAPI) -> None:
             ]
 
     app.dependency_overrides[get_billing_repo] = _FakeBillingRepo
+
+
 def _wire_local_seo(app: FastAPI) -> None:
     """Fake local repo: a two-row map-pack board + non-zero stats (so the table + KPI
     tiles are actually populated - an empty adapter would pass the col lock vacuously).
@@ -228,6 +232,27 @@ def _wire_local_seo(app: FastAPI) -> None:
     app.dependency_overrides[get_local_repo] = _FakeLocalRepo
 
 
+def _wire_on_page(app: FastAPI) -> None:
+    """Fake on-page repo: a two-row recommendation board + non-zero stats (so the
+    table + KPI tiles are actually populated - an empty adapter would pass the col
+    lock vacuously)."""
+    from app.modules.on_page.repo import get_on_page_repo
+
+    class _FakeOnPageRepo:
+        def stats(self) -> dict[str, Any]:
+            return {"analyzed": 214, "open": 41, "applied": 178}
+
+        def list_recommendations(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return [
+                {"page_url": "/services/implants", "issue": "Missing meta description",
+                 "impact": "High", "status": "open"},
+                {"page_url": "/blog/whitening", "issue": "H1 not keyword-aligned",
+                 "impact": "Med", "status": "applied"},
+            ]
+
+    app.dependency_overrides[get_on_page_repo] = _FakeOnPageRepo
+
+
 _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("keyword_research", "/api/v1/keyword-research/workspace", _wire_keyword_research),
     ToolAdapter(
@@ -235,6 +260,7 @@ _TOOL_ADAPTERS: list[ToolAdapter] = [
     ),
     ToolAdapter("billing", "/api/v1/billing/workspace", _wire_billing),
     ToolAdapter("local_seo", "/api/v1/local-seo/workspace", _wire_local_seo),
+    ToolAdapter("on_page", "/api/v1/on-page/workspace", _wire_on_page),
 ]
 
 _IDS = [a.tool_key for a in _TOOL_ADAPTERS]
@@ -407,7 +433,10 @@ def test_client_onboarding_service_constant_matches_tools_ts() -> None:
     from app.modules.client_onboarding.service import WORKSPACE_TABLE_COLS
 
     assert read_tool_extra("client_onboarding").table_cols == WORKSPACE_TABLE_COLS
-# 4. billing: the pinned literals (Part 8 Phase 2H).
+
+
+# --------------------------------------------------------------------------- #
+# 5. billing: the pinned literals (Part 8 Phase 2H).
 # --------------------------------------------------------------------------- #
 def test_billing_tools_ts_literals_are_pinned() -> None:
     ts = read_tool_extra("billing")
@@ -441,7 +470,10 @@ async def test_billing_mrr_tile_reads_the_subscription_table_not_the_ledger(
     assert tiles["MRR"] != "$2.2k"  # ... and emphatically NOT sum(invoices)
     assert tiles["Open invoices"] == "3"  # these two DO come from the ledger
     assert tiles["Past due"] == "1"
-# 4. local_seo: the pinned literals (Part 8 Phase 2E).
+
+
+# --------------------------------------------------------------------------- #
+# 6. local_seo: the pinned literals (Part 8 Phase 2E).
 # --------------------------------------------------------------------------- #
 def test_local_seo_tools_ts_literals_are_pinned() -> None:
     ts = read_tool_extra("local_seo")
@@ -457,3 +489,37 @@ def test_local_seo_service_constant_matches_tools_ts() -> None:
     from app.modules.local_seo.service import WORKSPACE_TABLE_COLS
 
     assert read_tool_extra("local_seo").table_cols == WORKSPACE_TABLE_COLS
+
+
+# --------------------------------------------------------------------------- #
+# 7. on_page: the pinned literals (Part 8 Phase 2D).
+# --------------------------------------------------------------------------- #
+def test_on_page_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("on_page")
+    assert ts.table_cols == ["Page", "Issue", "Impact", "Status"]
+    assert ts.kpi_labels == ["Pages analyzed", "Open suggestions", "Applied"]
+    assert ts.primary_label == "Analyze page"
+    assert ts.primary_icon == "tune"
+    assert ts.table_title == "Top recommendations"
+    assert ts.table_icon == "tune"
+
+
+def test_on_page_service_constant_matches_tools_ts() -> None:
+    from app.modules.on_page.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("on_page").table_cols == WORKSPACE_TABLE_COLS
+
+
+async def test_on_page_workspace_tones_match_the_demo_semantics(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """``tools.ts`` encodes the tone semantics in its demo rows: High reads ``crit``,
+    Med reads ``warn``, an Open status reads ``warn`` and an Applied one ``ok``. The
+    cols lock cannot see this (tones live inside the cells), so pin it here."""
+    adapter = next(a for a in _TOOL_ADAPTERS if a.tool_key == "on_page")
+    body = await _fetch_workspace(app, client, adapter)
+    high_open, med_applied = body["table"]["rows"]
+    assert high_open[2] == {"v": "High", "tone": "crit"}
+    assert high_open[3] == {"v": "Open", "tone": "warn"}
+    assert med_applied[2] == {"v": "Med", "tone": "warn"}
+    assert med_applied[3] == {"v": "Applied", "tone": "ok"}
