@@ -42,8 +42,12 @@ class OffpageRepo:
         limit: int | None = None,
         offset: int = 0,
     ) -> _Rows:
+        # OWN-PROFILE INVARIANT (0037): `backlinks` also carries COMPETITOR-side rows
+        # (competitor_id set). Every off-page read is the CLIENT's own profile, so it
+        # MUST pin competitor_id is null - otherwise the board would show a rival's
+        # links as the client's own. Pinned by tests/test_backlinks_own_profile.py.
         query = "select * from public.backlinks"
-        clauses: list[str] = []
+        clauses: list[str] = ["competitor_id is null"]
         params: list[Any] = []
         if status is not None:
             clauses.append("status = %s")
@@ -67,7 +71,8 @@ class OffpageRepo:
         the new/lost/toxic KPI tiles). RLS-scoped; an empty ledger yields ``{}``."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
-                "select status, count(*) as n from public.backlinks group by status"
+                "select status, count(*) as n from public.backlinks "
+                "where competitor_id is null group by status"
             )
             return {str(r["status"]): int(r["n"]) for r in cur.fetchall()}
 
@@ -77,7 +82,7 @@ class OffpageRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "select count(distinct ref_domain) as n from public.backlinks "
-                "where status <> 'lost'"
+                "where competitor_id is null and status <> 'lost'"
             )
             row = cur.fetchone()
             return int(row["n"]) if row else 0
@@ -94,7 +99,8 @@ class OffpageRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "select count(*) as n from public.backlinks "
-                "where status = 'new' and first_seen >= current_date - %s::int",
+                "where competitor_id is null and status = 'new' "
+                "and first_seen >= current_date - %s::int",
                 (days,),
             )
             row = cur.fetchone()
@@ -127,11 +133,18 @@ class OffpageRepo:
     def flag_toxic_backlinks(self, *, spam_threshold: int) -> _Rows:
         """Flag every backlink at/above ``spam_threshold`` spam as ``toxic`` (the
         disavow-review queue). Idempotent: rows already ``toxic`` are skipped, so a
-        re-run flags only newly-spammy links. Returns the rows it moved."""
+        re-run flags only newly-spammy links. Returns the rows it moved.
+
+        OWN-PROFILE INVARIANT (0037): pins ``competitor_id is null``. This is a WRITE,
+        so the stake is higher than a read - without the pin a COMPETITOR's spammy
+        links would be flagged toxic into THIS client's disavow queue, i.e. the client
+        would be asked to disavow a rival's links.
+        """
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.backlinks set status = 'toxic' "
-                "where spam >= %s and status <> 'toxic' returning *",
+                "where competitor_id is null and spam >= %s and status <> 'toxic' "
+                "returning *",
                 (spam_threshold,),
             )
             return cur.fetchall()
@@ -344,7 +357,9 @@ class ServiceOffpageStore:
     def list_backlinks_for_client(self, client_id: str) -> _Rows:
         with privileged_connection() as cur:
             cur.execute(
-                "select * from public.backlinks where client_id = %s", (client_id,)
+                "select * from public.backlinks "
+                "where client_id = %s and competitor_id is null",
+                (client_id,),
             )
             return cur.fetchall()
 
@@ -372,9 +387,18 @@ class ServiceOffpageStore:
             )
 
     def set_backlink_status(self, backlink_id: str, status: str) -> None:
+        """Move one OWN-PROFILE backlink's status (the monitoring new/lost diff).
+
+        OWN-PROFILE INVARIANT (0037): pins ``competitor_id is null`` even though the
+        id already targets a single row. This runs on the PRIVILEGED (BYPASSRLS) seam,
+        so the pin is the only thing standing between a mis-sourced id and the monitor
+        silently rewriting a COMPETITOR-side row's status. Safe-by-construction beats
+        safe-because-every-caller-currently-passes-an-own-profile-id.
+        """
         with privileged_connection() as cur:
             cur.execute(
-                "update public.backlinks set status = %s where id = %s",
+                "update public.backlinks set status = %s "
+                "where id = %s and competitor_id is null",
                 (status, backlink_id),
             )
 

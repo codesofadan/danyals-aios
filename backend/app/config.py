@@ -300,6 +300,40 @@ class Settings(BaseSettings):
     import_artifact_dir: str | None = None  # controlled root uploads are stored under
     import_max_file_bytes: int = 26_214_400  # 25 MiB - well past any real SEO export
     import_max_rows: int = 500_000  # rows one import may carry
+    # --- Competitor-intel module (Part 8 Phase 2C). ALL additive + optional (never
+    # required in prod): the module builds + unit-tests NOW against deterministic fakes
+    # and ACTIVATES per key as they land, exactly like the rank/local key-gating.
+    #
+    # The module spans BOTH house provider seams on purpose. Auto-discovery is a live
+    # SERP read, so it reuses the existing SERPER_API_KEY (the house vendor). The gap
+    # analysis needs a DOMAIN's whole ranked set - a question no /search call can
+    # answer - so it goes through the DataForSEO login/password pair above (the
+    # documented keyword-data exception). Missing keys degrade to the deterministic
+    # fakes, never to None.
+    #
+    # Both spends are the CLIENT's and are metered against the `competitor_intel`
+    # money-dial (R5 pre-check). Discovery prices the WHOLE sweep as one unit
+    # (keywords x per-SERP), so a client near their cap is refused the sweep rather
+    # than walked past it one SERP at a time. ---
+    competitor_intel_cost_estimate: float = 0.05  # one DataForSEO ranked_keywords pull
+    competitor_intel_serp_cost_estimate: float = 0.001  # one discovery SERP read
+    competitor_intel_ranked_limit: int = 200  # ranked keywords pulled per analysis
+    # Auto-discovery's bounds. Every sampled keyword costs a PAID SERP, so the sample
+    # is capped and taken highest-volume-first: if only N terms can be afforded, they
+    # should be the N that best describe who the client competes with.
+    competitor_intel_discovery_keywords: int = 10  # SERPs sampled per discovery sweep
+    competitor_intel_discovery_limit: int = 5  # competitors proposed per sweep
+    competitor_intel_discovery_min_appearances: int = 2  # SERPs a domain must appear on
+    # A `missing` gap at/above this volume is `untapped` - the subset to act on first.
+    # PROVISIONAL: a triage knob, not a fact about search.
+    competitor_intel_untapped_volume: int = 500
+    # The positional CTR curve share-of-voice is modelled from, comma-separated,
+    # position 1 first. PROVISIONAL and deliberately CONFIGURABLE (see
+    # modules/competitor_intel/service.DEFAULT_CTR_CURVE): there is no universal
+    # click-through curve - it moves with intent, SERP features, device and vertical -
+    # so this is a default to be re-fitted per vertical, never settled truth. Every SoV
+    # number the module emits carries `provisional=True` for exactly this reason.
+    competitor_intel_ctr_curve: str = "0.316,0.158,0.096,0.072,0.0525,0.043,0.038,0.032,0.028,0.025"
 
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting
@@ -399,6 +433,30 @@ class Settings(BaseSettings):
         """Allowed Host headers for ``TrustedHostMiddleware``; empty -> allow any."""
         hosts = [h.strip() for h in self.trusted_hosts.split(",") if h.strip()]
         return hosts or ["*"]
+
+    @property
+    def competitor_intel_ctr_curve_list(self) -> list[float]:
+        """The parsed positional CTR curve (position 1 first).
+
+        Falls back to the module's ``DEFAULT_CTR_CURVE`` when the setting is blank or
+        unparseable: a share-of-voice split computed against an EMPTY curve would score
+        every domain 0 and read as "nobody has any visibility", which is a far worse
+        answer than "ops fat-fingered the override, so we used the default". A bad
+        entry is dropped rather than raising - the curve is a tuning knob, not a
+        credential, and it must never take the API down.
+        """
+        from app.modules.competitor_intel.service import DEFAULT_CTR_CURVE
+
+        curve: list[float] = []
+        for part in self.competitor_intel_ctr_curve.split(","):
+            text = part.strip()
+            if not text:
+                continue
+            try:
+                curve.append(float(text))
+            except ValueError:
+                continue
+        return curve or list(DEFAULT_CTR_CURVE)
 
 
 @lru_cache

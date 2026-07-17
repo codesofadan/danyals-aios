@@ -71,9 +71,32 @@ class KeywordMetric:
     low_confidence: bool = False
 
 
+@dataclass(frozen=True)
+class RankedKeyword:
+    """One keyword a DOMAIN currently ranks for, with the demand behind it.
+
+    The competitor-intel gap analysis's raw material (Part 8 Phase 2C). This is the
+    one question the house Serper seam genuinely cannot answer: ``/search`` reads ONE
+    SERP for ONE keyword, whereas a gap analysis needs the whole set of terms a rival
+    ranks for - which is a domain-indexed query only a keyword-database vendor holds.
+    Hence it lives on THIS seam (the DataForSEO exception) rather than in a second
+    SERP provider.
+
+    ``position`` is the domain's rank for the term. Unlike a rank-tracker reading it
+    is never ``None``: the provider only returns keywords the domain DOES rank for,
+    so a term's absence from this list is what "does not rank" looks like here.
+    """
+
+    keyword: str
+    position: int
+    volume: int = 0
+    difficulty: float = 0.0
+    intent: str | None = None
+
+
 @runtime_checkable
 class KeywordDataProvider(Protocol):
-    """Keyword ideas + demand metrics + a provider-side intent.
+    """Keyword ideas + demand metrics + a provider-side intent + a domain's ranked set.
 
     ``geo`` is an optional country/locale hint (e.g. ``"us"``, ``"gb"``); ``None``
     uses the provider default. Implementations MUST be deterministic given the same
@@ -84,6 +107,7 @@ class KeywordDataProvider(Protocol):
     def related_keywords(self, keyword: str, *, geo: str | None = None, limit: int = 50) -> list[KeywordMetric]: ...
     def keyword_metrics_bulk(self, keywords: list[str], *, geo: str | None = None) -> list[KeywordMetric]: ...
     def search_intent(self, keyword: str) -> str | None: ...
+    def ranked_keywords(self, domain: str, *, geo: str | None = None, limit: int = 100) -> list[RankedKeyword]: ...
 
 
 def _to_int(value: Any, *, lo: int = 0) -> int:
@@ -174,6 +198,28 @@ class DataForSeoProvider(HttpProviderClient):
                 return label
         return None
 
+    def ranked_keywords(self, domain: str, *, geo: str | None = None, limit: int = 100) -> list[RankedKeyword]:
+        """Every keyword ``domain`` ranks for, with position + demand.
+
+        ``target`` is a bare host (no scheme) per the Labs API contract - the caller
+        normalises it. Items missing a keyword or a usable position are dropped rather
+        than defaulted: a fabricated position would become a fabricated gap verdict.
+        """
+        if not domain:
+            return []
+        body: dict[str, Any] = {"target": domain, "limit": max(1, min(limit, 1000))}
+        if geo:
+            body["location_name"] = geo
+        data = self.request_json(
+            "POST", "/v3/dataforseo_labs/google/ranked_keywords/live", json_body=[body], auth=self._auth
+        )
+        out: list[RankedKeyword] = []
+        for item in _dfs_items(data):
+            ranked = _ranked_from_dfs(item)
+            if ranked is not None:
+                out.append(ranked)
+        return out
+
 
 def _dfs_request_body(keywords: list[str], geo: str | None, limit: int) -> dict[str, Any]:
     """One DataForSEO Labs task body (keywords + optional geo + a bounded limit)."""
@@ -210,6 +256,55 @@ def _metric_from_dfs(item: dict[str, Any]) -> KeywordMetric:
         cpc=_to_float(info.get("cpc")),
         competition=_to_float(info.get("competition"), hi=1.0),
         low_confidence=info.get("search_volume") in (None, 0),
+    )
+
+
+def _ranked_from_dfs(item: dict[str, Any]) -> RankedKeyword | None:
+    """Map one DataForSEO Labs ``ranked_keywords`` item to a ``RankedKeyword``.
+
+    The Labs payload nests the term under ``keyword_data`` (the same block
+    ``_metric_from_dfs`` reads) and the POSITION under
+    ``ranked_serp_element.serp_item.rank_absolute``. ``rank_absolute`` is the
+    position counting EVERY SERP element, which is what a human sees on the page;
+    ``rank_group`` collapses a domain's stacked results to one number, so it is the
+    fallback rather than the primary.
+
+    Returns ``None`` - never a defaulted row - when the keyword or the position is
+    unreadable. A position defaulted to 0/1 here would silently become a "the
+    competitor ranks #1" gap verdict conjured out of a malformed payload.
+    """
+    kw_data = item.get("keyword_data")
+    if not isinstance(kw_data, dict):
+        return None
+    keyword = str(kw_data.get("keyword") or "").strip()
+    if not keyword:
+        return None
+
+    element = item.get("ranked_serp_element")
+    serp_item = element.get("serp_item") if isinstance(element, dict) else None
+    if not isinstance(serp_item, dict):
+        return None
+    raw_position = serp_item.get("rank_absolute")
+    if raw_position is None:
+        raw_position = serp_item.get("rank_group")
+    try:
+        position = int(raw_position)  # type: ignore[arg-type]  # guarded by the except
+    except (TypeError, ValueError):
+        return None
+    if position < 1:
+        return None
+
+    metric = _metric_from_dfs(kw_data)
+    intent_block = kw_data.get("search_intent_info")
+    intent = None
+    if isinstance(intent_block, dict):
+        intent = normalize_intent(intent_block.get("main_intent"))
+    return RankedKeyword(
+        keyword=keyword,
+        position=position,
+        volume=metric.volume,
+        difficulty=metric.difficulty,
+        intent=intent,
     )
 
 
@@ -257,6 +352,49 @@ class FakeKeywordDataProvider:
         # branch of the intent cascade reproducibly.
         idx = int(self._digest(keyword)[13:15], 16) % len(INTENT_LABELS)
         return INTENT_LABELS[idx]
+
+    def ranked_keywords(self, domain: str, *, geo: str | None = None, limit: int = 100) -> list[RankedKeyword]:
+        """A stable ranked set for ``domain``, derived from sha256(domain).
+
+        Deliberately built from a SHARED term pool plus a domain-specific tail: a gap
+        analysis is only meaningful when two domains' sets partially INTERSECT, so a
+        fake that gave every domain a disjoint set would make every overlap 0 and
+        every gap total - i.e. it would exercise none of the classification the
+        module exists to perform.
+        """
+        if not domain:
+            return []
+        digest = self._digest(domain)
+        # The shared pool: every domain ranks for some prefix of these, so two fake
+        # domains always intersect (and never identically - the prefix length varies).
+        shared = (
+            "seo services", "local seo", "seo agency", "keyword research",
+            "link building", "technical seo", "content marketing", "seo audit",
+        )
+        n_shared = 3 + int(digest[0:2], 16) % (len(shared) - 2)  # 3..len(shared)
+        terms = [*shared[:n_shared]]
+        # The tail: terms only THIS domain ranks for (the other side's pure gaps).
+        n_own = 2 + int(digest[2:4], 16) % 4  # 2..5
+        terms += [f"{domain.split('.')[0]} {suffix}" for suffix in
+                  ("reviews", "pricing", "alternative", "vs", "login")[:n_own]]
+
+        out: list[RankedKeyword] = []
+        for i, term in enumerate(terms[:limit]):
+            metric = self._metric(term)
+            # Position is domain-AND-term dependent, so two domains ranking for the
+            # same shared term hold DIFFERENT positions - which is what makes the
+            # weak/shared classification testable against the fake.
+            position = 1 + int(self._digest(f"{domain}|{term}")[0:2], 16) % 30
+            out.append(
+                RankedKeyword(
+                    keyword=term,
+                    position=position,
+                    volume=metric.volume,
+                    difficulty=metric.difficulty,
+                    intent=INTENT_LABELS[(i + int(digest[4:6], 16)) % len(INTENT_LABELS)],
+                )
+            )
+        return out
 
 
 def keyword_data_provider_from_settings(settings: Settings) -> KeywordDataProvider:

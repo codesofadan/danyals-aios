@@ -21,6 +21,7 @@ from fastapi import APIRouter
 
 from app.modules.billing import router as billing_router
 from app.modules.client_onboarding import router as client_onboarding_router
+from app.modules.competitor_intel import router as competitor_intel_router
 from app.modules.data_import import router as data_import_router
 from app.modules.keyword_research import router as keyword_research_router
 from app.modules.local_seo import router as local_seo_router
@@ -38,6 +39,7 @@ MODULE_ROUTERS: list[APIRouter] = [
     local_seo_router,
     on_page_router,
     rank_tracker_router,
+    competitor_intel_router,
     # Read-only /workspace adapters for the nine tools whose modules predate Part 8;
     # owns no tables and no tasks (see app/modules/tool_workspaces/router.py).
     tool_workspaces_router,

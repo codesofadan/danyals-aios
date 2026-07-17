@@ -59,6 +59,11 @@ celery_app = Celery(
         # per-run mutex, which is exactly the right granularity - two DIFFERENT files
         # should import concurrently, and the same file must not import twice.
         "app.modules.data_import.tasks",
+        # Part 8 Phase 2C: the competitor-intel workers (run_gap_analysis /
+        # discover_competitors). Both event-driven (enqueued per analyse / per discover
+        # press), so no beat entry / overlap-lock is needed - competitive intelligence
+        # is pulled when an analyst asks, never on a standing schedule.
+        "app.modules.competitor_intel.tasks",
     ],
 )
 
