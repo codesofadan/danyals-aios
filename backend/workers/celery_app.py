@@ -41,6 +41,12 @@ celery_app = Celery(
         # beat_schedule below) and therefore DOES take the R6 overlap lock;
         # sync_gbp_profile is event-driven (enqueued per profile).
         "app.modules.local_seo.tasks",
+        # Part 8: the on-page workers (analyze_page / apply_onpage_fix /
+        # revert_onpage_fix). All event-driven (enqueued per analysis / per lead
+        # decision), so no beat entry / overlap-lock is needed. The apply + revert
+        # tasks take the acting LEAD's id and run on that RLS identity - the 0038
+        # guard trigger refuses a live-site write that is not lead-attributed.
+        "app.modules.on_page.tasks",
     ],
 )
 
