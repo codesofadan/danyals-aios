@@ -28,6 +28,8 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",  # local-Postgres driver + connection pool (RLS + privileged seams)
     "argon2-cffi>=23.1",       # Argon2id password hashing for local auth (verifies imported bcrypt too)
     "cryptography>=43.0",      # app-layer AES-256-GCM vault sealing (master key never in Postgres)
+    "python-multipart>=0.0.9",  # multipart/form-data parsing - FastAPI needs it for the data-import upload
+    "openpyxl>=3.1",           # streaming (read_only) XLSX reader for the data-import worker
 ]
 
 [project.optional-dependencies]

@@ -285,6 +285,22 @@ class Settings(BaseSettings):
     rank_tracker_history_retention_days: int = 730  # hard-purge history past 2 years
     rank_tracker_rollup_after_days: int = 90  # thin to one snapshot/week past 90 days
 
+    # --- Data-import module (Part 8 Phase 2G). KEYLESS by design: file import only, no
+    # provider, no API client, no OAuth, no spend - so there is no key and no cost dial
+    # here, only the two safety bounds and the storage root. ALL optional and NOT in
+    # _REQUIRED_IN_PROD: an unconfigured root DEGRADES the upload route to a clean 503
+    # ("not configured"), never a crash and never a silent write to some default
+    # directory (mirrors audit_artifact_dir's key-gating).
+    #
+    # Both bounds are DEFENCES, not preferences. import_max_file_bytes is enforced on
+    # the STREAM as bytes land (a Content-Length is a claim, and a chunked body has
+    # none), so a hostile upload costs the cap plus one chunk of disk. import_max_rows
+    # bounds the worker's runtime: without it a crafted 50M-row CSV would hold a Celery
+    # slot for hours. Past either bound the run ends 'failed', honestly.
+    import_artifact_dir: str | None = None  # controlled root uploads are stored under
+    import_max_file_bytes: int = 26_214_400  # 25 MiB - well past any real SEO export
+    import_max_rows: int = 500_000  # rows one import may carry
+
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting
     # of the branded article) rides the EXISTING `content` money-dial; the publish +
