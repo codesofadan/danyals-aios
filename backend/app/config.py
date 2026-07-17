@@ -264,6 +264,27 @@ class Settings(BaseSettings):
     # validating the host at every hop, so this bounds each hop's request.
     onpage_fetch_timeout_seconds: float = 10.0
 
+    # --- Rank-tracker module (Part 8 Phase 2B). ALL additive + optional (never
+    # required in prod): the module builds + unit-tests NOW against a deterministic
+    # fake and ACTIVATES when the vendor's key lands, exactly like the content/context
+    # key-gating.
+    #
+    # The VENDOR IS TO-CONFIRM at kickoff, so it is a CONFIG choice, not a hard-wired
+    # import: `serper` (the house SERP vendor - reuses the existing SERPER_API_KEY
+    # above), `dataforseo` (the contracted fallback - reuses the login/password pair
+    # above), or `fake`. A configured vendor with no credentials degrades to the fake.
+    #
+    # The rank-check spend is the CLIENT's and is metered against the `rank_tracker`
+    # money-dial (R5 pre-check). `rank_tracker_cost_estimate` is the per-check price
+    # the provider scales by depth; it feeds BOTH the per-check gate and the N-A
+    # monthly commitment projection, so the two can never disagree. ---
+    rank_tracker_provider: str = "serper"  # serper | dataforseo | fake
+    rank_tracker_cost_estimate: float = 0.001  # one SERP read (Serper ~ $1/1k queries)
+    rank_tracker_depth: int = 100  # how deep the SERP is read (the tracking window)
+    rank_tracker_dispatch_batch: int = 200  # keywords claimed per nightly beat tick
+    rank_tracker_history_retention_days: int = 730  # hard-purge history past 2 years
+    rank_tracker_rollup_after_days: int = 90  # thin to one snapshot/week past 90 days
+
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting
     # of the branded article) rides the EXISTING `content` money-dial; the publish +

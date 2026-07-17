@@ -10,6 +10,7 @@ than ``autodiscover_tasks``, which would look for a non-existent
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import get_settings
 
@@ -47,6 +48,11 @@ celery_app = Celery(
         # tasks take the acting LEAD's id and run on that RLS identity - the 0038
         # guard trigger refuses a live-site write that is not lead-attributed.
         "app.modules.on_page.tasks",
+        # Part 8 Phase 2B: the rank-tracker workers. SCHEDULED (dispatch_rank_checks
+        # nightly + rollup_rank_history weekly) rather than event-driven - a tracked
+        # keyword is a standing per-client subscription, so it needs the beat entries
+        # below and DOES take the R6 overlap lock.
+        "app.modules.rank_tracker.tasks",
     ],
 )
 
@@ -109,5 +115,25 @@ celery_app.conf.beat_schedule = {
     "refresh-local-ranks": {
         "task": "refresh_local_ranks",
         "schedule": float(settings.local_rank_refresh_seconds),
+    },
+    # Part 8 Phase 2B - the rank tracker. dispatch-rank-checks runs NIGHTLY (03:15 UTC,
+    # off the daily-traffic peak): it takes the R6 beat-overlap lock, claims every due
+    # active subscription (FOR UPDATE SKIP LOCKED, advancing next_check_on in the same
+    # statement) and fans out one check_keyword_rank per claim. Per-keyword cadence
+    # lives in tracked_keywords.next_check_on, so this beat only drains what is due -
+    # a daily tick serves weekly keywords correctly without a second schedule.
+    #
+    # rollup-rank-history runs weekly (Sunday 04:10 UTC): it thins history older than
+    # rank_tracker_rollup_after_days to one snapshot per ISO week and purges past
+    # rank_tracker_history_retention_days. This is the DELIBERATE alternative to
+    # partitioning keyword_rankings (see 0036's header) - gradual and observable, with
+    # no month-rollover cliff.
+    "dispatch-rank-checks": {
+        "task": "dispatch_rank_checks",
+        "schedule": crontab(hour=3, minute=15),
+    },
+    "rollup-rank-history": {
+        "task": "rollup_rank_history",
+        "schedule": crontab(hour=4, minute=10, day_of_week=0),
     },
 }
