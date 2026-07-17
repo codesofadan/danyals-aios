@@ -44,9 +44,9 @@ from app.db.portal_repo import PortalRepo
 from app.routers.portal import get_portal_audit_loader
 from app.services.activity import log_activity, record_activity
 from app.services.client_audits import insert_audit_row
-from app.services.cost_gate import GateContext
+from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
-from workers.tasks.audit import SupabaseAuditStore
+from workers.tasks.audit import SupabaseAuditStore, _NullCostCache
 
 pytestmark = pytest.mark.integration
 
@@ -218,6 +218,34 @@ def test_record_cost_cached_does_not_touch_budget(seed: dict[str, Any]) -> None:
         cur.execute("select spent from public.client_budgets where client_id = %s", (seed["tenant_a"],))
         after = float(cur.fetchone()["spent"])
     assert after == before
+
+
+def test_sub_dollar_charges_accumulate_and_trip_the_cap(seed: dict[str, Any]) -> None:
+    # C2 end-to-end: 0044 typed cap/spent numeric(10,2), so sub-dollar charges
+    # accumulate EXACTLY and the per-client cap can finally trip. With the old
+    # INTEGER column every $0.15 rounded to 0, spent stayed 0, and no cap ever bit.
+    # (This test resets tenant_a's budget; no later test reads it.)
+    store = PostgresCostStore()
+    with privileged_connection(pool=seed["admin_pool"]) as cur:
+        cur.execute(
+            "update public.client_budgets set cap = 2, spent = 0 where client_id = %s",
+            (seed["tenant_a"],),
+        )
+    ctx = GateContext(
+        feature_key="tech_audit", client_id=seed["tenant_a"], provider="Anthropic",
+        estimated_cost=0.15, job_type="content", client_name=f"SvcWrites A {seed['tag']}",
+    )
+    for _ in range(20):  # 20 x $0.15 = $3.00 of genuinely sub-dollar charges
+        store.record_cost(ctx, 0.15, cached=False)
+
+    budget = store.client_budget(seed["tenant_a"])
+    assert budget is not None
+    cap, spent = budget
+    assert round(spent, 2) == 3.00  # accumulated exactly - NOT 0 (the old int bug)
+    assert cap == 2.0
+    # the gate now blocks the next paid call for this over-cap client
+    decision = CostGate(store, _NullCostCache()).evaluate(ctx)
+    assert decision.outcome == "blocked_cap"
 
 
 # --- client_audits.insert_audit_row -------------------------------------------

@@ -106,6 +106,22 @@ def test_over_client_cap_blocks() -> None:
     assert not store.recorded
 
 
+def test_sub_dollar_spend_accumulates_against_cap() -> None:
+    # The C2 scenario the numeric-column migration (0044) enables: $9.90 already
+    # spent under a $10 cap, so the next $0.15 charge reaches $10.05 > $10 and is
+    # blocked. Before 0044, `spent` was an INTEGER, every sub-dollar charge rounded
+    # to 0, `spent` stayed 0, and this cap could NEVER trip.
+    blocked = _gate(FakeStore(mode="api", budget=(10.0, 9.90))).evaluate(
+        _ctx(estimated_cost=0.15)
+    )
+    assert blocked.outcome == "blocked_cap"
+    # one cent of headroom below the cap still allows the call
+    ok = _gate(FakeStore(mode="api", budget=(10.0, 9.80))).evaluate(
+        _ctx(estimated_cost=0.15)
+    )
+    assert ok.outcome == "call"
+
+
 def test_uncapped_client_passes_cap_check() -> None:
     store = FakeStore(mode="api", budget=(0.0, 5000.0))  # cap 0 = uncapped
     d = _gate(store).evaluate(_ctx())

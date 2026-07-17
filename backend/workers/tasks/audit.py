@@ -27,7 +27,7 @@ from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
-from app.services.cost_gate import GateContext
+from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult, run_audit
@@ -42,6 +42,17 @@ _COST_PROVIDER = "audit_engine"
 _COST_JOB_TYPE = "audit"
 _PUBLIC_COST_JOB_TYPE = "public_audit"
 _ERROR_MAX = 500  # cap the stored error string; it is server-side only
+
+
+class _NullCostCache:
+    """A no-op ``CostCache`` for the audit gate: a Paid audit is a unique live
+    crawl of one URL, never a cache hit. Matches the content/off-page workers."""
+
+    def get(self, key: str) -> Any | None:
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        return None
 
 
 def _dynamic_update(table: str, row_id: str, fields: dict[str, Any]) -> None:
@@ -70,6 +81,7 @@ class AuditStore(Protocol):
 
     def load(self, audit_id: str) -> dict[str, Any] | None: ...
     def update(self, audit_id: str, fields: dict[str, Any]) -> None: ...
+    def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision: ...
     def record_cost(self, row: dict[str, Any], cost: float) -> None: ...
 
 
@@ -91,6 +103,23 @@ class SupabaseAuditStore:
 
     def update(self, audit_id: str, fields: dict[str, Any]) -> None:
         _dynamic_update("audits", audit_id, fields)
+
+    def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
+        """Pre-flight the paid audit spend through the SAME cost gate as every
+        other paid worker (dial -> client cap -> daily spend-stop). The caller
+        does NOT run the engine unless the decision is ``call``. This is the
+        missing gate: previously the worker only LOGGED the cost post-hoc, so a
+        Paid audit - the largest single spend - bypassed the caps entirely."""
+        ctx = GateContext(
+            feature_key=_COST_FEATURE,
+            client_id=row.get("client_id"),
+            provider=_COST_PROVIDER,
+            estimated_cost=cost,
+            job_id=str(row.get("id", "")),
+            job_type=_COST_JOB_TYPE,
+            client_name=row.get("client_name", ""),
+        )
+        return CostGate(PostgresCostStore(), _NullCostCache()).evaluate(ctx)
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         ctx = GateContext(
@@ -172,6 +201,28 @@ def execute_audit(
         return {"audit_id": audit_id, "status": "done", "reason": "already complete"}
 
     tier = row.get("tier", "free")
+
+    # Cost gate (PAID only): a Paid audit is the single largest spend, so it must
+    # clear the pre-flight gate (dial -> client cap -> daily spend-stop) BEFORE
+    # the engine runs. A Free audit makes no paid-provider call, so it is never
+    # gated ($0) - blocking a free run behind a budget cap would be wrong.
+    if tier == "paid":
+        decision = store.evaluate(row, settings.audit_paid_cost_estimate)
+        if not decision.allowed:
+            # off/byhand dial, over the client cap, or the daily stop engaged:
+            # do NOT run the paid crawl. Terminal `failed` with the reason - never
+            # left stuck; the operator lifts the block and re-runs the audit.
+            logger.info("audit_cost_blocked", audit_id=audit_id, outcome=decision.outcome)
+            store.update(
+                audit_id,
+                {
+                    "status": "failed",
+                    "error": f"cost gate: {decision.reason or decision.outcome}"[:_ERROR_MAX],
+                    "finished_at": _utcnow().isoformat(),
+                },
+            )
+            return {"audit_id": audit_id, "status": "blocked", "reason": decision.outcome}
+
     store.update(audit_id, {"status": "running", "started_at": _utcnow().isoformat()})
 
     try:
@@ -279,6 +330,12 @@ class PublicAuditStore:
 
     def update(self, public_audit_id: str, fields: dict[str, Any]) -> None:
         _dynamic_update("public_audits", public_audit_id, fields)
+
+    def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
+        # A public audit is ALWAYS the Free tier ($0): it makes no paid-provider
+        # call, so it is never gated. Present only to satisfy the AuditStore
+        # protocol; ``execute_public_audit`` never calls it (it runs Free-only).
+        return GateDecision("call", cost=0.0)
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         # No tenant: client_id is None (the money-dial handles a global/no-client

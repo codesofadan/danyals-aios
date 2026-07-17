@@ -32,8 +32,24 @@ from app.schemas.audits import (
 )
 from app.services.activity import record_activity
 from app.services.audit_artifacts import LocalArtifactStore, local_store_from_settings
+from app.services.cost_gate import CostGate, GateContext, GateDecision
+from app.services.cost_store import PostgresCostStore
 
 router = APIRouter(tags=["audits"])
+
+# The technical-audit cost identity, shared with workers/tasks/audit.py.
+_TECH_AUDIT_FEATURE = "tech_audit"
+_AUDIT_PROVIDER = "audit_engine"
+
+
+class _NullCostCache:
+    """No-op ``CostCache``: a Paid audit is a unique live crawl, never cached."""
+
+    def get(self, key: str) -> object | None:
+        return None
+
+    def set(self, key: str, value: object) -> None:
+        return None
 
 RunAudits = Annotated[CurrentUser, Depends(require_perm("run_audits"))]
 # All six staff roles hold view_reports; a portal client does NOT (role_has_perm
@@ -93,6 +109,32 @@ def get_audit_enqueuer() -> Callable[[str], None]:
 AuditEnqueuerDep = Annotated[Callable[[str], None], Depends(get_audit_enqueuer)]
 
 
+def get_paid_audit_gate() -> Callable[[str, str, float], GateDecision]:
+    """Dependency: evaluate a prospective PAID audit against the cost gate
+    (overridable in tests).
+
+    Reuses the SAME gate the worker runs (dial -> client cap -> daily spend-stop)
+    so the enqueue pre-check and the worker's run-time gate can never diverge. The
+    gate makes no paid call - it only decides - so a read here is cheap and safe.
+    """
+
+    def _evaluate(client_id: str, client_name: str, estimated_cost: float) -> GateDecision:
+        ctx = GateContext(
+            feature_key=_TECH_AUDIT_FEATURE,
+            client_id=client_id,
+            provider=_AUDIT_PROVIDER,
+            estimated_cost=estimated_cost,
+            job_type="audit",
+            client_name=client_name,
+        )
+        return CostGate(PostgresCostStore(), _NullCostCache()).evaluate(ctx)
+
+    return _evaluate
+
+
+PaidAuditGateDep = Annotated[Callable[[str, str, float], GateDecision], Depends(get_paid_audit_gate)]
+
+
 @router.get("/audits", response_model=list[AuditResponse])
 async def list_audits(repo: AuditsRepoDep, page: PageDep, _user: ViewReports) -> list[AuditResponse]:
     rows = await asyncio.to_thread(repo.list_audits, limit=page.limit, offset=page.offset)
@@ -142,6 +184,8 @@ async def create_audit(
     repo: AuditsRepoDep,
     clients: ClientsRepoDep,
     enqueue: AuditEnqueuerDep,
+    gate: PaidAuditGateDep,
+    settings: SettingsDep,
     actor: RunAudits,
 ) -> AuditResponse:
     # Free tier makes zero paid-provider spend: reject paid audit types up front.
@@ -166,6 +210,19 @@ async def create_audit(
     client = await asyncio.to_thread(clients.get_client, body.client_id)
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    # Cost pre-check (Paid only): reject an over-budget / dial-disabled paid audit
+    # at ENQUEUE so the operator is told immediately, not after the worker marks it
+    # failed. The worker re-checks the same gate at run time (defense in depth).
+    if body.tier == "Paid":
+        decision = await asyncio.to_thread(
+            gate, body.client_id, client.get("name", ""), settings.audit_paid_cost_estimate
+        )
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Paid audit blocked by cost controls: {decision.reason or decision.outcome}",
+            )
 
     row = await asyncio.to_thread(
         repo.insert_audit,

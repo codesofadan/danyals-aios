@@ -72,18 +72,25 @@ DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)
 
 
 class ClientBudgetResponse(BaseModel):
-    """A per-client budget in the frontend ``ClientBudget`` shape."""
+    """A per-client budget in the frontend ``ClientBudget`` shape.
+
+    ``cap``/``spent`` are USD amounts. They are ``float`` (not ``int``) because
+    0044 made the columns ``numeric(10,2)``: month-to-date ``spent`` accumulates
+    sub-dollar charges, so truncating it to whole dollars would misreport how
+    close a client is to its cap. The frontend ``ClientBudget`` types both as
+    ``number``, so this is contract-compatible (the lock checks field names).
+    """
 
     id: str
     cn: str
     tier: str
-    cap: int
-    spent: int
+    cap: float
+    spent: float
     c: str
 
 
 class BudgetUpdate(BaseModel):
-    cap: int = Field(ge=0)
+    cap: float = Field(ge=0)
 
 
 class DialFeatureResponse(BaseModel):

@@ -36,8 +36,10 @@ class CostRepo:
             "id": cid,
             "cn": client.get("name", ""),
             "tier": client.get("tier", "Starter"),
-            "cap": int(budget.get("cap", 0)),
-            "spent": int(budget.get("spent", 0)),
+            # numeric(10,2) since 0044: keep the cents so `spent` is not truncated
+            # to whole dollars in the admin view (a $9.90 spend under a $10 cap).
+            "cap": float(budget.get("cap", 0) or 0),
+            "spent": float(budget.get("spent", 0) or 0),
             "c": client.get("contact_color", "#7B69EE"),
         }
 
@@ -54,7 +56,7 @@ class CostRepo:
             budgets = cur.fetchall()
         return [self._merge_budget(b, clients) for b in budgets]
 
-    def upsert_budget(self, client_id: str, cap: int) -> dict[str, Any] | None:
+    def upsert_budget(self, client_id: str, cap: float) -> dict[str, Any] | None:
         clients = self._client_map()
         if client_id not in clients:
             return None

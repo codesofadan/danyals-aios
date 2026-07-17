@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from app.services.cost_gate import GateDecision
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult
 from workers.tasks.audit import execute_public_audit
 
@@ -30,6 +31,11 @@ class FakeStore:
         self.updates.append(fields)
         if self.row is not None:
             self.row.update(fields)
+
+    def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
+        # Public audits are always Free ($0) and never gated; execute_public_audit
+        # never calls this. Present only to satisfy the AuditStore protocol.
+        return GateDecision("call", cost=0.0)
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         self.costs.append(cost)

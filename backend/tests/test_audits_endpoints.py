@@ -14,7 +14,8 @@ from fastapi import FastAPI
 from app.core.auth import CurrentUser, get_current_user
 from app.db.audits_repo import get_audits_repo
 from app.db.clients_repo import get_clients_repo
-from app.routers.audits import get_audit_enqueuer
+from app.routers.audits import get_audit_enqueuer, get_paid_audit_gate
+from app.services.cost_gate import GateDecision
 
 pytestmark = pytest.mark.unit
 
@@ -95,6 +96,11 @@ def wire(
 ) -> Callable[..., None]:
     app.dependency_overrides[get_audits_repo] = lambda: repo
     app.dependency_overrides[get_audit_enqueuer] = lambda: enqueued.append
+    # Default: the paid-audit cost gate ALLOWS the run. Without this override the
+    # real gate would hit the DB; a specific test overrides it to a block below.
+    app.dependency_overrides[get_paid_audit_gate] = lambda: (
+        lambda client_id, client_name, cost: GateDecision("call", cost=cost)
+    )
 
     def _as(role: str, *, client_exists: bool = True) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
@@ -166,6 +172,43 @@ async def test_paid_tier_allows_paid_types(
     )
     assert resp.status_code == 201
     assert resp.json()["tier"] == "Paid"
+
+
+async def test_paid_audit_over_budget_is_rejected_at_enqueue(
+    app: FastAPI, client: httpx.AsyncClient, enqueued: list[str], wire: Callable[..., None]
+) -> None:
+    # A cost-gate block on a PAID audit must reject at enqueue (402) and NEVER
+    # queue the job - the operator learns immediately, no worker run, no spend.
+    wire("manager")
+    app.dependency_overrides[get_paid_audit_gate] = lambda: (
+        lambda client_id, client_name, cost: GateDecision(
+            "blocked_cap", reason="client budget cap reached"
+        )
+    )
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Paid", "types": ["technical"]},
+    )
+    assert resp.status_code == 402
+    assert "cost controls" in resp.json()["error"]["message"]
+    assert enqueued == []  # never enqueued
+
+
+async def test_free_audit_is_not_cost_gated_at_enqueue(
+    app: FastAPI, client: httpx.AsyncClient, enqueued: list[str], wire: Callable[..., None]
+) -> None:
+    # Even if the gate would block, a Free audit is never pre-checked (it makes no
+    # paid spend): it enqueues normally.
+    wire("manager")
+    app.dependency_overrides[get_paid_audit_gate] = lambda: (
+        lambda client_id, client_name, cost: GateDecision("blocked_cap", reason="ignored on free")
+    )
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": ["technical"]},
+    )
+    assert resp.status_code == 201
+    assert enqueued == [resp.json()["id"]]
 
 
 async def test_create_unknown_client_404(
