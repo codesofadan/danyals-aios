@@ -32,7 +32,7 @@ endpoint that owns the real workflow — exactly the endpoint a skill would call
   < 1024 chars, least-privilege `allowed-tools` with no bare `Bash(*)`, body < 500 lines).
 - every skill that **writes / publishes / spends** sets `disable-model-invocation: true`
   (a human runs it — the money-dial + review gates are not enough on their own).
-- `plugin.json` is valid and all 22 skills are present.
+- `plugin.json` is valid and all 30 skills are present.
 
 ## Keeping it green
 

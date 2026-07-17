@@ -1,7 +1,7 @@
 # Skills Authoring Standard — Danyal AIOS (`aios-seo` plugin)
 
 **The committed standard every AIOS Agent Skill in this plugin follows.** Read this before
-writing or editing any `SKILL.md`. The goal: ~22 skills that read as if **one senior SEO
+writing or editing any `SKILL.md`. The goal: ~30 skills that read as if **one senior SEO
 operator** wrote them — same shape, same voice, same guardrails — so a teammate (or Claude)
 can pick up any skill and know exactly what it does, when it fires, what it calls, and what it
 returns.
