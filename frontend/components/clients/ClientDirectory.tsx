@@ -5,9 +5,17 @@ import {
   clientReports, REPORT_GROUP_COLOR, TIER_COLOR,
   type ClientRecord, type SubStatus, type NewClient,
 } from "@/lib/data";
-import { useStore } from "@/lib/store";
+import {
+  useClients, useAllReportGrants, useCreateClient, useSaveGrants,
+} from "@/lib/hooks/clients";
 import AddClientWizard from "./AddClientWizard";
 import ClientAccessEditor from "./ClientAccessEditor";
+
+// Centred muted state message (loading / error / empty), self-styled so it never
+// depends on a class that might not exist.
+const stateStyle: React.CSSProperties = {
+  padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)",
+};
 
 type Mode = "info" | "portal" | "access";
 
@@ -75,22 +83,28 @@ function ReportChips({ keys }: { keys: string[] }) {
 
 export default function ClientDirectory() {
   const [mode, setMode] = useState<Mode>("info");
-  const { clients, clientGrants: grants, addClient, saveClientGrants } = useStore();
+  const clientsQ = useClients();
+  const clients = useMemo(() => clientsQ.data ?? [], [clientsQ.data]);
+  const { grants } = useAllReportGrants(clients.map((c) => c.id));
+  const createClient = useCreateClient();
+  const saveGrants = useSaveGrants();
   const [addOpen, setAddOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
   const editClient = useMemo(() => clients.find((c) => c.id === editId) ?? null, [clients, editId]);
 
   function handleAddClient(input: NewClient) {
-    addClient(input);
-    setAddOpen(false);
-    setMode("access");
+    createClient.mutate(input, {
+      onSuccess: () => {
+        setAddOpen(false);
+        setMode("access");
+      },
+    });
   }
 
   function handleSaveGrants(reports: string[]) {
     if (!editId) return;
-    saveClientGrants(editId, reports);
-    setEditId(null);
+    saveGrants.mutate({ clientId: editId, reports }, { onSuccess: () => setEditId(null) });
   }
 
   const subtitle =
@@ -137,6 +151,14 @@ export default function ClientDirectory() {
       )}
 
       <div className="cd-wrap">
+        {clientsQ.isLoading ? (
+          <div style={stateStyle}>Loading clients…</div>
+        ) : clientsQ.isError ? (
+          <div style={stateStyle}>Couldn&apos;t load clients — {(clientsQ.error as Error)?.message ?? "try again"}.</div>
+        ) : clients.length === 0 ? (
+          <div style={stateStyle}>No clients yet — add your first client to get started.</div>
+        ) : (
+        <>
         {mode === "info" && (
           <table className="cd-table">
             <thead>
@@ -247,6 +269,8 @@ export default function ClientDirectory() {
               })}
             </tbody>
           </table>
+        )}
+        </>
         )}
       </div>
 

@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
-import { traffic } from "@/lib/data";
+import type { CCTrafficPoint } from "@/lib/hooks/commandCenter";
 
 // Monthly organic sessions — animated SVG area line (anime.js) with hover crosshair.
-export default function TrafficChart() {
+export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
@@ -115,7 +115,7 @@ export default function TrafficChart() {
       svg.removeEventListener("pointermove", onMove);
       svg.removeEventListener("pointerleave", onLeave);
     };
-  }, []);
+  }, [traffic]);
 
   return (
     <section className="card">

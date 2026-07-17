@@ -3,16 +3,17 @@
 import { useState } from "react";
 import {
   TASK_TYPES, TASK_STATUS_META,
-  type Task, type TeamMemberRecord, type TaskType, type TaskPriority, type TaskStatus,
+  type Task, type TeamMemberRecord, type ClientRecord,
+  type TaskType, type TaskPriority, type TaskStatus,
 } from "@/lib/data";
 
 export type NewTask = {
   title: string;
-  client: string;
+  client_id: string;
   type: TaskType;
-  assignee: string;
+  assignee: string; // assignee user id
   priority: TaskPriority;
-  due: string;
+  due: string; // ISO YYYY-MM-DD, or "" when unset
 };
 
 const PRIORITIES: TaskPriority[] = ["urgent", "high", "med", "low"];
@@ -20,28 +21,32 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = { urgent: "Urgent", high: "
 const STATUS_FLOW: TaskStatus[] = ["todo", "in_progress", "review", "done"];
 
 export default function AssignTasks({
-  tasks, members, onAssign, onStatusChange,
+  tasks, members, clients, onAssign, onStatusChange,
 }: {
   tasks: Task[];
   members: TeamMemberRecord[];
+  clients: ClientRecord[];
   onAssign: (t: NewTask) => void;
   onStatusChange: (id: string, s: TaskStatus) => void;
 }) {
   const assignable = members.filter((m) => m.status !== "invited");
   const [title, setTitle] = useState("");
-  const [client, setClient] = useState("");
+  const [clientId, setClientId] = useState("");
   const [type, setType] = useState<TaskType>("Technical Audit");
   const [assignee, setAssignee] = useState(assignable[0]?.id ?? "");
   const [priority, setPriority] = useState<TaskPriority>("med");
   const [due, setDue] = useState("");
 
-  const valid = title.trim().length > 2 && client.trim().length > 1 && assignee && due.trim();
+  // The backend needs a real client_id (it validates the client exists), so the
+  // Client field is a picker over the live roster, not free text.
+  const effectiveClientId = clientId || clients[0]?.id || "";
+  const valid = title.trim().length > 2 && !!effectiveClientId && !!assignee;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!valid) return;
-    onAssign({ title: title.trim(), client: client.trim(), type, assignee, priority, due: due.trim() });
-    setTitle(""); setClient(""); setDue(""); setPriority("med");
+    onAssign({ title: title.trim(), client_id: effectiveClientId, type, assignee, priority, due });
+    setTitle(""); setDue(""); setPriority("med");
   }
 
   const memberById = new Map(members.map((m) => [m.id, m] as const));
@@ -57,7 +62,17 @@ export default function AssignTasks({
         <div className="fld-row">
           <div className="fld">
             <label>Client</label>
-            <input value={client} onChange={(e) => setClient(e.target.value)} placeholder="NorthPeak Dental" />
+            <select
+              value={effectiveClientId}
+              onChange={(e) => setClientId(e.target.value)}
+              disabled={clients.length === 0}
+            >
+              {clients.length === 0 ? (
+                <option value="">No clients yet</option>
+              ) : (
+                clients.map((c) => <option key={c.id} value={c.id}>{c.cn}</option>)
+              )}
+            </select>
           </div>
           <div className="fld">
             <label>Type</label>
@@ -86,8 +101,8 @@ export default function AssignTasks({
             </div>
           </div>
           <div className="fld">
-            <label>Due</label>
-            <input value={due} onChange={(e) => setDue(e.target.value)} placeholder="Jul 16" />
+            <label>Due <span style={{ color: "var(--muted)" }}>(optional)</span></label>
+            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </div>
         </div>
         <button type="submit" className="primary-btn wide" disabled={!valid}>

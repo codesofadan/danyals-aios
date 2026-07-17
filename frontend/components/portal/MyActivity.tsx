@@ -4,7 +4,7 @@ import {
   ACTIVITY_META, TASK_STATUS_META, SERIES,
   type Task, type TeamMemberRecord,
 } from "@/lib/data";
-import { useStore } from "@/lib/store";
+import { useActivity } from "@/lib/hooks/portal";
 
 // Verb + icon for each task state, from the member's point of view.
 const STATE_FEED: Record<Task["status"], { verb: string; icon: string; c: string }> = {
@@ -15,8 +15,8 @@ const STATE_FEED: Record<Task["status"], { verb: string; icon: string; c: string
 };
 
 export default function MyActivity({ me, myTasks }: { me: TeamMemberRecord; myTasks: Task[] }) {
-  const { activity } = useStore();
-  const myEvents = activity.filter((a) => a.actorInit === me.init);
+  const activityQ = useActivity();
+  const myEvents = (activityQ.data ?? []).filter((a) => a.actorInit === me.init);
 
   return (
     <div className="panel-in">

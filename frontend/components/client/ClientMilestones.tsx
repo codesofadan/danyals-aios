@@ -3,16 +3,15 @@
 import {
   LIFECYCLE, STAGE_STATUS_META, HEALTH_META, projectProgress, currentStage,
 } from "@/lib/milestones";
-import { projectForClient } from "@/lib/client";
-import { useClient } from "./ClientContext";
+import { useClientMilestones } from "@/lib/hooks/portalClient";
 import ClientHeader from "./ClientHeader";
 
 // The client's project timeline — the same milestone stages the agency
 // auto-advances as audits complete and content publishes. Read-only for
 // the client: they track progress, they don't edit it.
 export default function ClientMilestones() {
-  const { client } = useClient();
-  const project = projectForClient(client.cn);
+  const projectQ = useClientMilestones();
+  const project = projectQ.data;
 
   return (
     <div className="tw cl">
@@ -30,7 +29,12 @@ export default function ClientMilestones() {
         }
       />
 
-      {!project ? (
+      {projectQ.isLoading ? (
+        <div className="pt-empty">
+          <span className="material-symbols-rounded spin">progress_activity</span>
+          <div className="pt-empty-t">Loading your timeline…</div>
+        </div>
+      ) : !project ? (
         <div className="pt-empty">
           <span className="material-symbols-rounded">flag</span>
           <div className="pt-empty-t">No milestones yet</div>

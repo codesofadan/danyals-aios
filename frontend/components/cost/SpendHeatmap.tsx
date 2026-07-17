@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import {
-  costLog_seed, PROVIDERS, JOB_TYPE_META, usd,
-  type Provider, type JobType,
+  PROVIDERS, JOB_TYPE_META, usd,
+  type Provider, type JobType, type CostEntry,
 } from "@/lib/cost";
 
 // Spend heatmap — provider (rows) × job type (columns), cell shaded by
@@ -17,7 +17,7 @@ const JOB_COLS: JobType[] = ["audit", "content", "backlinks"];
 
 type Cell = { spend: number; calls: number };
 
-export default function SpendHeatmap() {
+export default function SpendHeatmap({ log }: { log: CostEntry[] }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
@@ -28,7 +28,7 @@ export default function SpendHeatmap() {
   for (const p of PROVIDER_ROWS) {
     for (const j of JOB_COLS) matrix[`${p}|${j}`] = { spend: 0, calls: 0 };
   }
-  for (const e of costLog_seed) {
+  for (const e of log) {
     const cell = matrix[`${e.provider}|${e.type}`];
     if (!cell) continue;
     cell.spend += e.cost;

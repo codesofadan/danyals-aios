@@ -1,6 +1,10 @@
-import { sources } from "@/lib/policy";
+"use client";
+
+import { useSources } from "@/lib/hooks/policy";
 
 export default function SourceMonitor() {
+  const sourcesQ = useSources();
+  const sources = sourcesQ.data ?? [];
   return (
     <section className="card pr-mon">
       <div className="card-h">
@@ -17,7 +21,14 @@ export default function SourceMonitor() {
       </div>
 
       <div className="pr-sources">
-        {sources.map((s) => (
+        {sourcesQ.isLoading && <div className="pr-empty">Loading sources…</div>}
+        {sourcesQ.isError && !sourcesQ.isLoading && (
+          <div className="pr-empty">Couldn&apos;t load sources — {(sourcesQ.error as Error)?.message ?? "try again"}.</div>
+        )}
+        {!sourcesQ.isLoading && !sourcesQ.isError && sources.length === 0 && (
+          <div className="pr-empty">No sources are being watched yet.</div>
+        )}
+        {!sourcesQ.isLoading && !sourcesQ.isError && sources.map((s) => (
           <div className="pr-src" key={s.id}>
             <span className="pr-src-ic">
               <span className="material-symbols-rounded">{s.icon}</span>

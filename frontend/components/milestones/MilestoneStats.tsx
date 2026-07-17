@@ -2,26 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import { projects, projectProgress } from "@/lib/milestones";
-
-// Derived from the seeded projects so the tiles stay honest.
-const active = projects.filter((p) => p.health !== "completed").length;
-const completedStages = projects.reduce((s, p) => s + p.stages.filter((st) => st.status === "completed").length, 0);
-const onTrack = projects.filter((p) => p.health === "on_track" || p.health === "completed").length;
-const atRisk = projects.filter((p) => p.health === "at_risk").length;
-const avgPct = Math.round(projects.reduce((s, p) => s + projectProgress(p), 0) / projects.length);
+import { projectProgress } from "@/lib/milestones";
+import { useMilestones } from "@/lib/hooks/milestones";
 
 type Tile = {
   icon: string; label: string; value: number; unit?: string; suffix?: string;
   delta: string; deltaDir: "up" | "down"; note: string; hero?: boolean;
 };
-
-const TILES: Tile[] = [
-  { icon: "flag", label: "Active projects", value: active, delta: "1", deltaDir: "up", note: `of ${projects.length} tracked`, hero: true },
-  { icon: "task_alt", label: "Milestones completed", value: completedStages, delta: "6", deltaDir: "up", note: "this month, auto-advanced" },
-  { icon: "monitoring", label: "On-track vs at-risk", value: onTrack, suffix: ` / ${atRisk}`, delta: `${atRisk}`, deltaDir: atRisk > 1 ? "down" : "up", note: "at-risk need attention" },
-  { icon: "donut_large", label: "Avg. completion", value: avgPct, unit: "%", delta: "5%", deltaDir: "up", note: "across all projects" },
-];
 
 function useCountUp(target: number) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -54,6 +41,24 @@ function Value({ value, unit, suffix }: { value: number; unit?: string; suffix?:
 }
 
 export default function MilestoneStats() {
+  const projects = useMilestones().data ?? [];
+
+  // Derived from the live projects so the tiles stay honest.
+  const active = projects.filter((p) => p.health !== "completed").length;
+  const completedStages = projects.reduce((s, p) => s + p.stages.filter((st) => st.status === "completed").length, 0);
+  const onTrack = projects.filter((p) => p.health === "on_track" || p.health === "completed").length;
+  const atRisk = projects.filter((p) => p.health === "at_risk").length;
+  const avgPct = projects.length
+    ? Math.round(projects.reduce((s, p) => s + projectProgress(p), 0) / projects.length)
+    : 0;
+
+  const TILES: Tile[] = [
+    { icon: "flag", label: "Active projects", value: active, delta: "1", deltaDir: "up", note: `of ${projects.length} tracked`, hero: true },
+    { icon: "task_alt", label: "Milestones completed", value: completedStages, delta: "6", deltaDir: "up", note: "this month, auto-advanced" },
+    { icon: "monitoring", label: "On-track vs at-risk", value: onTrack, suffix: ` / ${atRisk}`, delta: `${atRisk}`, deltaDir: atRisk > 1 ? "down" : "up", note: "at-risk need attention" },
+    { icon: "donut_large", label: "Avg. completion", value: avgPct, unit: "%", delta: "5%", deltaDir: "up", note: "across all projects" },
+  ];
+
   return (
     <section className="kpis">
       {TILES.map((t) => (

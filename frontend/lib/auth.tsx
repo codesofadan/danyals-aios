@@ -1,20 +1,20 @@
 "use client";
 
 // ============================================================
-// AIOS · demo authentication
-// A single login page is the front door: every dashboard (admin,
-// team portal, client) sits behind it. The operator picks a role
-// (Admin / Team / Client) and signs in; credentials are validated
-// against the shared store so a client or team member the admin
-// just created can sign straight in with the credentials issued to
-// them. The session is persisted to localStorage so a refresh keeps
-// you signed in. This is the seam the real FastAPI auth service
-// plugs into — swap validateLogin for a POST /auth/login call.
+// AIOS · authentication (real, token-backed)
+// One login page is the front door to all three portals. Login is now a real
+// 2-step call against FastAPI:
+//   1. POST /auth/login {username,password} → {access_token, role, portal}
+//      (the token is persisted by lib/api; the SERVER decides the portal)
+//   2. hydrate the display name — GET /me (admin/team) or GET /portal/dashboard
+//      (client) — since the token itself carries no name.
+// The bearer token in localStorage is the real credential; this Session is a
+// convenience snapshot for chrome + routing. The security boundary is the
+// backend (RLS + require_perm), NOT this provider or AuthGuard.
 // ============================================================
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { operatorProfile, teamCredentials } from "@/lib/data";
-import { useStore } from "@/lib/store";
+import { apiFetch, api, setToken } from "@/lib/api";
 
 export type Role = "admin" | "team" | "client";
 
@@ -24,31 +24,32 @@ export const ROLE_META: Record<Role, { label: string; icon: string; home: string
   client: { label: "Client", icon: "insights", home: "/client", hint: "Your reports, graphs, milestones & requests" },
 };
 
-// The agency super-admin credential — grounded in the seeded operator.
-export const ADMIN_CREDENTIAL = {
-  username: operatorProfile.email,
-  password: teamCredentials[operatorProfile.id]?.pass ?? "Xg!Danyal#2026",
-};
-
 export type Session = { role: Role; id: string; name: string };
+
+export type LoginResult = { ok: true; role: Role } | { ok: false; error: string };
 
 type AuthState = {
   session: Session | null;
   ready: boolean; // false until the persisted session has hydrated
-  login: (role: Role, username: string, password: string) => { ok: boolean; error?: string };
+  login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => void;
 };
 
 const Ctx = createContext<AuthState | null>(null);
 const SESSION_KEY = "aios-session-v1";
 
-const norm = (s: string) => s.trim().toLowerCase();
+// The server's login + identity shapes (portal ∈ admin/team/client maps 1:1 to Role).
+type LoginResponse = { access_token: string; role: string; portal: Role };
+type MeResponse = { id: string; name: string };
+type DashboardResponse = { client: string };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { members, clients, teamLogins } = useStore();
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
 
+  // Hydrate the last session snapshot instantly (no network). The bearer token
+  // is validated lazily on the first real API call — a stale token 401s and
+  // lib/api bounces to /login, so the snapshot never outlives the token.
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(SESSION_KEY);
@@ -69,42 +70,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const login = useCallback<AuthState["login"]>((role, username, password) => {
-    const u = norm(username);
-    if (!u || !password) return { ok: false, error: "Enter both a username and password." };
-
-    if (role === "admin") {
-      if (u === norm(ADMIN_CREDENTIAL.username) && password === ADMIN_CREDENTIAL.password) {
-        persist({ role, id: operatorProfile.id, name: operatorProfile.name });
-        return { ok: true };
+  const login = useCallback<AuthState["login"]>(
+    async (username, password) => {
+      let res: LoginResponse;
+      try {
+        // noAuthRedirect: a wrong password is a 401 we want to SHOW, not a
+        // session-expiry redirect.
+        res = await apiFetch<LoginResponse>("/auth/login", {
+          method: "POST",
+          body: { username, password },
+          noAuthRedirect: true,
+        });
+      } catch {
+        // The backend returns ONE generic 401 for wrong-password AND unknown-user
+        // by design (no account-enumeration oracle), so we surface one message.
+        return { ok: false, error: "Invalid credentials." };
       }
-      return { ok: false, error: "Invalid admin credentials." };
-    }
 
-    if (role === "team") {
-      const match = members.find((m) => {
-        const cred = teamLogins[m.id];
-        if (!cred) return false;
-        const matchesUser = norm(m.email) === u || norm(cred.username) === u;
-        return matchesUser && cred.pass === password;
-      });
-      if (match) {
-        persist({ role, id: match.id, name: match.name });
-        return { ok: true };
+      setToken(res.access_token);
+      const role = res.portal;
+
+      // Step 2: hydrate the display name (the token carries none).
+      let name = username;
+      let id = "";
+      try {
+        if (role === "client") {
+          const dash = await api.get<DashboardResponse>("/portal/dashboard");
+          name = dash.client || username;
+        } else {
+          const me = await api.get<MeResponse>("/me");
+          name = me.name || username;
+          id = me.id || "";
+        }
+      } catch {
+        /* name hydration is best-effort; the token is already valid */
       }
-      return { ok: false, error: "No team member matches those credentials." };
-    }
 
-    // client
-    const match = clients.find((c) => norm(c.portal.admin) === u && c.portal.pass === password);
-    if (match) {
-      persist({ role, id: match.id, name: match.cn });
-      return { ok: true };
-    }
-    return { ok: false, error: "No client account matches those credentials." };
-  }, [members, clients, teamLogins, persist]);
+      persist({ role, id, name });
+      return { ok: true, role };
+    },
+    [persist],
+  );
 
-  const logout = useCallback(() => persist(null), [persist]);
+  const logout = useCallback(() => {
+    setToken(null);
+    persist(null);
+  }, [persist]);
 
   const value = useMemo<AuthState>(() => ({ session, ready, login, logout }), [session, ready, login, logout]);
 

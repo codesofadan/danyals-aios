@@ -10,15 +10,21 @@ import LockableChart from "./LockableChart";
 // play the unlock animation and reveal live, monthly data (à la Search
 // Console / Analytics / GMB). Cards that were never granted stay locked.
 export default function ClientDashboard() {
-  const { grants, unlocked, isGranted } = useClient();
+  const { grants, unlocked, isGranted, reportViz } = useClient();
 
   const total = dashboardReports.length;
   const grantedCount = grants.size;
   const unlockedCount = [...unlocked].filter((k) => isGranted(k)).length;
 
+  // Keep the static report CATALOG (label/icon/group/desc) but draw each card's
+  // live data from the granted viz the backend sent. An ungranted card stays
+  // locked and never renders its viz, so its (unused) seed fallback is never
+  // surfaced.
+  const cards = dashboardReports.map((r) => ({ ...r, viz: reportViz[r.key] ?? r.viz }));
+
   // Granted-but-locked cards float to the top so the client sees what's
   // ready to open first; fully-locked (upsell) cards sink to the bottom.
-  const ordered = [...dashboardReports].sort((a, b) => rank(isGranted(a.key)) - rank(isGranted(b.key)));
+  const ordered = [...cards].sort((a, b) => rank(isGranted(a.key)) - rank(isGranted(b.key)));
 
   return (
     <div className="tw cl">

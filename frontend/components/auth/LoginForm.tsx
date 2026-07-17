@@ -2,36 +2,44 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth, ROLE_META, type Role } from "@/lib/auth";
+import { useAuth, ROLE_META } from "@/lib/auth";
 import { useLoader } from "@/components/loader/LoaderProvider";
-
-const ROLES: Role[] = ["admin", "team", "client"];
 
 export default function LoginForm() {
   const { session, ready, login } = useAuth();
   const router = useRouter();
   const loader = useLoader();
-  const [role, setRole] = useState<Role>("admin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expired, setExpired] = useState(false);
+
+  // Bounced here by a 401 (expired/absent token)? Read the flag client-side
+  // (avoids useSearchParams' Suspense requirement on this route).
+  useEffect(() => {
+    setExpired(new URLSearchParams(window.location.search).get("expired") === "1");
+  }, []);
 
   // Already signed in? Skip the form and go to that role's dashboard.
   useEffect(() => {
     if (ready && session) router.replace(ROLE_META[session.role].home);
   }, [ready, session, router]);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!username.trim() || !password) {
+      setError("Enter both your username and password.");
+      return;
+    }
     setBusy(true);
-    const res = login(role, username, password);
+    const res = await login(username.trim(), password);
     if (res.ok) {
       loader.navigate("Opening your workspace");
-      router.replace(ROLE_META[role].home);
+      router.replace(ROLE_META[res.role].home); // the SERVER decides the portal
     } else {
-      setError(res.error ?? "Sign-in failed.");
+      setError(res.error);
       setBusy(false);
     }
   }
@@ -48,34 +56,18 @@ export default function LoginForm() {
         </div>
 
         <h1 className="login-h">Sign in to AIOS</h1>
-        <p className="login-sub">Choose how you&apos;re signing in, then enter the credentials your agency issued you.</p>
+        <p className="login-sub">Enter the credentials your agency issued you — your role opens the right workspace.</p>
 
         <form className="login-form" onSubmit={submit}>
-          <div className="login-fld">
-            <span>Sign in as</span>
-            <div className="login-roles" role="radiogroup" aria-label="Role">
-              {ROLES.map((r) => {
-                const m = ROLE_META[r];
-                return (
-                  <button
-                    type="button"
-                    key={r}
-                    role="radio"
-                    aria-checked={role === r}
-                    className={`login-role${role === r ? " on" : ""}`}
-                    onClick={() => { setRole(r); setError(null); }}
-                  >
-                    <span className="material-symbols-rounded">{m.icon}</span>
-                    {m.label}
-                  </button>
-                );
-              })}
+          {expired && !error && (
+            <div className="login-error" role="status">
+              <span className="material-symbols-rounded">schedule</span>
+              Your session expired — please sign in again.
             </div>
-            <div className="login-role-hint">{ROLE_META[role].hint}</div>
-          </div>
+          )}
 
           <label className="login-fld">
-            <span>{role === "admin" ? "Admin email" : role === "team" ? "Work email" : "Portal login"}</span>
+            <span>Email or username</span>
             <div className="login-input">
               <span className="material-symbols-rounded">mail</span>
               <input
@@ -83,7 +75,7 @@ export default function LoginForm() {
                 name="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder={role === "client" ? "admin@yourcompany.com" : "you@xegents.ai"}
+                placeholder="you@xegents.ai"
                 autoComplete="username"
                 autoFocus
               />
@@ -114,7 +106,7 @@ export default function LoginForm() {
 
           <button type="submit" className="primary-btn wide" disabled={busy}>
             <span className="material-symbols-rounded">login</span>
-            Sign in as {ROLE_META[role].label}
+            {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
 

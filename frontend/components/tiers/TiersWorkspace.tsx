@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
-  tierClients, TIER_BY_KEY, BASE_COST,
-  type TierClient, type TierKey,
+  TIER_BY_KEY, BASE_COST,
+  type TierKey,
 } from "@/lib/tiers";
+import { useTierClients, useSetDeliveryTier } from "@/lib/hooks/tiers";
 import TierCards from "./TierCards";
 import ClientAssignment from "./ClientAssignment";
 import FeatureMatrix from "./FeatureMatrix";
@@ -16,7 +17,9 @@ const KPI: { key: TierKey; label: string; icon: string; c: string }[] = [
 ];
 
 export default function TiersWorkspace() {
-  const [clients, setClients] = useState<TierClient[]>(tierClients);
+  const clientsQ = useTierClients();
+  const setDeliveryTier = useSetDeliveryTier();
+  const clients = clientsQ.data ?? [];
 
   const stats = useMemo(() => {
     const counts: Record<TierKey, number> = { free: 0, semi: 0, fully: 0 };
@@ -28,8 +31,10 @@ export default function TiersWorkspace() {
     return { counts, spend };
   }, [clients]);
 
+  // Re-dial a client's preset on the backend; the assignment list refetches on
+  // success and the KPI counts / spend recompute from the fresh data.
   function handleSwitch(id: string, tier: TierKey) {
-    setClients((prev) => prev.map((c) => (c.id === id ? { ...c, tier } : c)));
+    setDeliveryTier.mutate({ clientId: id, tier });
   }
 
   return (
@@ -43,7 +48,7 @@ export default function TiersWorkspace() {
             <div className="val">{stats.counts[k.key]}</div>
             <div className="sub">
               <span className="tr-swatch" style={{ background: k.c }} />
-              {Math.round((stats.counts[k.key] / clients.length) * 100)}% of book
+              {clients.length ? Math.round((stats.counts[k.key] / clients.length) * 100) : 0}% of book
             </div>
           </div>
         ))}
@@ -83,7 +88,22 @@ export default function TiersWorkspace() {
             <span className="pill-tag"><span className="material-symbols-rounded">group</span>{clients.length} clients</span>
           </div>
         </div>
-        <ClientAssignment clients={clients} onSwitch={handleSwitch} />
+        {clientsQ.isLoading ? (
+          <div className="panel-hint" style={{ padding: "18px 20px" }}>Loading clients…</div>
+        ) : clientsQ.isError ? (
+          <div className="panel-hint" role="alert" style={{ padding: "18px 20px", color: "var(--warn, #d9822b)" }}>
+            Couldn&apos;t load clients — {(clientsQ.error as Error)?.message ?? "try again"}.
+          </div>
+        ) : clients.length === 0 ? (
+          <div className="panel-hint" style={{ padding: "18px 20px" }}>No clients yet.</div>
+        ) : (
+          <ClientAssignment clients={clients} onSwitch={handleSwitch} />
+        )}
+        {setDeliveryTier.isError && (
+          <div className="panel-hint" role="alert" style={{ padding: "0 20px 16px", color: "var(--warn, #d9822b)" }}>
+            Couldn&apos;t switch tier — {(setDeliveryTier.error as Error)?.message ?? "try again"}.
+          </div>
+        )}
       </section>
 
       {/* Feature-area × tier matrix */}

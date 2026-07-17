@@ -14,13 +14,6 @@ type Tile = {
   hero?: boolean;
 };
 
-const TILES: Tile[] = [
-  { icon: "fact_check", label: "Free audits this month", value: 1284, delta: "18.2%", deltaDir: "up", note: "vs last month", hero: true },
-  { icon: "diversity_3", label: "Active clients", value: 42, delta: "5", deltaDir: "up", note: "onboarded this week" },
-  { icon: "bolt", label: "Team utilization", value: 87, unit: "%", delta: "4.1%", deltaDir: "up", note: "across 5 specialists" },
-  { icon: "travel_explore", label: "Monthly organic traffic", value: 318, unit: "K", delta: "12.6%", deltaDir: "up", note: "sessions MoM" },
-];
-
 function useCountUp(target: number) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -53,10 +46,10 @@ function Value({ value, unit }: { value: number; unit?: string }) {
   );
 }
 
-export default function StatTiles() {
+export default function StatTiles({ tiles }: { tiles: Tile[] }) {
   return (
     <section className="kpis">
-      {TILES.map((t) => (
+      {tiles.map((t) => (
         <div key={t.label} className={t.hero ? "kpi hero" : "kpi"}>
           <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
           <div className="lab">{t.label}</div>

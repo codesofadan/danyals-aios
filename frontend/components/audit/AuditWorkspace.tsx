@@ -1,16 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  audits as seedAudits,
   auditTypes,
-  clientNames,
   TYPE_LABEL,
-  type AuditRow,
   type AuditTypeKey,
   type Tier,
   type JobStatus,
 } from "@/lib/audit";
+import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
+import { useClients } from "@/lib/hooks/clients";
 import AuditStats from "./AuditStats";
 import AuditCoverage from "./AuditCoverage";
 import AuditScoreHistogram from "./AuditScoreHistogram";
@@ -29,73 +28,52 @@ function scoreClass(score: number) {
 }
 
 export default function AuditWorkspace() {
-  const [rows, setRows] = useState<AuditRow[]>(seedAudits);
+  const auditsQ = useAudits(); // live: GET /audits, polls while a job is in flight
+  const statsQ = useAuditStats();
+  const clientsQ = useClients();
+  const createAudit = useCreateAudit();
+
+  const rows = auditsQ.data ?? [];
+  const clients = clientsQ.data ?? [];
 
   // Run-new-audit form state
   const [url, setUrl] = useState("");
-  const [client, setClient] = useState(clientNames[0]);
+  const [clientId, setClientId] = useState("");
   const [tier, setTier] = useState<Tier>("Paid");
   const [picked, setPicked] = useState<AuditTypeKey[]>(["technical", "actionable"]);
+  const effectiveClientId = clientId || clients[0]?.id || "";
 
   // Table filters
   const [statusFilter, setStatusFilter] = useState<"all" | JobStatus>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | AuditTypeKey>("all");
 
-  const nextId = useMemo(() => {
-    const max = seedAudits.reduce((m, r) => Math.max(m, Number(r.id.split("-")[1]) || 0), 0);
-    let n = max;
-    return () => `aud-${++n}`;
-  }, []);
-
   const toggleType = (k: AuditTypeKey) =>
     setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
 
-  const canRun = url.trim().length > 3 && picked.length > 0;
+  const canRun =
+    url.trim().length > 3 && picked.length > 0 && !!effectiveClientId && !createAudit.isPending;
 
   const runAudit = () => {
     if (!canRun) return;
     const clean = url.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    const row: AuditRow = {
-      id: nextId(),
-      client,
-      url: clean,
-      types: picked,
-      tier,
-      status: "queued",
-      score: null,
-      runtime: "—",
-      when: "Just now",
-      pdf: false,
-      json: false,
-    };
-    setRows((r) => [row, ...r]);
-    setUrl("");
-    // Optimistic lifecycle: queued → running → done.
-    window.setTimeout(() => {
-      setRows((r) => r.map((x) => (x.id === row.id ? { ...x, status: "running" } : x)));
-    }, 1400);
-    window.setTimeout(() => {
-      setRows((r) =>
-        r.map((x) =>
-          x.id === row.id
-            ? { ...x, status: "done", score: 70 + Math.floor(Math.random() * 26), runtime: "6m 04s", pdf: true, json: true }
-            : x
-        )
-      );
-    }, 4200);
+    createAudit.mutate(
+      { client_id: effectiveClientId, url: clean, tier, types: picked },
+      { onSuccess: () => setUrl("") },
+    );
   };
 
   const shown = rows.filter(
     (r) =>
       (statusFilter === "all" || r.status === statusFilter) &&
-      (typeFilter === "all" || r.types.includes(typeFilter))
+      (typeFilter === "all" || r.types.includes(typeFilter)),
   );
 
   const runningCount = rows.filter((r) => r.status === "running").length;
+  const createErr = createAudit.error instanceof Error ? createAudit.error.message : null;
 
   return (
     <>
-      <AuditStats runningNow={runningCount} thisMonth={128 + (rows.length - seedAudits.length)} />
+      <AuditStats runningNow={runningCount} thisMonth={statsQ.data?.thisMonth ?? rows.length} />
 
       <div className="row">
         {/* Audit queue / history */}
@@ -140,7 +118,13 @@ export default function AuditWorkspace() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r) => {
+                {auditsQ.isLoading && (
+                  <tr><td colSpan={8} className="au-empty">Loading audits…</td></tr>
+                )}
+                {auditsQ.isError && !auditsQ.isLoading && (
+                  <tr><td colSpan={8} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
+                )}
+                {!auditsQ.isLoading && !auditsQ.isError && shown.map((r) => {
                   const sm = STATUS_META[r.status];
                   return (
                     <tr key={r.id}>
@@ -184,7 +168,7 @@ export default function AuditWorkspace() {
                     </tr>
                   );
                 })}
-                {shown.length === 0 && (
+                {!auditsQ.isLoading && !auditsQ.isError && shown.length === 0 && (
                   <tr><td colSpan={8} className="au-empty">No audits match these filters.</td></tr>
                 )}
               </tbody>
@@ -213,8 +197,16 @@ export default function AuditWorkspace() {
 
           <div className="fld">
             <label>Client</label>
-            <select value={client} onChange={(e) => setClient(e.target.value)}>
-              {clientNames.map((c) => <option key={c}>{c}</option>)}
+            <select
+              value={effectiveClientId}
+              onChange={(e) => setClientId(e.target.value)}
+              disabled={clients.length === 0}
+            >
+              {clients.length === 0 ? (
+                <option value="">{clientsQ.isLoading ? "Loading clients…" : "No clients yet"}</option>
+              ) : (
+                clients.map((c) => <option key={c.id} value={c.id}>{c.cn}</option>)
+              )}
             </select>
           </div>
 
@@ -256,8 +248,14 @@ export default function AuditWorkspace() {
 
           <button className="primary-btn wide" onClick={runAudit} disabled={!canRun}>
             <span className="material-symbols-rounded">rocket_launch</span>
-            Run audit
+            {createAudit.isPending ? "Starting…" : "Run audit"}
           </button>
+          {createErr && (
+            <div className="au-run-note" role="alert" style={{ color: "var(--warn, #d9822b)" }}>
+              <span className="material-symbols-rounded">error</span>
+              {createErr}
+            </div>
+          )}
           <div className="au-run-note">
             <span className="material-symbols-rounded">auto_awesome</span>
             On completion: PDF + JSON + scores, the milestone auto-advances and the client is notified.

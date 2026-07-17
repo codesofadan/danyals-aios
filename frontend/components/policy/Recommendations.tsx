@@ -1,10 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  recommendations as seed, MODULE_META, REC_OPEN,
-  type Recommendation, type RecStatus,
-} from "@/lib/policy";
+import { MODULE_META, REC_OPEN, type RecStatus } from "@/lib/policy";
+import { useRecommendations, useTransitionRecommendation, type RecAction } from "@/lib/hooks/policy";
 
 const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string }> = {
   new: { label: "New", cls: "warn", icon: "fiber_new" },
@@ -21,12 +19,12 @@ const FILTERS: { key: RecStatus | "open" | "all"; label: string }[] = [
 ];
 
 export default function Recommendations() {
-  const [recs, setRecs] = useState<Recommendation[]>(seed);
+  const recsQ = useRecommendations();
+  const transition = useTransitionRecommendation();
+  const recs = recsQ.data ?? [];
   const [filter, setFilter] = useState<RecStatus | "open" | "all">("open");
 
-  function setStatus(id: string, status: RecStatus) {
-    setRecs((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-  }
+  const act = (id: string, action: RecAction) => transition.mutate({ id, action });
 
   const openCount = recs.filter((r) => REC_OPEN.includes(r.status)).length;
 
@@ -61,7 +59,11 @@ export default function Recommendations() {
       </div>
 
       <div className="pr-recs">
-        {rows.map((r) => {
+        {recsQ.isLoading && <div className="pr-empty pr-recs-empty">Loading recommendations…</div>}
+        {recsQ.isError && !recsQ.isLoading && (
+          <div className="pr-empty pr-recs-empty">Couldn&apos;t load recommendations — {(recsQ.error as Error)?.message ?? "try again"}.</div>
+        )}
+        {!recsQ.isLoading && !recsQ.isError && rows.map((r) => {
           const mod = MODULE_META[r.target];
           const st = STATUS_META[r.status];
           const settled = r.status === "applied" || r.status === "dismissed";
@@ -97,22 +99,22 @@ export default function Recommendations() {
               <div className="pr-rec-btns">
                 <button
                   className={`pr-act ack ${r.status === "acknowledged" ? "on" : ""}`}
-                  onClick={() => setStatus(r.id, "acknowledged")}
-                  disabled={r.status === "acknowledged"}
+                  onClick={() => act(r.id, "acknowledge")}
+                  disabled={r.status === "acknowledged" || transition.isPending}
                 >
                   <span className="material-symbols-rounded">visibility</span>Acknowledge
                 </button>
                 <button
                   className={`pr-act apply ${r.status === "applied" ? "on" : ""}`}
-                  onClick={() => setStatus(r.id, "applied")}
-                  disabled={r.status === "applied"}
+                  onClick={() => act(r.id, "apply")}
+                  disabled={r.status === "applied" || transition.isPending}
                 >
                   <span className="material-symbols-rounded">check_circle</span>Apply
                 </button>
                 <button
                   className={`pr-act dismiss ${r.status === "dismissed" ? "on" : ""}`}
-                  onClick={() => setStatus(r.id, "dismissed")}
-                  disabled={r.status === "dismissed"}
+                  onClick={() => act(r.id, "dismiss")}
+                  disabled={r.status === "dismissed" || transition.isPending}
                 >
                   <span className="material-symbols-rounded">cancel</span>Dismiss
                 </button>
@@ -120,7 +122,9 @@ export default function Recommendations() {
             </article>
           );
         })}
-        {rows.length === 0 && <div className="pr-empty pr-recs-empty">No {filter} recommendations.</div>}
+        {!recsQ.isLoading && !recsQ.isError && rows.length === 0 && (
+          <div className="pr-empty pr-recs-empty">No {filter} recommendations.</div>
+        )}
       </div>
     </section>
   );

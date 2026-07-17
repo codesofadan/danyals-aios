@@ -1,6 +1,11 @@
-import { changeEvents, SEV_META } from "@/lib/policy";
+"use client";
+
+import { SEV_META } from "@/lib/policy";
+import { useChanges } from "@/lib/hooks/policy";
 
 export default function ChangeFeed() {
+  const changesQ = useChanges();
+  const changeEvents = changesQ.data ?? [];
   return (
     <section className="card pr-feed">
       <div className="card-h">
@@ -14,7 +19,14 @@ export default function ChangeFeed() {
       </div>
 
       <div className="pr-events">
-        {changeEvents.map((e) => {
+        {changesQ.isLoading && <div className="pr-empty">Loading change events…</div>}
+        {changesQ.isError && !changesQ.isLoading && (
+          <div className="pr-empty">Couldn&apos;t load change events — {(changesQ.error as Error)?.message ?? "try again"}.</div>
+        )}
+        {!changesQ.isLoading && !changesQ.isError && changeEvents.length === 0 && (
+          <div className="pr-empty">No changes detected yet.</div>
+        )}
+        {!changesQ.isLoading && !changesQ.isError && changeEvents.map((e) => {
           const sev = SEV_META[e.severity];
           return (
             <div className="pr-event" key={e.id}>

@@ -3,6 +3,7 @@ import { Bricolage_Grotesque } from "next/font/google";
 import "./globals.css";
 import { AiosStoreProvider } from "@/lib/store";
 import { AuthProvider } from "@/lib/auth";
+import { QueryProvider } from "@/lib/query";
 import { LoaderProvider } from "@/components/loader/LoaderProvider";
 import DemoSwitcher from "@/components/DemoSwitcher";
 import ClickFX from "@/components/ClickFX";
@@ -38,15 +39,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="glow a" />
         <div className="glow b" />
-        <AiosStoreProvider>
-          <AuthProvider>
-            <LoaderProvider>
-              {children}
-              <DemoSwitcher />
-              <ClickFX />
-            </LoaderProvider>
-          </AuthProvider>
-        </AiosStoreProvider>
+        {/* Auth owns the bearer token (outermost); Query serves server data;
+            the legacy demo store stays nested for screens not yet swapped. */}
+        <AuthProvider>
+          <QueryProvider>
+            <AiosStoreProvider>
+              <LoaderProvider>
+                {children}
+                <DemoSwitcher />
+                <ClickFX />
+              </LoaderProvider>
+            </AiosStoreProvider>
+          </QueryProvider>
+        </AuthProvider>
       </body>
     </html>
   );

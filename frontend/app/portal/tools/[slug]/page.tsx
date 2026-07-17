@@ -5,13 +5,11 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import ToolWorkspace from "@/components/portal/ToolWorkspace";
 import { usePortal } from "@/components/portal/PortalContext";
-import { useStore } from "@/lib/store";
 import { getToolBySlug } from "@/lib/tools";
 
 export default function ToolPage() {
   const { slug } = useParams<{ slug: string }>();
-  const { me } = usePortal();
-  const { memberGrants } = useStore();
+  const { myGrants } = usePortal();
   const tool = getToolBySlug(String(slug));
 
   // Unknown tool.
@@ -35,7 +33,7 @@ export default function ToolPage() {
     );
   }
 
-  const granted = (memberGrants[me.id] ?? []).includes(tool.key);
+  const granted = myGrants.includes(tool.key);
 
   // Granted — the actual tool. Otherwise, a clear no-access screen.
   return (

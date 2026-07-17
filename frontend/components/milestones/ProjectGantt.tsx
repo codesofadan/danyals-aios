@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import {
-  projects, LIFECYCLE, STAGE_STATUS_META, currentStage,
+  LIFECYCLE, STAGE_STATUS_META, currentStage,
   type ClientProject,
 } from "@/lib/milestones";
+import { useMilestones } from "@/lib/hooks/milestones";
 
 // Project lifecycle Gantt — one swimlane per client across the five
 // lifecycle phases (the time axis). Each stage is a horizontal bar
@@ -26,6 +27,8 @@ function fillFor(status: string): number {
 export default function ProjectGantt() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<{ x: number; y: number; html: string } | null>(null);
+  const projectsQ = useMilestones();
+  const projects = projectsQ.data ?? [];
 
   useEffect(() => {
     const root = rootRef.current;
@@ -46,7 +49,7 @@ export default function ProjectGantt() {
       easing: "easeOutCubic",
     });
     return () => a.pause();
-  }, []);
+  }, [projectsQ.data]);
 
   const showTip = (e: React.PointerEvent, p: ClientProject, idx: number) => {
     const stage = p.stages[idx];
@@ -95,6 +98,13 @@ export default function ProjectGantt() {
         </div>
 
         {/* one swimlane per project */}
+        {projectsQ.isLoading && <div className="ms-empty">Loading timeline…</div>}
+        {projectsQ.isError && !projectsQ.isLoading && (
+          <div className="ms-empty">Couldn&apos;t load the timeline — {(projectsQ.error as Error)?.message ?? "try again"}.</div>
+        )}
+        {!projectsQ.isLoading && !projectsQ.isError && projects.length === 0 && (
+          <div className="ms-empty">No projects to chart yet.</div>
+        )}
         {projects.map((p) => {
           const cur = currentStage(p);
           const curIdx = p.stages.findIndex((s) => s.key === cur.key);

@@ -8,7 +8,9 @@ import { upsells } from "@/lib/upsells";
 // "recommended next steps" once a prospect has seen their free score. Cards
 // stagger in for a polished reveal (reduced-motion honored). Links open the
 // live gig on Fiverr in a new tab — consistent with the admin Upsells module.
-export default function FiverrUpsells() {
+// `fiverrUrl` (the backend-owned profile link from the report) powers the
+// section-level "view all" CTA.
+export default function FiverrUpsells({ fiverrUrl }: { fiverrUrl?: string }) {
   const gridRef = useRef<HTMLDivElement>(null);
   const active = upsells.filter((u) => u.active);
 
@@ -42,6 +44,12 @@ export default function FiverrUpsells() {
           <h2 className="fa-upsell-t">Recommended next steps</h2>
           <p className="fa-upsell-s">Done for you by our team on Fiverr — fix what your audit surfaced.</p>
         </div>
+        {fiverrUrl && (
+          <a className="fa-upsell-all" href={fiverrUrl} target="_blank" rel="noopener noreferrer">
+            View all gigs
+            <span className="material-symbols-rounded">arrow_outward</span>
+          </a>
+        )}
       </div>
 
       <div className="fa-gig-grid" ref={gridRef}>

@@ -1,6 +1,10 @@
-import { autoAdvances } from "@/lib/milestones";
+"use client";
+
+import { useAutoAdvances } from "@/lib/hooks/milestones";
 
 export default function AutoAdvanceFeed() {
+  const feedQ = useAutoAdvances();
+  const autoAdvances = feedQ.data ?? [];
   return (
     <section className="card">
       <div className="card-h">
@@ -12,7 +16,11 @@ export default function AutoAdvanceFeed() {
       </div>
 
       <div className="ms-feed">
-        {autoAdvances.map((a) => (
+        {feedQ.isLoading && <div className="ms-empty">Loading feed…</div>}
+        {feedQ.isError && !feedQ.isLoading && (
+          <div className="ms-empty">Couldn&apos;t load the feed — {(feedQ.error as Error)?.message ?? "try again"}.</div>
+        )}
+        {!feedQ.isLoading && !feedQ.isError && autoAdvances.map((a) => (
           <div className="ms-act" key={a.id}>
             <span className={a.flag ? "ms-act-ic flag" : "ms-act-ic"} style={a.flag ? undefined : { color: a.c, background: `${a.c}22` }}>
               <span className="material-symbols-rounded">{a.icon}</span>
@@ -31,6 +39,9 @@ export default function AutoAdvanceFeed() {
             <span className="ms-act-ago">{a.ago}</span>
           </div>
         ))}
+        {!feedQ.isLoading && !feedQ.isError && autoAdvances.length === 0 && (
+          <div className="ms-empty">No recent auto-advances.</div>
+        )}
       </div>
     </section>
   );

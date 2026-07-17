@@ -2,10 +2,10 @@
 
 import { Fragment, useState } from "react";
 import {
-  teamCredentials, ROLE_ORDER, ROLE_META, STATUS_META,
+  ROLE_ORDER, ROLE_META, STATUS_META,
   type TeamRole,
 } from "@/lib/data";
-import { useStore } from "@/lib/store";
+import { useMembers } from "@/lib/hooks/team";
 import { Switch, PasswordField, generatePassword } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
@@ -16,19 +16,23 @@ type Row = { pass: string; twoFA: boolean; mustReset: boolean; role: TeamRole; a
 const NEW_CRED = { pass: "Set at first sign-in", twoFA: false, mustReset: true, lastChanged: "—" };
 
 export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
-  const { members } = useStore();
-  const [rows, setRows] = useState<Record<string, Row>>(() =>
-    Object.fromEntries(members.map((m) => {
-      const c = teamCredentials[m.id] ?? NEW_CRED;
-      return [m.id, { pass: c.pass, twoFA: c.twoFA, mustReset: c.mustReset, role: m.role, active: m.status !== "offline" }];
-    }))
-  );
+  // The roster is live (GET /admin/users). MISMATCH (recorded): the backend NEVER
+  // persists or reveals a member's password (the real credential flow is the
+  // Add-Member invite's one-time password, shown once). There is no credential
+  // read/reset endpoint, so the per-member password / 2FA / reset here are LOCAL
+  // only — real UUID ids never match the demo `teamCredentials` seed, so every row
+  // falls back to the "set at first sign-in" placeholder (an honest empty state).
+  const membersQ = useMembers();
+  const members = membersQ.data ?? [];
+  const [rows, setRows] = useState<Record<string, Row>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [savedId, setSavedId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  function edit(id: string, patch: Partial<Row>) {
-    setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  // Merge onto the row currently on screen (the stored edit OR the render fallback)
+  // so an edit made before `rows` was ever seeded keeps every other field intact.
+  function edit(id: string, cur: Row, patch: Partial<Row>) {
+    setRows((prev) => ({ ...prev, [id]: { ...cur, ...prev[id], ...patch } }));
     setDirty((prev) => ({ ...prev, [id]: true }));
   }
 
@@ -40,10 +44,15 @@ export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
     onLog("updated credentials & access for", name, "Team access");
   }
 
-  function resetPassword(id: string, name: string) {
-    edit(id, { pass: generatePassword(), mustReset: true });
+  function resetPassword(id: string, cur: Row, name: string) {
+    edit(id, cur, { pass: generatePassword(), mustReset: true });
     onLog("reset the password for", name, "Team access");
   }
+
+  const muted: React.CSSProperties = { padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)" };
+  if (membersQ.isLoading && members.length === 0) return <div className="panel-in"><div style={muted}>Loading team…</div></div>;
+  if (membersQ.isError && members.length === 0)
+    return <div className="panel-in"><div style={muted}>Couldn&apos;t load the team — {(membersQ.error as Error)?.message ?? "try again"}.</div></div>;
 
   return (
     <div className="panel-in">
@@ -93,21 +102,21 @@ export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
                         value={r.role}
                         disabled={isOwner}
                         style={{ color: ROLE_META[r.role].c, borderColor: ROLE_META[r.role].c }}
-                        onChange={(e) => edit(m.id, { role: e.target.value as TeamRole })}
+                        onChange={(e) => edit(m.id, r, { role: e.target.value as TeamRole })}
                         aria-label={`Role for ${m.name}`}
                       >
                         {ROLE_ORDER.map((role) => <option key={role} value={role}>{role}</option>)}
                       </select>
                     </td>
                     <td>
-                      <Switch checked={r.twoFA} onChange={(v) => edit(m.id, { twoFA: v })} disabled={isOwner} label={`2FA for ${m.name}`} />
+                      <Switch checked={r.twoFA} onChange={(v) => edit(m.id, r, { twoFA: v })} disabled={isOwner} label={`2FA for ${m.name}`} />
                     </td>
                     <td>
                       {isOwner ? (
                         <span className="status-dot"><span className="dot" style={{ background: status.c, boxShadow: `0 0 8px ${status.c}` }} />Owner</span>
                       ) : (
                         <label className="access-toggle">
-                          <Switch checked={r.active} onChange={(v) => edit(m.id, { active: v })} label={`Account access for ${m.name}`} />
+                          <Switch checked={r.active} onChange={(v) => edit(m.id, r, { active: v })} label={`Account access for ${m.name}`} />
                           <span className={r.active ? "acc-on" : "acc-off"}>{r.active ? "Enabled" : "Disabled"}</span>
                         </label>
                       )}
@@ -128,14 +137,14 @@ export default function TeamCredentials({ onLog }: { onLog: LogFn }) {
                         <div className="tc-drawer">
                           <div className="fld tc-drawer-pass">
                             <label htmlFor={`tp-${m.id}`}>Set / view password for {m.name}</label>
-                            <PasswordField id={`tp-${m.id}`} value={r.pass} onChange={(v) => edit(m.id, { pass: v })} />
+                            <PasswordField id={`tp-${m.id}`} value={r.pass} onChange={(v) => edit(m.id, r, { pass: v })} />
                           </div>
                           <label className="tc-drawer-check">
-                            <input type="checkbox" checked={r.mustReset} onChange={(e) => edit(m.id, { mustReset: e.target.checked })} />
+                            <input type="checkbox" checked={r.mustReset} onChange={(e) => edit(m.id, r, { mustReset: e.target.checked })} />
                             Require change at next sign-in
                           </label>
                           <div className="tc-drawer-actions">
-                            <button className="ghostbtn" onClick={() => resetPassword(m.id, m.name)}>
+                            <button className="ghostbtn" onClick={() => resetPassword(m.id, r, m.name)}>
                               <span className="material-symbols-rounded">autorenew</span>Generate &amp; force reset
                             </button>
                             <button className="primary-btn sm" disabled={!dirty[m.id]} onClick={() => save(m.id, m.name)}>

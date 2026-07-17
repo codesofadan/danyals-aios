@@ -1,22 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { useStore } from "@/lib/store";
+import { useClients } from "@/lib/hooks/clients";
 import { Switch, PasswordField } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
 type Cred = { admin: string; pass: string; twoFA: boolean };
 
 export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
-  const { clients } = useStore();
-  const [creds, setCreds] = useState<Record<string, Cred>>(() =>
-    Object.fromEntries(clients.map((c) => [c.id, { admin: c.portal.admin, pass: c.portal.pass, twoFA: c.portal.twoFA }]))
-  );
+  // The client directory is live (GET /clients). MISMATCH (recorded): the backend
+  // NEVER persists or returns a portal password (it is set out-of-band, never in
+  // the ClientResponse), and there is NO client-credential write endpoint — so the
+  // password reads empty and Save here is a LOCAL confirmation only.
+  const clientsQ = useClients();
+  const clients = clientsQ.data ?? [];
+  const [creds, setCreds] = useState<Record<string, Cred>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [savedId, setSavedId] = useState<string | null>(null);
 
-  function edit(id: string, patch: Partial<Cred>) {
-    setCreds((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  // Merge onto the cred currently on screen (the stored edit OR the render fallback
+  // derived from the client record) so a first edit keeps every other field intact.
+  function edit(id: string, cur: Cred, patch: Partial<Cred>) {
+    setCreds((prev) => ({ ...prev, [id]: { ...cur, ...prev[id], ...patch } }));
     setDirty((prev) => ({ ...prev, [id]: true }));
   }
 
@@ -26,6 +31,11 @@ export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
     setTimeout(() => setSavedId((s) => (s === id ? null : s)), 1600);
     onLog("updated portal credentials for", name, "Client access");
   }
+
+  const muted: React.CSSProperties = { padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)" };
+  if (clientsQ.isLoading && clients.length === 0) return <div className="panel-in"><div style={muted}>Loading client portals…</div></div>;
+  if (clientsQ.isError && clients.length === 0)
+    return <div className="panel-in"><div style={muted}>Couldn&apos;t load clients — {(clientsQ.error as Error)?.message ?? "try again"}.</div></div>;
 
   return (
     <div className="panel-in">
@@ -42,7 +52,7 @@ export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
 
       <div className="cc-list">
         {clients.map((c) => {
-          const cr = creds[c.id];
+          const cr = creds[c.id] ?? { admin: c.portal.admin, pass: c.portal.pass, twoFA: c.portal.twoFA };
           const isDirty = dirty[c.id];
           return (
             <div className="cc-card" key={c.id}>
@@ -65,15 +75,15 @@ export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
               <div className="cc-fields">
                 <div className="fld">
                   <label htmlFor={`u-${c.id}`}>Portal username / login email</label>
-                  <input id={`u-${c.id}`} value={cr.admin} onChange={(e) => edit(c.id, { admin: e.target.value })} spellCheck={false} autoComplete="off" />
+                  <input id={`u-${c.id}`} value={cr.admin} onChange={(e) => edit(c.id, cr, { admin: e.target.value })} spellCheck={false} autoComplete="off" />
                 </div>
                 <div className="fld">
                   <label htmlFor={`p-${c.id}`}>Admin password</label>
-                  <PasswordField id={`p-${c.id}`} value={cr.pass} onChange={(v) => edit(c.id, { pass: v })} />
+                  <PasswordField id={`p-${c.id}`} value={cr.pass} onChange={(v) => edit(c.id, cr, { pass: v })} />
                 </div>
                 <div className="cc-2fa">
                   <span className="cc-2fa-l">Require 2FA</span>
-                  <Switch checked={cr.twoFA} onChange={(v) => edit(c.id, { twoFA: v })} label={`Require 2FA for ${c.cn}`} />
+                  <Switch checked={cr.twoFA} onChange={(v) => edit(c.id, cr, { twoFA: v })} label={`Require 2FA for ${c.cn}`} />
                 </div>
               </div>
             </div>

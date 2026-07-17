@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { kbEntries, SEV_META, CAT_META, type Severity, type Category } from "@/lib/policy";
+import { SEV_META, CAT_META, type Severity, type Category } from "@/lib/policy";
+import { useKb } from "@/lib/hooks/policy";
 
 const SEVERITIES: (Severity | "all")[] = ["all", "critical", "major", "minor", "info"];
 const CATEGORIES: (Category | "all")[] = ["all", "algorithm", "policy", "technical", "content", "local", "geo"];
 
 export default function KnowledgeBase() {
+  const kbQ = useKb();
+  const kbEntries = kbQ.data ?? [];
   const [sev, setSev] = useState<Severity | "all">("all");
   const [cat, setCat] = useState<Category | "all">("all");
 
@@ -61,7 +64,13 @@ export default function KnowledgeBase() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((e) => {
+            {kbQ.isLoading && (
+              <tr><td colSpan={5}><div className="pr-empty">Loading knowledge base…</div></td></tr>
+            )}
+            {kbQ.isError && !kbQ.isLoading && (
+              <tr><td colSpan={5}><div className="pr-empty">Couldn&apos;t load the knowledge base — {(kbQ.error as Error)?.message ?? "try again"}.</div></td></tr>
+            )}
+            {!kbQ.isLoading && !kbQ.isError && rows.map((e) => {
               const sm = SEV_META[e.severity];
               const cm = CAT_META[e.category];
               return (
@@ -93,7 +102,7 @@ export default function KnowledgeBase() {
                 </tr>
               );
             })}
-            {rows.length === 0 && (
+            {!kbQ.isLoading && !kbQ.isError && rows.length === 0 && (
               <tr><td colSpan={5}><div className="pr-empty">No entries match these filters.</div></td></tr>
             )}
           </tbody>

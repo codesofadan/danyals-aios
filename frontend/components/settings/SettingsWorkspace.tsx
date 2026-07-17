@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { type TeamRole, type PermKey } from "@/lib/data";
-import { useStore } from "@/lib/store";
+import { useRbac } from "@/lib/hooks/team";
 import AccessControl from "@/components/team/AccessControl";
 import AccountSettings from "./AccountSettings";
 import ClientCredentials from "./ClientCredentials";
@@ -23,11 +23,27 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "workspace", label: "Workspace", icon: "tune" },
 ];
 
+// Centred muted state for a tab panel (loading / error). Self-styled so it never
+// depends on a class that might not exist.
+const panelState: React.CSSProperties = {
+  padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)",
+};
+
+function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }): ReactNode | null {
+  if (q.isLoading) return <div style={panelState}>Loading…</div>;
+  if (q.isError) return <div style={panelState}>Couldn&apos;t load — {(q.error as Error)?.message ?? "try again"}.</div>;
+  return null;
+}
+
 export default function SettingsWorkspace() {
   const [tab, setTab] = useState<TabKey>("account");
-  // Roles & permissions come from the shared store, so changes here and in
-  // Team Management → Access Control stay in lock-step.
-  const { rolePerms, togglePerm } = useStore();
+  // The role×permission matrix is server-side REFERENCE data (GET /rbac/roles):
+  // versioned platform code with NO per-role toggle route, so it is rendered
+  // READ-ONLY here — the no-op onToggle persists nothing (an honest matrix, not a
+  // fake save). The visual toggle affordance lives inside AccessControl (a shared
+  // team component, out of this screen's scope to restyle).
+  const rbacQ = useRbac();
+  const rolePerms = rbacQ.data ?? ({} as Record<TeamRole, PermKey[]>);
   const [toast, setToast] = useState<{ n: number; text: string } | null>(null);
 
   // Shared audit-trail hook — every panel reports admin actions here.
@@ -35,11 +51,9 @@ export default function SettingsWorkspace() {
     setToast((prev) => ({ n: (prev?.n ?? 0) + 1, text: `${action} · ${target}${meta ? ` — ${meta}` : ""}` }));
   }
 
-  function handleTogglePerm(role: TeamRole, key: PermKey) {
-    const granted = !rolePerms[role].includes(key);
-    togglePerm(role, key);
-    onLog(granted ? "granted" : "revoked", key.replace(/_/g, " "), `${role} role`);
-  }
+  const noopToggle = () => {
+    /* read-only matrix — no persist route exists */
+  };
 
   return (
     <section className="card settings-card">
@@ -69,7 +83,7 @@ export default function SettingsWorkspace() {
         {tab === "account" && <AccountSettings onLog={onLog} />}
         {tab === "clients" && <ClientCredentials onLog={onLog} />}
         {tab === "team" && <TeamCredentials onLog={onLog} />}
-        {tab === "access" && <AccessControl rolePerms={rolePerms} onToggle={handleTogglePerm} />}
+        {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} onToggle={noopToggle} />)}
         {tab === "security" && <SecuritySettings onLog={onLog} />}
         {tab === "notifications" && <NotificationSettings onLog={onLog} />}
         {tab === "workspace" && <WorkspaceSettings onLog={onLog} />}

@@ -1,21 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { clientDeliverables, DELIVERABLE_COLOR } from "@/lib/client";
+import { DELIVERABLE_COLOR } from "@/lib/client";
 import { clientReports } from "@/lib/data";
+import { useClientDeliverables } from "@/lib/hooks/portalClient";
 import { useClient } from "./ClientContext";
 import ClientHeader from "./ClientHeader";
 
 // The Reports section — downloadable deliverables (audits, monthly rollups,
-// content & backlink reports). A report is only listed if the client holds
-// the grant it requires; anything else shows as a locked upsell row.
+// content & backlink reports). The backend already scopes the list to the
+// client's granted, visible deliverables (an ungranted one is hidden by the
+// RLS view); ungranted report TYPES surface as locked upsell rows.
 export default function ClientReports() {
   const { isGranted } = useClient();
+  const deliverablesQ = useClientDeliverables();
 
-  const available = clientDeliverables.filter((d) => isGranted(d.requires));
-  const locked = clientDeliverables.filter((d) => !isGranted(d.requires));
-  // De-dupe the locked rows by the report type they need.
-  const lockedTypes = Array.from(new Set(locked.map((d) => d.requires)));
+  const available = deliverablesQ.data ?? [];
+  // Report surfaces not in the client's plan — an upsell to "request access".
+  const lockedTypes = clientReports.filter((r) => !isGranted(r.key)).map((r) => r.key);
 
   return (
     <div className="tw cl">
@@ -40,7 +42,12 @@ export default function ClientReports() {
           </div>
         </div>
 
-        {available.length === 0 ? (
+        {deliverablesQ.isLoading ? (
+          <div className="pt-empty sm">
+            <span className="material-symbols-rounded spin">progress_activity</span>
+            <div className="pt-empty-t">Loading your reports…</div>
+          </div>
+        ) : available.length === 0 ? (
           <div className="pt-empty sm">
             <span className="material-symbols-rounded">summarize</span>
             <div className="pt-empty-t">No reports yet</div>

@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import {
-  snapshots as seedSnapshots,
   protectedStores,
   backupConfig,
   storage,
@@ -11,6 +10,7 @@ import {
   resilience,
   type Snapshot,
 } from "@/lib/backups";
+import { useSnapshots, useBackupConfig, useRunBackup } from "@/lib/hooks/backups";
 
 /* count-up hook (respects reduced motion) */
 function useCountUp(target: number, decimals = 0, dur = 1200) {
@@ -47,13 +47,26 @@ function Kpi({ label, value, decimals = 0, unit, sub, hero }: {
 }
 
 export default function BackupsWorkspace() {
-  const [list, setList] = useState<Snapshot[]>(seedSnapshots);
-  const [filter, setFilter] = useState<"All" | "Nightly" | "Manual">("All");
-  const [running, setRunning] = useState(false);
-  const manualCount = useRef(0);
+  const snapshotsQ = useSnapshots();
+  const configQ = useBackupConfig();
+  const runBackupM = useRunBackup();
 
-  const [nightlyOn, setNightlyOn] = useState(backupConfig.nightlyOn);
-  const [offsiteOn, setOffsiteOn] = useState(backupConfig.offsiteOn);
+  const list = snapshotsQ.data ?? [];
+  // Fall back to the seed config shape while GET /backups/config is in flight.
+  const cfg = configQ.data ?? backupConfig;
+
+  const [filter, setFilter] = useState<"All" | "Nightly" | "Manual">("All");
+
+  const [nightlyOn, setNightlyOn] = useState(cfg.nightlyOn);
+  const [offsiteOn, setOffsiteOn] = useState(cfg.offsiteOn);
+  // Reflect the fetched config in the local toggle view once it arrives. These
+  // toggles are view-only this pass — PUT /backups/config persistence is not wired.
+  useEffect(() => {
+    if (configQ.data) {
+      setNightlyOn(configQ.data.nightlyOn);
+      setOffsiteOn(configQ.data.offsiteOn);
+    }
+  }, [configQ.data]);
 
   const [restoreTarget, setRestoreTarget] = useState<Snapshot | null>(null);
   const [restore, setRestore] = useState<{ ts: string; phase: "running" | "done" } | null>(null);
@@ -62,18 +75,11 @@ export default function BackupsWorkspace() {
   const shown = list.filter((s) => filter === "All" || s.type === filter);
   const freeGB = Math.max(0, storage.totalGB - storageUsedGB);
 
-  // Run a manual backup now → optimistic "running" row that resolves to success.
+  // Run a manual backup now → POST /backups/run; the ledger + config refetch on
+  // success and the new row appears in the history table.
   const runBackup = () => {
-    if (running) return;
-    setRunning(true);
-    manualCount.current += 1;
-    const id = `bk-manual-${manualCount.current}`;
-    const row: Snapshot = { id, ts: "Just now", type: "Manual", scope: "Database", size: "—", duration: "—", status: "running" };
-    setList((l) => [row, ...l]);
-    window.setTimeout(() => {
-      setList((l) => l.map((s) => (s.id === id ? { ...s, status: "success", size: "1.83 GB", duration: "3m 51s" } : s)));
-      setRunning(false);
-    }, 2600);
+    if (runBackupM.isPending) return;
+    runBackupM.mutate({ type: "Manual", scope: "Database" });
   };
 
   // Confirmed restore → progress banner animates, then completes.
@@ -96,12 +102,12 @@ export default function BackupsWorkspace() {
     <>
       {/* KPI row */}
       <section className="kpis">
-        <Kpi hero label="Last successful backup" value={backupConfig.lastBackupAgoH} unit="h ago"
+        <Kpi hero label="Last successful backup" value={cfg.lastBackupAgoH} unit="h ago"
           sub={<><span className="delta up"><span className="material-symbols-rounded">check_circle</span>OK</span> Nightly · Today 02:00</>} />
-        <Kpi label="Next scheduled backup" value={backupConfig.nextBackupInH} unit="h"
-          sub={<>Tonight · {backupConfig.nightlyTime}</>} />
-        <Kpi label="Snapshots retained" value={backupConfig.retained}
-          sub={<>{backupConfig.retentionDays}-day rolling window</>} />
+        <Kpi label="Next scheduled backup" value={cfg.nextBackupInH} unit="h"
+          sub={<>Tonight · {cfg.nightlyTime}</>} />
+        <Kpi label="Snapshots retained" value={cfg.retained}
+          sub={<>{cfg.retentionDays}-day rolling window</>} />
         <Kpi label="Storage used" value={storageUsedGB} decimals={1} unit="GB"
           sub={<>of {storage.totalGB} GB VPS volume</>} />
       </section>
@@ -130,7 +136,7 @@ export default function BackupsWorkspace() {
           <div className="card-h">
             <div>
               <div className="ct">Backup History</div>
-              <div className="cs">Automated nightly + on-demand snapshots · {backupConfig.retained} retained</div>
+              <div className="cs">Automated nightly + on-demand snapshots · {cfg.retained} retained</div>
             </div>
             <div className="tools">
               <div className="seg">
@@ -138,9 +144,9 @@ export default function BackupsWorkspace() {
                   <button key={f} className={filter === f ? "on" : undefined} onClick={() => setFilter(f)}>{f}</button>
                 ))}
               </div>
-              <button className="bk-runbtn" onClick={runBackup} disabled={running}>
-                <span className={`material-symbols-rounded${running ? " spin" : ""}`}>{running ? "progress_activity" : "backup"}</span>
-                {running ? "Backing up…" : "Run backup now"}
+              <button className="bk-runbtn" onClick={runBackup} disabled={runBackupM.isPending}>
+                <span className={`material-symbols-rounded${runBackupM.isPending ? " spin" : ""}`}>{runBackupM.isPending ? "progress_activity" : "backup"}</span>
+                {runBackupM.isPending ? "Backing up…" : "Run backup now"}
               </button>
             </div>
           </div>
@@ -153,7 +159,15 @@ export default function BackupsWorkspace() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((s) => (
+                {snapshotsQ.isLoading && (
+                  <tr><td colSpan={7} style={{ padding: 16, color: "var(--muted)" }}>Loading snapshots…</td></tr>
+                )}
+                {snapshotsQ.isError && !snapshotsQ.isLoading && (
+                  <tr><td colSpan={7} style={{ padding: 16, color: "var(--warn, #d9822b)" }}>
+                    Couldn&apos;t load snapshots — {(snapshotsQ.error as Error)?.message ?? "try again"}.
+                  </td></tr>
+                )}
+                {!snapshotsQ.isLoading && !snapshotsQ.isError && shown.map((s) => (
                   <tr key={s.id}>
                     <td className="ts">{s.ts}</td>
                     <td><span className={`bk-type ${s.type}`}>{s.type}</span></td>
@@ -179,9 +193,18 @@ export default function BackupsWorkspace() {
                     </td>
                   </tr>
                 ))}
+                {!snapshotsQ.isLoading && !snapshotsQ.isError && shown.length === 0 && (
+                  <tr><td colSpan={7} style={{ padding: 16, color: "var(--muted)" }}>No snapshots yet.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
+          {runBackupM.isError && (
+            <div className="bk-note warn-note">
+              <span className="material-symbols-rounded">error</span>
+              <span>Couldn&apos;t start the backup — {(runBackupM.error as Error)?.message ?? "try again"}.</span>
+            </div>
+          )}
         </section>
 
         {/* What's protected */}
@@ -223,7 +246,7 @@ export default function BackupsWorkspace() {
           <div className="bk-setting">
             <div className="bk-st">
               <div className="bk-st-t">Nightly backups</div>
-              <div className="bk-st-d">Runs every night at {backupConfig.nightlyTime}</div>
+              <div className="bk-st-d">Runs every night at {cfg.nightlyTime}</div>
             </div>
             <button className={`bk-switch${nightlyOn ? " on" : ""}`} aria-pressed={nightlyOn}
               aria-label="Toggle nightly backups" onClick={() => setNightlyOn((v) => !v)} />
@@ -241,14 +264,14 @@ export default function BackupsWorkspace() {
               <div className="bk-st-t">Retention window</div>
               <div className="bk-st-d">Older snapshots are pruned automatically</div>
             </div>
-            <div className="bk-st-v">{backupConfig.retentionDays} days</div>
+            <div className="bk-st-v">{cfg.retentionDays} days</div>
           </div>
           <div className="bk-setting">
             <div className="bk-st">
               <div className="bk-st-t">Restore last tested</div>
               <div className="bk-st-d">Documented restore runbook verified</div>
             </div>
-            <div className="bk-st-v">{backupConfig.restoreTested}</div>
+            <div className="bk-st-v">{cfg.restoreTested}</div>
           </div>
 
           {!nightlyOn && (

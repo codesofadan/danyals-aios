@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import { useStore } from "@/lib/store";
+import { useMembers, useTasks } from "@/lib/hooks/team";
 
 type Tile = {
   icon: string;
@@ -48,7 +48,8 @@ function Value({ value, unit }: { value: number; unit?: string }) {
 }
 
 export default function TeamStats() {
-  const { members, tasks } = useStore();
+  const members = useMembers().data ?? [];
+  const tasks = useTasks().data ?? [];
 
   // Derived live from the shared roster + task board so the tiles stay honest
   // as members are invited and tasks are assigned during the demo.

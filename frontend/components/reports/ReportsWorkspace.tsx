@@ -1,84 +1,84 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  workbooks as seedWorkbooks,
-  syncActivity as seedActivity,
-  type Workbook,
-  type SyncEvent,
-} from "@/lib/reports";
+  useWorkbooks,
+  useSyncEvents,
+  useSyncWorkbook,
+  useSyncAllWorkbooks,
+} from "@/lib/hooks/reports";
 import ReportsKpis from "./ReportsKpis";
 import WorkbooksTable from "./WorkbooksTable";
 import SheetsConnection from "./SheetsConnection";
 import ReportTypes from "./ReportTypes";
 import SyncActivity from "./SyncActivity";
 
-let seq = 0;
-const nextId = () => `s-live-${Date.now().toString(36)}${seq++}`;
-
 export default function ReportsWorkspace() {
-  const [books, setBooks] = useState<Workbook[]>(seedWorkbooks);
-  const [log, setLog] = useState<SyncEvent[]>(seedActivity);
+  const workbooksQ = useWorkbooks(); // GET /reports/workbooks (freshest sync first)
+  const eventsQ = useSyncEvents(); // GET /reports/sync-events
+  const syncOne = useSyncWorkbook(); // POST /reports/sync
+  const syncAllM = useSyncAllWorkbooks(); // POST /reports/sync-all
+
+  const books = workbooksQ.data ?? [];
+  const log = eventsQ.data ?? [];
+
+  // Which workbooks are mid-push. A real sync flips the row to `synced` server-side,
+  // so on settle we clear the id and the invalidated queries refetch the fresh state.
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
-  const [lastSync, setLastSync] = useState("4m ago");
-  const timers = useRef<number[]>([]);
 
   const rowsToday = useMemo(() => books.reduce((s, b) => s + b.rows, 0), [books]);
   const health = useMemo(() => {
     const errors = books.filter((b) => b.status === "error").length;
     return Math.max(90, 100 - errors * 2);
   }, [books]);
+  // Server returns workbooks freshest-first; the top row's relative time is the clock.
+  const lastSync = books[0]?.lastSync ?? "—";
 
   function runSync(id: string) {
-    const wb = books.find((b) => b.id === id);
-    if (!wb || syncing.has(id)) return;
-
-    // optimistic: flip to syncing + freshen the clock immediately
+    if (syncing.has(id)) return;
     setSyncing((prev) => new Set(prev).add(id));
-    setLastSync("just now");
-
-    const added = 24 + wb.tabs.length * 18; // rows this push writes
-    const t = window.setTimeout(() => {
-      setBooks((prev) =>
-        prev.map((b) =>
-          b.id === id
-            ? { ...b, status: "synced", lastSync: "just now", rows: b.rows + added }
-            : b
-        )
-      );
-      setLog((prev) => [
-        { id: nextId(), client: wb.client, dataset: wb.tabs[0], rows: added, ago: "just now" },
-        ...prev,
-      ]);
-      setSyncing((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }, 950);
-    timers.current.push(t);
+    syncOne.mutate(id, {
+      onSettled: () =>
+        setSyncing((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        }),
+    });
   }
 
   function syncAll() {
-    books.forEach((b, i) => {
-      if (!syncing.has(b.id)) {
-        const t = window.setTimeout(() => runSync(b.id), i * 180);
-        timers.current.push(t);
-      }
-    });
+    if (syncAllM.isPending || books.length === 0) return;
+    const ids = books.map((b) => b.id);
+    setSyncing((prev) => new Set([...prev, ...ids]));
+    syncAllM.mutate(undefined, { onSettled: () => setSyncing(new Set()) });
   }
+
+  const workbooksErr = workbooksQ.isError
+    ? (workbooksQ.error as Error)?.message ?? "Couldn't load workbooks."
+    : null;
+  const eventsErr = eventsQ.isError
+    ? (eventsQ.error as Error)?.message ?? "Couldn't load sync activity."
+    : null;
 
   return (
     <>
       <ReportsKpis workbooks={books.length} lastSync={lastSync} rowsToday={rowsToday} health={health} />
 
       <div className="row">
-        <WorkbooksTable workbooks={books} syncing={syncing} onSync={runSync} onSyncAll={syncAll} />
+        <WorkbooksTable
+          workbooks={books}
+          syncing={syncing}
+          onSync={runSync}
+          onSyncAll={syncAll}
+          loading={workbooksQ.isLoading}
+          error={workbooksErr}
+        />
         <SheetsConnection />
       </div>
 
       <div className="row">
-        <SyncActivity log={log} />
+        <SyncActivity log={log} loading={eventsQ.isLoading} error={eventsErr} />
         <ReportTypes />
       </div>
     </>

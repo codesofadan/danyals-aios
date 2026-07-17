@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { buildFreeReport, type FreeReport } from "@/lib/freeAudit";
+import { auditTypes, type AuditTypeKey } from "@/lib/audit";
+import { useCreatePublicAudit, usePublicReport } from "@/lib/hooks/publicAudit";
 import FreeAuditReport from "./FreeAuditReport";
 import FiverrUpsells from "./FiverrUpsells";
 
@@ -11,60 +12,119 @@ import FiverrUpsells from "./FiverrUpsells";
 // bundle until a prospect actually runs an audit).
 const AuditVisualizer = dynamic(() => import("./AuditVisualizer"), { ssr: false });
 
-type Stage = "landing" | "form" | "generating" | "report";
+type View = "landing" | "form" | "working";
 
-// The agency's public Fiverr profile — the deliberate conversion path
-// (see lib/upsells.ts). Kept prominent before the report, then expanded
-// into gig cards after it.
+// A default Fiverr profile for the pre-report surfaces (before we hold a
+// report, whose `fiverr_url` is the backend-owned source of truth).
 const FIVERR_PROFILE = "https://www.fiverr.com/xegents";
 
-// Each step now maps to one cinematic phase of the 3D audit visualizer
-// (see AuditVisualizer.tsx): neural crawl → AI signal exchange → globe
-// synthesis → report assembly. The caption narrates what the scene shows.
+// The free audit runs the two non-paid engine types; a prospect may narrow the
+// focus but never reach a paid type (the backend 400s those anyway).
+const FREE_TYPES = auditTypes.filter((t) => !t.paid);
+
+// Decorative loading beats for the 3D stage — narration only. The REAL job
+// status (queued/running) drives the copy below; these just animate the scene.
 const GEN_STEPS = [
   { icon: "hub", label: "Crawling your site", caption: "Mapping pages and wiring up the neural graph…" },
   { icon: "forum", label: "Analyzing on-page signals", caption: "AI agents exchanging and cross-checking signals…" },
   { icon: "public", label: "Scoring foundations", caption: "Condensing the data into your site model…" },
-  { icon: "dashboard", label: "Compiling your report", caption: "Assembling your dashboard…" },
 ];
 
 const EMAIL_RE = /\S+@\S+\.\S+/;
 
+// First-class copy for the create-mutation errors the backend surfaces.
+function createErrorCopy(err: unknown): { title: string; body: string } {
+  const status = (err as { status?: number } | null)?.status;
+  const message = (err as { message?: string } | null)?.message ?? "";
+  if (status === 409) {
+    return {
+      title: "You've already claimed a free audit",
+      body: "It's one free audit per email. Work with us on Fiverr and we'll run a full deep-dive on your site.",
+    };
+  }
+  if (status === 400) {
+    return {
+      title: "We can't audit that URL",
+      body: message || "Enter a public website URL — the free audit covers on-page and technical checks.",
+    };
+  }
+  return {
+    title: "Something went wrong",
+    body: message || "We couldn't start your audit. Please try again in a moment.",
+  };
+}
+
 export default function FreeAuditFlow() {
-  const [stage, setStage] = useState<Stage>("landing");
+  const [view, setView] = useState<View>("landing");
   const [url, setUrl] = useState("");
   const [email, setEmail] = useState("");
-  const [report, setReport] = useState<FreeReport | null>(null);
+  const [types, setTypes] = useState<AuditTypeKey[]>(FREE_TYPES.map((t) => t.key));
+  const [token, setToken] = useState<string | null>(null);
   const [genStep, setGenStep] = useState(0);
-  const timers = useRef<number[]>([]);
+
+  const create = useCreatePublicAudit();
+  const reportQ = usePublicReport(token);
+  const report = reportQ.data;
 
   const urlValid = url.trim().length > 3 && /\.[a-z]{2,}/i.test(url);
   const emailValid = EMAIL_RE.test(email);
-  const canSubmit = urlValid && emailValid;
+  const canSubmit = urlValid && emailValid && types.length > 0;
 
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  // Working sub-states, derived from the real mutation + query.
+  const createFailed = view === "working" && create.isError;
+  const reportFailed = view === "working" && !!token && (reportQ.isError || report?.status === "failed");
+  const reportDone = view === "working" && !!token && report?.status === "done";
+  const generating = view === "working" && !createFailed && !reportFailed && !reportDone;
 
-  const submit = () => {
-    if (!canSubmit) return;
-    setStage("generating");
-    setGenStep(0);
-    // Simulated job lifecycle — mirrors AuditWorkspace's queued→running→done
-    // staged setTimeouts. Steps advance, then the report resolves.
-    timers.current.forEach((t) => window.clearTimeout(t));
-    // ~5s per beat so each 3D phase (neural → bots → globe) plays its
-    // signature animation two or three times over before advancing.
-    timers.current = [
-      window.setTimeout(() => setGenStep(1), 5000),
-      window.setTimeout(() => setGenStep(2), 10000),
-      window.setTimeout(() => setGenStep(3), 15000),
-      window.setTimeout(() => {
-        setReport(buildFreeReport(url));
-        setStage("report");
-      }, 18500),
-    ];
+  // Advance the decorative 3D scene while the job is genuinely pending. Purely
+  // cosmetic (the canvas is aria-hidden) — it never claims completion; the
+  // report only appears when the backend says `done`.
+  useEffect(() => {
+    if (!generating) return;
+    const id = window.setInterval(() => setGenStep((s) => (s + 1) % GEN_STEPS.length), 4200);
+    return () => window.clearInterval(id);
+  }, [generating]);
+
+  const toggleType = (key: AuditTypeKey) => {
+    setTypes((prev) => {
+      if (prev.includes(key)) {
+        // Keep at least one focus selected.
+        return prev.length > 1 ? prev.filter((k) => k !== key) : prev;
+      }
+      return [...prev, key];
+    });
   };
 
-  const showFiverrBar = stage !== "report";
+  const submit = () => {
+    if (!canSubmit || create.isPending) return;
+    setGenStep(0);
+    setView("working");
+    create.mutate(
+      { email: email.trim(), url: url.trim(), types },
+      { onSuccess: (data) => setToken(data.report_token) }
+    );
+  };
+
+  const restart = () => {
+    setToken(null);
+    create.reset();
+    setView("form");
+  };
+
+  // The upsell link is backend-owned once a report exists.
+  const fiverrUrl = report?.fiverr_url || FIVERR_PROFILE;
+  const showFiverrBar = view !== "working" || !reportDone;
+
+  // Live HUD copy — reflects the REAL status, not a fake timeline.
+  const hud = (() => {
+    if (create.isPending || (token && !report)) {
+      return { icon: "rocket_launch", label: "Starting your audit", caption: "Handing your site to the engine…" };
+    }
+    if (report?.status === "queued") {
+      return { icon: "schedule", label: "Queued", caption: "Waiting for an audit worker to pick up your site…" };
+    }
+    return GEN_STEPS[genStep];
+  })();
 
   return (
     <div className="fa-wrap">
@@ -89,7 +149,7 @@ export default function FreeAuditFlow() {
         </header>
       )}
 
-      {stage === "landing" && (
+      {view === "landing" && (
         <main className="fa-hero">
           <span className="fa-eyebrow">
             <span className="material-symbols-rounded">bolt</span>
@@ -99,13 +159,13 @@ export default function FreeAuditFlow() {
             See exactly what&apos;s holding your <span className="fa-hi">rankings</span> back.
           </h1>
           <p className="fa-hero-sub">
-            Get a free, instant SEO audit of your website — technical health and on-page fixes,
-            scored and explained. No login, no sales call.
+            Get a free SEO audit of your website — technical health and on-page fixes, scored and
+            explained by our engine. No login, no sales call.
           </p>
           <div className="fa-trust">
             <span><span className="material-symbols-rounded">lock_open</span>No login required</span>
-            <span><span className="material-symbols-rounded">timer</span>Ready in ~2 minutes</span>
-            <span><span className="material-symbols-rounded">insights</span>10 checks scored</span>
+            <span><span className="material-symbols-rounded">timer</span>Runs in the background</span>
+            <span><span className="material-symbols-rounded">insights</span>Real engine score</span>
           </div>
 
           {/* Fiverr link surfaced above the button, per the brief. */}
@@ -115,22 +175,22 @@ export default function FreeAuditFlow() {
             <span className="material-symbols-rounded">arrow_outward</span>
           </a>
 
-          <button className="primary-btn fa-cta" onClick={() => setStage("form")}>
+          <button className="primary-btn fa-cta" onClick={() => setView("form")}>
             <span className="material-symbols-rounded">rocket_launch</span>
             Get Your Free Audit
           </button>
         </main>
       )}
 
-      {stage === "form" && (
+      {view === "form" && (
         <main className="fa-form-wrap">
           <div className="fa-card">
-            <button className="fa-back" onClick={() => setStage("landing")} type="button">
+            <button className="fa-back" onClick={() => setView("landing")} type="button">
               <span className="material-symbols-rounded">arrow_back</span>
               Back
             </button>
             <h1 className="fa-card-h">Where should we look?</h1>
-            <p className="fa-card-sub">Enter your site and email — your report is generated on the spot and a copy is sent to you.</p>
+            <p className="fa-card-sub">Enter your site and email — we run the audit and keep your report at a private link.</p>
 
             <form
               className="fa-form"
@@ -168,6 +228,27 @@ export default function FreeAuditFlow() {
                 </div>
               </label>
 
+              <div className="fa-fld">
+                <span>Focus areas</span>
+                <div className="fa-chips">
+                  {FREE_TYPES.map((t) => {
+                    const on = types.includes(t.key);
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        className={`fa-chip ${on ? "on" : ""}`}
+                        aria-pressed={on}
+                        onClick={() => toggleType(t.key)}
+                      >
+                        <span className="material-symbols-rounded">{on ? "check" : t.icon}</span>
+                        {t.short}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <button className="primary-btn wide" type="submit" disabled={!canSubmit}>
                 <span className="material-symbols-rounded">rocket_launch</span>
                 Run my free audit
@@ -176,16 +257,17 @@ export default function FreeAuditFlow() {
 
             <div className="fa-note">
               <span className="material-symbols-rounded">info</span>
-              Demo build — the report is generated locally and no email is actually sent.
+              One free audit per email. Your report opens at a private link the moment it's ready.
             </div>
           </div>
         </main>
       )}
 
-      {stage === "generating" && (
+      {generating && (
         <main className="fa-gen">
-          {/* Immersive WebGL stage — the audit "runs" as a 3D visualization,
-              driven by genStep. A live-region HUD narrates each phase. */}
+          {/* Immersive WebGL stage — the audit "runs" as a 3D visualization
+              while we genuinely poll the backend. A live-region HUD narrates
+              the real job status. */}
           <div className="fa-viz">
             <AuditVisualizer phase={genStep} />
             <div className="fa-viz-vignette" aria-hidden />
@@ -195,42 +277,69 @@ export default function FreeAuditFlow() {
                 <span className="fa-viz-dot" />
                 AIOS engine · live
               </div>
-              {/* Bottom console — caption + progress kept clear of the
-                  centered 3D scene so nothing covers the animation. */}
+              {/* Bottom console — caption kept clear of the centered 3D scene. */}
               <div className="fa-viz-console">
                 <div className="fa-viz-caption" role="status" aria-live="polite">
-                  <span className="fa-viz-step"><span className="material-symbols-rounded">{GEN_STEPS[genStep].icon}</span></span>
+                  <span className="fa-viz-step"><span className="material-symbols-rounded">{hud.icon}</span></span>
                   <div className="fa-viz-caption-txt">
-                    <div className="fa-viz-label">{GEN_STEPS[genStep].label}</div>
-                    <div className="fa-viz-sub">{GEN_STEPS[genStep].caption}</div>
+                    <div className="fa-viz-label">{hud.label}</div>
+                    <div className="fa-viz-sub">{hud.caption}</div>
                   </div>
-                  <span className="fa-viz-count">{genStep + 1}<i>/ {GEN_STEPS.length}</i></span>
                 </div>
                 <ol className="fa-viz-track" aria-hidden>
                   {GEN_STEPS.map((s, i) => (
-                    <li
-                      key={s.label}
-                      className={`fa-viz-seg ${i < genStep ? "done" : i === genStep ? "on" : ""}`}
-                    />
+                    <li key={s.label} className={`fa-viz-seg ${i === genStep ? "on" : ""}`} />
                   ))}
                 </ol>
               </div>
             </div>
           </div>
           <h1 className="fa-gen-h">Auditing your site…</h1>
-          <p className="fa-gen-sub">Hang tight — our engine is crawling, cross-checking and scoring your pages in real time.</p>
+          <p className="fa-gen-sub">Hang tight — our engine is crawling, cross-checking and scoring your pages. This runs in the background and updates live.</p>
         </main>
       )}
 
-      {stage === "report" && report && (
+      {createFailed && (
+        <main className="fa-fail">
+          <FailCard {...createErrorCopy(create.error)} onRetry={restart} />
+        </main>
+      )}
+
+      {reportFailed && !createFailed && (
+        <main className="fa-fail">
+          <FailCard
+            title="Your audit didn't finish"
+            body="The engine couldn't complete a scan of this site. Double-check the URL is reachable and try again."
+            onRetry={restart}
+          />
+        </main>
+      )}
+
+      {reportDone && report && token && (
         <main className="fa-report-wrap">
-          <FreeAuditReport report={report} />
-          <FiverrUpsells />
+          <FreeAuditReport report={report} token={token} />
+          <FiverrUpsells fiverrUrl={fiverrUrl} />
           <div className="fa-report-foot">
-            Built by Xegents AI · <a href={FIVERR_PROFILE} target="_blank" rel="noopener noreferrer">See all our services on Fiverr →</a>
+            Built by Xegents AI · <a href={fiverrUrl} target="_blank" rel="noopener noreferrer">See all our services on Fiverr →</a>
           </div>
         </main>
       )}
+    </div>
+  );
+}
+
+function FailCard({ title, body, onRetry }: { title: string; body: string; onRetry: () => void }) {
+  return (
+    <div className="fa-fail-card">
+      <div className="fa-fail-ic">
+        <span className="material-symbols-rounded">error</span>
+      </div>
+      <h1 className="fa-fail-h">{title}</h1>
+      <p className="fa-fail-sub">{body}</p>
+      <button className="primary-btn" onClick={onRetry} type="button">
+        <span className="material-symbols-rounded">refresh</span>
+        Try again
+      </button>
     </div>
   );
 }

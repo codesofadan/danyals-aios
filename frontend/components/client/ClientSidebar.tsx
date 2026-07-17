@@ -9,7 +9,7 @@ type Item = { icon: string; label: string; href: string; badge?: number };
 
 export default function ClientSidebar() {
   const pathname = usePathname();
-  const { client, accounts, clientId, setClientId, grants, requests } = useClient();
+  const { client, grants, requests } = useClient();
   const { logout } = useAuth();
 
   const openRequests = requests.filter((r) => r.status !== "resolved").length;
@@ -59,19 +59,10 @@ export default function ClientSidebar() {
       </nav>
 
       <div className="side-foot">
-        {/* Demo-only account switcher — real auth resolves the client from
-            the session. Lets you preview any client's dashboard for now. */}
-        <label className="ts-switch">
-          <span className="ts-switch-l">Signed in as</span>
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)} aria-label="Signed in as">
-            {accounts.map((c) => (
-              <option key={c.id} value={c.id}>{c.cn}</option>
-            ))}
-          </select>
-        </label>
-
+        {/* A signed-in client sees only its OWN tenant (RLS-scoped by token) —
+            there is no account switcher and no cross-tenant preview. */}
         <div className="userchip">
-          <div className="av" style={{ background: client.contact.c }}>{client.contact.init}</div>
+          <div className="av" style={{ background: client.c }}>{client.init}</div>
           <div className="who">
             <div className="nm">{client.cn}</div>
             <div className="rl">{client.tier} plan</div>

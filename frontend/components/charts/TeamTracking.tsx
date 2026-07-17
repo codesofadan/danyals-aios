@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import { team } from "@/lib/data";
+import type { CCTeamPoint } from "@/lib/hooks/commandCenter";
 
 // Team member tracking — animated bars + count-ups (anime.js). Identity via name label.
-export default function TeamTracking() {
+export default function TeamTracking({ team }: { team: CCTeamPoint[] }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const totalRef = useRef<HTMLElement>(null);
   const maxJobs = Math.max(...team.map((t) => t.jobs));
@@ -68,7 +68,7 @@ export default function TeamTracking() {
       </div>
 
       <div className="team-foot">
-        <span>5 specialists active</span>
+        <span>{team.length} specialists active</span>
         <span><b ref={totalRef}>0</b> jobs delivered</span>
       </div>
     </section>

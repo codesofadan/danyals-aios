@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
-import { securityDefaults, PASS_LENGTHS, ROTATION_OPTIONS, SESSION_OPTIONS, type SecurityPolicy } from "@/lib/data";
+import { useEffect, useRef, useState } from "react";
+import { PASS_LENGTHS, ROTATION_OPTIONS, SESSION_OPTIONS, type SecurityPolicy } from "@/lib/data";
+import { useSecuritySettings, useSaveSecuritySettings } from "@/lib/hooks/settings";
 import { Switch, SettingGroup, SettingRow } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
 
 export default function SecuritySettings({ onLog }: { onLog: LogFn }) {
-  const [p, setP] = useState<SecurityPolicy>(securityDefaults);
+  // GET /settings/security seeds the form; each toggle persists via the partial
+  // PUT (only the changed field is sent — the backend accepts partial updates).
+  const secQ = useSecuritySettings();
+  const saveSec = useSaveSecuritySettings();
+  const [p, setP] = useState<SecurityPolicy | null>(null);
+
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && secQ.data) { setP(secQ.data); seeded.current = true; }
+  }, [secQ.data]);
 
   function set<K extends keyof SecurityPolicy>(key: K, value: SecurityPolicy[K], label: string) {
-    setP((prev) => ({ ...prev, [key]: value }));
+    setP((prev) => (prev ? { ...prev, [key]: value } : prev));
+    saveSec.mutate({ [key]: value } as Partial<SecurityPolicy>);
     onLog("changed security policy", label, "Security");
   }
+
+  const muted: React.CSSProperties = { padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)" };
+  if (secQ.isLoading && !p) return <div className="panel-in"><div style={muted}>Loading security policy…</div></div>;
+  if (secQ.isError && !p)
+    return <div className="panel-in"><div style={muted}>Couldn&apos;t load — {(secQ.error as Error)?.message ?? "try again"}.</div></div>;
+  if (!p) return null;
 
   return (
     <div className="panel-in">
@@ -21,6 +38,12 @@ export default function SecuritySettings({ onLog }: { onLog: LogFn }) {
           <span className="material-symbols-rounded">security</span>
           Platform-wide security policy for every login on this workspace
         </div>
+        {saveSec.isError && (
+          <div className="sec-note inline" role="alert">
+            <span className="material-symbols-rounded">error</span>
+            Couldn&apos;t save the last change — {(saveSec.error as Error)?.message ?? "try again"}.
+          </div>
+        )}
       </div>
 
       <SettingGroup title="Authentication" icon="verified_user">

@@ -1,75 +1,57 @@
 "use client";
 
-import { useState } from "react";
-import {
-  contentJobs, clientAccent,
-  type ContentJob, type Framework,
-} from "@/lib/content";
+import { useContentJobs, useCreateContentJob, useReviewContentJob } from "@/lib/hooks/content";
 import ContentKpis from "./ContentKpis";
 import PipelineBoard from "./PipelineBoard";
 import ReviewGate, { type ReviewAction } from "./ReviewGate";
 import NewJobForm, { type NewJob } from "./NewJobForm";
 import Frameworks from "./Frameworks";
 
-let seq = 0;
-const nextId = () => `CJ-${4200 + seq++}`;
-
-// Auto framework pick: page type + intent heuristic (mirrors the selector stage).
-function autoFramework(pageType: NewJob["pageType"]): Framework {
-  if (pageType === "service") return "AIDA";
-  if (pageType === "local") return "BAB";
-  return "PAS";
-}
-const schemaFor = (pageType: NewJob["pageType"]) =>
-  pageType === "service" ? "Service" : pageType === "local" ? "LocalBusiness" : "Article";
-
 export default function ContentWorkspace() {
-  const [jobs, setJobs] = useState<ContentJob[]>(contentJobs);
+  const jobsQ = useContentJobs(); // live: GET /content/jobs, polls while the worker moves a job
+  const createJob = useCreateContentJob();
+  const reviewJob = useReviewContentJob();
 
+  const jobs = jobsQ.data ?? [];
+
+  // The server snapshots the client name/color, resolves Auto → framework + the
+  // JSON-LD schema, seeds source_pack, and returns the queued job — the board then
+  // refetches. `code` is unused here; the new row arrives via invalidation.
   function handleCreate(input: NewJob) {
-    const resolved = input.framework === "Auto" ? autoFramework(input.pageType) : input.framework;
-    const job: ContentJob = {
-      id: nextId(),
-      client: input.client,
-      color: clientAccent(input.client),
+    createJob.mutate({
+      client_id: input.clientId,
       pageType: input.pageType,
       topic: input.topic,
-      framework: resolved,
-      auto: input.framework === "Auto",
+      framework: input.framework,
       target: input.target,
-      status: "queued",
-      cost: 0,
-      words: 0,
-      schema: schemaFor(input.pageType),
-      images: 0,
-      stage: "Queued",
-      ago: "just now",
-    };
-    setJobs((prev) => [job, ...prev]);
+    });
   }
 
+  // The review gate; the DB trigger owns the transition. approve also hands the
+  // publish worker the job (publishing → done happens server-side), so the board
+  // polls to completion rather than faking the final hop.
   function handleReview(id: string, action: ReviewAction) {
-    setJobs((prev) => prev.map((j) => {
-      if (j.id !== id) return j;
-      if (action === "approve") return { ...j, status: "publishing", stage: "Publish", ago: "just now" };
-      if (action === "edit") return { ...j, status: "drafting", stage: "Draft", ago: "just now" };
-      return { ...j, status: "rejected", stage: "Rejected", ago: "just now" };
-    }));
-    // approve → auto-advance from publishing to done, like the WordPress push finishing.
-    if (action === "approve") {
-      setTimeout(() => {
-        setJobs((prev) => prev.map((j) =>
-          j.id === id && j.status === "publishing"
-            ? { ...j, status: "done", stage: "Published", ago: "just now" }
-            : j));
-      }, 1400);
-    }
+    reviewJob.mutate({ code: id, action });
   }
 
   const needsReview = jobs.filter((j) => j.status === "needs_review");
+  const createErr = createJob.error instanceof Error ? createJob.error.message : null;
+  const reviewErr = reviewJob.error instanceof Error ? reviewJob.error.message : null;
+  const actionErr = createErr ?? reviewErr;
 
   return (
     <>
+      {jobsQ.isError && (
+        <div className="cs" role="alert" style={{ color: "var(--warn)", marginBottom: 8 }}>
+          Couldn&apos;t load content jobs — {(jobsQ.error as Error)?.message ?? "try again"}.
+        </div>
+      )}
+      {actionErr && (
+        <div className="cs" role="alert" style={{ color: "var(--warn)", marginBottom: 8 }}>
+          {createErr ? "Couldn't queue the job" : "Couldn't apply the review"} — {actionErr}.
+        </div>
+      )}
+
       <ContentKpis jobs={jobs} />
 
       <PipelineBoard jobs={jobs} />

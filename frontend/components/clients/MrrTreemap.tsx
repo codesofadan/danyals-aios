@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
-import { clientDirectory, TIER_COLOR, type SubTier } from "@/lib/data";
+import { TIER_COLOR, type SubTier } from "@/lib/data";
+import { useClients } from "@/lib/hooks/clients";
 
 // Revenue treemap — MRR by plan tier. Each tier is a column sized by its
 // share of total MRR; inside it every client is a tile sized by its own
@@ -16,10 +17,13 @@ export default function MrrTreemap() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
 
+  const clientsQ = useClients();
+  const all = clientsQ.data ?? [];
+
   // Only revenue-bearing accounts have area on the map (paused = $0).
-  const paying = clientDirectory.filter((c) => c.mrr > 0);
+  const paying = all.filter((c) => c.mrr > 0);
   const totalMrr = paying.reduce((s, c) => s + c.mrr, 0);
-  const paused = clientDirectory.length - paying.length;
+  const paused = all.length - paying.length;
 
   const groups = TIER_ORDER.map((tier) => {
     const items = paying
@@ -43,7 +47,7 @@ export default function MrrTreemap() {
       easing: "easeOutCubic",
     });
     return () => a.pause();
-  }, []);
+  }, [totalMrr]);
 
   return (
     <section className="card">
@@ -61,6 +65,11 @@ export default function MrrTreemap() {
       </div>
 
       <div className="tmap" ref={rootRef}>
+        {groups.length === 0 && (
+          <div style={{ padding: "2rem 1rem", textAlign: "center", color: "var(--muted)", flexGrow: 1 }}>
+            {clientsQ.isLoading ? "Loading revenue…" : clientsQ.isError ? "Couldn't load clients." : "No paying accounts yet."}
+          </div>
+        )}
         {groups.map((g) => (
           <div className="tmap-group" key={g.tier} style={{ flexGrow: g.sum }}>
             <div className="tmap-group-h">
@@ -95,7 +104,7 @@ export default function MrrTreemap() {
         <table>
           <thead><tr><th>Client</th><th>Tier</th><th>MRR</th></tr></thead>
           <tbody>
-            {[...clientDirectory].sort((a, b) => b.mrr - a.mrr).map((c) => (
+            {[...all].sort((a, b) => b.mrr - a.mrr).map((c) => (
               <tr key={c.id}><td>{c.cn}</td><td>{c.tier}</td><td>{usd(c.mrr)}</td></tr>
             ))}
           </tbody>

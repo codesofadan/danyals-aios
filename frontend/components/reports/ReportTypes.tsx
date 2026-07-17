@@ -1,6 +1,11 @@
-import { reportTypes, DATASET_META } from "@/lib/reports";
+"use client";
+
+import { DATASET_META } from "@/lib/reports";
+import { useReportTypes } from "@/lib/hooks/reports";
 
 export default function ReportTypes() {
+  const typesQ = useReportTypes();
+  const reportTypes = typesQ.data ?? [];
   return (
     <section className="card">
       <div className="card-h">

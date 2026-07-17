@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { backlinks, BACKLINK_META, type Backlink, type BacklinkStatus } from "@/lib/offpage";
+import { BACKLINK_META, type Backlink, type BacklinkStatus } from "@/lib/offpage";
+import { useBacklinks } from "@/lib/hooks/offpage";
 
 type FilterKey = "all" | BacklinkStatus;
 
@@ -21,17 +22,19 @@ function authorityColor(v: number) {
 
 export default function BacklinksTab() {
   const [filter, setFilter] = useState<FilterKey>("all");
+  const backlinksQ = useBacklinks();
+  const backlinks = backlinksQ.data ?? [];
 
   const rows = useMemo(
     () => backlinks.filter((b) => filter === "all" || b.status === filter),
-    [filter],
+    [backlinks, filter],
   );
 
   const counts = useMemo(() => {
     const c: Record<FilterKey, number> = { all: backlinks.length, new: 0, lost: 0, toxic: 0 };
     backlinks.forEach((b) => { c[b.status] += 1; });
     return c;
-  }, []);
+  }, [backlinks]);
 
   return (
     <div className="panel-in">
@@ -63,7 +66,13 @@ export default function BacklinksTab() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((b: Backlink) => {
+            {backlinksQ.isLoading && (
+              <tr><td colSpan={7} className="op-empty">Loading backlinks…</td></tr>
+            )}
+            {backlinksQ.isError && !backlinksQ.isLoading && (
+              <tr><td colSpan={7} className="op-empty">Couldn&apos;t load backlinks — {(backlinksQ.error as Error)?.message ?? "try again"}.</td></tr>
+            )}
+            {!backlinksQ.isLoading && !backlinksQ.isError && rows.map((b: Backlink) => {
               const meta = BACKLINK_META[b.status];
               return (
                 <tr key={b.id}>
@@ -90,7 +99,7 @@ export default function BacklinksTab() {
                 </tr>
               );
             })}
-            {rows.length === 0 && (
+            {!backlinksQ.isLoading && !backlinksQ.isError && rows.length === 0 && (
               <tr><td colSpan={7} className="op-empty">No links match this filter.</td></tr>
             )}
           </tbody>

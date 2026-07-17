@@ -5,14 +5,10 @@ import {
   PAGE_TYPES, TARGETS, FRAMEWORKS,
   type PageType, type PublishTarget, type Framework,
 } from "@/lib/content";
-
-const CLIENTS = [
-  "NorthPeak Dental", "Lumen Realty", "Verde Cafe", "Atlas Legal",
-  "BrightHVAC", "Coastline Fit", "Meridian Wealth", "Orchard Pediatrics",
-];
+import { useClients } from "@/lib/hooks/clients";
 
 export type NewJob = {
-  client: string;
+  clientId: string;
   pageType: PageType;
   topic: string;
   framework: Framework | "Auto";
@@ -22,16 +18,20 @@ export type NewJob = {
 const FW_OPTIONS: (Framework | "Auto")[] = ["Auto", ...FRAMEWORKS.map((f) => f.key)];
 
 export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => void }) {
-  const [client, setClient] = useState(CLIENTS[0]);
+  const clientsQ = useClients();
+  const clients = clientsQ.data ?? [];
+  const [clientId, setClientId] = useState("");
   const [pageType, setPageType] = useState<PageType>("service");
   const [topic, setTopic] = useState("");
   const [framework, setFramework] = useState<Framework | "Auto">("Auto");
   const [target, setTarget] = useState<PublishTarget>("WordPress");
 
+  const effectiveClientId = clientId || clients[0]?.id || "";
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!topic.trim()) return;
-    onCreate({ client, pageType, topic: topic.trim(), framework, target });
+    if (!topic.trim() || !effectiveClientId) return;
+    onCreate({ clientId: effectiveClientId, pageType, topic: topic.trim(), framework, target });
     setTopic("");
     setFramework("Auto");
   }
@@ -48,8 +48,16 @@ export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => vo
       <form className="co-form" onSubmit={submit}>
         <div className="fld">
           <label>Client</label>
-          <select value={client} onChange={(e) => setClient(e.target.value)}>
-            {CLIENTS.map((c) => <option key={c} value={c}>{c}</option>)}
+          <select
+            value={effectiveClientId}
+            onChange={(e) => setClientId(e.target.value)}
+            disabled={clients.length === 0}
+          >
+            {clients.length === 0 ? (
+              <option value="">{clientsQ.isLoading ? "Loading clients…" : "No clients yet"}</option>
+            ) : (
+              clients.map((c) => <option key={c.id} value={c.id}>{c.cn}</option>)
+            )}
           </select>
         </div>
 
@@ -103,7 +111,7 @@ export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => vo
           </div>
         </div>
 
-        <button className="primary-btn wide" type="submit" disabled={!topic.trim()}>
+        <button className="primary-btn wide" type="submit" disabled={!topic.trim() || !effectiveClientId}>
           <span className="material-symbols-rounded">add</span>Queue content job
         </button>
       </form>

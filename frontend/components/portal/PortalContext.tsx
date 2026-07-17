@@ -1,17 +1,20 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { PORTAL_MEMBER_ID, type Task, type TeamMemberRecord } from "@/lib/data";
+import { createContext, useCallback, useContext, useMemo } from "react";
+import { type Task, type TeamMemberRecord } from "@/lib/data";
 import { type ReviewAction } from "@/lib/portal";
-import { useStore } from "@/lib/store";
-import { useAuth } from "@/lib/auth";
+import {
+  useAdvanceTask,
+  useMe,
+  useMyGrants,
+  useMyTasks,
+  useReviewTask,
+} from "@/lib/hooks/portal";
 
 type PortalState = {
   me: TeamMemberRecord;
-  members: TeamMemberRecord[];
-  memberId: string;
-  setMemberId: (id: string) => void;
   myTasks: Task[];
+  myGrants: string[]; // granted accessFeatures.key[] for the signed-in member
   openCount: number;
   reviewCount: number;
   advance: (id: string) => void;
@@ -20,36 +23,51 @@ type PortalState = {
 
 const Ctx = createContext<PortalState | null>(null);
 
-// Reads the shared roster + task board from the global store and scopes it
-// to the signed-in member, so tasks the admin assigns land here live and a
-// member's actions (start / deliver / approve) flow back to the admin
-// activity log. Any member — including one just invited from the admin
-// dashboard — can be previewed via the sidebar switcher.
+// Scopes the portal to the SIGNED-IN member and nothing else: `me` comes from
+// GET /me, the queue from GET /tasks?mine=1, and every action posts back to the
+// task lifecycle — all RLS-scoped server-side to the caller. There is no member
+// switcher (the session IS the identity). Until /me resolves we render a neutral
+// splash so no member's workspace — let alone another member's data — flashes.
 export function PortalProvider({ children }: { children: React.ReactNode }) {
-  const { members, tasks, advanceTask, reviewTask } = useStore();
-  const { session } = useAuth();
-  const [memberId, setMemberId] = useState<string>(
-    session?.role === "team" ? session.id : PORTAL_MEMBER_ID,
+  const meQ = useMe();
+  const tasksQ = useMyTasks();
+  const grantsQ = useMyGrants(meQ.data?.id);
+  const advanceM = useAdvanceTask();
+  const reviewM = useReviewTask();
+
+  // mutate() is a stable reference across renders, so these callbacks are stable.
+  const advanceMutate = advanceM.mutate;
+  const reviewMutate = reviewM.mutate;
+  const advance = useCallback((id: string) => advanceMutate(id), [advanceMutate]);
+  const review = useCallback(
+    (id: string, action: ReviewAction) => reviewMutate({ code: id, action }),
+    [reviewMutate],
   );
 
-  // When the signed-in team member resolves (or changes), scope the portal
-  // to them. The sidebar switcher can still preview any member afterwards.
-  useEffect(() => {
-    if (session?.role === "team") setMemberId(session.id);
-  }, [session?.role, session?.id]);
-
-  const me = useMemo(
-    () => members.find((m) => m.id === memberId) ?? members[0],
-    [members, memberId],
-  );
-  const myTasks = useMemo(() => tasks.filter((t) => t.assignee === me.id), [tasks, me.id]);
+  const me = meQ.data;
+  const myTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
+  const myGrants = useMemo(() => grantsQ.data ?? [], [grantsQ.data]);
   const openCount = myTasks.filter((t) => t.status !== "done").length;
   const reviewCount = myTasks.filter((t) => t.status === "review").length;
 
-  const value: PortalState = {
-    me, members, memberId, setMemberId,
-    myTasks, openCount, reviewCount, advance: advanceTask, review: reviewTask,
-  };
+  const value = useMemo<PortalState | null>(
+    () =>
+      me ? { me, myTasks, myGrants, openCount, reviewCount, advance, review } : null,
+    [me, myTasks, myGrants, openCount, reviewCount, advance, review],
+  );
+
+  // Loading / not-yet-resolved gate — never render the workspace until the
+  // signed-in member's own record has loaded.
+  if (!value) {
+    return (
+      <div className="auth-splash">
+        <div className="auth-splash-logo" />
+        <div className="auth-splash-txt">
+          {meQ.isError ? "Couldn't load your workspace — please retry." : "Loading your workspace…"}
+        </div>
+      </div>
+    );
+  }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

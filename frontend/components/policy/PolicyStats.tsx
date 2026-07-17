@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import { sources, changeEvents, recommendations, kbEntries, REC_OPEN } from "@/lib/policy";
+import { REC_OPEN } from "@/lib/policy";
+import { useSources, useChanges, useRecommendations, useKb } from "@/lib/hooks/policy";
 
 type Tile = {
   icon: string;
@@ -14,15 +15,6 @@ type Tile = {
   note: string;
   hero?: boolean;
 };
-
-const openRecs = recommendations.filter((r) => REC_OPEN.includes(r.status)).length;
-
-const TILES: Tile[] = [
-  { icon: "radar", label: "Sources watched", value: sources.length, delta: "live", deltaDir: "up", note: "monitored continuously", hero: true },
-  { icon: "change_circle", label: "Changes detected (7d)", value: changeEvents.length, delta: "3", deltaDir: "up", note: "vs. prior week" },
-  { icon: "recommend", label: "Open recommendations", value: openRecs, delta: "2", deltaDir: "up", note: "awaiting human confirm" },
-  { icon: "library_books", label: "KB entries", value: kbEntries.length, delta: "4", deltaDir: "up", note: "versioned & cited" },
-];
 
 function useCountUp(target: number) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -57,6 +49,20 @@ function Value({ value, unit }: { value: number; unit?: string }) {
 }
 
 export default function PolicyStats() {
+  const sourcesQ = useSources();
+  const changesQ = useChanges();
+  const recsQ = useRecommendations();
+  const kbQ = useKb();
+
+  const openRecs = (recsQ.data ?? []).filter((r) => REC_OPEN.includes(r.status)).length;
+
+  const TILES: Tile[] = [
+    { icon: "radar", label: "Sources watched", value: sourcesQ.data?.length ?? 0, delta: "live", deltaDir: "up", note: "monitored continuously", hero: true },
+    { icon: "change_circle", label: "Changes detected (7d)", value: changesQ.data?.length ?? 0, delta: "3", deltaDir: "up", note: "vs. prior week" },
+    { icon: "recommend", label: "Open recommendations", value: openRecs, delta: "2", deltaDir: "up", note: "awaiting human confirm" },
+    { icon: "library_books", label: "KB entries", value: kbQ.data?.length ?? 0, delta: "4", deltaDir: "up", note: "versioned & cited" },
+  ];
+
   return (
     <section className="kpis">
       {TILES.map((t) => (

@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import {
-  projects, projectProgress, PROJECT_FILTERS, STAGE_STATUS_META,
+  projectProgress, PROJECT_FILTERS, STAGE_STATUS_META,
   type ProjectFilter,
 } from "@/lib/milestones";
+import { useMilestones } from "@/lib/hooks/milestones";
 import ClientTimeline from "./ClientTimeline";
 import AutoAdvanceFeed from "./AutoAdvanceFeed";
 import StagePipeline from "./StagePipeline";
@@ -15,12 +16,15 @@ const LEGEND: { status: keyof typeof STAGE_STATUS_META }[] = [
 ];
 
 export default function MilestonesWorkspace() {
+  const projectsQ = useMilestones();
+  const projects = projectsQ.data ?? [];
+
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const shown = useMemo(
     () => projects.filter((p) => filter === "all" || p.health === filter),
-    [filter],
+    [projects, filter],
   );
 
   const avg = shown.length
@@ -63,10 +67,16 @@ export default function MilestonesWorkspace() {
         </div>
 
         <div className="ms-list">
-          {shown.map((p) => (
+          {projectsQ.isLoading && <div className="ms-empty">Loading projects…</div>}
+          {projectsQ.isError && !projectsQ.isLoading && (
+            <div className="ms-empty">Couldn&apos;t load projects — {(projectsQ.error as Error)?.message ?? "try again"}.</div>
+          )}
+          {!projectsQ.isLoading && !projectsQ.isError && shown.map((p) => (
             <ClientTimeline key={p.id} project={p} expanded={!!open[p.id]} onToggle={() => toggle(p.id)} />
           ))}
-          {shown.length === 0 && <div className="ms-empty">No projects match this filter.</div>}
+          {!projectsQ.isLoading && !projectsQ.isError && shown.length === 0 && (
+            <div className="ms-empty">No projects match this filter.</div>
+          )}
         </div>
 
         <div className="ms-legend">

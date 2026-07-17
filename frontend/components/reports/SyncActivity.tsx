@@ -1,6 +1,11 @@
+import type { CSSProperties } from "react";
 import { DATASET_META, type SyncEvent } from "@/lib/reports";
 
-export default function SyncActivity({ log }: { log: SyncEvent[] }) {
+const RP_EMPTY: CSSProperties = { padding: "20px", textAlign: "center", color: "var(--muted)" };
+
+type Props = { log: SyncEvent[]; loading?: boolean; error?: string | null };
+
+export default function SyncActivity({ log, loading, error }: Props) {
   const total = log.reduce((s, e) => s + e.rows, 0);
   return (
     <section className="card">
@@ -15,7 +20,10 @@ export default function SyncActivity({ log }: { log: SyncEvent[] }) {
       </div>
 
       <div className="rp-log">
-        {log.map((e) => {
+        {loading && <div style={RP_EMPTY}>Loading sync activity…</div>}
+        {error && !loading && <div style={RP_EMPTY}>Couldn&apos;t load activity — {error}</div>}
+        {!loading && !error && log.length === 0 && <div style={RP_EMPTY}>No sync activity yet.</div>}
+        {!loading && !error && log.map((e) => {
           const m = DATASET_META[e.dataset];
           return (
             <div className="rp-log-row" key={e.id}>

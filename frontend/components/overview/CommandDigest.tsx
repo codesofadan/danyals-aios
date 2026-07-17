@@ -1,14 +1,19 @@
 import Link from "next/link";
-import { recommendations, kbEntries, SEV_META, MODULE_META, REC_OPEN } from "@/lib/policy";
+import { SEV_META, MODULE_META, type Severity } from "@/lib/policy";
+import type { Recommendation } from "@/lib/policy";
 
 // Command Center surface for the main dashboard: the top open Policy Radar
 // recommendations awaiting the Super Admin's confirmation. Read-only digest —
-// full acknowledge/apply/dismiss actions live in /policy-radar.
-export default function CommandDigest() {
-  const open = recommendations
-    .filter((r) => REC_OPEN.includes(r.status))
-    .slice(0, 4)
-    .map((r) => ({ r, sev: kbEntries.find((k) => k.id === r.kbId)?.severity ?? "info" }));
+// full acknowledge/apply/dismiss actions live in /policy-radar. The list is fed
+// from GET /command-center (`digest` — already the top-4 OPEN recs).
+//
+// SEVERITY GAP (recorded for the orchestrator): the digest items are
+// RecommendationResponse (11 keys, no `severity`), and the /command-center
+// payload carries no KB entries to resolve `kbId → severity`. So severity here
+// defaults to "info" (critical count is always 0) until the backend adds a
+// `severity` field to each digest item.
+export default function CommandDigest({ digest }: { digest: Recommendation[] }) {
+  const open = digest.map((r) => ({ r, sev: "info" as Severity }));
   const critical = open.filter((x) => x.sev === "critical").length;
 
   return (

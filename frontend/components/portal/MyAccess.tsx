@@ -5,14 +5,14 @@ import {
   accessFeatures, GROUP_COLOR, ROLE_META,
   type FeatureGroup, type TeamMemberRecord,
 } from "@/lib/data";
-import { useStore } from "@/lib/store";
+import { usePortal } from "./PortalContext";
 import { toolSlug } from "@/lib/tools";
 
 const GROUPS: FeatureGroup[] = ["Analytics", "Content", "Delivery", "Admin"];
 
 export default function MyAccess({ me }: { me: TeamMemberRecord }) {
-  const { memberGrants } = useStore();
-  const granted = new Set(memberGrants[me.id] ?? []);
+  const { myGrants } = usePortal();
+  const granted = new Set(myGrants);
   const role = ROLE_META[me.role];
   const total = accessFeatures.length;
 

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePortal } from "./PortalContext";
-import { useStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { toolForKey } from "@/lib/tools";
 
@@ -11,8 +10,7 @@ type Item = { icon: string; label: string; href: string; badge?: number };
 
 export default function TeamSidebar() {
   const pathname = usePathname();
-  const { me, members, memberId, setMemberId, openCount, reviewCount } = usePortal();
-  const { memberGrants } = useStore();
+  const { me, myGrants, openCount, reviewCount } = usePortal();
   const { logout } = useAuth();
 
   const items: Item[] = [
@@ -26,7 +24,7 @@ export default function TeamSidebar() {
 
   // The tools this member can actually open — exactly what the admin
   // granted them, in feature order.
-  const myTools = (memberGrants[me.id] ?? [])
+  const myTools = myGrants
     .map((key) => toolForKey(key))
     .filter((t): t is NonNullable<typeof t> => Boolean(t));
 
@@ -74,17 +72,6 @@ export default function TeamSidebar() {
       </nav>
 
       <div className="side-foot">
-        {/* Demo-only account switcher — real auth resolves the member from
-            the session. Lets you preview any member's portal for now. */}
-        <label className="ts-switch">
-          <span className="ts-switch-l">Signed in as</span>
-          <select value={memberId} onChange={(e) => setMemberId(e.target.value)} aria-label="Signed in as">
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-        </label>
-
         <div className="userchip">
           <div className="av" style={{ background: me.c }}>{me.init}</div>
           <div className="who">

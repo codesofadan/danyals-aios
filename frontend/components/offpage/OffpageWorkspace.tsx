@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
-import { offpageKpis } from "@/lib/offpage";
+import { useOffpageKpis } from "@/lib/hooks/offpage";
 import BacklinksTab from "./BacklinksTab";
 import CitationsTab from "./CitationsTab";
 import Web2Tab from "./Web2Tab";
@@ -17,13 +17,6 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
 ];
 
 type Kpi = { icon: string; label: string; value: number; delta: string; dir: "up" | "down"; note: string; hero?: boolean };
-
-const KPIS: Kpi[] = [
-  { icon: "public", label: "Referring domains", value: offpageKpis.referringDomains, delta: "5.2%", dir: "up", note: "live profile", hero: true },
-  { icon: "add_link", label: "New links (30d)", value: offpageKpis.newLinks30d, delta: "18", dir: "up", note: "DataForSEO alerts" },
-  { icon: "link_off", label: "Lost links (30d)", value: offpageKpis.lostLinks30d, delta: "6", dir: "down", note: "flagged for recovery" },
-  { icon: "gpp_bad", label: "Toxic / spam flagged", value: offpageKpis.toxicFlagged, delta: "2", dir: "down", note: "in disavow review" },
-];
 
 function useCountUp(target: number) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -64,6 +57,14 @@ function KpiTile({ k }: { k: Kpi }) {
 
 export default function OffpageWorkspace() {
   const [tab, setTab] = useState<TabKey>("backlinks");
+  const kpis = useOffpageKpis().data;
+
+  const KPIS: Kpi[] = [
+    { icon: "public", label: "Referring domains", value: kpis?.referringDomains ?? 0, delta: "5.2%", dir: "up", note: "live profile", hero: true },
+    { icon: "add_link", label: "New links (30d)", value: kpis?.newLinks30d ?? 0, delta: "18", dir: "up", note: "DataForSEO alerts" },
+    { icon: "link_off", label: "Lost links (30d)", value: kpis?.lostLinks30d ?? 0, delta: "6", dir: "down", note: "flagged for recovery" },
+    { icon: "gpp_bad", label: "Toxic / spam flagged", value: kpis?.toxicFlagged ?? 0, delta: "2", dir: "down", note: "in disavow review" },
+  ];
 
   return (
     <>

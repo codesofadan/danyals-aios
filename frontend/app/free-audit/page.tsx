@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 };
 
 // Public, shareable lead-gen page — standalone, outside every app shell
-// (like /login). Prospects land here, run a free audit, and are funneled
-// toward the agency's Fiverr gigs. All simulated client-side until the
-// FastAPI /audits backend exists.
+// (like /login). Prospects land here, run a real free audit against the
+// FastAPI public funnel (POST /api/v1/public/audits + token poll), and are
+// funneled toward the agency's Fiverr gigs.
 export default function FreeAuditPage() {
   return <FreeAuditFlow />;
 }

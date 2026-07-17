@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { HEALTH_META } from "@/lib/milestones";
 import { useClient } from "./ClientContext";
-import { projectForClient } from "@/lib/client";
+import { useClientMilestones } from "@/lib/hooks/portalClient";
 
 function greeting(name: string): string {
   const h = new Date().getHours();
@@ -11,25 +11,28 @@ function greeting(name: string): string {
   return `${part}, ${name.split(" ")[0]}`;
 }
 
-// Shared hero across the client portal pages — identity, plan, health.
+// Shared hero across the client portal pages — identity, plan, health. A portal
+// login IS the client (the company), so the identity is company-level: the
+// avatar/initials are derived from the name, and health comes from the client's
+// own /portal/milestones project.
 export default function ClientHeader({ eyebrow, focus }: { eyebrow: string; focus?: React.ReactNode }) {
   const { client, grants } = useClient();
-  const project = projectForClient(client.cn);
+  const project = useClientMilestones().data;
   const health = project ? HEALTH_META[project.health] : null;
 
-  const [hi, setHi] = useState(`Welcome, ${client.contact.name.split(" ")[0]}`);
-  useEffect(() => { setHi(greeting(client.contact.name)); }, [client.contact.name]);
+  const [hi, setHi] = useState(`Welcome, ${client.cn.split(" ")[0]}`);
+  useEffect(() => { setHi(greeting(client.cn)); }, [client.cn]);
 
   return (
     <section className="cl-hero">
-      <span className="cl-hero-av av" style={{ background: client.contact.c }}>{client.contact.init}</span>
+      <span className="cl-hero-av av" style={{ background: client.c }}>{client.init}</span>
 
       <div className="cl-hero-id">
         <div className="cl-hero-hi">{eyebrow ?? hi}</div>
         <div className="cl-hero-name">{client.cn}</div>
         <div className="cl-hero-meta">
           <span className="cl-hero-plan">{client.tier} plan</span>
-          <span className="cl-hero-title">{client.contact.name} · {client.contact.role}</span>
+          {client.site && <span className="cl-hero-title">{client.site}</span>}
           {health && (
             <span className={`status-pill ${health.cls}`}>
               <span className="material-symbols-rounded" style={{ fontSize: 14 }}>{health.icon}</span>

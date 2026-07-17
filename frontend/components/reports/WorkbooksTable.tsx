@@ -1,13 +1,18 @@
+import type { CSSProperties } from "react";
 import { DATASET_META, STATUS_META, type Workbook } from "@/lib/reports";
+
+const RP_EMPTY: CSSProperties = { padding: "20px", textAlign: "center", color: "var(--muted)" };
 
 type Props = {
   workbooks: Workbook[];
   syncing: Set<string>;
   onSync: (id: string) => void;
   onSyncAll: () => void;
+  loading?: boolean;
+  error?: string | null;
 };
 
-export default function WorkbooksTable({ workbooks, syncing, onSync, onSyncAll }: Props) {
+export default function WorkbooksTable({ workbooks, syncing, onSync, onSyncAll, loading, error }: Props) {
   const anySyncing = syncing.size > 0;
   return (
     <section className="card">
@@ -17,7 +22,7 @@ export default function WorkbooksTable({ workbooks, syncing, onSync, onSyncAll }
           <div className="cs">One Google Sheets workbook per client — audit, content &amp; milestone tabs</div>
         </div>
         <div className="tools">
-          <button className="ghostbtn" onClick={onSyncAll} disabled={anySyncing}>
+          <button className="ghostbtn" onClick={onSyncAll} disabled={anySyncing || loading || workbooks.length === 0}>
             <span className="material-symbols-rounded">sync</span>
             {anySyncing ? "Syncing…" : "Sync all"}
           </button>
@@ -38,7 +43,16 @@ export default function WorkbooksTable({ workbooks, syncing, onSync, onSyncAll }
             </tr>
           </thead>
           <tbody>
-            {workbooks.map((w) => {
+            {loading && (
+              <tr><td colSpan={7} style={RP_EMPTY}>Loading workbooks…</td></tr>
+            )}
+            {error && !loading && (
+              <tr><td colSpan={7} style={RP_EMPTY}>Couldn&apos;t load workbooks — {error}</td></tr>
+            )}
+            {!loading && !error && workbooks.length === 0 && (
+              <tr><td colSpan={7} style={RP_EMPTY}>No client workbooks yet.</td></tr>
+            )}
+            {!loading && !error && workbooks.map((w) => {
               const isSyncing = syncing.has(w.id) || w.status === "syncing";
               const st = STATUS_META[isSyncing ? "syncing" : w.status];
               return (

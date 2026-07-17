@@ -20,21 +20,23 @@ const UNLOCK_MS = 1500;
 //   · unlocked    — the live, themed visualization.
 export default function LockableChart({ report }: { report: DashboardReport }) {
   const router = useRouter();
-  const { clientId, isGranted, isUnlocked, unlock } = useClient();
+  const { isGranted, isUnlocked, unlock } = useClient();
   const granted = isGranted(report.key);
+  const unlockedNow = isUnlocked(report.key);
   const accent = reportColor(report);
 
-  const initial: Phase = !granted ? "locked" : isUnlocked(report.key) ? "unlocked" : "unlockable";
+  const initial: Phase = !granted ? "locked" : unlockedNow ? "unlocked" : "unlockable";
   const [phase, setPhase] = useState<Phase>(initial);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Re-sync to the signed-in client (the demo switcher can change it, and
-  // each client has its own grants + unlocked set).
+  // Re-sync when the grant/unlock state changes — the reports query may resolve
+  // AFTER this card first mounts (grants start empty → the card starts locked),
+  // so this promotes it to unlockable once its grant arrives.
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    setPhase(!granted ? "locked" : isUnlocked(report.key) ? "unlocked" : "unlockable");
+    setPhase(!granted ? "locked" : unlockedNow ? "unlocked" : "unlockable");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, report.key]);
+  }, [granted, unlockedNow, report.key]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   function startUnlock() {

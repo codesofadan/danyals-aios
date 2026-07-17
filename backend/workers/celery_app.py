@@ -11,10 +11,33 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from app.config import get_settings
 
 settings = get_settings()
+
+
+@worker_process_init.connect  # type: ignore[untyped-decorator]  # celery's signal decorator is untyped
+def _init_worker_db_pools(**_kwargs: object) -> None:
+    """Build THIS worker process's DB pools.
+
+    The API opens its pools in the FastAPI lifespan; a Celery worker has no
+    lifespan, so without this every DB-touching task (audit, content, rank
+    tracker, ...) fails with ``DatabaseNotConfiguredError`` - the pool globals stay
+    ``None``. Built per worker process (post-fork under the prefork pool) so a
+    psycopg connection is never shared across a fork. Fires for the solo pool too.
+    """
+    from app.db.database import build_admin_pool, build_rls_pool, set_pools
+
+    s = get_settings()
+    rls = build_rls_pool(s.database_url)
+    admin = build_admin_pool(s.database_admin_url)
+    if rls is not None:
+        rls.open()
+    if admin is not None:
+        admin.open()
+    set_pools(rls, admin)
 
 celery_app = Celery(
     "aios",

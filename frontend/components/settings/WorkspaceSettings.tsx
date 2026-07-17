@@ -1,24 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { workspaceDefaults, TIMEZONES, LANGUAGES, BRAND_COLORS, type WorkspaceSettingsData } from "@/lib/data";
+import { useWorkspaceSettings, useSaveWorkspaceSettings } from "@/lib/hooks/settings";
 import { SettingGroup, SettingRow, SavedFlash } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
 
 export default function WorkspaceSettings({ onLog }: { onLog: LogFn }) {
-  const [w, setW] = useState<WorkspaceSettingsData>(workspaceDefaults);
+  // GET /settings/workspace seeds the form; the Save button persists it via PUT.
+  const wsQ = useWorkspaceSettings();
+  const saveWs = useSaveWorkspaceSettings();
+  const [w, setW] = useState<WorkspaceSettingsData | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && wsQ.data) { setW(wsQ.data); seeded.current = true; }
+  }, [wsQ.data]);
+
   function set<K extends keyof WorkspaceSettingsData>(key: K, value: WorkspaceSettingsData[K]) {
-    setW((prev) => ({ ...prev, [key]: value }));
+    setW((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
   function save() {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
-    onLog("updated workspace settings", w.agencyName, "Workspace");
+    if (!w) return;
+    saveWs.mutate(w, {
+      onSuccess: () => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1800);
+        onLog("updated workspace settings", w.agencyName, "Workspace");
+      },
+    });
   }
+
+  const muted: React.CSSProperties = { padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)" };
+  if (wsQ.isLoading && !w) return <div className="panel-in"><div style={muted}>Loading workspace settings…</div></div>;
+  if (wsQ.isError && !w)
+    return <div className="panel-in"><div style={muted}>Couldn&apos;t load — {(wsQ.error as Error)?.message ?? "try again"}.</div></div>;
+  if (!w) return null;
 
   return (
     <div className="panel-in">
@@ -78,9 +98,15 @@ export default function WorkspaceSettings({ onLog }: { onLog: LogFn }) {
       </SettingGroup>
 
       <div className="set-actions end">
+        {saveWs.isError && (
+          <span className="sec-note inline" role="alert">
+            <span className="material-symbols-rounded">error</span>
+            {(saveWs.error as Error)?.message ?? "Couldn't save — try again."}
+          </span>
+        )}
         <SavedFlash show={saved} />
-        <button className="primary-btn" onClick={save}>
-          <span className="material-symbols-rounded">save</span>Save changes
+        <button className="primary-btn" onClick={save} disabled={saveWs.isPending}>
+          <span className="material-symbols-rounded">save</span>{saveWs.isPending ? "Saving…" : "Save changes"}
         </button>
       </div>
 

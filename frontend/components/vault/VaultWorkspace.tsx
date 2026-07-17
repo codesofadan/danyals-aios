@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import anime from "animejs";
-import { vaultKeys, maskSecret, type VaultKey } from "@/lib/vault";
+import { useVaultKeys, useAddVaultKey } from "@/lib/hooks/vault";
 import VaultTable from "./VaultTable";
 import ProvidersOverview from "./ProvidersOverview";
 import AddKeyForm, { type NewKey } from "./AddKeyForm";
@@ -41,10 +41,10 @@ function NumKpi({ icon, label, value, sub, hero }: {
   );
 }
 
-let seq = 0;
-
 export default function VaultWorkspace() {
-  const [keys, setKeys] = useState<VaultKey[]>(vaultKeys);
+  const keysQ = useVaultKeys();
+  const addKey = useAddVaultKey();
+  const keys = keysQ.data ?? [];
 
   const stats = useMemo(() => {
     const providersConnected = new Set(keys.map((k) => k.provider)).size;
@@ -53,26 +53,23 @@ export default function VaultWorkspace() {
     return { stored: keys.length, providersConnected, rotate, expiring };
   }, [keys]);
 
-  // Rotate → optimistically stamp "just now" and clear the rotation flag.
-  function handleRotate(id: string) {
-    setKeys((prev) => prev.map((k) =>
-      k.id === id ? { ...k, rotated: "just now", status: "active" } : k
-    ));
+  // Rotate on the backend REQUIRES a new secret (POST /vault/keys/{id}/rotate
+  // { secret }). The table's one-click rotate button collects no new value, so it
+  // cannot be wired without a new-secret input (a UI addition out of scope here).
+  // Recorded as a backend/frontend mismatch; a no-op until that input lands.
+  function handleRotate(_id: string) {
+    /* mismatch: needs a new-secret input — see note above */
   }
 
-  // Add → optimistic new row, masked by default, freshly rotated.
+  // Add → POST /vault/keys; the list refetches on success. The response is masked
+  // metadata only (no secret), so nothing plaintext is ever cached.
   function handleAdd(input: NewKey) {
-    const key: VaultKey = {
-      id: `k-new-${Date.now().toString(36)}${seq++}`,
+    addKey.mutate({
       provider: input.provider,
       label: input.label,
-      masked: maskSecret(input.value),
       secret: input.value,
       scope: input.scope,
-      status: "active",
-      rotated: "just now",
-    };
-    setKeys((prev) => [key, ...prev]);
+    });
   }
 
   return (
@@ -121,12 +118,25 @@ export default function VaultWorkspace() {
               <div className="cs">Every API key &amp; password — masked by default, reveal &amp; rotate on demand.</div>
             </div>
           </div>
-          <VaultTable keys={keys} onRotate={handleRotate} />
+          {keysQ.isLoading ? (
+            <div className="panel-hint" style={{ padding: "18px 20px" }}>Loading keys…</div>
+          ) : keysQ.isError ? (
+            <div className="panel-hint" role="alert" style={{ padding: "18px 20px", color: "var(--warn, #d9822b)" }}>
+              Couldn&apos;t load vault keys — {(keysQ.error as Error)?.message ?? "try again"}.
+            </div>
+          ) : (
+            <VaultTable keys={keys} onRotate={handleRotate} />
+          )}
         </section>
 
         <div className="kv-side">
           <ProvidersOverview keys={keys} />
           <AddKeyForm onAdd={handleAdd} />
+          {addKey.isError && (
+            <div className="panel-hint" role="alert" style={{ color: "var(--warn, #d9822b)" }}>
+              Couldn&apos;t add key — {(addKey.error as Error)?.message ?? "try again"}.
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
-import { backlinks, BACKLINK_META, type BacklinkStatus } from "@/lib/offpage";
+import { BACKLINK_META, type BacklinkStatus } from "@/lib/offpage";
+import { useBacklinks } from "@/lib/hooks/offpage";
 
 // Backlink quality scatter — domain authority (x) vs spam score (y),
 // one dot per referring domain, coloured by status. Toxic links land
@@ -27,6 +28,8 @@ export default function BacklinkScatter() {
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
+  const backlinksQ = useBacklinks();
+  const backlinks = backlinksQ.data ?? [];
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -136,7 +139,7 @@ export default function BacklinkScatter() {
       svg.removeEventListener("pointermove", onMove);
       svg.removeEventListener("pointerleave", onLeave);
     };
-  }, []);
+  }, [backlinksQ.data]);
 
   return (
     <section className="card">

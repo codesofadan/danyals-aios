@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { web2Properties, PLATFORM_META, type Web2Platform, type Web2Verified } from "@/lib/offpage";
+import { PLATFORM_META, type Web2Platform, type Web2Verified } from "@/lib/offpage";
+import { useWeb2 } from "@/lib/hooks/offpage";
 
 type FilterKey = "all" | Web2Verified;
 
@@ -13,10 +14,12 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 
 export default function Web2Tab() {
   const [filter, setFilter] = useState<FilterKey>("all");
+  const web2Q = useWeb2();
+  const web2Properties = web2Q.data ?? [];
 
   const rows = useMemo(
     () => web2Properties.filter((w) => filter === "all" || w.verified === filter),
-    [filter],
+    [web2Properties, filter],
   );
 
   return (
@@ -48,7 +51,13 @@ export default function Web2Tab() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((w) => {
+            {web2Q.isLoading && (
+              <tr><td colSpan={6} className="op-empty">Loading placements…</td></tr>
+            )}
+            {web2Q.isError && !web2Q.isLoading && (
+              <tr><td colSpan={6} className="op-empty">Couldn&apos;t load placements — {(web2Q.error as Error)?.message ?? "try again"}.</td></tr>
+            )}
+            {!web2Q.isLoading && !web2Q.isError && rows.map((w) => {
               const pm = PLATFORM_META[w.platform as Web2Platform];
               return (
                 <tr key={w.id}>
@@ -82,7 +91,7 @@ export default function Web2Tab() {
                 </tr>
               );
             })}
-            {rows.length === 0 && (
+            {!web2Q.isLoading && !web2Q.isError && rows.length === 0 && (
               <tr><td colSpan={6} className="op-empty">No placements match this filter.</td></tr>
             )}
           </tbody>

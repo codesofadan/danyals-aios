@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
-import { audits } from "@/lib/data";
+import type { CCAuditPoint } from "@/lib/hooks/commandCenter";
 
 // Clean 2D bar chart (animated SVG · anime.js). Bars grow from the
 // baseline; hover raises a bar and shows a tooltip. Week labels sit
 // on the x-axis; a "Data" toggle exposes the underlying table.
-export default function AuditVolumeChart() {
+export default function AuditVolumeChart({ audits }: { audits: CCAuditPoint[] }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
@@ -123,7 +123,7 @@ export default function AuditVolumeChart() {
       svg.removeEventListener("pointermove", onMove);
       svg.removeEventListener("pointerleave", onLeave);
     };
-  }, []);
+  }, [audits]);
 
   return (
     <section className="card">

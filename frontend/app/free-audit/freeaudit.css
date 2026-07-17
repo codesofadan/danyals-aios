@@ -126,6 +126,21 @@
 .fa-input input::placeholder { color: var(--muted-2); }
 .fa-form .primary-btn.wide { height: 48px; margin-top: 6px; font-size: 14px; }
 
+/* Optional focus-area chips (the two free audit types). */
+.fa-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.fa-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 13px; border-radius: 10px;
+  cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 700; letter-spacing: -.01em;
+  color: var(--muted); background: var(--well); border: 1px solid var(--line); transition: .14s;
+}
+.fa-chip:hover { color: var(--body); border-color: var(--line-2); }
+.fa-chip .material-symbols-rounded { font-size: 17px; }
+.fa-chip.on {
+  color: var(--fg-strong); background: color-mix(in srgb, var(--violet) 14%, transparent);
+  border-color: color-mix(in srgb, var(--violet) 42%, transparent);
+}
+.fa-chip.on .material-symbols-rounded { color: var(--violet-soft); }
+
 .fa-note, .fa-report-note {
   display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; padding: 12px 14px; border-radius: 12px;
   background: var(--well); border: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.5;
@@ -292,9 +307,60 @@
 .fa-check-tag.warn { color: var(--warn); background: rgba(245, 166, 35, .12); }
 .fa-check-tag.crit { color: var(--crit); background: rgba(239, 68, 68, .12); }
 
+/* ---------- Category score bars (real per-category `scores`) ---------- */
+.fa-bars { padding: 22px clamp(18px, 3vw, 24px); border-radius: 18px; background: var(--card); border: 1px solid var(--line); }
+.fa-bars-h { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.fa-bars-h .material-symbols-rounded { font-size: 18px; }
+.fa-bar-list { display: flex; flex-direction: column; gap: 16px; }
+.fa-bar { display: flex; align-items: center; gap: 13px; }
+.fa-bar-ic { width: 38px; height: 38px; flex: none; border-radius: 11px; display: grid; place-items: center; }
+.fa-bar-ic .material-symbols-rounded { font-size: 20px; }
+.fa-bar-main { flex: 1; min-width: 0; }
+.fa-bar-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.fa-bar-label { font-size: 14px; font-weight: 700; color: var(--body); }
+.fa-bar-score { font-size: 14.5px; font-weight: 800; letter-spacing: -.01em; }
+.fa-bar-score.band-ok { color: var(--ok); }
+.fa-bar-score.band-warn { color: var(--warn); }
+.fa-bar-score.band-crit { color: var(--crit); }
+.fa-bar-track { height: 8px; border-radius: 999px; background: var(--well); overflow: hidden; }
+.fa-bar-fill { display: block; height: 100%; width: 0; border-radius: inherit; box-shadow: 0 0 12px -2px currentColor; }
+
+/* ---------- Full-report PDF CTA ---------- */
+.fa-pdf-cta {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; height: 42px; padding: 0 17px;
+  border-radius: 11px; text-decoration: none; font-size: 13.5px; font-weight: 800; letter-spacing: -.01em;
+  color: var(--fg-strong); background: var(--well); border: 1px solid var(--line-2); transition: .16s;
+}
+.fa-pdf-cta:hover { border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); transform: translateY(-1px); }
+.fa-pdf-cta .material-symbols-rounded { font-size: 19px; color: var(--violet-soft); }
+.fa-pdf-cta .material-symbols-rounded:last-child { font-size: 16px; color: var(--muted); }
+
+/* ---------- Failed / error card ---------- */
+.fa-fail { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px 80px; }
+.fa-fail-card {
+  width: 100%; max-width: 460px; text-align: center; padding: 34px 32px; border-radius: 22px;
+  background: linear-gradient(168deg, var(--elev-1), var(--elev-2)); border: 1px solid var(--line-2);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .6);
+}
+.fa-fail-ic {
+  width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 16px; display: grid; place-items: center;
+  color: var(--crit); background: rgba(239, 68, 68, .12);
+}
+.fa-fail-ic .material-symbols-rounded { font-size: 30px; }
+.fa-fail-h { font-size: 21px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.02em; }
+.fa-fail-sub { font-size: 13.5px; color: var(--muted); margin-top: 8px; line-height: 1.55; }
+.fa-fail-card .primary-btn { margin-top: 20px; }
+
 /* ---------- Fiverr upsells (post-report) ---------- */
 .fa-upsell { margin-top: 34px; }
 .fa-upsell-h { display: flex; align-items: center; gap: 13px; margin-bottom: 18px; }
+.fa-upsell-all {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 8px 13px; border-radius: 10px;
+  text-decoration: none; font-size: 12.5px; font-weight: 800; color: var(--body);
+  background: var(--well); border: 1px solid var(--line); transition: .16s; white-space: nowrap;
+}
+.fa-upsell-all:hover { border-color: var(--fa-fiverr); color: var(--fg-strong); }
+.fa-upsell-all .material-symbols-rounded { font-size: 15px; color: var(--fa-fiverr); }
 .fa-fiverr-badge {
   width: 42px; height: 42px; flex: none; border-radius: 12px; display: grid; place-items: center;
   color: #fff; background: var(--fa-fiverr); box-shadow: 0 12px 28px -12px var(--fa-fiverr);

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { operatorProfile } from "@/lib/data";
+import { useEffect, useRef, useState } from "react";
+import { useMe } from "@/lib/hooks/settings";
 import { Switch, SettingGroup, SettingRow, PasswordField, SavedFlash } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
@@ -25,11 +25,19 @@ function strength(pw: string): { pct: number; label: string; cls: string } {
 }
 
 export default function AccountSettings({ onLog }: { onLog: LogFn }) {
-  const [name, setName] = useState(operatorProfile.name);
-  const [title, setTitle] = useState(operatorProfile.title);
-  const [email, setEmail] = useState(operatorProfile.email);
-  const [phone, setPhone] = useState(operatorProfile.phone);
-  const [twoFA, setTwoFA] = useState(operatorProfile.twoFA);
+  // The signed-in operator's own record (GET /me). MISMATCH (recorded): /me carries
+  // no `phone` and no 2FA field, and there is NO write route (no PUT /me, no
+  // password-change endpoint) — so the profile fields READ from the API, but Save
+  // profile / password / 2FA remain local confirmations until an account-write
+  // endpoint exists. Phone & 2FA are local-only (not backed by /me).
+  const meQ = useMe();
+  const me = meQ.data;
+
+  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [twoFA, setTwoFA] = useState(false);
 
   const [cur, setCur] = useState("");
   const [next, setNext] = useState("");
@@ -37,6 +45,17 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
 
   const [savedProfile, setSavedProfile] = useState(false);
   const [savedPass, setSavedPass] = useState(false);
+
+  // Seed the editable form ONCE from the API record (a refetch never clobbers edits).
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && me) {
+      setName(me.name);
+      setTitle(me.title);
+      setEmail(me.email);
+      seeded.current = true;
+    }
+  }, [me]);
 
   const st = strength(next);
   const mismatch = confirm.length > 0 && next !== confirm;
@@ -53,8 +72,14 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
     setCur(""); setNext(""); setConfirm("");
     setSavedPass(true);
     setTimeout(() => setSavedPass(false), 1800);
-    onLog("changed own password", operatorProfile.email, "Security");
+    onLog("changed own password", email, "Security");
   }
+
+  const muted: React.CSSProperties = { padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)" };
+  if (meQ.isLoading && !me) return <div className="panel-in"><div style={muted}>Loading your account…</div></div>;
+  if (meQ.isError && !me)
+    return <div className="panel-in"><div style={muted}>Couldn&apos;t load your account — {(meQ.error as Error)?.message ?? "try again"}.</div></div>;
+  if (!me) return null;
 
   return (
     <div className="panel-in">
@@ -66,11 +91,11 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
       </div>
 
       <div className="acct-head">
-        <span className="acct-av" style={{ background: operatorProfile.c }}>{operatorProfile.init}</span>
+        <span className="acct-av" style={{ background: me.c }}>{me.init}</span>
         <div>
           <div className="acct-name">{name}</div>
           <div className="acct-sub">
-            <span className="role-chip" style={{ color: operatorProfile.c, borderColor: operatorProfile.c }}>{operatorProfile.role}</span>
+            <span className="role-chip" style={{ color: me.c, borderColor: me.c }}>{me.role}</span>
             <span>{email}</span>
           </div>
         </div>
