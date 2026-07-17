@@ -253,6 +253,29 @@ def _wire_on_page(app: FastAPI) -> None:
     app.dependency_overrides[get_on_page_repo] = _FakeOnPageRepo
 
 
+def _wire_rank_tracker(app: FastAPI) -> None:
+    """Fake rank repo: a two-row board + non-zero stats (so the table + KPI tiles are
+    actually populated - an empty adapter would pass the col lock vacuously).
+
+    One row is a climber and one a faller, so the Change column exercises BOTH toned
+    cells the dashboard renders (``▲``/ok and ``▼``/crit) rather than only one."""
+    from app.modules.rank_tracker.repo import get_rank_repo
+
+    class _FakeRankRepo:
+        def rank_stats(self, **kwargs: Any) -> dict[str, Any]:
+            return {"tracked": 128, "avg_position": 8.4, "top_three": 34}
+
+        def list_keywords(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return [
+                {"keyword": "dental implants karachi", "client_name": "NorthPeak Dental",
+                 "latest_position": 3, "previous_position": 7},
+                {"keyword": "best cafe near me", "client_name": "Verde Cafe",
+                 "latest_position": 12, "previous_position": 9},
+            ]
+
+    app.dependency_overrides[get_rank_repo] = _FakeRankRepo
+
+
 _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("keyword_research", "/api/v1/keyword-research/workspace", _wire_keyword_research),
     ToolAdapter(
@@ -261,6 +284,7 @@ _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("billing", "/api/v1/billing/workspace", _wire_billing),
     ToolAdapter("local_seo", "/api/v1/local-seo/workspace", _wire_local_seo),
     ToolAdapter("on_page", "/api/v1/on-page/workspace", _wire_on_page),
+    ToolAdapter("rank_tracker", "/api/v1/rank-tracker/workspace", _wire_rank_tracker),
 ]
 
 _IDS = [a.tool_key for a in _TOOL_ADAPTERS]
@@ -523,3 +547,22 @@ async def test_on_page_workspace_tones_match_the_demo_semantics(
     assert high_open[3] == {"v": "Open", "tone": "warn"}
     assert med_applied[2] == {"v": "Med", "tone": "warn"}
     assert med_applied[3] == {"v": "Applied", "tone": "ok"}
+
+
+# --------------------------------------------------------------------------- #
+# 8. rank_tracker: the pinned literals (Part 8 Phase 2B).
+# --------------------------------------------------------------------------- #
+def test_rank_tracker_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("rank_tracker")
+    assert ts.table_cols == ["Keyword", "Client", "Position", "Change"]
+    assert ts.kpi_labels == ["Tracked keywords", "Avg. position", "Top-3 keywords"]
+    assert ts.primary_label == "Add keywords"
+    assert ts.primary_icon == "add"
+    assert ts.table_title == "Keyword movements"
+    assert ts.table_icon == "trending_up"
+
+
+def test_rank_tracker_service_constant_matches_tools_ts() -> None:
+    from app.modules.rank_tracker.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("rank_tracker").table_cols == WORKSPACE_TABLE_COLS
