@@ -226,11 +226,15 @@ def require_module_perm(perm: ModulePermKey) -> Any:
     """Dependency factory: require the caller's role to hold the MODULE perm ``perm``.
 
     The module-perm twin of :func:`require_perm` (a Part-8 tool's finer paid-action
-    gate). It MUST be used instead of ``require_perm`` for a ``ModulePermKey``: those
-    keys are not in ``DEFAULT_ROLE_PERMS``, so ``require_perm`` would deny every
-    non-owner role. Note ``require_perm(<module perm>)`` is also a static type error
-    that mypy cannot see, because these factories are called inside ``Annotated[...]``
-    metadata, which mypy leaves unanalyzed - hence the separate, correctly-typed door.
+    gate), and DELIBERATELY a separate door. A module perm is NOT in
+    ``DEFAULT_ROLE_PERMS`` (that map mirrors ``data.ts`` verbatim), so routing one
+    through ``role_has_perm`` would resolve it to owner-only for every other role -
+    silently locking out the leads the RLS policies do permit. The role set lives in
+    ``app.rbac.matrix.MODULE_PERM_ROLES``.
+
+    Note ``require_perm(<module perm>)`` is also a static type error that mypy cannot
+    see, because these factories are called inside ``Annotated[...]`` metadata, which
+    mypy leaves unanalyzed - hence the separate, correctly-typed door.
     """
 
     async def _dep(user: CurrentUserDep) -> CurrentUser:

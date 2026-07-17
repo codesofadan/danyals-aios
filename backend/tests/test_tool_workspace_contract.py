@@ -177,6 +177,32 @@ def _wire_client_onboarding(app: FastAPI) -> None:
             ]
 
     app.dependency_overrides[get_onboarding_repo] = _FakeOnboardingRepo
+def _wire_billing(app: FastAPI) -> None:
+    """Fake billing repo: a two-row ledger + non-zero tiles (so the table + KPI tiles
+    are actually populated - an empty adapter would pass the col lock vacuously).
+
+    ``subscription_mrr`` and ``invoice_counts`` are SEPARATE reads over separate
+    tables by design (MRR is subscription-derived, never invoice-derived), so the
+    fake mirrors that split rather than collapsing them into one stats dict.
+    """
+    from app.modules.billing.repo import get_billing_repo
+
+    class _FakeBillingRepo:
+        def subscription_mrr(self) -> int:
+            return 28_400  # sum(clients.mrr) - NOT the invoices below
+
+        def invoice_counts(self) -> dict[str, int]:
+            return {"open_invoices": 3, "past_due": 1}
+
+        def list_invoices(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return [
+                {"client_name": "Meridian Wealth", "total": 1490, "due_date": "2026-08-27",
+                 "status": "paid"},
+                {"client_name": "Atlas Legal", "total": 690, "due_date": "2026-07-05",
+                 "status": "past_due"},
+            ]
+
+    app.dependency_overrides[get_billing_repo] = _FakeBillingRepo
 
 
 _TOOL_ADAPTERS: list[ToolAdapter] = [
@@ -184,6 +210,7 @@ _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter(
         "client_onboarding", "/api/v1/client-onboarding/workspace", _wire_client_onboarding
     ),
+    ToolAdapter("billing", "/api/v1/billing/workspace", _wire_billing),
 ]
 
 _IDS = [a.tool_key for a in _TOOL_ADAPTERS]
@@ -356,3 +383,37 @@ def test_client_onboarding_service_constant_matches_tools_ts() -> None:
     from app.modules.client_onboarding.service import WORKSPACE_TABLE_COLS
 
     assert read_tool_extra("client_onboarding").table_cols == WORKSPACE_TABLE_COLS
+# 4. billing: the pinned literals (Part 8 Phase 2H).
+# --------------------------------------------------------------------------- #
+def test_billing_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("billing")
+    assert ts.table_cols == ["Client", "Amount", "Due", "Status"]
+    assert ts.kpi_labels == ["MRR", "Open invoices", "Past due"]
+    assert ts.primary_label == "New invoice"
+    assert ts.primary_icon == "payments"
+    assert ts.table_title == "Invoices"
+    assert ts.table_icon == "payments"
+
+
+def test_billing_service_constant_matches_tools_ts() -> None:
+    from app.modules.billing.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("billing").table_cols == WORKSPACE_TABLE_COLS
+
+
+async def test_billing_mrr_tile_reads_the_subscription_table_not_the_ledger(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """The module's load-bearing scope rule, pinned at the workspace edge.
+
+    The fake ledger bills 1490 + 690 = 2180; the fake subscription book carries an MRR
+    of 28,400. The MRR tile must render the SUBSCRIPTION number - if the adapter ever
+    starts summing invoices, this tile flips to "$2.2k" and this test names it.
+    """
+    adapter = next(a for a in _TOOL_ADAPTERS if a.tool_key == "billing")
+    body = await _fetch_workspace(app, client, adapter)
+    tiles = {k["label"]: k["value"] for k in body["kpis"]}
+    assert tiles["MRR"] == "$28.4k"  # sum(clients.mrr), compact-formatted
+    assert tiles["MRR"] != "$2.2k"  # ... and emphatically NOT sum(invoices)
+    assert tiles["Open invoices"] == "3"  # these two DO come from the ledger
+    assert tiles["Past due"] == "1"

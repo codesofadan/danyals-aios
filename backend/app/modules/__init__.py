@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.modules.billing import router as billing_router
 from app.modules.client_onboarding import router as client_onboarding_router
 from app.modules.keyword_research import router as keyword_research_router
 
@@ -28,4 +29,5 @@ from app.modules.keyword_research import router as keyword_research_router
 MODULE_ROUTERS: list[APIRouter] = [
     keyword_research_router,
     client_onboarding_router,
+    billing_router,
 ]

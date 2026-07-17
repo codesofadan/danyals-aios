@@ -33,6 +33,10 @@ celery_app = Celery(
         # Part 8: the keyword-research worker (research_keywords). Event-driven (enqueued
         # per research request), so no beat entry / overlap-lock is needed.
         "app.modules.keyword_research.tasks",
+        # Part 8: the billing past-due sweep (mark_past_due). BEAT-driven (see the
+        # schedule below); the flip is a single idempotent UPDATE, so Postgres's row
+        # locks serialise overlapping ticks and no overlap-lock is needed.
+        "app.modules.billing.tasks",
     ],
 )
 
@@ -67,6 +71,12 @@ celery_app.conf.update(
 # walks every entity with vectors and detects/logs (optionally repairs) ledger-vs-
 # store drift. It is a safety net, not a hot path - Postgres is the source of truth
 # and sync_vectors keeps the two in step per fold - so it deliberately runs rarely.
+#
+# The billing past-due sweep (Part 8 Phase 2H) runs nightly by default: it flips every
+# `open` invoice whose due date has passed to `past_due` (the one automatic status
+# transition in the module - it notices a date, it does not move money). A single
+# idempotent UPDATE keyed on `status = 'open'`, so a re-run or an overlapping tick is
+# a no-op and it needs no overlap lock.
 celery_app.conf.beat_schedule = {
     "dispatch-context": {
         "task": "dispatch_context",
@@ -75,5 +85,9 @@ celery_app.conf.beat_schedule = {
     "reconcile-context-vectors": {
         "task": "reconcile_context_vectors",
         "schedule": float(settings.context_reconcile_seconds),
+    },
+    "mark-past-due-invoices": {
+        "task": "mark_past_due",
+        "schedule": float(settings.billing_past_due_sweep_seconds),
     },
 }

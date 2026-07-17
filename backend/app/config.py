@@ -221,6 +221,15 @@ class Settings(BaseSettings):
     # cost gate against the `keyword_research` money-dial (R5 pre-check). ---
     keyword_research_cost_estimate: float = 0.02  # one DataForSEO keyword pull
 
+    # --- Billing module (Part 8). RECORDS ONLY: there is no payment gateway in v1, so
+    # there is no key, no provider and no cost dial here - the only knobs are the
+    # nightly past-due sweep's cadence and its grace window. Additive + optional
+    # (never required in prod). `grace_days` buys an invoice that many days past its
+    # due date before the sweep flips it `open` -> `past_due` (0 = flip the morning
+    # after it is due). ---
+    billing_past_due_grace_days: int = 0  # days after due_date before past_due
+    billing_past_due_sweep_seconds: int = 86400  # the beat cadence: nightly
+
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting
     # of the branded article) rides the EXISTING `content` money-dial; the publish +
