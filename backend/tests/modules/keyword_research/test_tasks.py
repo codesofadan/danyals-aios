@@ -27,6 +27,7 @@ import pytest
 from app.config import Settings
 from app.modules.keyword_research import tasks as wk
 from app.modules.keyword_research.tasks import execute_research, research_keywords
+from app.schemas.cost import DIAL_KEYS
 from app.services.cost_gate import CostGate, DialMode, GateContext
 from integrations.keyword_data import FakeKeywordDataProvider, KeywordMetric
 
@@ -289,14 +290,23 @@ def test_a_blocked_run_never_calls_the_provider() -> None:
 def test_an_allowed_run_commits_exactly_the_configured_estimate() -> None:
     cost = FakeCostStore()
     _run(cost=cost)
-    assert cost.recorded == [("keyword_research", _settings().keyword_research_cost_estimate)]
+    assert cost.recorded == [("keywords", _settings().keyword_research_cost_estimate)]
 
 
-def test_the_spend_rides_its_own_money_dial() -> None:
-    # A dedicated dial lets ops throttle keyword spend without touching content/audit.
+def test_the_spend_rides_its_own_registered_money_dial() -> None:
+    """The spend rides the "keywords" dial - which is REGISTERED in DIAL_FEATURES.
+
+    A dedicated dial lets ops throttle keyword spend without touching content/audit.
+    The key is "keywords" (whose meta is literally label="Keyword Research"), NOT a
+    twin "keyword_research" dial: an UNREGISTERED key would make ``dial_mode()`` fall
+    back to "off" AND make ``PATCH /cost/dials`` reject it, so the paid path would be
+    unswitchable-on - dead on arrival. ``tests/test_dial_registration.py`` sweeps this
+    for every module; this test pins the specific key the spend is billed under.
+    """
     cost = FakeCostStore()
     _run(cost=cost)
-    assert cost.recorded[0][0] == "keyword_research"
+    assert cost.recorded[0][0] == "keywords"
+    assert cost.recorded[0][0] in DIAL_KEYS
 
 
 # --------------------------------------------------------------------------- #

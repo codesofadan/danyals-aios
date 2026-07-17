@@ -40,6 +40,7 @@ from app.modules.local_seo.tasks import (
     refresh_local_ranks,
     sync_gbp_profile,
 )
+from app.schemas.cost import DIAL_KEYS
 from app.services.cost_gate import CostGate, DialMode, GateContext
 
 pytestmark = pytest.mark.unit
@@ -389,14 +390,20 @@ def test_the_check_is_billed_to_the_rows_client() -> None:
     _check(cost=cost, provider=StubProvider(LocalRankResult(rank=1)))
     feature, client_id, _amount = cost.recorded[0]
     assert client_id == _CLIENT
-    assert feature == "local_rank"  # its OWN dial, throttled independently
+    # The REGISTERED "local_seo" dial (meta: label="Local SEO", note="GBP + map-pack
+    # lookups") - its own dial, throttled independently of keyword/content/audit spend.
+    # NOT a twin "local_rank" key: an unregistered key would make dial_mode() fall back
+    # to "off" AND make PATCH /cost/dials reject it, so the paid path would be
+    # unswitchable-on. tests/test_dial_registration.py sweeps this for every module.
+    assert feature == "local_seo"
+    assert feature in DIAL_KEYS
 
 
 def test_an_allowed_check_commits_exactly_the_providers_estimate() -> None:
     cost = FakeCostStore()
     provider = StubProvider(LocalRankResult(rank=1))
     _check(cost=cost, provider=provider)
-    assert cost.recorded == [("local_rank", _CLIENT, provider.estimated_cost())]
+    assert cost.recorded == [("local_seo", _CLIENT, provider.estimated_cost())]
 
 
 @pytest.mark.parametrize(

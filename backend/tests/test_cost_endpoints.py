@@ -116,9 +116,14 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     resp = await client.get("/api/v1/cost/dial")
     assert resp.status_code == 200
     dial = {d["key"]: d for d in resp.json()}
-    assert len(dial) == 10
+    assert len(dial) == 13
     assert dial["keywords"]["mode"] == "off"  # default
     assert dial["tech_audit"]["mode"] == "api"
+    # Part 8: the tool modules' spends are dial-controllable. rank_tracker is the
+    # first STANDING per-client cost, so it defaults off - ops must opt in.
+    assert dial["rank_tracker"]["mode"] == "off"
+    assert dial["on_page"]["mode"] == "off"
+    assert dial["competitor_intel"]["mode"] == "off"
     # P6B-4: the context module's two AI spends are dial-controllable.
     assert dial["context"]["provider"] == "Anthropic"
     assert dial["context_embed"]["provider"] == "Voyage"

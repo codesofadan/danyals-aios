@@ -47,7 +47,11 @@ logger = get_logger("workers.local_seo")
 # The map-pack spend rides its OWN money-dial feature, so ops can throttle local rank
 # off/byhand/api independently of keyword/content/audit spend. job_type is the
 # free-text cost-log label.
-_FEATURE = "local_rank"
+# NOTE: this is the REGISTERED dial key "local_seo" (app/schemas/cost.py), whose meta
+# is literally label="Local SEO", note="GBP + map-pack lookups". We reuse it rather
+# than minting a twin dial: an unregistered key would make dial_mode() fall back to
+# "off" AND make PATCH /cost/dials reject it, leaving this module unswitchable-on.
+_FEATURE = "local_seo"
 _JOB_TYPE = "local_rank"
 
 # R6: the beat-overlap lock. A Postgres ADVISORY lock (session-scoped, auto-released

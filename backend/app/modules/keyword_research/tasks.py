@@ -39,7 +39,11 @@ logger = get_logger("workers.keyword_research")
 # The keyword-research spend rides its OWN money-dial feature (a dedicated DataForSEO
 # metrics dial), so ops can throttle it off/byhand/api independently. job_type is the
 # free-text cost-log label.
-_FEATURE = "keyword_research"
+# NOTE: this is the REGISTERED dial key "keywords" (app/schemas/cost.py), whose meta
+# is literally label="Keyword Research". We reuse it rather than minting a twin dial:
+# an unregistered key would make dial_mode() fall back to "off" AND make PATCH
+# /cost/dials reject it, leaving this module permanently unswitchable-on.
+_FEATURE = "keywords"
 _JOB_TYPE = "keywords"
 
 

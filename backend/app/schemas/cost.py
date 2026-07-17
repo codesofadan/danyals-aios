@@ -51,6 +51,21 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # THIS gate (the client never holds a key), so ops throttle it off/byhand/api on
     # the money-dial exactly like context; a block DEGRADES the reply, never crashes.
     DialFeatureMeta(key="ai_assist", label="In-Product AI", icon="assistant", provider="Anthropic", note="Dashboard AI assist (Claude)", default_mode="api"),
+    # Part 8 - the tool modules' paid spends. EVERY key a module passes to the gate
+    # MUST be registered here: dial_mode() falls back to "off" for an unknown key
+    # (cost_store.py) AND the PATCH /cost/dials guard rejects a key not in DIAL_KEYS
+    # (routers/cost.py), so an unregistered module is not merely defaulted-off - it is
+    # UNSWITCHABLE-ON, i.e. dead on arrival. Two Part-8 modules deliberately reuse the
+    # dials that already describe their product concept rather than minting a twin:
+    # keyword_research -> "keywords" and local_seo -> "local_seo".
+    #
+    # rank_tracker is the platform's first STANDING per-client cost (audits/content are
+    # on-demand; rank checks recur nightly forever) and the CLIENT pays for it, so it
+    # defaults OFF: switching it on is an explicit ops decision, and the module prices
+    # the monthly commitment before a lead can subscribe to it.
+    DialFeatureMeta(key="rank_tracker", label="Rank Tracker", icon="trending_up", provider="Serper", note="Nightly rank checks — recurring", default_mode="off"),
+    DialFeatureMeta(key="on_page", label="On-Page Optimizer", icon="tune", provider="Anthropic", note="Entity-coverage scoring (Claude)", default_mode="off"),
+    DialFeatureMeta(key="competitor_intel", label="Competitor Intel", icon="insights", provider="Serper", note="Gap + share-of-voice pulls", default_mode="off"),
 )
 
 DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)
