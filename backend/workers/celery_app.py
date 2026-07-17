@@ -53,6 +53,11 @@ celery_app = Celery(
         # keyword is a standing per-client subscription, so it needs the beat entries
         # below and DOES take the R6 overlap lock.
         "app.modules.rank_tracker.tasks",
+        # Part 8 Phase 2C: the competitor-intel workers (run_gap_analysis /
+        # discover_competitors). Both event-driven (enqueued per analyse / per discover
+        # press), so no beat entry / overlap-lock is needed - competitive intelligence
+        # is pulled when an analyst asks, never on a standing schedule.
+        "app.modules.competitor_intel.tasks",
     ],
 )
 

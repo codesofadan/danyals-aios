@@ -518,6 +518,33 @@ def _wire_team_access(app: FastAPI) -> None:
     app.dependency_overrides[get_team_metrics] = _FakeMetrics
 
 
+def _wire_competitor_intel(app: FastAPI) -> None:
+    """Fake competitor repo: a two-row board + non-zero stats (so the table + KPI tiles
+    are actually populated - an empty adapter would pass the col lock vacuously).
+
+    One row overlaps meaningfully and one barely, so the Overlap column exercises BOTH
+    toned cells the dashboard renders (``info`` and ``mut``) rather than only one. The
+    rows carry a ``client_id`` on purpose: the sweep's envelope assertions would not
+    notice a leak, so the module's own router test pins that.
+    """
+    from app.modules.competitor_intel.repo import get_competitor_repo
+
+    class _FakeCompetitorRepo:
+        def competitor_stats(self, **kwargs: Any) -> dict[str, Any]:
+            return {"tracked": 18, "keyword_gaps": 92, "share_of_voice": 41.0}
+
+        def list_competitors(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return [
+                {"domain": "brightsmile.com", "client_id": "cl-1",
+                 "client_name": "NorthPeak Dental", "keyword_gaps_count": 24,
+                 "overlap_pct": 38.0},
+                {"domain": "urbaneats.pk", "client_id": "cl-2", "client_name": "Verde Cafe",
+                 "keyword_gaps_count": 12, "overlap_pct": 22.0},
+            ]
+
+    app.dependency_overrides[get_competitor_repo] = _FakeCompetitorRepo
+
+
 _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("keyword_research", "/api/v1/keyword-research/workspace", _wire_keyword_research),
     ToolAdapter(
@@ -527,6 +554,9 @@ _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("local_seo", "/api/v1/local-seo/workspace", _wire_local_seo),
     ToolAdapter("on_page", "/api/v1/on-page/workspace", _wire_on_page),
     ToolAdapter("rank_tracker", "/api/v1/rank-tracker/workspace", _wire_rank_tracker),
+    ToolAdapter(
+        "competitor_intel", "/api/v1/competitor-intel/workspace", _wire_competitor_intel
+    ),
     # Part 8 Phase 2.5 - the nine adapters over the Parts 1-9 modules.
     ToolAdapter("technical_audit", "/api/v1/technical-audit/workspace", _wire_technical_audit),
     ToolAdapter("backlink_manager", "/api/v1/backlink-manager/workspace", _wire_backlink_manager),
@@ -1191,3 +1221,54 @@ async def test_team_access_tasks_column_is_the_real_metric(
     assert active[3] == "6"
     assert invited[2] == {"v": "Invited", "tone": "info"}
     assert invited[3] == "0"  # absent from the metrics map -> all-zero, never blank
+
+
+# --------------------------------------------------------------------------- #
+# 17. competitor_intel: the pinned literals (Part 8 Phase 2C).
+# --------------------------------------------------------------------------- #
+def test_competitor_intel_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("competitor_intel")
+    assert ts.table_cols == ["Competitor", "Client", "Keyword gaps", "Overlap"]
+    assert ts.kpi_labels == ["Competitors tracked", "Keyword gaps", "Share of voice"]
+    assert ts.primary_label == "Compare"
+    assert ts.primary_icon == "insights"
+    assert ts.table_title == "Gap analysis"
+    assert ts.table_icon == "insights"
+
+
+def test_competitor_intel_service_constant_matches_tools_ts() -> None:
+    from app.modules.competitor_intel.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("competitor_intel").table_cols == WORKSPACE_TABLE_COLS
+
+
+async def test_competitor_intel_workspace_emits_no_invented_kpi_delta(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """``tools.ts``'s DEMO Share-of-voice tile carries ``delta: "4%", dir: "up"``, but
+    the module stores no historical share-of-voice baseline to compute a delta FROM.
+
+    So the adapter emits the honest value and no delta at all. This is pinned because
+    the temptation is exactly the other way: copying the demo tile verbatim would put a
+    fabricated "up 4%" trend on a board an agency answers to its client for.
+    """
+    adapter = next(a for a in _TOOL_ADAPTERS if a.tool_key == "competitor_intel")
+    body = await _fetch_workspace(app, client, adapter)
+    tiles = {k["label"]: k for k in body["kpis"]}
+    assert tiles["Share of voice"]["value"] == "41%"
+    for label in ("Competitors tracked", "Keyword gaps", "Share of voice"):
+        assert tiles[label].get("delta") is None, f"{label} invented a delta"
+        assert tiles[label].get("dir") is None, f"{label} invented a direction"
+
+
+async def test_competitor_intel_overlap_tones_match_the_demo_semantics(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """``tools.ts`` encodes the tone semantics in its demo rows: a meaningful overlap
+    (38/40/45%) reads ``info`` and a marginal one (22%) reads ``mut``. The cols lock
+    cannot see this (tones live inside the cells), so pin it here."""
+    adapter = next(a for a in _TOOL_ADAPTERS if a.tool_key == "competitor_intel")
+    body = await _fetch_workspace(app, client, adapter)
+    strong, marginal = body["table"]["rows"]
+    assert strong[3] == {"v": "38%", "tone": "info"}
+    assert marginal[3] == {"v": "22%", "tone": "mut"}
