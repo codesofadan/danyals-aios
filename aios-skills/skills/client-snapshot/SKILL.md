@@ -4,7 +4,7 @@ description: Builds a one-page client health brief - the client profile, its liv
 argument-hint: "[client]"
 arguments: [client]
 model: opus
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # One-Page Client Snapshot
@@ -16,7 +16,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) R
 ## Required inputs / keys
 - `$client` - the client name or id. Resolve the name to a client `id` in Step 1.
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer, any staff).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - The context provider keys (Anthropic / Voyage / Pinecone) are deferred. When dormant, the context module runs on deterministic fakes: the `summary` may be a fake/degraded string and `status` may be `pending`/`degraded`. The freshness fields (`lag`, `stale`, `event_watermark`, `latest_seq`) stay honest either way. Label a degraded/fake summary explicitly; never present it as a live AI summary.
 
 **Trigger.** A request for a client one-pager, health brief, or "what do we know about this client".
@@ -76,4 +76,4 @@ Gaps (routed to a human): <asked-for facts absent from context, or "none">
 Next: <internal only | client-facing report -> /monthly-report>
 ```
 
-Rubric enforced (reference, not inlined): the Context module freshness invariant (backend invariant #11 - `event_watermark >= latest_seq` when caught up; `lag = latest_seq - event_watermark`). Shared wiring + the degrade contract: `../../reference/`.
+Rubric enforced (reference, not inlined): the Context module freshness invariant (backend invariant #11 - `event_watermark >= latest_seq` when caught up; `lag = latest_seq - event_watermark`). Shared wiring + the degrade contract: `${CLAUDE_PLUGIN_ROOT}/reference/`.

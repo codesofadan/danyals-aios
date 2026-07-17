@@ -5,7 +5,7 @@ argument-hint: "[client] [platform] [anchor] [target-url]"
 arguments: [client, platform, anchor, target_url]
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Build a Web 2.0 Property (Human-Gated)
@@ -36,11 +36,11 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: On explicit LEAD go -> approve or reject (POST /offpage/web2/{id}/approve)
 ```
 
-1. **Read the ledger for footprint.** Run `../../scripts/aios_client.py GET /offpage/web2?clientId=<id>`. Check the platform mix + anchors already used so the new property diversifies (no stacking the same platform/anchor).
-2. **Plan the property.** Run `../../scripts/aios_client.py POST /offpage/web2/plan --json '{"clientId":"<id>","platform":"<platform>","anchor":"<anchor>","targetUrl":"<url>","pageType":"blog","framework":"Auto"}'` -> creates a `draft` and hands it to the write worker. Capture the returned `id`.
-3. **Wait for needs_review.** Poll `../../scripts/aios_client.py GET /offpage/web2?clientId=<id>` until the row's status reaches `needs_review` (the worker owns `draft -> needs_review`; never force it). The ledger exposes 7 fields only (id, client, platform, postUrl, anchor, verified, published) - the article BODY is reviewed in the platform draft out-of-band, not via this API.
+1. **Read the ledger for footprint.** Run `aios_client.py get /offpage/web2?clientId=<id>`. Check the platform mix + anchors already used so the new property diversifies (no stacking the same platform/anchor).
+2. **Plan the property.** Run `aios_client.py post /offpage/web2/plan --json '{"clientId":"<id>","platform":"<platform>","anchor":"<anchor>","targetUrl":"<url>","pageType":"blog","framework":"Auto"}'` -> creates a `draft` and hands it to the write worker. Capture the returned `id`.
+3. **Wait for needs_review.** Poll `aios_client.py get /offpage/web2?clientId=<id>` until the row's status reaches `needs_review` (the worker owns `draft -> needs_review`; never force it). The ledger exposes 7 fields only (id, client, platform, postUrl, anchor, verified, published) - the article BODY is reviewed in the platform draft out-of-band, not via this API.
 4. **STOP at the quality gate.** Present the metadata this skill CAN see (platform, anchor -> target, footprint fit) plus the reviewer checklist below. Do NOT approve on your own; approval publishes to an external platform.
-5. **Approve or reject on the LEAD's explicit decision.** On an explicit LEAD go: `../../scripts/aios_client.py POST /offpage/web2/{id}/approve --json '{"action":"approve"}'` (moves `needs_review -> publishing`, enqueues publish -> verify -> track) or `{"action":"reject"}` (-> `rejected`). 409 if it is not awaiting review.
+5. **Approve or reject on the LEAD's explicit decision.** On an explicit LEAD go: `aios_client.py post /offpage/web2/{id}/approve --json '{"action":"approve"}'` (moves `needs_review -> publishing`, enqueues publish -> verify -> track) or `{"action":"reject"}` (-> `rejected`). 409 if it is not awaiting review.
 
 Reviewer checklist the LEAD applies at the gate (footprint diversification + no spam):
 - Platform diversifies the ledger (not the same platform/anchor stacked).
@@ -80,4 +80,4 @@ Note: this skill never auto-publishes; approve is a deliberate LEAD action.
 Next: <LEAD reads draft + approves/rejects | re-plan on a different platform | monitor publish>
 ```
 
-Rubric enforced (reference, not inlined): draft quality per `backend/docs/CONTENT-DOCTRINE.md`; footprint/anchor safety per `danyals-audit-system/checklists/off-page.yaml` + the Team C SOP `danyals-audit-system/.claude/agents/offpage/c2-anchor-toxicity.md` (OFF-017..023 anchors, OFF-036 PBN footprint). Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): draft quality per `backend/docs/CONTENT-DOCTRINE.md`; footprint/anchor safety per `danyals-audit-system/checklists/off-page.yaml` + the Team C SOP `danyals-audit-system/.claude/agents/offpage/c2-anchor-toxicity.md` (OFF-017..023 anchors, OFF-036 PBN footprint). Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

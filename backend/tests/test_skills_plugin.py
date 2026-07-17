@@ -68,7 +68,20 @@ _KV_RE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*)$")
 # An HTTP-verb-prefixed API path as the SKILL.md bodies document backend calls. The
 # char class keeps dotted suffixes (findings.json / report.pdf) and pipe shorthands
 # (backlinks|citations|web2, {acknowledge|dismiss}); trailing punctuation is trimmed.
-_PATH_RE = re.compile(r"\b(?:GET|POST|PATCH|PUT|DELETE)\s+(/[A-Za-z0-9_{}|.\-/]+)")
+# Case-insensitive so it verifies BOTH the uppercase prose form (``POST /api/v1/audits``)
+# AND the client's real lowercase invocation (``aios_client.py get /audits``) - a
+# documented call and an actual call must both map to a real backend route.
+_PATH_RE = re.compile(r"\b(?:GET|POST|PATCH|PUT|DELETE)\s+(/[A-Za-z0-9_{}|.\-/]+)", re.IGNORECASE)
+
+# AUTHORING-STANDARD §6: every skill reaches the ONE shared backend client through the
+# plugin root, with a single canonical allowed-tools form - so all 22 skills read as if
+# one operator wrote them and no per-call permission prompt fires at runtime.
+_CANON_ALLOWED_TOOLS = "Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read"
+# The shared client, when referenced by PATH, must resolve through the plugin root.
+# (A bare "aios_client.py <cmd>" shorthand in a later step is fine - only the pathed
+# form is constrained, which is what a ${CLAUDE_SKILL_DIR}/../../ traversal would hit.)
+_CANON_CLIENT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/"
+_CLIENT_SCRIPT_RE = re.compile(r"scripts/aios_client\.py")
 
 
 def _skill_dirs() -> list[Path]:
@@ -126,6 +139,36 @@ def test_frontmatter_is_valid(skill: str) -> None:
 
     body_lines = body.count("\n") + 1
     assert body_lines < _MAX_BODY_LINES, f"{skill}: body must be < {_MAX_BODY_LINES} lines (is {body_lines})"
+
+
+# --------------------------------------------------------------------------- #
+# Wiring: the shared client is reached one canonical way (AUTHORING-STANDARD §6)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("skill", sorted(EXPECTED_SKILLS))
+def test_backend_call_wiring_is_canonical(skill: str) -> None:
+    text = (_SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    fm, _ = _parse(text)
+
+    # No relative traversal anywhere: every plugin asset (scripts/, reference/) is
+    # addressed from ${CLAUDE_PLUGIN_ROOT}, so a call resolves regardless of cwd.
+    assert "../.." not in text, (
+        f"{skill}: no '../..' traversal - address plugin assets via ${{CLAUDE_PLUGIN_ROOT}}"
+    )
+    # Every PATHED reference to the shared client resolves through the plugin root -
+    # never a ${CLAUDE_SKILL_DIR}/../../ traversal (${CLAUDE_SKILL_DIR} is only for a
+    # skill's own reference/ files, §0/§2). Bare 'aios_client.py <cmd>' shorthand is fine.
+    for m in _CLIENT_SCRIPT_RE.finditer(text):
+        prefix = text[max(0, m.start() - len(_CANON_CLIENT_PREFIX)):m.start()]
+        assert prefix.endswith(_CANON_CLIENT_PREFIX), (
+            f"{skill}: 'scripts/aios_client.py' must be reached via "
+            f"${{CLAUDE_PLUGIN_ROOT}}/, not {text[max(0, m.start() - 24):m.start()]!r} "
+            f"(AUTHORING-STANDARD §6)"
+        )
+    # allowed-tools is exactly the standard's single canonical form (§6 line 194).
+    assert fm.get("allowed-tools") == _CANON_ALLOWED_TOOLS, (
+        f"{skill}: allowed-tools must be the canonical form {_CANON_ALLOWED_TOOLS!r}, "
+        f"got {fm.get('allowed-tools')!r}"
+    )
 
 
 # --------------------------------------------------------------------------- #

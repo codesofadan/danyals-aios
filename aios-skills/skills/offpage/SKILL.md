@@ -4,7 +4,7 @@ description: Reads the off-page boards and KPIs (referring-domain / backlink pro
 argument-hint: "[board] [client]"
 arguments: [board, client]
 model: opus
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Read the Off-Page Boards and Route the Work
@@ -31,11 +31,11 @@ Copy this checklist and check items off as you go:
 - [ ] Step 4: Route any write to the guarded feature skill (do NOT mutate here)
 ```
 
-1. **Read the KPIs.** Run `../../scripts/aios_client.py GET /offpage/kpis` -> `{referringDomains, newLinks30d, lostLinks30d, toxicFlagged}`.
+1. **Read the KPIs.** Run `aios_client.py get /offpage/kpis` -> `{referringDomains, newLinks30d, lostLinks30d, toxicFlagged}`.
 2. **Read the board(s).** Per `$board` (add `?clientId=<id>` for `$client`):
-   - `../../scripts/aios_client.py GET /offpage/backlinks` (add `?status=toxic` for the disavow queue).
-   - `../../scripts/aios_client.py GET /offpage/citations` (add `?nap=inconsistent` or `?nap=missing`).
-   - `../../scripts/aios_client.py GET /offpage/web2`.
+   - `aios_client.py get /offpage/backlinks` (add `?status=toxic` for the disavow queue).
+   - `aios_client.py get /offpage/citations` (add `?nap=inconsistent` or `?nap=missing`).
+   - `aios_client.py get /offpage/web2`.
 3. **Summarize grounded state.** Render the **Output format** from the real rows only: referring-domain size, new/lost/toxic, NAP consistency counts, and the web2 ledger (draft / needs_review / published mix).
 4. **Route the write.** If the operator wants to act, hand off - do NOT call a mutation from the hub:
    - Flag toxic backlinks / disavow review -> `/backlink-audit` (LEAD).
@@ -71,4 +71,4 @@ Route the work:
   web 2.0 build / approve    -> /web2-build (LEAD; publishes; cost-gated)
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` (OFF-* checks) + the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1..c4*.md`; citation/NAP rubric in `local.yaml` (D2). Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` (OFF-* checks) + the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1..c4*.md`; citation/NAP rubric in `local.yaml` (D2). Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

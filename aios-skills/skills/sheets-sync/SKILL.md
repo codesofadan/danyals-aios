@@ -3,7 +3,7 @@ name: sheets-sync
 description: Mechanically pushes every client report workbook to its Google Sheet in one pass (POST /reports/sync-all), then confirms the pushes via the sync-event feed and reports the connection state. Use when the operator says "sync all sheets", "push all reports to Google Sheets", "flush the sheets buffer", or "sync everything". This is a lead-only external write to Google Sheets and is manual-invocation only. To sync a single client use /report.
 model: sonnet
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Sync All Report Workbooks to Google Sheets
@@ -15,7 +15,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 ## Required inputs / keys
 - No positional input - this pushes ALL workbooks (bounded to 500 per pass server-side).
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer, lead role for the sync).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - The Google Sheets credential must be live for a REAL push. Dormant -> `GET /reports/connection` `connected=false`; every workbook flips to `synced` optimistically but the buffers are retained and each sync event records 0 rows. Report the degrade; do not claim rows reached Sheets when `connected=false`.
 
 **Trigger.** A request to sync/flush/push ALL report workbooks to Google Sheets at once.
@@ -71,4 +71,4 @@ State: <LIVE bulk push | DEGRADED (buffers held, 0 rows, Sheets key pending)>
 Single-client sync instead: /report
 ```
 
-Rubric enforced (reference, not inlined): the `GET /reports/types` tab/column map. Shared wiring + the Sheets degrade contract: `../../reference/`.
+Rubric enforced (reference, not inlined): the `GET /reports/types` tab/column map. Shared wiring + the Sheets degrade contract: `${CLAUDE_PLUGIN_ROOT}/reference/`.

@@ -5,7 +5,7 @@ argument-hint: "[client] [spam-threshold]"
 arguments: [client, spam_threshold]
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Audit the Backlink Profile and Queue Disavows
@@ -33,11 +33,11 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: On explicit LEAD go, flag (POST /offpage/backlinks/flag-toxic); re-read the queue
 ```
 
-1. **Read the profile and KPIs.** Run `../../scripts/aios_client.py GET /offpage/backlinks` (add `?clientId=<id>`) and `... GET /offpage/kpis`. Read each row's `authority`, `spam`, `anchor`, `refDomain`, `status`, and the `toxicFlagged` KPI.
-2. **Read the current toxic queue.** Run `../../scripts/aios_client.py GET /offpage/backlinks?status=toxic` so you flag the delta, not what is already queued.
+1. **Read the profile and KPIs.** Run `aios_client.py get /offpage/backlinks` (add `?clientId=<id>`) and `... get /offpage/kpis`. Read each row's `authority`, `spam`, `anchor`, `refDomain`, `status`, and the `toxicFlagged` KPI.
+2. **Read the current toxic queue.** Run `aios_client.py get /offpage/backlinks?status=toxic` so you flag the delta, not what is already queued.
 3. **Assess and propose.** Summarize the anchor distribution (branded vs exact-match vs naked/generic) and spam concentration against the C1/C2 rubric; recommend a `spam_threshold`. Show which rows the threshold would move to `toxic`.
 4. **STOP for the LEAD.** Present the proposed flag set and threshold. Do NOT flag without an explicit LEAD confirmation - the flag mutates shared state.
-5. **Flag on confirmation.** On the LEAD's go, run `../../scripts/aios_client.py POST /offpage/backlinks/flag-toxic --json '{"spam_threshold":<n>}'`. It returns `{flagged:<count>}` (idempotent). Re-read `?status=toxic` and render the **Output format**.
+5. **Flag on confirmation.** On the LEAD's go, run `aios_client.py post /offpage/backlinks/flag-toxic --json '{"spam_threshold":<n>}'`. It returns `{flagged:<count>}` (idempotent). Re-read `?status=toxic` and render the **Output format**.
 
 ## Decision points
 - If the caller is not a LEAD -> the flag 403s -> report "requires a LEAD (owner/admin/manager)", STOP after presenting the read-only assessment.
@@ -69,4 +69,4 @@ Note: toxic = queued for disavow review, NOT submitted to Google.
 Next: <LEAD confirm threshold | export disavow set for review | re-monitor>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` and the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1-backlink-profile.md` (OFF-001..016, 070/071 profile) + `c2-anchor-toxicity.md` (OFF-007/008 toxicity, OFF-017..023 anchors, OFF-036..040 PBN/disavow). Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` and the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1-backlink-profile.md` (OFF-001..016, 070/071 profile) + `c2-anchor-toxicity.md` (OFF-007/008 toxicity, OFF-017..023 anchors, OFF-036..040 PBN/disavow). Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

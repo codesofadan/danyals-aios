@@ -4,7 +4,7 @@ description: Surfaces the agency-global Fiverr upsell catalogue (the add-on gigs
 argument-hint: "[action]"
 model: sonnet
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py patch *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Manage the Upsell Catalogue
@@ -17,7 +17,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 - `$ARGUMENTS[0]` (optional) - the intent: `list` (default), `add`, `edit`, `toggle`, or `reorder`.
 - For `add`/`edit`: the card fields - `title`, `description`, `fiverrUrl`, `price`, `rating`, `reviews`, `icon`, `color`, `active`, `sort_order`. `clicks30d` is portal-tracked and NEVER set by hand (starts at 0).
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer; owner/admin for writes).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - No provider key or metered spend; these are catalogue CRUD writes. The cost is that they are agency-global.
 
 **Trigger.** A request to view, add, edit, toggle, or reorder the upsell/add-on/Fiverr offers.
@@ -71,4 +71,4 @@ Change applied: <none | added "<title>" | edited "<title>" (<fields>) | toggled 
 Scope note: this catalogue is agency-global (every client portal). Owner/admin only for writes.
 ```
 
-Rubric enforced (reference, not inlined): the upsell catalogue model (fields + the 0.062 conversion estimate). Shared wiring + roles: `../../reference/`.
+Rubric enforced (reference, not inlined): the upsell catalogue model (fields + the 0.062 conversion estimate). Shared wiring + roles: `${CLAUDE_PLUGIN_ROOT}/reference/`.

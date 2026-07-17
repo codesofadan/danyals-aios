@@ -3,7 +3,7 @@ name: team-status
 description: Reads the team's live workload - the caller's own record and real performance metrics, the task queue (mine or a named member's), and the Command Center team feed - so an operator sees who is working on what. Use when the operator says "team status", "my tasks", "who is working on what", "my queue", "workload", or "how is the team doing". Read-only; assigning work is a separate action in /assign-task.
 argument-hint: "[member]"
 model: sonnet
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Read Team Status
@@ -15,7 +15,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) R
 ## Required inputs / keys
 - `$ARGUMENTS[0]` (optional) - a member id to scope the queue to that person; omitted, scope to the caller (`mine=true`).
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer, any staff).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - No provider key required. Pure read.
 
 **Trigger.** A request about team status, my/a member's task queue, workload, or who is working on what.
@@ -70,4 +70,4 @@ Team load (from command-center):
 Next: <assign/route work -> /assign-task>
 ```
 
-Rubric enforced (reference, not inlined): the task lifecycle (Part 5 - `todo -> in_progress -> [review] -> done`, review gate is lead-only). Shared wiring: `../../reference/`.
+Rubric enforced (reference, not inlined): the task lifecycle (Part 5 - `todo -> in_progress -> [review] -> done`, review gate is lead-only). Shared wiring: `${CLAUDE_PLUGIN_ROOT}/reference/`.

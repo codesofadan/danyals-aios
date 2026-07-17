@@ -5,7 +5,7 @@ argument-hint: "[client] [nap-status]"
 arguments: [client, nap_status]
 model: sonnet
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Build and Reconcile Citations (NAP)
@@ -34,12 +34,12 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: Re-read the board; render output
 ```
 
-1. **Read the board.** Run `../../scripts/aios_client.py GET /offpage/citations` (add `?nap=missing`/`?nap=inconsistent`, `?clientId=<id>`). Each row: `directory`, `nap`, `action`, `note`.
+1. **Read the board.** Run `aios_client.py get /offpage/citations` (add `?nap=missing`/`?nap=inconsistent`, `?clientId=<id>`). Each row: `directory`, `nap`, `action`, `note`.
 2. **Bucket the work.** `missing` -> `Submit` (create the listing); anything else needing a fix -> `Update`. Confirm the canonical NAP the operator is reconciling to is known and correct.
 3. **STOP for the LEAD.** Present the exact rows and the Submit/Update intent. Do NOT write without an explicit LEAD confirmation; a bulk pass mutates many rows.
 4. **Apply the change on confirmation.**
-   - Single: `../../scripts/aios_client.py POST /offpage/citations/{id}/action --json '{"action":"Submit|Update","note":"<detail>"}'` -> resolves that row to `consistent`.
-   - Bulk: `../../scripts/aios_client.py POST /offpage/citations/bulk --json '{"ids":["<id>",...]}'` -> resolves each visible row to `consistent`. Only rows RLS lets the caller see are touched.
+   - Single: `aios_client.py post /offpage/citations/{id}/action --json '{"action":"Submit|Update","note":"<detail>"}'` -> resolves that row to `consistent`.
+   - Bulk: `aios_client.py post /offpage/citations/bulk --json '{"ids":["<id>",...]}'` -> resolves each visible row to `consistent`. Only rows RLS lets the caller see are touched.
 5. **Confirm and render.** Re-read the board and render the **Output format** from the real updated rows.
 
 ## Decision points
@@ -72,4 +72,4 @@ Excluded by RLS (bulk): <n or "none">
 Next: <supply canonical NAP | continue Update pass | re-monitor drift>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` and the Team D SOP `danyals-audit-system/.claude/agents/local/d2-citations-nap.md` (LOC-011..020: citation audit, consistency, NAP exactness, aggregators). Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` and the Team D SOP `danyals-audit-system/.claude/agents/local/d2-citations-nap.md` (LOC-011..020: citation audit, consistency, NAP exactness, aggregators). Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

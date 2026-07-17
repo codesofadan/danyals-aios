@@ -3,7 +3,7 @@ name: milestones
 description: Reads the client project milestones (the five-stage delivery timeline per engagement) and the recently-auto-advanced feed, and surfaces stalled or blocked projects. Use when the operator says "milestones", "project status", "delivery timeline", "roadmap", "which projects are stalled", or "what advanced recently". Read-only; stages are auto-advanced from delivery events, never edited by hand here.
 argument-hint: "[client]"
 model: sonnet
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Read Client Milestones
@@ -15,7 +15,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) R
 ## Required inputs / keys
 - `$ARGUMENTS[0]` (optional) - a client name to filter to a single project. Omitted, report the whole board.
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer, any staff).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - No provider key required. This is a pure read.
 
 **Trigger.** A request about project status, the delivery timeline/roadmap, stalled projects, or recent auto-advances.
@@ -71,4 +71,4 @@ Recent auto-advances:
   ...  (or "no recent auto-advances")
 ```
 
-Rubric enforced (reference, not inlined): the milestone stage model (the five-stage lifecycle + stage weights). Shared wiring: `../../reference/`.
+Rubric enforced (reference, not inlined): the milestone stage model (the five-stage lifecycle + stage weights). Shared wiring: `${CLAUDE_PLUGIN_ROOT}/reference/`.

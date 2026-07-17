@@ -4,7 +4,7 @@ description: Interprets an audit's GEO / AI-search-readiness findings (AI Overvi
 argument-hint: "[audit-id | client | url]"
 arguments: [target]
 model: opus
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Interpret the GEO / AI-Search Audit
@@ -31,9 +31,9 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: If no suitable geo audit -> route to /audit (Paid; confirm spend first)
 ```
 
-1. **Resolve the audit.** If `$target` is not an id, run `../../scripts/aios_client.py GET /audits` and pick the newest `status=done` row for that client/url whose `types` include `geo`.
-2. **Confirm done.** Run `../../scripts/aios_client.py GET /audits/{id}` -> `status` must be `done` (else STOP / route).
-3. **Pull findings.** Run `../../scripts/aios_client.py GET /audits/{id}/findings.json`. Keep the A5-owned GEO checks (ON-048, ON-049, ON-100..107) and the AI-search-authority checks (OFF-067, OFF-068, OFF-069).
+1. **Resolve the audit.** If `$target` is not an id, run `aios_client.py get /audits` and pick the newest `status=done` row for that client/url whose `types` include `geo`.
+2. **Confirm done.** Run `aios_client.py get /audits/{id}` -> `status` must be `done` (else STOP / route).
+3. **Pull findings.** Run `aios_client.py get /audits/{id}/findings.json`. Keep the A5-owned GEO checks (ON-048, ON-049, ON-100..107) and the AI-search-authority checks (OFF-067, OFF-068, OFF-069).
 4. **Group and prioritize.** Bucket by the GEO rubric dimensions (below), rank by severity then lowest per-check `score`; flag every AI-authority claim without Otterly evidence as `confidence 0.5` needs-validation. Render the **Output format**.
 5. **No geo audit? Route, confirm the spend.** If none exists, a GEO run needs the **Paid** tier via `/audit` (spends metered budget, cost-gated). Do NOT create a Paid run from this interpret skill.
 
@@ -78,4 +78,4 @@ Data gaps / [NEEDS:]: <verbatim or "none">   -> route to a human
 Next: <fix extractability / structure | re-audit via /audit (Paid) | manual citation probe>
 ```
 
-Rubric enforced (reference, not inlined): the A5 GEO SOP `danyals-audit-system/.claude/agents/onpage/a5-geo-ai-search.md`, `danyals-audit-system/checklists/on-page.yaml` (ON-048/049, ON-100..107) + `off-page.yaml` (OFF-067..069), and `backend/docs/CONTENT-DOCTRINE.md` §4 (extractable answer). Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): the A5 GEO SOP `danyals-audit-system/.claude/agents/onpage/a5-geo-ai-search.md`, `danyals-audit-system/checklists/on-page.yaml` (ON-048/049, ON-100..107) + `off-page.yaml` (OFF-067..069), and `backend/docs/CONTENT-DOCTRINE.md` §4 (extractable answer). Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

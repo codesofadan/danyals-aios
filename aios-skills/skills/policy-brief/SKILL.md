@@ -4,7 +4,7 @@ description: Turns a policy change-event or an open recommendation into a client
 argument-hint: "[change-or-rec-id]"
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Write a Policy Brief and Close the Loop
@@ -16,7 +16,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 ## Required inputs / keys
 - `$ARGUMENTS[0]` - the recommendation id (or the backing change-event id) to brief on. If only a topic is given, resolve it against the queue in Step 1.
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer). The token's role decides read vs. `apply`.
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - No provider key is spent by `apply` - the overlay is deterministic (title/guidance/weight from the materialized rec), not a metered AI call. Server-side the transition still records an activity entry and is RLS-gated. If the change-detection watcher has not run, the KB/changes may be empty; brief only on what the recommendation carries and say so.
 
 **Trigger.** A request to explain the client impact of a specific policy/algorithm update, draft the advisory, or apply/close-the-loop on a recommendation.
@@ -78,4 +78,4 @@ Apply gate (closed loop):
 Applied result: <n/a | overlay now active v<version>, weight <weight>>
 ```
 
-Rubric enforced (reference, not inlined): the Policy KB (`GET /policy/kb`) and the affected-check mapping in `danyals-audit-system/checklists/*.yaml`; narrative discipline in `backend/docs/CONTENT-DOCTRINE.md`. Shared wiring + the closed-loop overlay contract: `../../reference/`.
+Rubric enforced (reference, not inlined): the Policy KB (`GET /policy/kb`) and the affected-check mapping in `danyals-audit-system/checklists/*.yaml`; narrative discipline in `backend/docs/CONTENT-DOCTRINE.md`. Shared wiring + the closed-loop overlay contract: `${CLAUDE_PLUGIN_ROOT}/reference/`.

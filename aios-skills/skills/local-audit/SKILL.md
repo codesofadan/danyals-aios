@@ -4,7 +4,7 @@ description: Interprets an audit's LOCAL findings (Google Business Profile, cita
 argument-hint: "[audit-id | client | url]"
 arguments: [target]
 model: opus
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Interpret the Local Audit
@@ -31,9 +31,9 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: If no suitable local audit -> route to /audit (Paid; confirm spend first)
 ```
 
-1. **Resolve the audit.** If `$target` is not an id, run `../../scripts/aios_client.py GET /audits` and pick the newest `status=done` row for that client/url whose `types` include `local`.
-2. **Confirm done.** Run `../../scripts/aios_client.py GET /audits/{id}` -> `status` must be `done` (else STOP / route).
-3. **Pull findings.** Run `../../scripts/aios_client.py GET /audits/{id}/findings.json`. Keep the `LOC-*` findings.
+1. **Resolve the audit.** If `$target` is not an id, run `aios_client.py get /audits` and pick the newest `status=done` row for that client/url whose `types` include `local`.
+2. **Confirm done.** Run `aios_client.py get /audits/{id}` -> `status` must be `done` (else STOP / route).
+3. **Pull findings.** Run `aios_client.py get /audits/{id}/findings.json`. Keep the `LOC-*` findings.
 4. **Group and prioritize.** Bucket by area (below), rank by severity then lowest per-check `score`; flag `confidence < 0.6` as needs-validation (map-grid and review data often carry it). Render the **Output format**.
 5. **No local audit? Route, confirm the spend.** If none exists, tell the operator a local run needs the **Paid** tier via `/audit` (spends metered budget, cost-gated). Do NOT create a Paid run from this interpret skill.
 
@@ -76,4 +76,4 @@ By area: GBP <n> · Citations/NAP <n> · Reviews <n> · LocalPack/Geo <n>
 Next: <fix roadmap | reconcile NAP via /citation-builder | re-audit via /audit (Paid)>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` (LOC-* checks) and the Team D SOPs `danyals-audit-system/.claude/agents/local/d1..d4*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` (LOC-* checks) and the Team D SOPs `danyals-audit-system/.claude/agents/local/d1..d4*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

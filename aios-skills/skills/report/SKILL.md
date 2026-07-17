@@ -4,7 +4,7 @@ description: The Reports module hub - reads the per-client workbooks, sync-event
 argument-hint: "[client-or-workbook-id]"
 model: sonnet
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Refresh a Client Report Workbook
@@ -16,7 +16,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 ## Required inputs / keys
 - `$ARGUMENTS[0]` - the client name or the workbook row id to refresh. Resolve the name to a workbook `id` in Step 1.
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer). The role decides read vs. sync.
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - The Google Sheets service-account credential must be configured for a REAL push. When it is dormant, `GET /reports/connection` returns `connected=false` and a sync DEGRADES: the status still flips to `synced` optimistically but the buffer is retained and the sync events record 0 rows pushed. Report the degrade honestly; do not claim rows landed in Sheets when `connected=false`.
 
 **Trigger.** A request to refresh/sync a single client's report workbook or to read the Reports module state.
@@ -74,4 +74,4 @@ State: <LIVE push | DEGRADED (buffer held, 0 rows, Sheets key pending)>
 Recommended next: <monthly narrative -> /monthly-report | push all clients -> /sheets-sync>
 ```
 
-Rubric enforced (reference, not inlined): the `GET /reports/types` tab/column map and the audit report-design contract. Shared wiring + the Sheets degrade contract: `../../reference/`.
+Rubric enforced (reference, not inlined): the `GET /reports/types` tab/column map and the audit report-design contract. Shared wiring + the Sheets degrade contract: `${CLAUDE_PLUGIN_ROOT}/reference/`.

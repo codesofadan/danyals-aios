@@ -4,7 +4,7 @@ description: Interprets an audit's TECHNICAL findings (crawl/index, Core Web Vit
 argument-hint: "[audit-id | client | url]"
 arguments: [target]
 model: opus
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Interpret the Technical Audit
@@ -31,9 +31,9 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: If no suitable audit exists -> route to /audit (do NOT silently run one)
 ```
 
-1. **Resolve the audit.** If `$target` is not an id, run `../../scripts/aios_client.py GET /audits` and pick the newest `status=done` row for that client/url whose `types` include `technical`.
-2. **Confirm done.** Run `../../scripts/aios_client.py GET /audits/{id}` -> `status` must be `done` (else STOP / route).
-3. **Pull findings.** Run `../../scripts/aios_client.py GET /audits/{id}/findings.json`. Keep only `TECH-*` (and the technical `ON-*` rollups the Team B SOPs own, e.g. ON-084 to ON-089 CWV impact).
+1. **Resolve the audit.** If `$target` is not an id, run `aios_client.py get /audits` and pick the newest `status=done` row for that client/url whose `types` include `technical`.
+2. **Confirm done.** Run `aios_client.py get /audits/{id}` -> `status` must be `done` (else STOP / route).
+3. **Pull findings.** Run `aios_client.py get /audits/{id}/findings.json`. Keep only `TECH-*` (and the technical `ON-*` rollups the Team B SOPs own, e.g. ON-084 to ON-089 CWV impact).
 4. **Group and prioritize.** Bucket by area (below), rank each by severity then lowest per-check `score`, boost by `impact_usd` if present (M2 method). Flag any `confidence < 0.6` as needs-validation. Render the **Output format**.
 5. **No audit? Route, do not spend.** If nothing suitable exists, tell the operator to run one via `/audit` (technical is Free-tier). Do NOT create a run from this interpret skill unless the operator explicitly asks.
 
@@ -76,4 +76,4 @@ By area: crawl/index <n> · CWV <n> · rendering <n> · schema <n> · security <
 Next: <fix roadmap week1 / month1 | re-audit via /audit after fixes>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/technical.yaml` (TECH-* checks) and the Team B SOPs `danyals-audit-system/.claude/agents/technical/b1..b5*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/technical.yaml` (TECH-* checks) and the Team B SOPs `danyals-audit-system/.claude/agents/technical/b1..b5*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.

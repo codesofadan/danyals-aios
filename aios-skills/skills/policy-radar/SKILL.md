@@ -3,7 +3,7 @@ name: policy-radar
 description: Reads the Policy Radar brain (watched sources, detected change-events, the KB, and the open recommendation queue) plus the Command Center digest, and returns a prioritized read on what an operator should act on. Use when the operator says "policy", "algorithm update", "Google guideline change", "core update", "what recommendations are open", "policy radar", or asks what changed and who is exposed. Reads are staff-wide; acknowledging or dismissing a recommendation is a lead-only status write that this skill runs only after an explicit operator confirm. Applying a recommendation (the audit-overlay closed loop) is routed to /policy-brief.
 argument-hint: "[rec-status]"
 model: opus
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Read the Policy Radar
@@ -15,7 +15,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 ## Required inputs / keys
 - `$ARGUMENTS[0]` (optional) - a recommendation `status` filter (`new` | `acknowledged` | `applied` | `dismissed`). Omitted, the queue merges the DB rows with the evergreen baseline recs so the digest is never empty pre-live.
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer). The token's role decides read (any staff) vs. transition (lead).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared platform wiring (roles, degrade contract) is in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared platform wiring (roles, degrade contract) is in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - No provider key is required to READ the radar. The change-detection WATCHER that fills sources/changes/KB is a deferred backend chunk: until it runs, `lastChecked` reads "never" and sources/changes/KB may be empty. The recommendation queue still serves the baseline recs. Report this state honestly; do not present an empty watcher as "no policy risk".
 
 **Trigger.** Any request about a policy/algorithm/guideline change, an open-recommendation review, or "what should we act on in the radar".
@@ -77,4 +77,4 @@ Recommended next step:
   <acknowledge/dismiss (lead + confirm) -> POST /policy/recommendations/{id}/{acknowledge|dismiss}>
 ```
 
-Rubric enforced (reference, not inlined): the Policy KB (`GET /policy/kb`) and the impact discipline in `backend/docs/CONTENT-DOCTRINE.md`. Shared platform wiring (roles, degrade contract, the closed-loop overlay): `../../reference/`.
+Rubric enforced (reference, not inlined): the Policy KB (`GET /policy/kb`) and the impact discipline in `backend/docs/CONTENT-DOCTRINE.md`. Shared platform wiring (roles, degrade contract, the closed-loop overlay): `${CLAUDE_PLUGIN_ROOT}/reference/`.

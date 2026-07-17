@@ -5,7 +5,7 @@ argument-hint: "[client] [month]"
 arguments: [client, month]
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Assemble the Monthly Client Report
@@ -18,7 +18,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 - `$client` - the client to report on (resolved to a workbook in Step 4).
 - `$month` (optional) - the reporting month label; defaults to the current month.
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - The Google Sheets credential must be live for a REAL sync. Dormant -> `GET /reports/connection` `connected=false`; the sync DEGRADES (status flips, buffer retained, 0 rows pushed). Label it. The report NARRATIVE is composed by this skill from data that is already fetched, so it does not itself spend metered AI budget; content-job spend is gated separately server-side.
 
 **Trigger.** A request for the monthly client report, update deck, or end-of-month summary.
@@ -82,4 +82,4 @@ Sheets sync: workbook <id> -> status=<synced>  rows pushed=<from sync-events>  s
 Gaps routed to a human: <list any missing project/workbook/data, or "none">
 ```
 
-Rubric enforced (reference, not inlined): the audit report-design contract and `backend/docs/CONTENT-DOCTRINE.md` narrative discipline; the `GET /reports/types` tab map. Shared wiring + degrade contract: `../../reference/`.
+Rubric enforced (reference, not inlined): the audit report-design contract and `backend/docs/CONTENT-DOCTRINE.md` narrative discipline; the `GET /reports/types` tab map. Shared wiring + degrade contract: `${CLAUDE_PLUGIN_ROOT}/reference/`.

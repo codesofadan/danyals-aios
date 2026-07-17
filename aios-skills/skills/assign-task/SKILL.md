@@ -5,7 +5,7 @@ argument-hint: "[member] [client] [task-title]"
 arguments: [member, client, task]
 model: sonnet
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py post *) Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py patch *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Assign and Route a Task
@@ -20,7 +20,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py get *) B
 - `$task` - the task title.
 - Also: `type` (one of Technical Audit, Actionable Audit, Content Sprint, Backlink Audit, Local SEO, Publishing), `priority` (`urgent`|`high`|`med`|`low`, default `med`), optional `due` (`YYYY-MM-DD`).
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer; lead for create/reassign).
-- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py` (the plugin's `../../scripts/aios_client.py`); shared wiring in `../../reference/`.
+- The shared client `${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py`; shared wiring in `${CLAUDE_PLUGIN_ROOT}/reference/`.
 - No metered spend to create a task. The board lifecycle + the review gate are enforced by the `tasks_guard_update` DB trigger, not this skill.
 
 **Trigger.** A request to assign, delegate, create, or route a task to a team member.
@@ -76,4 +76,4 @@ Confirm: created by a lead (assign_tasks); assignee validated as staff.
 Next: assignee advances via /advance; <lead signs off via /review for Content Sprint>
 ```
 
-Rubric enforced (reference, not inlined): the task state machine (backend invariant, Part 5 - the `tasks_guard_update` trigger owns the lifecycle; the review gate is lead-only). Shared wiring + roles: `../../reference/`.
+Rubric enforced (reference, not inlined): the task state machine (backend invariant, Part 5 - the `tasks_guard_update` trigger owns the lifecycle; the review gate is lead-only). Shared wiring + roles: `${CLAUDE_PLUGIN_ROOT}/reference/`.

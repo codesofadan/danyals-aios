@@ -5,7 +5,7 @@ argument-hint: "[client] [url] [tier] [types]"
 arguments: [client, url, tier, types]
 model: opus
 disable-model-invocation: true
-allowed-tools: Bash(python ${CLAUDE_SKILL_DIR}/../../scripts/aios_client.py *) Read
+allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 ---
 
 # Run and Interpret a URL Audit
@@ -35,11 +35,11 @@ Copy this checklist and check items off as you go:
 - [ ] Step 5: Pull findings.json (+ report.pdf); interpret grounded top findings; render output
 ```
 
-1. **Read the board and KPIs.** Run `../../scripts/aios_client.py GET /audits` and `... GET /audits/stats` -> the audit rows and `{thisMonth, avgScore, runningNow, turnaroundMin}`. Use this to answer board/stats questions without creating a run.
+1. **Read the board and KPIs.** Run `aios_client.py get /audits` and `... get /audits/stats` -> the audit rows and `{thisMonth, avgScore, runningNow, turnaroundMin}`. Use this to answer board/stats questions without creating a run.
 2. **Reconcile tier and types.** If `$types` contains `local`/`geo`/`backlink` while `$tier` is `Free`, apply the tier decision point BEFORE creating.
-3. **Create the run.** Run `../../scripts/aios_client.py POST /audits --json '{"client_id":"<id>","url":"$url","tier":"$tier","types":[...]}'` -> `POST /api/v1/audits`. Capture the returned `id` and initial `status` (`queued`).
-4. **Poll to a terminal state.** Run `../../scripts/aios_client.py GET /audits/{id}` until `status` is `done` or `failed`. The worker owns `queued -> running -> done|failed`; never force a transition.
-5. **Pull and interpret the artifacts.** When `done`, fetch `../../scripts/aios_client.py GET /audits/{id}/findings.json` (and `GET /audits/{id}/report.pdf` if `pdf` is true). Read the composite `score`, then rank findings by severity then lowest per-check score (M2 method). Render the **Output format**. Do NOT invent any metric the artifact did not return.
+3. **Create the run.** Run `aios_client.py post /audits --json '{"client_id":"<id>","url":"$url","tier":"$tier","types":[...]}'` -> `POST /api/v1/audits`. Capture the returned `id` and initial `status` (`queued`).
+4. **Poll to a terminal state.** Run `aios_client.py get /audits/{id}` until `status` is `done` or `failed`. The worker owns `queued -> running -> done|failed`; never force a transition.
+5. **Pull and interpret the artifacts.** When `done`, fetch `aios_client.py get /audits/{id}/findings.json` (and `GET /audits/{id}/report.pdf` if `pdf` is true). Read the composite `score`, then rank findings by severity then lowest per-check score (M2 method). Render the **Output format**. Do NOT invent any metric the artifact did not return.
 
 ## Decision points
 - If the caller lacks `run_audits` -> `POST /audits` 403s -> report "requires run_audits", STOP. Reads may still proceed.
@@ -78,4 +78,4 @@ Recommended next:
   <or: run Paid types (spends, cost-gated) | pull report.pdf>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/README.md` (the 339-check taxonomy + ID prefixes ON-/TECH-/OFF-/LOC-) and the meta SOPs `danyals-audit-system/.claude/agents/meta/m1-orchestrator.md`, `m2-prioritizer.md` (severity x score x confidence ranking). Shared depth in `../../reference/`.
+Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/README.md` (the 339-check taxonomy + ID prefixes ON-/TECH-/OFF-/LOC-) and the meta SOPs `danyals-audit-system/.claude/agents/meta/m1-orchestrator.md`, `m2-prioritizer.md` (severity x score x confidence ranking). Shared depth in `${CLAUDE_PLUGIN_ROOT}/reference/`.
