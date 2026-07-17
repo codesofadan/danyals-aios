@@ -12,7 +12,7 @@ Four properties, all enforced against the real files + the real FastAPI app:
 * **parity / coverage** - every ``/api/v1`` path a SKILL.md references in its body is a
   REAL route on ``app.main:app`` (modulo ``{param}``). This is the skill<->dashboard
   parity the plan requires: a documented skill call maps to an actual backend call.
-* **manifest** - ``plugin.json`` is valid JSON and the 22 expected skills are all present.
+* **manifest** - ``plugin.json`` is valid JSON and the 30 expected skills are all present.
 
 Pure + offline: it reads the plugin files and builds the app's OpenAPI schema (no DB,
 no network, no broker), so it runs in the ``unit`` gate.
@@ -37,13 +37,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PLUGIN_DIR = _REPO_ROOT / "aios-skills"
 _SKILLS_DIR = _PLUGIN_DIR / "skills"
 
-# The 22 skills the plugin ships. Kept explicit so a dropped/renamed skill fails loudly.
+# The 30 skills the plugin ships. Kept explicit so a dropped/renamed skill fails loudly.
 EXPECTED_SKILLS = frozenset({
     "assign-task", "audit", "backlink-audit", "blog-post", "citation-builder",
     "client-snapshot", "content", "geo-audit", "local-audit", "local-service-page",
     "milestones", "monthly-report", "offpage", "policy-brief", "policy-radar",
     "report", "sheets-sync", "team-status", "technical-audit", "titles-meta",
     "upsells", "web2-build",
+    # Part 8 - one skill per Part-8 tool module.
+    "billing", "competitor-intel", "data-import", "keyword-research", "local-seo",
+    "on-page-fix", "onboard-client", "rank-report",
 })
 
 # Skills that WRITE / PUBLISH / SPEND must never be auto-invoked by a model turn - a
@@ -54,6 +57,14 @@ WRITE_SKILLS = frozenset({
     "report", "monthly-report",                                   # report*
     "web2-build", "citation-builder", "backlink-audit", "policy-brief",
     "sheets-sync", "upsells", "assign-task", "audit",
+    # Part 8. Every one of these spends, mutates a live site, seals a secret, or moves
+    # money: rank-report re-prices a standing per-client commitment when it adds a
+    # keyword; keyword-research / competitor-intel spend provider budget; on-page-fix
+    # writes to the client's live WordPress; local-seo's refresh spends; onboard-client
+    # seals credentials into the vault; data-import commits rows; billing moves the
+    # invoice ledger.
+    "billing", "competitor-intel", "data-import", "keyword-research", "local-seo",
+    "on-page-fix", "onboard-client", "rank-report",
 })
 
 _MAX_DESC = 1024
@@ -74,7 +85,7 @@ _KV_RE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*)$")
 _PATH_RE = re.compile(r"\b(?:GET|POST|PATCH|PUT|DELETE)\s+(/[A-Za-z0-9_{}|.\-/]+)", re.IGNORECASE)
 
 # AUTHORING-STANDARD §6: every skill reaches the ONE shared backend client through the
-# plugin root, with a single canonical allowed-tools form - so all 22 skills read as if
+# plugin root, with a single canonical allowed-tools form - so all 30 skills read as if
 # one operator wrote them and no per-call permission prompt fires at runtime.
 _CANON_ALLOWED_TOOLS = "Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read"
 # The shared client, when referenced by PATH, must resolve through the plugin root.
