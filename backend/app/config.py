@@ -229,6 +229,28 @@ class Settings(BaseSettings):
     # after it is due). ---
     billing_past_due_grace_days: int = 0  # days after due_date before past_due
     billing_past_due_sweep_seconds: int = 86400  # the beat cadence: nightly
+    # --- Local-SEO module (Part 8 Phase 2E). ALL optional and NOT in
+    # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with a deterministic fake
+    # and ACTIVATES per key as they land (mirrors the content/context key-gating).
+    # The map-pack provider is TO-CONFIRM: the seam prefers the SERPER_API_KEY the
+    # platform already holds (Serper Places - the house default), falls back to the
+    # DataForSEO login/password above (DataForSEO Maps), and degrades to a
+    # deterministic fake (never None). The per-check estimate is logged through the
+    # cost gate against the `local_rank` money-dial (R5 pre-check), billed to the
+    # ranking's CLIENT. ---
+    local_rank_cost_estimate: float = 0.003  # one map-pack position check
+    # The refresh BEAT's cadence + batch. Daily by default: a map-pack position does
+    # not move hourly and every check is paid, so a tighter cadence buys noise at
+    # linear cost. The batch caps how many rows ONE tick claims.
+    local_rank_refresh_seconds: int = 86_400
+    local_rank_refresh_batch: int = 100
+    # Google Business Profile OAuth client (DORMANT). The GBP API is APPROVAL-gated -
+    # a new project starts at 0 QPM and approval takes days-to-weeks - so these stay
+    # unset and `sync_gbp_profile` HOLDS cleanly; map-pack rank + citations work
+    # without them. The per-client refresh TOKEN is never here: it is AES-GCM sealed
+    # in the vault and `gbp_profiles.oauth_vault_ref` points at it.
+    gbp_oauth_client_id: str | None = None
+    gbp_oauth_client_secret: SecretStr | None = None
 
     # --- Off-page Web 2.0 PUBLISH pipeline + monitoring worker tuning (7B-3).
     # Additive + optional (never required in prod). The write stage (Claude drafting

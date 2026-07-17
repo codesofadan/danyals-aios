@@ -203,6 +203,29 @@ def _wire_billing(app: FastAPI) -> None:
             ]
 
     app.dependency_overrides[get_billing_repo] = _FakeBillingRepo
+def _wire_local_seo(app: FastAPI) -> None:
+    """Fake local repo: a two-row map-pack board + non-zero stats (so the table + KPI
+    tiles are actually populated - an empty adapter would pass the col lock vacuously).
+
+    One row is deliberately UNRANKED (``rank: None``) - the honest "checked, not in
+    the pack" state - so the sweep proves the adapter renders it as a real cell rather
+    than crashing or inventing a number.
+    """
+    from app.modules.local_seo.repo import get_local_repo
+
+    class _FakeLocalRepo:
+        def local_stats(self) -> dict[str, Any]:
+            return {"gbp_profiles": 9, "avg_map_rank": 3.2, "citations": 210}
+
+        def list_rankings(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return [
+                {"location_label": "Karachi", "client_name": "Verde Cafe",
+                 "keyword": "cafe near me", "rank": 2},
+                {"location_label": "Lahore", "client_name": "Coastline Fit",
+                 "keyword": "gym membership", "rank": None},
+            ]
+
+    app.dependency_overrides[get_local_repo] = _FakeLocalRepo
 
 
 _TOOL_ADAPTERS: list[ToolAdapter] = [
@@ -211,6 +234,7 @@ _TOOL_ADAPTERS: list[ToolAdapter] = [
         "client_onboarding", "/api/v1/client-onboarding/workspace", _wire_client_onboarding
     ),
     ToolAdapter("billing", "/api/v1/billing/workspace", _wire_billing),
+    ToolAdapter("local_seo", "/api/v1/local-seo/workspace", _wire_local_seo),
 ]
 
 _IDS = [a.tool_key for a in _TOOL_ADAPTERS]
@@ -417,3 +441,19 @@ async def test_billing_mrr_tile_reads_the_subscription_table_not_the_ledger(
     assert tiles["MRR"] != "$2.2k"  # ... and emphatically NOT sum(invoices)
     assert tiles["Open invoices"] == "3"  # these two DO come from the ledger
     assert tiles["Past due"] == "1"
+# 4. local_seo: the pinned literals (Part 8 Phase 2E).
+# --------------------------------------------------------------------------- #
+def test_local_seo_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("local_seo")
+    assert ts.table_cols == ["Location", "Client", "Keyword", "Rank"]
+    assert ts.kpi_labels == ["GBP profiles", "Avg. map rank", "Citations"]
+    assert ts.primary_label == "Run local audit"
+    assert ts.primary_icon == "storefront"
+    assert ts.table_title == "Map-pack rankings"
+    assert ts.table_icon == "storefront"
+
+
+def test_local_seo_service_constant_matches_tools_ts() -> None:
+    from app.modules.local_seo.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("local_seo").table_cols == WORKSPACE_TABLE_COLS

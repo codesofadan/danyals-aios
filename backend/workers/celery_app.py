@@ -37,6 +37,10 @@ celery_app = Celery(
         # schedule below); the flip is a single idempotent UPDATE, so Postgres's row
         # locks serialise overlapping ticks and no overlap-lock is needed.
         "app.modules.billing.tasks",
+        # Part 8: the local-SEO workers. refresh_local_ranks IS beat-driven (see the
+        # beat_schedule below) and therefore DOES take the R6 overlap lock;
+        # sync_gbp_profile is event-driven (enqueued per profile).
+        "app.modules.local_seo.tasks",
     ],
 )
 
@@ -89,5 +93,15 @@ celery_app.conf.beat_schedule = {
     "mark-past-due-invoices": {
         "task": "mark_past_due",
         "schedule": float(settings.billing_past_due_sweep_seconds),
+    },
+    # Part 8 Phase 2E: the map-pack rank refresh. It CLAIMS active local_rankings
+    # rows (FOR UPDATE SKIP LOCKED) and checks each through the cost gate, so the
+    # cadence is deliberately slow (default daily) - a map-pack position does not
+    # move hourly and every check is PAID. The task also takes the R6 advisory
+    # overlap lock, so a tick that arrives while the previous one is still draining
+    # returns immediately instead of double-spending.
+    "refresh-local-ranks": {
+        "task": "refresh_local_ranks",
+        "schedule": float(settings.local_rank_refresh_seconds),
     },
 }
