@@ -24,6 +24,7 @@ from app.modules.client_onboarding import router as client_onboarding_router
 from app.modules.keyword_research import router as keyword_research_router
 from app.modules.local_seo import router as local_seo_router
 from app.modules.on_page import router as on_page_router
+from app.modules.tool_workspaces import router as tool_workspaces_router
 
 # Every module's public router, in include order. ``app/routers/__init__.py``
 # includes each entry into the ``api_v1`` aggregator, so a new module needs exactly
@@ -34,4 +35,7 @@ MODULE_ROUTERS: list[APIRouter] = [
     billing_router,
     local_seo_router,
     on_page_router,
+    # Read-only /workspace adapters for the nine tools whose modules predate Part 8;
+    # owns no tables and no tasks (see app/modules/tool_workspaces/router.py).
+    tool_workspaces_router,
 ]

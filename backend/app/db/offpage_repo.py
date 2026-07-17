@@ -82,6 +82,48 @@ class OffpageRepo:
             row = cur.fetchone()
             return int(row["n"]) if row else 0
 
+    def new_backlink_count(self, *, days: int) -> int:
+        """How many links were DISCOVERED in the last ``days`` (the growth tile).
+
+        Additive read for the ``backlink_manager`` tool workspace (Part 8 Phase 2.5),
+        which needs a WINDOWED count: ``backlink_status_counts`` is all-time, so it
+        cannot answer "new links (30d)" without inventing the window. Counts by
+        ``first_seen`` (the discovery date), not ``created_at``: a link is new when the
+        crawler first SAW it, not when this row happened to be written. RLS-scoped.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select count(*) as n from public.backlinks "
+                "where status = 'new' and first_seen >= current_date - %s::int",
+                (days,),
+            )
+            row = cur.fetchone()
+            return int(row["n"]) if row else 0
+
+    def web2_publish_stats(self, *, days: int) -> dict[str, int]:
+        """The Web 2.0 publish tiles in ONE pass: scheduled / failed / published(window).
+
+        Additive read for the ``publishing`` tool workspace (Part 8 Phase 2.5). The
+        ``filter (where ...)`` form computes every tile in a single scan (mirrors
+        ``team_metrics._TASK_AGG_SQL``). ``published`` is windowed on ``published_at``
+        (the live date), the other two are current state and inherently un-windowed.
+        RLS-scoped; an empty ledger yields all zeros.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select "
+                "count(*) filter (where status = 'publishing')::int as scheduled, "
+                "count(*) filter (where status = 'failed')::int as failed, "
+                "count(*) filter (where status = 'published' "
+                "  and published_at >= current_date - %s::int)::int as published "
+                "from public.web2_properties",
+                (days,),
+            )
+            row = cur.fetchone()
+            if row is None:  # pragma: no cover - an aggregate always yields one row
+                return {"scheduled": 0, "failed": 0, "published": 0}
+            return {k: int(v or 0) for k, v in row.items()}
+
     def flag_toxic_backlinks(self, *, spam_threshold: int) -> _Rows:
         """Flag every backlink at/above ``spam_threshold`` spam as ``toxic`` (the
         disavow-review queue). Idempotent: rows already ``toxic`` are skipped, so a
