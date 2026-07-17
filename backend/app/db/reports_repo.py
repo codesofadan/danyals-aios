@@ -110,6 +110,23 @@ class ReportsRepo:
             return cur.fetchall()
 
 
+    def sync_event_count(self, *, days: int) -> int:
+        """How many report pushes landed in the last ``days`` (the "reports sent" tile).
+
+        Additive read for the ``reporting`` tool workspace (Part 8 Phase 2.5): the event
+        log is append-only and unbounded, so counting a window in Python would mean
+        fetching the whole history. One aggregate answers it. RLS-scoped.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select count(*) as n from public.report_sync_events "
+                "where synced_at >= now() - (%s::int * interval '1 day')",
+                (days,),
+            )
+            row = cur.fetchone()
+            return int(row["n"]) if row else 0
+
+
 def workbook_tabs(row: dict[str, Any]) -> list[str]:
     """The dataset tabs stored on a workbook row, tolerant of a jsonb value that
     psycopg returns as a Python list OR (rarely) a JSON string."""

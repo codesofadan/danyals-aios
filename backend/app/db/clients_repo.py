@@ -86,6 +86,35 @@ class ClientsRepo:
             counts[key] = counts.get(key, 0) + 1
         return counts
 
+    def list_all_sites(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        """Every visible site ACROSS clients, each carrying its client's name + status.
+
+        Additive read for the ``client_setup`` tool workspace (Part 8 Phase 2.5).
+        ``list_sites`` is scoped to ONE client by signature, so a cross-client board had
+        no way to render without one query per client (and ``sites`` carries no
+        client-name snapshot, unlike the ledger tables - it is joined live here).
+
+        INNER join, deliberately: ``sites.client_id`` is ``not null references clients``,
+        so a site without a client cannot exist and the join drops nothing. Only the
+        display columns are selected - ``client_id`` is never among them, so the
+        internal id cannot reach a response by accident. Both tables are RLS-scoped
+        (staff see all; a portal client has no ``sites`` select policy).
+        """
+        query = (
+            "select s.id, s.domain, s.cms_type, "
+            "c.name as client_name, c.status as client_status "
+            "from public.sites s "
+            "join public.clients c on c.id = s.client_id "
+            "order by c.name, s.domain"
+        )
+        params: list[Any] = []
+        if limit is not None:
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
     def list_sites(self, client_id: str, *, limit: int | None = None, offset: int = 0) -> _Rows:
         query = "select * from public.sites where client_id = %s order by domain"
         params: list[Any] = [client_id]

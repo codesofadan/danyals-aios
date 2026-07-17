@@ -44,6 +44,35 @@ class TasksRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
+    def list_board_tasks(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        """The board newest-first, each row carrying its assignee's DISPLAY NAME.
+
+        Additive read for the ``task_board`` tool workspace (Part 8 Phase 2.5). Every
+        other read here exposes ``assignee_id`` only (``TaskResponse.assignee`` IS the
+        uuid - the frontend resolves names off its own roster), so a server-rendered
+        board had no way to NAME an assignee without one ``get_user`` round-trip per
+        row. This left-joins the roster instead: one query, no N+1.
+
+        LEFT join, not inner: an unassigned task (``assignee_id is null``) must still
+        appear on the board - an inner join would silently drop it. ``assignee_name``
+        is '' for that case, which the caller renders as "Unassigned". Both tables are
+        RLS-scoped on this path (staff read the whole board + the whole roster), so the
+        join can never widen what the caller may see.
+        """
+        query = (
+            "select t.*, coalesce(u.name, '') as assignee_name "
+            "from public.tasks t "
+            "left join public.users u on u.id = t.assignee_id "
+            "order by t.created_at desc"
+        )
+        params: list[Any] = []
+        if limit is not None:
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
     def get_task_by_code(self, code: str) -> dict[str, Any] | None:
         with rls_connection(self._user_id) as cur:
             cur.execute("select * from public.tasks where code = %s limit 1", (code,))

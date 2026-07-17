@@ -117,6 +117,33 @@ class ContentRepo:
             return {str(r["status"]): int(r["n"]) for r in cur.fetchall()}
 
 
+    def publish_stats(self, *, days: int) -> dict[str, int]:
+        """The publish tiles in ONE pass: scheduled / failed / published(window).
+
+        Additive read for the ``publishing`` tool workspace (Part 8 Phase 2.5), which
+        needs a WINDOWED published count: ``stats()`` is an all-time ``{status: count}``
+        and cannot answer "published (30d)" without inventing the window. The
+        ``filter (where ...)`` form computes every tile in a single scan (mirrors
+        ``team_metrics._TASK_AGG_SQL``). ``published`` is windowed on ``updated_at`` -
+        the moment the job last moved, which for a ``done`` job is when it went live.
+        RLS-scoped; an empty ledger yields all zeros.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select "
+                "count(*) filter (where status = 'publishing')::int as scheduled, "
+                "count(*) filter (where status = 'failed')::int as failed, "
+                "count(*) filter (where status = 'done' "
+                "  and updated_at >= now() - (%s::int * interval '1 day'))::int as published "
+                "from public.content_jobs",
+                (days,),
+            )
+            row = cur.fetchone()
+            if row is None:  # pragma: no cover - an aggregate always yields one row
+                return {"scheduled": 0, "failed": 0, "published": 0}
+            return {k: int(v or 0) for k, v in row.items()}
+
+
 def get_content_repo(user: CurrentUserDep) -> ContentRepo:
     """Dependency: a repo bound to the caller's verified user id (RLS-scoped)."""
     return ContentRepo(user.id)
