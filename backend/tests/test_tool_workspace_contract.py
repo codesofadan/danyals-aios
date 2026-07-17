@@ -276,6 +276,35 @@ def _wire_rank_tracker(app: FastAPI) -> None:
     app.dependency_overrides[get_rank_repo] = _FakeRankRepo
 
 
+def _wire_data_import(app: FastAPI) -> None:
+    """Fake import repo: a two-row ledger + non-zero stats (so the table + KPI tiles are
+    actually populated - an empty adapter would pass the col lock vacuously).
+
+    One run is ``imported`` and one ``partial``, so the Status column exercises BOTH of
+    the toned cells the dashboard renders (ok and warn) rather than only one. The rows
+    carry a ``stored_path`` on purpose: the sweep's envelope assertions would not notice
+    it leaking into a cell, so the module's own router/schema tests pin that - but a
+    fake that omitted it could not catch a leak at all.
+    """
+    from app.modules.data_import.repo import get_import_repo
+
+    class _FakeImportRepo:
+        def import_stats(self) -> dict[str, Any]:
+            return {"imports_30d": 18, "rows_mapped": 42_000, "rows_error": 3}
+
+        def list_runs(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return [
+                {"filename": "gsc-export-june.csv", "stored_path": "deadbeef.csv",
+                 "source_type": "search_console", "rows_total": 12_400, "rows_error": 0,
+                 "status": "imported"},
+                {"filename": "backlinks.csv", "stored_path": "cafebabe.csv",
+                 "source_type": "backlinks", "rows_total": 1_050, "rows_error": 3,
+                 "status": "partial"},
+            ]
+
+    app.dependency_overrides[get_import_repo] = _FakeImportRepo
+
+
 _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("keyword_research", "/api/v1/keyword-research/workspace", _wire_keyword_research),
     ToolAdapter(
@@ -285,6 +314,7 @@ _TOOL_ADAPTERS: list[ToolAdapter] = [
     ToolAdapter("local_seo", "/api/v1/local-seo/workspace", _wire_local_seo),
     ToolAdapter("on_page", "/api/v1/on-page/workspace", _wire_on_page),
     ToolAdapter("rank_tracker", "/api/v1/rank-tracker/workspace", _wire_rank_tracker),
+    ToolAdapter("data_import", "/api/v1/data-import/workspace", _wire_data_import),
 ]
 
 _IDS = [a.tool_key for a in _TOOL_ADAPTERS]
@@ -566,3 +596,52 @@ def test_rank_tracker_service_constant_matches_tools_ts() -> None:
     from app.modules.rank_tracker.service import WORKSPACE_TABLE_COLS
 
     assert read_tool_extra("rank_tracker").table_cols == WORKSPACE_TABLE_COLS
+
+
+# --------------------------------------------------------------------------- #
+# 9. data_import: the pinned literals (Part 8 Phase 2G).
+# --------------------------------------------------------------------------- #
+def test_data_import_tools_ts_literals_are_pinned() -> None:
+    ts = read_tool_extra("data_import")
+    assert ts.table_cols == ["File", "Type", "Rows", "Status"]
+    assert ts.kpi_labels == ["Imports (30d)", "Rows mapped", "Errors"]
+    assert ts.primary_label == "Upload file"
+    assert ts.primary_icon == "upload_file"
+    assert ts.table_title == "Recent imports"
+    assert ts.table_icon == "upload_file"
+
+
+def test_data_import_service_constant_matches_tools_ts() -> None:
+    from app.modules.data_import.service import WORKSPACE_TABLE_COLS
+
+    assert read_tool_extra("data_import").table_cols == WORKSPACE_TABLE_COLS
+
+
+async def test_data_import_workspace_tones_match_the_demo_semantics(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """``tools.ts`` encodes the tone semantics in its demo rows: an imported run reads
+    ``Imported``/ok and a partial one names the damage (``3 errors``/warn). The cols lock
+    cannot see this (tones live inside the cells), so pin it here."""
+    adapter = next(a for a in _TOOL_ADAPTERS if a.tool_key == "data_import")
+    body = await _fetch_workspace(app, client, adapter)
+    imported, partial = body["table"]["rows"]
+    assert imported[1] == "Search Console"  # the source_type's display label
+    assert imported[2] == "12,400"
+    assert imported[3] == {"v": "Imported", "tone": "ok"}
+    assert partial[3] == {"v": "3 errors", "tone": "warn"}
+
+
+async def test_data_import_workspace_never_emits_the_stored_path(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """The server-only upload location must not reach the wire through the WORKSPACE
+    either. The fake repo's rows carry ``stored_path``, so an adapter that widened to
+    ``**row`` (or added a column) would be caught here and not only in the module's own
+    schema sweep."""
+    adapter = next(a for a in _TOOL_ADAPTERS if a.tool_key == "data_import")
+    body = await _fetch_workspace(app, client, adapter)
+    assert "deadbeef.csv" not in str(body)
+    assert "cafebabe.csv" not in str(body)
+    # The ORIGINAL display name is what a File cell shows.
+    assert body["table"]["rows"][0][0] == "gsc-export-june.csv"
