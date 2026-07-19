@@ -12,8 +12,10 @@ THE ``schema`` GOTCHA: ``schema`` is a reserved attribute on Pydantic's
 ``serialization_alias`` - which the contract-lock test verifies is emitted.
 
 The two server rules the router will reuse live here as pure helpers:
-``auto_framework(page_type)`` (service->AIDA, local->BAB, blog->PAS) and
-``schema_for(page_type)`` (service->Service, local->LocalBusiness, blog->Article).
+``auto_framework(page_type)`` (service->AIDA, local->BAB, blog->PAS,
+gbp_post->4 U's) and ``schema_for(page_type)`` (service->Service,
+local->LocalBusiness, blog->Article, gbp_post->"" - a GBP post is never
+rendered as its own page, so it carries no JSON-LD @type).
 """
 
 from __future__ import annotations
@@ -34,14 +36,14 @@ _IN_PIPELINE: frozenset[str] = frozenset(
 
 # Unions verbatim from content.ts (note the spaces / apostrophes in the
 # frameworks). These are the SAME values front + back - no display remapping.
-PageType = Literal["service", "blog", "local"]
+PageType = Literal["service", "blog", "local", "gbp_post"]
 PublishTarget = Literal["WordPress", "PDF/Markdown"]
 Framework = Literal["AIDA", "PAS", "BAB", "FAB", "4 Ps", "PASTOR", "4 U's"]
 JobStatus = Literal[
     "queued", "drafting", "needs_review", "publishing", "done", "failed", "rejected"
 ]
 
-_PAGE_TYPES: frozenset[str] = frozenset({"service", "blog", "local"})
+_PAGE_TYPES: frozenset[str] = frozenset({"service", "blog", "local", "gbp_post"})
 _TARGETS: frozenset[str] = frozenset({"WordPress", "PDF/Markdown"})
 _FRAMEWORKS: frozenset[str] = frozenset(
     {"AIDA", "PAS", "BAB", "FAB", "4 Ps", "PASTOR", "4 U's"}
@@ -50,29 +52,36 @@ _STATUSES: frozenset[str] = frozenset(
     {"queued", "drafting", "needs_review", "publishing", "done", "failed", "rejected"}
 )
 
-# Server rule: content type -> the framework "Auto" resolves to.
+# Server rule: content type -> the framework "Auto" resolves to. gbp_post uses
+# "4 U's" (Urgent/Unique/Useful/Ultra-specific) - the one existing framework built
+# for short punchy copy, not AIDA/BAB/PAS's long-form persuasion arc.
 _AUTO_FRAMEWORK: dict[str, Framework] = {
     "service": "AIDA",
     "local": "BAB",
     "blog": "PAS",
+    "gbp_post": "4 U's",
 }
-# Server rule: content type -> the JSON-LD @type (the schema the page validates as).
+# Server rule: content type -> the JSON-LD @type (the schema the page validates
+# as). gbp_post maps to "" (no schema) - it is never rendered as its own page, so
+# it has nothing to mark up; ``schema_type`` already tolerates an empty string.
 _SCHEMA_FOR: dict[str, str] = {
     "service": "Service",
     "local": "LocalBusiness",
     "blog": "Article",
+    "gbp_post": "",
 }
 
 
 def auto_framework(page_type: str) -> Framework:
     """The framework "Auto" resolves to for a page type (service->AIDA,
-    local->BAB, blog->PAS). Falls back to AIDA for an unknown type."""
+    local->BAB, blog->PAS, gbp_post->4 U's). Falls back to AIDA for an unknown
+    type."""
     return _AUTO_FRAMEWORK.get(page_type, "AIDA")
 
 
 def schema_for(page_type: str) -> str:
     """The JSON-LD @type for a page type (service->Service, local->LocalBusiness,
-    blog->Article). Falls back to Article for an unknown type."""
+    blog->Article, gbp_post->""). Falls back to Article for an unknown type."""
     return _SCHEMA_FOR.get(page_type, "Article")
 
 

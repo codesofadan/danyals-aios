@@ -87,6 +87,14 @@ celery_app = Celery(
         # press), so no beat entry / overlap-lock is needed - competitive intelligence
         # is pulled when an analyst asks, never on a standing schedule.
         "app.modules.competitor_intel.tasks",
+        # 7B-4: the citation-submission worker (citation_submit). Event-driven
+        # (enqueued per row when a lead dispatches a campaign), so no beat entry /
+        # overlap-lock is needed - each row is claimed exactly once by its own id.
+        "app.modules.citations.tasks",
+        # 7C: the site-analytics workers (sync_gsc_property / sync_ga4_property).
+        # Both event-driven (enqueued per property from the router), so no beat
+        # entry / overlap-lock is needed - each property is synced on request.
+        "app.modules.site_analytics.tasks",
     ],
 )
 

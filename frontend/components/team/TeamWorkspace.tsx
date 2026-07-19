@@ -124,7 +124,7 @@ export default function TeamWorkspace() {
         {tab === "assign" && (panelGuard(tasksQ) ?? panelGuard(membersQ) ?? (
           <>
             {assignTask.error instanceof Error && (
-              <div style={{ ...panelState, padding: "0.75rem 1rem", color: "var(--warn, #d9822b)" }} role="alert">
+              <div style={{ ...panelState, padding: "0.75rem 1rem", color: "var(--warn, #A96913)" }} role="alert">
                 Couldn&apos;t assign task — {assignTask.error.message}
               </div>
             )}

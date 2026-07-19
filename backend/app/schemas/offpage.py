@@ -41,16 +41,43 @@ Web2ReviewAction = Literal["approve", "reject"]
 BacklinkStatus = Literal["new", "lost", "toxic"]
 NapStatus = Literal["consistent", "inconsistent", "missing"]
 CitationAction = Literal["Submit", "Update"]
-Web2Platform = Literal["WordPress.com", "Blogger", "Tumblr", "Medium"]
+# 7B-4: the citation SUBMISSION pipeline's state - verbatim from
+# public.citation_submit_status (0045) / frontend CitationSubmitStatus (offpage.ts).
+CitationSubmitStatus = Literal[
+    "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked"
+]
+Web2Platform = Literal[
+    "WordPress.com", "Blogger", "Tumblr", "Medium",
+    "dev.to", "Write.as", "Telegra.ph", "Mataroa", "Ghost", "Mastodon",
+    "GitHub Pages", "GitLab Pages", "Micro.blog", "Hashnode", "Hatena Blog",
+    "LiveJournal", "Dreamwidth",
+]
 Web2Verified = Literal["verified", "pending"]
+# The publish PIPELINE's internal state machine (0028) - distinct from `verified`,
+# which is the live/indexable check on an ALREADY-published row.
+Web2PipelineStatus = Literal[
+    "draft", "needs_review", "publishing", "published", "failed", "rejected"
+]
 
 _BACKLINK_STATUSES: frozenset[str] = frozenset({"new", "lost", "toxic"})
 _NAP_STATUSES: frozenset[str] = frozenset({"consistent", "inconsistent", "missing"})
 _CITATION_ACTIONS: frozenset[str] = frozenset({"Submit", "Update"})
+_CITATION_SUBMIT_STATUSES: frozenset[str] = frozenset(
+    {"not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked"}
+)
+# Verbatim from integrations.web2_publishers.WEB2_PLATFORMS (7B-4's platform expansion).
 _WEB2_PLATFORMS: frozenset[str] = frozenset(
-    {"WordPress.com", "Blogger", "Tumblr", "Medium"}
+    {
+        "WordPress.com", "Blogger", "Tumblr", "Medium",
+        "dev.to", "Write.as", "Telegra.ph", "Mataroa", "Ghost", "Mastodon",
+        "GitHub Pages", "GitLab Pages", "Micro.blog", "Hashnode", "Hatena Blog",
+        "LiveJournal", "Dreamwidth",
+    }
 )
 _WEB2_VERIFIED: frozenset[str] = frozenset({"verified", "pending"})
+_WEB2_PIPELINE_STATUSES: frozenset[str] = frozenset(
+    {"draft", "needs_review", "publishing", "published", "failed", "rejected"}
+)
 
 
 def action_for(nap_status: str) -> CitationAction:
@@ -90,9 +117,14 @@ class BacklinkResponse(BaseModel):
 
 
 class CitationResponse(BaseModel):
-    """One citation in the frontend ``Citation`` shape - and ONLY those 6 keys.
+    """One citation in the frontend ``Citation`` shape - and ONLY those 8 keys.
     ``action`` is the stored verb (kept in sync with ``nap`` via ``action_for`` on
-    write); the internal ``client_id`` never leaks (``client`` is the snapshot)."""
+    write); the internal ``client_id`` never leaks (``client`` is the snapshot).
+
+    ``submit_status``/``proof_url`` are 7B-4's SUBMISSION-pipeline fields (additive
+    on the same row, 0045) - distinct from ``nap``, which is the MONITORING verdict.
+    A pre-0045 (monitoring-only) row has no ``submit_status`` at all, which reads as
+    ``not_started`` here - honest, since nothing has ever tried to submit it."""
 
     id: str
     client: str
@@ -100,6 +132,8 @@ class CitationResponse(BaseModel):
     nap: NapStatus
     action: CitationAction
     note: str
+    submit_status: CitationSubmitStatus = Field(serialization_alias="submitStatus")
+    proof_url: str = Field(serialization_alias="proofUrl")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> CitationResponse:
@@ -111,19 +145,32 @@ class CitationResponse(BaseModel):
         action_v: CitationAction = (
             action if action in _CITATION_ACTIONS else action_for(nap_v)
         )
+        submit_status = row.get("submit_status")
+        submit_status_v: CitationSubmitStatus = (
+            submit_status if submit_status in _CITATION_SUBMIT_STATUSES else "not_started"
+        )
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
             directory=row.get("directory", ""),
             nap=nap_v,
             action=action_v,
+            submit_status=submit_status_v,
+            proof_url=row.get("proof_url", ""),
             note=row.get("note", ""),
         )
 
 
 class Web2PropertyResponse(BaseModel):
     """One Web 2.0 property in the frontend ``Web2Property`` shape - and ONLY those
-    7 keys. ``id`` is the row uuid; the internal ``client_id`` never leaks."""
+    8 keys. ``id`` is the row uuid; the internal ``client_id`` never leaks.
+
+    ``status`` (0028's pipeline state machine) is additive: a pre-pipeline row (one
+    that already had a ``post_url`` before 0028 landed) defaults to ``published`` in
+    the DB, so surfacing it here is a strict widening - the dashboard can now show
+    the plan/approve UI's queue (``needs_review`` awaiting a lead) without a second
+    endpoint, and every EXISTING consumer that only reads platform/postUrl/anchor/
+    verified/published is unaffected."""
 
     id: str
     client: str
@@ -132,11 +179,13 @@ class Web2PropertyResponse(BaseModel):
     anchor: str
     verified: Web2Verified
     published: str
+    status: Web2PipelineStatus
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> Web2PropertyResponse:
         platform = row.get("platform")
         verified = row.get("verified")
+        status = row.get("status")
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
@@ -145,6 +194,7 @@ class Web2PropertyResponse(BaseModel):
             anchor=row.get("anchor", ""),
             verified=verified if verified in _WEB2_VERIFIED else "pending",
             published=format_date(row.get("published_at"), empty="—"),
+            status=status if status in _WEB2_PIPELINE_STATUSES else "published",
         )
 
 

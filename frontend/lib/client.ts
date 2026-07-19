@@ -134,11 +134,12 @@ export function reportColor(r: ClientReport): string {
 // The full ordered list of report surfaces, each paired with its viz.
 // The dashboard walks this and decides locked/unlocked per client grant.
 export type DashboardReport = ClientReport & { viz: ReportViz };
+// Neutral placeholder ONLY — the real visualization is sent by the backend
+// (useClientReports → ClientContext.reportViz). We never fall back to fabricated
+// chart numbers: an un-backed report card shows "—" (no current data).
 export const dashboardReports: DashboardReport[] = clientReports.map((r) => ({
   ...r,
-  viz: REPORT_VIZ[r.key] ?? {
-    kind: "stat", headline: "—", caption: r.desc, stats: [{ label: r.short, value: "—" }],
-  },
+  viz: { kind: "stat", headline: "—", caption: r.desc, stats: [{ label: r.short, value: "—" }] },
 }));
 
 // --- Milestone timeline for a client ---------------------------------------

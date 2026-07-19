@@ -110,6 +110,28 @@ class SpendSnapshot(BaseModel):
     halted: bool
 
 
+class GscSummary(BaseModel):
+    """Agency-wide Search Console rollup (7C). ``placeholder=true`` until at least
+    one property is connected - mirrors the ``traffic`` series's honesty flag, but
+    for the opposite reason: this one is REAL once connected, never an estimate."""
+
+    placeholder: bool
+    connected: int
+    total: int
+    clicks_28d: int = Field(serialization_alias="clicks28d")
+    impressions_28d: int = Field(serialization_alias="impressions28d")
+
+
+class Ga4Summary(BaseModel):
+    """Agency-wide GA4 rollup (7C). Mirrors :class:`GscSummary` exactly."""
+
+    placeholder: bool
+    connected: int
+    total: int
+    sessions_28d: int = Field(serialization_alias="sessions28d")
+    users_28d: int = Field(serialization_alias="users28d")
+
+
 class CommandCenterResponse(BaseModel):
     """The whole admin-home payload (a COMPOSITE - see the module contract note)."""
 
@@ -120,6 +142,8 @@ class CommandCenterResponse(BaseModel):
     clients: list[ClientPoint]
     digest: list[RecommendationResponse]
     spend: SpendSnapshot
+    gsc: GscSummary
+    ga4: Ga4Summary
 
 
 # --- pure helpers ------------------------------------------------------------- #
@@ -308,6 +332,34 @@ def build_digest(rec_rows: list[dict[str, Any]]) -> list[RecommendationResponse]
     return [RecommendationResponse.from_row(r) for r in open_recs[:_DIGEST_LIMIT]]
 
 
+def build_gsc_summary(rows: list[dict[str, Any]]) -> GscSummary:
+    """Agency-wide Search Console rollup: how many registered properties are
+    actually CONNECTED, and their summed trailing-28-day totals. ``placeholder``
+    is true until at least one is connected - unlike ``traffic``, this flips to
+    real data the moment a client's property is connected, it is never an
+    estimate."""
+    connected_rows = [r for r in rows if r.get("oauth_connected")]
+    return GscSummary(
+        placeholder=not connected_rows,
+        connected=len(connected_rows),
+        total=len(rows),
+        clicks_28d=sum(int(r.get("clicks_28d", 0) or 0) for r in connected_rows),
+        impressions_28d=sum(int(r.get("impressions_28d", 0) or 0) for r in connected_rows),
+    )
+
+
+def build_ga4_summary(rows: list[dict[str, Any]]) -> Ga4Summary:
+    """Agency-wide GA4 rollup. Mirrors :func:`build_gsc_summary` exactly."""
+    connected_rows = [r for r in rows if r.get("oauth_connected")]
+    return Ga4Summary(
+        placeholder=not connected_rows,
+        connected=len(connected_rows),
+        total=len(rows),
+        sessions_28d=sum(int(r.get("sessions_28d", 0) or 0) for r in connected_rows),
+        users_28d=sum(int(r.get("users_28d", 0) or 0) for r in connected_rows),
+    )
+
+
 def _count_this_month(rows: list[dict[str, Any]], ref: datetime) -> int:
     key = (ref.year, ref.month)
     return sum(1 for r in rows if (dt := _to_dt(r.get("created_at"))) and _month_key(dt) == key)
@@ -398,9 +450,13 @@ def build_command_center(
     budgets: list[dict[str, Any]],
     settings: dict[str, Any],
     rec_rows: list[dict[str, Any]],
+    gsc_rows: list[dict[str, Any]] | None = None,
+    ga4_rows: list[dict[str, Any]] | None = None,
     now: datetime | None = None,
 ) -> CommandCenterResponse:
-    """Compose the full admin-home payload from the (already RLS-scoped) rows."""
+    """Compose the full admin-home payload from the (already RLS-scoped) rows.
+    ``gsc_rows``/``ga4_rows`` default to empty (both summaries come back an honest
+    placeholder) so existing callers/tests that predate 7C keep working unchanged."""
     return CommandCenterResponse(
         stat_tiles=build_stat_tiles(audits, clients, tasks, budgets, now=now),
         audits=build_audit_series(audits, now=now),
@@ -409,4 +465,6 @@ def build_command_center(
         clients=build_client_series(clients, audits),
         digest=build_digest(rec_rows),
         spend=build_spend_snapshot(budgets, settings),
+        gsc=build_gsc_summary(gsc_rows or []),
+        ga4=build_ga4_summary(ga4_rows or []),
     )

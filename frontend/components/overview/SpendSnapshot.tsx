@@ -46,7 +46,7 @@ export default function SpendSnapshot({ spend }: { spend: CCSpendSnapshot }) {
 
       <div className="ov-spend-foot">
         <span>Daily spend-stop at {usd(dailyStop)}/day</span>
-        <Link href="/cost" className="ghostbtn">
+        <Link href="/admin/cost" className="ghostbtn">
           Open Cost Controls<span className="material-symbols-rounded">arrow_forward</span>
         </Link>
       </div>

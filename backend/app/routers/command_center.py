@@ -26,6 +26,7 @@ from app.db.clients_repo import ClientsRepoDep
 from app.db.cost_repo import CostRepoDep
 from app.db.policy_repo import PolicyRepoDep
 from app.db.tasks_repo import TasksRepo, TasksRepoDep
+from app.modules.site_analytics.repo import SiteAnalyticsRepoDep
 from app.schemas.command_center import CommandCenterResponse, build_command_center
 
 router = APIRouter(tags=["command-center"])
@@ -56,6 +57,7 @@ async def command_center(
     tasks_repo: TasksRepoDep,
     cost_repo: CostRepoDep,
     policy_repo: PolicyRepoDep,
+    site_analytics_repo: SiteAnalyticsRepoDep,
     _user: ViewReports,
 ) -> CommandCenterResponse:
     """The admin-home aggregate (staff-only). Reuses the module repos + pure builders;
@@ -67,6 +69,8 @@ async def command_center(
     settings = await asyncio.to_thread(cost_repo.get_settings)
     rec_rows = await asyncio.to_thread(policy_repo.list_recommendations)
     users_by_id = await asyncio.to_thread(_resolve_assignees, tasks_repo, tasks)
+    gsc_rows = await asyncio.to_thread(site_analytics_repo.list_gsc)
+    ga4_rows = await asyncio.to_thread(site_analytics_repo.list_ga4)
 
     return build_command_center(
         audits=audits,
@@ -76,4 +80,6 @@ async def command_center(
         budgets=budgets,
         settings=settings,
         rec_rows=rec_rows,
+        gsc_rows=gsc_rows,
+        ga4_rows=ga4_rows,
     )

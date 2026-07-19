@@ -482,3 +482,25 @@ def test_local_page_below_uniqueness_floor_scores_low() -> None:
 def test_non_local_page_local_relevance_not_applicable() -> None:
     result = score(_content(page_type="service"), _brief(), _schema_ok(), _source_pack())
     assert result.dimensions["local_relevance"] == 100
+
+
+def test_gbp_post_not_applicable_dimensions_score_full() -> None:
+    """A gbp_post carries no internal links, no JSON-LD schema, and never
+    competes for a SERP format - inputs that would tank a normal page (a
+    real page with 0 internal links scores 40; schema_result=None scores 60;
+    a confident SERP-format mismatch scores 45), but for gbp_post all three
+    are structurally not-applicable and must score 100 (mirrors
+    ``local_relevance`` for a non-local page_type)."""
+    gbp = _content(page_type="gbp_post", internal_links=[])
+    result = score(
+        gbp,
+        _brief(recommended_format="product", format_confidence=0.9),  # a page-type mismatch a service/blog page would fail
+        None,  # no JSON-LD validation result - gbp_post has no schema to validate
+        _source_pack(),
+    )
+    assert result.dimensions["internal_linking"] == 100
+    assert result.dimensions["schema_validity"] == 100
+    assert result.dimensions["serp_format_fit"] == 100
+    # None of the three inapplicable dims should ever trip the per-dimension floor.
+    below_min = {dim for dim in QA_DIMENSIONS if result.dimensions[dim] < MIN_DIMENSION_SCORE}
+    assert not {"internal_linking", "schema_validity", "serp_format_fit"} & below_min

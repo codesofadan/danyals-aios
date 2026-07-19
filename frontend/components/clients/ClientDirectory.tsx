@@ -90,14 +90,19 @@ export default function ClientDirectory() {
   const saveGrants = useSaveGrants();
   const [addOpen, setAddOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [portalWarning, setPortalWarning] = useState<string | null>(null);
 
   const editClient = useMemo(() => clients.find((c) => c.id === editId) ?? null, [clients, editId]);
 
   function handleAddClient(input: NewClient) {
     createClient.mutate(input, {
-      onSuccess: () => {
+      onSuccess: (created) => {
         setAddOpen(false);
         setMode("access");
+        if (created.portalWarning) {
+          setPortalWarning(created.portalWarning);
+          window.setTimeout(() => setPortalWarning(null), 6000);
+        }
       },
     });
   }
@@ -137,6 +142,11 @@ export default function ClientDirectory() {
         </div>
       </div>
 
+      {portalWarning && (
+        <div className="login-error" role="alert">
+          <span className="material-symbols-rounded">warning</span>{portalWarning}
+        </div>
+      )}
       {mode === "portal" && (
         <div className="sec-note">
           <span className="material-symbols-rounded">lock</span>

@@ -16,7 +16,7 @@ allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read
 
 ## Required inputs / keys
 - `$client` - the client id (`clientId`). Snapshotted server-side; an unknown/invisible client 404s. Never invent one.
-- `$platform` - one of `WordPress.com`, `Blogger`, `Tumblr`, `Medium` (exact). Choose it for FOOTPRINT DIVERSITY against the client's existing web2 ledger.
+- `$platform` - one of 17 (exact): `WordPress.com`, `Blogger`, `Tumblr`, `Medium`, `dev.to`, `Write.as`, `Telegra.ph`, `Mataroa`, `Ghost`, `Mastodon`, `GitHub Pages`, `GitLab Pages`, `Micro.blog`, `Hashnode`, `Hatena Blog`, `LiveJournal`, `Dreamwidth`. Choose it for FOOTPRINT DIVERSITY against the client's existing web2 ledger - the wider set makes this much easier than picking among 4. `Medium` is DRAFT-ONLY (its publish API is retired) - plan it only if the operator explicitly wants a manually-finished draft.
 - `$anchor` - the single editorial anchor text. Keep it branded/natural; an exact-match commercial anchor is a footprint risk.
 - `$target_url` - the client page the backlink points to.
 - Optional: `topic` (defaults to the anchor), `pageType` (`service|blog|local`, default `blog`), `framework` (`Auto`).
@@ -38,7 +38,7 @@ Copy this checklist and check items off as you go:
 
 1. **Read the ledger for footprint.** Run `aios_client.py get /offpage/web2?clientId=<id>`. Check the platform mix + anchors already used so the new property diversifies (no stacking the same platform/anchor).
 2. **Plan the property.** Run `aios_client.py post /offpage/web2/plan --json '{"clientId":"<id>","platform":"<platform>","anchor":"<anchor>","targetUrl":"<url>","pageType":"blog","framework":"Auto"}'` -> creates a `draft` and hands it to the write worker. Capture the returned `id`.
-3. **Wait for needs_review.** Poll `aios_client.py get /offpage/web2?clientId=<id>` until the row's status reaches `needs_review` (the worker owns `draft -> needs_review`; never force it). The ledger exposes 7 fields only (id, client, platform, postUrl, anchor, verified, published) - the article BODY is reviewed in the platform draft out-of-band, not via this API.
+3. **Wait for needs_review.** Poll `aios_client.py get /offpage/web2?clientId=<id>` until the row's `status` field reaches `needs_review` (the worker owns `draft -> needs_review`; never force it). The ledger exposes 8 fields (id, client, platform, postUrl, anchor, verified, published, status) - the article BODY is still reviewed in the platform draft out-of-band, not via this API, but `status` itself is now directly readable (no more inferring it from a blank postUrl).
 4. **STOP at the quality gate.** Present the metadata this skill CAN see (platform, anchor -> target, footprint fit) plus the reviewer checklist below. Do NOT approve on your own; approval publishes to an external platform.
 5. **Approve or reject on the LEAD's explicit decision.** On an explicit LEAD go: `aios_client.py post /offpage/web2/{id}/approve --json '{"action":"approve"}'` (moves `needs_review -> publishing`, enqueues publish -> verify -> track) or `{"action":"reject"}` (-> `rejected`). 409 if it is not awaiting review.
 

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { BACKLINK_META, type Backlink, type BacklinkStatus } from "@/lib/offpage";
-import { useBacklinks } from "@/lib/hooks/offpage";
+import { useBacklinks, useFlagToxicBacklinks } from "@/lib/hooks/offpage";
 
 type FilterKey = "all" | BacklinkStatus;
 
@@ -24,6 +24,8 @@ export default function BacklinksTab() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const backlinksQ = useBacklinks();
   const backlinks = backlinksQ.data ?? [];
+  const flagToxic = useFlagToxicBacklinks();
+  const [flash, setFlash] = useState<string | null>(null);
 
   const rows = useMemo(
     () => backlinks.filter((b) => filter === "all" || b.status === filter),
@@ -36,6 +38,20 @@ export default function BacklinksTab() {
     return c;
   }, [backlinks]);
 
+  function runFlagToxic() {
+    if (flagToxic.isPending) return;
+    flagToxic.mutate(undefined, {
+      onSuccess: (res) => {
+        setFlash(`Flagged ${res.flagged} link${res.flagged === 1 ? "" : "s"} as toxic for disavow review.`);
+        window.setTimeout(() => setFlash(null), 3200);
+      },
+      onError: (err) => {
+        setFlash(`Flagging failed — ${(err as Error)?.message ?? "try again"}.`);
+        window.setTimeout(() => setFlash(null), 3200);
+      },
+    });
+  }
+
   return (
     <div className="panel-in">
       <div className="panel-h">
@@ -43,14 +59,26 @@ export default function BacklinksTab() {
           <span className="material-symbols-rounded">hub</span>
           Referring domains, anchors &amp; authority — new / lost alerts from DataForSEO.
         </div>
-        <div className="seg">
-          {FILTERS.map((f) => (
-            <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
-              {f.label} <span className="op-count">{counts[f.key]}</span>
-            </button>
-          ))}
+        <div className="op-toolset">
+          <div className="seg">
+            {FILTERS.map((f) => (
+              <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
+                {f.label} <span className="op-count">{counts[f.key]}</span>
+              </button>
+            ))}
+          </div>
+          <button className="ghostbtn" onClick={runFlagToxic} disabled={flagToxic.isPending}>
+            <span className="material-symbols-rounded">flag</span>
+            {flagToxic.isPending ? "Flagging…" : "Flag toxic backlinks"}
+          </button>
         </div>
       </div>
+
+      {flash && (
+        <div className="op-flash">
+          <span className="material-symbols-rounded">task_alt</span>{flash}
+        </div>
+      )}
 
       <div className="tbl-wrap">
         <table className="tbl op-tbl">

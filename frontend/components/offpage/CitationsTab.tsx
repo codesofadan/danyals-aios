@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { NAP_META, type Citation, type NapStatus } from "@/lib/offpage";
-import { useBulkUpdateCitations, useCitations } from "@/lib/hooks/offpage";
+import { NAP_META, SUBMIT_STATUS_META, type Citation, type NapStatus } from "@/lib/offpage";
+import { useActOnCitation, useBulkUpdateCitations, useCitations } from "@/lib/hooks/offpage";
+import CitationCampaignModal from "./CitationCampaignModal";
 
 type FilterKey = "all" | NapStatus;
 
@@ -18,7 +19,27 @@ export default function CitationsTab() {
   const citationsQ = useCitations();
   const list: Citation[] = citationsQ.data ?? [];
   const bulk = useBulkUpdateCitations();
+  const act = useActOnCitation();
   const [flash, setFlash] = useState<string | null>(null);
+  const [showCampaign, setShowCampaign] = useState(false);
+
+  // Mark ONE listing handled — Submit a missing one or Update a drifted one.
+  function actOnRow(c: Citation) {
+    if (act.isPending) return;
+    act.mutate(
+      { id: c.id, action: c.action },
+      {
+        onSuccess: () => {
+          setFlash(`${c.action === "Submit" ? "Submitted" : "Updated"} ${c.directory} — NAP synced.`);
+          window.setTimeout(() => setFlash(null), 3200);
+        },
+        onError: (err) => {
+          setFlash(`${c.action} failed — ${(err as Error)?.message ?? "try again"}.`);
+          window.setTimeout(() => setFlash(null), 3200);
+        },
+      },
+    );
+  }
 
   const rows = useMemo(
     () => list.filter((c) => filter === "all" || c.nap === filter),
@@ -63,8 +84,14 @@ export default function CitationsTab() {
             <span className="material-symbols-rounded">sync</span>
             {bulk.isPending ? "Syncing…" : `Bulk update (${inconsistentCount})`}
           </button>
+          <button className="primary-btn" onClick={() => setShowCampaign(true)}>
+            <span className="material-symbols-rounded">rocket_launch</span>
+            Build citations
+          </button>
         </div>
       </div>
+
+      {showCampaign && <CitationCampaignModal onClose={() => setShowCampaign(false)} />}
 
       {flash && (
         <div className="op-flash">
@@ -81,17 +108,19 @@ export default function CitationsTab() {
               <th>NAP status</th>
               <th>Detail</th>
               <th>State / action</th>
+              <th>Submission</th>
             </tr>
           </thead>
           <tbody>
             {citationsQ.isLoading && (
-              <tr><td colSpan={5} className="op-empty">Loading citations…</td></tr>
+              <tr><td colSpan={6} className="op-empty">Loading citations…</td></tr>
             )}
             {citationsQ.isError && !citationsQ.isLoading && (
-              <tr><td colSpan={5} className="op-empty">Couldn&apos;t load citations — {(citationsQ.error as Error)?.message ?? "try again"}.</td></tr>
+              <tr><td colSpan={6} className="op-empty">Couldn&apos;t load citations — {(citationsQ.error as Error)?.message ?? "try again"}.</td></tr>
             )}
             {!citationsQ.isLoading && !citationsQ.isError && rows.map((c) => {
               const meta = NAP_META[c.nap];
+              const submitMeta = SUBMIT_STATUS_META[c.submitStatus];
               return (
                 <tr key={c.id}>
                   <td className="op-strong">{c.client}</td>
@@ -103,17 +132,29 @@ export default function CitationsTab() {
                   <td><span className={`status-pill ${meta.cls}`}>{meta.label}</span></td>
                   <td className="op-muted">{c.note}</td>
                   <td>
-                    <button className={c.action === "Submit" ? "op-act submit" : "op-act update"}>
+                    <button
+                      className={c.action === "Submit" ? "op-act submit" : "op-act update"}
+                      onClick={() => actOnRow(c)}
+                      disabled={act.isPending}
+                    >
                       <span className="material-symbols-rounded">
                         {c.action === "Submit" ? "add_location_alt" : "edit_location_alt"}
                       </span>{c.action}
                     </button>
                   </td>
+                  <td>
+                    <span className={`status-pill ${submitMeta.cls}`}>{submitMeta.label}</span>
+                    {c.proofUrl && (
+                      <a className="op-url" href={c.proofUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>
+                        <span className="material-symbols-rounded">image</span>
+                      </a>
+                    )}
+                  </td>
                 </tr>
               );
             })}
             {!citationsQ.isLoading && !citationsQ.isError && rows.length === 0 && (
-              <tr><td colSpan={5} className="op-empty">No citations match this filter.</td></tr>
+              <tr><td colSpan={6} className="op-empty">No citations match this filter.</td></tr>
             )}
           </tbody>
         </table>

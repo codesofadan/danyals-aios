@@ -60,6 +60,26 @@ export type CCSpendSnapshot = {
   halted: boolean;
 };
 
+// Agency-wide Search Console rollup (== GscSummary, 7C). `placeholder` is
+// honest in the OPPOSITE direction from traffic's: real once connected, never
+// an estimate — it's just false-by-default until at least one property is.
+export type CCGscSummary = {
+  placeholder: boolean;
+  connected: number;
+  total: number;
+  clicks28d: number;
+  impressions28d: number;
+};
+
+// Agency-wide GA4 rollup (== Ga4Summary). Mirrors CCGscSummary exactly.
+export type CCGa4Summary = {
+  placeholder: boolean;
+  connected: number;
+  total: number;
+  sessions28d: number;
+  users28d: number;
+};
+
 // The whole admin-home payload (a COMPOSITE — CommandCenterResponse). `digest`
 // reuses the already-locked `Recommendation` (== RecommendationResponse, 11 keys).
 export type CommandCenter = {
@@ -70,6 +90,8 @@ export type CommandCenter = {
   clients: CCClientPoint[];
   digest: Recommendation[];
   spend: CCSpendSnapshot;
+  gsc: CCGscSummary;
+  ga4: CCGa4Summary;
 };
 
 export const COMMAND_CENTER_KEY = ["command-center"] as const;

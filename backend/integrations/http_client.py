@@ -90,15 +90,23 @@ class HttpProviderClient:
 
         ``auth`` is an optional ``(username, password)`` pair for HTTP Basic (used by
         WordPress application passwords); it is handed to ``httpx`` and NEVER logged.
+
+        Every caller across this codebase catches ``ProviderCallError`` (never a raw
+        transport error or the internal ``_TransientHTTPError``) - so a persistent
+        5xx/429/network failure that survives every retry attempt is translated
+        here, not left to escape as the internal/transport-level exception.
         """
-        for attempt in Retrying(
-            retry=retry_if_exception_type(self._transient),
-            wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
-            stop=stop_after_attempt(self._max_attempts),
-            reraise=True,
-        ):
-            with attempt:
-                return self._once(method, url, params=params, json_body=json_body, auth=auth)
+        try:
+            for attempt in Retrying(
+                retry=retry_if_exception_type(self._transient),
+                wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
+                stop=stop_after_attempt(self._max_attempts),
+                reraise=True,
+            ):
+                with attempt:
+                    return self._once(method, url, params=params, json_body=json_body, auth=auth)
+        except self._transient as exc:
+            raise ProviderCallError(f"{self.provider} failed after {self._max_attempts} attempts: {exc}") from exc
         raise AssertionError("unreachable: tenacity reraises or returns")  # pragma: no cover
 
     def _once(

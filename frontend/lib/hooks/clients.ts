@@ -72,11 +72,18 @@ export function useSaveGrants() {
  * accept report grants (that is a separate PUT) — and it never persists the portal
  * password. MRR is derived client-side from the tier (TIER_PRICE), since the wizard
  * collects the tier, not a dollar amount.
+ *
+ * Third step: the wizard's step-3 "temporary password" is generated client-side and
+ * shown to the operator — it only WORKS if it's also sent to POST /clients/{id}/
+ * portal-users (the real portal-login provisioning route). Best-effort: mirrors the
+ * backend's own onboarding-seed pattern (never fails/rolls back the client creation
+ * that already succeeded) — a `portalWarning` on the resolved value lets the caller
+ * flag it if provisioning the login itself failed (e.g. a duplicate email).
  */
 export function useCreateClient() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: NewClient) => {
+    mutationFn: async (input: NewClient): Promise<ClientRecord & { portalWarning?: string }> => {
       const created = await api.post<ClientRecord>("/clients", {
         cn: input.cn,
         industry: input.industry,
@@ -90,7 +97,20 @@ export function useCreateClient() {
           reports: input.reports,
         });
       }
-      return created;
+      try {
+        await api.post(`/clients/${created.id}/portal-users`, {
+          email: input.contactEmail,
+          name: input.contactName,
+          username: input.adminLogin,
+          password: input.adminPass,
+        });
+        return created;
+      } catch {
+        return {
+          ...created,
+          portalWarning: "Client created, but the portal login couldn't be provisioned — set it up from Settings.",
+        };
+      }
     },
     onSuccess: (created) => {
       void qc.invalidateQueries({ queryKey: CLIENTS_KEY });

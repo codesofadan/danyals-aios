@@ -37,7 +37,7 @@ export default function DashboardHome() {
               <div className="cs">Your open work, soonest due first.</div>
             </div>
             <div className="tools">
-              <Link href="/portal/queue" className="ghostbtn">
+              <Link href="/team/queue" className="ghostbtn">
                 <span className="material-symbols-rounded">view_kanban</span>Open queue
               </Link>
             </div>
@@ -55,7 +55,7 @@ export default function DashboardHome() {
                 const due = dueInfo(t.due);
                 const sm = TASK_STATUS_META[t.status];
                 return (
-                  <Link href="/portal/queue" className="dh-row" key={t.id}>
+                  <Link href="/team/queue" className="dh-row" key={t.id}>
                     <span className={`prio-bar ${t.priority}`} title={`${PRIORITY_LABEL[t.priority]} priority`} />
                     <div className="dh-main">
                       <div className="dh-title">{t.title}</div>
@@ -96,17 +96,17 @@ export default function DashboardHome() {
           </div>
 
           <div className="dh-actions">
-            <Link href="/portal/deliver" className="dh-action">
+            <Link href="/team/deliver" className="dh-action">
               <span className="dh-action-ic"><span className="material-symbols-rounded">play_circle</span></span>
               <div><div className="dh-action-t">Run &amp; deliver</div><div className="dh-action-s">Work your assigned jobs</div></div>
               <span className="material-symbols-rounded dh-action-go">chevron_right</span>
             </Link>
-            <Link href="/portal/review" className="dh-action">
+            <Link href="/team/review" className="dh-action">
               <span className="dh-action-ic"><span className="material-symbols-rounded">how_to_reg</span></span>
               <div><div className="dh-action-t">Review checkpoint</div><div className="dh-action-s">{counts.review} awaiting sign-off</div></div>
               <span className="material-symbols-rounded dh-action-go">chevron_right</span>
             </Link>
-            <Link href="/portal/access" className="dh-action">
+            <Link href="/team/access" className="dh-action">
               <span className="dh-action-ic"><span className="material-symbols-rounded">shield_person</span></span>
               <div><div className="dh-action-t">My access</div><div className="dh-action-s">Features unlocked for you</div></div>
               <span className="material-symbols-rounded dh-action-go">chevron_right</span>

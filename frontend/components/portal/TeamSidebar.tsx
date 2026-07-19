@@ -14,12 +14,12 @@ export default function TeamSidebar() {
   const { logout } = useAuth();
 
   const items: Item[] = [
-    { icon: "space_dashboard", label: "Team Dashboard", href: "/portal" },
-    { icon: "view_kanban", label: "My Queue", href: "/portal/queue", badge: openCount },
-    { icon: "play_circle", label: "Deliver", href: "/portal/deliver" },
-    { icon: "how_to_reg", label: "Review", href: "/portal/review", badge: reviewCount },
-    { icon: "shield_person", label: "My Access", href: "/portal/access" },
-    { icon: "history", label: "Activity", href: "/portal/activity" },
+    { icon: "space_dashboard", label: "Team Dashboard", href: "/team" },
+    { icon: "view_kanban", label: "My Queue", href: "/team/queue", badge: openCount },
+    { icon: "play_circle", label: "Deliver", href: "/team/deliver" },
+    { icon: "how_to_reg", label: "Review", href: "/team/review", badge: reviewCount },
+    { icon: "shield_person", label: "My Access", href: "/team/access" },
+    { icon: "history", label: "Activity", href: "/team/activity" },
   ];
 
   // The tools this member can actually open — exactly what the admin
@@ -43,7 +43,7 @@ export default function TeamSidebar() {
           <div className="sec">My Workspace</div>
           {items.map((it) => {
             const active =
-              pathname === it.href || (it.href !== "/portal" && pathname.startsWith(`${it.href}/`));
+              pathname === it.href || (it.href !== "/team" && pathname.startsWith(`${it.href}/`));
             return (
               <Link key={it.label} href={it.href} className={active ? "active" : undefined}>
                 <span className="material-symbols-rounded">{it.icon}</span>
@@ -58,7 +58,7 @@ export default function TeamSidebar() {
           <div>
             <div className="sec">My Tools</div>
             {myTools.map((t) => {
-              const href = `/portal/tools/${t.slug}`;
+              const href = `/team/tools/${t.slug}`;
               const active = pathname === href;
               return (
                 <Link key={t.key} href={href} className={active ? "active" : undefined} title={t.label}>

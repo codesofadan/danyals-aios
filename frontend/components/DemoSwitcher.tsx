@@ -15,10 +15,12 @@ export default function DemoSwitcher() {
   const { session, logout } = useAuth();
   const [open, setOpen] = useState(false);
 
-  // Nothing to show on the login screen or before a session exists.
+  // Nothing to show on the login screen or before a session exists. A cached
+  // localStorage session snapshot can go stale (e.g. from an older build's role
+  // shape) — guard against an unrecognized role rather than crash the whole shell.
   if (pathname.startsWith("/login") || !session) return null;
-
   const meta = ROLE_META[session.role];
+  if (!meta) return null;
 
   function handleReset() {
     if (typeof window !== "undefined" && !window.confirm("Reset the demo? This clears every client, member and task you added and restores the seed data.")) return;

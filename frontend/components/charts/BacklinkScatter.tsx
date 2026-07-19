@@ -17,9 +17,9 @@ const STATUS_COLOR: Record<BacklinkStatus, string> = {
 };
 // Resolved hex for SVG fills (CSS vars don't animate cleanly on attrs here).
 const STATUS_HEX: Record<BacklinkStatus, string> = {
-  new: "#3DE68A",
-  lost: "#FFB43D",
-  toxic: "#FF4D6D",
+  new: "#2F8A73",
+  lost: "#A96913",
+  toxic: "#B74355",
 };
 
 const ORDER: BacklinkStatus[] = ["new", "lost", "toxic"];
@@ -54,7 +54,7 @@ export default function BacklinkScatter() {
     // Toxic quadrant wash — high spam (top) + low authority (left).
     svg.appendChild(mk("rect", {
       x: padL, y: padT, width: innerW * 0.4, height: innerH * 0.5,
-      fill: "rgba(255,77,109,.07)", rx: 4,
+      fill: "rgba(183,67,85,.07)", rx: 4,
     }));
 
     // grid + axis labels

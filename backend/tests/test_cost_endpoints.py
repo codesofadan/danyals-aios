@@ -116,7 +116,7 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     resp = await client.get("/api/v1/cost/dial")
     assert resp.status_code == 200
     dial = {d["key"]: d for d in resp.json()}
-    assert len(dial) == 13
+    assert len(dial) == 15  # +1 citations (7B-4), +1 site_analytics (7C)
     assert dial["keywords"]["mode"] == "off"  # default
     assert dial["tech_audit"]["mode"] == "api"
     # Part 8: the tool modules' spends are dial-controllable. rank_tracker is the

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  PAGE_TYPES, TARGETS, FRAMEWORKS,
+  PAGE_TYPES, PAGE_TYPE_LABELS, TARGETS, FRAMEWORKS,
   type PageType, type PublishTarget, type Framework,
 } from "@/lib/content";
 import { useClients } from "@/lib/hooks/clients";
@@ -68,7 +68,7 @@ export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => vo
               <button type="button" key={p}
                 className={pageType === p ? "chip on" : "chip"}
                 onClick={() => setPageType(p)}>
-                {p}
+                {PAGE_TYPE_LABELS[p]}
               </button>
             ))}
           </div>

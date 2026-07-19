@@ -59,12 +59,12 @@ export default function UpsellsWorkspace() {
 
       {upsellsQ.isLoading && <div className="panel-hint" style={{ marginTop: 4 }}>Loading upsells…</div>}
       {upsellsQ.isError && (
-        <div className="panel-hint" role="alert" style={{ marginTop: 4, color: "var(--warn, #d9822b)" }}>
+        <div className="panel-hint" role="alert" style={{ marginTop: 4, color: "var(--warn, #A96913)" }}>
           Couldn&apos;t load upsells — {(upsellsQ.error as Error)?.message ?? "try again"}.
         </div>
       )}
       {mutError && (
-        <div className="panel-hint" role="alert" style={{ marginTop: 4, color: "var(--warn, #d9822b)" }}>
+        <div className="panel-hint" role="alert" style={{ marginTop: 4, color: "var(--warn, #A96913)" }}>
           {(mutError as Error)?.message ?? "That action failed — try again."}
         </div>
       )}

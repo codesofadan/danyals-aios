@@ -20,3 +20,6 @@ npm-debug.log*
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Stray duplicate frontend copy (build artifacts + older mirror; not authoritative)
+daniyals-frontend/

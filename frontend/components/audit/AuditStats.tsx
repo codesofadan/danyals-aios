@@ -46,12 +46,24 @@ function Value({ value, decimals, unit, suffix }: { value: number; decimals?: nu
   );
 }
 
-export default function AuditStats({ runningNow, thisMonth }: { runningNow: number; thisMonth: number }) {
+export default function AuditStats({
+  runningNow,
+  thisMonth,
+  avgScore,
+  turnaroundMin,
+}: {
+  runningNow: number;
+  thisMonth: number;
+  avgScore: number;
+  turnaroundMin: number;
+}) {
+  // Every value is the live figure from GET /audits/stats — no fabricated
+  // deltas. On a fresh tenant these read 0, which is the honest current state.
   const tiles: Tile[] = [
-    { icon: "fact_check", label: "Audits this month", value: thisMonth, delta: "18", deltaDir: "up", note: "vs. last month", hero: true },
-    { icon: "speed", label: "Avg. site score", value: 76, delta: "2.4", deltaDir: "up", note: "composite · rolling 30d" },
+    { icon: "fact_check", label: "Audits this month", value: thisMonth, note: "completed + queued this month", hero: true },
+    { icon: "speed", label: "Avg. site score", value: avgScore, note: "composite · completed audits" },
     { icon: "play_circle", label: "Running now", value: runningNow, note: "in the job queue" },
-    { icon: "timer", label: "Avg. turnaround", value: 6, suffix: "m", delta: "0.8m", deltaDir: "down", note: "queued → done" },
+    { icon: "timer", label: "Avg. turnaround", value: turnaroundMin, suffix: "m", note: "queued → done" },
   ];
   return (
     <section className="kpis">

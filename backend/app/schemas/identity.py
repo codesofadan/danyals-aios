@@ -54,6 +54,23 @@ class ProvisionUserRequest(BaseModel):
     template: str | None = None  # optional role template key to seed feature grants
 
 
+class UpdateMeRequest(BaseModel):
+    """PATCH /me body: the caller's own profile fields. Every field optional; only
+    those provided change. Never carries role/id - self-service can't escalate."""
+
+    name: str | None = Field(default=None, min_length=1)
+    title: str | None = None
+    email: EmailStr | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    """POST /me/password body: the caller's own password change, current-password
+    verified server-side before the new one is accepted."""
+
+    current_password: SecretStr
+    new_password: SecretStr = Field(min_length=8)
+
+
 class PortalUserRequest(BaseModel):
     """Payload for provisioning a client PORTAL login (owner-only).
 

@@ -1,22 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 import { auditTypes, type AuditTypeKey } from "@/lib/audit";
 import { useCreatePublicAudit, usePublicReport } from "@/lib/hooks/publicAudit";
 import FreeAuditReport from "./FreeAuditReport";
 import FiverrUpsells from "./FiverrUpsells";
 
-// The 3D visualizer is a client-only WebGL surface — load it without SSR so
-// three.js never touches the server render (and it stays out of the initial
-// bundle until a prospect actually runs an audit).
-const AuditVisualizer = dynamic(() => import("./AuditVisualizer"), { ssr: false });
-
 type View = "landing" | "form" | "working";
 
 // A default Fiverr profile for the pre-report surfaces (before we hold a
 // report, whose `fiverr_url` is the backend-owned source of truth).
-const FIVERR_PROFILE = "https://www.fiverr.com/xegents";
+const FIVERR_PROFILE = "https://www.fiverr.com/iamdaani";
 
 // The free audit runs the two non-paid engine types; a prospect may narrow the
 // focus but never reach a paid type (the backend 400s those anyway).
@@ -265,11 +259,17 @@ export default function FreeAuditFlow() {
 
       {generating && (
         <main className="fa-gen">
-          {/* Immersive WebGL stage — the audit "runs" as a 3D visualization
-              while we genuinely poll the backend. A live-region HUD narrates
-              the real job status. */}
+          {/* Lightweight CSS stage — the audit "runs" as a simple pulsing
+              icon while we genuinely poll the backend. A live-region HUD
+              narrates the real job status. */}
           <div className="fa-viz">
-            <AuditVisualizer phase={genStep} />
+            <div className="fa-viz-core" aria-hidden>
+              <span className="fa-viz-core-ring" />
+              <span className="fa-viz-core-ring r2" />
+              <span className="fa-viz-core-badge">
+                <span className="material-symbols-rounded">{hud.icon}</span>
+              </span>
+            </div>
             <div className="fa-viz-vignette" aria-hidden />
             <div className="fa-viz-grid" aria-hidden />
             <div className="fa-viz-hud">

@@ -6,7 +6,7 @@ import type { CCClientPoint } from "@/lib/hooks/commandCenter";
 
 const R = 44;
 const CIRC = 2 * Math.PI * R;
-const RAMP = ["#EBFFB8", "#D6FF6B", "#C6FF3C", "#A6E62A", "#7FB814"]; // lime ordinal
+const RAMP = ["#EADFF0", "#B392C7", "#7C5F91", "#5B3A6E", "#432B52"]; // Meteorite ordinal
 const colorFor = (p: number) => RAMP[Math.min(RAMP.length - 1, Math.floor((p / 100) * RAMP.length))];
 
 // Active client progress — animated SVG rings + counting % (anime.js).

@@ -1,11 +1,13 @@
 // ============================================================
-// AIOS · Off-page module mock data — Module 03 (Backlinks,
-// Citations & Web 2.0). Paid tier; every placement is human-
+// AIOS · Off-page module types — Module 03 (Backlinks, Citations
+// & Web 2.0). Paid tier; every Web 2.0 placement is human-
 // approved, never link spam. Backlink signals originate from
 // DataForSEO (new/lost alerts); Web 2.0 posts publish through
-// the official platform APIs (WordPress.com / Blogger / Tumblr).
-// Swap these arrays for FastAPI / Postgres queries when the
-// backend is wired. Shapes mirror the §8 data model.
+// official platform APIs; citations SUBMIT via a direct API, an
+// aggregator push, or the self-hosted Playwright bot (7B-4).
+// Shapes mirror the live FastAPI response models 1:1 (contract-
+// locked server-side by tests/test_contract_lock.py) — there is
+// no mock data left in this file; every screen reads the backend.
 // ============================================================
 
 import { SERIES } from "@/lib/data";
@@ -32,23 +34,6 @@ export type Backlink = {
   status: BacklinkStatus;
 };
 
-export const backlinks: Backlink[] = [
-  { id: "bl-01", client: "NorthPeak Dental", refDomain: "healthgrades.com", anchor: "family dentist Bellevue", authority: 88, spam: 2, firstSeen: "Jul 08, 2026", status: "new" },
-  { id: "bl-02", client: "Lumen Realty", refDomain: "realtor.com", anchor: "Lumen Realty listings", authority: 91, spam: 1, firstSeen: "Jul 07, 2026", status: "new" },
-  { id: "bl-03", client: "Meridian Wealth", refDomain: "investopedia.com", anchor: "wealth management guide", authority: 93, spam: 3, firstSeen: "Jul 06, 2026", status: "new" },
-  { id: "bl-04", client: "BrightHVAC", refDomain: "angi.com", anchor: "HVAC repair near me", authority: 82, spam: 4, firstSeen: "Jul 05, 2026", status: "new" },
-  { id: "bl-05", client: "Verde Cafe", refDomain: "tripadvisor.com", anchor: "best brunch downtown", authority: 90, spam: 5, firstSeen: "Jul 04, 2026", status: "new" },
-  { id: "bl-06", client: "Atlas Legal", refDomain: "justia.com", anchor: "corporate attorney", authority: 85, spam: 3, firstSeen: "Jul 02, 2026", status: "lost" },
-  { id: "bl-07", client: "Coastline Fit", refDomain: "classpass.com", anchor: "coastal strength studio", authority: 79, spam: 6, firstSeen: "Jun 30, 2026", status: "lost" },
-  { id: "bl-08", client: "Orchard Pediatrics", refDomain: "webmd.com", anchor: "pediatric care", authority: 92, spam: 2, firstSeen: "Jun 28, 2026", status: "lost" },
-  { id: "bl-09", client: "NorthPeak Dental", refDomain: "cheap-seo-links.ru", anchor: "buy backlinks cheap", authority: 8, spam: 94, firstSeen: "Jun 26, 2026", status: "toxic" },
-  { id: "bl-10", client: "Meridian Wealth", refDomain: "casino-payday-loans.biz", anchor: "fast cash loans", authority: 5, spam: 97, firstSeen: "Jun 24, 2026", status: "toxic" },
-  { id: "bl-11", client: "BrightHVAC", refDomain: "link-farm-directory.net", anchor: "click here", authority: 11, spam: 88, firstSeen: "Jun 22, 2026", status: "toxic" },
-  { id: "bl-12", client: "Lumen Realty", refDomain: "medium.com", anchor: "first-time buyer tips", authority: 95, spam: 4, firstSeen: "Jun 20, 2026", status: "new" },
-  { id: "bl-13", client: "Coastline Fit", refDomain: "yelp.com", anchor: "Coastline Fit", authority: 89, spam: 3, firstSeen: "Jun 18, 2026", status: "new" },
-  { id: "bl-14", client: "Atlas Legal", refDomain: "avvo.com", anchor: "business litigation", authority: 84, spam: 5, firstSeen: "Jun 16, 2026", status: "lost" },
-];
-
 // --- Local citations / NAP --------------------------------------------------
 // nap_status: consistent = name/address/phone match the source of truth,
 // inconsistent = a field drifted, missing = no listing on that directory yet.
@@ -63,6 +48,25 @@ export const NAP_META: Record<NapStatus, { label: string; cls: string }> = {
 // State/action derives from nap_status: missing → Submit, otherwise → Update.
 export type CitationAction = "Submit" | "Update";
 
+// 7B-4: the SUBMISSION pipeline state (as opposed to nap_status, which is the
+// MONITORING verdict). not_started/queued/submitting are in-flight; submitted and
+// verified are both "live" (verified = a human/re-check confirmed it, submitted =
+// the engine reported success but it has not been re-verified yet); failed/blocked
+// both need attention (blocked = a cost-gate hold or no engine configured, never a
+// guess at a live result).
+export type CitationSubmitStatus =
+  | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked";
+
+export const SUBMIT_STATUS_META: Record<CitationSubmitStatus, { label: string; cls: string }> = {
+  not_started: { label: "Not started", cls: "mut" },
+  queued: { label: "Queued", cls: "info" },
+  submitting: { label: "Submitting", cls: "info" },
+  submitted: { label: "Submitted", cls: "ok" },
+  verified: { label: "Verified", cls: "ok" },
+  failed: { label: "Failed", cls: "op-crit" },
+  blocked: { label: "Blocked", cls: "warn" },
+};
+
 export type Citation = {
   id: string;
   client: string;
@@ -70,26 +74,21 @@ export type Citation = {
   nap: NapStatus;
   action: CitationAction;
   note: string; // what drifted / listing detail
+  submitStatus: CitationSubmitStatus;
+  proofUrl: string; // a submission's screenshot/receipt artifact (blank if none)
 };
-
-export const citations: Citation[] = [
-  { id: "ct-01", client: "NorthPeak Dental", directory: "Google Business", nap: "consistent", action: "Update", note: "Hours verified" },
-  { id: "ct-02", client: "NorthPeak Dental", directory: "Yelp", nap: "inconsistent", action: "Update", note: "Suite # differs" },
-  { id: "ct-03", client: "Lumen Realty", directory: "Bing Places", nap: "consistent", action: "Update", note: "Verified" },
-  { id: "ct-04", client: "Lumen Realty", directory: "Apple Maps", nap: "missing", action: "Submit", note: "No listing yet" },
-  { id: "ct-05", client: "Verde Cafe", directory: "Google Business", nap: "consistent", action: "Update", note: "Photos refreshed" },
-  { id: "ct-06", client: "Verde Cafe", directory: "Yellow Pages", nap: "inconsistent", action: "Update", note: "Old phone number" },
-  { id: "ct-07", client: "Atlas Legal", directory: "Yelp", nap: "missing", action: "Submit", note: "Category pending" },
-  { id: "ct-08", client: "BrightHVAC", directory: "Google Business", nap: "consistent", action: "Update", note: "Service area set" },
-  { id: "ct-09", client: "BrightHVAC", directory: "Apple Maps", nap: "inconsistent", action: "Update", note: "Address unit drift" },
-  { id: "ct-10", client: "Coastline Fit", directory: "Bing Places", nap: "missing", action: "Submit", note: "Awaiting submit" },
-  { id: "ct-11", client: "Meridian Wealth", directory: "Google Business", nap: "consistent", action: "Update", note: "Verified" },
-  { id: "ct-12", client: "Orchard Pediatrics", directory: "Yellow Pages", nap: "missing", action: "Submit", note: "New account" },
-];
 
 // --- Web 2.0 automation -----------------------------------------------------
 // Branded article → published via official platform API → link verified live.
-export type Web2Platform = "WordPress.com" | "Blogger" | "Tumblr" | "Medium";
+// 7B-4: grew from 4 to 17 platforms — every one the reference plan tags API-post:
+// Yes, not deprecated, and not a blockchain/brand-risk case (see
+// integrations/web2_publishers.py's module docstring for what was deliberately left
+// out and why). Medium stays draft-only (its publish API is retired).
+export type Web2Platform =
+  | "WordPress.com" | "Blogger" | "Tumblr" | "Medium"
+  | "dev.to" | "Write.as" | "Telegra.ph" | "Mataroa" | "Ghost" | "Mastodon"
+  | "GitHub Pages" | "GitLab Pages" | "Micro.blog" | "Hashnode" | "Hatena Blog"
+  | "LiveJournal" | "Dreamwidth";
 export type Web2Verified = "verified" | "pending";
 
 export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = {
@@ -97,7 +96,25 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   Blogger: { icon: "rss_feed", c: SERIES.c3 },
   Tumblr: { icon: "tag", c: SERIES.c1 },
   Medium: { icon: "article", c: SERIES.c2 },
+  "dev.to": { icon: "code", c: SERIES.c1 },
+  "Write.as": { icon: "edit_note", c: SERIES.c2 },
+  "Telegra.ph": { icon: "send", c: SERIES.c3 },
+  Mataroa: { icon: "draft", c: SERIES.c4 },
+  Ghost: { icon: "history_edu", c: SERIES.c1 },
+  Mastodon: { icon: "alternate_email", c: SERIES.c2 },
+  "GitHub Pages": { icon: "hub", c: SERIES.c3 },
+  "GitLab Pages": { icon: "hub", c: SERIES.c4 },
+  "Micro.blog": { icon: "rss_feed", c: SERIES.c1 },
+  Hashnode: { icon: "article", c: SERIES.c2 },
+  "Hatena Blog": { icon: "public", c: SERIES.c3 },
+  LiveJournal: { icon: "menu_book", c: SERIES.c4 },
+  Dreamwidth: { icon: "menu_book", c: SERIES.c1 },
 };
+
+// Every platform NOT draft-only can be planned/approved through the pipeline.
+export const LIVE_WEB2_PLATFORMS: Web2Platform[] = (
+  Object.keys(PLATFORM_META) as Web2Platform[]
+).filter((p) => p !== "Medium");
 
 export type Web2Property = {
   id: string;
@@ -107,25 +124,100 @@ export type Web2Property = {
   anchor: string;
   verified: Web2Verified;
   published: string;
+  status: Web2PipelineStatus;
 };
 
-export const web2Properties: Web2Property[] = [
-  { id: "w2-01", client: "NorthPeak Dental", platform: "WordPress.com", postUrl: "northpeaksmiles.wordpress.com/gentle-cleanings", anchor: "gentle dental cleanings", verified: "verified", published: "Jul 06, 2026" },
-  { id: "w2-02", client: "Lumen Realty", platform: "Medium", postUrl: "medium.com/@lumenrealty/2026-buyer-guide", anchor: "2026 home buyer guide", verified: "verified", published: "Jul 05, 2026" },
-  { id: "w2-03", client: "Verde Cafe", platform: "Tumblr", postUrl: "verdecafe.tumblr.com/seasonal-menu", anchor: "seasonal brunch menu", verified: "pending", published: "Jul 04, 2026" },
-  { id: "w2-04", client: "BrightHVAC", platform: "Blogger", postUrl: "brighthvac.blogspot.com/summer-tune-up", anchor: "summer AC tune-up", verified: "verified", published: "Jul 03, 2026" },
-  { id: "w2-05", client: "Meridian Wealth", platform: "Medium", postUrl: "medium.com/@meridian/retirement-planning", anchor: "retirement planning basics", verified: "verified", published: "Jul 01, 2026" },
-  { id: "w2-06", client: "Coastline Fit", platform: "WordPress.com", postUrl: "coastlinefit.wordpress.com/beginner-strength", anchor: "beginner strength program", verified: "pending", published: "Jun 29, 2026" },
-  { id: "w2-07", client: "Atlas Legal", platform: "Blogger", postUrl: "atlaslegal.blogspot.com/contract-basics", anchor: "business contract basics", verified: "verified", published: "Jun 27, 2026" },
-  { id: "w2-08", client: "Orchard Pediatrics", platform: "Tumblr", postUrl: "orchardpeds.tumblr.com/wellness-checks", anchor: "child wellness checks", verified: "pending", published: "Jun 25, 2026" },
-];
+// The publish PIPELINE's state machine (0028) — distinct from `verified`, which is
+// the live/indexable check on an ALREADY-published row. Drives the plan/approve UI:
+// `needs_review` rows get an Approve/Reject action, everything else is read-only.
+export type Web2PipelineStatus = "draft" | "needs_review" | "publishing" | "published" | "failed" | "rejected";
 
-// --- KPI summary ------------------------------------------------------------
-// Referring-domain total is the live profile size; new/lost are the 30-day
-// DataForSEO deltas; toxic is the disavow-review queue.
-export const offpageKpis = {
-  referringDomains: 1284,
-  newLinks30d: 96,
-  lostLinks30d: 23,
-  toxicFlagged: backlinks.filter((b) => b.status === "toxic").length + 6, // queue incl. earlier flags
+// --- Off-page KPIs -----------------------------------------------------------
+export type OffpageKpis = {
+  referringDomains: number;
+  newLinks30d: number;
+  lostLinks30d: number;
+  toxicFlagged: number;
+};
+
+// --- 7B-4: business profiles (canonical NAP) --------------------------------
+export type BusinessMarket = "US" | "UK" | "CA" | "AU" | "GLOBAL";
+
+export type BusinessProfile = {
+  id: string;
+  client: string;
+  label: string;
+  businessName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  market: BusinessMarket;
+  phone: string;
+  websiteUrl: string;
+  categories: string[];
+  hours: Record<string, string>;
+  isPrimary: boolean;
+};
+
+export type BusinessProfileInput = {
+  clientId: string;
+  label?: string;
+  businessName: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  region?: string;
+  postalCode?: string;
+  market?: BusinessMarket;
+  phone?: string;
+  websiteUrl?: string;
+  categories?: string[];
+  hours?: Record<string, string>;
+  isPrimary?: boolean;
+};
+
+// --- 7B-4: the directory catalog (reference data) ---------------------------
+export type DirectoryTier = "aggregator" | "api" | "bot_fillable" | "captcha_assisted" | "manual_only";
+export type LinkRel = "dofollow" | "nofollow" | "mixed" | "unknown";
+
+export const TIER_META: Record<DirectoryTier, { label: string; cls: string }> = {
+  aggregator: { label: "Aggregator", cls: "info" },
+  api: { label: "Direct API", cls: "ok" },
+  bot_fillable: { label: "Bot-fillable", cls: "ok" },
+  captcha_assisted: { label: "CAPTCHA-assisted", cls: "warn" },
+  manual_only: { label: "Manual only", cls: "mut" },
+};
+
+// A campaign may target these four tiers; manual_only never queues (no worker path).
+export const AUTOMATABLE_TIERS: DirectoryTier[] = ["aggregator", "api", "bot_fillable", "captcha_assisted"];
+
+export type Directory = {
+  id: string;
+  name: string;
+  url: string;
+  market: BusinessMarket;
+  tier: DirectoryTier;
+  submitMethod: string;
+  linkRel: LinkRel;
+  priceNote: string;
+  automationNote: string;
+  active: boolean;
+};
+
+// --- 7B-4: campaign dispatch -------------------------------------------------
+export type CitationCampaignInput = {
+  clientId: string;
+  businessProfileId: string;
+  markets?: BusinessMarket[];
+  tiers?: DirectoryTier[];
+};
+
+export type CitationCampaignResult = {
+  queued: number;
+  alreadyQueued: number;
+  skippedManualOnly: number;
+  estimatedCost: number;
+  citationIds: string[];
 };

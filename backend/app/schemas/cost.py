@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.util.timefmt import relative_ago
 
-Provider = Literal["Serper", "DataForSEO", "Anthropic", "PageSpeed", "Places", "Voyage"]
+Provider = Literal["Serper", "DataForSEO", "Anthropic", "PageSpeed", "Places", "Voyage", "Google"]
 DialMode = Literal["api", "byhand", "off"]
 JobType = Literal["audit", "content", "backlinks"]
 
@@ -31,6 +31,15 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     DialFeatureMeta(key="cwv", label="Core Web Vitals", icon="speed", provider="PageSpeed", note="Free tier — always on", default_mode="api"),
     DialFeatureMeta(key="content", label="Content Pipeline", icon="article", provider="Anthropic", note="Claude drafting, ~$0.90/pg", default_mode="api"),
     DialFeatureMeta(key="backlinks", label="Backlink Manager", icon="hub", provider="Serper", note="Paid — review before pull", default_mode="byhand"),
+    # 7B-4 — citation/Web2 SUBMISSION (building new listings/posts) is a distinct
+    # spend from "backlinks" (which meters MONITORING pulls + Web2 publish calls,
+    # both effectively free/near-free). A citation submission run spends real money
+    # on CAPTCHA-solves + proxy bandwidth, so it gets its own dial + its own budget
+    # visibility rather than hiding inside the backlinks dial's numbers. Defaults to
+    # byhand: a lead reviews a submission BATCH's cost estimate before it runs
+    # (mirrors backlinks' own default — submission is exactly the kind of paid pull
+    # that should not fire unattended by default).
+    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="CAPTCHA + proxy spend — review before a batch", default_mode="byhand"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
     DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),
     # Part 6B — the Client-Context / AI-memory module's two AI spends. Both flow
@@ -66,6 +75,11 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     DialFeatureMeta(key="rank_tracker", label="Rank Tracker", icon="trending_up", provider="Serper", note="Nightly rank checks — recurring", default_mode="off"),
     DialFeatureMeta(key="on_page", label="On-Page Optimizer", icon="tune", provider="Anthropic", note="Entity-coverage scoring (Claude)", default_mode="off"),
     DialFeatureMeta(key="competitor_intel", label="Competitor Intel", icon="insights", provider="Serper", note="Gap + share-of-voice pulls", default_mode="off"),
+    # 7C — live Google Search Console + GA4 reads. Free-tier (mirrors "cwv"): the
+    # dial still gates every call for spend-visibility parity with every other
+    # module (the e8964de lesson — an unregistered key is unswitchable-on), it just
+    # never actually costs anything.
+    DialFeatureMeta(key="site_analytics", label="Site Analytics (GSC/GA4)", icon="query_stats", provider="Google", note="Search Console + GA4 — free tier", default_mode="api"),
 )
 
 DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)

@@ -425,9 +425,17 @@ def _score_snippet_extractability(content: GeneratedContent, brief: ResearchBrie
     return _clamp_score(score), notes
 
 
-def _score_schema_validity(schema_result: ValidationResult | None) -> tuple[int, list[str]]:
+def _score_schema_validity(
+    schema_result: ValidationResult | None, page_type: str = ""
+) -> tuple[int, list[str]]:
     """§11 (schema): validity + match-visible-content from the schema chunk's
-    :class:`ValidationResult`. Errors fail hard; warnings shave a little."""
+    :class:`ValidationResult`. Errors fail hard; warnings shave a little. A
+    ``gbp_post`` carries no JSON-LD (``schema_for`` maps it to ``""`` - it is
+    never rendered as its own page), so a missing result is EXPECTED there, not
+    a quality gap - not applicable (mirrors ``_score_local_relevance``'s
+    non-local early-return)."""
+    if page_type == "gbp_post":
+        return 100, []
     if schema_result is None:
         return 60, ["no JSON-LD validation result supplied"]
     if not schema_result.valid:
@@ -440,7 +448,12 @@ def _score_schema_validity(schema_result: ValidationResult | None) -> tuple[int,
 
 def _score_internal_linking(content: GeneratedContent, brief: ResearchBrief) -> tuple[int, list[str]]:
     """§11.10: pillar<->cluster internal links present, with VARIED anchors (not
-    the same exact-match anchor everywhere)."""
+    the same exact-match anchor everywhere). A ``gbp_post`` is a standalone
+    business-update post, never part of a pillar/cluster page scheme, so the
+    dimension is not applicable (mirrors ``_score_local_relevance``'s
+    non-local early-return) - a real page with zero internal links still fails."""
+    if content.page_type == "gbp_post":
+        return 100, []
     links = content.internal_links
     if not links:
         return 40, ["no internal links (pillar<->cluster map not applied)"]
@@ -463,7 +476,12 @@ def _score_internal_linking(content: GeneratedContent, brief: ResearchBrief) -> 
 
 def _score_serp_format_fit(content: GeneratedContent, brief: ResearchBrief) -> tuple[int, list[str]]:
     """§11.1/§5: the page-type must satisfy the SERP-derived content format. A blog
-    scored against a product SERP is a miss and fails this dimension."""
+    scored against a product SERP is a miss and fails this dimension. A
+    ``gbp_post`` never competes for a SERP position (it's a Business Profile
+    update, not an indexed page), so it is not applicable here (mirrors
+    ``_score_local_relevance``'s non-local early-return)."""
+    if content.page_type == "gbp_post":
+        return 100, []
     recommended = brief.content_format.recommended
     fit_types = _FORMAT_PAGE_FIT.get(recommended, frozenset({"blog", "service", "local"}))
     if content.page_type in fit_types:
@@ -709,7 +727,7 @@ def score(
     record("keyword_handling", _score_keyword_handling(content, brief))
     record("structure_readability", _score_structure_readability(content))
     record("snippet_extractability", _score_snippet_extractability(content, brief))
-    record("schema_validity", _score_schema_validity(schema_result))
+    record("schema_validity", _score_schema_validity(schema_result, content.page_type))
     record("internal_linking", _score_internal_linking(content, brief))
     record("serp_format_fit", _score_serp_format_fit(content, brief))
     record("local_relevance", _score_local_relevance(content))

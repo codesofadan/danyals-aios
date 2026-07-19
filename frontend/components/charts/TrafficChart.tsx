@@ -36,11 +36,11 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
     const defs = mk("defs", {});
     defs.innerHTML =
       `<linearGradient id="tgrad" x1="0" y1="0" x2="0" y2="1">
-         <stop offset="0" stop-color="#C6FF3C" stop-opacity="0.34"/>
-         <stop offset="1" stop-color="#C6FF3C" stop-opacity="0"/>
+         <stop offset="0" stop-color="#432B52" stop-opacity="0.34"/>
+         <stop offset="1" stop-color="#432B52" stop-opacity="0"/>
        </linearGradient>
        <linearGradient id="tline" x1="0" y1="0" x2="1" y2="0">
-         <stop offset="0" stop-color="#D6FF6B"/><stop offset="1" stop-color="#93E80A"/>
+         <stop offset="0" stop-color="#5B3A6E"/><stop offset="1" stop-color="#211B29"/>
        </linearGradient>`;
     svg.appendChild(defs);
 
@@ -83,10 +83,10 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
     }
 
     const li = traffic.length - 1;
-    svg.appendChild(mk("circle", { cx: X(li), cy: Y(traffic[li].v), r: 6.5, fill: "#0A0A0B", stroke: "#C6FF3C", "stroke-width": 2.4 }));
+    svg.appendChild(mk("circle", { cx: X(li), cy: Y(traffic[li].v), r: 6.5, fill: "#FAF6EE", stroke: "#432B52", "stroke-width": 2.4 }));
 
-    const cross = mk("line", { x1: 0, y1: padT, x2: 0, y2: padT + innerH, stroke: "rgba(159,147,230,.26)", "stroke-width": 1, opacity: 0 });
-    const dot = mk("circle", { r: 5.5, fill: "#D6FF6B", stroke: "#0A0A0B", "stroke-width": 2, opacity: 0 });
+    const cross = mk("line", { x1: 0, y1: padT, x2: 0, y2: padT + innerH, stroke: "rgba(67,43,82,.26)", "stroke-width": 1, opacity: 0 });
+    const dot = mk("circle", { r: 5.5, fill: "#5B3A6E", stroke: "#FAF6EE", "stroke-width": 2, opacity: 0 });
     svg.appendChild(cross);
     svg.appendChild(dot);
 

@@ -14,13 +14,13 @@
 // ============================================================
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { apiFetch, api, setToken } from "@/lib/api";
+import { apiFetch, api, setToken, clearSession, SESSION_KEY } from "@/lib/api";
 
 export type Role = "admin" | "team" | "client";
 
 export const ROLE_META: Record<Role, { label: string; icon: string; home: string; hint: string }> = {
-  admin: { label: "Admin", icon: "shield_person", home: "/", hint: "Agency super-admin — the full control dashboard" },
-  team: { label: "Team member", icon: "groups", home: "/portal", hint: "Your assigned work, deliverables & tools" },
+  admin: { label: "Admin", icon: "shield_person", home: "/admin", hint: "Agency super-admin — the full control dashboard" },
+  team: { label: "Team member", icon: "groups", home: "/team", hint: "Your assigned work, deliverables & tools" },
   client: { label: "Client", icon: "insights", home: "/client", hint: "Your reports, graphs, milestones & requests" },
 };
 
@@ -36,7 +36,9 @@ type AuthState = {
 };
 
 const Ctx = createContext<AuthState | null>(null);
-const SESSION_KEY = "aios-session-v1";
+// SESSION_KEY is imported from lib/api (the single owner of both storage keys —
+// see clearSession there) so the token and this session snapshot can never be
+// cleared out of sync with each other again.
 
 // The server's login + identity shapes (portal ∈ admin/team/client maps 1:1 to Role).
 type LoginResponse = { access_token: string; role: string; portal: Role };
@@ -53,7 +55,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(SESSION_KEY);
-      if (raw) setSession(JSON.parse(raw) as Session);
+      const parsed = raw ? (JSON.parse(raw) as Partial<Session>) : null;
+      // A cached snapshot can predate a role-shape change (or be hand-edited) —
+      // every consumer indexes ROLE_META[session.role] assuming it's always one
+      // of the three known keys, so an unrecognized role must never hydrate.
+      if (parsed && parsed.role && Object.hasOwn(ROLE_META, parsed.role)) {
+        setSession(parsed as Session);
+      } else if (raw) {
+        window.localStorage.removeItem(SESSION_KEY);
+      }
     } catch {
       /* ignore corrupt/unavailable storage */
     }
@@ -113,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
-    setToken(null);
+    clearSession();
     persist(null);
   }, [persist]);
 

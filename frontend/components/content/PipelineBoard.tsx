@@ -1,11 +1,12 @@
 "use client";
 
-import { COLUMNS, type ContentJob, type ColumnKey } from "@/lib/content";
+import { COLUMNS, PAGE_TYPE_LABELS, type ContentJob, type ColumnKey } from "@/lib/content";
 
 const PAGE_ICON: Record<ContentJob["pageType"], string> = {
   service: "home_repair_service",
   blog: "article",
   local: "location_on",
+  gbp_post: "storefront",
 };
 
 function JobCard({ job }: { job: ContentJob }) {
@@ -15,7 +16,7 @@ function JobCard({ job }: { job: ContentJob }) {
         <span className="co-jid">{job.id}</span>
         <span className={`co-page ${job.pageType}`}>
           <span className="material-symbols-rounded">{PAGE_ICON[job.pageType]}</span>
-          {job.pageType}
+          {PAGE_TYPE_LABELS[job.pageType]}
         </span>
       </div>
       <div className="co-topic">{job.topic}</div>

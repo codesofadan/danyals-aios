@@ -104,7 +104,7 @@ class Settings(BaseSettings):
 
     # Fiverr upsell link shown on the PUBLIC free-audit report (P6C). Not a secret
     # (it is rendered to anonymous visitors); trivial to change per campaign.
-    fiverr_upsell_url: str = "https://www.fiverr.com/danyalseo"
+    fiverr_upsell_url: str = "https://www.fiverr.com/iamdaani"
 
     # --- Context / AI-memory module (P6B). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic
@@ -252,6 +252,22 @@ class Settings(BaseSettings):
     gbp_oauth_client_id: str | None = None
     gbp_oauth_client_secret: SecretStr | None = None
 
+    # --- Site Analytics module (live GSC + GA4). ALL optional and NOT in
+    # _REQUIRED_IN_PROD: unlike GBP, the Search Console (`webmasters.readonly`) and
+    # GA4 (`analytics.readonly`) scopes are standard OAuth - no Google approval gate -
+    # so a keyless deploy simply HOLDS (`sync_gsc_property`/`sync_ga4_property`) until
+    # Danyal loads one shared Google Cloud OAuth client covering both scopes. The
+    # per-client refresh TOKEN is never here: it is AES-GCM sealed in the vault and
+    # `gsc_properties.oauth_vault_ref` / `ga4_properties.oauth_vault_ref` point at it. ---
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: SecretStr | None = None
+    google_oauth_redirect_uri: str | None = None  # e.g. https://api.example.com/api/v1/site-analytics/oauth/callback
+    # Where the oauth callback sends the browser back to once it's done (the
+    # frontend's settings page); a bare path works in dev (same-origin proxy) - set
+    # an absolute frontend URL in prod, where the API sits on its own subdomain.
+    google_oauth_return_path: str = "/admin/settings"
+    site_analytics_cost_estimate: float = 0.0  # GSC/GA4 reads are free-tier; logged for spend visibility
+
     # --- On-page optimizer module (Part 8 Phase 2D). Additive + optional (never
     # required in prod). The analysis worker's only PAID call is one Serper SERP pull
     # (the content score's entity-coverage dimension); it is logged through the cost
@@ -345,6 +361,37 @@ class Settings(BaseSettings):
     # publisher factory degrades to 'hold at the review gate' until that wiring lands. ---
     web2_publish_cost_estimate: float = 0.0  # marginal cost of one blog-API publish
     offpage_monitor_cost_estimate: float = 0.05  # one backlink/citation provider pull
+
+    # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: direct
+    # APIs (Bing Places / Foursquare), aggregator pushes, a self-hosted Playwright
+    # bot for bot_fillable/captcha_assisted directories, and an Apify actor as an
+    # OCCASIONAL fallback (not the primary engine — the reference cost model shows
+    # self-hosted beats Apify ~2.5x and a managed service 20-50x per unit). ALL
+    # optional and NOT in _REQUIRED_IN_PROD: every provider degrades to a fake/hold
+    # exactly like every other off-page seam. Per-directory login credentials (a
+    # directory account username/password the bot fills in) are NOT here — they
+    # are per-client `client_access` vault rows, like a client's own WordPress
+    # login. Costs are logged through the `citations` money-dial (R5 pre-check). ---
+    bing_places_api_key: SecretStr | None = None  # Bing Places for Business API
+    foursquare_api_key: SecretStr | None = None  # Foursquare Places API
+    captcha_solver_provider: str = "capsolver"  # capsolver | capmonster | none
+    captcha_solver_api_key: SecretStr | None = None
+    citation_proxy_url: SecretStr | None = None  # http(s)://user:pass@host:port
+    apify_api_token: SecretStr | None = None  # Apify Citation Builder actor (fallback engine)
+    apify_citation_actor_id: str = ""  # the actor id/slug to run when Apify is the chosen engine
+    # Per-call/per-submit cost estimates for the `citations` money-dial. Figures are
+    # the reference plan's own directional numbers (self-hosted route): a solve is
+    # ~$0.0006 (CapMonster reCAPTCHA v2), a submit's proxy bandwidth is ~$0.002-0.005,
+    # and Playwright compute is ~$0.001 — summing to the bot_fillable estimate below;
+    # captcha_assisted adds one solve; api/aggregator calls carry no CAPTCHA/proxy.
+    citation_api_cost_estimate: float = 0.01  # one direct-API submit (Bing/Foursquare)
+    citation_bot_cost_estimate: float = 0.005  # one Playwright bot_fillable submit (no CAPTCHA)
+    citation_captcha_cost_estimate: float = 0.006  # one Playwright captcha_assisted submit
+    citation_apify_cost_estimate: float = 0.25  # one Apify Citation Builder actor run (fallback)
+    # Controlled root a bot_fillable/captcha_assisted submission's proof screenshot is
+    # written under. Unset -> no screenshot is captured (an honest empty proof_url,
+    # never a crash) - mirrors audit_artifact_dir's key-gating.
+    citation_artifact_dir: str | None = None
 
     # --- Reports module: the Google Sheets operational store (7D). OPTIONAL and NOT
     # in _REQUIRED_IN_PROD: the SheetStore buffers writes in Redis and unit-tests NOW

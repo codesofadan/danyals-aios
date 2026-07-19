@@ -11,9 +11,9 @@ import ClientAssignment from "./ClientAssignment";
 import FeatureMatrix from "./FeatureMatrix";
 
 const KPI: { key: TierKey; label: string; icon: string; c: string }[] = [
-  { key: "free", label: "Clients on Free", icon: "toll", c: "#3DE68A" },
-  { key: "semi", label: "Clients on Semi-Auto", icon: "tune", c: "#4CC9F0" },
-  { key: "fully", label: "Clients on Fully-Auto", icon: "bolt", c: "#C6FF3C" },
+  { key: "free", label: "Clients on Free", icon: "toll", c: "#2F8A73" },
+  { key: "semi", label: "Clients on Semi-Auto", icon: "tune", c: "#7C5F91" },
+  { key: "fully", label: "Clients on Fully-Auto", icon: "bolt", c: "#432B52" },
 ];
 
 export default function TiersWorkspace() {
@@ -91,7 +91,7 @@ export default function TiersWorkspace() {
         {clientsQ.isLoading ? (
           <div className="panel-hint" style={{ padding: "18px 20px" }}>Loading clients…</div>
         ) : clientsQ.isError ? (
-          <div className="panel-hint" role="alert" style={{ padding: "18px 20px", color: "var(--warn, #d9822b)" }}>
+          <div className="panel-hint" role="alert" style={{ padding: "18px 20px", color: "var(--warn, #A96913)" }}>
             Couldn&apos;t load clients — {(clientsQ.error as Error)?.message ?? "try again"}.
           </div>
         ) : clients.length === 0 ? (
@@ -100,7 +100,7 @@ export default function TiersWorkspace() {
           <ClientAssignment clients={clients} onSwitch={handleSwitch} />
         )}
         {setDeliveryTier.isError && (
-          <div className="panel-hint" role="alert" style={{ padding: "0 20px 16px", color: "var(--warn, #d9822b)" }}>
+          <div className="panel-hint" role="alert" style={{ padding: "0 20px 16px", color: "var(--warn, #A96913)" }}>
             Couldn&apos;t switch tier — {(setDeliveryTier.error as Error)?.message ?? "try again"}.
           </div>
         )}

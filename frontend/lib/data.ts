@@ -91,11 +91,8 @@ export type ClientRecord = {
 
 // Total active accounts on the platform, month over month.
 export type GrowthPoint = { m: string; v: number };
-export const clientGrowth: GrowthPoint[] = [
-  { m: "Aug", v: 24 }, { m: "Sep", v: 26 }, { m: "Oct", v: 27 }, { m: "Nov", v: 30 },
-  { m: "Dec", v: 31 }, { m: "Jan", v: 33 }, { m: "Feb", v: 35 }, { m: "Mar", v: 36 },
-  { m: "Apr", v: 38 }, { m: "May", v: 40 }, { m: "Jun", v: 41 }, { m: "Jul", v: 42 },
-];
+// No fabricated growth series — a live analytics source is not wired yet.
+export const clientGrowth: GrowthPoint[] = [];
 
 // Plan pricing (USD / month) — drives MRR + subscription mix.
 export const TIER_PRICE: Record<SubTier, number> = { Starter: 290, Growth: 690, Scale: 1490 };
@@ -103,17 +100,9 @@ export const TIER_COLOR: Record<SubTier, string> = { Starter: SERIES.c4, Growth:
 
 // Aggregate subscription mix across the full 42-account base
 // (the directory below lists a featured/recent subset).
-export const subStatusMix: { status: SubStatus; label: string; count: number; c: string }[] = [
-  { status: "active", label: "Active", count: 34, c: "var(--ok)" },
-  { status: "trial", label: "In trial", count: 5, c: SERIES.c4 },
-  { status: "past_due", label: "Past due", count: 2, c: "var(--warn)" },
-  { status: "paused", label: "Paused", count: 1, c: "var(--muted)" },
-];
-export const subTierMix: { tier: SubTier; count: number }[] = [
-  { tier: "Starter", count: 18 },
-  { tier: "Growth", count: 16 },
-  { tier: "Scale", count: 8 },
-];
+// No fabricated subscription mix — billing data is not wired yet.
+export const subStatusMix: { status: SubStatus; label: string; count: number; c: string }[] = [];
+export const subTierMix: { tier: SubTier; count: number }[] = [];
 
 export const clientDirectory: ClientRecord[] = [
   {
@@ -176,14 +165,8 @@ export type Ticket = {
   ago: string;
 };
 
-export const tickets: Ticket[] = [
-  { id: "T-4821", client: "Atlas Legal", subject: "Invoice past due — renewal on hold", channel: "Email", priority: "urgent", status: "open", ago: "22m ago" },
-  { id: "T-4820", client: "NorthPeak Dental", subject: "Audit PDF not generating for second site", channel: "Portal", priority: "high", status: "open", ago: "1h ago" },
-  { id: "T-4818", client: "Verde Cafe", subject: "How to reset admin portal password", channel: "Chat", priority: "med", status: "pending", ago: "3h ago" },
-  { id: "T-4815", client: "Meridian Wealth", subject: "Request: add two team-member logins", channel: "Portal", priority: "med", status: "pending", ago: "5h ago" },
-  { id: "T-4812", client: "BrightHVAC", subject: "Content sprint delivery timeline check", channel: "Call", priority: "low", status: "resolved", ago: "1d ago" },
-  { id: "T-4809", client: "Coastline Fit", subject: "Enable 2FA on the portal login", channel: "Email", priority: "low", status: "resolved", ago: "2d ago" },
-];
+// No fabricated tickets — the support feed is not wired into this view yet.
+export const tickets: Ticket[] = [];
 
 // ============================================================
 // Client report access — what each client is allowed to SEE.

@@ -304,6 +304,22 @@ async def test_create_resolves_auto_framework_and_schema(
     assert enqueued == [body["id"]]
 
 
+async def test_create_resolves_gbp_post_framework_and_schema(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str], wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/content/jobs",
+        json={"client_id": "cl-1", "pageType": "gbp_post", "topic": "Weekend hours update", "framework": "Auto"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert set(body) == _CONTENT_FIELDS
+    assert body["framework"] == "4 U's"  # gbp_post -> 4 U's (auto_framework)
+    assert body["auto"] is True
+    assert body["schema"] == ""          # gbp_post -> no JSON-LD (schema_for)
+
+
 async def test_create_explicit_framework_sets_auto_false(
     client: httpx.AsyncClient, wire: Callable[..., None]
 ) -> None:

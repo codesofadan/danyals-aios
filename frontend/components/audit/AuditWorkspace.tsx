@@ -73,7 +73,12 @@ export default function AuditWorkspace() {
 
   return (
     <>
-      <AuditStats runningNow={runningCount} thisMonth={statsQ.data?.thisMonth ?? rows.length} />
+      <AuditStats
+        runningNow={runningCount}
+        thisMonth={statsQ.data?.thisMonth ?? rows.length}
+        avgScore={statsQ.data?.avgScore ?? 0}
+        turnaroundMin={statsQ.data?.turnaroundMin ?? 0}
+      />
 
       <div className="row">
         {/* Audit queue / history */}
@@ -251,7 +256,7 @@ export default function AuditWorkspace() {
             {createAudit.isPending ? "Starting…" : "Run audit"}
           </button>
           {createErr && (
-            <div className="au-run-note" role="alert" style={{ color: "var(--warn, #d9822b)" }}>
+            <div className="au-run-note" role="alert" style={{ color: "var(--warn, #A96913)" }}>
               <span className="material-symbols-rounded">error</span>
               {createErr}
             </div>

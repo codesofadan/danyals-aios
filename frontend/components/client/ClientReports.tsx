@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { DELIVERABLE_COLOR } from "@/lib/client";
 import { clientReports } from "@/lib/data";
+import { openFile, downloadFile } from "@/lib/api";
 import { useClientDeliverables } from "@/lib/hooks/portalClient";
 import { useClient } from "./ClientContext";
 import ClientHeader from "./ClientHeader";
@@ -14,10 +16,38 @@ import ClientHeader from "./ClientHeader";
 export default function ClientReports() {
   const { isGranted } = useClient();
   const deliverablesQ = useClientDeliverables();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errorId, setErrorId] = useState<string | null>(null);
 
   const available = deliverablesQ.data ?? [];
   // Report surfaces not in the client's plan — an upsell to "request access".
   const lockedTypes = clientReports.filter((r) => !isGranted(r.key)).map((r) => r.key);
+
+  async function view(id: string) {
+    if (busyId) return;
+    setBusyId(id);
+    setErrorId(null);
+    try {
+      await openFile(`/portal/deliverables/${id}/download`);
+    } catch {
+      setErrorId(id);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function download(id: string, title: string) {
+    if (busyId) return;
+    setBusyId(id);
+    setErrorId(null);
+    try {
+      await downloadFile(`/portal/deliverables/${id}/download`, title);
+    } catch {
+      setErrorId(id);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="tw cl">
@@ -80,10 +110,15 @@ export default function ClientReports() {
                   ) : (
                     <div className="cl-rp-actions">
                       <span className="cl-rp-size">{d.size}</span>
-                      <button className="ghostbtn" type="button">
+                      {errorId === d.id && (
+                        <span className="cl-rp-err" title="Couldn't open this report — try again.">
+                          <span className="material-symbols-rounded">error</span>
+                        </span>
+                      )}
+                      <button className="ghostbtn" type="button" onClick={() => view(d.id)} disabled={busyId === d.id}>
                         <span className="material-symbols-rounded">visibility</span>View
                       </button>
-                      <button className="primary-btn sm" type="button">
+                      <button className="primary-btn sm" type="button" onClick={() => download(d.id, d.title)} disabled={busyId === d.id}>
                         <span className="material-symbols-rounded">download</span>Download
                       </button>
                     </div>

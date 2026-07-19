@@ -344,9 +344,21 @@ const EXTRAS: Record<string, ToolExtra> = {
 };
 
 // All tools, in the same order as the feature list.
-export const tools: Tool[] = accessFeatures.map((f) => ({
-  ...f, ...EXTRAS[f.key], slug: toolSlug(f.key),
-}));
+// The per-tool KPI numbers and table rows in EXTRAS were sample/demo data; they
+// are STRIPPED here so each tool page shows an honest "no current data" state
+// until it is wired to its live /workspace/{slug} endpoint. We keep the table
+// headers and the capability bullets — those are product copy, not fabricated
+// business data.
+export const tools: Tool[] = accessFeatures.map((f) => {
+  const extra: ToolExtra = EXTRAS[f.key] ?? { kpis: [], bullets: [] };
+  return {
+    ...f,
+    ...extra,
+    kpis: [],
+    table: extra.table ? { ...extra.table, rows: [] } : undefined,
+    slug: toolSlug(f.key),
+  };
+});
 
 export function getToolBySlug(slug: string): Tool | undefined {
   return tools.find((t) => t.slug === slug);

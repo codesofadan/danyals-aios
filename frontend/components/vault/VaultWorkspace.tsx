@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import anime from "animejs";
-import { useVaultKeys, useAddVaultKey } from "@/lib/hooks/vault";
+import { useVaultKeys, useAddVaultKey, useRotateVaultKey } from "@/lib/hooks/vault";
 import VaultTable from "./VaultTable";
 import ProvidersOverview from "./ProvidersOverview";
 import AddKeyForm, { type NewKey } from "./AddKeyForm";
+import RotateKeyModal from "./RotateKeyModal";
 
 // count-up hook (respects reduced motion)
 function useCountUp(target: number, dur = 1100) {
@@ -44,7 +45,10 @@ function NumKpi({ icon, label, value, sub, hero }: {
 export default function VaultWorkspace() {
   const keysQ = useVaultKeys();
   const addKey = useAddVaultKey();
+  const rotateKey = useRotateVaultKey();
   const keys = keysQ.data ?? [];
+  const [rotateId, setRotateId] = useState<string | null>(null);
+  const rotateTarget = keys.find((k) => k.id === rotateId) ?? null;
 
   const stats = useMemo(() => {
     const providersConnected = new Set(keys.map((k) => k.provider)).size;
@@ -54,11 +58,17 @@ export default function VaultWorkspace() {
   }, [keys]);
 
   // Rotate on the backend REQUIRES a new secret (POST /vault/keys/{id}/rotate
-  // { secret }). The table's one-click rotate button collects no new value, so it
-  // cannot be wired without a new-secret input (a UI addition out of scope here).
-  // Recorded as a backend/frontend mismatch; a no-op until that input lands.
-  function handleRotate(_id: string) {
-    /* mismatch: needs a new-secret input — see note above */
+  // { secret }) — the table's row button opens a modal to collect it, then confirms.
+  function handleRotate(id: string) {
+    setRotateId(id);
+  }
+
+  function confirmRotate(secret: string) {
+    if (!rotateTarget) return;
+    rotateKey.mutate(
+      { id: rotateTarget.id, secret },
+      { onSuccess: () => setRotateId(null) },
+    );
   }
 
   // Add → POST /vault/keys; the list refetches on success. The response is masked
@@ -121,7 +131,7 @@ export default function VaultWorkspace() {
           {keysQ.isLoading ? (
             <div className="panel-hint" style={{ padding: "18px 20px" }}>Loading keys…</div>
           ) : keysQ.isError ? (
-            <div className="panel-hint" role="alert" style={{ padding: "18px 20px", color: "var(--warn, #d9822b)" }}>
+            <div className="panel-hint" role="alert" style={{ padding: "18px 20px", color: "var(--warn, #A96913)" }}>
               Couldn&apos;t load vault keys — {(keysQ.error as Error)?.message ?? "try again"}.
             </div>
           ) : (
@@ -133,12 +143,22 @@ export default function VaultWorkspace() {
           <ProvidersOverview keys={keys} />
           <AddKeyForm onAdd={handleAdd} />
           {addKey.isError && (
-            <div className="panel-hint" role="alert" style={{ color: "var(--warn, #d9822b)" }}>
+            <div className="panel-hint" role="alert" style={{ color: "var(--warn, #A96913)" }}>
               Couldn&apos;t add key — {(addKey.error as Error)?.message ?? "try again"}.
             </div>
           )}
         </div>
       </div>
+
+      {rotateTarget && (
+        <RotateKeyModal
+          keyRow={rotateTarget}
+          busy={rotateKey.isPending}
+          error={rotateKey.isError ? ((rotateKey.error as Error)?.message ?? "Couldn't rotate key.") : null}
+          onClose={() => setRotateId(null)}
+          onConfirm={confirmRotate}
+        />
+      )}
     </div>
   );
 }

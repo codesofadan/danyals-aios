@@ -64,3 +64,30 @@ export function useRunBackup() {
     },
   });
 }
+
+/**
+ * Restore a snapshot over the live database (POST /backups/{id}/restore,
+ * owner-only, doubly guarded — body.confirm must echo the snapshot id). On
+ * success the ledger + config refetch (retained count / last-backup can shift).
+ */
+export function useRestoreBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      api.post<{ restored: boolean; id: string }>(`/backups/${id}/restore`, { confirm: id }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: SNAPSHOTS_KEY });
+      void qc.invalidateQueries({ queryKey: BACKUP_CONFIG_KEY });
+    },
+  });
+}
+
+/** Edit the schedule + toggle nightly/offsite (PUT /backups/config, owner/admin). */
+export function useUpdateBackupConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<Pick<BackupConfig, "nightlyOn" | "offsiteOn">>) =>
+      api.put<BackupConfig>("/backups/config", patch),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: BACKUP_CONFIG_KEY }),
+  });
+}

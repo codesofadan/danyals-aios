@@ -38,11 +38,13 @@ from app.schemas.offpage import action_for
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
+from app.services.vault import find_secret
 from app.services.web2_pipeline import Web2Client, Web2Outcome, run_publish, run_write
 from integrations.backlinks import BacklinkProvider, BacklinkRecord, backlink_provider_from_settings
 from integrations.citations import CitationProvider, CitationRecord, citation_provider_from_settings
 from integrations.content_providers import content_providers_from_settings
-from integrations.web2_publishers import web2_publisher_from_settings
+from integrations.web2_credentials import build_publisher
+from integrations.web2_publishers import Web2Publisher
 
 logger = get_logger("workers.offpage")
 
@@ -331,9 +333,31 @@ def execute_web2_write(store: ServiceOffpageStore, settings: Settings, web2_id: 
 
 
 def execute_web2_publish(store: ServiceOffpageStore, settings: Settings, web2_id: str) -> Web2Outcome:
-    """Publish an APPROVED property (wires the OAuth-gated publisher + gate)."""
-    publisher = web2_publisher_from_settings(settings)
+    """Publish an APPROVED property (wires the vault-backed, per-client publisher +
+    gate). ``_publisher_for`` degrades to ``None`` on ANY failure (missing row,
+    store error, missing/malformed vault credential) - never raises, so it can never
+    bypass ``run_publish``'s own never-raise guarantee below."""
+    publisher = _publisher_for(store, web2_id)
     return run_publish(store, web2_id, publisher=publisher, gate=_gate(), settings=settings)
+
+
+def _publisher_for(store: ServiceOffpageStore, web2_id: str) -> Web2Publisher | None:
+    """Best-effort vault lookup for the row's ``(client_id, platform)``. Any failure
+    here (a store error, a missing row, no vault credential yet, Medium/an
+    unrecognised platform) degrades to ``None`` - ``run_publish`` then HOLDS the
+    placement at ``needs_review`` exactly as if the platform were unconfigured."""
+    try:
+        row = store.load_web2(web2_id)
+        if row is None:
+            return None
+        client_id = str(row.get("client_id") or "")
+        platform = str(row.get("platform") or "")
+        if not client_id or not platform:
+            return None
+        return build_publisher(client_id=client_id, platform=platform, lookup=find_secret)
+    except Exception:
+        logger.warning("web2_publisher_lookup_failed", web2_id=web2_id)
+        return None
 
 
 def execute_monitor(

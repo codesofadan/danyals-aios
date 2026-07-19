@@ -23,6 +23,7 @@ from app.db.clients_repo import get_clients_repo
 from app.db.cost_repo import get_cost_repo
 from app.db.policy_repo import get_policy_repo
 from app.db.tasks_repo import get_tasks_repo
+from app.modules.site_analytics.repo import get_site_analytics_repo
 from app.schemas.command_center import (
     CommandCenterResponse,
     build_audit_series,
@@ -38,7 +39,7 @@ from app.schemas.command_center import (
 pytestmark = pytest.mark.unit
 
 _NOW = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
-_CC_KEYS = {"statTiles", "audits", "traffic", "team", "clients", "digest", "spend"}
+_CC_KEYS = {"statTiles", "audits", "traffic", "team", "clients", "digest", "spend", "gsc", "ga4"}
 
 
 def _audit(created: datetime, *, client: str = "Acme", score: int | None = 88,
@@ -265,6 +266,18 @@ class _FakePolicyRepo:
         return self._recs
 
 
+class _FakeSiteAnalyticsRepo:
+    def __init__(self, gsc: list[dict[str, Any]], ga4: list[dict[str, Any]]) -> None:
+        self._gsc = gsc
+        self._ga4 = ga4
+
+    def list_gsc(self, *, client_id: str | None = None) -> list[dict[str, Any]]:
+        return self._gsc
+
+    def list_ga4(self, *, client_id: str | None = None) -> list[dict[str, Any]]:
+        return self._ga4
+
+
 def _user(role: str) -> CurrentUser:
     return CurrentUser(
         id="u-1", email="op@x.com", role=role, status="active",  # type: ignore[arg-type]
@@ -289,6 +302,10 @@ def wire(app: FastAPI) -> Callable[..., None]:
         [{"id": "r1", "kb_ref": "k1", "title": "T", "status": "new",
           "target_module": "audit", "region": "global"}]
     )
+    app.dependency_overrides[get_site_analytics_repo] = lambda: _FakeSiteAnalyticsRepo(
+        [{"oauth_connected": True, "clicks_28d": 120, "impressions_28d": 4000}],
+        [{"oauth_connected": False, "sessions_28d": 0, "users_28d": 0}],
+    )
 
     def _as(role: str) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
@@ -312,6 +329,12 @@ async def test_command_center_payload_shape_and_placeholder_flag(
     assert body["team"][0]["nm"] == "Ayesha Raza"
     assert body["spend"]["flagged"][0]["cn"] == "Acme"  # 95% -> flagged
     assert body["digest"][0]["kbId"] == "k1"
+    # One connected GSC property -> real numbers, not a placeholder.
+    assert body["gsc"]["placeholder"] is False
+    assert body["gsc"]["connected"] == 1 and body["gsc"]["clicks28d"] == 120
+    # Zero connected GA4 properties -> honest placeholder.
+    assert body["ga4"]["placeholder"] is True
+    assert body["ga4"]["connected"] == 0
 
 
 async def test_command_center_forbidden_for_client(

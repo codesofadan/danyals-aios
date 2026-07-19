@@ -14,6 +14,27 @@
 // Set to an absolute origin (e.g. https://api.example.com/api/v1) for cross-origin.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 const TOKEN_KEY = "aios-token-v1";
+// The auth session snapshot's storage key — owned by lib/auth.tsx (imports this
+// constant rather than defining its own), so there is exactly ONE key string to
+// keep in sync. MUST be cleared together with the token (see clearSession below):
+// clearing only the token left a stale session snapshot behind, which made
+// LoginForm's "already signed in" bounce fire on dead data — /admin → 401 →
+// /login?expired=1 → stale session still says "signed in" → bounce back to
+// /admin → 401 again → infinite loop.
+export const SESSION_KEY = "aios-session-v1";
+
+// The one place that fully clears auth state — used by BOTH a 401 (below) and a
+// manual logout (lib/auth.tsx), so the token and the session snapshot can never
+// drift out of sync again.
+export function clearSession(): void {
+  setToken(null);
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* storage unavailable — the in-memory token is already cleared */
+  }
+}
 
 // --- token (module-level so the fetch layer can read it without a React hook) ---
 let _token: string | null = null;
@@ -113,11 +134,11 @@ export async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promis
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
-// --- authenticated binary download --------------------------------------------
+// --- authenticated binary fetch ------------------------------------------------
 // For bearer-protected file endpoints (audit report.pdf / findings.json, client
-// deliverables) that JSON `apiFetch` can't serve. Streams the blob, triggers a
-// browser download, and revokes the object URL. Never caches the bytes.
-export async function downloadFile(path: string, filename?: string): Promise<void> {
+// deliverables) that JSON `apiFetch` can't serve. Shared by downloadFile/openFile
+// below; never caches the bytes.
+async function fetchAuthedBlob(path: string): Promise<Blob> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -128,7 +149,13 @@ export async function downloadFile(path: string, filename?: string): Promise<voi
     throw new ApiError(401, "unauthorized", "Your session expired. Please sign in again.", "");
   }
   if (!res.ok) throw await decodeError(res);
-  const blob = await res.blob();
+  return res.blob();
+}
+
+// Streams the blob, triggers a browser download (forces save-as via filename), and
+// revokes the object URL.
+export async function downloadFile(path: string, filename?: string): Promise<void> {
+  const blob = await fetchAuthedBlob(path);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -137,6 +164,16 @@ export async function downloadFile(path: string, filename?: string): Promise<voi
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// Opens the blob in a new tab (no forced download attribute) — for a "View" action
+// where the browser's native viewer (e.g. PDF) is preferable to a save prompt.
+// Revokes the object URL after a delay long enough for the new tab to load it.
+export async function openFile(path: string): Promise<void> {
+  const blob = await fetchAuthedBlob(path);
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // --- verb helpers -------------------------------------------------------------

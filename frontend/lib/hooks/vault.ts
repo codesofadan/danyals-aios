@@ -47,6 +47,22 @@ export function useAddVaultKey() {
 }
 
 /**
+ * Rotate a key's secret in place (POST /vault/keys/{id}/rotate, manage_vault).
+ * Requires the NEW secret value (unlike a one-click rotate, the backend never
+ * generates one) — the caller collects it via a modal. Returns masked metadata.
+ */
+export function useRotateVaultKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, secret }: { id: string; secret: string }) =>
+      api.post<VaultKey>(`/vault/keys/${id}/rotate`, { secret }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: VAULT_KEYS_KEY });
+    },
+  });
+}
+
+/**
  * Decrypt one secret on demand (GET /vault/keys/{id}/reveal → { id, secret }).
  * SUPER-ADMIN only on the backend. A `useMutation`, so the plaintext is returned
  * once and NEVER written to the Query cache — the caller keeps it in transient

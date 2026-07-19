@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { providerById, STATUS_META, type VaultKey } from "@/lib/vault";
+import { FALLBACK_PROVIDER, providerById, STATUS_META, type VaultKey } from "@/lib/vault";
 import { useRevealVaultKey } from "@/lib/hooks/vault";
 
 type Props = {
@@ -74,7 +74,7 @@ export default function VaultTable({ keys, onRotate }: Props) {
       </div>
 
       {error && (
-        <div className="panel-hint" role="alert" style={{ padding: "0 4px 8px", color: "var(--warn, #d9822b)" }}>
+        <div className="panel-hint" role="alert" style={{ padding: "0 4px 8px", color: "var(--warn, #A96913)" }}>
           <span className="material-symbols-rounded">error</span>{error}
         </div>
       )}
@@ -94,7 +94,9 @@ export default function VaultTable({ keys, onRotate }: Props) {
           </thead>
           <tbody>
             {keys.map((k) => {
-              const p = providerById[k.provider];
+              // The backend's `provider` field is unvalidated `str` — fall back rather
+              // than crash on any value outside the known set.
+              const p = providerById[k.provider] ?? FALLBACK_PROVIDER;
               const st = STATUS_META[k.status];
               const show = secrets[k.id] !== undefined;
               const loading = pendingId === k.id;

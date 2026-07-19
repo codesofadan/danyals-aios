@@ -167,8 +167,11 @@ _ENUM_CONTRACT: list[tuple[type[BaseModel], str, str, str]] = [
     (BacklinkResponse, "status", "frontend/lib/offpage.ts", "BacklinkStatus"),
     (CitationResponse, "nap", "frontend/lib/offpage.ts", "NapStatus"),
     (CitationResponse, "action", "frontend/lib/offpage.ts", "CitationAction"),
+    # 7B-4: the SUBMISSION pipeline status, distinct from nap (the monitoring verdict).
+    (CitationResponse, "submit_status", "frontend/lib/offpage.ts", "CitationSubmitStatus"),
     (Web2PropertyResponse, "platform", "frontend/lib/offpage.ts", "Web2Platform"),
     (Web2PropertyResponse, "verified", "frontend/lib/offpage.ts", "Web2Verified"),
+    (Web2PropertyResponse, "status", "frontend/lib/offpage.ts", "Web2PipelineStatus"),
     # Policy Radar: all seven enums locked (one representative field each). Several
     # unions share a label (scope 'global' vs region 'global') but are DISTINCT.
     (SourceResponse, "status", "frontend/lib/policy.ts", "SourceStatus"),

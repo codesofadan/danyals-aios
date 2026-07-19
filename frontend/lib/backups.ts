@@ -51,7 +51,7 @@ export const protectedStores: ProtectedStore[] = [
     name: "Postgres database",
     desc: "App data + knowledge base — clients, sites, audits, content jobs, milestones, and the Policy Radar KB.",
     icon: "database",
-    size: "1.8 GB",
+    size: "—",
     included: true,
   },
   {
@@ -59,15 +59,15 @@ export const protectedStores: ProtectedStore[] = [
     name: "File artifacts",
     desc: "Audit PDFs, generated content packages and AI images on the VPS volume.",
     icon: "folder_zip",
-    size: "38.0 GB",
+    size: "—",
     included: true,
   },
   {
     key: "vault",
     name: "Encrypted key vault",
-    desc: "API keys + WordPress credentials (Supabase Vault) — encrypted, never in logs.",
+    desc: "API keys + WordPress credentials (encrypted app-layer vault) — never in logs.",
     icon: "lock",
-    size: "12 KB",
+    size: "—",
     included: true,
   },
   {
@@ -93,13 +93,10 @@ export const backupConfig = {
 };
 
 export type StorageSeg = { key: string; label: string; gb: number; color: string };
+// No fabricated storage usage — real disk measurement is not wired yet.
 export const storage = {
   totalGB: 100, // VPS volume
-  segments: [
-    { key: "files", label: "File artifacts", gb: 38.0, color: "var(--c4)" },
-    { key: "postgres", label: "Database + KB", gb: 1.8, color: "var(--c1)" },
-    { key: "vault", label: "Key vault", gb: 0.02, color: "var(--c2)" },
-  ] as StorageSeg[],
+  segments: [] as StorageSeg[],
 };
 export const storageUsedGB = storage.segments.reduce((s, x) => s + x.gb, 0);
 

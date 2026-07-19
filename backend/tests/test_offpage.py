@@ -49,8 +49,12 @@ from integrations.errors import ProviderNotConfiguredError
 pytestmark = pytest.mark.unit
 
 _BACKLINK_KEYS = {"id", "client", "refDomain", "anchor", "authority", "spam", "firstSeen", "status"}
-_CITATION_KEYS = {"id", "client", "directory", "nap", "action", "note"}
-_WEB2_KEYS = {"id", "client", "platform", "postUrl", "anchor", "verified", "published"}
+_CITATION_KEYS = {
+    "id", "client", "directory", "nap", "action", "note", "submitStatus", "proofUrl",
+}
+_WEB2_KEYS = {
+    "id", "client", "platform", "postUrl", "anchor", "verified", "published", "status",
+}
 _KPI_KEYS = {"referringDomains", "newLinks30d", "lostLinks30d", "toxicFlagged"}
 
 
@@ -77,7 +81,11 @@ def test_web2_platform_union_includes_medium() -> None:
     from app.schemas.offpage import Web2Platform
 
     platforms = set(typing.get_args(Web2Platform))
-    assert platforms == {"WordPress.com", "Blogger", "Tumblr", "Medium"}
+    # 7B-4 grew this from 4 to 17 platforms (integrations/web2_publishers.py); the
+    # ORIGINAL four must still all be present, and Medium specifically - the one
+    # that is easy to drop since it is draft-only (no live publisher exists for it).
+    assert {"WordPress.com", "Blogger", "Tumblr", "Medium"} <= platforms
+    assert len(platforms) == 17
     assert "Medium" in platforms  # §3: the one that is easy to drop
 
 

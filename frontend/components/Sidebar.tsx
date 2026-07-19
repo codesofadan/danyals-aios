@@ -14,37 +14,37 @@ const SECTIONS: Section[] = [
   {
     title: "Overview",
     items: [
-      { icon: "space_dashboard", label: "Admin Dashboard", href: "/" },
-      { icon: "grid_view", label: "Features", href: "/features" },
+      { icon: "space_dashboard", label: "Admin Dashboard", href: "/admin" },
+      { icon: "grid_view", label: "Features", href: "/admin/features" },
     ],
   },
   {
     title: "SEO Engine",
     items: [
-      { icon: "fact_check", label: "Audit", href: "/audit" },
-      { icon: "article", label: "Content", href: "/content" },
-      { icon: "hub", label: "Off-page", href: "/off-page" },
-      { icon: "radar", label: "Policy Radar", href: "/policy-radar", badge: "3" },
+      { icon: "fact_check", label: "Audit", href: "/admin/audit" },
+      { icon: "article", label: "Content", href: "/admin/content" },
+      { icon: "hub", label: "Off-page", href: "/admin/off-page" },
+      { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", badge: "3" },
     ],
   },
   {
     title: "Delivery",
     items: [
-      { icon: "diversity_3", label: "Clients", href: "/clients" },
-      { icon: "groups", label: "Team Management", href: "/team" },
-      { icon: "flag", label: "Milestones", href: "/milestones" },
-      { icon: "summarize", label: "Reports", href: "/reports" },
-      { icon: "sell", label: "Upsells", href: "/upsells" },
+      { icon: "diversity_3", label: "Clients", href: "/admin/clients" },
+      { icon: "groups", label: "Team Management", href: "/admin/team" },
+      { icon: "flag", label: "Milestones", href: "/admin/milestones" },
+      { icon: "summarize", label: "Reports", href: "/admin/reports" },
+      { icon: "sell", label: "Upsells", href: "/admin/upsells" },
     ],
   },
   {
     title: "Platform",
     items: [
-      { icon: "workspace_premium", label: "Service Tiers", href: "/tiers" },
-      { icon: "savings", label: "Cost Controls", href: "/cost" },
-      { icon: "key", label: "Key Vault", href: "/vault" },
-      { icon: "backup", label: "Backups", href: "/backups" },
-      { icon: "settings", label: "Settings", href: "/settings" },
+      { icon: "workspace_premium", label: "Service Tiers", href: "/admin/tiers" },
+      { icon: "savings", label: "Cost Controls", href: "/admin/cost" },
+      { icon: "key", label: "Key Vault", href: "/admin/vault" },
+      { icon: "backup", label: "Backups", href: "/admin/backups" },
+      { icon: "settings", label: "Settings", href: "/admin/settings" },
     ],
   },
 ];
@@ -90,7 +90,7 @@ export default function Sidebar() {
             {sec.items.map((it) => {
               const active =
                 it.href !== "#" &&
-                (pathname === it.href || (it.href !== "/" && pathname.startsWith(`${it.href}/`)));
+                (pathname === it.href || (it.href !== "/admin" && pathname.startsWith(`${it.href}/`)));
               return (
                 <Link key={it.label} href={it.href} className={active ? "active" : undefined}>
                   <span className="material-symbols-rounded">{it.icon}</span>

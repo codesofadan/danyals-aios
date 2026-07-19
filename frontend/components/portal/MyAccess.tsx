@@ -47,7 +47,7 @@ export default function MyAccess({ me }: { me: TeamMemberRecord }) {
                   return (
                     <Link
                       key={f.key}
-                      href={`/portal/tools/${toolSlug(f.key)}`}
+                      href={`/team/tools/${toolSlug(f.key)}`}
                       className="ac-chip on"
                       style={{ ["--c" as string]: GROUP_COLOR[g] }}
                       title={`Open ${f.label}`}

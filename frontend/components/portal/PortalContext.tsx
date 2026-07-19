@@ -31,7 +31,7 @@ const Ctx = createContext<PortalState | null>(null);
 export function PortalProvider({ children }: { children: React.ReactNode }) {
   const meQ = useMe();
   const tasksQ = useMyTasks();
-  const grantsQ = useMyGrants(meQ.data?.id);
+  const grantsQ = useMyGrants();
   const advanceM = useAdvanceTask();
   const reviewM = useReviewTask();
 

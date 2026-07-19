@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useMe } from "@/lib/hooks/settings";
+import { useChangePassword, useMe, useUpdateMe } from "@/lib/hooks/settings";
 import { Switch, SettingGroup, SettingRow, PasswordField, SavedFlash } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
@@ -25,13 +25,13 @@ function strength(pw: string): { pct: number; label: string; cls: string } {
 }
 
 export default function AccountSettings({ onLog }: { onLog: LogFn }) {
-  // The signed-in operator's own record (GET /me). MISMATCH (recorded): /me carries
-  // no `phone` and no 2FA field, and there is NO write route (no PUT /me, no
-  // password-change endpoint) — so the profile fields READ from the API, but Save
-  // profile / password / 2FA remain local confirmations until an account-write
-  // endpoint exists. Phone & 2FA are local-only (not backed by /me).
+  // The signed-in operator's own record (GET /me · PATCH /me · POST /me/password).
+  // Phone & 2FA stay local-only — /me carries neither field yet (an intentionally
+  // narrower contract; see the plan note on MemberResponse).
   const meQ = useMe();
   const me = meQ.data;
+  const updateMe = useUpdateMe();
+  const changePassword = useChangePassword();
 
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
@@ -42,6 +42,7 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
   const [cur, setCur] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [passError, setPassError] = useState<string | null>(null);
 
   const [savedProfile, setSavedProfile] = useState(false);
   const [savedPass, setSavedPass] = useState(false);
@@ -62,17 +63,33 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
   const canSavePass = cur.length > 0 && next.length >= 8 && next === confirm;
 
   function saveProfile() {
-    setSavedProfile(true);
-    setTimeout(() => setSavedProfile(false), 1800);
-    onLog("updated own profile", name, "Account");
+    updateMe.mutate(
+      { name, title, email },
+      {
+        onSuccess: () => {
+          setSavedProfile(true);
+          setTimeout(() => setSavedProfile(false), 1800);
+          onLog("updated own profile", name, "Account");
+        },
+      },
+    );
   }
 
   function savePassword() {
     if (!canSavePass) return;
-    setCur(""); setNext(""); setConfirm("");
-    setSavedPass(true);
-    setTimeout(() => setSavedPass(false), 1800);
-    onLog("changed own password", email, "Security");
+    setPassError(null);
+    changePassword.mutate(
+      { current_password: cur, new_password: next },
+      {
+        onSuccess: () => {
+          setCur(""); setNext(""); setConfirm("");
+          setSavedPass(true);
+          setTimeout(() => setSavedPass(false), 1800);
+          onLog("changed own password", email, "Security");
+        },
+        onError: (err) => setPassError((err as Error)?.message ?? "Couldn't change your password."),
+      },
+    );
   }
 
   const muted: React.CSSProperties = { padding: "2.5rem 1rem", textAlign: "center", color: "var(--muted)" };
@@ -110,8 +127,9 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
         </div>
         <div className="set-actions">
           <SavedFlash show={savedProfile} />
-          <button className="primary-btn" onClick={saveProfile}>
-            <span className="material-symbols-rounded">save</span>Save profile
+          <button className="primary-btn" onClick={saveProfile} disabled={updateMe.isPending}>
+            <span className="material-symbols-rounded">save</span>
+            {updateMe.isPending ? "Saving…" : "Save profile"}
           </button>
         </div>
       </SettingGroup>
@@ -133,10 +151,12 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
             </div>
           </div>
         </div>
+        {passError && <div className="fld-err">{passError}</div>}
         <div className="set-actions">
           <SavedFlash show={savedPass} label="Password updated" />
-          <button className="primary-btn" onClick={savePassword} disabled={!canSavePass}>
-            <span className="material-symbols-rounded">lock_reset</span>Update password
+          <button className="primary-btn" onClick={savePassword} disabled={!canSavePass || changePassword.isPending}>
+            <span className="material-symbols-rounded">lock_reset</span>
+            {changePassword.isPending ? "Updating…" : "Update password"}
           </button>
         </div>
       </SettingGroup>

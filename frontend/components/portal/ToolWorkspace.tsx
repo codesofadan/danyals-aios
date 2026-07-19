@@ -2,6 +2,7 @@
 
 import { GROUP_COLOR } from "@/lib/data";
 import type { Cell, Tool } from "@/lib/tools";
+import EmptyState from "@/components/ui/EmptyState";
 
 function CellView({ cell }: { cell: Cell }) {
   if (typeof cell === "string") return <>{cell}</>;
@@ -30,22 +31,32 @@ export default function ToolWorkspace({ tool }: { tool: Tool }) {
         </div>
       </section>
 
-      <section className="kpis tool-kpis">
-        {tool.kpis.map((k) => (
-          <div key={k.label} className="kpi">
-            <div className="lab">{k.label}</div>
-            <div className="val">{k.value}</div>
-            {k.delta && (
-              <div className="sub">
-                <span className={`delta ${k.dir}`}>
-                  <span className="material-symbols-rounded">{k.dir === "up" ? "trending_up" : "trending_down"}</span>
-                  {k.delta}
-                </span>{" "}vs. last period
-              </div>
-            )}
-          </div>
-        ))}
-      </section>
+      {tool.kpis.length > 0 ? (
+        <section className="kpis tool-kpis">
+          {tool.kpis.map((k) => (
+            <div key={k.label} className="kpi">
+              <div className="lab">{k.label}</div>
+              <div className="val">{k.value}</div>
+              {k.delta && (
+                <div className="sub">
+                  <span className={`delta ${k.dir}`}>
+                    <span className="material-symbols-rounded">{k.dir === "up" ? "trending_up" : "trending_down"}</span>
+                    {k.delta}
+                  </span>{" "}vs. last period
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
+      ) : (
+        <section className="card">
+          <EmptyState
+            icon="monitoring"
+            title="No current data"
+            hint="This tool isn't connected to a live data source yet — metrics will appear here once it's wired up and has records."
+          />
+        </section>
+      )}
 
       <div className="row">
         {tool.table && (
@@ -59,22 +70,26 @@ export default function ToolWorkspace({ tool }: { tool: Tool }) {
                 <span className="material-symbols-rounded" style={{ color: c, fontSize: 22 }}>{tool.table.icon}</span>
               </div>
             </div>
-            <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>{tool.table.cols.map((col, i) => <th key={col} className={i === 0 ? undefined : "num"}>{col}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {tool.table.rows.map((row, ri) => (
-                    <tr key={ri}>
-                      {row.map((cell, ci) => (
-                        <td key={ci} className={ci === 0 ? "tool-cell-1" : "num"}><CellView cell={cell} /></td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {tool.table.rows.length > 0 ? (
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead>
+                    <tr>{tool.table.cols.map((col, i) => <th key={col} className={i === 0 ? undefined : "num"}>{col}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {tool.table.rows.map((row, ri) => (
+                      <tr key={ri}>
+                        {row.map((cell, ci) => (
+                          <td key={ci} className={ci === 0 ? "tool-cell-1" : "num"}><CellView cell={cell} /></td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState icon="table_rows" title="No records yet" hint="Nothing to show here yet — records will appear once this tool has activity." compact />
+            )}
           </section>
         )}
 

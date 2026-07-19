@@ -113,7 +113,7 @@ export default function BudgetTable({ budgets, total, onEditCap }: Props) {
                   </td>
                   <td>
                     <span className={`status-pill ${BUDGET_STATUS_META[st].cls === "crit" ? "warn" : BUDGET_STATUS_META[st].cls}`}
-                      style={st === "crit" ? { color: "var(--crit)", background: "rgba(229,85,92,.15)" } : undefined}>
+                      style={st === "crit" ? { color: "var(--crit)", background: "rgba(183,67,85,.15)" } : undefined}>
                       {BUDGET_STATUS_META[st].label}
                     </span>
                   </td>

@@ -30,7 +30,7 @@ export default function CommandDigest({ digest }: { digest: Recommendation[] }) 
           </div>
         </div>
         <div className="tools">
-          <Link href="/policy-radar" className="ghostbtn">
+          <Link href="/admin/policy-radar" className="ghostbtn">
             Open Radar<span className="material-symbols-rounded">arrow_forward</span>
           </Link>
         </div>
@@ -42,7 +42,7 @@ export default function CommandDigest({ digest }: { digest: Recommendation[] }) 
           const mod = MODULE_META[r.target];
           return (
             <li key={r.id} className="pr-item" data-sev={sev} style={{ ["--sev" as any]: sm.color }}>
-              <Link href="/policy-radar" className="pr-link">
+              <Link href="/admin/policy-radar" className="pr-link">
                 <span className="pr-spine" />
                 <span className="pr-medallion">
                   <span className="material-symbols-rounded">{mod.icon}</span>

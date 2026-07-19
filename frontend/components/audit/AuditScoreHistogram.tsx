@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
-import { audits, type AuditRow } from "@/lib/audit";
+import type { AuditRow } from "@/lib/audit";
+import EmptyState from "@/components/ui/EmptyState";
 
 // Audit score distribution — a histogram of composite site scores across
 // every completed audit, binned into 10-point bands. Bars are coloured by
@@ -15,12 +16,12 @@ const BINS = [
 ];
 
 function bandColor(lo: number): string {
-  if (lo >= 80) return "#3DE68A"; // ok
-  if (lo >= 70) return "#FFB43D"; // warn
-  return "#FF4D6D";               // crit
+  if (lo >= 80) return "#2F8A73"; // ok
+  if (lo >= 70) return "#A96913"; // warn
+  return "#B74355";               // crit
 }
 
-export default function AuditScoreHistogram({ rows = audits }: { rows?: AuditRow[] }) {
+export default function AuditScoreHistogram({ rows = [] }: { rows?: AuditRow[] }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
@@ -155,15 +156,23 @@ export default function AuditScoreHistogram({ rows = audits }: { rows?: AuditRow
         </div>
       </div>
 
-      <div className="svg-wrap bar-wrap">
-        <svg ref={svgRef} viewBox="0 0 760 320" preserveAspectRatio="none" aria-label="Histogram of composite audit scores by 10-point band" />
-        <div className="chart-tip" ref={tipRef} />
-        <div className="hint">
-          <span className="material-symbols-rounded">touch_app</span>Hover a band
+      {scored.length === 0 ? (
+        <EmptyState
+          icon="bar_chart"
+          title="No current data"
+          hint="No completed audits with a score yet — run an audit to see the score distribution."
+        />
+      ) : (
+        <div className="svg-wrap bar-wrap">
+          <svg ref={svgRef} viewBox="0 0 760 320" preserveAspectRatio="none" aria-label="Histogram of composite audit scores by 10-point band" />
+          <div className="chart-tip" ref={tipRef} />
+          <div className="hint">
+            <span className="material-symbols-rounded">touch_app</span>Hover a band
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className={showTable ? "dtable show" : "dtable"}>
+      <div className={showTable && scored.length > 0 ? "dtable show" : "dtable"}>
         <table>
           <thead><tr><th>Score band</th><th>Audits</th></tr></thead>
           <tbody>

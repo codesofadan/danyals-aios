@@ -20,10 +20,11 @@ export const metadata: Metadata = {
   description: "SEO automation platform for the agency — audits, content, clients and Policy Radar. Built by Xegents AI.",
 };
 
-// Root shell holds only the document chrome + ambient glow. Each portal
-// brings its OWN navigation: the admin dashboard's Sidebar lives in
-// (admin)/layout.tsx; the team member portal's shell lives in
-// portal/layout.tsx. They are fully separate experiences.
+// Root shell holds only the document chrome + ambient glow, plus the public
+// free-audit page (this file's own page.tsx). Each portal brings its OWN
+// navigation: the admin dashboard's Sidebar lives in admin/layout.tsx; the
+// team member portal's shell lives in team/layout.tsx. They are fully
+// separate experiences.
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={bricolage.variable}>
@@ -36,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
         />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <div className="glow a" />
         <div className="glow b" />
         {/* Auth owns the bearer token (outermost); Query serves server data;

@@ -10,7 +10,7 @@ import {
   resilience,
   type Snapshot,
 } from "@/lib/backups";
-import { useSnapshots, useBackupConfig, useRunBackup } from "@/lib/hooks/backups";
+import { useSnapshots, useBackupConfig, useRunBackup, useRestoreBackup, useUpdateBackupConfig } from "@/lib/hooks/backups";
 
 /* count-up hook (respects reduced motion) */
 function useCountUp(target: number, decimals = 0, dur = 1200) {
@@ -50,6 +50,8 @@ export default function BackupsWorkspace() {
   const snapshotsQ = useSnapshots();
   const configQ = useBackupConfig();
   const runBackupM = useRunBackup();
+  const restoreM = useRestoreBackup();
+  const updateConfigM = useUpdateBackupConfig();
 
   const list = snapshotsQ.data ?? [];
   // Fall back to the seed config shape while GET /backups/config is in flight.
@@ -59,8 +61,9 @@ export default function BackupsWorkspace() {
 
   const [nightlyOn, setNightlyOn] = useState(cfg.nightlyOn);
   const [offsiteOn, setOffsiteOn] = useState(cfg.offsiteOn);
-  // Reflect the fetched config in the local toggle view once it arrives. These
-  // toggles are view-only this pass — PUT /backups/config persistence is not wired.
+  // Reflect the fetched config in the local toggle view once it arrives (a refetch
+  // never clobbers a pending edit — the toggle handlers below write straight through
+  // to PUT /backups/config, so the query becomes authoritative again on success).
   useEffect(() => {
     if (configQ.data) {
       setNightlyOn(configQ.data.nightlyOn);
@@ -68,8 +71,20 @@ export default function BackupsWorkspace() {
     }
   }, [configQ.data]);
 
+  function toggleNightly() {
+    const next = !nightlyOn;
+    setNightlyOn(next);
+    updateConfigM.mutate({ nightlyOn: next }, { onError: () => setNightlyOn(!next) });
+  }
+  function toggleOffsite() {
+    const next = !offsiteOn;
+    setOffsiteOn(next);
+    updateConfigM.mutate({ offsiteOn: next }, { onError: () => setOffsiteOn(!next) });
+  }
+
   const [restoreTarget, setRestoreTarget] = useState<Snapshot | null>(null);
-  const [restore, setRestore] = useState<{ ts: string; phase: "running" | "done" } | null>(null);
+  const [restore, setRestore] = useState<{ ts: string; id: string; phase: "running" | "done" | "error" } | null>(null);
+  const [animDone, setAnimDone] = useState(false);
   const barRef = useRef<HTMLElement>(null);
 
   const shown = list.filter((s) => filter === "All" || s.type === filter);
@@ -82,21 +97,31 @@ export default function BackupsWorkspace() {
     runBackupM.mutate({ type: "Manual", scope: "Database" });
   };
 
-  // Confirmed restore → progress banner animates, then completes.
+  // Confirmed restore → the real POST fires immediately; the progress banner is a
+  // cosmetic minimum-duration wrapper around it. Whichever finishes LAST (the
+  // animation or the request) drives the transition to done/error below, so a
+  // slow request never gets cut off by an early "done".
   const confirmRestore = () => {
     if (!restoreTarget) return;
-    setRestore({ ts: restoreTarget.ts, phase: "running" });
+    setAnimDone(false);
+    setRestore({ ts: restoreTarget.ts, id: restoreTarget.id, phase: "running" });
     setRestoreTarget(null);
+    restoreM.mutate({ id: restoreTarget.id });
   };
   useEffect(() => {
     if (restore?.phase !== "running") return;
     const bar = barRef.current;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const finish = () => setRestore((r) => (r ? { ...r, phase: "done" } : r));
-    if (reduce || !bar) { const t = window.setTimeout(finish, 400); return () => window.clearTimeout(t); }
-    const a = anime({ targets: bar, width: ["0%", "100%"], duration: 2800, easing: "easeInOutQuad", complete: finish });
+    if (reduce || !bar) { setAnimDone(true); return; }
+    const a = anime({ targets: bar, width: ["0%", "100%"], duration: 2800, easing: "easeInOutQuad", complete: () => setAnimDone(true) });
     return () => a.pause();
   }, [restore?.phase]);
+  useEffect(() => {
+    if (restore?.phase !== "running" || !animDone) return;
+    if (restoreM.isSuccess) setRestore((r) => (r ? { ...r, phase: "done" } : r));
+    else if (restoreM.isError) setRestore((r) => (r ? { ...r, phase: "error" } : r));
+    // else still pending — the bar holds at 100% until the request settles.
+  }, [animDone, restore?.phase, restoreM.isSuccess, restoreM.isError]);
 
   return (
     <>
@@ -114,16 +139,25 @@ export default function BackupsWorkspace() {
 
       {/* restore progress banner */}
       {restore && (
-        <div className={`bk-banner${restore.phase === "done" ? " done" : ""}`}>
-          <span className="material-symbols-rounded">{restore.phase === "done" ? "task_alt" : "settings_backup_restore"}</span>
+        <div className={`bk-banner${restore.phase === "done" ? " done" : restore.phase === "error" ? " error" : ""}`}>
+          <span className="material-symbols-rounded">
+            {restore.phase === "done" ? "task_alt" : restore.phase === "error" ? "error" : "settings_backup_restore"}
+          </span>
           {restore.phase === "running" ? (
             <>
               <span className="bt">Restoring from {restore.ts}…</span>
               <span className="bp"><i ref={barRef} /></span>
             </>
-          ) : (
+          ) : restore.phase === "done" ? (
             <>
               <span className="bt">Restore complete — data restored from {restore.ts}.</span>
+              <button className="bk-btn2" onClick={() => setRestore(null)}>Dismiss</button>
+            </>
+          ) : (
+            <>
+              <span className="bt">
+                Restore failed — {(restoreM.error as Error)?.message ?? "try again"}.
+              </span>
               <button className="bk-btn2" onClick={() => setRestore(null)}>Dismiss</button>
             </>
           )}
@@ -163,7 +197,7 @@ export default function BackupsWorkspace() {
                   <tr><td colSpan={7} style={{ padding: 16, color: "var(--muted)" }}>Loading snapshots…</td></tr>
                 )}
                 {snapshotsQ.isError && !snapshotsQ.isLoading && (
-                  <tr><td colSpan={7} style={{ padding: 16, color: "var(--warn, #d9822b)" }}>
+                  <tr><td colSpan={7} style={{ padding: 16, color: "var(--warn, #A96913)" }}>
                     Couldn&apos;t load snapshots — {(snapshotsQ.error as Error)?.message ?? "try again"}.
                   </td></tr>
                 )}
@@ -249,7 +283,7 @@ export default function BackupsWorkspace() {
               <div className="bk-st-d">Runs every night at {cfg.nightlyTime}</div>
             </div>
             <button className={`bk-switch${nightlyOn ? " on" : ""}`} aria-pressed={nightlyOn}
-              aria-label="Toggle nightly backups" onClick={() => setNightlyOn((v) => !v)} />
+              aria-label="Toggle nightly backups" onClick={toggleNightly} disabled={updateConfigM.isPending} />
           </div>
           <div className="bk-setting">
             <div className="bk-st">
@@ -257,7 +291,7 @@ export default function BackupsWorkspace() {
               <div className="bk-st-d">Mirror snapshots to object storage (add later)</div>
             </div>
             <button className={`bk-switch${offsiteOn ? " on" : ""}`} aria-pressed={offsiteOn}
-              aria-label="Toggle off-site copy" onClick={() => setOffsiteOn((v) => !v)} />
+              aria-label="Toggle off-site copy" onClick={toggleOffsite} disabled={updateConfigM.isPending} />
           </div>
           <div className="bk-setting">
             <div className="bk-st">
@@ -309,7 +343,7 @@ export default function BackupsWorkspace() {
               {storage.segments.map((sg) => (
                 <span key={sg.key}><i style={{ background: sg.color }} />{sg.label} · {sg.gb} GB</span>
               ))}
-              <span><i style={{ background: "rgba(255,255,255,.12)" }} />Free · {freeGB.toFixed(1)} GB</span>
+              <span><i style={{ background: "rgba(33,27,41,.06)" }} />Free · {freeGB.toFixed(1)} GB</span>
             </div>
           </div>
 

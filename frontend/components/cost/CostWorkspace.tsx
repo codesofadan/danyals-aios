@@ -1,10 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import {
-  providerSpend_seed, jobsThisMonth, dailyStopDefault,
-  type DialMode,
-} from "@/lib/cost";
+import { dailyStopDefault, type DialMode, type Provider } from "@/lib/cost";
 import {
   useBudgets, useCostLog, useDial, useSpendStop,
   useSetBudget, useSetDial, useSetSpendStop,
@@ -46,10 +43,19 @@ export default function CostWorkspace() {
     return { spent, cap, used };
   }, [budgets]);
 
+  // Derived from the real cost log — a job can have multiple provider rows (one
+  // per API call), so "jobs this month" is the count of DISTINCT job ids, and the
+  // provider breakdown groups+sums cost per provider (both replace hardcoded seeds).
+  const providerSpend = useMemo(() => {
+    const byProvider = new Map<Provider, number>();
+    for (const e of costLog) byProvider.set(e.provider, (byProvider.get(e.provider) ?? 0) + e.cost);
+    return [...byProvider.entries()].map(([provider, amount]) => ({ provider, amount }));
+  }, [costLog]);
   const providerTotal = useMemo(
-    () => providerSpend_seed.reduce((s, p) => s + p.amount, 0),
-    [],
+    () => providerSpend.reduce((s, p) => s + p.amount, 0),
+    [providerSpend],
   );
+  const jobsThisMonth = useMemo(() => new Set(costLog.map((e) => e.id)).size, [costLog]);
 
   function handleEditCap(id: string, cap: number) {
     setBudget.mutate({ clientId: id, cap });
@@ -103,7 +109,7 @@ export default function CostWorkspace() {
 
       <div className="row">
         <CostLog log={costLog} />
-        <ProviderBreakdown data={providerSpend_seed} total={providerTotal} />
+        <ProviderBreakdown data={providerSpend} total={providerTotal} />
       </div>
 
       <div className="row-single">

@@ -5,7 +5,7 @@ import type { ContentJob } from "@/lib/content";
 export type ReviewAction = "approve" | "edit" | "reject";
 
 const PAGE_LABEL: Record<ContentJob["pageType"], string> = {
-  service: "Service", blog: "Blog", local: "Local",
+  service: "Service", blog: "Blog", local: "Local", gbp_post: "GMB Post",
 };
 
 export default function ReviewGate({

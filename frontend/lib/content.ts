@@ -7,7 +7,7 @@
 // ============================================================
 import { SERIES } from "@/lib/data";
 
-export type PageType = "service" | "blog" | "local";
+export type PageType = "service" | "blog" | "local" | "gbp_post";
 export type PublishTarget = "WordPress" | "PDF/Markdown";
 export type Framework = "AIDA" | "PAS" | "BAB" | "FAB" | "4 Ps" | "PASTOR" | "4 U's";
 
@@ -72,7 +72,15 @@ export const FRAMEWORKS: FrameworkRef[] = [
 ];
 
 export const TARGETS: PublishTarget[] = ["WordPress", "PDF/Markdown"];
-export const PAGE_TYPES: PageType[] = ["service", "blog", "local"];
+export const PAGE_TYPES: PageType[] = ["service", "blog", "local", "gbp_post"];
+// Display label per page type — CSS text-transform:capitalize handles the plain
+// words fine, but "gbp_post" needs an explicit label (no auto de-snake-casing).
+export const PAGE_TYPE_LABELS: Record<PageType, string> = {
+  service: "Service",
+  blog: "Blog",
+  local: "Local",
+  gbp_post: "GMB Post",
+};
 
 // Per-client accent, reusing the existing agency client roster.
 const CLR: Record<string, string> = {

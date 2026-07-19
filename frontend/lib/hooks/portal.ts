@@ -8,7 +8,7 @@
 //   • useMe()        → GET /me           (MemberResponse ≡ TeamMemberRecord)
 //   • useMyTasks()   → GET /tasks?mine=1 (TaskResponse[]  ≡ Task[])
 //   • useActivity()  → GET /activity     (ActivityResponse[] ≡ Activity[])
-//   • useMyGrants(id)→ GET /admin/users/{id}/grants → the granted feature keys
+//   • useMyGrants()  → GET /me/grants     → the granted feature keys (self-serve)
 // plus the lifecycle mutations useAdvanceTask() / useReviewTask(), which
 // invalidate the queue (+ me metrics + activity) on success.
 // All response shapes are contract-locked to the frontend types — the JSON
@@ -23,7 +23,7 @@ import type { ReviewAction } from "@/lib/portal";
 export const ME_KEY = ["me"] as const;
 export const MY_TASKS_KEY = ["tasks", "mine"] as const;
 export const ACTIVITY_KEY = ["activity"] as const;
-export const grantsKey = (userId: string) => ["grants", userId] as const;
+export const MY_GRANTS_KEY = ["me", "grants"] as const;
 
 /** The signed-in member's own record, with live metrics (RLS-scoped to them). */
 export function useMe() {
@@ -56,21 +56,39 @@ type GrantsResponse = { grants: Record<string, GrantLevel> };
 
 /**
  * The signed-in member's granted feature keys (`accessFeatures.key[]`), the
- * shape MyAccess / the sidebar / the tool gate expect. NOTE: the only grants
- * endpoint is access_control-gated (owner-only by default) — a non-owner member
- * gets a 403 and this resolves to `[]` (every feature reads as locked). See the
- * mismatch note in the wiring report; a self-serve `/me/grants` is the fix.
+ * shape MyAccess / the sidebar / the tool gate expect. Self-serve (GET /me/grants) —
+ * no access_control permission required, so every member (not just the owner) sees
+ * their real grants instead of a false-locked `[]`.
  */
-export function useMyGrants(userId: string | undefined) {
+export function useMyGrants() {
   return useQuery({
-    queryKey: grantsKey(userId ?? ""),
-    enabled: Boolean(userId),
+    queryKey: MY_GRANTS_KEY,
     queryFn: async () => {
-      const res = await api.get<GrantsResponse>(`/admin/users/${userId}/grants`);
+      const res = await api.get<GrantsResponse>("/me/grants");
       return Object.entries(res.grants)
         .filter(([, level]) => level !== "off")
         .map(([key]) => key);
     },
+  });
+}
+
+export type UpdateMeInput = { name?: string; title?: string; email?: string };
+
+/** PATCH /me — edit the caller's own name/title/email; returns the updated record. */
+export function useUpdateMe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateMeInput) => api.patch<TeamMemberRecord>("/me", input),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ME_KEY }),
+  });
+}
+
+export type ChangePasswordInput = { current_password: string; new_password: string };
+
+/** POST /me/password — the caller's own password change (current verified server-side). */
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (input: ChangePasswordInput) => api.post<void>("/me/password", input),
   });
 }
 

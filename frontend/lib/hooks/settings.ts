@@ -22,9 +22,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { NotifPref, SecurityPolicy, WorkspaceSettingsData } from "@/lib/data";
 
-// The account tab reads the caller's own record from GET /me — the same query
-// (and cache key) the team portal already owns; re-exported, not re-created.
-export { useMe } from "./portal";
+// The account tab reads/writes the caller's own record via the same hooks (and
+// cache key) the team portal already owns; re-exported, not re-created.
+export { useMe, useUpdateMe, useChangePassword } from "./portal";
 
 export const WORKSPACE_SETTINGS_KEY = ["settings", "workspace"] as const;
 export const SECURITY_SETTINGS_KEY = ["settings", "security"] as const;

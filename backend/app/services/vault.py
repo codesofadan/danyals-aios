@@ -192,6 +192,33 @@ def rotate_key(key_id: str, new_secret: str) -> dict[str, Any] | None:
     return row
 
 
+def find_secret(*, provider: str, label: str) -> str | None:
+    """Reveal a secret by ``(provider, label)`` rather than by row id.
+
+    This is the SERVER-SIDE lookup a worker uses to build a per-client, per-platform
+    credential (e.g. ``provider="web2:WordPress.com"``, ``label=client_id``) without
+    a user-facing id round-trip -- there is no dashboard "reveal" click in this path,
+    it is the publish pipeline building its own client. Same guardrails as
+    ``reveal_secret``: never logs, raises :class:`VaultSecretError` on a tampered
+    blob, and returns ``None`` (not an exception) for "no such row" -- an unconfigured
+    credential is the ordinary, expected degraded case every off-page seam already
+    handles, not a fault.
+
+    The most-recently-added matching row wins (mirrors how a rotated key naturally
+    supersedes an older one without a separate "current" flag).
+    """
+    with privileged_connection() as cur:
+        cur.execute(
+            "select secret_sealed from public.vault_keys "
+            "where provider = %s and label = %s order by created_at desc limit 1",
+            (provider, label),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return _open(row["secret_sealed"])
+
+
 def reveal_secret(key_id: str) -> str | None:
     """Open and return a secret (super-admin only; enforced in the router).
 

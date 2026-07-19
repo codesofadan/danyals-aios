@@ -3,29 +3,34 @@
 // ============================================================
 // AIOS · off-page data hooks
 // Backs the Off-page workspace (Backlinks / Citations / Web 2.0 + KPIs) off the
-// FastAPI /offpage endpoints instead of the build-time seeds. Backlink / Citation /
-// Web2Property are contract-locked to their responses (camelCase aliases match), so
-// the JSON drops straight into the existing types — no field mapping. The one write
-// the UI performs is the citation bulk-reconcile.
+// FastAPI /offpage + /citation-builder endpoints. Backlink / Citation / Web2Property
+// are contract-locked to their responses (camelCase aliases match), so the JSON
+// drops straight into the existing types — no field mapping.
 // ============================================================
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Backlink, Citation, Web2Property } from "@/lib/offpage";
+import type {
+  Backlink,
+  BusinessMarket,
+  BusinessProfile,
+  BusinessProfileInput,
+  Citation,
+  CitationAction,
+  CitationCampaignInput,
+  CitationCampaignResult,
+  Directory,
+  DirectoryTier,
+  OffpageKpis,
+  Web2Property,
+} from "@/lib/offpage";
 
 export const BACKLINKS_KEY = ["offpage", "backlinks"] as const;
 export const CITATIONS_KEY = ["offpage", "citations"] as const;
 export const WEB2_KEY = ["offpage", "web2"] as const;
 export const OFFPAGE_KPIS_KEY = ["offpage", "kpis"] as const;
-
-// GET /offpage/kpis → OffpageKpisResponse (serialized camelCase). No exported TS
-// type on the value side, so it is mirrored here.
-export type OffpageKpis = {
-  referringDomains: number;
-  newLinks30d: number;
-  lostLinks30d: number;
-  toxicFlagged: number;
-};
+export const BUSINESS_PROFILES_KEY = ["citation-builder", "business-profiles"] as const;
+export const DIRECTORIES_KEY = ["citation-builder", "directories"] as const;
 
 /** The referring-domain profile (freshest first). */
 export function useBacklinks() {
@@ -35,7 +40,7 @@ export function useBacklinks() {
   });
 }
 
-/** The local directory / NAP listings. */
+/** The local directory / NAP listings (now carrying submission-pipeline fields too). */
 export function useCitations() {
   return useQuery({
     queryKey: CITATIONS_KEY,
@@ -43,11 +48,14 @@ export function useCitations() {
   });
 }
 
-/** The Web 2.0 property ledger (newest-published first). */
+/** The Web 2.0 property ledger (newest-published first), incl. pipeline `status`. */
 export function useWeb2() {
   return useQuery({
     queryKey: WEB2_KEY,
     queryFn: () => api.get<Web2Property[]>("/offpage/web2"),
+    // needs_review rows move fast when a lead is actively approving; a short poll
+    // keeps the queue fresh without the operator having to refresh by hand.
+    refetchInterval: 15_000,
   });
 }
 
@@ -72,5 +80,103 @@ export function useBulkUpdateCitations() {
       void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
       void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
     },
+  });
+}
+
+/** Mark ONE listing handled (Submit a missing one / Update a drifted one). Lead-only. */
+export function useActOnCitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: CitationAction }) =>
+      api.post<Citation>(`/offpage/citations/${id}/action`, { action }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+      void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
+    },
+  });
+}
+
+/** Flag every backlink at/above the spam threshold as toxic (disavow queue). Lead-only. */
+export function useFlagToxicBacklinks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (spamThreshold?: number) =>
+      api.post<{ flagged: number }>("/offpage/backlinks/flag-toxic", {
+        ...(spamThreshold !== undefined ? { spam_threshold: spamThreshold } : {}),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: BACKLINKS_KEY }),
+  });
+}
+
+// --- 7B-4: business profiles (canonical NAP) --------------------------------
+export function useBusinessProfiles(clientId?: string) {
+  return useQuery({
+    queryKey: [...BUSINESS_PROFILES_KEY, clientId ?? "all"],
+    queryFn: () =>
+      api.get<BusinessProfile[]>(
+        clientId ? `/citation-builder/business-profiles?clientId=${clientId}` : "/citation-builder/business-profiles",
+      ),
+  });
+}
+
+export function useCreateBusinessProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BusinessProfileInput) =>
+      api.post<BusinessProfile>("/citation-builder/business-profiles", body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: BUSINESS_PROFILES_KEY }),
+  });
+}
+
+// --- 7B-4: the directory catalog ---------------------------------------------
+export function useDirectories(filters?: { market?: BusinessMarket[]; tier?: DirectoryTier[] }) {
+  const params = new URLSearchParams();
+  for (const m of filters?.market ?? []) params.append("market", m);
+  for (const t of filters?.tier ?? []) params.append("tier", t);
+  const qs = params.toString();
+  return useQuery({
+    queryKey: [...DIRECTORIES_KEY, qs],
+    queryFn: () => api.get<Directory[]>(`/citation-builder/directories${qs ? `?${qs}` : ""}`),
+  });
+}
+
+// --- 7B-4: campaign dispatch --------------------------------------------------
+export function useCreateCitationCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CitationCampaignInput) =>
+      api.post<CitationCampaignResult>("/citation-builder/campaigns", body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+      void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
+    },
+  });
+}
+
+// --- Web 2.0 plan / approve ----------------------------------------------------
+export type Web2PlanInput = {
+  clientId: string;
+  platform: string;
+  anchor: string;
+  targetUrl: string;
+  topic?: string;
+  pageType?: "service" | "blog" | "local";
+  framework?: string;
+};
+
+export function usePlanWeb2() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Web2PlanInput) => api.post<Web2Property>("/offpage/web2/plan", body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: WEB2_KEY }),
+  });
+}
+
+export function useApproveWeb2() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "approve" | "reject" }) =>
+      api.post<Web2Property>(`/offpage/web2/${id}/approve`, { action }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: WEB2_KEY }),
   });
 }

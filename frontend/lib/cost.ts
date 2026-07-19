@@ -8,7 +8,10 @@
 // ============================================================
 import { SERIES, type SubTier } from "@/lib/data";
 
-export type Provider = "Serper" | "DataForSEO" | "Anthropic" | "PageSpeed" | "Places";
+// Mirrors the full backend `Provider` set (app/services/cost_gate.py dial features) —
+// Voyage (embeddings) + Google (Search Console/GA4) were added by later parts and
+// must stay in sync here, or a dial/log row naming either crashes every lookup below.
+export type Provider = "Serper" | "DataForSEO" | "Anthropic" | "PageSpeed" | "Places" | "Voyage" | "Google";
 export type JobType = "audit" | "content" | "backlinks";
 export type DialMode = "api" | "byhand" | "off";
 
@@ -19,6 +22,8 @@ export const PROVIDERS: Record<Provider, { c: string; use: string; unit: string;
   Anthropic:  { c: SERIES.c1, use: "Content drafting (Claude)",   unit: "~$0.90 / page",   paid: true },
   Places:     { c: SERIES.c5, use: "Local / GBP lookups",         unit: "$0.17 / lookup",  paid: true },
   PageSpeed:  { c: SERIES.c3, use: "Core Web Vitals",             unit: "free tier",       paid: false },
+  Voyage:     { c: SERIES.c1, use: "Context embeddings",          unit: "~$0.02 / 1k tok", paid: true },
+  Google:     { c: SERIES.c5, use: "Search Console + GA4",        unit: "free tier",       paid: false },
 };
 
 export const JOB_TYPE_META: Record<JobType, { label: string; cls: string; icon: string }> = {
