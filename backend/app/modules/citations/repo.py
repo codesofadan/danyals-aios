@@ -11,11 +11,22 @@ from typing import Annotated, Any
 
 from fastapi import Depends
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import privileged_connection, rls_connection
 
 _Rows = list[dict[str, Any]]
+
+
+def _adapt_jsonb(fields: dict[str, Any]) -> dict[str, Any]:
+    """Wrap the ``hours`` dict in ``Jsonb`` so it binds cleanly into the jsonb column -
+    psycopg3 will not adapt a raw ``dict`` through a ``%s`` placeholder (mirrors
+    ``policy_repo``/``context_repo``'s jsonb handling). ``categories`` is ``text[]``,
+    which psycopg adapts from a list natively, so only ``hours`` needs wrapping."""
+    if isinstance(fields.get("hours"), dict):
+        return {**fields, "hours": Jsonb(fields["hours"])}
+    return fields
 
 
 class CitationsRepo:
@@ -52,18 +63,35 @@ class CitationsRepo:
             row = cur.fetchone()
             return str(row["name"]) if row else None
 
-    def create_business_profile(self, *, client_name: str, fields: dict[str, Any]) -> dict[str, Any] | None:
-        cols = ["client_name", *fields.keys()]
+    def client_meta_for(self, client_id: str) -> dict[str, Any] | None:
+        """``{name, industry}`` for a client the caller can see (RLS-scoped), or
+        ``None``. ``industry`` drives the campaign's vertical resolution - it is a
+        free-text column, normalized to a vertical key by ``verticals.normalize_vertical``."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select name, industry from public.clients where id = %s limit 1", (client_id,)
+            )
+            return cur.fetchone()
+
+    def create_business_profile(
+        self, *, client_id: str, client_name: str, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        # client_id is stored (NOT NULL FK + the tenant link) AND client_name is a
+        # display snapshot; the response model exposes only the name, so the id never
+        # leaks on the wire but the row is still correctly tenant-scoped.
+        fields = _adapt_jsonb(fields)
+        cols = ["client_id", "client_name", *fields.keys()]
         placeholders = ", ".join(["%s"] * len(cols))
         col_sql = sql.SQL(", ").join(sql.Identifier(c) for c in cols)
         stmt = sql.SQL(
             "insert into public.business_profiles ({cols}) values ({vals}) returning *"
         ).format(cols=col_sql, vals=sql.SQL(placeholders))
         with rls_connection(self._user_id) as cur:
-            cur.execute(stmt, [client_name, *fields.values()])
+            cur.execute(stmt, [client_id, client_name, *fields.values()])
             return cur.fetchone()
 
     def update_business_profile(self, profile_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+        changes = _adapt_jsonb(changes)
         assignments = sql.SQL(", ").join(
             sql.SQL("{} = %s").format(sql.Identifier(c)) for c in changes
         )
@@ -76,7 +104,12 @@ class CitationsRepo:
 
     # --- directories catalog (reference data, not client-scoped) ----------------
     def list_directories(
-        self, *, markets: list[str] | None = None, tiers: list[str] | None = None, active_only: bool = True
+        self,
+        *,
+        markets: list[str] | None = None,
+        tiers: list[str] | None = None,
+        vertical: str | None = None,
+        active_only: bool = True,
     ) -> _Rows:
         query = "select * from public.directories"
         clauses: list[str] = []
@@ -89,6 +122,11 @@ class CitationsRepo:
         if tiers:
             clauses.append("tier = any(%s)")
             params.append(tiers)
+        if vertical:
+            # A general directory (no verticals) serves every client; a niche one only
+            # its own vertical. GIN-indexed (0048) so this stays cheap on the catalog.
+            clauses.append("(cardinality(verticals) = 0 or %s = any(verticals))")
+            params.append(vertical)
         if clauses:
             query += " where " + " and ".join(clauses)
         query += " order by market, tier, name"
@@ -100,6 +138,31 @@ class CitationsRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute("select * from public.directories where id = %s limit 1", (directory_id,))
             return cur.fetchone()
+
+    def stale_directories(self, *, older_than_days: int = 90, limit: int = 100) -> _Rows:
+        """Active catalog rows never verified, or not verified within the window - the
+        candidates the verify-live health-check (P4) re-checks. Oldest/never-checked
+        first, so a bounded batch always makes progress across the whole catalog."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, name, url from public.directories "
+                "where active = true and url <> '' "
+                "and (last_verified is null or last_verified < now() - make_interval(days => %s)) "
+                "order by last_verified asc nulls first limit %s",
+                (older_than_days, limit),
+            )
+            return cur.fetchall()
+
+    def mark_directory_verified(self, directory_id: str, *, alive: bool) -> None:
+        """Stamp a directory's ``last_verified`` and DEACTIVATE it if the URL is dead
+        (churn: a 2019-era entry that is now parked). Never deletes - a churned
+        directory can come back, and reporting wants the row. Catalog maintenance is a
+        system operation, so it runs on the privileged (service_role) connection."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.directories set last_verified = now(), active = %s where id = %s",
+                (alive, directory_id),
+            )
 
     # --- citation campaign dispatch (writes the SAME citations table 0018/0045) -
     def existing_citation_directory_ids(self, client_id: str) -> set[str]:

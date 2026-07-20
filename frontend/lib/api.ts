@@ -122,7 +122,10 @@ export async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promis
 
   if (res.status === 401) {
     if (opts.noAuthRedirect) throw await decodeError(res);
-    setToken(null);
+    // clearSession() (NOT setToken(null)): a 401 must clear BOTH the token AND the
+    // session snapshot, or LoginForm re-hydrates the stale snapshot, fires its
+    // "already signed in" bounce back to the dashboard, 401s again, and loops.
+    clearSession();
     if (typeof window !== "undefined") window.location.assign("/login?expired=1");
     throw new ApiError(401, "unauthorized", "Your session expired. Please sign in again.", "");
   }
@@ -144,7 +147,8 @@ async function fetchAuthedBlob(path: string): Promise<Blob> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (res.status === 401) {
-    setToken(null);
+    // Full clear (token + session snapshot) — same anti-loop reason as apiFetch above.
+    clearSession();
     if (typeof window !== "undefined") window.location.assign("/login?expired=1");
     throw new ApiError(401, "unauthorized", "Your session expired. Please sign in again.", "");
   }

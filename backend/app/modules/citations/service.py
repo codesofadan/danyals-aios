@@ -8,11 +8,20 @@ queued row's ``submit_method`` routes to.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import Settings
-from app.modules.citations.schemas import AUTOMATABLE_TIERS
+from app.modules.citations.schemas import (
+    AUTOMATABLE_TIERS,
+    DEFAULT_CAMPAIGN_CAP,
+    DEFAULT_MIN_AUTHORITY,
+)
 from integrations.citation_submitters import CitationJob, CitationSubmitter
+
+# core builds first everywhere, then tier1, then tier2 (the reference plan's build
+# order); an unknown authority_tier sorts last with tier2.
+_TIER_RANK: dict[str, int] = {"core": 0, "tier1": 1, "tier2": 2}
 
 
 def automatable_directories(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -27,6 +36,95 @@ def automatable_directories(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if r.get("tier") in AUTOMATABLE_TIERS
         and not str(r.get("submit_method") or "").startswith("aggregator:fed_by_")
     ]
+
+
+@dataclass
+class DirectorySelection:
+    """The outcome of applying the reference-plan strategy to a catalog: the ORDERED
+    rows to queue, plus a transparent count of what each rule excluded (so a capped or
+    filtered batch is never a silent truncation - the counts surface to the operator)."""
+
+    selected: list[dict[str, Any]] = field(default_factory=list)
+    excluded_off_vertical: int = 0
+    excluded_low_authority: int = 0
+    excluded_marketplace: int = 0
+    capped: int = 0
+
+
+def _serves_vertical(row: dict[str, Any], vertical: str | None) -> bool:
+    """A directory serves a client when it is GENERAL (no verticals = applies to all)
+    or explicitly names the client's vertical. With no resolved vertical we keep only
+    general rows - never blast a niche directory at an unknown industry."""
+    verticals = row.get("verticals") or []
+    if not verticals:
+        return True
+    return vertical is not None and vertical in verticals
+
+
+def select_campaign_directories(
+    rows: list[dict[str, Any]],
+    *,
+    vertical: str | None = None,
+    cap: int | None = DEFAULT_CAMPAIGN_CAP,
+    min_authority: int | None = DEFAULT_MIN_AUTHORITY,
+    include_marketplaces: bool = False,
+) -> DirectorySelection:
+    """Apply the reference-plan selection to already-automatable rows: match the
+    client's vertical, drop the sub-DA spam tail, optionally exclude lead-gen
+    marketplaces, order by build-tier then authority, and cap the batch.
+
+    Ordering: authority_tier (core -> tier1 -> tier2) then authority DESC (a scored
+    row outranks a lower-scored one; an UNSCORED row - authority NULL - sorts after
+    scored rows within its tier rather than being dropped) then name for stability.
+    Every exclusion is counted, so ``cap`` and the filters are transparent, not silent.
+    """
+    result = DirectorySelection()
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        if not _serves_vertical(row, vertical):
+            result.excluded_off_vertical += 1
+            continue
+        if not include_marketplaces and bool(row.get("is_marketplace")):
+            result.excluded_marketplace += 1
+            continue
+        da = row.get("authority")
+        if min_authority is not None and da is not None and int(da) < min_authority:
+            result.excluded_low_authority += 1
+            continue
+        kept.append(row)
+
+    def _sort_key(r: dict[str, Any]) -> tuple[int, int, str]:
+        rank = _TIER_RANK.get(str(r.get("authority_tier") or "tier2"), 2)
+        da = r.get("authority")
+        # higher DA first -> negate; unscored (None) -> 0 so it sits just below any
+        # positive-DA row in the same tier but above genuinely low-DA ones.
+        da_key = -int(da) if da is not None else 0
+        return (rank, da_key, str(r.get("name") or ""))
+
+    kept.sort(key=_sort_key)
+
+    if cap and cap > 0 and len(kept) > cap:
+        result.capped = len(kept) - cap
+        kept = kept[:cap]
+
+    result.selected = kept
+    return result
+
+
+def is_live_directory_response(status_code: int | None) -> bool:
+    """Whether an HTTP status from a catalog URL health-check means the directory is
+    still LIVE (reference plan step 7: "verify live at submission - directory churn is
+    high, many 2019-era entries are parked or dead"). A 2xx/3xx (redirects to a live
+    page) is live; a 4xx/5xx or an unreachable host (None) is treated as dead so the
+    row can be deactivated rather than wasting a submission attempt on a parked domain.
+    A 403/429 (bot-blocked but alive) is the one grey area - treated as LIVE, since the
+    domain answered, to avoid deactivating a real directory that merely refused a HEAD.
+    """
+    if status_code is None:
+        return False
+    if status_code in (403, 429):
+        return True
+    return 200 <= status_code < 400
 
 
 def estimate_campaign_cost(rows: list[dict[str, Any]], settings: Settings) -> float:

@@ -147,9 +147,15 @@ def execute_citation_submit(
         if result.external_ref:
             fields["external_ref"] = result.external_ref
         if result.status in ("submitted", "verified"):
-            fields["nap_status"] = "consistent"
             fields["action"] = "Update"
             fields["submitted_at"] = datetime.now(UTC)
+            # HONEST NAP: only a VERIFIED result (the engine confirmed the live listing
+            # reflects our canonical NAP) claims nap_status='consistent'. A bare
+            # 'submitted' was sent but not confirmed, so it does NOT assert consistency
+            # here - an inconsistent citation is worse than none, and a claim we cannot
+            # back with a read-back is exactly the drift the reference plan warns about.
+            if result.status == "verified":
+                fields["nap_status"] = "consistent"
         store.update_citation(citation_id, fields)
         logger.info("citation_submit_done", citation_id=citation_id, status=result.status)
         return {"state": result.status, "reason": result.error}

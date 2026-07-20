@@ -27,6 +27,8 @@ from app.core.auth import CurrentUser, require_perm, require_role
 from app.modules.citations.repo import CitationsRepoDep
 from app.modules.citations.schemas import (
     AUTOMATABLE_TIERS,
+    DEFAULT_CAMPAIGN_CAP,
+    DEFAULT_MIN_AUTHORITY,
     BusinessProfileRequest,
     BusinessProfileResponse,
     CitationCampaignRequest,
@@ -36,8 +38,10 @@ from app.modules.citations.schemas import (
 from app.modules.citations.service import (
     automatable_directories,
     estimate_campaign_cost,
+    select_campaign_directories,
     submit_method_label,
 )
+from app.modules.citations.verticals import normalize_vertical
 from app.services.activity import record_activity
 
 router = APIRouter(prefix="/citation-builder", tags=["citation-builder"])
@@ -94,7 +98,9 @@ async def create_business_profile(
     if name is None:
         raise _CLIENT_NOT_FOUND
     fields = body.model_dump(exclude={"client_id"})
-    row = await asyncio.to_thread(repo.create_business_profile, client_name=name, fields=fields)
+    row = await asyncio.to_thread(
+        repo.create_business_profile, client_id=body.client_id, client_name=name, fields=fields
+    )
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Could not create the profile"
@@ -110,6 +116,17 @@ async def create_business_profile(
 async def update_business_profile(
     profile_id: str, body: BusinessProfileRequest, repo: CitationsRepoDep, actor: Lead
 ) -> BusinessProfileResponse:
+    # Canonical-NAP lock guard: a locked profile rejects edits UNLESS the request
+    # explicitly unlocks it (nap_locked=false in the same call). This stops the
+    # name/address/phone every citation submits against from silently drifting.
+    current = await asyncio.to_thread(repo.get_business_profile, profile_id)
+    if current is None:
+        raise _PROFILE_NOT_FOUND
+    if current.get("nap_locked") and body.nap_locked:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This profile's NAP is locked. Unlock it (napLocked=false) before editing.",
+        )
     changes = body.model_dump(exclude={"client_id"})
     row = await asyncio.to_thread(repo.update_business_profile, profile_id, changes)
     if row is None:
@@ -156,12 +173,19 @@ async def create_campaign(
     (so a client's budget cap still governs per row, not just this batch's own
     upfront estimate). 404s if the client or business profile is unknown/invisible.
     """
-    name = await asyncio.to_thread(repo.client_name_for, body.client_id)
-    if name is None:
+    client = await asyncio.to_thread(repo.client_meta_for, body.client_id)
+    if client is None:
         raise _CLIENT_NOT_FOUND
+    name = str(client.get("name") or "")
     profile = await asyncio.to_thread(repo.get_business_profile, body.business_profile_id)
     if profile is None:
         raise _PROFILE_NOT_FOUND
+
+    # Resolve the client's vertical: an explicit override wins, else derive it from the
+    # client's free-text industry. Unresolvable -> None -> general directories only.
+    vertical = body.vertical or normalize_vertical(str(client.get("industry") or ""))
+    cap = DEFAULT_CAMPAIGN_CAP if body.cap is None else body.cap
+    min_authority = DEFAULT_MIN_AUTHORITY if body.min_authority is None else body.min_authority
 
     markets: list[str] = (
         [str(m) for m in body.markets] if body.markets else [str(profile.get("market", "US")), "GLOBAL"]
@@ -174,9 +198,20 @@ async def create_campaign(
     tiers = set(body.tiers) if body.tiers else set(AUTOMATABLE_TIERS)
     candidates = [r for r in automatable_directories(all_market_rows) if r.get("tier") in tiers]
 
+    # Apply the reference-plan strategy (vertical match + spam-tail floor + marketplace
+    # gate + build-order sort + cap). The selection is ORDERED, so queueing walks it in
+    # build order (core -> tier1 -> tier2), and every exclusion is counted, never silent.
+    selection = select_campaign_directories(
+        candidates,
+        vertical=vertical,
+        cap=cap,
+        min_authority=min_authority,
+        include_marketplaces=body.include_marketplaces,
+    )
+
     existing = await asyncio.to_thread(repo.existing_citation_directory_ids, body.client_id)
     skipped_manual = sum(1 for r in all_market_rows if r.get("tier") == "manual_only")
-    fresh = [d for d in candidates if str(d["id"]) not in existing]
+    fresh = [d for d in selection.selected if str(d["id"]) not in existing]
 
     queued_ids: list[str] = []
     for directory in fresh:
@@ -202,8 +237,13 @@ async def create_campaign(
     )
     return CitationCampaignResponse(
         queued=len(queued_ids),
-        already_queued=len(candidates) - len(fresh),
+        already_queued=len(selection.selected) - len(fresh),
         skipped_manual_only=skipped_manual,
         estimated_cost=estimated_cost,
         citation_ids=queued_ids,
+        resolved_vertical=vertical,
+        excluded_off_vertical=selection.excluded_off_vertical,
+        excluded_low_authority=selection.excluded_low_authority,
+        excluded_marketplace=selection.excluded_marketplace,
+        capped=selection.capped,
     )

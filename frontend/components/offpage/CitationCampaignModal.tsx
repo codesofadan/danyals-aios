@@ -46,6 +46,7 @@ export default function CitationCampaignModal({ onClose }: { onClose: () => void
 
   const [markets, setMarkets] = useState<Set<BusinessMarket>>(new Set(["US", "GLOBAL"]));
   const [tiers, setTiers] = useState<Set<DirectoryTier>>(new Set(AUTOMATABLE_TIERS));
+  const [includeMarketplaces, setIncludeMarketplaces] = useState(false);
   const [result, setResult] = useState<CitationCampaignResult | null>(null);
 
   const previewQ = useDirectories({ market: Array.from(markets), tier: Array.from(tiers) });
@@ -85,6 +86,7 @@ export default function CitationCampaignModal({ onClose }: { onClose: () => void
       {
         clientId, businessProfileId: profileId,
         markets: Array.from(markets), tiers: Array.from(tiers),
+        includeMarketplaces,
       },
       { onSuccess: (body) => setResult(body) },
     );
@@ -114,6 +116,17 @@ export default function CitationCampaignModal({ onClose }: { onClose: () => void
               <span className="material-symbols-rounded">task_alt</span>
               Queued {result.queued} directories · {result.alreadyQueued} already in flight ·{" "}
               {result.skippedManualOnly} manual-only skipped
+            </div>
+            <div className="fld">
+              <label>Strategy applied</label>
+              <div className="op-muted">
+                Vertical: <b>{result.resolvedVertical ?? "general only"}</b>
+                {typeof result.capped === "number" && result.capped > 0 && <> · capped {result.capped} past ~45</>}
+              </div>
+              <div className="op-muted" style={{ marginTop: 2 }}>
+                Excluded — off-vertical {result.excludedOffVertical ?? 0} · low-authority{" "}
+                {result.excludedLowAuthority ?? 0} · marketplaces {result.excludedMarketplace ?? 0}
+              </div>
             </div>
             <div className="fld">
               <label>Estimated cost (R5 pre-check — each row still cost-gates individually)</label>
@@ -235,9 +248,30 @@ export default function CitationCampaignModal({ onClose }: { onClose: () => void
                     ))}
                   </div>
                 </div>
+                <div className="fld">
+                  <label>Lead-gen marketplaces</label>
+                  <div className="op-toolset">
+                    <button
+                      type="button"
+                      className={includeMarketplaces ? "op-act update" : "ghostbtn"}
+                      onClick={() => setIncludeMarketplaces((v) => !v)}
+                    >
+                      <span className="material-symbols-rounded">
+                        {includeMarketplaces ? "check_box" : "check_box_outline_blank"}
+                      </span>
+                      Include Angi, Zillow, Thumbtack &amp; similar
+                    </button>
+                  </div>
+                  <div className="op-muted" style={{ marginTop: 4 }}>
+                    Marketplaces give a citation but also rank for the client&apos;s keywords and
+                    often charge — excluded by default; opt in deliberately.
+                  </div>
+                </div>
                 <div className="op-muted">
-                  {previewCount} directories match this market/tier combination (some may already be
-                  in flight for this client — the exact count is confirmed on dispatch).
+                  {previewCount} directories match this market/tier before vertical + authority
+                  filtering. The campaign auto-matches the client&apos;s industry, drops the
+                  sub-DA-30 tail, builds in authority order and caps at ~45 — the exact queued
+                  count and what was excluded are confirmed on dispatch.
                 </div>
                 <div className="modal-f">
                   <button type="button" className="ghostbtn" onClick={onClose}>Cancel</button>

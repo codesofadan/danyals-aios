@@ -54,6 +54,7 @@ class FakeCitationsRepo:
         self.profiles: dict[str, dict[str, Any]] = {}
         self.directories: list[dict[str, Any]] = []
         self.client_names: dict[str, str] = {}
+        self.client_industries: dict[str, str] = {}
         self.existing_directory_ids: dict[str, set[str]] = {}
         self.created_profiles: list[dict[str, Any]] = []
         self.updated_profiles: list[tuple[str, dict[str, Any]]] = []
@@ -70,9 +71,17 @@ class FakeCitationsRepo:
     def client_name_for(self, client_id: str) -> str | None:
         return self.client_names.get(client_id)
 
-    def create_business_profile(self, *, client_name: str, fields: dict[str, Any]) -> dict[str, Any] | None:
-        self.created_profiles.append(fields)
-        row = _profile_row(id="bp-new", client_name=client_name, **fields)
+    def client_meta_for(self, client_id: str) -> dict[str, Any] | None:
+        name = self.client_names.get(client_id)
+        if name is None:
+            return None
+        return {"name": name, "industry": self.client_industries.get(client_id, "")}
+
+    def create_business_profile(
+        self, *, client_id: str, client_name: str, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        self.created_profiles.append({"client_id": client_id, **fields})
+        row = _profile_row(id="bp-new", client_id=client_id, client_name=client_name, **fields)
         self.profiles["bp-new"] = row
         return row
 
@@ -85,13 +94,20 @@ class FakeCitationsRepo:
         return row
 
     def list_directories(
-        self, *, markets: list[str] | None = None, tiers: list[str] | None = None, active_only: bool = True
+        self,
+        *,
+        markets: list[str] | None = None,
+        tiers: list[str] | None = None,
+        vertical: str | None = None,
+        active_only: bool = True,
     ) -> list[dict[str, Any]]:
         rows = self.directories
         if markets:
             rows = [r for r in rows if r["market"] in markets]
         if tiers:
             rows = [r for r in rows if r["tier"] in tiers]
+        if vertical:
+            rows = [r for r in rows if not r.get("verticals") or vertical in r["verticals"]]
         return list(rows)
 
     def get_directory(self, directory_id: str) -> dict[str, Any] | None:
@@ -317,3 +333,71 @@ async def test_campaign_reports_an_estimated_cost_for_the_fresh_batch(
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["estimatedCost"] > 0
+
+
+async def test_campaign_matches_vertical_and_excludes_marketplaces(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None], enqueued: list[str]
+) -> None:
+    # A legal client: only the GENERAL + LEGAL directories queue; a MEDICAL niche row
+    # and a lead-gen MARKETPLACE are excluded, and the response reports why (P1/P5).
+    repo.client_names["cl-secret"] = "Atlas Legal"
+    repo.client_industries["cl-secret"] = "Family Law Firm"
+    repo.profiles["bp-1"] = _profile_row()
+    repo.directories = [
+        _directory_row(id="gen", name="YellowPages", verticals=[], authority=92),
+        _directory_row(id="law", name="Avvo", verticals=["legal"], authority=74),
+        _directory_row(id="med", name="Healthgrades", verticals=["medical"], authority=69),
+        _directory_row(id="mkt", name="Angi", verticals=["legal"], is_marketplace=True, authority=89),
+    ]
+    wire("owner")
+    resp = await client.post(
+        "/api/v1/citation-builder/campaigns",
+        json={"clientId": "cl-secret", "businessProfileId": "bp-1"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["resolvedVertical"] == "legal"
+    assert body["queued"] == 2  # gen + law only
+    assert body["excludedOffVertical"] == 1  # the medical row
+    assert body["excludedMarketplace"] == 1  # Angi (legal, but a marketplace)
+    queued_names = {r["directory_name"] for r in repo.queued}
+    assert queued_names == {"YellowPages", "Avvo"}
+
+
+async def test_campaign_can_opt_into_marketplaces(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    repo.client_names["cl-secret"] = "Atlas Legal"
+    repo.client_industries["cl-secret"] = "law"
+    repo.profiles["bp-1"] = _profile_row()
+    repo.directories = [
+        _directory_row(id="law", name="Avvo", verticals=["legal"], authority=74),
+        _directory_row(id="mkt", name="Angi", verticals=["legal"], is_marketplace=True, authority=89),
+    ]
+    wire("owner")
+    resp = await client.post(
+        "/api/v1/citation-builder/campaigns",
+        json={"clientId": "cl-secret", "businessProfileId": "bp-1", "includeMarketplaces": True},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["queued"] == 2
+    assert resp.json()["excludedMarketplace"] == 0
+
+
+async def test_locked_business_profile_rejects_edits_until_unlocked(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    repo.profiles["bp-1"] = _profile_row(nap_locked=True)
+    wire("owner")
+    # A locked profile: an edit that keeps it locked is a 409...
+    resp = await client.patch(
+        "/api/v1/citation-builder/business-profiles/bp-1",
+        json={"clientId": "cl-secret", "businessName": "Renamed", "napLocked": True},
+    )
+    assert resp.status_code == 409, resp.text
+    # ...but the same edit that unlocks it (napLocked=false) goes through.
+    ok = await client.patch(
+        "/api/v1/citation-builder/business-profiles/bp-1",
+        json={"clientId": "cl-secret", "businessName": "Renamed", "napLocked": False},
+    )
+    assert ok.status_code == 200, ok.text

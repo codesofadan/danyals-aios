@@ -22,13 +22,24 @@ CitationSubmitStatus = Literal[
     "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked"
 ]
 
+AuthorityTier = Literal["core", "tier1", "tier2"]
+DirectoryAccess = Literal["open", "apply_gated", "aggregator"]
+
 _MARKETS: frozenset[str] = frozenset({"US", "UK", "CA", "AU", "GLOBAL"})
 _TIERS: frozenset[str] = frozenset(
     {"aggregator", "api", "bot_fillable", "captcha_assisted", "manual_only"}
 )
+_AUTHORITY_TIERS: frozenset[str] = frozenset({"core", "tier1", "tier2"})
+_ACCESS: frozenset[str] = frozenset({"open", "apply_gated", "aggregator"})
 # The tiers a campaign may actually DISPATCH work to - manual_only never queues (no
 # worker will ever claim a manual_only row; see service.automatable_directories).
 AUTOMATABLE_TIERS: frozenset[str] = frozenset({"aggregator", "api", "bot_fillable", "captcha_assisted"})
+
+# Reference-plan defaults for a campaign's strategy knobs (all overridable per run):
+# ~40-50 clean citations beat 100+ scattergun (consistency > volume), and the sub-DA30
+# spam tail adds risk more than rank. NULL-authority rows are UNSCORED, never dropped.
+DEFAULT_CAMPAIGN_CAP: int = 45
+DEFAULT_MIN_AUTHORITY: int = 30
 
 
 class BusinessProfileResponse(BaseModel):
@@ -49,6 +60,8 @@ class BusinessProfileResponse(BaseModel):
     categories: list[str]
     hours: dict[str, str]
     is_primary: bool = Field(serialization_alias="isPrimary")
+    # Once locked, the canonical NAP cannot be edited until explicitly unlocked (0048).
+    nap_locked: bool = Field(default=False, serialization_alias="napLocked")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> BusinessProfileResponse:
@@ -70,6 +83,7 @@ class BusinessProfileResponse(BaseModel):
             categories=list(row.get("categories") or []),
             hours=dict(hours) if isinstance(hours, dict) else {},
             is_primary=bool(row.get("is_primary", False)),
+            nap_locked=bool(row.get("nap_locked", False)),
         )
 
 
@@ -92,10 +106,17 @@ class BusinessProfileRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     hours: dict[str, str] = Field(default_factory=dict)
     is_primary: bool = Field(default=True, alias="isPrimary")
+    # Lock/unlock the canonical NAP. A locked profile rejects edits until a request
+    # explicitly sets this back to false (see the router's update guard).
+    nap_locked: bool = Field(default=False, alias="napLocked")
 
 
 class DirectoryResponse(BaseModel):
-    """One catalog row (``public.directories``) - reference data, not tenant data."""
+    """One catalog row (``public.directories``) - reference data, not tenant data.
+
+    Carries both the AUTOMATION vocabulary (``tier``/``submitMethod`` - how to submit)
+    and the STRATEGY vocabulary (0048: ``authority``/``authorityTier``/``access``/
+    ``isMarketplace``/``verticals`` - what to submit and in what order)."""
 
     id: str
     name: str
@@ -107,10 +128,18 @@ class DirectoryResponse(BaseModel):
     price_note: str = Field(serialization_alias="priceNote")
     automation_note: str = Field(serialization_alias="automationNote")
     active: bool
+    # 0048 strategy layer
+    authority: int | None = None
+    authority_tier: AuthorityTier = Field(default="tier2", serialization_alias="authorityTier")
+    access: DirectoryAccess = "open"
+    is_marketplace: bool = Field(default=False, serialization_alias="isMarketplace")
+    verticals: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> DirectoryResponse:
         market, tier, link_rel = row.get("market"), row.get("tier"), row.get("link_rel")
+        atier, access = row.get("authority_tier"), row.get("access")
+        raw_da = row.get("authority")
         return cls(
             id=str(row["id"]),
             name=row.get("name", ""),
@@ -122,16 +151,29 @@ class DirectoryResponse(BaseModel):
             price_note=row.get("price_note", ""),
             automation_note=row.get("automation_note", ""),
             active=bool(row.get("active", True)),
+            authority=int(raw_da) if raw_da is not None else None,
+            authority_tier=atier if atier in _AUTHORITY_TIERS else "tier2",
+            access=access if access in _ACCESS else "open",
+            is_marketplace=bool(row.get("is_marketplace", False)),
+            verticals=list(row.get("verticals") or []),
         )
 
 
 class CitationCampaignRequest(BaseModel):
     """POST /citation-builder/campaigns body: queue a submission run.
 
-    ``markets``/``tiers`` narrow which catalog rows to queue (default: every
-    automatable row in the business profile's own market + GLOBAL). ``manual_only``
-    directories are ALWAYS excluded regardless of ``tiers`` - there is no worker path
-    for them; passing it is not an error, it is simply a no-op filter.
+    The reference-plan strategy knobs (all optional - sensible defaults apply):
+    * ``markets``/``tiers`` narrow the catalog by market + automation tier (default:
+      the profile's own market + GLOBAL, every automatable tier). ``manual_only`` is
+      ALWAYS excluded (no worker path).
+    * ``vertical`` matches the client's industry - only general directories + this
+      vertical's niche directories are queued. Omitted -> resolved from the client's
+      ``industry`` server-side; unresolvable -> general directories only (never blast
+      a plumber with Healthgrades).
+    * ``cap`` bounds the batch (default ~45: consistency beats volume). ``0`` = no cap.
+    * ``min_authority`` drops the sub-DA spam tail (default 30); UNSCORED rows are kept.
+    * ``include_marketplaces`` toggles lead-gen marketplaces (Angi/Zillow/...) that
+      compete for the client's own keywords (default: excluded - opt in deliberately).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -140,6 +182,10 @@ class CitationCampaignRequest(BaseModel):
     business_profile_id: str = Field(min_length=1, alias="businessProfileId")
     markets: list[BusinessMarket] | None = None
     tiers: list[DirectoryTier] | None = None
+    vertical: str | None = None
+    cap: int | None = Field(default=None, ge=0)
+    min_authority: int | None = Field(default=None, ge=0, le=100, alias="minAuthority")
+    include_marketplaces: bool = Field(default=False, alias="includeMarketplaces")
 
 
 class CitationCampaignResponse(BaseModel):
@@ -152,3 +198,9 @@ class CitationCampaignResponse(BaseModel):
     skipped_manual_only: int = Field(serialization_alias="skippedManualOnly")
     estimated_cost: float = Field(serialization_alias="estimatedCost")
     citation_ids: list[str] = Field(serialization_alias="citationIds")
+    # Strategy transparency: what the selection actually did (never a silent cap).
+    resolved_vertical: str | None = Field(default=None, serialization_alias="resolvedVertical")
+    excluded_off_vertical: int = Field(default=0, serialization_alias="excludedOffVertical")
+    excluded_low_authority: int = Field(default=0, serialization_alias="excludedLowAuthority")
+    excluded_marketplace: int = Field(default=0, serialization_alias="excludedMarketplace")
+    capped: int = 0

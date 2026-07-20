@@ -212,6 +212,14 @@ export type CitationCampaignInput = {
   businessProfileId: string;
   markets?: BusinessMarket[];
   tiers?: DirectoryTier[];
+  // Strategy knobs (0048/P1): match the client's vertical, bound the batch, drop the
+  // sub-DA spam tail, and opt into lead-gen marketplaces. All optional — the backend
+  // applies reference-plan defaults (vertical from the client's industry, cap ~45,
+  // min DA 30, marketplaces excluded).
+  vertical?: string;
+  cap?: number;
+  minAuthority?: number;
+  includeMarketplaces?: boolean;
 };
 
 export type CitationCampaignResult = {
@@ -220,4 +228,10 @@ export type CitationCampaignResult = {
   skippedManualOnly: number;
   estimatedCost: number;
   citationIds: string[];
+  // Strategy transparency (never a silent cap): what the selection resolved + excluded.
+  resolvedVertical?: string | null;
+  excludedOffVertical?: number;
+  excludedLowAuthority?: number;
+  excludedMarketplace?: number;
+  capped?: number;
 };

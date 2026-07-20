@@ -10,10 +10,13 @@ from app.config import Settings
 from app.modules.citations.service import (
     automatable_directories,
     estimate_campaign_cost,
+    is_live_directory_response,
     job_from_row,
+    select_campaign_directories,
     submit_method_label,
     submitter_for,
 )
+from app.modules.citations.verticals import normalize_vertical
 from integrations.citation_submitters import CitationJob, CitationSubmitResult
 
 pytestmark = pytest.mark.unit
@@ -178,3 +181,117 @@ def test_job_from_row_falls_back_to_the_legacy_directory_text_column() -> None:
     job = job_from_row(row)
     assert job.directory_name == "Yelp"
     assert job.categories == ()
+
+
+# --------------------------------------------------------------------------- #
+# select_campaign_directories (the reference-plan strategy - P0/P1)
+# --------------------------------------------------------------------------- #
+def _sd(**over: Any) -> dict[str, Any]:
+    """A strategy-enriched directory row (0048 fields), general + tier2 by default."""
+    row: dict[str, Any] = {
+        "id": "d", "name": "Dir", "tier": "bot_fillable", "submit_method": "bot:playwright",
+        "market": "US", "authority": 60, "authority_tier": "tier2", "access": "open",
+        "is_marketplace": False, "verticals": [],
+    }
+    row.update(over)
+    return row
+
+
+def test_general_directory_serves_every_client() -> None:
+    rows = [_sd(id="g", verticals=[])]
+    sel = select_campaign_directories(rows, vertical="legal", min_authority=None)
+    assert [r["id"] for r in sel.selected] == ["g"]
+
+
+def test_niche_directory_only_serves_its_vertical() -> None:
+    rows = [_sd(id="law", verticals=["legal"]), _sd(id="med", verticals=["medical"])]
+    sel = select_campaign_directories(rows, vertical="legal", min_authority=None)
+    assert [r["id"] for r in sel.selected] == ["law"]
+    assert sel.excluded_off_vertical == 1
+
+
+def test_unknown_vertical_keeps_only_general() -> None:
+    # a plumber (unresolved vertical) must never get Healthgrades - general only.
+    rows = [_sd(id="gen", verticals=[]), _sd(id="niche", verticals=["medical"])]
+    sel = select_campaign_directories(rows, vertical=None, min_authority=None)
+    assert [r["id"] for r in sel.selected] == ["gen"]
+    assert sel.excluded_off_vertical == 1
+
+
+def test_spam_tail_below_da_floor_is_dropped_but_unscored_is_kept() -> None:
+    rows = [
+        _sd(id="strong", authority=80),
+        _sd(id="spam", authority=12),
+        _sd(id="unscored", authority=None),
+    ]
+    sel = select_campaign_directories(rows, min_authority=30)
+    ids = {r["id"] for r in sel.selected}
+    assert ids == {"strong", "unscored"}  # unscored kept (can't judge), spam dropped
+    assert sel.excluded_low_authority == 1
+
+
+def test_marketplaces_excluded_by_default_and_counted() -> None:
+    rows = [_sd(id="dir"), _sd(id="mkt", is_marketplace=True)]
+    sel = select_campaign_directories(rows, min_authority=None)
+    assert [r["id"] for r in sel.selected] == ["dir"]
+    assert sel.excluded_marketplace == 1
+    # opt-in includes them
+    sel2 = select_campaign_directories(rows, min_authority=None, include_marketplaces=True)
+    assert {r["id"] for r in sel2.selected} == {"dir", "mkt"}
+
+
+def test_ordered_by_build_tier_then_authority() -> None:
+    rows = [
+        _sd(id="t2hi", authority_tier="tier2", authority=95),
+        _sd(id="core", authority_tier="core", authority=40),
+        _sd(id="t1hi", authority_tier="tier1", authority=90),
+        _sd(id="t1lo", authority_tier="tier1", authority=70),
+    ]
+    sel = select_campaign_directories(rows, min_authority=None, cap=None)
+    # core first, then tier1 (high DA before low), then tier2 - regardless of raw DA.
+    assert [r["id"] for r in sel.selected] == ["core", "t1hi", "t1lo", "t2hi"]
+
+
+def test_cap_truncates_after_ordering_and_reports_the_drop() -> None:
+    rows = [_sd(id=f"d{i}", authority=90 - i, authority_tier="tier1") for i in range(10)]
+    sel = select_campaign_directories(rows, min_authority=None, cap=3)
+    assert len(sel.selected) == 3
+    assert sel.capped == 7
+    assert [r["id"] for r in sel.selected] == ["d0", "d1", "d2"]  # top-DA survived
+
+
+# --------------------------------------------------------------------------- #
+# normalize_vertical (client industry -> vertical key)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("industry", "expected"),
+    [
+        ("Family Law Firm", "legal"),
+        ("Cosmetic Dentist", "dental"),
+        ("HVAC & Heating", "hvac"),
+        ("Italian Restaurant", "restaurants"),
+        ("Real Estate Agency", "real_estate"),
+        ("legal", "legal"),  # an exact key matches itself
+        ("Blockchain Consulting", None),  # no vertical -> general only
+        ("", None),
+        (None, None),
+    ],
+)
+def test_normalize_vertical(industry: str | None, expected: str | None) -> None:
+    assert normalize_vertical(industry) == expected
+
+
+# --------------------------------------------------------------------------- #
+# is_live_directory_response (verify-live health check - P4)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("code", "alive"),
+    [
+        (200, True), (301, True), (302, True), (399, True),
+        (403, True), (429, True),   # bot-blocked but the domain answered -> live
+        (404, False), (410, False), (500, False), (503, False),
+        (None, False),              # unreachable host -> dead
+    ],
+)
+def test_is_live_directory_response(code: int | None, alive: bool) -> None:
+    assert is_live_directory_response(code) is alive
