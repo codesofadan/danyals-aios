@@ -25,7 +25,12 @@ COPY backend/integrations ./integrations
 # the seams lazy-import-fail and silently degrade to fakes. Override with
 # --build-arg PIP_TARGET="." for a lean, provider-less image.
 ARG PIP_TARGET=".[ai]"
-RUN pip install --upgrade pip && pip install "${PIP_TARGET}"
+# Install, then PROVE the three first-party packages are importable from the venv.
+# If a build ever ships without them, this fails the build LOUDLY here instead of
+# producing an image that dies at runtime with "No module named 'app'". find_spec
+# checks importability without executing module code (no env needed at build time).
+RUN pip install --upgrade pip && pip install "${PIP_TARGET}" \
+    && python -c "import importlib.util as u, sys; miss=[m for m in ('app','app.db.rls_check','workers','integrations') if u.find_spec(m) is None]; sys.exit('BUILD ABORT — backend packages missing from the venv: '+', '.join(miss)) if miss else print('backend package import-check OK')"
 
 # ---- runtime ----------------------------------------------------------------
 FROM python:3.12-slim AS runtime
