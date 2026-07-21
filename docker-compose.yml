@@ -54,6 +54,16 @@ x-app-env: &app-env
   GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
   GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
   GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+  # Content article images (OpenAI-compatible). Model preset; key awaited → placeholder.
+  IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
+  IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
+  # Off-page citation-builder direct-API submitters (each absent → that submitter is
+  # skipped, the directory HOLDS as 'blocked'; never a crash). Apify is the fallback
+  # engine and needs BOTH the token AND an actor id to switch on.
+  FOURSQUARE_API_KEY: ${FOURSQUARE_API_KEY:-}
+  BING_PLACES_API_KEY: ${BING_PLACES_API_KEY:-}
+  APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
+  APIFY_CITATION_ACTOR_ID: ${APIFY_CITATION_ACTOR_ID:-}
   SENTRY_DSN: ${SENTRY_DSN:-}
 
 # ---- shared build (all backend roles share ONE image) ------------------------
