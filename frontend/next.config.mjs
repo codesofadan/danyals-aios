@@ -20,6 +20,9 @@ const OLD_ADMIN_PATHS = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Emit a self-contained server bundle (.next/standalone) for a small Docker
+  // runtime image — ignored by `next dev`, only affects `next build`.
+  output: "standalone",
   async redirects() {
     return [
       { source: "/free-audit", destination: "/", permanent: true },

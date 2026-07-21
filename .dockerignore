@@ -1,0 +1,49 @@
+# Root build context is used by backend/Dockerfile (it needs backend/ + db/migrations/).
+# Keep the context small + free of secrets and unrelated trees.
+
+# VCS / editor
+.git
+.gitignore
+.github
+**/.DS_Store
+**/Thumbs.db
+
+# Frontend + its stray duplicate (backend image never needs these)
+frontend
+daniyals-frontend
+**/node_modules
+**/.next
+
+# Sibling trees the backend image never needs (keep the root context lean + fast).
+# The backend wheel only reads backend/ + db/migrations/ + infra/docker/.
+danyals-audit-system
+aios
+aios-skills
+.claude
+.claude-plugin
+
+# Python caches / local venvs / build artifacts
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/*.egg-info
+**/dist
+**/build
+
+# Secrets / local env (NEVER bake these into an image)
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.docker.example
+
+# Docs / design / deliverables (not needed at runtime)
+design
+docs
+context/*.pdf
+
+# Docker meta itself
+**/Dockerfile
+docker-compose*.yml

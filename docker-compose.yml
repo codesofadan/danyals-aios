@@ -1,0 +1,190 @@
+# AIOS — full-stack Docker deployment (Portainer-ready).
+#
+#   db      PostgreSQL 16 (the data plane; RLS tenant boundary)
+#   redis   app cache (/0) + Celery broker (/1) + results (/2)  [invariant #7]
+#   migrate ONE-SHOT: applies db/migrations, sets role passwords, RLS gate, seeds owner
+#   api     FastAPI (uvicorn)         — same image as worker/beat/migrate, chosen by `command`
+#   worker  Celery worker            — runs Audit/Content/Off-page/... jobs
+#   beat    Celery beat              — schedules context compaction, rank checks, billing sweep
+#   web     Next.js 15 (standalone)  — proxies /api/v1/* to the api service
+#
+# Secrets come from ./.env (CLI) or the Portainer stack "Environment variables" panel.
+# See infra/docker/DEPLOY-PORTAINER.md for the click-by-click guide.
+
+name: aios
+
+# ---- shared backend config (every role reads the same env) -------------------
+x-app-env: &app-env
+  APP_ENV: prod
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  API_CORS_ORIGINS: ${API_CORS_ORIGINS:-*}
+  TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*}
+  # Two trust-level DSNs — host/db/user are fixed to the compose network; only the
+  # passwords vary and MUST equal the role passwords the migrate step sets.
+  DATABASE_URL: postgresql://authenticated:${AUTH_DB_PASSWORD}@db:5432/aios
+  DATABASE_ADMIN_URL: postgresql://service_role:${SERVICE_DB_PASSWORD}@db:5432/aios
+  # Local EdDSA auth (single-line, \n-escaped PEM — config restores the newlines) + vault.
+  JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+  JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+  LOCAL_JWT_ISSUER: aios
+  JWT_AUDIENCE: authenticated
+  JWT_ACCESS_TTL_SECONDS: "3600"
+  VAULT_MASTER_KEY: ${VAULT_MASTER_KEY}
+  # Redis: app cache /0, Celery broker /1, results /2 (invariant #7).
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  READINESS_TIMEOUT_SECONDS: "3"
+  # Artifact roots live on the shared aios_state volume (writable by the aios user).
+  AUDIT_ARTIFACT_DIR: /var/lib/aios/artifacts/audits
+  CONTENT_ARTIFACT_DIR: /var/lib/aios/artifacts/content
+  BACKUP_ARTIFACT_DIR: /var/lib/aios/backups
+  # Seed OWNER (first login) — used once by the migrate step, inert afterward.
+  SEED_OWNER_USERNAME: ${SEED_OWNER_USERNAME:-owner}
+  SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD}
+  SEED_OWNER_EMAIL: ${SEED_OWNER_EMAIL:-owner@example.com}
+  SEED_OWNER_NAME: ${SEED_OWNER_NAME:-Agency Owner}
+  # ---- provider keys (each module is key-gated: absent → degrades to a fake) ----
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL_SUMMARY: ${ANTHROPIC_MODEL_SUMMARY:-claude-haiku-4-5}
+  ANTHROPIC_MODEL_HEAVY: ${ANTHROPIC_MODEL_HEAVY:-claude-sonnet-5}
+  SERPER_API_KEY: ${SERPER_API_KEY:-}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-AIOS <notifications@example.com>}
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+  GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+
+# ---- shared build (all backend roles share ONE image) ------------------------
+x-backend-build: &backend-build
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  image: aios-backend:${TAG:-local}
+
+services:
+  # ------------------------------------------------------------------ Postgres
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: aios
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aios"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------- Redis
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # ------------------------------------------- one-shot DB bootstrap (migrate)
+  migrate:
+    <<: *backend-build
+    command: ["bash", "/app/migrate-entrypoint.sh"]
+    environment:
+      <<: *app-env
+      # Superuser leg: apply migrations + set the authenticated/service_role
+      # passwords (migration 0000 creates those roles with NO password).
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: aios
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # ----------------------------------------------------------------- FastAPI
+  api:
+    <<: *backend-build
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    environment: *app-env
+    volumes:
+      - aios_state:/var/lib/aios
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- Celery worker
+  worker:
+    <<: *backend-build
+    command: ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    environment: *app-env
+    volumes:
+      - aios_state:/var/lib/aios
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ Celery beat
+  beat:
+    <<: *backend-build
+    command: ["celery", "-A", "workers.celery_app", "beat", "--loglevel=info", "--schedule", "/var/lib/aios/celerybeat-schedule", "--pidfile="]
+    environment: *app-env
+    volumes:
+      - aios_state:/var/lib/aios
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # -------------------------------------------------------------- Next.js frontend
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Next bakes the /api/v1 rewrite destination at build time; api:8000 is the
+        # stable in-network backend service.
+        BACKEND_ORIGIN: http://api:8000
+    image: aios-web:${TAG:-local}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  aios_state:
