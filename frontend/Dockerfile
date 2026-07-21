@@ -22,6 +22,9 @@ COPY . .
 ARG BACKEND_ORIGIN=http://api:8000
 ENV BACKEND_ORIGIN=$BACKEND_ORIGIN NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
+# This app ships no public/ dir; `next` doesn't require one. Guarantee it exists
+# so the runtime `COPY --from=builder /app/public` below never fails (empty is fine).
+RUN mkdir -p /app/public
 
 # ---- runtime (standalone) ---------------------------------------------------
 FROM node:20-alpine AS runtime
