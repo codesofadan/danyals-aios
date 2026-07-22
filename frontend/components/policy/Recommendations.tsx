@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { MODULE_META, REC_OPEN, type RecStatus } from "@/lib/policy";
-import { useRecommendations, useTransitionRecommendation, type RecAction } from "@/lib/hooks/policy";
+import { useRecommendations } from "@/lib/hooks/policy";
 
 const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string }> = {
   new: { label: "New", cls: "warn", icon: "fiber_new" },
@@ -20,11 +20,8 @@ const FILTERS: { key: RecStatus | "open" | "all"; label: string }[] = [
 
 export default function Recommendations() {
   const recsQ = useRecommendations();
-  const transition = useTransitionRecommendation();
   const recs = recsQ.data ?? [];
   const [filter, setFilter] = useState<RecStatus | "open" | "all">("open");
-
-  const act = (id: string, action: RecAction) => transition.mutate({ id, action });
 
   const openCount = recs.filter((r) => REC_OPEN.includes(r.status)).length;
 
@@ -44,7 +41,7 @@ export default function Recommendations() {
             <span className="material-symbols-rounded pr-cc-star">recommend</span>
             Command Center — Recommendations
           </div>
-          <div className="cs">Nothing changes live until you confirm. Acknowledge, apply, or dismiss each closed-loop action.</div>
+          <div className="cs">Closed-loop recommendations from Policy Radar, refreshed daily.</div>
         </div>
         <div className="tools">
           <span className="pr-cc-count">{openCount} open</span>
@@ -94,30 +91,6 @@ export default function Recommendations() {
               <div className="pr-rec-action">
                 <span className="material-symbols-rounded">arrow_forward</span>
                 <span><span className="pr-rec-k">Recommended action</span>{r.action}</span>
-              </div>
-
-              <div className="pr-rec-btns">
-                <button
-                  className={`pr-act ack ${r.status === "acknowledged" ? "on" : ""}`}
-                  onClick={() => act(r.id, "acknowledge")}
-                  disabled={r.status === "acknowledged" || transition.isPending}
-                >
-                  <span className="material-symbols-rounded">visibility</span>Acknowledge
-                </button>
-                <button
-                  className={`pr-act apply ${r.status === "applied" ? "on" : ""}`}
-                  onClick={() => act(r.id, "apply")}
-                  disabled={r.status === "applied" || transition.isPending}
-                >
-                  <span className="material-symbols-rounded">check_circle</span>Apply
-                </button>
-                <button
-                  className={`pr-act dismiss ${r.status === "dismissed" ? "on" : ""}`}
-                  onClick={() => act(r.id, "dismiss")}
-                  disabled={r.status === "dismissed" || transition.isPending}
-                >
-                  <span className="material-symbols-rounded">cancel</span>Dismiss
-                </button>
               </div>
             </article>
           );

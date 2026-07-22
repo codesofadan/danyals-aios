@@ -3,9 +3,9 @@ import { SEV_META, MODULE_META, type Severity } from "@/lib/policy";
 import type { Recommendation } from "@/lib/policy";
 
 // Command Center surface for the main dashboard: the top open Policy Radar
-// recommendations awaiting the Super Admin's confirmation. Read-only digest —
-// full acknowledge/apply/dismiss actions live in /policy-radar. The list is fed
-// from GET /command-center (`digest` — already the top-4 OPEN recs).
+// recommendations. Read-only digest — the full recommendation queue lives in
+// /policy-radar (refreshed daily). The list is fed from GET /command-center
+// (`digest` — already the top-4 OPEN recs).
 //
 // SEVERITY GAP (recorded for the orchestrator): the digest items are
 // RecommendationResponse (11 keys, no `severity`), and the /command-center
