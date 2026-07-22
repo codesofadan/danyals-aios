@@ -20,7 +20,11 @@ dependencies = [
     "httpx[http2]>=0.27",
     "tenacity>=8.5",
     "celery[redis]>=5.4",
-    "redis[hiredis]>=5.0",
+    # Cap <7: redis 7.x/8.x drive a pathological pip-resolver backtrack against
+    # celery/kombu (walks redis 8.x->6.x on every clean install), which hangs/fails
+    # the Docker build. 6.x is the highest celery+kombu resolve to; pin it so the
+    # build is deterministic and fast.
+    "redis[hiredis]>=5.0,<7",
     "sentry-sdk[fastapi]>=2.8",
     "pyjwt[crypto]>=2.9",      # sign + verify our own EdDSA (Ed25519) access tokens
     "email-validator>=2.1",    # pydantic EmailStr for user provisioning
@@ -38,7 +42,17 @@ dependencies = [
 # on deterministic fakes. Install with `pip install -e .[ai]` + set the keys to
 # activate the real Summarizer / Embedder / VectorStore.
 ai = [
-    "anthropic>=0.40",   # Summarizer (Claude Haiku/Sonnet); lazy-imported
+    "anthropic>=0.40",   # Summarizer (Claude Haiku/Sonnet); lazy-imported. This is
+                         # the only provider SDK the image needs — the content writer,
+                         # ai-assist, and context summarizer all use it.
+]
+# Vector store SDKs (Embedder + VectorStore). SPLIT OUT of `ai` and OUT of the default
+# image: the deployment uses NO Voyage/Pinecone (context vector recall is off), and this
+# tree (voyageai -> langchain/tokenizers/huggingface, plus pinecone) is both heavy and a
+# major contributor to pip-resolver backtracking. The seams lazy-import these and degrade
+# to deterministic fakes when absent, so omitting them is safe. Install `.[ai,embeddings]`
+# only if the Pinecone/Voyage vector store is ever activated.
+embeddings = [
     "voyageai>=0.2",     # Embedder (Voyage AI - Anthropic has NO embeddings API)
     "pinecone>=5",       # VectorStore (Pinecone; namespaced per entity)
 ]
