@@ -48,9 +48,13 @@ logger = get_logger("integrations.audit_engine")
 # does NOT produce "report-final.pdf" (that comes from a separate Claude script);
 # we accept whichever the pipeline actually emitted, and tolerate none (PDFs are
 # skipped when no rendering backend is present - the run still succeeds).
+# report-full.pdf is the COMPLETE multi-page report (e.g. 69 pages / 1.2 MB for a real
+# run) - the actual client deliverable. report-consolidated.pdf is a thin summary that
+# collapses to a near-empty 1-page file on a small site (which read as "empty / failed
+# to load" in the browser), so it must NOT be preferred. Full first, always.
 _PDF_CANDIDATES: tuple[str, ...] = (
-    "report-consolidated.pdf",
     "report-full.pdf",
+    "report-consolidated.pdf",
     "report-executive.pdf",
     "remediation.pdf",
     "report-final.pdf",
