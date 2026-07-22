@@ -23,8 +23,13 @@ COPY backend/integrations ./integrations
 # `.[ai]` bakes the Context/Content/ai-assist provider SDKs (anthropic, voyageai,
 # pinecone) so a supplied ANTHROPIC_API_KEY actually activates — without the extra
 # the seams lazy-import-fail and silently degrade to fakes. Override with
-# --build-arg PIP_TARGET="." for a lean, provider-less image.
-ARG PIP_TARGET=".[ai]"
+# --build-arg PKG_SPEC="." for a lean, provider-less image.
+# DO NOT rename this back to PIP_TARGET: pip reads any PIP_<OPTION> env var as that
+# option, and Docker exposes an ARG into the RUN environment — so an ARG named
+# PIP_TARGET becomes `pip --target=.[ai]`, installing the whole app into a stray
+# ./.[ai]/ dir instead of the venv (site-packages ends up empty → runtime "No module
+# named 'app'"). Any name NOT starting with PIP_ is safe.
+ARG PKG_SPEC=".[ai]"
 # Install, then PROVE the three first-party packages are importable from the venv.
 # If a build ever ships without them, this fails the build LOUDLY here instead of
 # producing an image that dies at runtime with "No module named 'app'". find_spec
@@ -34,7 +39,7 @@ ARG PIP_TARGET=".[ai]"
 # package into the venv (a false pass that shipped a runtime-broken image). -P drops
 # cwd from sys.path so this checks the VENV install, not the source tree. Changing this
 # RUN also busts any stale layer cache that reused a broken venv.
-RUN pip install --upgrade pip && pip install "${PIP_TARGET}" \
+RUN pip install --upgrade pip && pip install "${PKG_SPEC}" \
     && python -P -c "import importlib.util as u, sys; miss=[m for m in ('app','app.db.rls_check','workers','integrations') if u.find_spec(m) is None]; sys.exit('BUILD ABORT — backend packages missing from the venv: '+', '.join(miss)) if miss else print('backend package import-check OK')"
 
 # ---- runtime ----------------------------------------------------------------
