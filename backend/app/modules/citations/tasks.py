@@ -138,6 +138,26 @@ def execute_citation_submit(
             store.update_citation(citation_id, {"submit_status": "failed", "error": f"{exc!r}"[:_ERROR_MAX]})
             return {"state": "failed", "reason": f"{exc!r}"[:_ERROR_MAX]}
 
+        # The self-hosted bot only drives directories it has a FormSpec for. When it
+        # doesn't, FALL THROUGH to the Apify network (the client's call: a queued
+        # directory gets built by whatever engine can reach it) instead of failing.
+        if (
+            result.status == "failed"
+            and "no FormSpec" in result.error
+            and apify is not None
+            and submitter is not apify
+        ):
+            logger.info("citation_submit_apify_fallthrough", citation_id=citation_id)
+            try:
+                result = apify.submit(job)
+            except Exception as exc:
+                _gate().commit(ctx, ctx.estimated_cost)
+                logger.exception("citation_submit_provider_error", citation_id=citation_id)
+                store.update_citation(
+                    citation_id, {"submit_status": "failed", "error": f"{exc!r}"[:_ERROR_MAX]}
+                )
+                return {"state": "failed", "reason": f"{exc!r}"[:_ERROR_MAX]}
+
         _gate().commit(ctx, ctx.estimated_cost)
         fields: dict[str, Any] = {
             "submit_status": result.status,

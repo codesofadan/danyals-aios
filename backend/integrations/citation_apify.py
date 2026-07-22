@@ -15,6 +15,7 @@ has ``submit_method="apify"`` instead of ``"bot:playwright"`` or ``"api:..."``.
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from app.config import Settings
 from app.logging_setup import get_logger
@@ -25,6 +26,65 @@ from integrations.http_client import HttpProviderClient
 logger = get_logger("integrations.citation_apify")
 
 _INSTALL_HINT = "set APIFY_API_TOKEN + APIFY_CITATION_ACTOR_ID to enable the Apify fallback engine"
+
+# The actor's directory network, discovered from a live audit run 2026-07-23
+# (48 names, item shape {directory, domain, category, priority, status}). The
+# run's `directories` filter matches THESE names — our catalog's own names
+# ("Bing Places for Business") silently match nothing, which burned a paid run
+# that touched zero directories. Names are mapped below before every run.
+_ACTOR_NETWORK: tuple[str, ...] = (
+    "Google Business Profile", "Facebook", "Bing Places", "Apple Maps", "BBB",
+    "Yellow Pages", "MapQuest", "SuperPages", "Foursquare", "LinkedIn", "Angi",
+    "Nextdoor", "Healthgrades", "Citysearch", "Alignable", "Hotfrog",
+    "ShowMeLocal", "CitySquares", "EZLocal", "LocalStack", "Spoke",
+    "ChamberOfCommerce", "Tupalo", "USCity", "WhereTo", "GoLocal", "Hub.biz",
+    "Fyple", "Local.com", "eLocal", "2FindLocal", "iBegin", "YellowBot",
+    "Instagram", "Yelp", "Manta", "TripAdvisor", "Merchant Circle", "n49",
+    "Zocdoc", "Brownbook", "Trustpilot", "Cybo", "Cylex", "FindUsLocal",
+    "Vitals", "Kompass", "DexKnows",
+)
+
+
+def _norm(name: str) -> str:
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+# Catalog-name → actor-name for the spellings a plain normalization can't bridge.
+_NETWORK_ALIASES: dict[str, str] = {
+    "bingplacesforbusiness": "Bing Places",
+    "facebookbusinesspage": "Facebook",
+    "facebookbusiness": "Facebook",
+    "applebusinessconnect": "Apple Maps",
+    "applemapsconnect": "Apple Maps",
+    "betterbusinessbureau": "BBB",
+    "betterbusinessbureaubbb": "BBB",
+    "bbb": "BBB",
+    "googlebusinessprofilegbp": "Google Business Profile",
+    "angieslist": "Angi",
+    "yellowpagescom": "Yellow Pages",
+    "merchantcirclecom": "Merchant Circle",
+}
+
+_NETWORK_BY_NORM: dict[str, str] = {_norm(n): n for n in _ACTOR_NETWORK}
+
+
+def actor_network_name(directory_name: str) -> str | None:
+    """Map one of OUR catalog names onto the actor's directory name, or ``None``
+    when the actor's network simply does not include it (the caller reports that
+    honestly instead of paying for a run that touches nothing)."""
+    n = _norm(directory_name)
+    if not n:
+        return None
+    if n in _NETWORK_ALIASES:
+        return _NETWORK_ALIASES[n]
+    if n in _NETWORK_BY_NORM:
+        return _NETWORK_BY_NORM[n]
+    # containment either way (e.g. "yelpforbusiness" ~ "yelp"), guarded against
+    # tiny tokens so "n49" can't swallow unrelated names.
+    for cand_norm, cand in _NETWORK_BY_NORM.items():
+        if len(cand_norm) >= 4 and (cand_norm in n or n in cand_norm):
+            return cand
+    return None
 
 
 class ApifyCitationSubmitter(HttpProviderClient):
@@ -56,6 +116,15 @@ class ApifyCitationSubmitter(HttpProviderClient):
         self._captcha_api_key = captcha_api_key
 
     def submit(self, job: CitationJob) -> CitationSubmitResult:
+        # Map our catalog name onto the actor's network FIRST - an unmapped
+        # directory fails fast and free instead of paying for a run that
+        # matches nothing.
+        target = actor_network_name(job.directory_name)
+        if target is None:
+            return CitationSubmitResult(
+                status="failed",
+                error=f"{job.directory_name!r} is not in the Apify actor's 48-directory network",
+            )
         # The Citation Builder actor's REAL input schema
         # (apify.com/alizarin_refrigerator-owner/citation-builder): flattened NAP
         # fields + mode. `demoMode` DEFAULTS TRUE on the actor, so it must be
@@ -77,10 +146,16 @@ class ApifyCitationSubmitter(HttpProviderClient):
             "phone": job.phone,
             "website": job.website_url,
             "categories": list(job.categories),
-            "directories": [job.directory_name],
+            "directories": [target],
             "maxConcurrent": 1,
         }
-        if self._captcha_provider and self._captcha_api_key:
+        # The actor's schema allows ONLY these solver enums — an off-list value
+        # (e.g. capmonster) is a 400 invalid-input on the whole run, so pass the
+        # solver through only when the actor can actually accept it.
+        if (
+            self._captcha_provider in ("capsolver", "2captcha", "anticaptcha")
+            and self._captcha_api_key
+        ):
             run_input["captchaSolverProvider"] = self._captcha_provider
             run_input["captchaSolverApiKey"] = self._captcha_api_key
         try:
@@ -128,11 +203,22 @@ class ApifyCitationSubmitter(HttpProviderClient):
             # The run succeeded; only the result read failed - still a submission.
             return CitationSubmitResult(status="submitted", external_ref=run_id)
         rows = items if isinstance(items, list) else (items.get("items") or []) if isinstance(items, dict) else []
+        saw_candidate = False
         for item in rows:
             if not isinstance(item, dict):
                 continue
-            nested = item.get("results")
-            candidates = nested if isinstance(nested, list) else [item]
+            # The actor nests per-directory outcomes under audit.results (and may
+            # grow a submissions list); a flat item is also accepted.
+            candidates: list[Any] = []
+            for source in (
+                item.get("results"),
+                (item.get("audit") or {}).get("results") if isinstance(item.get("audit"), dict) else None,
+                item.get("submissions"),
+            ):
+                if isinstance(source, list):
+                    candidates.extend(source)
+            if not candidates:
+                candidates = [item]
             for c in candidates:
                 if not isinstance(c, dict):
                     continue
@@ -141,15 +227,35 @@ class ApifyCitationSubmitter(HttpProviderClient):
                     c.get("liveUrl") or c.get("listingUrl") or c.get("proofUrl")
                     or c.get("submissionUrl") or c.get("url") or ""
                 )
+                if not (status or url):
+                    continue
+                saw_candidate = True
                 if status in ("failed", "error", "skipped"):
                     reason = str(c.get("error") or c.get("message") or f"directory {status}")
                     return CitationSubmitResult(status="failed", error=reason)
-                if status or url:
+                # Only submission vocabulary counts as success; audit vocabulary
+                # (missing/incorrect/correct) means the directory was CHECKED, not
+                # built - reported honestly as a failure with the status attached.
+                if status in ("submitted", "success", "succeeded", "verified", "created", "updated", "ok", "pending") or (
+                    not status and url
+                ):
                     return CitationSubmitResult(
                         status="verified" if status == "verified" else "submitted",
                         proof_url=url,
                         external_ref=str(c.get("externalRef") or c.get("id") or run_id),
                     )
+                return CitationSubmitResult(
+                    status="failed",
+                    error=f"Apify reported '{status}' (audited, not submitted)",
+                )
+        if not saw_candidate:
+            # The run finished but processed NOTHING (e.g. the directory filter
+            # matched none of the actor's network) — an honest failure, never a
+            # claimed submission.
+            return CitationSubmitResult(
+                status="failed",
+                error="Apify run completed without touching this directory (not in the actor's network?)",
+            )
         return CitationSubmitResult(status="submitted", external_ref=run_id)
 
 
