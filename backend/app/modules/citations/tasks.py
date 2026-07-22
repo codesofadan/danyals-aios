@@ -138,12 +138,16 @@ def execute_citation_submit(
             store.update_citation(citation_id, {"submit_status": "failed", "error": f"{exc!r}"[:_ERROR_MAX]})
             return {"state": "failed", "reason": f"{exc!r}"[:_ERROR_MAX]}
 
-        # The self-hosted bot only drives directories it has a FormSpec for. When it
-        # doesn't, FALL THROUGH to the Apify network (the client's call: a queued
-        # directory gets built by whatever engine can reach it) instead of failing.
+        # The self-hosted bot only drives directories it has a FormSpec for, and a
+        # native API can turn out not to expose the write endpoint at all (e.g.
+        # Foursquare's public API has no anonymous place-create - POST /v3/places
+        # 404s). Either way, FALL THROUGH to the Apify network (the client's call:
+        # a queued directory gets built by whatever engine can reach it) - the
+        # actor then reports the honest outcome (submitted, or blocked with the
+        # platform's manual link) instead of a dead-end failure.
         if (
             result.status == "failed"
-            and "no FormSpec" in result.error
+            and ("no FormSpec" in result.error or "status 404" in result.error or "status 405" in result.error)
             and apify is not None
             and submitter is not apify
         ):
