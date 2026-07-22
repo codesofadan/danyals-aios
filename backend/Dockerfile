@@ -29,8 +29,13 @@ ARG PIP_TARGET=".[ai]"
 # If a build ever ships without them, this fails the build LOUDLY here instead of
 # producing an image that dies at runtime with "No module named 'app'". find_spec
 # checks importability without executing module code (no env needed at build time).
+# NOTE: `python -P` is REQUIRED — without it cwd (/src, which holds ./app on disk) is
+# on sys.path, so find_spec('app') passes even when the wheel didn't install the
+# package into the venv (a false pass that shipped a runtime-broken image). -P drops
+# cwd from sys.path so this checks the VENV install, not the source tree. Changing this
+# RUN also busts any stale layer cache that reused a broken venv.
 RUN pip install --upgrade pip && pip install "${PIP_TARGET}" \
-    && python -c "import importlib.util as u, sys; miss=[m for m in ('app','app.db.rls_check','workers','integrations') if u.find_spec(m) is None]; sys.exit('BUILD ABORT — backend packages missing from the venv: '+', '.join(miss)) if miss else print('backend package import-check OK')"
+    && python -P -c "import importlib.util as u, sys; miss=[m for m in ('app','app.db.rls_check','workers','integrations') if u.find_spec(m) is None]; sys.exit('BUILD ABORT — backend packages missing from the venv: '+', '.join(miss)) if miss else print('backend package import-check OK')"
 
 # ---- runtime ----------------------------------------------------------------
 FROM python:3.12-slim AS runtime
