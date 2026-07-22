@@ -124,12 +124,13 @@ def build_argv(
         "--profile", profile, "--max-pages", str(max_pages), "--no-moz",
     ]
     if comprehensive:
-        return base + [
+        return [
+            *base,
             "--mode", "paid",
             "--serper", "--places", "--citations",
             "--agents", "on", "--ai-narrative", "on",
         ]
-    argv = base + ["--mode", mode, "--agents", "off", "--ai-narrative", "off"]
+    argv = [*base, "--mode", mode, "--agents", "off", "--ai-narrative", "off"]
     if mode == "paid":
         argv += ["--serper", "--places", "--citations"]
     else:

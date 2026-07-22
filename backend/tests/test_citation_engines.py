@@ -182,23 +182,40 @@ def test_apify_refuses_without_token_or_actor() -> None:
 
 
 def test_apify_runs_and_polls_to_success() -> None:
+    """The REAL Citation Builder actor contract: results land in the run's default
+    DATASET (actor runs carry no `output` field), the run input is the actor's
+    flattened NAP schema, and demoMode MUST be explicitly disabled (it defaults to
+    true on the actor - a sample run that builds nothing)."""
     client = ApifyCitationSubmitter(api_token="t", actor_id="a1")
     calls = {"n": 0}
+    seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/runs"):
+            import json as _json
+
+            seen.update(_json.loads(request.content))
             return httpx.Response(200, json={"data": {"id": "run-1"}})
+        if "/datasets/" in request.url.path:
+            return httpx.Response(
+                200,
+                json=[{"results": [{"status": "submitted", "liveUrl": "https://proof.example/1"}]}],
+            )
         calls["n"] += 1
         if calls["n"] < 2:
             return httpx.Response(200, json={"data": {"status": "RUNNING"}})
         return httpx.Response(
-            200, json={"data": {"status": "SUCCEEDED", "output": {"proofUrl": "https://proof.example/1"}}}
+            200, json={"data": {"status": "SUCCEEDED", "defaultDatasetId": "ds-1"}}
         )
 
     _with_mock(client, handler)
     ApifyCitationSubmitter._POLL_INTERVAL_SECONDS = 0.01
     result = client.submit(_job())
     assert result.status == "submitted" and result.proof_url == "https://proof.example/1"
+    # The run input follows the actor's schema and never runs in demo mode.
+    assert seen["demoMode"] is False
+    assert seen["mode"] == "submit"
+    assert seen["businessName"] == "Acme Dental"
 
 
 def test_apify_submitter_from_settings_degrades_without_credentials() -> None:

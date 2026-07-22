@@ -210,20 +210,29 @@ async def create_campaign(
     )
 
     existing = await asyncio.to_thread(repo.existing_citation_directory_ids, body.client_id)
+    requeueable = await asyncio.to_thread(repo.requeueable_citations, body.client_id)
     skipped_manual = sum(1 for r in all_market_rows if r.get("tier") == "manual_only")
     fresh = [d for d in selection.selected if str(d["id"]) not in existing]
 
     queued_ids: list[str] = []
     for directory in fresh:
-        row = await asyncio.to_thread(
-            repo.queue_citation,
-            client_id=body.client_id,
-            client_name=name,
-            directory_id=str(directory["id"]),
-            directory_name=str(directory.get("name", "")),
-            business_profile_id=body.business_profile_id,
-            submit_method=submit_method_label(directory),
-        )
+        did = str(directory["id"])
+        # A directory whose previous attempt ended blocked/failed is RE-QUEUED
+        # (reset in place), not re-inserted and never silently skipped — a past
+        # cost-gate hold must not permanently fence a directory off.
+        stale_id = requeueable.get(did)
+        if stale_id is not None:
+            row = await asyncio.to_thread(repo.requeue_citation, stale_id)
+        else:
+            row = await asyncio.to_thread(
+                repo.queue_citation,
+                client_id=body.client_id,
+                client_name=name,
+                directory_id=did,
+                directory_name=str(directory.get("name", "")),
+                business_profile_id=body.business_profile_id,
+                submit_method=submit_method_label(directory),
+            )
         if row is None:
             continue
         queued_ids.append(str(row["id"]))

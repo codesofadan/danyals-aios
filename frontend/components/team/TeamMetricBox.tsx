@@ -43,6 +43,12 @@ export default function TeamMetricBox({ members }: { members: TeamMemberRecord[]
     const svg = svgRef.current;
     const tip = tipRef.current;
     if (!svg || !tip) return;
+    // No scored members (fresh DB / everyone still invited) → boxStats([]) is all
+    // undefined and every coordinate NaNs. Bail; the JSX renders the empty state.
+    if (scored.length === 0) {
+      svg.innerHTML = "";
+      return;
+    }
     const NS = "http://www.w3.org/2000/svg";
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -146,6 +152,11 @@ export default function TeamMetricBox({ members }: { members: TeamMemberRecord[]
       </div>
 
       <div className="svg-wrap">
+        {scored.length === 0 && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
+            Performance distributions appear once members are active with completed work.
+          </div>
+        )}
         <svg ref={svgRef} viewBox="0 0 760 320" preserveAspectRatio="none" aria-label="Box-and-whisker distribution of team utilization, on-time delivery and QA pass rate" />
         <div className="chart-tip" ref={tipRef} />
         <div className="hint">

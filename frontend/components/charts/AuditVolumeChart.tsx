@@ -16,6 +16,12 @@ export default function AuditVolumeChart({ audits }: { audits: CCAuditPoint[] })
     const svg = svgRef.current;
     const tip = tipRef.current;
     if (!svg || !tip) return;
+    // Empty data (fresh DB) would make Math.max(...[]) -Infinity and every bar
+    // coordinate NaN — bail out; the JSX below renders the empty state instead.
+    if (audits.length === 0) {
+      svg.innerHTML = "";
+      return;
+    }
     const NS = "http://www.w3.org/2000/svg";
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -23,7 +29,8 @@ export default function AuditVolumeChart({ audits }: { audits: CCAuditPoint[] })
     const innerW = W - padL - padR, innerH = H - padT - padB;
     const baseY = padT + innerH;
     const vals = audits.map((d) => d.v);
-    const maxV = Math.ceil(Math.max(...vals) / 20) * 20;
+    // Floor at 20 so an all-zero week (fresh DB) never divides by zero in Y().
+    const maxV = Math.max(20, Math.ceil(Math.max(...vals) / 20) * 20);
     const N = audits.length;
     const slot = innerW / N;
     const barW = Math.min(30, slot * 0.6);
@@ -140,6 +147,11 @@ export default function AuditVolumeChart({ audits }: { audits: CCAuditPoint[] })
       </div>
 
       <div className="svg-wrap bar-wrap">
+        {audits.length === 0 && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
+            Audit volume appears here once audits start running.
+          </div>
+        )}
         <svg ref={svgRef} viewBox="0 0 760 330" preserveAspectRatio="none" aria-label="Free audits run per week over the last 12 weeks" />
         <div className="chart-tip" ref={tipRef} />
         <div className="hint">

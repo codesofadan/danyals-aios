@@ -166,16 +166,44 @@ class CitationsRepo:
 
     # --- citation campaign dispatch (writes the SAME citations table 0018/0045) -
     def existing_citation_directory_ids(self, client_id: str) -> set[str]:
-        """Every directory_id already queued/submitted for this client - the
-        campaign dispatch never double-queues a directory that's already in flight
-        or done for this client."""
+        """Every directory_id already IN FLIGHT or DONE for this client - the
+        campaign dispatch never double-queues those. A ``blocked``/``failed`` row is
+        deliberately NOT in this set: those are retryable outcomes (a past cost-gate
+        hold or engine outage), and the next campaign RE-QUEUES them via
+        :meth:`requeueable_citations` instead of skipping the directory forever."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "select directory_id from public.citations "
-                "where client_id = %s and directory_id is not null",
+                "where client_id = %s and directory_id is not null "
+                "and coalesce(submit_status::text, 'not_started') not in ('blocked', 'failed')",
                 (client_id,),
             )
             return {str(r["directory_id"]) for r in cur.fetchall()}
+
+    def requeueable_citations(self, client_id: str) -> dict[str, str]:
+        """``{directory_id: citation_id}`` for this client's ``blocked``/``failed``
+        rows - the retry surface a new campaign RESETS instead of re-inserting."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, directory_id from public.citations "
+                "where client_id = %s and directory_id is not null "
+                "and submit_status in ('blocked', 'failed')",
+                (client_id,),
+            )
+            return {str(r["directory_id"]): str(r["id"]) for r in cur.fetchall()}
+
+    def requeue_citation(self, citation_id: str) -> dict[str, Any] | None:
+        """Reset one blocked/failed row back to ``queued`` (clearing the stale
+        error) so the submit worker picks it up again."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.citations "
+                "set submit_status = 'queued', error = '', action = 'Submit' "
+                "where id = %s and submit_status in ('blocked', 'failed') "
+                "returning *",
+                (citation_id,),
+            )
+            return cur.fetchone()
 
     def queue_citation(
         self,

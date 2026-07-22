@@ -1,6 +1,6 @@
 "use client";
 
-import { DIAL_MODES, DIAL_MODE_META, PROVIDERS, type DialFeature, type DialMode } from "@/lib/cost";
+import { DIAL_MODES, DIAL_MODE_META, providerMeta, type DialFeature, type DialMode } from "@/lib/cost";
 
 type Props = { dial: DialFeature[]; onSetMode: (key: string, mode: DialMode) => void };
 
@@ -21,7 +21,7 @@ export default function CostDial({ dial, onSetMode }: Props) {
 
       <div className="cst-dial-list">
         {dial.map((d) => {
-          const pv = PROVIDERS[d.provider];
+          const pv = providerMeta(d.provider);
           return (
             <div key={d.key} className="cst-dial-row">
               <span className="cst-dial-ic" style={{ color: pv.c, background: `${pv.c}22` }}>

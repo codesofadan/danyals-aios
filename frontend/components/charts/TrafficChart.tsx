@@ -15,6 +15,12 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
     const svg = svgRef.current;
     const tip = tipRef.current;
     if (!svg || !tip) return;
+    // Empty/single-point data (fresh DB) would make min/max Infinity and the
+    // axis math NaN — bail out; the JSX below renders the empty state instead.
+    if (traffic.length < 2) {
+      svg.innerHTML = "";
+      return;
+    }
     const NS = "http://www.w3.org/2000/svg";
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -137,6 +143,11 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
       </div>
 
       <div className="svg-wrap">
+        {traffic.length < 2 && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
+            Traffic history appears here once site analytics start reporting.
+          </div>
+        )}
         <svg ref={svgRef} viewBox="0 0 760 300" preserveAspectRatio="none" aria-label="Monthly organic sessions" />
         <div className="chart-tip" ref={tipRef} />
       </div>

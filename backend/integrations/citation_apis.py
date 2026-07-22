@@ -118,6 +118,11 @@ class FoursquareSubmitter(HttpProviderClient):
         except ProviderCallError as exc:
             return CitationSubmitResult(status="failed", error=str(exc))
         place_id = data.get("fsq_id") or data.get("id")
+        ref = str(place_id) if place_id else job.external_ref
+        # The public Foursquare venue page IS the live citation — surface it as the
+        # proof link so the board shows WHERE the listing was built, not just "submitted".
         return CitationSubmitResult(
-            status="submitted", external_ref=str(place_id) if place_id else job.external_ref
+            status="submitted",
+            external_ref=ref,
+            proof_url=f"https://foursquare.com/v/{ref}" if ref else "",
         )

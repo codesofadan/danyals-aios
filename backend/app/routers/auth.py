@@ -105,6 +105,25 @@ def _lookup_credentials(username: str) -> dict[str, Any] | None:
         return cur.fetchone()
 
 
+def _activate_if_invited(user_id: str) -> None:
+    """First successful sign-in flips ``status`` invited -> active (best-effort).
+
+    Provisioning stamps every new account ``invited``; without this the roster
+    shows members as "Invited" forever and metric views (which exclude invited
+    rows) stay empty even for people who log in daily. Never raises - a failed
+    flip must not fail a correct login.
+    """
+    try:
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.users set status = 'active' "
+                "where id = %s and status = 'invited'",
+                (user_id,),
+            )
+    except Exception:  # pragma: no cover - best-effort by contract
+        pass
+
+
 @router.post(
     "/login",
     response_model=LoginResponse,
@@ -127,6 +146,7 @@ async def login(body: LoginRequest, settings: SettingsDep) -> LoginResponse:
         raise _INVALID_CREDENTIALS
 
     role: UserRole = row["role"]
+    await asyncio.to_thread(_activate_if_invited, str(row["id"]))
     try:
         token = issue_access_token(str(row["id"]), role, settings=settings)
     except TokenSigningNotConfiguredError as exc:

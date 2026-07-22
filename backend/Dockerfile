@@ -20,16 +20,17 @@ COPY backend/pyproject.toml backend/README.md ./
 COPY backend/app ./app
 COPY backend/workers ./workers
 COPY backend/integrations ./integrations
-# `.[ai]` bakes the Context/Content/ai-assist provider SDKs (anthropic, voyageai,
-# pinecone) so a supplied ANTHROPIC_API_KEY actually activates — without the extra
-# the seams lazy-import-fail and silently degrade to fakes. Override with
-# --build-arg PKG_SPEC="." for a lean, provider-less image.
+# `.[ai,automation]` bakes the Context/Content/ai-assist provider SDKs (anthropic,
+# voyageai, pinecone) so a supplied ANTHROPIC_API_KEY actually activates, PLUS
+# playwright for the citation-submission bot (bot_fillable/captcha_assisted
+# directories hold as 'blocked' without it). Override with --build-arg
+# PKG_SPEC="." for a lean, provider-less image.
 # DO NOT rename this back to PIP_TARGET: pip reads any PIP_<OPTION> env var as that
 # option, and Docker exposes an ARG into the RUN environment — so an ARG named
 # PIP_TARGET becomes `pip --target=.[ai]`, installing the whole app into a stray
 # ./.[ai]/ dir instead of the venv (site-packages ends up empty → runtime "No module
 # named 'app'"). Any name NOT starting with PIP_ is safe.
-ARG PKG_SPEC=".[ai]"
+ARG PKG_SPEC=".[ai,automation]"
 # Install, then PROVE the three first-party packages are importable from the venv.
 # If a build ever ships without them, this fails the build LOUDLY here instead of
 # producing an image that dies at runtime with "No module named 'app'". find_spec
@@ -76,6 +77,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Point the engine's PDF backend at the wrapper (reporters/pdf.py honours this override).
 ENV SEO_AUDIT_CHROME=/usr/local/bin/chromium-wrap
 COPY --from=builder /opt/venv /opt/venv
+# Playwright's own chromium build for the citation-submission bot (the system
+# `chromium` package above already pulls in the shared libs it needs). A shared,
+# root-owned browsers dir so the non-root `aios` user finds it at runtime; if the
+# download ever breaks the bot degrades to 'blocked' rows, never a crash.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN (playwright install chromium && chmod -R a+rX /opt/ms-playwright) \
+    || echo "WARN: playwright browser install failed — citation bot will hold"
 # The audit engine's venv + its source tree. The engine reads checklists/knowledge/
 # templates from its CWD (AUDIT_ENGINE_DIR) and writes artifacts under <dir>/data/, so
 # the source ships here (its data/ is git+docker-ignored; a writable one is made below).

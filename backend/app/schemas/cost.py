@@ -36,10 +36,11 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # both effectively free/near-free). A citation submission run spends real money
     # on CAPTCHA-solves + proxy bandwidth, so it gets its own dial + its own budget
     # visibility rather than hiding inside the backlinks dial's numbers. Defaults to
-    # byhand: a lead reviews a submission BATCH's cost estimate before it runs
-    # (mirrors backlinks' own default — submission is exactly the kind of paid pull
-    # that should not fire unattended by default).
-    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="CAPTCHA + proxy spend — review before a batch", default_mode="byhand"),
+    # API per the client's explicit 2026-07-23 decision ("no approval gate — a
+    # queued campaign submits immediately"); the dial + per-client budget caps +
+    # the daily spend-stop still bound the spend, and an operator can turn it back
+    # to byhand/off at any time.
+    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="Auto-submits queued directories (CAPTCHA + proxy spend)", default_mode="api"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
     DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),
     # Part 6B — the Client-Context / AI-memory module's two AI spends. Both flow

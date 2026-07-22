@@ -16,7 +16,7 @@
 // ============================================================
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, FILE_BASE } from "@/lib/api";
 import type { AuditTypeKey } from "@/lib/audit";
 
 // 201 response from POST /public/audits (the capability token + initial status).
@@ -47,14 +47,13 @@ export type CreatePublicAuditInput = {
 
 const publicAuditKey = (token: string) => ["public-audit", token] as const;
 
-// The public API base mirrors lib/api.ts (which does not export it). Used only
-// to build the direct <a href> for the PDF — a plain browser GET, not an api.*
-// fetch — where the token in the path is the sole guard.
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
+// The PDF href uses FILE_BASE (lib/api.ts): the multi-MB report must stream
+// straight from the API origin, not crawl through the Next rewrite proxy. A
+// plain browser GET, not an api.* fetch — the token in the path is the guard.
 
 /** Direct-download URL for the report PDF (only meaningful when `has_pdf`). */
 export function publicReportPdfUrl(token: string): string {
-  return `${API_BASE}/public/audits/${encodeURIComponent(token)}/report.pdf`;
+  return `${FILE_BASE}/public/audits/${encodeURIComponent(token)}/report.pdf`;
 }
 
 const isPending = (r: PublicReport | undefined) => r?.status === "queued" || r?.status === "running";

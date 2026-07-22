@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
-  JOB_TYPE_META, PROVIDERS, usd,
+  jobTypeMeta, providerLabel, providerMeta, usd,
   type CostEntry, type JobType,
 } from "@/lib/cost";
 
@@ -63,8 +63,10 @@ export default function CostLog({ log }: Props) {
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const jt = JOB_TYPE_META[r.type];
-              const pv = PROVIDERS[r.provider];
+              // Tolerant lookups: the backend logs free-form provider/type
+              // strings (audit_engine, serper, …) — never crash on one.
+              const jt = jobTypeMeta(r.type);
+              const pv = providerMeta(r.provider);
               return (
                 <tr key={`${r.id}-${r.provider}-${i}`}>
                   <td><span className="cst-job">{r.id}</span></td>
@@ -77,7 +79,7 @@ export default function CostLog({ log }: Props) {
                   <td>
                     <span className="cst-prov">
                       <span className="cst-prov-dot" style={{ background: pv.c }} />
-                      {r.provider}
+                      {providerLabel(r.provider)}
                     </span>
                   </td>
                   <td>

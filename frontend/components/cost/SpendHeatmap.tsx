@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import {
-  PROVIDERS, JOB_TYPE_META, usd,
+  PROVIDERS, JOB_TYPE_META, providerLabel, providerMeta, usd,
   type Provider, type JobType, type CostEntry,
 } from "@/lib/cost";
 
@@ -22,20 +22,25 @@ export default function SpendHeatmap({ log }: { log: CostEntry[] }) {
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
 
-  // Aggregate the per-job cost log into a provider × job-type matrix.
+  // Aggregate the per-job cost log into a provider × job-type matrix. The log's
+  // provider strings are FREE-FORM (audit_engine, serper, …), so rows are the
+  // known providers PLUS any provider actually seen in the log — spend must
+  // never be silently invisible, and an unknown name must never crash.
+  const seen = [...new Set(log.map((e) => String(e.provider)))];
+  const allRows = [...new Set([...PROVIDER_ROWS, ...seen])] as Provider[];
   const matrix: Record<string, Cell> = {};
   let max = 0;
-  for (const p of PROVIDER_ROWS) {
+  for (const p of allRows) {
     for (const j of JOB_COLS) matrix[`${p}|${j}`] = { spend: 0, calls: 0 };
   }
   for (const e of log) {
     const cell = matrix[`${e.provider}|${e.type}`];
-    if (!cell) continue;
+    if (!cell) continue; // unknown job type — column set is fixed
     cell.spend += e.cost;
     cell.calls += 1;
     if (cell.spend > max) max = cell.spend;
   }
-  const rowsUsed = PROVIDER_ROWS.filter((p) =>
+  const rowsUsed = allRows.filter((p) =>
     JOB_COLS.some((j) => matrix[`${p}|${j}`].calls > 0),
   );
 
@@ -131,8 +136,8 @@ function FragmentRow({
   return (
     <>
       <div className="hm-rowh">
-        <span className="hm-dot" style={{ background: PROVIDERS[p].c }} />
-        {p}
+        <span className="hm-dot" style={{ background: providerMeta(p).c }} />
+        {providerLabel(p)}
       </div>
       {JOB_COLS.map((j) => {
         const c = matrix[`${p}|${j}`];

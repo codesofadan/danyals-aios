@@ -32,6 +32,65 @@ export const JOB_TYPE_META: Record<JobType, { label: string; cls: string; icon: 
   backlinks: { label: "Backlinks", cls: "ok",   icon: "hub" },
 };
 
+// ---------------------------------------------------------------------------
+// TOLERANT lookups. The backend cost log stores FREE-FORM provider/job-type
+// strings (audit_engine, serper, google_search_console, context, ai_assist, …)
+// — CostEntryResponse types them `str`, not our narrow unions. Indexing the
+// exact-key maps above with an unknown string crashed the whole Cost screen
+// (`Cannot read properties of undefined (reading 'c')`). Every component must
+// resolve through these helpers instead: recognized names (any casing) map to
+// canonical meta, anything else gets a neutral fallback — never a crash.
+// ---------------------------------------------------------------------------
+export type ProviderMeta = { c: string; use: string; unit: string; paid: boolean };
+
+const PROVIDER_ALIASES: Record<string, Provider> = {
+  serper: "Serper",
+  dataforseo: "DataForSEO",
+  anthropic: "Anthropic",
+  claude: "Anthropic",
+  pagespeed: "PageSpeed",
+  googlepagespeed: "PageSpeed",
+  places: "Places",
+  googleplaces: "Places",
+  voyage: "Voyage",
+  google: "Google",
+  googlesearchconsole: "Google",
+  googleanalytics: "Google",
+  googleoauth: "Google",
+};
+
+// Extra spend sources that are real but not one of the 7 dial providers.
+const PROVIDER_EXTRAS: Record<string, ProviderMeta> = {
+  auditengine: { c: SERIES.c3, use: "Comprehensive audit run", unit: "~$1.50 / run", paid: true },
+  fake: { c: "var(--muted)", use: "Deterministic fake (no key)", unit: "free", paid: false },
+};
+
+export function providerMeta(p: string): ProviderMeta {
+  const direct = (PROVIDERS as Record<string, ProviderMeta>)[p];
+  if (direct) return direct;
+  const key = String(p).toLowerCase().replace(/[^a-z0-9]/g, "");
+  const alias = PROVIDER_ALIASES[key];
+  if (alias) return PROVIDERS[alias];
+  const extra = PROVIDER_EXTRAS[key];
+  if (extra) return extra;
+  return { c: "var(--muted)", use: String(p || "Unknown provider"), unit: "", paid: true };
+}
+
+/** Human label for a raw provider string ("audit_engine" → "Audit Engine"). */
+export function providerLabel(p: string): string {
+  if ((PROVIDERS as Record<string, ProviderMeta>)[p]) return p;
+  return String(p || "Unknown")
+    .split(/[_\-\s]+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+export function jobTypeMeta(t: string): { label: string; cls: string; icon: string } {
+  const direct = (JOB_TYPE_META as Record<string, { label: string; cls: string; icon: string }>)[t];
+  if (direct) return direct;
+  return { label: providerLabel(t) || "Job", cls: "mut", icon: "receipt_long" };
+}
+
 // --- Per-client budget caps (live on the job queue) -------------------------
 export type ClientBudget = {
   id: string;

@@ -171,9 +171,20 @@ def submitter_for(
     if submit_method.startswith("api:"):
         key = submit_method.split(":", 1)[1]
         sub = api_submitters.get(key)
-        return sub, ("" if sub is not None else f"no API submitter configured for {key!r}")
+        if sub is not None:
+            return sub, ""
+        # FALL BACK to Apify rather than blocking - the client's explicit call
+        # (2026-07-23): a queued directory must be BUILT by whatever engine can
+        # reach it, not parked behind an unconfigured native integration.
+        if apify is not None:
+            return apify, ""
+        return None, f"no API submitter configured for {key!r}"
     if submit_method.startswith("aggregator:") or submit_method.startswith("bot:"):
-        return bot, ("" if bot is not None else "Playwright bot not installed/configured")
+        if bot is not None:
+            return bot, ""
+        if apify is not None:
+            return apify, ""
+        return None, "Playwright bot not installed/configured"
     if submit_method == "apify":
         return apify, ("" if apify is not None else "Apify fallback not configured")
     return None, f"no automatable engine for submit_method={submit_method!r}"

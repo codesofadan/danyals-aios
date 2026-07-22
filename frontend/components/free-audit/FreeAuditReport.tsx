@@ -124,10 +124,15 @@ export default function FreeAuditReport({ report, token }: { report: PublicRepor
           <h1 className="fa-score-title">Your free SEO audit is ready</h1>
           <p className="fa-score-verdict">{VERDICT[band]}</p>
           {report.has_pdf && (
+            // Same-tab on purpose: the server sends Content-Disposition:
+            // attachment, so this never navigates away — while target="_blank"
+            // left a blank tab hanging for the whole (large) transfer, which
+            // read as "the link opens but nothing downloads". The download
+            // attribute doubles the hint for older browsers.
             <a
               className="fa-pdf-cta"
               href={publicReportPdfUrl(token)}
-              target="_blank"
+              download="free-audit-report.pdf"
               rel="noopener noreferrer"
             >
               <span className="material-symbols-rounded">picture_as_pdf</span>

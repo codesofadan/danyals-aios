@@ -206,6 +206,9 @@ services:
         # Next bakes the /api/v1 rewrite destination at build time; api:8000 is the
         # stable in-network backend service.
         BACKEND_ORIGIN: http://api:8000
+        # PUBLIC origin the BROWSER streams big files (PDFs/deliverables) from —
+        # the rewrite proxy stalls on multi-MB binaries. Empty = same-origin proxy.
+        NEXT_PUBLIC_FILE_BASE_URL: ${PUBLIC_FILE_BASE_URL:-}
     image: aios-web:${TAG:-local}
     ports:
       - "${WEB_PORT:-3000}:3000"

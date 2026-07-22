@@ -56,9 +56,11 @@ class FakeCitationsRepo:
         self.client_names: dict[str, str] = {}
         self.client_industries: dict[str, str] = {}
         self.existing_directory_ids: dict[str, set[str]] = {}
+        self.requeueable: dict[str, dict[str, str]] = {}
         self.created_profiles: list[dict[str, Any]] = []
         self.updated_profiles: list[tuple[str, dict[str, Any]]] = []
         self.queued: list[dict[str, Any]] = []
+        self.requeued: list[str] = []
         self._next_id = 1
 
     def list_business_profiles(self, *, client_id: str | None = None) -> list[dict[str, Any]]:
@@ -115,6 +117,16 @@ class FakeCitationsRepo:
 
     def existing_citation_directory_ids(self, client_id: str) -> set[str]:
         return set(self.existing_directory_ids.get(client_id, set()))
+
+    def requeueable_citations(self, client_id: str) -> dict[str, str]:
+        # {directory_id: citation_id} of this client's blocked/failed rows; tests
+        # populate `requeueable` directly when exercising the retry path.
+        return dict(self.requeueable.get(client_id, {}))
+
+    def requeue_citation(self, citation_id: str) -> dict[str, Any] | None:
+        row = {"id": citation_id, "submit_status": "queued", "error": ""}
+        self.requeued.append(citation_id)
+        return row
 
     def queue_citation(self, **kwargs: Any) -> dict[str, Any] | None:
         row_id = f"cit-{self._next_id}"

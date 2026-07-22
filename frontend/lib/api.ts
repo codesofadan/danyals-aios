@@ -141,9 +141,17 @@ export async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promis
 // For bearer-protected file endpoints (audit report.pdf / findings.json, client
 // deliverables) that JSON `apiFetch` can't serve. Shared by downloadFile/openFile
 // below; never caches the bytes.
+//
+// Files stream from FILE_BASE, not API_BASE: the same-origin Next rewrite proxy
+// is fine for JSON but pathologically slow on multi-MB binaries (a 7.5MB PDF
+// took minutes through the proxy vs ~5s direct), which users experienced as a
+// 0KB/hung download. Deployments bake NEXT_PUBLIC_FILE_BASE_URL to the API's
+// public origin; unset falls back to the same-origin proxy.
+export const FILE_BASE = process.env.NEXT_PUBLIC_FILE_BASE_URL || API_BASE;
+
 async function fetchAuthedBlob(path: string): Promise<Blob> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${FILE_BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (res.status === 401) {
