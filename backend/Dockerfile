@@ -53,8 +53,8 @@ RUN pip install --upgrade pip && pip install "${PKG_SPEC}" \
 COPY danyals-audit-system /src-audit
 RUN python -m venv /opt/audit-venv \
     && /opt/audit-venv/bin/pip install --upgrade pip \
-    && /opt/audit-venv/bin/pip install /src-audit markdown pygments \
-    && /opt/audit-venv/bin/python -c "import audit_engine.cli.main; print('audit engine import OK')"
+    && /opt/audit-venv/bin/pip install /src-audit markdown pygments anthropic \
+    && /opt/audit-venv/bin/python -c "import audit_engine.cli.main, anthropic; print('audit engine import OK')"
 
 # ---- runtime ----------------------------------------------------------------
 FROM python:3.12-slim AS runtime

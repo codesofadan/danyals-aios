@@ -86,7 +86,9 @@ class AuditStore(Protocol):
 
 
 class _Runner(Protocol):
-    def __call__(self, cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult: ...
+    def __call__(
+        self, cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+    ) -> AuditRunResult: ...
 
 
 class SupabaseAuditStore:
@@ -226,7 +228,12 @@ def execute_audit(
     store.update(audit_id, {"status": "running", "started_at": _utcnow().isoformat()})
 
     try:
-        result = runner(_config_from_settings(settings), url=row["url"], tier=tier)
+        # The authenticated dashboard audit ALWAYS runs the full consulting pipeline:
+        # on-page + technical + off-page (Serper) + local (Places) + the 21 AI agents +
+        # narrative + PDF. (The public homepage funnel stays light/$0 - see below.)
+        result = runner(
+            _config_from_settings(settings), url=row["url"], tier=tier, comprehensive=True
+        )
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("audit_job_crashed", audit_id=audit_id)
         store.update(
@@ -245,8 +252,9 @@ def execute_audit(
     # started (a run_uuid was minted): Free = $0, Paid = the configured estimate
     # (the engine reports no machine-readable spend).
     if result.run_uuid is not None:
-        cost = settings.audit_paid_cost_estimate if tier == "paid" else 0.0
-        _safe_record_cost(store, row, cost)
+        # A dashboard audit is always the comprehensive (paid-provider) run, so log the
+        # paid estimate through the cost path regardless of the row's tier label.
+        _safe_record_cost(store, row, settings.audit_paid_cost_estimate)
 
     if not result.ok:
         store.update(

@@ -99,32 +99,33 @@ def domain_to_slug(domain: str) -> str:
     return domain.replace("https://", "").replace("http://", "").rstrip("/").replace("/", "_")
 
 
-def build_argv(*, domain: str, mode: str, max_pages: int, profile: str) -> list[str]:
+def build_argv(
+    *, domain: str, mode: str, max_pages: int, profile: str, comprehensive: bool = False
+) -> list[str]:
     """Build the ``python -m audit_engine.cli.main full ...`` argument vector.
 
-    ``mode`` is the stored/engine value (``free`` | ``paid``). We always pass
-    explicit ``--agents off --ai-narrative off`` (never rely on the ``ask``
-    default) and ``--no-moz`` (Moz needs a separate paid key, out of scope). On
-    ``free`` we also pass ``--no-serper/--no-places/--no-citations`` for an
-    explicit zero-paid-spend run; on ``paid`` we enable them (engine keys).
+    ``comprehensive=True`` (the authenticated dashboard audit) runs the FULL
+    consulting pipeline: the on-page + technical deterministic checks PLUS off-page
+    (Serper SERP/competitors), local (Places/citations when ``profile=local``), the
+    21 AI specialist agents, and the narrative. It runs in ``--mode paid`` so the
+    paid data sources actually fire. This is the "real audit that takes full time".
+
+    ``comprehensive=False`` (the PUBLIC free-audit funnel) keeps the light, zero-spend
+    on-page-only run: ``mode`` is the stored value (``free`` | ``paid``), agents +
+    narrative off, and on ``free`` every paid provider is explicitly disabled.
+    ``--no-moz`` always (Moz needs a separate paid key, out of scope).
     """
-    argv = [
-        "-m",
-        "audit_engine.cli.main",
-        "full",
-        domain,
-        "--profile",
-        profile,
-        "--max-pages",
-        str(max_pages),
-        "--mode",
-        mode,
-        "--no-moz",
-        "--agents",
-        "off",
-        "--ai-narrative",
-        "off",
+    base = [
+        "-m", "audit_engine.cli.main", "full", domain,
+        "--profile", profile, "--max-pages", str(max_pages), "--no-moz",
     ]
+    if comprehensive:
+        return base + [
+            "--mode", "paid",
+            "--serper", "--places", "--citations",
+            "--agents", "on", "--ai-narrative", "on",
+        ]
+    argv = base + ["--mode", mode, "--agents", "off", "--ai-narrative", "off"]
     if mode == "paid":
         argv += ["--serper", "--places", "--citations"]
     else:
@@ -164,12 +165,16 @@ def _find_pdf(artifact_dir: Path) -> str | None:
     return None
 
 
-def run_audit(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+def run_audit(
+    cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
     ``tier`` is the stored value (``free`` | ``paid``); it selects the engine
-    ``--mode``. The URL is SSRF-validated here (defense in depth - the endpoint
-    already validated at enqueue) before any subprocess is spawned.
+    ``--mode`` for the light path. ``comprehensive=True`` overrides that and runs the
+    full consulting pipeline (all dimensions + AI agents, paid mode) - used for the
+    authenticated dashboard audit. The URL is SSRF-validated here (defense in depth -
+    the endpoint already validated at enqueue) before any subprocess is spawned.
     """
     # 1) SSRF guard. Sync context (a Celery worker, no event loop) so a direct
     # call is fine - no to_thread needed off the loop.
@@ -183,8 +188,11 @@ def run_audit(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
     if not Path(cfg.engine_python).exists():
         return AuditRunResult(ok=False, error="audit engine interpreter not found")
 
-    mode = "paid" if tier == "paid" else "free"
-    argv = build_argv(domain=url, mode=mode, max_pages=cfg.max_pages, profile=cfg.profile)
+    mode = "paid" if (tier == "paid" or comprehensive) else "free"
+    argv = build_argv(
+        domain=url, mode=mode, max_pages=cfg.max_pages, profile=cfg.profile,
+        comprehensive=comprehensive,
+    )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}
     started = time.monotonic()

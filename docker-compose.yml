@@ -39,6 +39,13 @@ x-app-env: &app-env
   # venv; the worker invokes it as a subprocess (integrations/audit_engine.py).
   AUDIT_ENGINE_DIR: /app/audit-engine
   AUDIT_ENGINE_PYTHON: /opt/audit-venv/bin/python
+  # Google APIs the bundled engine reads from the env (CWV via PageSpeed/CrUX, entities
+  # via NL, local via Places) + the 21-agent model. Comprehensive audits use these.
+  GOOGLE_PAGESPEED_API_KEY: ${GOOGLE_PAGESPEED_API_KEY:-}
+  GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
+  GOOGLE_CRUX_API_KEY: ${GOOGLE_CRUX_API_KEY:-}
+  GOOGLE_NL_API_KEY: ${GOOGLE_NL_API_KEY:-}
+  AUDIT_AGENT_MODEL: ${AUDIT_AGENT_MODEL:-claude-haiku-4-5}
   # Artifact roots live on the shared aios_state volume (writable by the aios user).
   AUDIT_ARTIFACT_DIR: /var/lib/aios/artifacts/audits
   CONTENT_ARTIFACT_DIR: /var/lib/aios/artifacts/content

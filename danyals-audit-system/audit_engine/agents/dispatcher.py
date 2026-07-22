@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +25,9 @@ log = get_logger(__name__)
 
 
 AGENTS_DIR = ROOT / ".claude" / "agents"
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Overridable via AUDIT_AGENT_MODEL (the AIOS worker sets it in the container env).
+# The old hard-coded "claude-sonnet-4-6" is stale; default to a current model.
+DEFAULT_MODEL = os.getenv("AUDIT_AGENT_MODEL") or "claude-haiku-4-5"
 MAX_TOKENS_OUT = 4000
 MAX_PAGES_IN_CONTEXT = 25
 MAX_BODY_CHARS_PER_PAGE = 1200
