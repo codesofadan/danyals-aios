@@ -23,7 +23,8 @@ const SECTIONS: Section[] = [
     items: [
       { icon: "fact_check", label: "Audit", href: "/admin/audit" },
       { icon: "article", label: "Content", href: "/admin/content" },
-      { icon: "hub", label: "Off-page", href: "/admin/off-page" },
+      { icon: "storefront", label: "Citations", href: "/admin/citations" },
+      { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2" },
       { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", badge: "3" },
     ],
   },
@@ -40,10 +41,8 @@ const SECTIONS: Section[] = [
   {
     title: "Platform",
     items: [
-      { icon: "workspace_premium", label: "Service Tiers", href: "/admin/tiers" },
       { icon: "savings", label: "Cost Controls", href: "/admin/cost" },
       { icon: "key", label: "Key Vault", href: "/admin/vault" },
-      { icon: "backup", label: "Backups", href: "/admin/backups" },
       { icon: "settings", label: "Settings", href: "/admin/settings" },
     ],
   },

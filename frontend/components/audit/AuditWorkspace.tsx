@@ -5,7 +5,6 @@ import {
   auditTypes,
   TYPE_LABEL,
   type AuditTypeKey,
-  type Tier,
   type JobStatus,
 } from "@/lib/audit";
 import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
@@ -36,28 +35,26 @@ export default function AuditWorkspace() {
   const rows = auditsQ.data ?? [];
   const clients = clientsQ.data ?? [];
 
-  // Run-new-audit form state
+  // Run-new-audit form state (URL + client only — every dashboard audit is the FULL
+  // comprehensive run, so there are no tier/type options to pick).
   const [url, setUrl] = useState("");
   const [clientId, setClientId] = useState("");
-  const [tier, setTier] = useState<Tier>("Paid");
-  const [picked, setPicked] = useState<AuditTypeKey[]>(["technical", "actionable"]);
   const effectiveClientId = clientId || clients[0]?.id || "";
 
   // Table filters
   const [statusFilter, setStatusFilter] = useState<"all" | JobStatus>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | AuditTypeKey>("all");
 
-  const toggleType = (k: AuditTypeKey) =>
-    setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
-
-  const canRun =
-    url.trim().length > 3 && picked.length > 0 && !!effectiveClientId && !createAudit.isPending;
+  const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending;
 
   const runAudit = () => {
     if (!canRun) return;
     const clean = url.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    // The backend ALWAYS runs the full comprehensive audit (on-page + technical +
+    // off-page + local + 21 AI agents + PDF) for dashboard runs; the tier/types below
+    // are just the free-allowed defaults the worker ignores for depth.
     createAudit.mutate(
-      { client_id: effectiveClientId, url: clean, tier, types: picked },
+      { client_id: effectiveClientId, url: clean, tier: "Free", types: ["technical", "actionable"] },
       { onSuccess: () => setUrl("") },
     );
   };
@@ -215,40 +212,10 @@ export default function AuditWorkspace() {
             </select>
           </div>
 
-          <div className="fld">
-            <label>Tier</label>
-            <div className="seg au-tier-seg">
-              {(["Free", "Paid"] as const).map((t) => (
-                <button key={t} className={tier === t ? "on" : undefined} onClick={() => setTier(t)}>{t}</button>
-              ))}
-            </div>
-            <div className="fld-hint">
-              {tier === "Free"
-                ? "Free tier runs the on-page engine only — paid data sources are skipped by the cost gate."
-                : "Paid tier unlocks Local & GBP, AI/GEO and Backlink data (Places, Business Profile, link index)."}
-            </div>
-          </div>
-
-          <div className="fld">
-            <label>Audit types</label>
-            <div className="au-picks">
-              {auditTypes.map((t) => {
-                const on = picked.includes(t.key);
-                const gated = tier === "Free" && t.paid;
-                return (
-                  <button
-                    key={t.key}
-                    className={`au-pick${on ? " on" : ""}${gated ? " gated" : ""}`}
-                    onClick={() => toggleType(t.key)}
-                    title={gated ? "Needs Paid tier — will be gated on Free" : undefined}
-                  >
-                    <span className="material-symbols-rounded" style={on ? { color: t.color } : undefined}>{t.icon}</span>
-                    {t.short}
-                    {gated && on && <span className="au-pick-lock material-symbols-rounded">lock</span>}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="fld-hint" style={{ margin: "2px 0 10px" }}>
+            <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: "16px" }}>bolt</span>{" "}
+            Every audit is the <b>full run</b> — on-page, technical, off-page, local, AI
+            analysis + a branded PDF report. No options to pick.
           </div>
 
           <button className="primary-btn wide" onClick={runAudit} disabled={!canRun}>
