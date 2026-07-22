@@ -79,7 +79,12 @@ class LoginResponse(BaseModel):
 
 
 def _lookup_credentials(username: str) -> dict[str, Any] | None:
-    """Return ``{id, role, password_hash}`` for ``username`` (case-insensitive) or None.
+    """Return ``{id, role, password_hash}`` for ``username`` OR email (case-insensitive).
+
+    People routinely type their email into a "username" box (and a portal login
+    like ``admin@client.com`` IS email-shaped), so the lookup matches either
+    column — both are case-insensitively unique, and ties prefer the username
+    match so an email that collides with someone else's username cannot shadow it.
 
     Joins the identity row to its credential in ``auth.users`` on the privileged
     (service_role) connection - ``auth.users`` is not readable by any other role.
@@ -91,10 +96,11 @@ def _lookup_credentials(username: str) -> dict[str, Any] | None:
             select u.id, u.role, a.password_hash
             from public.users u
             join auth.users a on a.id = u.id
-            where lower(u.username) = lower(%s)
+            where lower(u.username) = lower(%(login)s) or lower(u.email) = lower(%(login)s)
+            order by (lower(u.username) = lower(%(login)s)) desc
             limit 1
             """,
-            (username,),
+            {"login": username},
         )
         return cur.fetchone()
 

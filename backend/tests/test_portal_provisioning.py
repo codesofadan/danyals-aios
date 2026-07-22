@@ -86,13 +86,40 @@ def wire(app: FastAPI) -> Any:
     return _as
 
 
-async def test_portal_user_requires_owner(client: httpx.AsyncClient, wire: Any) -> None:
-    wire("admin")  # manage_team but not owner
+async def test_portal_user_requires_manage_clients(client: httpx.AsyncClient, wire: Any) -> None:
+    """The gate is ``manage_clients`` — the SAME one that creates the client, so the
+    Add-Client wizard's final step never silently 403s for an admin/manager. A role
+    without it (specialist) stays locked out."""
+    wire("specialist")  # no manage_clients
     resp = await client.post(
         "/api/v1/clients/cl-1/portal-users",
         json={"email": "p@acme.com", "name": "P", "username": "acmeportal", "password": "secret12"},
     )
     assert resp.status_code == 403
+
+
+async def test_portal_user_admin_can_provision(
+    client: httpx.AsyncClient, wire: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An admin (manage_clients holder) CAN mint the portal login — closing the
+    invalid-credentials bug where the wizard's final step silently 403'd for
+    any non-owner and the client ended up with no login at all."""
+    from app.routers import clients as clients_router
+
+    def _fake_provision(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "id": "u-new", "email": kwargs["email"], "name": kwargs["name"],
+            "role": "client", "status": "invited", "avatar_color": "#000",
+            "client_id": kwargs["client_id"], "created_at": "2026-07-14T00:00:00Z",
+        }
+
+    monkeypatch.setattr(clients_router, "provision_user", _fake_provision)
+    wire("admin")
+    resp = await client.post(
+        "/api/v1/clients/cl-1/portal-users",
+        json={"email": "p@acme.com", "name": "P", "username": "acmeportal", "password": "secret12"},
+    )
+    assert resp.status_code == 201, resp.text
 
 
 async def test_portal_user_unknown_client_404(client: httpx.AsyncClient, wire: Any) -> None:

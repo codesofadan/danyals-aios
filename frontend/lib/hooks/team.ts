@@ -80,6 +80,12 @@ export type AddMemberInput = {
   role: TeamRole;
   color: string;
   features?: string[];
+  // The credential pair the wizard DISPLAYED to the admin. Sent to the server so
+  // the stored hash matches what the admin copied — omitting these made the
+  // server generate a DIFFERENT password and every new member hit
+  // "Invalid credentials" at first sign-in.
+  username?: string;
+  password?: string;
 };
 
 export type InviteResult = {
@@ -107,6 +113,10 @@ export function useAddMember() {
         title: input.title,
         avatar_color: input.color,
         features: input.features ?? [],
+        // Store EXACTLY the credentials the wizard showed (server generates only
+        // when these are absent).
+        ...(input.username ? { username: input.username } : {}),
+        ...(input.password ? { password: input.password } : {}),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: MEMBERS_KEY });

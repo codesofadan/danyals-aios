@@ -212,20 +212,24 @@ async def invite_member(
     body: InviteMemberRequest,
     current: ManageTeam,
 ) -> MemberInviteResponse:
-    """Add a team member with GENERATED one-time credentials (mirrors the wizard).
+    """Add a team member with one-time credentials (mirrors the wizard).
 
     Picks a role template (or an explicit feature list) to seed ``user_feature_grants``,
-    generates a username + strong temp password, provisions with reset-on-first-login
-    + 2FA-on-first-login flags, and returns ``{username, tempPassword}`` ONCE (only the
-    argon2id hash is stored). Owner-only for owner/admin roles (escalation guard).
+    provisions with reset-on-first-login + 2FA-on-first-login flags, and returns
+    ``{username, tempPassword}`` ONCE (only the argon2id hash is stored). The wizard
+    that already DISPLAYED a credential pair sends that same pair in the body — the
+    stored hash must match what the admin copied; absent fields are server-generated.
+    Owner-only for owner/admin roles (escalation guard).
     """
     if body.role in _ELEVATED_ROLES and not current.is_owner:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only a super-admin can create owner/admin users",
         )
-    username = generate_username(body.name)
-    temp_password = generate_password()
+    username = body.username or generate_username(body.name)
+    temp_password = (
+        body.password.get_secret_value() if body.password is not None else generate_password()
+    )
     # Explicit custom toggles win over a template; each granted feature is 'full'.
     feature_grants: dict[str, AccessLevel] | None = (
         cast("dict[str, AccessLevel]", dict.fromkeys(body.features, "full"))

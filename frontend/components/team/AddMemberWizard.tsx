@@ -17,12 +17,22 @@ const ADJ = ["Solar", "Rapid", "Cobalt", "Lunar", "Amber", "Quartz", "Nimbus", "
 const NOUN = ["Falcon", "Harbor", "Cipher", "Meadow", "Quasar", "Lynx", "Beacon", "Vertex", "Willow", "Ember", "Comet", "Delta"];
 const SYM = "!@#$%&*?";
 
-function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+// Crypto-random index — this password is now the REAL stored credential (the
+// server hashes exactly what the wizard shows), so Math.random isn't enough.
+function rand(n: number): number {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return buf[0] % n;
+}
 
+function pick<T>(arr: T[]): T { return arr[rand(arr.length)]; }
+
+// Mirrors the server's shape: Adjective-Noun####$xxxxxx (4 digits + symbol + 6 hex).
 function genPassword(): string {
-  const digits = String(10 + Math.floor(Math.random() * 90));
-  const sym = SYM[Math.floor(Math.random() * SYM.length)];
-  return `${pick(ADJ)}-${pick(NOUN)}${digits}${sym}`;
+  const digits = String(1000 + rand(9000));
+  const sym = SYM[rand(SYM.length)];
+  const tail = Array.from({ length: 6 }, () => "0123456789abcdef"[rand(16)]).join("");
+  return `${pick(ADJ)}-${pick(NOUN)}${digits}${sym}${tail}`;
 }
 
 function genUsername(name: string): string {

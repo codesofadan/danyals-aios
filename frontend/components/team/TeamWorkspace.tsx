@@ -60,6 +60,9 @@ export default function TeamWorkspace() {
     addMember.mutate({
       name: input.name, email: input.email, title: input.title,
       role: input.role, color: input.color, features: input.features,
+      // Send the credentials the wizard DISPLAYED so the server stores that
+      // exact pair — otherwise the member's copied password never matches.
+      username: input.username, password: input.password,
     });
     setTab("roster");
   }
@@ -120,7 +123,16 @@ export default function TeamWorkspace() {
       </div>
 
       <div className="tw-panel" role="tabpanel">
-        {tab === "roster" && (panelGuard(membersQ) ?? <TeamRoster members={members} onAdd={handleAddMember} />)}
+        {tab === "roster" && (panelGuard(membersQ) ?? (
+          <>
+            {addMember.error instanceof Error && (
+              <div style={{ ...panelState, padding: "0.75rem 1rem", color: "var(--warn, #A96913)" }} role="alert">
+                Couldn&apos;t create the member — {addMember.error.message}. The shared credentials will NOT work until this succeeds.
+              </div>
+            )}
+            <TeamRoster members={members} onAdd={handleAddMember} />
+          </>
+        ))}
         {tab === "assign" && (panelGuard(tasksQ) ?? panelGuard(membersQ) ?? (
           <>
             {assignTask.error instanceof Error && (

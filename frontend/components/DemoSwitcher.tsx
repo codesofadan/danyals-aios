@@ -2,16 +2,15 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { useStore } from "@/lib/store";
 import { useAuth, ROLE_META } from "@/lib/auth";
 
-// A small floating control for the live demo: shows who's signed in, lets
-// the presenter sign out (to switch between admin / team / client via the
-// login page), and resets the persisted demo data back to seeds. It only
-// appears once you're signed in — every dashboard sits behind the login.
+// A small floating session control: shows who's signed in and lets the user
+// sign out (to switch between the admin / team / client portals via the login
+// page). It only appears once you're signed in — every dashboard sits behind
+// the login. (The old "reset demo data" button is gone: every screen is on the
+// real API now, so there is no demo store left to reset.)
 export default function DemoSwitcher() {
   const pathname = usePathname() || "/";
-  const { resetDemo } = useStore();
   const { session, logout } = useAuth();
   const [open, setOpen] = useState(false);
 
@@ -21,11 +20,6 @@ export default function DemoSwitcher() {
   if (pathname.startsWith("/login") || !session) return null;
   const meta = ROLE_META[session.role];
   if (!meta) return null;
-
-  function handleReset() {
-    if (typeof window !== "undefined" && !window.confirm("Reset the demo? This clears every client, member and task you added and restores the seed data.")) return;
-    resetDemo();
-  }
 
   return (
     <div className={`demo-switch${open ? " open" : ""}`} role="region" aria-label="Session controls">
@@ -42,10 +36,6 @@ export default function DemoSwitcher() {
           <button type="button" className="demo-switch-link" onClick={() => { setOpen(false); logout(); }}>
             <span className="material-symbols-rounded">logout</span>
             <span className="demo-switch-lbl">Sign out</span>
-          </button>
-          <button type="button" className="demo-switch-reset" onClick={handleReset}>
-            <span className="material-symbols-rounded">restart_alt</span>
-            Reset demo data
           </button>
           <div className="demo-switch-note">
             Sign out to switch between the admin, team &amp; client logins.

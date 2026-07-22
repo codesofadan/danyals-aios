@@ -36,6 +36,9 @@ type ClientState = {
   unlock: (key: string) => void;
   isGranted: (key: string) => boolean;
   isUnlocked: (key: string) => boolean;
+  // True when the backend flagged this report's series as representative sample
+  // data (`placeholder`) — the card must badge it "Sample", never "Live".
+  isPlaceholder: (key: string) => boolean;
   // Requests raised by the client.
   requests: ClientRequest[];
   addRequest: (r: { kind: RequestKind; subject: string; detail: string }) => void;
@@ -108,11 +111,16 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
     for (const r of reports) m[r.key] = r.viz;
     return m;
   }, [reports]);
+  const placeholders = useMemo(
+    () => new Set(reports.filter((r) => r.placeholder).map((r) => r.key)),
+    [reports],
+  );
 
   const requests = requestsQ.data ?? EMPTY_REQUESTS;
 
   const isGranted = useCallback((key: string) => grants.has(key), [grants]);
   const isUnlocked = useCallback((key: string) => unlocked.has(key), [unlocked]);
+  const isPlaceholder = useCallback((key: string) => placeholders.has(key), [placeholders]);
 
   const addRequest = useCallback(
     (r: { kind: RequestKind; subject: string; detail: string }) => {
@@ -130,10 +138,11 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
       unlock,
       isGranted,
       isUnlocked,
+      isPlaceholder,
       requests,
       addRequest,
     }),
-    [client, grants, reportViz, unlocked, unlock, isGranted, isUnlocked, requests, addRequest],
+    [client, grants, reportViz, unlocked, unlock, isGranted, isUnlocked, isPlaceholder, requests, addRequest],
   );
 
   // Until the tenant identity resolves, show the neutral splash — never a seed,

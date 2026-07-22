@@ -170,8 +170,12 @@ class InviteMemberRequest(BaseModel):
 
     Mirrors the wizard's output (``NewMember``): a ``template`` role-template key
     seeds the feature grants, OR an explicit ``features`` list (custom toggles)
-    overrides it; ``role`` is the governance role stamped on the roster row. No
-    password is supplied - the server generates a one-time username + password.
+    overrides it; ``role`` is the governance role stamped on the roster row.
+
+    ``username``/``password`` are OPTIONAL: when the wizard has already shown the
+    admin a credential pair, it sends that SAME pair here so the stored hash
+    matches what the admin copied (otherwise the server generates both). Either
+    way the response echoes the pair that was actually stored.
     """
 
     email: EmailStr
@@ -181,6 +185,8 @@ class InviteMemberRequest(BaseModel):
     avatar_color: str = "#7B69EE"
     template: str | None = None  # role-template key (seo|content|va|super)
     features: list[str] | None = None  # explicit granted feature keys (custom)
+    username: str | None = Field(default=None, min_length=3, max_length=254)
+    password: SecretStr | None = Field(default=None, min_length=8)
 
     @field_validator("template")
     @classmethod

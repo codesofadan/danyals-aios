@@ -882,27 +882,87 @@ def _write_artifacts(
         return None, None
 
 
+def _wp_creds_by_domain(site_url: str, code: str) -> tuple[str, str] | None:
+    """Look up ``"<username>:<app password>"`` by THE vault convention (see on_page).
+
+    One ``vault_keys`` row per WordPress site: ``provider='wordpress'``, ``label`` =
+    the site's domain, secret = ``"<username>:<application password>"`` — the exact
+    convention ``app.modules.on_page`` already resolves. Tries the URL's host and
+    its ``www.``-stripped twin so the label matches however the site was added.
+    Returns ``(username, app_password)`` or None; never raises.
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(site_url).netloc or site_url).strip().lower()
+    if not host:
+        return None
+    labels = [host]
+    if host.startswith("www."):
+        labels.append(host[4:])
+    else:
+        labels.append(f"www.{host}")
+    try:
+        from app.db.database import privileged_connection
+        from app.services.vault import reveal_secret
+
+        with privileged_connection() as cur:
+            cur.execute(
+                "select id from public.vault_keys "
+                "where provider = 'wordpress' and lower(label) = any(%s) limit 1",
+                (labels,),
+            )
+            key_row = cur.fetchone()
+        if key_row is None:
+            return None
+        secret = reveal_secret(str(key_row["id"])) or ""
+    except Exception:
+        logger.warning("wp_credential_reveal_failed", code=code)
+        return None
+    if ":" not in secret:
+        return None
+    username, app_password = secret.split(":", 1)
+    if not username.strip() or not app_password.strip():
+        return None
+    return username.strip(), app_password.strip()
+
+
 def _resolve_wp_from_vault(row: dict[str, Any], settings: Settings) -> WpTarget | None:
     """Resolve a per-site WordPress publisher from the job's WP config + the vault.
 
-    The job's ``source_pack`` carries ``wp_site_url`` + ``wp_username`` +
-    ``wp_vault_key_id`` (seeded by the router); this reveals the app-password
-    server-side and builds a real :class:`WordPressClient`. Any missing piece (or a
-    reveal failure) returns ``None`` -> the publish degrades to artifact-only.
+    Two resolution paths, in order:
+
+    1. EXPLICIT: ``source_pack`` carries ``wp_username`` + ``wp_vault_key_id``
+       (a pre-resolved key id) -> reveal that key directly.
+    2. DOMAIN CONVENTION (the path the router actually seeds): only
+       ``wp_site_url`` is present -> look up the ``vault_keys`` row with
+       ``provider='wordpress'`` and ``label`` = the site's domain, secret
+       ``"<username>:<app password>"`` — the SAME convention the on-page module
+       resolves, so one vault row powers both publish and on-page edits.
+
+    Any missing piece (or a reveal failure) returns ``None`` -> the publish
+    degrades to artifact-only, never a crash.
     """
     raw = _as_dict(row.get("source_pack"))
     site_url = str(raw.get("wp_site_url") or "").strip()
+    if not site_url:
+        return None
+    code = str(row.get("code", ""))
     username = str(raw.get("wp_username") or "").strip()
     key_id = str(raw.get("wp_vault_key_id") or "").strip()
-    if not (site_url and username and key_id):
-        return None
-    try:
-        from app.services.vault import reveal_secret
+    app_password = ""
+    if username and key_id:
+        try:
+            from app.services.vault import reveal_secret
 
-        app_password = reveal_secret(key_id)
-    except Exception:
-        logger.warning("wp_credential_reveal_failed", code=str(row.get("code", "")))
-        return None
+            app_password = reveal_secret(key_id) or ""
+        except Exception:
+            logger.warning("wp_credential_reveal_failed", code=code)
+            return None
+    else:
+        creds = _wp_creds_by_domain(site_url, code)
+        if creds is None:
+            return None
+        username, app_password = creds
     if not app_password:
         return None
     try:
@@ -910,7 +970,7 @@ def _resolve_wp_from_vault(row: dict[str, Any], settings: Settings) -> WpTarget 
 
         publisher: WordPressPublisher = WordPressClient(username=username, app_password=app_password)
     except Exception:
-        logger.warning("wp_client_unavailable", code=str(row.get("code", "")))
+        logger.warning("wp_client_unavailable", code=code)
         return None
     return WpTarget(site_url=site_url, publisher=publisher)
 

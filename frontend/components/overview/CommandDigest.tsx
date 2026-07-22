@@ -39,7 +39,9 @@ export default function CommandDigest({ digest }: { digest: Recommendation[] }) 
       <ul className="pr-list">
         {open.map(({ r, sev }) => {
           const sm = SEV_META[sev];
-          const mod = MODULE_META[r.target];
+          // Guard: an unrecognized target_module from a future backend must
+          // degrade to a generic chip, never white-screen the admin home.
+          const mod = MODULE_META[r.target] ?? { icon: "extension", label: String(r.target || "module") };
           return (
             <li key={r.id} className="pr-item" data-sev={sev} style={{ ["--sev" as any]: sm.color }}>
               <Link href="/admin/policy-radar" className="pr-link">

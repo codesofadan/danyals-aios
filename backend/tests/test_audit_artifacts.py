@@ -80,7 +80,9 @@ class FakeStore:
 def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
     pdf_src, findings_src = _engine_artifacts(tmp_path)
 
-    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _runner(
+        cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+    ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir=str(tmp_path / "engine"), score=80,
             scores={"overall": 80}, findings_path=findings_src, pdf_path=pdf_src,

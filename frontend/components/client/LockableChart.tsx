@@ -20,9 +20,10 @@ const UNLOCK_MS = 1500;
 //   · unlocked    — the live, themed visualization.
 export default function LockableChart({ report }: { report: DashboardReport }) {
   const router = useRouter();
-  const { isGranted, isUnlocked, unlock } = useClient();
+  const { isGranted, isUnlocked, isPlaceholder, unlock } = useClient();
   const granted = isGranted(report.key);
   const unlockedNow = isUnlocked(report.key);
+  const sample = isPlaceholder(report.key);
   const accent = reportColor(report);
 
   const initial: Phase = !granted ? "locked" : unlockedNow ? "unlocked" : "unlockable";
@@ -59,7 +60,7 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
           <div className="cl-chart-t">{report.label}</div>
           <div className="cl-chart-grp">{report.group}</div>
         </div>
-        <ChartBadge phase={phase} />
+        <ChartBadge phase={phase} sample={sample} />
       </header>
 
       {phase === "unlocked" ? (
@@ -117,8 +118,17 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
   );
 }
 
-function ChartBadge({ phase }: { phase: Phase }) {
+function ChartBadge({ phase, sample }: { phase: Phase; sample?: boolean }) {
   if (phase === "unlocked") {
+    // A backend-flagged placeholder series is representative sample data — it
+    // must never be presented to a paying client as "Live".
+    if (sample) {
+      return (
+        <span className="cl-chart-badge sample" title="Representative preview — live data appears as this service ramps up" style={{ background: "rgba(255,180,60,.12)", color: "#c8871a", borderColor: "rgba(200,135,26,.35)" }}>
+          <span className="material-symbols-rounded" style={{ fontSize: "0.85em" }}>science</span>Preview
+        </span>
+      );
+    }
     return (
       <span className="cl-chart-badge live">
         <span className="cl-live-dot" />Live

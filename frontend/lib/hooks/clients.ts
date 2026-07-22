@@ -6,9 +6,18 @@
 // view + the Add-Client wizard.
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { TIER_PRICE, type ClientRecord, type NewClient } from "@/lib/data";
+import { TIER_PRICE, type ClientRecord, type NewClient, type Ticket } from "@/lib/data";
 
 export const CLIENTS_KEY = ["clients"] as const;
+export const TICKETS_KEY = ["tickets"] as const;
+
+/** The support-ticket queue (GET /tickets, newest first) for the Directory feed. */
+export function useTickets() {
+  return useQuery({
+    queryKey: TICKETS_KEY,
+    queryFn: () => api.get<Ticket[]>("/tickets"),
+  });
+}
 export const reportGrantsKey = (clientId: string) =>
   ["clients", clientId, "report-grants"] as const;
 

@@ -147,6 +147,12 @@ export default function ClientDirectory() {
           <span className="material-symbols-rounded">warning</span>{portalWarning}
         </div>
       )}
+      {createClient.error instanceof Error && (
+        <div className="login-error" role="alert">
+          <span className="material-symbols-rounded">error</span>
+          Couldn&apos;t create the client — {createClient.error.message}
+        </div>
+      )}
       {mode === "portal" && (
         <div className="sec-note">
           <span className="material-symbols-rounded">lock</span>

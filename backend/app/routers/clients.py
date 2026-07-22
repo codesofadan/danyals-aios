@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.auth import CurrentUser, CurrentUserDep, require_owner, require_perm
+from app.core.auth import CurrentUser, CurrentUserDep, require_perm
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
 from app.db.database import DatabaseNotConfiguredError
@@ -32,7 +32,6 @@ router = APIRouter(tags=["clients"])
 logger = get_logger("app.clients")
 
 ManageClients = Annotated[CurrentUser, Depends(require_perm("manage_clients"))]
-OwnerOnly = Annotated[CurrentUser, Depends(require_owner())]
 
 _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
@@ -168,13 +167,17 @@ async def create_site(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_portal_user(
-    client_id: str, body: PortalUserRequest, repo: ClientsRepoDep, actor: OwnerOnly
+    client_id: str, body: PortalUserRequest, repo: ClientsRepoDep, actor: ManageClients
 ) -> MemberResponse:
-    """Provision a client PORTAL login scoped to ``client_id`` (owner-only).
+    """Provision a client PORTAL login scoped to ``client_id`` (lead-only).
 
-    The role is fixed to ``client`` and the tenant is pinned from the path, so
-    this endpoint can neither mint a staff account nor point a login at another
-    client's data. Provisioning uses the service_role admin client (server-only).
+    Guarded by ``manage_clients`` — the SAME gate as creating the client itself,
+    so the Add-Client wizard's final step (this call) can never silently 403 for
+    an admin/manager who was just allowed to create the client. Not an
+    escalation: the role is fixed to ``client`` and the tenant is pinned from
+    the path, so this endpoint can neither mint a staff account nor point a
+    login at another client's data. Provisioning uses the service_role admin
+    client (server-only).
     """
     client = await asyncio.to_thread(repo.get_client, client_id)
     if client is None:

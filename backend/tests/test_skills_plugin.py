@@ -37,9 +37,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PLUGIN_DIR = _REPO_ROOT / "aios-skills"
 _SKILLS_DIR = _PLUGIN_DIR / "skills"
 
-# The 30 skills the plugin ships. Kept explicit so a dropped/renamed skill fails loudly.
+# The 31 skills the plugin ships. Kept explicit so a dropped/renamed skill fails loudly.
 EXPECTED_SKILLS = frozenset({
     "assign-task", "audit", "backlink-audit", "blog-post", "citation-builder",
+    "citation-submit",
     "client-snapshot", "content", "geo-audit", "local-audit", "local-service-page",
     "milestones", "monthly-report", "offpage", "policy-brief", "policy-radar",
     "report", "sheets-sync", "team-status", "technical-audit", "titles-meta",
@@ -55,7 +56,7 @@ EXPECTED_SKILLS = frozenset({
 WRITE_SKILLS = frozenset({
     "content", "blog-post", "local-service-page", "titles-meta",  # content/*
     "report", "monthly-report",                                   # report*
-    "web2-build", "citation-builder", "backlink-audit", "policy-brief",
+    "web2-build", "citation-builder", "citation-submit", "backlink-audit", "policy-brief",
     "sheets-sync", "upsells", "assign-task", "audit",
     # Part 8. Every one of these spends, mutates a live site, seals a secret, or moves
     # money: rank-report re-prices a standing per-client commitment when it adds a
