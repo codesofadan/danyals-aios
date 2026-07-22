@@ -35,6 +35,10 @@ x-app-env: &app-env
   CELERY_BROKER_URL: redis://redis:6379/1
   CELERY_RESULT_BACKEND: redis://redis:6379/2
   READINESS_TIMEOUT_SECONDS: "3"
+  # Audit engine (danyals-audit-system) is baked into the backend image with its OWN
+  # venv; the worker invokes it as a subprocess (integrations/audit_engine.py).
+  AUDIT_ENGINE_DIR: /app/audit-engine
+  AUDIT_ENGINE_PYTHON: /opt/audit-venv/bin/python
   # Artifact roots live on the shared aios_state volume (writable by the aios user).
   AUDIT_ARTIFACT_DIR: /var/lib/aios/artifacts/audits
   CONTENT_ARTIFACT_DIR: /var/lib/aios/artifacts/content

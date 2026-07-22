@@ -15,8 +15,13 @@ daniyals-frontend
 **/.next
 
 # Sibling trees the backend image never needs (keep the root context lean + fast).
-# The backend wheel only reads backend/ + db/migrations/ + infra/docker/.
-danyals-audit-system
+# NOTE: danyals-audit-system IS now built into the image (the worker subprocess-invokes
+# it as the audit engine), so it is NO LONGER excluded wholesale — only its heavy /
+# unneeded subtrees are dropped from the context below.
+danyals-audit-system/data
+danyals-audit-system/generated-audits
+danyals-audit-system/tests
+danyals-audit-system/docs
 aios
 aios-skills
 .claude
