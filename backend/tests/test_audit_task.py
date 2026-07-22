@@ -61,7 +61,7 @@ def _row(**over: Any) -> dict[str, Any]:
 
 
 def _ok_runner(score: int) -> Any:
-    def _run(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _run(cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=score,
             scores={"overall": score, "technical": 90}, runtime_seconds=372, exit_code=0,
@@ -82,7 +82,9 @@ def test_success_marks_running_then_done_and_logs_zero_cost_on_free() -> None:
     assert done["run_uuid"] == "u-1"
     assert done["runtime_seconds"] == 372
     assert "finished_at" in done
-    assert store.costs == [0.0]  # Free tier -> zero paid spend logged
+    # Authenticated dashboard audits ALWAYS run the comprehensive (paid-provider)
+    # pipeline now, so the paid estimate is logged regardless of the row's tier label.
+    assert store.costs == [1.5]
 
 
 def test_paid_run_logs_estimated_cost() -> None:
@@ -92,7 +94,7 @@ def test_paid_run_logs_estimated_cost() -> None:
 
 
 def test_engine_failure_marks_failed_never_running() -> None:
-    def _fail(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _fail(cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False) -> AuditRunResult:
         return AuditRunResult(ok=False, run_uuid="u-9", runtime_seconds=5, error="engine timed out after 1500s")
 
     store = FakeStore(_row(tier="paid"))
@@ -148,7 +150,7 @@ def test_cost_log_failure_never_breaks_job() -> None:
 # C1: the audit worker routes a PAID run through the cost gate BEFORE spending.
 # --------------------------------------------------------------------------- #
 def _tracking_runner(ran: list[bool], score: int = 90) -> Any:
-    def _run(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _run(cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False) -> AuditRunResult:
         ran.append(True)  # records that the (paid) engine actually executed
         return _ok_runner(score)(cfg, url=url, tier=tier)
     return _run
@@ -193,9 +195,10 @@ def test_free_audit_is_never_gated_even_if_a_block_would_apply() -> None:
     )
     out = execute_audit(store, _settings(), "aud-1", runner=_tracking_runner(ran, score=77))
     assert out["status"] == "done"
-    assert ran == [True]  # the free engine ran normally
-    assert store.evaluated == []  # gate never consulted on Free
-    assert store.costs == [0.0]
+    assert ran == [True]  # the engine ran normally
+    assert store.evaluated == []  # gate never consulted on the Free-labelled row
+    # Dashboard audits run the comprehensive pipeline, so the paid estimate is logged.
+    assert store.costs == [1.5]
 
 
 def test_task_is_registered() -> None:

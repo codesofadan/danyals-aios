@@ -33,7 +33,7 @@ const SECTIONS: Section[] = [
     items: [
       { icon: "diversity_3", label: "Clients", href: "/admin/clients" },
       { icon: "groups", label: "Team Management", href: "/admin/team" },
-      { icon: "flag", label: "Milestones", href: "/admin/milestones" },
+      // { icon: "flag", label: "Milestones", href: "/admin/milestones" }, // hidden for now
       { icon: "summarize", label: "Reports", href: "/admin/reports" },
       { icon: "sell", label: "Upsells", href: "/admin/upsells" },
     ],
