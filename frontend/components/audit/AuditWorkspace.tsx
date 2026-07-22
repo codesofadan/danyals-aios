@@ -9,6 +9,7 @@ import {
 } from "@/lib/audit";
 import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
+import { downloadFile } from "@/lib/api";
 import AuditStats from "./AuditStats";
 import AuditCoverage from "./AuditCoverage";
 import AuditScoreHistogram from "./AuditScoreHistogram";
@@ -158,10 +159,24 @@ export default function AuditWorkspace() {
                       </td>
                       <td>
                         <div className="au-arts">
-                          <button className="au-art" title="Download PDF report" disabled={!r.pdf}>
+                          <button
+                            className="au-art"
+                            title="Download PDF report"
+                            disabled={!r.pdf}
+                            onClick={() =>
+                              downloadFile(`/audits/${r.id}/report.pdf`, `${r.client}-audit-${r.id}.pdf`)
+                            }
+                          >
                             <span className="material-symbols-rounded">picture_as_pdf</span>
                           </button>
-                          <button className="au-art" title="Download JSON" disabled={!r.json}>
+                          <button
+                            className="au-art"
+                            title="Download findings JSON"
+                            disabled={!r.json}
+                            onClick={() =>
+                              downloadFile(`/audits/${r.id}/findings.json`, `${r.client}-findings-${r.id}.json`)
+                            }
+                          >
                             <span className="material-symbols-rounded">data_object</span>
                           </button>
                         </div>
