@@ -64,6 +64,12 @@ x-app-env: &app-env
   BING_PLACES_API_KEY: ${BING_PLACES_API_KEY:-}
   APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
   APIFY_CITATION_ACTOR_ID: ${APIFY_CITATION_ACTOR_ID:-}
+  # Citation bot: captcha solver (CapSolver|CapMonster) + optional residential proxy.
+  CAPTCHA_SOLVER_PROVIDER: ${CAPTCHA_SOLVER_PROVIDER:-capsolver}
+  CAPTCHA_SOLVER_API_KEY: ${CAPTCHA_SOLVER_API_KEY:-}
+  CITATION_PROXY_URL: ${CITATION_PROXY_URL:-}
+  # Reports: Google Sheets operational store (service-account credential JSON).
+  GOOGLE_SHEETS_SA_JSON: ${GOOGLE_SHEETS_SA_JSON:-}
   SENTRY_DSN: ${SENTRY_DSN:-}
 
 # ---- shared build (all backend roles share ONE image) ------------------------
