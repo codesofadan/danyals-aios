@@ -207,47 +207,64 @@ class ApifyCitationSubmitter(HttpProviderClient):
         for item in rows:
             if not isinstance(item, dict):
                 continue
-            # The actor nests per-directory outcomes under audit.results (and may
-            # grow a submissions list); a flat item is also accepted.
-            candidates: list[Any] = []
-            for source in (
-                item.get("results"),
-                (item.get("audit") or {}).get("results") if isinstance(item.get("audit"), dict) else None,
-                item.get("submissions"),
-            ):
-                if isinstance(source, list):
-                    candidates.extend(source)
-            if not candidates:
-                candidates = [item]
-            for c in candidates:
+            # THE REAL OUTPUT SHAPE (verified against live runs 2026-07-23):
+            #   item.submissions = {summary: {...}, results: [{directory, status,
+            #   manualLink?, listingUrl?, preformattedData?}, ...]}
+            # Submission results are authoritative; audit.results is the CHECK
+            # (missing/correct/incorrect vocabulary), used only as a fallback.
+            sub_results: list[Any] = []
+            subs = item.get("submissions")
+            if isinstance(subs, dict) and isinstance(subs.get("results"), list):
+                sub_results = subs["results"]
+            elif isinstance(subs, list):
+                sub_results = subs
+            for c in sub_results:
                 if not isinstance(c, dict):
                     continue
-                status = str(c.get("status") or c.get("submissionStatus") or "").lower()
+                saw_candidate = True
+                status = str(c.get("status") or "").lower()
                 url = str(
                     c.get("liveUrl") or c.get("listingUrl") or c.get("proofUrl")
                     or c.get("submissionUrl") or c.get("url") or ""
                 )
-                if not (status or url):
-                    continue
-                saw_candidate = True
+                if status in ("requires_account", "requiresaccount"):
+                    # The platform only accepts an authenticated business account
+                    # (Google/Facebook/Bing/Apple class). Blocked - retryable once
+                    # credentials exist - with the actor's manual link surfaced so
+                    # the operator can finish it by hand from the board.
+                    manual = str(c.get("manualLink") or "")
+                    return CitationSubmitResult(
+                        status="blocked",
+                        proof_url=manual,
+                        error="requires an authenticated business account"
+                        + (f" - manual: {manual}" if manual else ""),
+                    )
                 if status in ("failed", "error", "skipped"):
                     reason = str(c.get("error") or c.get("message") or f"directory {status}")
                     return CitationSubmitResult(status="failed", error=reason)
-                # Only submission vocabulary counts as success; audit vocabulary
-                # (missing/incorrect/correct) means the directory was CHECKED, not
-                # built - reported honestly as a failure with the status attached.
-                if status in ("submitted", "success", "succeeded", "verified", "created", "updated", "ok", "pending") or (
-                    not status and url
-                ):
+                if status in (
+                    "submitted", "success", "succeeded", "verified", "created",
+                    "updated", "ok", "pending", "verification_pending", "verificationpending",
+                ) or (not status and url):
                     return CitationSubmitResult(
                         status="verified" if status == "verified" else "submitted",
                         proof_url=url,
                         external_ref=str(c.get("externalRef") or c.get("id") or run_id),
                     )
                 return CitationSubmitResult(
-                    status="failed",
-                    error=f"Apify reported '{status}' (audited, not submitted)",
+                    status="failed", error=f"Apify submission reported '{status}'"
                 )
+            # Fallback: audit-only output (no submissions block) - the directory
+            # was checked, not built.
+            audit = item.get("audit")
+            audit_results = audit.get("results") if isinstance(audit, dict) else None
+            for c in audit_results or []:
+                if isinstance(c, dict) and (c.get("status") or c.get("directory")):
+                    saw_candidate = True
+                    return CitationSubmitResult(
+                        status="failed",
+                        error=f"Apify audited only (status '{c.get('status')}') - nothing was submitted",
+                    )
         if not saw_candidate:
             # The run finished but processed NOTHING (e.g. the directory filter
             # matched none of the actor's network) — an honest failure, never a

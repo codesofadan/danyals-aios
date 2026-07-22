@@ -197,9 +197,17 @@ def test_apify_runs_and_polls_to_success() -> None:
             seen.update(_json.loads(request.content))
             return httpx.Response(200, json={"data": {"id": "run-1"}})
         if "/datasets/" in request.url.path:
+            # The REAL actor output: submissions is a DICT {summary, results}.
             return httpx.Response(
                 200,
-                json=[{"results": [{"status": "submitted", "liveUrl": "https://proof.example/1"}]}],
+                json=[{
+                    "submissions": {
+                        "summary": {"total": 1, "submitted": 1},
+                        "results": [{"directory": "Brownbook", "status": "submitted",
+                                     "listingUrl": "https://proof.example/1"}],
+                    },
+                    "audit": {"results": [{"directory": "Brownbook", "status": "missing"}]},
+                }],
             )
         calls["n"] += 1
         if calls["n"] < 2:
