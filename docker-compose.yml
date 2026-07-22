@@ -43,6 +43,8 @@ x-app-env: &app-env
   AUDIT_ARTIFACT_DIR: /var/lib/aios/artifacts/audits
   CONTENT_ARTIFACT_DIR: /var/lib/aios/artifacts/content
   BACKUP_ARTIFACT_DIR: /var/lib/aios/backups
+  # Data-import upload store — without this the multipart upload route 503s.
+  IMPORT_ARTIFACT_DIR: /var/lib/aios/artifacts/imports
   # Seed OWNER (first login) — used once by the migrate step, inert afterward.
   SEED_OWNER_USERNAME: ${SEED_OWNER_USERNAME:-owner}
   SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD}

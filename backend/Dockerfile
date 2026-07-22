@@ -61,8 +61,20 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PATH="/opt/venv/bin:$PATH"
 # postgresql-client -> psql for the migrate entrypoint; curl -> the API healthcheck.
 # (psycopg[binary] bundles its own libpq, so no libpq-dev needed at runtime.)
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client curl \
-    && rm -rf /var/lib/apt/lists/*
+# chromium (+ fonts) -> the audit engine's PDF report backend: reporters/pdf.py finds a
+# headless browser via shutil.which("chromium") and renders with --headless --no-sandbox
+# --disable-gpu, which is exactly container-safe. Without it audits still complete (real
+# score + findings.json) but produce no report.pdf; with it the flagship PDF deliverable
+# renders and reaches the client portal.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-client curl chromium fonts-liberation fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/* \
+    # Wrapper prepends --disable-dev-shm-usage so headless chromium doesn't crash on the
+    # container's tiny /dev/shm; the engine appends its own --headless/--no-sandbox flags.
+    && printf '#!/bin/sh\nexec /usr/bin/chromium --disable-dev-shm-usage "$@"\n' > /usr/local/bin/chromium-wrap \
+    && chmod +x /usr/local/bin/chromium-wrap
+# Point the engine's PDF backend at the wrapper (reporters/pdf.py honours this override).
+ENV SEO_AUDIT_CHROME=/usr/local/bin/chromium-wrap
 COPY --from=builder /opt/venv /opt/venv
 # The audit engine's venv + its source tree. The engine reads checklists/knowledge/
 # templates from its CWD (AUDIT_ENGINE_DIR) and writes artifacts under <dir>/data/, so
