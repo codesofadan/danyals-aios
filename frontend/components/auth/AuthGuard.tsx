@@ -17,14 +17,17 @@ export default function AuthGuard({ role, children }: { role: Role; children: Re
   const { session, ready } = useAuth();
   const router = useRouter();
 
-  const allowed = ready && session?.role === role;
+  // The admin/owner may VIEW any portal (a super-admin preview) — so /team and
+  // /client stay put instead of bouncing to /admin. Team + client stay scoped to
+  // their own portal. (Still UX-only; the API enforces real data access per role.)
+  const allowed = ready && !!session && (session.role === role || session.role === "admin");
 
   useEffect(() => {
     if (!ready) return;
     if (!session) {
       router.replace("/login");
-    } else if (session.role !== role) {
-      // Signed in under a different role — send them to their own home.
+    } else if (session.role !== role && session.role !== "admin") {
+      // A team/client signed in under a different portal — send them to their own.
       router.replace(ROLE_META[session.role].home);
     }
   }, [ready, session, role, router]);

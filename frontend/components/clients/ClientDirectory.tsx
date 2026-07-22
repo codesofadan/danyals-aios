@@ -182,7 +182,7 @@ export default function ClientDirectory() {
             </thead>
             <tbody>
               {clients.map((c) => {
-                const sm = STATUS_META[c.status];
+                const sm = STATUS_META[c.status] ?? { label: c.status, cls: "mut" };
                 return (
                   <tr key={c.id}>
                     <td>

@@ -109,7 +109,9 @@ export default function Web2Tab() {
             )}
             {!web2Q.isLoading && !web2Q.isError && rows.map((w) => {
               const pm = PLATFORM_META[w.platform as Web2Platform];
-              const pipeline = PIPELINE_META[w.status];
+              // Fallback for any status the backend emits that isn't in the map
+              // (e.g. blocked/unchanged/error/skipped) — never crash the page.
+              const pipeline = PIPELINE_META[w.status] ?? { label: w.status, cls: "mut" };
               return (
                 <tr key={w.id}>
                   <td className="op-strong">{w.client}</td>

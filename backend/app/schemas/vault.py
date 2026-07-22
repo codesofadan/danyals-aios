@@ -13,7 +13,10 @@ from pydantic import BaseModel, Field, SecretStr
 
 from app.util.timefmt import relative_ago
 
-ProviderId = Literal["serper", "dataforseo", "google", "anthropic", "imagegen", "gsheets", "wordpress"]
+ProviderId = Literal[
+    "serper", "dataforseo", "google", "anthropic", "imagegen", "gsheets", "wordpress",
+    "foursquare", "apify", "capmonster", "resend",
+]
 Scope = Literal["Agency-global", "Per-site"]
 KeyStatus = Literal["active", "expiring", "rotate"]
 

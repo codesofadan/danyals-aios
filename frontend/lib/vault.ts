@@ -18,9 +18,10 @@ import { SERIES } from "@/lib/data";
 // anything not listed here rather than crashing on an unknown value.
 export type ProviderId =
   | "serper" | "dataforseo" | "google" | "anthropic" | "imagegen" | "gsheets" | "wordpress"
+  | "foursquare" | "apify" | "capmonster" | "resend"
   | "gbp" | "website_cms" | "analytics" | "search_console";
 
-export type Category = "Rankings" | "Google APIs" | "AI / Content" | "Publishing" | "Sheets" | "Client Access";
+export type Category = "Rankings" | "Google APIs" | "AI / Content" | "Publishing" | "Sheets" | "Off-page" | "Delivery" | "Client Access";
 
 export type Provider = {
   id: ProviderId;
@@ -39,6 +40,10 @@ export const providers: Provider[] = [
   { id: "imagegen", name: "Image Generation", icon: "image", category: "AI / Content", c: SERIES.c1, desc: "AI image generation API" },
   { id: "gsheets", name: "Google Sheets", icon: "grid_on", category: "Sheets", c: SERIES.c5, desc: "Service-account exports" },
   { id: "wordpress", name: "WordPress", icon: "language", category: "Publishing", c: SERIES.c3, desc: "Per-site application passwords" },
+  { id: "foursquare", name: "Foursquare", icon: "place", category: "Off-page", c: SERIES.c4, desc: "Citation submissions (Places API)" },
+  { id: "apify", name: "Apify", icon: "smart_toy", category: "Off-page", c: SERIES.c4, desc: "Citation-builder fallback actor" },
+  { id: "capmonster", name: "CapMonster", icon: "security", category: "Off-page", c: SERIES.c4, desc: "CAPTCHA solver for the citation bot" },
+  { id: "resend", name: "Resend", icon: "mail", category: "Delivery", c: SERIES.c3, desc: "Transactional email" },
   { id: "gbp", name: "Google Business Profile", icon: "storefront", category: "Client Access", c: SERIES.c2, desc: "A client's GBP access, collected at onboarding" },
   { id: "website_cms", name: "Website / CMS", icon: "language", category: "Client Access", c: SERIES.c3, desc: "A client's CMS login, collected at onboarding" },
   { id: "analytics", name: "Analytics", icon: "query_stats", category: "Client Access", c: SERIES.c2, desc: "A client's Analytics access, collected at onboarding" },
@@ -63,6 +68,8 @@ export const CATEGORIES: { key: Category; icon: string; c: string; note?: string
   { key: "AI / Content", icon: "auto_awesome", c: SERIES.c1 },
   { key: "Publishing", icon: "language", c: SERIES.c3 },
   { key: "Sheets", icon: "grid_on", c: SERIES.c5 },
+  { key: "Off-page", icon: "hub", c: SERIES.c4 },
+  { key: "Delivery", icon: "mail", c: SERIES.c3 },
   { key: "Client Access", icon: "badge", c: SERIES.c2 },
 ];
 

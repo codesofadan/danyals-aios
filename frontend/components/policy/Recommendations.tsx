@@ -62,7 +62,7 @@ export default function Recommendations() {
         )}
         {!recsQ.isLoading && !recsQ.isError && rows.map((r) => {
           const mod = MODULE_META[r.target];
-          const st = STATUS_META[r.status];
+          const st = STATUS_META[r.status] ?? { label: r.status, cls: "mut", icon: "help" };
           const settled = r.status === "applied" || r.status === "dismissed";
           return (
             <article className={`pr-rec ${settled ? "settled" : ""}`} key={r.id}>
