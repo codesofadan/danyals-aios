@@ -55,7 +55,7 @@
 .dh-action-ic .material-symbols-rounded { font-size: 21px; }
 .dh-action-t { font-size: 13px; font-weight: 700; color: var(--ink); }
 .dh-action-s { font-size: 11px; color: var(--muted); margin-top: 1px; }
-.dh-action-go { margin-left: auto; color: var(--muted-2); font-size: 20px; }
+.dh-action-go.material-symbols-rounded { margin-left: auto; color: var(--muted-2); font-size: 20px; }
 .dh-action div { min-width: 0; }
 
 /* ---- personalized hero ---- */
@@ -169,6 +169,10 @@
 .dl-done-ic .material-symbols-rounded { font-size: 19px; }
 .dl-done-actions { flex: none; display: flex; gap: 6px; }
 .dl-done-actions .mini-btn .material-symbols-rounded { font-size: 15px; }
+.dl-done-badge { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700;
+  color: var(--ok); padding: 5px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 26%, transparent); }
+.dl-done-badge .material-symbols-rounded { font-size: 15px; }
 
 /* ============================================================
    REVIEW — the human 10% gate
@@ -206,7 +210,7 @@
 .ac-chip.on { border-color: color-mix(in srgb, var(--c) 45%, transparent);
   background: color-mix(in srgb, var(--c) 12%, var(--well)); }
 .ac-chip.off { opacity: .62; }
-.ac-chip-ic { flex: none; font-size: 22px; }
+.ac-chip-ic.material-symbols-rounded { flex: none; font-size: 22px; }
 .ac-chip.on .ac-chip-ic { color: var(--c); }
 .ac-chip.off .ac-chip-ic { color: var(--muted-2); }
 .ac-chip-main { flex: 1; min-width: 0; }

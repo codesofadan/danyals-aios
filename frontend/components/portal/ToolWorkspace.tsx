@@ -23,11 +23,6 @@ export default function ToolWorkspace({ tool }: { tool: Tool }) {
         </div>
         <div className="tool-hero-side">
           <span className="tool-granted"><span className="material-symbols-rounded">verified_user</span>Access granted</span>
-          {tool.primary && (
-            <button className="primary-btn">
-              <span className="material-symbols-rounded">{tool.primary.icon}</span>{tool.primary.label}
-            </button>
-          )}
         </div>
       </section>
 

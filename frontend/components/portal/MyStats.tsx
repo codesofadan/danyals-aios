@@ -27,7 +27,7 @@ export default function MyStats({ me, myTasks }: { me: TeamMemberRecord; myTasks
       note: "due today or overdue",
       ...(attention > 0 ? { delta: String(attention), deltaDir: "down" as const } : {}),
     },
-    { icon: "schedule", label: "On-time delivery", value: `${me.onTime}%`, delta: "1.3%", deltaDir: "up", note: "rolling 30 days" },
+    { icon: "schedule", label: "On-time delivery", value: `${me.onTime}%`, note: "rolling 30 days" },
     { icon: "task_alt", label: "Delivered", value: String(me.completed), note: `this cycle · ${inReview} in review` },
   ];
 

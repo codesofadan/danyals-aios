@@ -33,6 +33,7 @@ from app.schemas.tasks import (
     type_to_db,
 )
 from app.services.activity import record_activity
+from app.services.notifications import notify
 
 router = APIRouter(tags=["tasks"])
 
@@ -136,6 +137,19 @@ async def create_task(
     await record_activity(
         actor, kind="task", action="assigned a task", target=client.get("name", ""),
         entity_type="client", entity_id=body.client_id,
+    )
+    # Email + in-app the assignee that work landed in their queue (best-effort;
+    # honours their notification_prefs, never blocks the create).
+    await notify(
+        body.assignee_id,
+        kind="task_assigned",
+        title=f"New task assigned: {body.title}",
+        body=(
+            f'You have been assigned "{body.title}" for {client.get("name", "a client")}. '
+            f"Priority: {body.priority}."
+            + (f" Due {body.due.isoformat()}." if body.due else "")
+            + " Open your portal queue to get started."
+        ),
     )
     return TaskResponse.from_row(row)
 
@@ -246,4 +260,18 @@ async def patch_task(
         actor, kind="task", action="updated a task", target=task.get("client_name", ""),
         entity_type=ent_type, entity_id=ent_id,
     )
+    # If the task was handed to a NEW assignee, email + in-app them (best-effort).
+    # Compare as strings: the stored id is a psycopg uuid, the patch value a str.
+    prev_assignee = task.get("assignee_id")
+    new_assignee = patch.get("assignee_id")
+    if new_assignee and (str(prev_assignee) if prev_assignee is not None else None) != new_assignee:
+        await notify(
+            new_assignee,
+            kind="task_assigned",
+            title=f"Task reassigned to you: {task.get('title', '')}",
+            body=(
+                f'"{task.get("title", "A task")}" for {task.get("client_name", "a client")} '
+                "is now assigned to you. Open your portal queue to pick it up."
+            ),
+        )
     return TaskResponse.from_row(updated)

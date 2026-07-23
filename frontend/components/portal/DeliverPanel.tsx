@@ -89,10 +89,9 @@ export default function DeliverPanel({ tasks, onAdvance }: { tasks: Task[]; onAd
                     <span className="task-type">{t.type}</span>
                   </div>
                 </div>
-                <div className="dl-done-actions">
-                  <button className="mini-btn" type="button"><span className="material-symbols-rounded">visibility</span>View</button>
-                  <button className="mini-btn" type="button"><span className="material-symbols-rounded">download</span></button>
-                </div>
+                <span className="dl-done-badge">
+                  <span className="material-symbols-rounded">check_circle</span>Delivered
+                </span>
               </div>
             ))}
           </div>

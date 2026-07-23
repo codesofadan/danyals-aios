@@ -185,7 +185,7 @@
 
 .pr-rec-head { display: flex; align-items: flex-start; gap: 10px; }
 .pr-rec-title { flex: 1; font-size: 14px; font-weight: 800; color: var(--ink); line-height: 1.35; letter-spacing: -.01em; }
-.pr-st-ic { font-size: 14px; margin-right: 3px; }
+.pr-st-ic.material-symbols-rounded { font-size: 14px; margin-right: 3px; }
 .status-pill .pr-st-ic { vertical-align: -2px; }
 
 .pr-rec-k {

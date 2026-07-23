@@ -26,6 +26,7 @@ from app.schemas.clients import (
 )
 from app.schemas.identity import MemberResponse, PortalUserRequest
 from app.services.activity import record_activity
+from app.services.notifications import notify
 from app.services.provisioning import provision_user
 
 router = APIRouter(tags=["clients"])
@@ -216,6 +217,22 @@ async def create_portal_user(
         # login), so track the client entity, not the freshly-minted user.
         entity_type="client",
         entity_id=client_id,
+    )
+    # Email the client their brand-new portal credentials (best-effort). This is
+    # the "send invitation email" path - the admin still sees the pair once to copy
+    # manually. `row["id"]` is the freshly provisioned client user, so notify()
+    # resolves the address directly.
+    await notify(
+        str(row["id"]),
+        kind="portal_ready",
+        title=f"Your {client.get('name', 'client')} portal is ready",
+        body=(
+            f"Hi {body.name}, your client portal has been set up. Sign in to track "
+            "your SEO progress, reports and deliverables.\n\n"
+            f"Username: {body.username or str(body.email)}\n"
+            f"Password: {body.password.get_secret_value()}\n\n"
+            "We recommend changing your password after your first sign-in."
+        ),
     )
     return MemberResponse.from_row(row)
 

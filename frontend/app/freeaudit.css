@@ -288,7 +288,7 @@
   position: relative; padding: 18px 18px 16px; border-radius: 16px;
   background: linear-gradient(160deg, var(--card), var(--card-2)); border: 1px solid var(--line);
 }
-.fa-kpi-ic { position: absolute; top: 16px; right: 16px; font-size: 22px; color: var(--muted-2); }
+.fa-kpi-ic.material-symbols-rounded { position: absolute; top: 16px; right: 16px; font-size: 22px; color: var(--muted-2); }
 .fa-kpi.warn .fa-kpi-ic { color: var(--warn); }
 .fa-kpi.ok .fa-kpi-ic { color: var(--ok); }
 .fa-kpi-val { font-size: 34px; font-weight: 800; letter-spacing: -.03em; color: var(--fg-strong); line-height: 1; }

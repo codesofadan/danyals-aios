@@ -137,7 +137,18 @@ class WordPressClient(HttpProviderClient):
         if not username or not app_password:
             raise ProviderNotConfiguredError(f"WordPress client unavailable: {_INSTALL_HINT}")
         # No base_url: each publish targets a per-call absolute site URL.
-        super().__init__(headers={"Content-Type": "application/json"}, timeout=timeout)
+        # A managed host in front of WordPress (Hostinger's hcdn, a WAF, some
+        # security plugins) intermittently answers an otherwise-valid authenticated
+        # REST call with a soft-challenge 403 that clears on an immediate retry, so
+        # 403 is transient HERE (not globally) and the publish path gets one extra
+        # attempt. A genuine permission-403 (the app password lacks publish rights)
+        # still surfaces as ProviderCallError once the attempts are spent.
+        super().__init__(
+            headers={"Content-Type": "application/json"},
+            timeout=timeout,
+            max_attempts=4,
+            transient_statuses=frozenset({403}),
+        )
         self._auth = (username, app_password)
 
     def _post_endpoint(self, site_url: str, post_id: int) -> str:

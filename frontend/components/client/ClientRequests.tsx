@@ -15,17 +15,35 @@ export default function ClientRequests() {
   const [subject, setSubject] = useState("");
   const [detail, setDetail] = useState("");
   const [sent, setSent] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const valid = subject.trim().length > 3;
   const open = requests.filter((r) => r.status !== "resolved").length;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!valid) return;
-    addRequest({ kind, subject: subject.trim(), detail: detail.trim() });
-    setSubject(""); setDetail(""); setKind("Report");
-    setSent(true);
-    setTimeout(() => setSent(false), 2200);
+    if (!valid || busy) return;
+    setFailed(false);
+    setSent(false);
+    setBusy(true);
+    // Only confirm + clear the form once the POST actually succeeds; on failure,
+    // keep what the client typed and show a retry-able error.
+    addRequest(
+      { kind, subject: subject.trim(), detail: detail.trim() },
+      {
+        onSuccess: () => {
+          setBusy(false);
+          setSubject(""); setDetail(""); setKind("Report");
+          setSent(true);
+          setTimeout(() => setSent(false), 2600);
+        },
+        onError: () => {
+          setBusy(false);
+          setFailed(true);
+        },
+      },
+    );
   }
 
   return (
@@ -85,8 +103,9 @@ export default function ClientRequests() {
 
             <div className="cl-req-foot">
               {sent && <span className="cl-req-sent"><span className="material-symbols-rounded">check_circle</span>Request sent</span>}
-              <button type="submit" className="primary-btn" disabled={!valid}>
-                <span className="material-symbols-rounded">send</span>Send request
+              {failed && <span className="cl-req-sent err"><span className="material-symbols-rounded">error</span>Couldn&apos;t send — please try again</span>}
+              <button type="submit" className="primary-btn" disabled={!valid || busy}>
+                <span className="material-symbols-rounded">{busy ? "progress_activity" : "send"}</span>{busy ? "Sending…" : "Send request"}
               </button>
             </div>
           </form>

@@ -361,6 +361,12 @@ class Settings(BaseSettings):
     # publisher factory degrades to 'hold at the review gate' until that wiring lands. ---
     web2_publish_cost_estimate: float = 0.0  # marginal cost of one blog-API publish
     offpage_monitor_cost_estimate: float = 0.05  # one backlink/citation provider pull
+    # House Web 2.0 publishing accounts (JSON: platform -> credential fields). NOT a
+    # runtime seam — the publish pipeline reads the VAULT (one row per client x
+    # platform). This only feeds the one-shot `app.cli.seed_web2_vault` seeder that
+    # writes those vault rows for every client; a SecretStr because it carries live
+    # tokens (never logged / never in a repr). Optional, never required in prod.
+    web2_house_credentials_json: SecretStr | None = None
 
     # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: direct
     # APIs (Bing Places / Foursquare), aggregator pushes, a self-hosted Playwright
@@ -409,7 +415,7 @@ class Settings(BaseSettings):
     # the email + Slack legs are skipped until the keys arrive. Keys are SecretStr
     # (never logged / never in a repr); the ``from`` sender address is not a secret. ---
     resend_api_key: SecretStr | None = None  # Resend transactional-email API key
-    resend_from_email: str = "AIOS <notifications@xegents.ai>"  # verified Resend sender
+    resend_from_email: str = "AIOS <noreply@mail.qanry.com>"  # verified Resend sending domain
     slack_webhook_url: SecretStr | None = None  # Slack incoming-webhook URL (embeds a token)
     # --- Backups module (7G-1). Nightly/manual Postgres snapshots via pg_dump, a
     # guarded restore via pg_restore, and an OPTIONAL Backblaze B2 offsite copy. ALL

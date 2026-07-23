@@ -45,6 +45,14 @@ x-app-env: &app-env
   GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
   GOOGLE_CRUX_API_KEY: ${GOOGLE_CRUX_API_KEY:-}
   GOOGLE_NL_API_KEY: ${GOOGLE_NL_API_KEY:-}
+  # Maps Platform key — a Places-capable fallback the engine tries after the
+  # restricted Places key and before the universal key (config.APIKeys.from_env).
+  GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+  # Universal Google fallback + Firecrawl JS-render crawler — the engine reads BOTH
+  # from the child env (integrations/audit_engine.py passes os.environ through); its
+  # own gitignored .env is NOT baked into the image, so these MUST come from here.
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
   AUDIT_AGENT_MODEL: ${AUDIT_AGENT_MODEL:-claude-haiku-4-5}
   # Artifact roots live on the shared aios_state volume (writable by the aios user).
   AUDIT_ARTIFACT_DIR: /var/lib/aios/artifacts/audits
@@ -63,7 +71,7 @@ x-app-env: &app-env
   ANTHROPIC_MODEL_HEAVY: ${ANTHROPIC_MODEL_HEAVY:-claude-sonnet-5}
   SERPER_API_KEY: ${SERPER_API_KEY:-}
   RESEND_API_KEY: ${RESEND_API_KEY:-}
-  RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-AIOS <notifications@example.com>}
+  RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-AIOS <noreply@mail.qanry.com>}
   GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
   GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
   GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
@@ -81,6 +89,14 @@ x-app-env: &app-env
   CAPTCHA_SOLVER_PROVIDER: ${CAPTCHA_SOLVER_PROVIDER:-capsolver}
   CAPTCHA_SOLVER_API_KEY: ${CAPTCHA_SOLVER_API_KEY:-}
   CITATION_PROXY_URL: ${CITATION_PROXY_URL:-}
+  # Proof screenshots for bot/captcha citation submissions (dashboard proofUrl);
+  # unset -> submissions succeed with an honest empty proof, never a crash.
+  CITATION_ARTIFACT_DIR: /var/lib/aios/artifacts/citations
+  # House Web 2.0 publishing credentials (JSON: platform -> credential fields).
+  # NOT read at runtime — runtime reads the VAULT. This feeds the one-shot
+  # `python -m app.cli.seed_web2_vault --yes` seeder (run it inside the api
+  # container after adding a client) which writes the per-client vault rows.
+  WEB2_HOUSE_CREDENTIALS_JSON: ${WEB2_HOUSE_CREDENTIALS_JSON:-}
   # Reports: Google Sheets operational store (service-account credential JSON).
   GOOGLE_SHEETS_SA_JSON: ${GOOGLE_SHEETS_SA_JSON:-}
   SENTRY_DSN: ${SENTRY_DSN:-}

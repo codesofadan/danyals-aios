@@ -261,7 +261,7 @@
 .cl-step-line { flex: 1; width: 2px; min-height: 26px; background: var(--line-2); margin: 4px 0; }
 .cl-step-body { flex: 1; min-width: 0; padding-bottom: 22px; }
 .cl-step-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.cl-step-ic { font-size: 19px; color: var(--muted); }
+.cl-step-ic.material-symbols-rounded { font-size: 19px; color: var(--muted); }
 .cl-step-t { font-size: 14.5px; font-weight: 800; color: var(--fg-strong); }
 .cl-step-src { font-size: 12px; color: var(--body); margin-top: 5px; line-height: 1.4; }
 .cl-step-time { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 6px; }
@@ -292,7 +292,7 @@
 .cl-rp-locked { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .cl-rp-lockrow { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 13px;
   border: 1px dashed var(--line-2); background: var(--well); opacity: .75; }
-.cl-rp-lockic { flex: none; width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+.cl-rp-lockic.material-symbols-rounded { flex: none; width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
   font-size: 21px; color: var(--muted); background: var(--hover); }
 
 .spin { animation: cl-spin 1s linear infinite; }
@@ -318,6 +318,7 @@
   border-color: color-mix(in srgb, var(--c) 46%, transparent); }
 .cl-req-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 16px; }
 .cl-req-sent { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 800; color: var(--ok); }
+.cl-req-sent.err { color: var(--crit, #e5484d); }
 .cl-req-sent .material-symbols-rounded { font-size: 16px; }
 
 .cl-req-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }

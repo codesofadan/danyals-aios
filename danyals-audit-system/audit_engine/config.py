@@ -54,13 +54,17 @@ class APIKeys:
     @classmethod
     def from_env(cls) -> APIKeys:
         google_fallback = os.getenv("GOOGLE_API_KEY") or None
+        # A Maps Platform key can call the Places API, so it is a Places-specific
+        # fallback ahead of the universal key: prefer the restricted Places key, then
+        # the Maps key, then the unrestricted universal key.
+        maps_fallback = os.getenv("GOOGLE_MAPS_API_KEY") or google_fallback
         return cls(
             moz_access_id=os.getenv("MOZ_ACCESS_ID") or None,
             moz_secret_key=os.getenv("MOZ_SECRET_KEY") or None,
             serper=os.getenv("SERPER_API_KEY") or None,
             google=google_fallback,
             google_pagespeed=os.getenv("GOOGLE_PAGESPEED_API_KEY") or google_fallback,
-            google_places=os.getenv("GOOGLE_PLACES_API_KEY") or google_fallback,
+            google_places=os.getenv("GOOGLE_PLACES_API_KEY") or maps_fallback,
             google_crux=os.getenv("GOOGLE_CRUX_API_KEY") or google_fallback,
             google_nl=os.getenv("GOOGLE_NL_API_KEY") or google_fallback,
             google_credentials_path=os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or None,

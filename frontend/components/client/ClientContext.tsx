@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { SERIES } from "@/lib/data";
 import { type ClientRequest, type ReportViz, type RequestKind } from "@/lib/client";
 import {
@@ -41,7 +41,10 @@ type ClientState = {
   isPlaceholder: (key: string) => boolean;
   // Requests raised by the client.
   requests: ClientRequest[];
-  addRequest: (r: { kind: RequestKind; subject: string; detail: string }) => void;
+  addRequest: (
+    r: { kind: RequestKind; subject: string; detail: string },
+    opts?: { onSuccess?: () => void; onError?: () => void },
+  ) => void;
 };
 
 const Ctx = createContext<ClientState | null>(null);
@@ -77,20 +80,53 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
   const requestsQ = useClientRequests();
   const createRequest = useCreateRequest();
 
-  // The unlock animation is client-side session state (which granted graphs the
-  // user has popped open) — it never leaves the browser.
+  // Which granted graphs this client has popped open. The unlock is a cosmetic
+  // reveal over data the admin already GRANTED (real access lives in `grants`),
+  // so it is persisted PER-CLIENT in localStorage rather than the DB: once a
+  // client unlocks a graph it stays unlocked across refreshes and revisits,
+  // while remaining cheap and requiring no server round-trip. Keyed by the
+  // company name so two tenants sharing a browser never see each other's state.
   const [unlocked, setUnlocked] = useState<Set<string>>(EMPTY);
+
+  const dash = dashboardQ.data;
+  const clientName = dash?.client ?? "";
+  const storageKey = clientName ? `aios:portal:unlocked:${clientName}` : "";
+
+  // Hydrate the persisted unlock set once the tenant identity resolves. Runs
+  // client-side only (the provider gates children behind `dash`, so by the time
+  // a card can be tapped this has already loaded). A re-sync effect in
+  // LockableChart promotes any hydrated card straight to "unlocked" (no replay
+  // of the pop animation), so a refresh simply shows the graphs already open.
+  const hydratedFor = useRef<string>("");
+  useEffect(() => {
+    if (!storageKey || hydratedFor.current === storageKey) return;
+    hydratedFor.current = storageKey;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const arr = JSON.parse(raw) as unknown;
+        if (Array.isArray(arr)) setUnlocked(new Set(arr.filter((k): k is string => typeof k === "string")));
+      }
+    } catch {
+      /* private-mode / disabled storage — fall back to session-only unlocking */
+    }
+  }, [storageKey]);
 
   const unlock = useCallback((key: string) => {
     setUnlocked((prev) => {
       if (prev.has(key)) return prev;
       const next = new Set(prev);
       next.add(key);
+      if (storageKey) {
+        try {
+          window.localStorage.setItem(storageKey, JSON.stringify([...next]));
+        } catch {
+          /* storage unavailable — the unlock still holds for this session */
+        }
+      }
       return next;
     });
-  }, []);
-
-  const dash = dashboardQ.data;
+  }, [storageKey]);
 
   const client = useMemo<PortalClient>(() => {
     const name = dash?.client ?? "";
@@ -123,8 +159,14 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
   const isPlaceholder = useCallback((key: string) => placeholders.has(key), [placeholders]);
 
   const addRequest = useCallback(
-    (r: { kind: RequestKind; subject: string; detail: string }) => {
-      createRequest.mutate(r);
+    (
+      r: { kind: RequestKind; subject: string; detail: string },
+      opts?: { onSuccess?: () => void; onError?: () => void },
+    ) => {
+      // Surface the real POST outcome to the caller so the UI can confirm on
+      // success and show an error on failure (never an optimistic "sent" that
+      // lies when the request never reached the backend).
+      createRequest.mutate(r, { onSuccess: opts?.onSuccess, onError: opts?.onError });
     },
     [createRequest],
   );

@@ -1,20 +1,13 @@
 "use client";
 
-import {
-  ACTIVITY_META, TASK_STATUS_META, SERIES,
-  type Task, type TeamMemberRecord,
-} from "@/lib/data";
+import { ACTIVITY_META, type TeamMemberRecord } from "@/lib/data";
 import { useActivity } from "@/lib/hooks/portal";
 
-// Verb + icon for each task state, from the member's point of view.
-const STATE_FEED: Record<Task["status"], { verb: string; icon: string; c: string }> = {
-  todo: { verb: "was assigned to you", icon: "assignment_add", c: SERIES.c4 },
-  in_progress: { verb: "you're working on", icon: "bolt", c: SERIES.c1 },
-  review: { verb: "you submitted for review", icon: "how_to_reg", c: SERIES.c3 },
-  done: { verb: "you delivered", icon: "task_alt", c: "var(--ok)" },
-};
-
-export default function MyActivity({ me, myTasks }: { me: TeamMemberRecord; myTasks: Task[] }) {
+// The member's own recent activity, sourced live from GET /activity (filtered to
+// events this member performed). The previous "state of every job on your desk"
+// feed was dropped: it re-rendered every open task as a synthetic timeline row,
+// duplicating the Queue with no new information.
+export default function MyActivity({ me }: { me: TeamMemberRecord }) {
   const activityQ = useActivity();
   const myEvents = (activityQ.data ?? []).filter((a) => a.actorInit === me.init);
 
@@ -23,7 +16,7 @@ export default function MyActivity({ me, myTasks }: { me: TeamMemberRecord; myTa
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">history</span>
-          Your recent activity &amp; the state of every job on your desk
+          Your recent activity
         </div>
       </div>
 
@@ -51,30 +44,10 @@ export default function MyActivity({ me, myTasks }: { me: TeamMemberRecord; myTa
           );
         })}
 
-        {myTasks.map((t) => {
-          const f = STATE_FEED[t.status];
-          const sm = TASK_STATUS_META[t.status];
-          return (
-            <div className="tl-row" key={t.id}>
-              <div className="tl-rail">
-                <span className="tl-ic" style={{ background: `${f.c}22`, color: f.c }}>
-                  <span className="material-symbols-rounded">{f.icon}</span>
-                </span>
-              </div>
-              <div className="tl-body">
-                <div className="tl-line">
-                  <span className="tl-action">{f.verb}</span>
-                  <span className="tl-target">{t.id}</span>
-                  <span className="tl-action">— {t.title}</span>
-                </div>
-                <div className="tl-meta">{t.client} · {t.type}</div>
-              </div>
-              <div className="tl-ago">{sm.label}</div>
-            </div>
-          );
-        })}
-
-        {myEvents.length === 0 && myTasks.length === 0 && (
+        {activityQ.isLoading && myEvents.length === 0 && (
+          <div className="tl-empty">Loading your activity…</div>
+        )}
+        {!activityQ.isLoading && myEvents.length === 0 && (
           <div className="tl-empty">No activity yet — your work will show up here.</div>
         )}
       </div>

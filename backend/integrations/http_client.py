@@ -57,6 +57,7 @@ class HttpProviderClient:
         headers: dict[str, str] | None = None,
         timeout: float = 20.0,
         max_attempts: int = 3,
+        transient_statuses: frozenset[int] | None = None,
     ) -> None:
         try:
             import httpx
@@ -76,6 +77,12 @@ class HttpProviderClient:
             _TransientHTTPError,
         )
         self._max_attempts = max_attempts
+        # Extra status codes a SUBCLASS opts into treating as transient (retry with
+        # backoff) beyond the universal 429/5xx. Empty by default: for most providers
+        # a 4xx is a hard caller error. The WordPress client adds 403 because managed
+        # hosts (Hostinger's hcdn, some WAFs) intermittently answer an otherwise-valid
+        # authenticated REST call with a soft-challenge 403 that clears on retry.
+        self._transient_statuses: frozenset[int] = frozenset(transient_statuses or ())
 
     def request_json(
         self,
@@ -122,7 +129,7 @@ class HttpProviderClient:
         # transient tuple); everything else is classified by status below.
         response = self._client.request(method, url, params=params, json=json_body, auth=auth)
         status = response.status_code
-        if status == 429 or 500 <= status < 600:
+        if status == 429 or 500 <= status < 600 or status in self._transient_statuses:
             raise _TransientHTTPError(f"{self.provider} {status}")
         if status >= 400:
             # A caller problem (bad request / auth): stop now. Log the STRIPPED path

@@ -238,6 +238,41 @@ def test_wordpress_idempotent_create_vs_update_routing() -> None:
     assert calls[-1] == "https://blog.example/wp-json/wp/v2/posts/99"  # UPDATE route
 
 
+def test_wordpress_retries_a_soft_challenge_403_then_publishes() -> None:
+    """A managed host (Hostinger hcdn / a WAF) intermittently answers an otherwise-
+    valid authenticated REST call with a soft-challenge 403 that clears on retry. The
+    WordPress client opts 403 into the transient set, so the publish survives it."""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            return httpx.Response(403, text="<html>Just a moment...</html>")  # hcdn challenge
+        return httpx.Response(200, json={"id": 42, "link": "https://blog.example/live-post"})
+
+    client = WordPressClient(username="adan", app_password="app pass word")
+    _with_mock(client, handler)
+    result = client.publish("https://blog.example", PostDraft(title="Hi", content="<p>x</p>"))
+    assert attempts["n"] == 3  # two 403s retried, third attempt published
+    assert result.url == "https://blog.example/live-post"
+
+
+def test_serper_403_is_still_a_hard_error_not_retried() -> None:
+    """The 403->transient opt-in is WordPress-only: for every other provider a 403 is
+    a real permission error that must surface at once (never a silent retry storm)."""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(403, json={"error": "forbidden"})
+
+    researcher = SerperResearcher(api_key="k")
+    _with_mock(researcher, handler)
+    with pytest.raises(ProviderCallError):
+        researcher.serp("kw")
+    assert attempts["n"] == 1  # not retried
+
+
 def test_openai_image_parses_url_and_carries_alt() -> None:
     seen: dict[str, Any] = {}
 

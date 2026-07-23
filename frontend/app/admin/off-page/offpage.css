@@ -35,7 +35,7 @@
 .op-spam.hot { color: var(--crit); }
 
 /* pill inline icons */
-.op-pill-ic { font-size: 13px; vertical-align: -2px; margin-right: 3px; }
+.op-pill-ic.material-symbols-rounded { font-size: 13px; vertical-align: -2px; margin-right: 3px; }
 
 /* toxic status pill — crit variant (globals only ship ok/info/warn/mut) */
 .status-pill.op-crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 16%, transparent); }

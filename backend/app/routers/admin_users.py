@@ -39,6 +39,7 @@ from app.schemas.identity import (
 )
 from app.services.activity import record_activity
 from app.services.credentials import generate_password, generate_username
+from app.services.notifications import notify
 from app.services.provisioning import provision_user
 from app.services.team_metrics import ZERO_METRICS, TeamMetricsDep
 
@@ -204,6 +205,18 @@ async def create_user(
         current, kind="member", action="provisioned member", target=body.name, meta=body.role,
         entity_type="user", entity_id=str(row["id"]),
     )
+    # Welcome the new member by email + in-app (best-effort). The password was set
+    # by the admin, so it is NOT echoed here - only the username + a sign-in nudge.
+    await notify(
+        str(row["id"]),
+        kind="member_welcome",
+        title="Your team account is ready",
+        body=(
+            f"Hi {body.name}, your account has been created with the {body.role} role. "
+            f"Sign in to your team portal with the username \"{body.username or str(body.email)}\" "
+            "to see your dashboard and assigned work."
+        ),
+    )
     return MemberResponse.from_row(row)
 
 
@@ -263,6 +276,21 @@ async def invite_member(
     await record_activity(
         current, kind="member", action="invited member", target=body.name, meta=body.role,
         entity_type="user", entity_id=str(row["id"]),
+    )
+    # Send the invitation email with the ONE-TIME credentials (best-effort). The
+    # temp password is reset-on-first-login (must_reset=True) so it is single-use;
+    # the admin also still sees the pair once in the response to copy manually.
+    await notify(
+        str(row["id"]),
+        kind="member_welcome",
+        title="You've been invited to the team portal",
+        body=(
+            f"Hi {body.name}, an account has been created for you ({body.role}).\n\n"
+            f"Username: {username}\n"
+            f"Temporary password: {temp_password}\n\n"
+            "Sign in to your team portal and you'll be asked to set a new password. "
+            "This temporary password only works once."
+        ),
     )
     return MemberInviteResponse(
         member=MemberResponse.from_row(row), username=username, temp_password=temp_password

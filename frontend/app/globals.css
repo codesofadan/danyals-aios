@@ -69,9 +69,19 @@ body {
    optically centres inside its (mostly flex) wrapper and never inherits the
    body's ~1.5 line-height — which otherwise inflates the icon line-box and
    drops the glyph below adjacent text in any inline usage. vertical-align is
-   ignored inside flex/grid (99% of call sites), so this is regression-free. */
-.material-symbols-rounded { font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
-  line-height: 1; vertical-align: middle; }
+   ignored inside flex/grid (99% of call sites), so this is regression-free.
+   The `body ` prefix (specificity 0,1,1) DETERMINISTICALLY outranks Google
+   Fonts' own single-class `.material-symbols-rounded` helper (0,1,0 — which
+   ships display:inline-block + font-size:24px) whose stylesheet load order Next
+   does not guarantee. Making the glyph an inline-flex box that self-centres kills
+   the whole "off-centre in its medallion / squished in a flex row" class in one
+   place. It sets NO font-size, so every per-component size still applies; a
+   component can still override display via a compound (0,2,0) selector. */
+body .material-symbols-rounded {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  line-height: 1; vertical-align: middle;
+}
 /* Icons that sit inside an accent / coloured container read more premium filled.
    Inline & utility icons keep the outline (the base rule above). */
 .kpi .ic .material-symbols-rounded,
@@ -818,7 +828,7 @@ body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + v
 .rbac-role-name { font-size: 12px; font-weight: 800; }
 .rbac-cell { text-align: center; }
 .cap { display: flex; align-items: center; gap: 11px; }
-.cap-ic { flex: none; width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+.cap-ic.material-symbols-rounded { flex: none; width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
   font-size: 19px; color: var(--violet-soft); background: var(--hover); }
 .cap-l { font-size: 13px; font-weight: 700; color: var(--ink); }
 .cap-d { font-size: 11px; color: var(--muted); margin-top: 1px; }
@@ -870,7 +880,8 @@ body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + v
 .tpl-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .tpl-label { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .tpl-select { position: relative; display: flex; align-items: center; flex: 1; min-width: 260px; max-width: 380px; }
-.tpl-ic { position: absolute; left: 11px; font-size: 19px; color: var(--violet-soft); pointer-events: none; }
+.tpl-ic.material-symbols-rounded { position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  font-size: 19px; color: var(--violet-soft); pointer-events: none; }
 .tpl-select select { width: 100%; font-family: inherit; font-size: 13px; color: var(--ink); appearance: none; cursor: pointer;
   background: var(--well); border: 1px solid var(--line); border-radius: 10px; padding: 10px 34px 10px 38px; outline: none; transition: .16s;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237A6B7F' stroke-width='3' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
@@ -912,7 +923,7 @@ body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + v
 .bubble-sheen { display: block; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
   background: radial-gradient(120% 90% at 32% 16%, rgba(255, 255, 255, .10), rgba(255, 255, 255, 0) 46%);
   transition: opacity .35s; }
-.bubble-ic { font-size: 30px; color: var(--c); position: relative; z-index: 1;
+.bubble-ic.material-symbols-rounded { font-size: 30px; color: var(--c); position: relative; z-index: 1;
   font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;
   text-shadow: 0 0 10px color-mix(in srgb, var(--c) 55%, transparent); }
 /* label — hidden until hover / focus / press ("hold"), then floats above as a chip */
@@ -979,7 +990,7 @@ body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + v
 .cred-ok .material-symbols-rounded { font-size: 16px; }
 .cred-row { display: flex; align-items: center; gap: 12px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px;
   margin-bottom: 10px; background: var(--well); }
-.cred-ic { font-size: 22px; color: var(--violet-soft); flex: none; }
+.cred-ic.material-symbols-rounded { font-size: 22px; color: var(--violet-soft); flex: none; }
 .cred-main { flex: 1; min-width: 0; }
 .cred-l { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .cred-v { font-size: 15px; font-weight: 700; color: var(--fg-strong); margin-top: 3px; word-break: break-all; }
@@ -1028,7 +1039,7 @@ body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + v
 .set-row { display: flex; align-items: center; gap: 16px; padding: 15px 18px; }
 .set-row + .set-row { border-top: 1px solid var(--line); }
 .set-row-main { display: flex; align-items: center; gap: 13px; flex: 1; min-width: 0; }
-.set-ic { font-size: 22px; color: var(--violet-soft); flex: none; }
+.set-ic.material-symbols-rounded { font-size: 22px; color: var(--violet-soft); flex: none; }
 .set-ic.danger { color: var(--crit); }
 .set-l { font-size: 13.5px; font-weight: 700; color: var(--ink); }
 .set-d { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
@@ -1124,7 +1135,7 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
 
 /* notifications */
 .notif-tbl th.ta-c, .notif-tbl td.ta-c { width: 92px; }
-.notif-ic { font-size: 22px; color: var(--violet-soft); flex: none; width: 34px; text-align: center; }
+.notif-ic.material-symbols-rounded { font-size: 22px; color: var(--violet-soft); flex: none; width: 34px; text-align: center; }
 
 /* danger zone */
 .danger-zone { margin-top: 26px; border: 1px solid color-mix(in srgb, var(--crit) 30%, transparent); border-radius: 14px; overflow: hidden;

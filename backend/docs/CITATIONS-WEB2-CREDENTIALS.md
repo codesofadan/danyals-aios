@@ -41,6 +41,26 @@ plan → write → review → publish pipeline for every client going forward.
 
 Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
 
+> **House accounts + the seeder (2026-07-23).** The agency publishes through
+> shared HOUSE accounts (grill.publisher@gmail.com) rather than per-client logins.
+> Those credentials live in `WEB2_HOUSE_CREDENTIALS_JSON` (root `.env`, forwarded by
+> compose), and the idempotent CLI copies them into the per-client vault rows this
+> doc describes:
+>
+> ```bash
+> docker compose exec api python -m app.cli.seed_web2_vault        # dry run
+> docker compose exec api python -m app.cli.seed_web2_vault --yes  # write rows
+> ```
+>
+> Re-run it after onboarding a new client (existing rows are never touched).
+> Seeded today: dev.to, Telegra.ph, Mataroa, Mastodon (mastodon.social),
+> Micro.blog, GitHub Pages (`grillpublisher/qanry`), GitLab Pages
+> (`qanry.com/qanry`), Hashnode (**publication_id still blank** — grab it from the
+> publication dashboard URL, update the JSON, re-run or rotate the row; until then
+> Hashnode publishes hold cleanly at review). WordPress.com still needs a human
+> OAuth run (the app's client_id/secret are in the root `.env` reference section —
+> they MINT per-blog tokens; the minted token is what goes in the vault).
+
 | Platform | Vault secret JSON | How to get it |
 |---|---|---|
 | dev.to | `{"api_key": "..."}` | dev.to → Settings → Extensions → generate an API key. |

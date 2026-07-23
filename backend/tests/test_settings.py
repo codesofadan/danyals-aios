@@ -105,10 +105,15 @@ def test_security_from_row_reads_stored_values() -> None:
     assert resp.audit_logging is True  # unspecified -> default
 
 
-def test_notif_merge_returns_all_seven_events_with_defaults() -> None:
+def test_notif_merge_returns_all_events_with_defaults() -> None:
     prefs = NotifPrefResponse.merged({})
-    assert len(prefs) == len(NOTIF_EVENTS) == 7
+    assert len(prefs) == len(NOTIF_EVENTS)
     by_key = {p.key: p for p in prefs}
+    # The assignment/onboarding events email by default (wired into task/member/
+    # portal provisioning) so an assignee is actually told work landed.
+    assert by_key["task_assigned"].email is True
+    assert by_key["member_welcome"].email is True
+    assert by_key["portal_ready"].email is True
     # past_due default is email on, in-app off (data.ts notificationDefaults).
     assert by_key["past_due"].email is True
     assert by_key["past_due"].in_app is False
@@ -261,12 +266,12 @@ async def test_notifications_client_forbidden(
     assert (await client.get("/api/v1/settings/notifications")).status_code == 403
 
 
-async def test_notifications_get_returns_seven_events(
+async def test_notifications_get_returns_all_events(
     client: httpx.AsyncClient, wire: Callable[..., None]
 ) -> None:
     wire("viewer", "u-v")  # any staff manages their OWN prefs
     body = (await client.get("/api/v1/settings/notifications")).json()
-    assert len(body) == 7
+    assert len(body) == len(NOTIF_EVENTS)
     assert set(body[0]) == _NOTIF_KEYS
 
 
