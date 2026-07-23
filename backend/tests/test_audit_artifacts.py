@@ -52,6 +52,31 @@ def test_store_tolerates_missing_sources(tmp_path: Path) -> None:
     assert json_key is None
 
 
+def _engine_report_html(tmp_path: Path) -> str:
+    src = tmp_path / "engine"
+    src.mkdir(exist_ok=True)
+    html = src / "report.html"
+    html.write_text(
+        "<!doctype html><html><head><style>body{color:#000}</style></head>"
+        "<body>report body</body></html>",
+        encoding="utf-8",
+    )
+    return str(html)
+
+
+def test_store_copies_report_html_and_resolves_by_convention(tmp_path: Path) -> None:
+    html_src = _engine_report_html(tmp_path)
+    store = LocalArtifactStore(tmp_path / "root")
+    # report.html is copied even when no PDF/findings were produced.
+    store.store("aud-1", pdf_src=None, findings_src=None, html_src=html_src)
+    assert (tmp_path / "root" / "aud-1" / "report.html").is_file()
+    resolved = store.resolve_report_html("aud-1")
+    assert resolved is not None
+    assert resolved.read_text(encoding="utf-8").startswith("<!doctype html>")
+    # A run with no stored HTML resolves to None (graceful for older engines).
+    assert store.resolve_report_html("aud-none") is None
+
+
 def test_resolve_blocks_traversal(tmp_path: Path) -> None:
     (tmp_path / "secret.txt").write_text("top secret", encoding="utf-8")
     store = LocalArtifactStore(tmp_path / "root")
@@ -79,6 +104,7 @@ class FakeStore:
 
 def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
     pdf_src, findings_src = _engine_artifacts(tmp_path)
+    html_src = _engine_report_html(tmp_path)
 
     def _runner(
         cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False,
@@ -87,7 +113,7 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir=str(tmp_path / "engine"), score=80,
             scores={"overall": 80}, findings_path=findings_src, pdf_path=pdf_src,
-            runtime_seconds=100, exit_code=0,
+            html_path=html_src, runtime_seconds=100, exit_code=0,
         )
 
     store = FakeStore({"id": "aud-1", "url": "https://x.com", "tier": "free", "status": "queued"})
@@ -98,6 +124,8 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
     assert done["pdf_path"] == "aud-1/report.pdf"
     assert done["json_path"] == "aud-1/findings.json"
     assert (tmp_path / "root" / "aud-1" / "report.pdf").is_file()
+    # report.html is copied alongside so the dashboard viewer can render it.
+    assert artifacts.resolve_report_html("aud-1") is not None
 
 
 # --- the download endpoints ----------------------------------------------------
@@ -144,6 +172,33 @@ async def test_download_pdf_and_findings(
     fj = await client.get("/api/v1/audits/aud-1/findings.json")
     assert fj.status_code == 200
     assert json.loads(fj.content)[0]["check_id"] == "TECH-001"
+
+
+async def test_view_report_html(
+    client: httpx.AsyncClient, tmp_path: Path,
+    wire_dl: Callable[[dict[str, Any] | None, LocalArtifactStore | None], None],
+) -> None:
+    html_src = _engine_report_html(tmp_path)
+    store = LocalArtifactStore(tmp_path / "root")
+    store.store("aud-1", pdf_src=None, findings_src=None, html_src=html_src)
+    # The row has no pdf_path/json_path: the viewer works purely by convention.
+    wire_dl({"id": "aud-1", "pdf_path": None, "json_path": None}, store)
+
+    resp = await client.get("/api/v1/audits/aud-1/report.html")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "content-security-policy" in resp.headers
+    assert b"report body" in resp.content
+
+
+async def test_view_report_html_404_when_absent(
+    client: httpx.AsyncClient, tmp_path: Path,
+    wire_dl: Callable[[dict[str, Any] | None, LocalArtifactStore | None], None],
+) -> None:
+    store = LocalArtifactStore(tmp_path / "root")
+    wire_dl({"id": "aud-1", "pdf_path": None, "json_path": None}, store)
+    resp = await client.get("/api/v1/audits/aud-1/report.html")
+    assert resp.status_code == 404
 
 
 async def test_download_404_when_no_artifact(

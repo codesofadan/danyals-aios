@@ -20,3 +20,6 @@ venv/
 .coverage
 htmlcov/
 coverage.xml
+
+# A separate SEO-content product dropped in locally; not part of the AIOS backend.
+seo-content-os/

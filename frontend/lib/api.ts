@@ -188,6 +188,31 @@ export async function openFile(path: string): Promise<void> {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+// --- authenticated text fetch --------------------------------------------------
+// For bearer-protected text endpoints (the self-contained audit report.html the
+// in-dashboard page-viewer renders into a sandboxed srcdoc). Same origin/auth/401
+// handling as fetchAuthedBlob; returns the raw response body as a string. A 404
+// (no report for that run) surfaces as an ApiError the viewer renders as an
+// "unavailable" state.
+export async function fetchAuthedText(path: string): Promise<string> {
+  const token = getToken();
+  const res = await fetch(`${FILE_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    clearSession();
+    if (typeof window !== "undefined") window.location.assign("/login?expired=1");
+    throw new ApiError(401, "unauthorized", "Your session expired. Please sign in again.", "");
+  }
+  if (!res.ok) throw await decodeError(res);
+  return res.text();
+}
+
+/** Fetch a staff/portal audit's self-contained report.html (bearer-authed). */
+export function getReportHtml(path: string): Promise<string> {
+  return fetchAuthedText(path);
+}
+
 // --- verb helpers -------------------------------------------------------------
 export const api = {
   get: <T>(path: string, signal?: AbortSignal) => apiFetch<T>(path, { signal }),

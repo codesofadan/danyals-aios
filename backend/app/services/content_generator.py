@@ -50,29 +50,35 @@ if TYPE_CHECKING:  # a pure pydantic model; imported only for the adapter's typi
     from app.schemas.context import ContextView
 
 # --------------------------------------------------------------------------- #
-# Doctrine constants (docs/CONTENT-DOCTRINE.md is the source of truth; change a
-# number there AND here). Each names the section it enforces.
+# Doctrine constants. The CANONICAL doctrine is the SEO-CONTENT-OS knowledge base
+# (backend/seo-content-os/knowledge/); docs/CONTENT-DOCTRINE.md is the code<->knowledge
+# cross-map. These constants ENFORCE a named numeric subset of that knowledge.
 # --------------------------------------------------------------------------- #
-# §4: the extractable direct-answer block under the key heading.
+# The enforced NUMBERS below are re-derived from the SEO-CONTENT-OS knowledge base
+# (backend/seo-content-os/knowledge/ — the canonical doctrine; see docs/CONTENT-DOCTRINE.md).
+# Each names the knowledge source it enforces.
+# Passage-block opener band (foundations/passage-block-protocol.md: short-answer 60-120).
 ANSWER_MIN_WORDS = 40
 ANSWER_MAX_WORDS = 55
-# §3: primary-keyword density (occurrences * primary-words / total-words).
-PRIMARY_DENSITY_TARGET_MIN = 0.005
-PRIMARY_DENSITY_TARGET_MAX = 0.015
-PRIMARY_DENSITY_HARD_CEILING = 0.03
-# §10: total word budget (match/beat the teardown target, clamped).
+# Keyword handling: NO density TARGET (Law 17 - density gaming reduces AI citation).
+# Placement matters, not a % floor; the only density rule is the anti-stuffing ceiling.
+PRIMARY_DENSITY_TARGET_MIN = 0.0
+PRIMARY_DENSITY_TARGET_MAX = 0.02
+PRIMARY_DENSITY_HARD_CEILING = 0.03  # G5 anti-stuffing ceiling
+# Per-page word bounds are outer SAFETY clamps only (budgets are per-passage-block).
 WORD_COUNT_FLOOR = 600
 WORD_COUNT_CEILING = 3500
-# §8: each city page's body must be >= this fraction unique vs sibling cities.
-LOCAL_UNIQUE_MIN = 0.60
-# §9: media + FAQ + coverage caps (bound the draft so budgets stay honored).
+# Local uniqueness: the "genuine majority city-specific" heuristic (local-content-laws.md
+# Law 15/16, NON-safe-harbor) - backed by the strip-the-city + external-verifiability gates.
+LOCAL_UNIQUE_MIN = 0.50
+# Media + FAQ + coverage caps (coverage is a floor to clear, never an auto-fail - Law 15).
 MAX_IMAGES = 5
 MAX_FAQ = 6
 MAX_COVERAGE_ENTITIES = 8
 MAX_INTERNAL_SPOKES = 6
-# §9: title / meta length ceilings.
+# Title / meta length ceilings (foundations/meta-and-headings.md: ~50-60 title / ~160 meta).
 TITLE_MAX_CHARS = 60
-META_MAX_CHARS = 155
+META_MAX_CHARS = 160
 
 _DEFAULT_MODEL = "content-writer"
 _DEFAULT_TARGET_WORDS = 1200

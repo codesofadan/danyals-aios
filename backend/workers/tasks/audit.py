@@ -177,12 +177,15 @@ def _safe_record_cost(store: AuditStore, row: dict[str, Any], cost: float) -> No
 def _store_artifacts(
     artifacts: ArtifactStore | None, audit_id: str, result: AuditRunResult
 ) -> tuple[str | None, str | None]:
-    """Copy the run's PDF + findings into the controlled root; never fatal."""
+    """Copy the run's PDF + findings + report.html into the controlled root; never fatal."""
     if artifacts is None:
         return None, None
     try:
         return artifacts.store(
-            audit_id, pdf_src=result.pdf_path, findings_src=result.findings_path
+            audit_id,
+            pdf_src=result.pdf_path,
+            findings_src=result.findings_path,
+            html_src=result.html_path,
         )
     except Exception:
         logger.warning("audit_artifact_store_failed", audit_id=audit_id)

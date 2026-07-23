@@ -24,6 +24,7 @@ import pytest
 from app.services.content_generator import (
     ANSWER_MAX_WORDS,
     DIFFERENTIATION_KINDS,
+    LOCAL_UNIQUE_MIN,
     MAX_IMAGES,
     NAP,
     PRIMARY_DENSITY_HARD_CEILING,
@@ -289,7 +290,7 @@ def test_local_anatomy_blocks_present_and_unique() -> None:
     assert "Frequently asked questions" in draft
     # Per-city uniqueness computed + above the doctrine floor for distinct proof.
     assert set(result.local_uniqueness) == {"Austin", "Dallas"}
-    assert all(ratio >= 0.6 for ratio in result.local_uniqueness.values())
+    assert all(ratio >= LOCAL_UNIQUE_MIN for ratio in result.local_uniqueness.values())
 
 
 def test_local_missing_nap_and_proof_yields_needs() -> None:

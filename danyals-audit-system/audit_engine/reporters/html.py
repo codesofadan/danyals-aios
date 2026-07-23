@@ -7,6 +7,7 @@ Reads validated findings + run metadata; renders the three Jinja templates
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,15 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from audit_engine.config import TEMPLATES_DIR, get_branding
 
 SEVERITY_RANK = {"critical": 0, "major": 1, "minor": 2, "info": 3}
+
+# The self-contained single-file report shown in the AIOS dashboard viewer AND
+# rendered to the delivered PDF - same HTML, so the on-screen report and the PDF
+# match exactly. In the CONDENSED (free-tier) variant we keep the identical
+# layout but cap the findings shown per dimension so the report lands at roughly
+# 10-15 pages instead of the full inventory.
+_REPORT_HTML_NAME = "report.html"
+_CONDENSED_FINDINGS_PER_CATEGORY = 8
+_STYLESHEET_LINK_RE = re.compile(r'<link[^>]*rel=["\']stylesheet["\'][^>]*>', re.IGNORECASE)
 
 
 @dataclass
@@ -179,3 +189,93 @@ def render_all(
         "remediation_html": remediation_path,
         "stylesheet": dst_css,
     }
+
+
+def _inline_stylesheet(html: str, css: str) -> str:
+    """Replace the external ``<link rel=stylesheet>`` with an inline ``<style>``.
+
+    The report viewer loads this file as an ``srcdoc`` and the PDF renderer opens
+    it directly, so it must carry its own CSS - never a sibling ``print.css`` the
+    copy step would leave behind. If no link tag is present (already inlined) the
+    stylesheet is injected before ``</head>`` so the file is always styled.
+    """
+    style_block = f"<style>\n{css}\n</style>"
+    new_html, n = _STYLESHEET_LINK_RE.subn(style_block, html, count=1)
+    if n:
+        return new_html
+    return html.replace("</head>", f"{style_block}\n</head>", 1)
+
+
+def render_report_html(
+    *,
+    findings: list[dict[str, Any]],
+    run_metadata: dict[str, Any],
+    artifact_dir: Path,
+    brand: BrandConfig | None = None,
+    condensed: bool = False,
+) -> Path:
+    """Render the SELF-CONTAINED single-file ``report.html`` (CSS inlined).
+
+    This is the exact HTML the AIOS dashboard viewer displays AND the source the
+    delivered PDF is rendered from, so the on-screen report matches the PDF page
+    for page. It reuses the same ``full.html.j2`` layout as ``report-full.html``;
+    the only difference in the ``condensed`` (free-tier) variant is that each
+    dimension is capped to its top findings by severity/score, keeping the report
+    at roughly 10-15 pages while preserving the identical layout.
+    """
+    brand = brand or BrandConfig()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR / "report")),
+        autoescape=select_autoescape(["html", "xml"]),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+
+    shaped = [_shape_finding(f) for f in findings]
+    severity_counts: Counter[str] = Counter(f["severity"] for f in shaped)
+
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for f in shaped:
+        by_category.setdefault(f["category"], []).append(f)
+
+    categories = []
+    for cat in ("on-page", "technical", "off-page", "local-seo"):
+        items = sorted(
+            by_category.get(cat, []),
+            key=lambda f: (SEVERITY_RANK.get(f["severity"], 99), -(f.get("score") or 0)),
+        )
+        if condensed:
+            items = items[:_CONDENSED_FINDINGS_PER_CATEGORY]
+        categories.append({"category": cat, "findings": items})
+
+    duration_sec = float(run_metadata.get("duration_sec") or 0)
+    if duration_sec < 60:
+        duration_str = f"{duration_sec:.1f}s"
+    else:
+        m, s = divmod(int(duration_sec), 60)
+        duration_str = f"{m}m {s}s"
+
+    html = env.get_template("full.html.j2").render(
+        title=f"SEO Audit - {run_metadata.get('domain')}",
+        domain=run_metadata.get("domain"),
+        run_uuid=run_metadata.get("run_uuid"),
+        profile=run_metadata.get("profile"),
+        pages_crawled=run_metadata.get("pages_crawled"),
+        duration_sec_str=duration_str,
+        started_at_pkt=run_metadata.get("started_at"),
+        scores=run_metadata.get("scores") or {},
+        brand_name=brand.name,
+        stylesheet_href="print.css",
+        findings_total=len(shaped),
+        severity_counts=severity_counts,
+        categories=categories,
+    )
+
+    css = (TEMPLATES_DIR / "report" / "print.css").read_text(encoding="utf-8")
+    html = _inline_stylesheet(html, css)
+
+    path = artifact_dir / _REPORT_HTML_NAME
+    path.write_text(html, encoding="utf-8")
+    return path

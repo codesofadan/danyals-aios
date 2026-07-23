@@ -53,12 +53,22 @@ logger = get_logger("integrations.audit_engine")
 # collapses to a near-empty 1-page file on a small site (which read as "empty / failed
 # to load" in the browser), so it must NOT be preferred. Full first, always.
 _PDF_CANDIDATES: tuple[str, ...] = (
+    # report.pdf is the self-contained single-file deliverable rendered from the
+    # SAME report.html the dashboard viewer displays, so serving it guarantees the
+    # downloaded PDF matches the on-screen report page for page. Prefer it; fall
+    # back to the older multi-file reports for runs from an engine that predates it.
+    "report.pdf",
     "report-full.pdf",
     "report-consolidated.pdf",
     "report-executive.pdf",
     "remediation.pdf",
     "report-final.pdf",
 )
+
+# The self-contained HTML report (CSS inlined) that the AIOS dashboard renders in
+# its paginated page-viewer. It is the exact source the served PDF is rendered
+# from, so the viewer and the PDF are the same document.
+_HTML_CANDIDATES: tuple[str, ...] = ("report.html",)
 
 _FINDINGS_FILE = "findings.json"
 _RUN_FILE = "run.json"
@@ -96,6 +106,9 @@ class AuditRunResult:
     scores: dict[str, Any] = field(default_factory=dict)
     findings_path: str | None = None
     pdf_path: str | None = None
+    # The self-contained report.html the dashboard viewer displays (same content
+    # as the PDF). None when an older engine build produced no such file.
+    html_path: str | None = None
     runtime_seconds: int = 0
     exit_code: int | None = None
     error: str | None = None
@@ -230,6 +243,14 @@ def _find_pdf(artifact_dir: Path) -> str | None:
     return None
 
 
+def _find_html(artifact_dir: Path) -> str | None:
+    for name in _HTML_CANDIDATES:
+        candidate = artifact_dir / name
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def run_audit(
     cfg: AuditEngineConfig,
     *,
@@ -337,6 +358,7 @@ def run_audit(
         scores=scores,
         findings_path=str(findings) if findings.is_file() else None,
         pdf_path=_find_pdf(artifact_dir),
+        html_path=_find_html(artifact_dir),
         runtime_seconds=elapsed,
         exit_code=0,
         pages_crawled=int(run_meta["pages_crawled"])

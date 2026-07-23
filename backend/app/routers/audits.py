@@ -31,7 +31,11 @@ from app.schemas.audits import (
     tier_to_db,
 )
 from app.services.activity import record_activity
-from app.services.audit_artifacts import LocalArtifactStore, local_store_from_settings
+from app.services.audit_artifacts import (
+    REPORT_HTML_VIEW_HEADERS,
+    LocalArtifactStore,
+    local_store_from_settings,
+)
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 
@@ -171,6 +175,27 @@ async def download_audit_findings(
     return await _serve_artifact(
         repo, store, audit_id, "json_path", "application/json", f"audit-{audit_id}.json"
     )
+
+
+@router.get("/audits/{audit_id}/report.html")
+async def view_audit_report_html(
+    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
+) -> FileResponse:
+    """Serve the self-contained report.html for the in-dashboard page-viewer.
+
+    Resolved by convention from the audit id (sibling of report.pdf), so it is
+    available even for a run whose PDF backend was unavailable. Same document the
+    PDF is rendered from, so the viewer matches the download.
+    """
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    row = await asyncio.to_thread(repo.get_audit, audit_id)
+    if row is None:
+        raise _AUDIT_NOT_FOUND
+    path = store.resolve_report_html(audit_id)
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="text/html", headers=REPORT_HTML_VIEW_HEADERS)
 
 
 @router.post(

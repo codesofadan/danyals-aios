@@ -20,7 +20,6 @@ no network, no broker), so it runs in the ``unit`` gate.
 
 from __future__ import annotations
 
-import json
 import re
 from itertools import product
 from pathlib import Path
@@ -34,8 +33,9 @@ pytestmark = pytest.mark.unit
 # backend/tests/test_skills_plugin.py -> parents[2] is the repo root; aios-skills is a
 # sibling of backend/.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PLUGIN_DIR = _REPO_ROOT / "aios-skills"
-_SKILLS_DIR = _PLUGIN_DIR / "skills"
+# Skills are PROJECT skills under .claude/skills/ (the aios-skills plugin layout was
+# retired in Wave 7; the shared client + reference live in .claude/skills/_shared/).
+_SKILLS_DIR = _REPO_ROOT / ".claude" / "skills"
 
 # The 31 skills the plugin ships. Kept explicit so a dropped/renamed skill fails loudly.
 EXPECTED_SKILLS = frozenset({
@@ -88,16 +88,17 @@ _PATH_RE = re.compile(r"\b(?:GET|POST|PATCH|PUT|DELETE)\s+(/[A-Za-z0-9_{}|.\-/]+
 # AUTHORING-STANDARD §6: every skill reaches the ONE shared backend client through the
 # plugin root, with a single canonical allowed-tools form - so all 30 skills read as if
 # one operator wrote them and no per-call permission prompt fires at runtime.
-_CANON_ALLOWED_TOOLS = "Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/aios_client.py:*), Read"
+_CANON_ALLOWED_TOOLS = "Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_client.py:*), Read"
 # The shared client, when referenced by PATH, must resolve through the plugin root.
 # (A bare "aios_client.py <cmd>" shorthand in a later step is fine - only the pathed
 # form is constrained, which is what a ${CLAUDE_SKILL_DIR}/../../ traversal would hit.)
-_CANON_CLIENT_PREFIX = "${CLAUDE_PLUGIN_ROOT}/"
-_CLIENT_SCRIPT_RE = re.compile(r"scripts/aios_client\.py")
+_CANON_CLIENT_PREFIX = "${CLAUDE_PROJECT_DIR}/.claude/skills/"
+_CLIENT_SCRIPT_RE = re.compile(r"_shared/aios_client\.py")
 
 
 def _skill_dirs() -> list[Path]:
-    return sorted(p for p in _SKILLS_DIR.iterdir() if p.is_dir())
+    # _shared/ holds the client + reference (no SKILL.md) -> not a skill.
+    return sorted(p for p in _SKILLS_DIR.iterdir() if p.is_dir() and (p / "SKILL.md").exists())
 
 
 def _parse(text: str) -> tuple[dict[str, str], str]:
@@ -195,13 +196,10 @@ def test_write_skill_disables_model_invocation(skill: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Manifest + roster
+# Roster completeness (project skills; the plugin manifest was retired in Wave 7)
 # --------------------------------------------------------------------------- #
-def test_plugin_manifest_valid_and_roster_complete() -> None:
-    manifest = json.loads((_PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    assert manifest.get("name"), "plugin.json must declare a name"
-
-    present = {p.name for p in _skill_dirs() if (p / "SKILL.md").exists()}
+def test_skill_roster_complete() -> None:
+    present = {p.name for p in _skill_dirs()}
     assert present == EXPECTED_SKILLS, (
         f"skill roster drift: missing={sorted(EXPECTED_SKILLS - present)} "
         f"extra={sorted(present - EXPECTED_SKILLS)}"

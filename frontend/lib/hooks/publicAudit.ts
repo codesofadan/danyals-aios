@@ -56,6 +56,22 @@ export function publicReportPdfUrl(token: string): string {
   return `${FILE_BASE}/public/audits/${encodeURIComponent(token)}/report.pdf`;
 }
 
+/** Direct URL for the self-contained report.html the in-page viewer renders. */
+export function publicReportHtmlUrl(token: string): string {
+  return `${FILE_BASE}/public/audits/${encodeURIComponent(token)}/report.html`;
+}
+
+/**
+ * Fetch the condensed free report.html for a token (unauthenticated — the token
+ * in the path is the capability). Returns the HTML string the ReportViewer
+ * renders; a 404 (no report yet) throws so the caller shows a fallback.
+ */
+export async function fetchPublicReportHtml(token: string): Promise<string> {
+  const res = await fetch(publicReportHtmlUrl(token));
+  if (!res.ok) throw new Error(`report unavailable (${res.status})`);
+  return res.text();
+}
+
 const isPending = (r: PublicReport | undefined) => r?.status === "queued" || r?.status === "running";
 
 /**

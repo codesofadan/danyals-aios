@@ -36,7 +36,11 @@ from app.core.security import PrivateAddressError, validate_public_host
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.schemas.audits import PAID_AUDIT_TYPES, AuditTypeKey
-from app.services.audit_artifacts import LocalArtifactStore, local_store_from_settings
+from app.services.audit_artifacts import (
+    REPORT_HTML_VIEW_HEADERS,
+    LocalArtifactStore,
+    local_store_from_settings,
+)
 from app.services.cost_gate import GateContext
 from app.services.cost_store import PostgresCostStore
 
@@ -319,3 +323,24 @@ async def download_public_report_pdf(
     if path is None:
         raise _ARTIFACT_NOT_FOUND
     return FileResponse(path, media_type="application/pdf", filename="free-audit-report.pdf")
+
+
+@router.get("/audits/{report_token}/report.html")
+async def view_public_report_html(
+    report_token: str, gateway: PublicGatewayDep, store: PublicArtifactStoreDep
+) -> FileResponse:
+    """Serve the (condensed) free report.html for a token's in-page viewer.
+
+    The token is the only guard. The file is resolved by convention from the public
+    audit's id (sibling of report.pdf), so the viewer works even when no PDF backend
+    produced a PDF. Same condensed document the free PDF is rendered from.
+    """
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    row = await asyncio.to_thread(gateway.get_by_token, report_token)
+    if row is None:
+        raise _REPORT_NOT_FOUND
+    path = store.resolve_report_html(str(row["id"]))
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="text/html", headers=REPORT_HTML_VIEW_HEADERS)

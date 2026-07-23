@@ -31,7 +31,7 @@ from app.schemas.portal import ClientDashboard
 from app.schemas.portal_deliverables import ClientDeliverableResponse
 from app.schemas.portal_reports import PortalReportResponse
 from app.schemas.portal_requests import ClientRequestResponse, PortalRequestCreate
-from app.services.audit_artifacts import LocalArtifactStore
+from app.services.audit_artifacts import REPORT_HTML_VIEW_HEADERS, LocalArtifactStore
 from app.services.client_audits import AuditInserter, create_client_audit, insert_audit_row
 from app.services.client_requests import RequestInserter, create_client_request, insert_request_row
 from app.services.report_viz import build_report_viz
@@ -256,6 +256,30 @@ async def download_portal_findings(
     return await _serve_portal_artifact(
         reader, loader, store, audit_id, "json_path", "application/json", f"audit-{audit_id}.json"
     )
+
+
+@router.get("/audits/{audit_id}/report.html")
+async def view_portal_report_html(
+    audit_id: str,
+    reader: PortalRepoDep,
+    store: ArtifactStoreDep,
+    _client: CurrentClientDep,
+) -> FileResponse:
+    """Serve the client's own report.html for the in-portal page-viewer.
+
+    Ownership is verified through the RLS view FIRST (the row is returned only if
+    it is the caller's own audit); the file is then resolved by convention from the
+    audit id (sibling of report.pdf) - the path is never returned to the client.
+    """
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    owned = await asyncio.to_thread(reader.get_audit, audit_id)
+    if owned is None:
+        raise _AUDIT_NOT_FOUND
+    path = store.resolve_report_html(audit_id)
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="text/html", headers=REPORT_HTML_VIEW_HEADERS)
 
 
 @router.post(

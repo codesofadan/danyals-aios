@@ -313,7 +313,9 @@ def test_audit_worker_emits_audit_deliverable(monkeypatch: pytest.MonkeyPatch) -
             return None
 
     class FakeArtifacts:
-        def store(self, audit_id: str, *, pdf_src: Any, findings_src: Any) -> tuple[str, None]:
+        def store(
+            self, audit_id: str, *, pdf_src: Any, findings_src: Any, html_src: Any = None
+        ) -> tuple[str, None]:
             return f"{audit_id}/report.pdf", None
 
     def runner(

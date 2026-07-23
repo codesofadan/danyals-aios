@@ -1,13 +1,1 @@
-{
-  "enabledPlugins": {
-    "aios-seo@danyals-aios": true
-  },
-  "extraKnownMarketplaces": {
-    "danyals-aios": {
-      "source": {
-        "source": "directory",
-        "path": "."
-      }
-    }
-  }
-}
+{}

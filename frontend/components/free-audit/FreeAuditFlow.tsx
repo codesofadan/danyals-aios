@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useCreatePublicAudit, usePublicReport } from "@/lib/hooks/publicAudit";
+import { useCallback, useEffect, useState } from "react";
+import {
+  fetchPublicReportHtml,
+  publicReportPdfUrl,
+  useCreatePublicAudit,
+  usePublicReport,
+} from "@/lib/hooks/publicAudit";
+import ReportViewer from "@/components/report/ReportViewer";
 import FreeAuditReport from "./FreeAuditReport";
 import FiverrUpsells from "./FiverrUpsells";
 
@@ -96,6 +102,11 @@ export default function FreeAuditFlow() {
   // The upsell link is backend-owned once a report exists.
   const fiverrUrl = report?.fiverr_url || FIVERR_PROFILE;
   const showFiverrBar = view !== "working" || !reportDone;
+
+  // Unauthenticated fetch of the condensed report.html (the token in the path is
+  // the capability) for the in-page viewer. Same condensed document the free PDF
+  // is rendered from, so the on-screen report matches the download.
+  const loadPublicReport = useCallback(() => fetchPublicReportHtml(token ?? ""), [token]);
 
   // Live HUD copy — reflects the REAL status, not a fake timeline.
   const hud = (() => {
@@ -285,6 +296,13 @@ export default function FreeAuditFlow() {
       {reportDone && report && token && (
         <main className="fa-report-wrap">
           <FreeAuditReport report={report} token={token} />
+          {/* The full condensed report, page by page — the SAME document as the PDF. */}
+          <ReportViewer
+            load={loadPublicReport}
+            reloadKey={token}
+            label="Your SEO audit report"
+            pdfHref={report.has_pdf ? publicReportPdfUrl(token) : undefined}
+          />
           <FiverrUpsells fiverrUrl={fiverrUrl} />
           <div className="fa-report-foot">
             Built by AIOS · <a href={fiverrUrl} target="_blank" rel="noopener noreferrer">See all our services on Fiverr →</a>

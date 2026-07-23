@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   auditTypes,
   TYPE_LABEL,
@@ -10,7 +10,8 @@ import {
 } from "@/lib/audit";
 import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
-import { downloadFile } from "@/lib/api";
+import { downloadFile, getReportHtml } from "@/lib/api";
+import ReportViewer from "@/components/report/ReportViewer";
 import AuditStats from "./AuditStats";
 import AuditScoreHistogram from "./AuditScoreHistogram";
 
@@ -51,6 +52,13 @@ export default function AuditWorkspace() {
   // Table filters
   const [statusFilter, setStatusFilter] = useState<"all" | JobStatus>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | AuditTypeKey>("all");
+
+  // The audit whose report.html is open in the full-screen page-viewer (null = none).
+  const [viewId, setViewId] = useState<string | null>(null);
+  const viewRow = viewId ? rows.find((r) => r.id === viewId) ?? null : null;
+  // Bearer-authed fetch of the self-contained report.html for the viewer. The SAME
+  // document the PDF is rendered from, so the on-screen report matches the download.
+  const loadReport = useCallback(() => getReportHtml(`/audits/${viewId}/report.html`), [viewId]);
 
   const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending;
 
@@ -177,6 +185,14 @@ export default function AuditWorkspace() {
                         <div className="au-arts">
                           <button
                             className="au-art"
+                            title="View report"
+                            disabled={r.status !== "done"}
+                            onClick={() => setViewId(r.id)}
+                          >
+                            <span className="material-symbols-rounded">visibility</span>
+                          </button>
+                          <button
+                            className="au-art"
                             title="Download PDF report"
                             disabled={!r.pdf}
                             onClick={() =>
@@ -291,6 +307,20 @@ export default function AuditWorkspace() {
       <div className="row-single">
         <AuditScoreHistogram rows={rows} />
       </div>
+
+      {viewId && (
+        <ReportViewer
+          load={loadReport}
+          reloadKey={viewId}
+          label={viewRow ? `${viewRow.client} · ${viewRow.url}` : "Audit report"}
+          onClose={() => setViewId(null)}
+          onDownloadPdf={
+            viewRow?.pdf
+              ? () => downloadFile(`/audits/${viewId}/report.pdf`, `${viewRow.client}-audit-${viewId}.pdf`)
+              : undefined
+          }
+        />
+      )}
     </>
   );
 }

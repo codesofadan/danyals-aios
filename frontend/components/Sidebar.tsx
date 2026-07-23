@@ -26,7 +26,6 @@ const SECTIONS: Section[] = [
       { icon: "fact_check", label: "Audit", href: "/admin/audit" },
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads" },
       { icon: "article", label: "Content", href: "/admin/content" },
-      { icon: "add_business", label: "GMB Posts", href: "/admin/gmb" },
       { icon: "storefront", label: "Citations", href: "/admin/citations" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2" },
       { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", badge: "3" },

@@ -147,6 +147,20 @@ def write_full_bundle(
         brand=brand,
     )
 
+    # The single self-contained deliverable: report.html (CSS inlined) is what the
+    # AIOS dashboard viewer shows AND the source report.pdf is rendered from (via
+    # write_all_pdfs below, which PDFs every *_html entry), so the on-screen report
+    # and the delivered PDF are the SAME document. Free mode renders the condensed
+    # (~10-15 page) variant of the identical layout; paid mode the full inventory.
+    report_html_path = html_reporter.render_report_html(
+        findings=findings,
+        run_metadata=run_meta,
+        artifact_dir=artifact_dir,
+        brand=brand,
+        condensed=(str(mode).lower() == "free"),
+    )
+    html_paths["report_html"] = report_html_path
+
     # ----- Consolidated narrative (free, deterministic) -----
     consolidated_md = consolidated_reporter.render_consolidated(
         domain=domain,

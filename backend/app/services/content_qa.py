@@ -66,10 +66,13 @@ from app.services.content_research import ResearchBrief
 from app.services.content_schema import ValidationResult
 
 # --------------------------------------------------------------------------- #
-# Doctrine constants (docs/CONTENT-DOCTRINE.md §11 is the source of truth).
+# QA gate. Canonical doctrine = the SEO-CONTENT-OS knowledge base
+# (backend/seo-content-os/knowledge/quality-gates/ — the PLAN + G0-G13 fail-fast
+# gate stack). This 14-dimension scorecard is the code projection of those gates:
+# EVERY dimension below MIN_DIMENSION_SCORE blocks publish (fail-fast, like the gate
+# stack), and the five critical dims below carry the hard non-negotiables.
 # --------------------------------------------------------------------------- #
-# The 14 QA dimensions this gate scores (0-100 each). Canonical snake_case keys;
-# each maps to a doctrine §11 dimension.
+# Each dimension maps to a SEO-CONTENT-OS gate (noted inline).
 QA_DIMENSIONS: tuple[str, ...] = (
     "intent_match",              # §11.1  - structure/format matches the brief intent
     "eeat_experience",           # §11.4  - first-hand Experience + expertise + trust
