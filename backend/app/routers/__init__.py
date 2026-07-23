@@ -34,6 +34,7 @@ from app.routers.reports import router as reports_router
 from app.routers.settings import router as settings_router
 from app.routers.skills import router as skills_router
 from app.routers.tasks import router as tasks_router
+from app.routers.team import router as team_router
 from app.routers.tickets import router as tickets_router
 from app.routers.tiers import router as tiers_router
 from app.routers.upsells import router as upsells_router
@@ -53,6 +54,7 @@ api_v1.include_router(tiers_router)
 api_v1.include_router(audits_router)
 api_v1.include_router(content_router)
 api_v1.include_router(tasks_router)
+api_v1.include_router(team_router)
 api_v1.include_router(milestones_router)
 api_v1.include_router(offpage_router)
 api_v1.include_router(reports_router)
