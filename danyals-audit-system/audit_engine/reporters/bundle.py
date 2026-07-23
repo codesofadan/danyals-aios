@@ -89,8 +89,15 @@ def write_full_bundle(
     brand: html_reporter.BrandConfig | None = None,
     ai_narrative: bool = False,
     mode: str = "auto",
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
-    """Render MD + HTML + PDF (best-effort) + consolidated narrative."""
+    """Render MD + HTML + PDF (best-effort) + consolidated narrative.
+
+    ``usage`` (optional) is the run's machine-readable AI-spend accounting -- real
+    token counts + call count -- persisted into run.json so a downstream consumer
+    (the AIOS cost gate) can commit the actual spend instead of a flat estimate.
+    """
+    usage = dict(usage or {})
     executive_md, full_md, remediation_md = md_reporter.render_audit(
         domain=domain,
         run_uuid=run_uuid,
@@ -117,6 +124,7 @@ def write_full_bundle(
             "pages_crawled": pages_crawled,
             "scores": scores,
             "mode": mode,
+            "usage": usage,
         },
     )
 
@@ -129,6 +137,7 @@ def write_full_bundle(
         "pages_crawled": pages_crawled,
         "scores": scores,
         "mode": mode,
+        "usage": usage,
     }
 
     html_paths = html_reporter.render_all(

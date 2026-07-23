@@ -92,6 +92,13 @@ class AuditRunResult:
     runtime_seconds: int = 0
     exit_code: int | None = None
     error: str | None = None
+    # run.json observables the worker turns into a RUNTIME-derived cost (never a
+    # flat estimate): pages crawled, the engine mode (free|paid), and -- when a
+    # newer engine build reports it -- a `usage` block (real token counts + serper
+    # query count). ``usage`` is ``{}`` on an older engine that omits it.
+    pages_crawled: int = 0
+    mode: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 def domain_to_slug(domain: str) -> str:
@@ -261,6 +268,7 @@ def run_audit(
 
     score, scores = _composite_score(run_meta)
     findings = artifact_dir / _FINDINGS_FILE
+    usage = run_meta.get("usage")
     logger.info("audit_engine_done", run_uuid=run_uuid, score=score, seconds=elapsed)
     return AuditRunResult(
         ok=True,
@@ -272,4 +280,9 @@ def run_audit(
         pdf_path=_find_pdf(artifact_dir),
         runtime_seconds=elapsed,
         exit_code=0,
+        pages_crawled=int(run_meta["pages_crawled"])
+        if isinstance(run_meta.get("pages_crawled"), (int, float))
+        else 0,
+        mode=str(run_meta.get("mode") or ""),
+        usage=usage if isinstance(usage, dict) else {},
     )

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from app.services import pricing
 from app.services.cost_gate import GateDecision
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult
 from workers.tasks.audit import execute_audit
@@ -47,6 +48,13 @@ def _settings() -> Settings:
     return Settings(_env_file=None, app_env="dev", audit_paid_cost_estimate=1.5)
 
 
+# The RUNTIME-derived paid-audit cost the worker now LOGS (via pricing.audit_cost: the
+# engine's run.json observables, here the fake's defaults -> pages_crawled=0 + the agent
+# fan-out), replacing the old flat audit_paid_cost_estimate. The flat 1.5 survives ONLY
+# as the upfront pre-check estimate, never as the committed cost.
+_PAID_COST = pricing.audit_cost(_settings(), pages_crawled=0, mode="paid", usage=None)
+
+
 def _row(**over: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": "aud-1",
@@ -84,13 +92,13 @@ def test_success_marks_running_then_done_and_logs_zero_cost_on_free() -> None:
     assert "finished_at" in done
     # Authenticated dashboard audits ALWAYS run the comprehensive (paid-provider)
     # pipeline now, so the paid estimate is logged regardless of the row's tier label.
-    assert store.costs == [1.5]
+    assert store.costs == [pytest.approx(_PAID_COST)]
 
 
 def test_paid_run_logs_estimated_cost() -> None:
     store = FakeStore(_row(tier="paid"))
     execute_audit(store, _settings(), "aud-1", runner=_ok_runner(70))
-    assert store.costs == [1.5]  # audit_paid_cost_estimate
+    assert store.costs == [pytest.approx(_PAID_COST)]  # runtime-derived, not the flat estimate
 
 
 def test_engine_failure_marks_failed_never_running() -> None:
@@ -106,7 +114,7 @@ def test_engine_failure_marks_failed_never_running() -> None:
     assert final["run_uuid"] == "u-9"
     assert "finished_at" in final
     # engine started (run_uuid present) on a paid run -> cost still logged
-    assert store.costs == [1.5]
+    assert store.costs == [pytest.approx(_PAID_COST)]
 
 
 def test_worker_exception_marks_failed_and_does_not_reraise() -> None:
@@ -198,7 +206,7 @@ def test_free_audit_is_never_gated_even_if_a_block_would_apply() -> None:
     assert ran == [True]  # the engine ran normally
     assert store.evaluated == []  # gate never consulted on the Free-labelled row
     # Dashboard audits run the comprehensive pipeline, so the paid estimate is logged.
-    assert store.costs == [1.5]
+    assert store.costs == [pytest.approx(_PAID_COST)]
 
 
 def test_task_is_registered() -> None:

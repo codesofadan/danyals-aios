@@ -35,6 +35,7 @@ from app.config import Settings, get_settings
 from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
 from app.schemas.offpage import action_for
+from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
@@ -213,7 +214,8 @@ def run_backlink_monitor(
     except Exception:
         logger.exception("backlink_monitor_pull_failed", domain=domain)
         return {"state": "error", "reason": "provider pull failed", "new": 0, "lost": 0}
-    gate.commit(ctx, ctx.estimated_cost)
+    # ACTUAL cost = one DataForSEO backlink pull x the per-call unit price (pricing.py).
+    gate.commit(ctx, pricing.dataforseo_cost(settings, calls=1))
 
     stored = store.list_backlinks_for_client(client_id)
     diff = diff_backlinks(fetched, stored)
@@ -276,7 +278,10 @@ def run_citation_monitor(
     except Exception:
         logger.exception("citation_monitor_pull_failed", business=business)
         return {"state": "error", "reason": "provider pull failed", "new": 0, "changed": 0}
-    gate.commit(ctx, ctx.estimated_cost)
+    # One BrightLocal monitoring pull. BrightLocal is a subscription with no per-call
+    # meter, so the committed cost is the per-pull unit price itself (1 pull performed)
+    # -- a real unit of work, not a flat per-call guess of a token/query count.
+    gate.commit(ctx, float(settings.offpage_monitor_cost_estimate))
 
     stored = store.list_citations_for_client(client_id)
     diff = diff_citations(fetched, stored)

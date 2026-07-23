@@ -33,6 +33,7 @@ from typing import Any
 from app.config import Settings
 from app.logging_setup import get_logger
 from app.schemas.ai_assist import AiAssistSurface, AssistStatus
+from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from integrations.errors import ProviderNotConfiguredError
@@ -221,7 +222,17 @@ def run_assist(
     llm = summarizer.summarize(
         composed, model=settings.anthropic_model_summary, max_tokens=settings.ai_assist_max_tokens
     )
-    gate.commit(ctx, ctx.estimated_cost)
+    # Commit the ACTUAL assist spend from the call's real token usage x the model's
+    # unit price (pricing.py), not the flat estimate that fronted the pre-check.
+    gate.commit(
+        ctx,
+        pricing.anthropic_cost(
+            settings,
+            model=settings.anthropic_model_summary,
+            input_tokens=llm.input_tokens,
+            output_tokens=llm.output_tokens,
+        ),
+    )
     return AssistResult(
         surface=surface,
         status="ok",

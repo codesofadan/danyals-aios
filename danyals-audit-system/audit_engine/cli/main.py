@@ -33,6 +33,7 @@ from audit_engine.agents.dispatcher import (
     AgentRunResult,
     dispatch_agents,
     load_check_specs,
+    run_usage_snapshot,
 )
 from audit_engine.analyzers.ai_search import iter_per_page_ai_search
 from audit_engine.analyzers.semantic_seo import (
@@ -1571,6 +1572,9 @@ async def _run_full(
         findings=all_findings,
         ai_narrative=use_ai,
         mode=mode,
+        # Real AI-spend accounting for run.json: the specialist agents' actual
+        # token usage this run, so the AIOS cost gate commits usage x unit price.
+        usage=run_usage_snapshot(),
     )
     with connection() as conn:
         AuditRunRepository.finalize(

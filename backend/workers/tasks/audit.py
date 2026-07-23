@@ -26,6 +26,7 @@ from psycopg.types.json import Jsonb
 from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
+from app.services import pricing
 from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
@@ -248,13 +249,17 @@ def execute_audit(
 
     finished = _utcnow().isoformat()
 
-    # Log the run cost through the Part-2 cost path once the engine has actually
-    # started (a run_uuid was minted): Free = $0, Paid = the configured estimate
-    # (the engine reports no machine-readable spend).
+    # Commit the run cost through the Part-2 cost path once the engine has actually
+    # started (a run_uuid was minted). A dashboard audit is always the comprehensive
+    # (paid-provider) run, so the cost is computed at RUNTIME from the engine's
+    # run.json observables (real token usage + serper queries when the engine reports
+    # a `usage` block; else derived from pages_crawled + the agent fan-out) -- NEVER
+    # the flat estimate, which only fed the upfront pre-flight gate above.
     if result.run_uuid is not None:
-        # A dashboard audit is always the comprehensive (paid-provider) run, so log the
-        # paid estimate through the cost path regardless of the row's tier label.
-        _safe_record_cost(store, row, settings.audit_paid_cost_estimate)
+        cost = pricing.audit_cost(
+            settings, pages_crawled=result.pages_crawled, mode="paid", usage=result.usage
+        )
+        _safe_record_cost(store, row, cost)
 
     if not result.ok:
         store.update(

@@ -27,6 +27,7 @@ from app.config import Settings, get_settings
 from app.logging_setup import get_logger
 from app.modules.keyword_research.repo import ServiceKeywordStore, service_keyword_store
 from app.modules.keyword_research.service import plan_research
+from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from integrations.keyword_data import (
@@ -107,7 +108,9 @@ def execute_research(
     except Exception:
         logger.exception("keyword_research_fetch_failed", seed=seed)
         return {"state": "error", "reason": "provider fetch failed", "saved": 0}
-    gate.commit(ctx, ctx.estimated_cost)
+    # ACTUAL cost = the three DataForSEO calls made above (ideas + related + intent)
+    # x the per-call unit price (pricing.py), not one flat per-run estimate.
+    gate.commit(ctx, pricing.dataforseo_cost(settings, calls=3))
 
     plan = plan_research(
         seed,

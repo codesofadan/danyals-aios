@@ -64,6 +64,7 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 from app.config import Settings
 from app.core.security import is_public_url
 from app.logging_setup import get_logger
+from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext, GateOutcome
 from integrations.content_research import KeywordMetrics, SerpResearcher, SerpResult
 
@@ -431,7 +432,9 @@ class GatedResearcher:
         if not decision.allowed:
             raise ContentSpendBlocked(decision.outcome)
         result = self._inner.serp(keyword, geo)
-        self._gate.commit(ctx, ctx.estimated_cost, cache_value=result)
+        # One paid Serper SERP query -> ACTUAL cost = 1 x the per-query unit price
+        # (pricing.py), not the flat estimate that fronted the pre-check.
+        self._gate.commit(ctx, pricing.serper_cost(self._settings, queries=1), cache_value=result)
         return result
 
     def keyword_metrics(self, keyword: str) -> KeywordMetrics:
@@ -445,7 +448,8 @@ class GatedResearcher:
         if not decision.allowed:
             raise ContentSpendBlocked(decision.outcome)
         result = self._inner.keyword_metrics(keyword)
-        self._gate.commit(ctx, ctx.estimated_cost, cache_value=result)
+        # One paid Serper keyword-metrics query -> ACTUAL cost = 1 x per-query price.
+        self._gate.commit(ctx, pricing.serper_cost(self._settings, queries=1), cache_value=result)
         return result
 
     def teardown(self, urls: list[str], keyword: str, geo: str | None) -> TeardownFetch:

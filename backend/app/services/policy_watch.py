@@ -30,6 +30,7 @@ from urllib.parse import urljoin
 from app.config import Settings
 from app.core.security import PrivateAddressError, validate_public_host
 from app.logging_setup import get_logger
+from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from integrations.llm import AnthropicSummarizer, Summarizer
 
@@ -291,7 +292,17 @@ def analyze_change(
         model=settings.anthropic_model_summary,
         max_tokens=_ANALYSIS_MAX_TOKENS,
     )
-    gate.commit(ctx, ctx.estimated_cost)
+    # Commit the ACTUAL Haiku spend from the call's real token usage x the model's
+    # unit price (pricing.py), not the flat estimate that fronted the pre-check.
+    gate.commit(
+        ctx,
+        pricing.anthropic_cost(
+            settings,
+            model=settings.anthropic_model_summary,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        ),
+    )
     return parse_analysis(
         result.text,
         fallback_title=f"Update to {source_name}",

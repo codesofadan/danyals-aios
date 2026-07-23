@@ -60,6 +60,7 @@ from app.modules.competitor_intel.service import (
 )
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
+from app.services.pricing import serper_cost
 from integrations.content_research import SerpResearcher
 from integrations.keyword_data import KeywordDataProvider
 
@@ -286,9 +287,10 @@ def execute_discovery(
         }
 
     # Commit only what was actually DELIVERED - a partial sweep bills partially. The
-    # gate was pre-checked for the full sweep (the conservative direction), so this can
-    # only ever charge less than was authorised.
-    delivered = round(ctx.estimated_cost * len(serps) / len(sample), 6) if sample else 0.0
+    # ACTUAL cost = the number of SERPs actually read x the per-query unit price
+    # (pricing.py); the gate was pre-checked for the full sweep (the conservative
+    # direction), so this can only ever charge less than was authorised.
+    delivered = serper_cost(settings, queries=len(serps))
     gate.commit(ctx, delivered)
 
     candidates = tally_competitors(

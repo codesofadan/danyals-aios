@@ -34,6 +34,32 @@ MAX_BODY_CHARS_PER_PAGE = 1200
 MAX_FINDINGS_PER_AGENT = 60
 
 
+# ---------- Per-process AI-spend accounting ----------
+# The engine runs one audit per subprocess invocation, so a module-level
+# accumulator is a safe per-run tally: every specialist agent call adds its real
+# token usage here (asyncio is single-threaded, so the += has no race), and the
+# CLI folds ``run_usage_snapshot()`` into run.json's ``usage`` block. The AIOS
+# worker prices that at the model's real per-token rate instead of a flat guess.
+_RUN_USAGE: dict[str, Any] = {
+    "agent_calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "model": DEFAULT_MODEL,
+}
+
+
+def _record_agent_usage(*, model: str, input_tokens: int, output_tokens: int) -> None:
+    _RUN_USAGE["agent_calls"] += 1
+    _RUN_USAGE["input_tokens"] += max(int(input_tokens or 0), 0)
+    _RUN_USAGE["output_tokens"] += max(int(output_tokens or 0), 0)
+    _RUN_USAGE["model"] = model
+
+
+def run_usage_snapshot() -> dict[str, Any]:
+    """A copy of this process's accumulated agent token usage (for run.json)."""
+    return dict(_RUN_USAGE)
+
+
 # ---------- Loading agent definitions ----------
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -370,6 +396,14 @@ async def _call_agent(
             valid.append(v)
     cache_read = getattr(msg.usage, "cache_read_input_tokens", 0) or 0
     cache_write = getattr(msg.usage, "cache_creation_input_tokens", 0) or 0
+    # Tally this call's real token usage into the per-process accumulator so the
+    # AIOS worker can commit the actual AI spend (usage x unit price), not a flat
+    # per-audit estimate. Priced at ``model`` (the tier the run actually used).
+    _record_agent_usage(
+        model=model,
+        input_tokens=getattr(msg.usage, "input_tokens", 0),
+        output_tokens=getattr(msg.usage, "output_tokens", 0),
+    )
     log.info(
         "agent_call_complete",
         agent=agent.short,

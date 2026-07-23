@@ -54,6 +54,7 @@ from app.modules.on_page.service import (
     priority_score,
     quick_win,
 )
+from app.services import pricing
 from app.services.content_research import FetchedPage, salient_entities
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
@@ -361,7 +362,8 @@ def _entities_for(
     except Exception:
         logger.warning("on_page_entity_fetch_failed", code=code)
         return None
-    gate.commit(ctx, ctx.estimated_cost)
+    # ACTUAL cost = one Serper SERP pull x the per-query unit price (pricing.py).
+    gate.commit(ctx, pricing.serper_cost(settings, queries=1))
     return entities
 
 

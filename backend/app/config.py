@@ -98,9 +98,25 @@ class Settings(BaseSettings):
     # single-VPS deploy the API + worker share this filesystem. Unset -> no
     # artifacts are stored/served (the pdf/json flags stay false).
     audit_artifact_dir: str | None = None
-    # The engine emits no machine-readable spend; a Paid run logs this estimate
-    # through the Part-2 cost path (a Free run always logs 0).
+    # A Paid audit's UPFRONT pre-flight estimate (feeds GateContext.estimated_cost
+    # for the dial/cap/spend-stop pre-check BEFORE the engine runs, when real usage
+    # is unknown). It is NOT the logged cost: the COMMITTED cost is computed at
+    # RUNTIME from the engine's run.json (real token usage + serper queries when the
+    # engine reports a `usage` block; else derived from pages_crawled + agent count).
+    # See app/services/pricing.audit_cost. (A Free run always logs 0.)
     audit_paid_cost_estimate: float = 1.5
+    # --- Runtime-derived audit cost knobs (used by pricing.audit_cost). ---
+    # PRECISE path: when run.json carries a `usage` block the cost is real token x
+    # unit price; these knobs are the DERIVED fallback for an older engine build that
+    # reports only pages_crawled + mode. A blended paid-provider cost per crawled page
+    # (Serper SERP + PageSpeed + Places lookups amortised over the crawl):
+    audit_cost_per_page: float = 0.003
+    # The comprehensive run's specialist AI-agent fan-out (~21 agents + narrative).
+    # Priced at the haiku unit from rough per-agent token estimates when the engine
+    # does not report real token usage.
+    audit_agent_calls: int = 21
+    audit_agent_tokens_in: int = 6000  # rough per-agent input tokens (derived only)
+    audit_agent_tokens_out: int = 1200  # rough per-agent output tokens (derived only)
 
     # Fiverr upsell link shown on the PUBLIC free-audit report (P6C). Not a secret
     # (it is rendered to anonymous visitors); trivial to change per campaign.
@@ -444,6 +460,37 @@ class Settings(BaseSettings):
     b2_application_key: SecretStr | None = None  # B2 application key (secret)
     b2_bucket: str | None = None  # destination bucket name
     b2_endpoint_url: str | None = None  # optional S3 endpoint override (region host)
+
+    # --- Provider UNIT prices (single source of truth: app/services/pricing.py). ---
+    # Every LOGGED/committed cost is computed at RUNTIME from ACTUAL usage x one of
+    # these real unit prices -- there is NO flat per-CALL dollar constant used as the
+    # logged cost. Defaults are current public list prices (2026); each is env-
+    # overridable (12-factor) so ops can re-price without a code change. See
+    # docs and app/services/pricing.py. Prices are USD.
+    #
+    # Anthropic (Claude) is billed per-token, priced per 1,000,000 tokens, per model
+    # tier. haiku = the cheap default fold/summary model; sonnet = the heavier model;
+    # opus = the top tier (defensive default for an unrecognised model id).
+    price_anthropic_haiku_input_per_mtok: float = 1.00  # claude-haiku-4-5 input $/MTok
+    price_anthropic_haiku_output_per_mtok: float = 5.00  # claude-haiku-4-5 output $/MTok
+    price_anthropic_sonnet_input_per_mtok: float = 3.00  # claude-sonnet-5 input $/MTok
+    price_anthropic_sonnet_output_per_mtok: float = 15.00  # claude-sonnet-5 output $/MTok
+    price_anthropic_opus_input_per_mtok: float = 5.00  # claude-opus-* input $/MTok
+    price_anthropic_opus_output_per_mtok: float = 25.00  # claude-opus-* output $/MTok
+    # Serper.dev is billed per SERP query (~ $1 / 1,000 queries on the paid plan).
+    price_serper_per_query: float = 0.001
+    # Google paid APIs billed per call (Places/geocode ~ $0.005/call blended; env-tune
+    # per SKU). GSC/GA4/PageSpeed are FREE-tier and priced at $0 by their own settings.
+    price_google_per_call: float = 0.005
+    # OpenAI-compatible image generation billed per generated image (gpt-image-1
+    # standard 1024^2 ~ $0.04/image; env-tune per size/quality).
+    price_image_per_image: float = 0.04
+    # Voyage AI embeddings billed per token, priced per 1,000,000 tokens (voyage-3
+    # ~ $0.06/MTok). The Embedder seam does not surface the provider token count, so
+    # the embed caller approximates tokens from the ACTUAL text length (~4 chars/tok).
+    price_voyage_per_mtok: float = 0.06
+    # DataForSEO billed per API call (backlink/keyword pulls ~ $0.0006/call blended).
+    price_dataforseo_per_call: float = 0.0006
 
     # --- Tuning ---
     readiness_timeout_seconds: float = 3.0

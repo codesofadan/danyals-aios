@@ -57,6 +57,7 @@ from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.schemas.content import schema_for
+from app.services import pricing
 from app.services.content_artifacts import (
     ContentArtifactStore,
     content_store_from_settings,
@@ -263,7 +264,15 @@ class _ContentGatedWriter:
         if not decision.allowed:
             raise ContentSpendBlocked(decision.outcome)
         result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens)
-        self._gate.commit(ctx, ctx.estimated_cost)
+        # Commit the ACTUAL draft spend from the call's real token usage x the
+        # model's unit price (pricing.py), not the flat per-call estimate.
+        actual = pricing.anthropic_cost(
+            self._settings,
+            model=model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+        self._gate.commit(ctx, actual)
         return result
 
 
@@ -568,19 +577,23 @@ def _generate_images(
     images: ImageGenerator,
     content: GeneratedContent,
     gate: CostGate,
+    settings: Settings,
     *,
     client_id: str | None,
     code: str,
 ) -> int:
     """Generate the planned hero/section images, gated on the content dial. A dial
-    block stops image generation (not fatal); a provider error skips that image."""
+    block stops image generation (not fatal); a provider error skips that image.
+    Each generated image is committed at its RUNTIME cost = 1 x the per-image unit
+    price (pricing.py); the pre-check estimate is the same per-image price."""
+    per_image = settings.price_image_per_image
     count = 0
     for item in content.images_plan:
         ctx = GateContext(
             feature_key=_CONTENT_FEATURE,
             client_id=client_id,
             provider=_IMAGE_PROVIDER,
-            estimated_cost=0.0,  # negligible vs drafting; folds into the content dial
+            estimated_cost=per_image,  # one image's per-image price (upfront pre-check)
             job_id=code,
             job_type=_JOB_TYPE,
             cache_key=None,
@@ -590,7 +603,8 @@ def _generate_images(
             break
         try:
             images.generate(item.prompt, item.alt)
-            gate.commit(ctx, 0.0)
+            # ACTUAL cost = one image generated x the per-image unit price.
+            gate.commit(ctx, pricing.image_cost(settings, images=1))
             count += 1
         except Exception:  # one bad image never fails the job
             logger.warning("content_image_failed", code=code)
@@ -783,7 +797,9 @@ def _run_pipeline(
 
     # --- images (bounded, gated) -> assemble
     stream("images")
-    image_count = _generate_images(providers.images, content, gate, client_id=client_id, code=code)
+    image_count = _generate_images(
+        providers.images, content, gate, settings, client_id=client_id, code=code
+    )
     stream("assemble")
 
     # --- qa (the 14-dimension scorecard; attached so the reviewer sees it)

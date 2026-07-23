@@ -30,6 +30,7 @@ import hashlib
 
 from app.config import Settings
 from app.db.database import privileged_connection
+from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext, GateOutcome
 from integrations.embeddings import Embedder
 from integrations.llm import LLMResult, Summarizer
@@ -115,10 +116,17 @@ class GatedSummarizer:
         if not decision.allowed:
             raise ContextSpendBlocked(decision.outcome)
         result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens)
-        # No machine-readable price is available (the SDK reports tokens, not $),
-        # so -- exactly like the audit worker -- the configured estimate is the
-        # actual logged cost. Token usage rides in the LLMResult for later pricing.
-        self._gate.commit(ctx, ctx.estimated_cost)
+        # Commit the ACTUAL spend computed at RUNTIME from the call's real token
+        # usage x the model's unit price (pricing.py) -- NOT the flat estimate. The
+        # estimate stays only as the upfront pre-check number the evaluate() above
+        # needed before usage was known.
+        actual = pricing.anthropic_cost(
+            self._settings,
+            model=model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+        self._gate.commit(ctx, actual)
         return result
 
 
@@ -192,10 +200,17 @@ class GatedEmbedder:
                 raise ContextSpendBlocked(decision.outcome)
 
         if miss_order:
-            vectors = self._inner.embed([_first_text(texts, miss_positions[c]) for c in miss_order])
-            for checksum, vector in zip(miss_order, vectors, strict=True):
-                # Commit the spend and warm the cache so an unchanged re-embed is $0.
-                self._gate.commit(miss_ctx[checksum], miss_ctx[checksum].estimated_cost, cache_value=vector)
+            miss_texts = [_first_text(texts, miss_positions[c]) for c in miss_order]
+            vectors = self._inner.embed(miss_texts)
+            for checksum, text, vector in zip(miss_order, miss_texts, vectors, strict=True):
+                # Commit the ACTUAL embedding spend from the real text's token count
+                # x the Voyage per-token price (the Embedder seam surfaces no token
+                # count, so it is approximated from the embedded text) -- NOT the flat
+                # estimate. Warm the cache so an unchanged re-embed is a $0 hit.
+                actual = pricing.voyage_embed_cost(
+                    self._settings, tokens=pricing.approx_tokens(text)
+                )
+                self._gate.commit(miss_ctx[checksum], actual, cache_value=vector)
                 for pos in miss_positions[checksum]:
                     results[pos] = vector
 

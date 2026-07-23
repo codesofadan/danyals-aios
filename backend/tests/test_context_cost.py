@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from app.services import pricing
 from app.services.context_cost import (
     ContextSpendBlocked,
     GatedEmbedder,
@@ -128,10 +129,14 @@ def test_summarize_api_calls_inner_once_and_commits() -> None:
     result = gs.summarize("please summarize this fold", model="m", max_tokens=100)
     assert spy.calls == 1  # inner called exactly once
     assert result.text.startswith("summary::")
-    # commit logged exactly one (non-cached) cost row at the estimate.
+    # commit logged exactly one (non-cached) cost row at the RUNTIME cost: the spy's
+    # actual token usage (3 in / 2 out) x the model's unit price (pricing.py), NOT the
+    # flat context_summarize_cost_estimate.
     assert len(store.recorded) == 1
     ctx, cost, cached = store.recorded[0]
-    assert cost == pytest.approx(0.02)
+    assert cost == pytest.approx(
+        pricing.anthropic_cost(_settings(), model="m", input_tokens=3, output_tokens=2)
+    )
     assert cached is False
     assert ctx.feature_key == "context"
     assert ctx.provider == "Anthropic"
@@ -171,7 +176,10 @@ def test_embed_api_calls_inner_and_commits_per_text() -> None:
     # Two committed (non-cached) cost rows, one per unique text.
     non_cached = [r for r in store.recorded if not r[2]]
     assert len(non_cached) == 2
-    assert all(cost == pytest.approx(0.001) for _, cost, _ in non_cached)
+    # Each committed cost is the RUNTIME voyage price for that text's token estimate
+    # (pricing.py), never a flat per-text constant.
+    expected = [pricing.voyage_embed_cost(_settings(), tokens=pricing.approx_tokens(t)) for t in ("alpha", "beta")]
+    assert [cost for _, cost, _ in non_cached] == expected
     assert ge.dim == spy.dim
 
 
