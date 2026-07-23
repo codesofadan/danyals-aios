@@ -64,12 +64,28 @@ export function useSetBudget() {
 }
 
 // PUT /cost/dial/{feature_key} — flip a feature's cost mode (api/byhand/off).
+// Optimistic: flip the row in-cache immediately so the segmented control feels
+// instant, roll back on error, then reconcile with the server on settle.
 export function useSetDial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ key, mode }: { key: string; mode: DialMode }) =>
       api.put<DialFeature>(`/cost/dial/${key}`, { mode }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: DIAL_KEY }),
+    onMutate: async ({ key, mode }) => {
+      await qc.cancelQueries({ queryKey: DIAL_KEY });
+      const prev = qc.getQueryData<DialFeature[]>(DIAL_KEY);
+      if (prev) {
+        qc.setQueryData<DialFeature[]>(
+          DIAL_KEY,
+          prev.map((d) => (d.key === key ? { ...d, mode } : d)),
+        );
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(DIAL_KEY, ctx.prev);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: DIAL_KEY }),
   });
 }
 
@@ -80,6 +96,24 @@ export function useSetSpendStop() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: SpendStopUpdate) => api.put<SpendStop>("/cost/spend-stop", body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: SPEND_STOP_KEY }),
+    // Optimistic: reflect the halt flip / new threshold immediately so the toggle
+    // and threshold read live. The request body is snake_case (daily_stop) while the
+    // cache is camelCase (dailyStop) — map across. Roll back on error.
+    onMutate: async (body) => {
+      await qc.cancelQueries({ queryKey: SPEND_STOP_KEY });
+      const prev = qc.getQueryData<SpendStop>(SPEND_STOP_KEY);
+      if (prev) {
+        qc.setQueryData<SpendStop>(SPEND_STOP_KEY, {
+          ...prev,
+          ...(body.halted !== undefined ? { halted: body.halted } : {}),
+          ...(body.daily_stop !== undefined ? { dailyStop: body.daily_stop } : {}),
+        });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(SPEND_STOP_KEY, ctx.prev);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: SPEND_STOP_KEY }),
   });
 }

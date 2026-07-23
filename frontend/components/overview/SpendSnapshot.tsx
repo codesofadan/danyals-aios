@@ -10,7 +10,7 @@ const STATUS_COLOR: Record<BudgetStatus, string> = {
 // clients, plus the near/over-cap accounts. Fed from GET /command-center
 // (`spend`, already rolled up + flagged worst-first). Full controls live in /cost.
 export default function SpendSnapshot({ spend }: { spend: CCSpendSnapshot }) {
-  const { totalSpent, totalCap, pct, flagged, dailyStop } = spend;
+  const { totalSpent, totalCap, pct, flagged, dailyStop, halted } = spend;
 
   return (
     <section className="card">
@@ -20,7 +20,10 @@ export default function SpendSnapshot({ spend }: { spend: CCSpendSnapshot }) {
           <div className="cs">Month-to-date across all clients</div>
         </div>
         <div className="tools">
-          <span className="pill-tag ok"><span className="material-symbols-rounded">shield</span>Spend-stop armed</span>
+          <span className={`pill-tag ${halted ? "warn" : "ok"}`}>
+            <span className="material-symbols-rounded">{halted ? "gpp_bad" : "shield"}</span>
+            {halted ? "Spend-stop tripped" : "Spend-stop armed"}
+          </span>
         </div>
       </div>
 

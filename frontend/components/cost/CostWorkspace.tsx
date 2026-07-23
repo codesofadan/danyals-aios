@@ -30,6 +30,8 @@ export default function CostWorkspace() {
   // Spend-stop: `armed` (providers live) is the inverse of the server `halted` flag.
   const armed = !(spendStopQ.data?.halted ?? false);
   const serverThreshold = spendStopQ.data?.dailyStop ?? dailyStopDefault;
+  // Live day-to-date paid spend (the number the daily stop trips on).
+  const todaySpent = spendStopQ.data?.todaySpent ?? 0;
   // Local draft so typing the threshold feels instant; the PUT is debounced and the
   // draft is cleared once the write settles (the query becomes authoritative).
   const [thresholdDraft, setThresholdDraft] = useState<number | null>(null);
@@ -91,12 +93,13 @@ export default function CostWorkspace() {
         </div>
       )}
 
-      <CostStats spend={totals.spent} budgetUsed={totals.used} jobs={jobsThisMonth} armed={armed} />
+      <CostStats spend={totals.spent} budgetUsed={totals.used} jobs={jobsThisMonth} armed={armed} todaySpent={todaySpent} />
 
       <div className="row">
         <SpendStopCard
           armed={armed}
           threshold={threshold}
+          todaySpent={todaySpent}
           onToggle={handleToggleStop}
           onThreshold={handleThreshold}
         />

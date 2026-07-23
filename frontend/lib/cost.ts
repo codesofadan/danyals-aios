@@ -101,19 +101,6 @@ export type ClientBudget = {
   c: string;     // accent (SERIES slot)
 };
 
-// Shared base cost runs ~$44–64/mo; content adds ~$10–50/page, so caps
-// scale with tier. Spend below drives the near-cap / over states.
-export const budgets_seed: ClientBudget[] = [
-  { id: "b-northpeak",   cn: "NorthPeak Dental",   tier: "Scale",   cap: 500, spent: 312, c: SERIES.c1 },
-  { id: "b-meridian",    cn: "Meridian Wealth",    tier: "Scale",   cap: 500, spent: 356, c: SERIES.c1 },
-  { id: "b-lumen",       cn: "Lumen Realty",       tier: "Growth",  cap: 250, spent: 214, c: SERIES.c2 },
-  { id: "b-atlas",       cn: "Atlas Legal",        tier: "Growth",  cap: 250, spent: 261, c: SERIES.c4 },
-  { id: "b-brighthvac",  cn: "BrightHVAC",         tier: "Growth",  cap: 250, spent: 138, c: SERIES.c3 },
-  { id: "b-coastline",   cn: "Coastline Fit",      tier: "Starter", cap: 120, spent: 103, c: SERIES.c2 },
-  { id: "b-verde",       cn: "Verde Cafe",         tier: "Starter", cap: 120, spent:  47, c: SERIES.c5 },
-  { id: "b-orchard",     cn: "Orchard Pediatrics", tier: "Starter", cap: 120, spent:   8, c: SERIES.c5 },
-];
-
 export type BudgetStatus = "ok" | "warn" | "crit";
 export function budgetPct(b: { cap: number; spent: number }): number {
   return b.cap === 0 ? 0 : Math.round((b.spent / b.cap) * 100);
@@ -141,21 +128,6 @@ export type CostEntry = {
   time: string;     // relative
 };
 
-export const costLog_seed: CostEntry[] = [
-  { id: "J-2041", client: "NorthPeak Dental",  type: "audit",     provider: "DataForSEO", cost: 0.75, cached: false, time: "6m ago" },
-  { id: "J-2041", client: "NorthPeak Dental",  type: "audit",     provider: "PageSpeed",  cost: 0.00, cached: false, time: "6m ago" },
-  { id: "J-2039", client: "Lumen Realty",      type: "content",   provider: "Anthropic",  cost: 1.28, cached: false, time: "24m ago" },
-  { id: "J-2038", client: "Meridian Wealth",   type: "backlinks", provider: "Serper",     cost: 0.30, cached: false, time: "38m ago" },
-  { id: "J-2037", client: "Verde Cafe",        type: "audit",     provider: "DataForSEO", cost: 0.00, cached: true,  time: "52m ago" },
-  { id: "J-2036", client: "BrightHVAC",        type: "content",   provider: "Anthropic",  cost: 0.94, cached: false, time: "1h ago" },
-  { id: "J-2035", client: "Coastline Fit",     type: "backlinks", provider: "Places",     cost: 0.17, cached: false, time: "1h ago" },
-  { id: "J-2034", client: "Atlas Legal",       type: "audit",     provider: "Serper",     cost: 0.00, cached: true,  time: "2h ago" },
-  { id: "J-2033", client: "Lumen Realty",      type: "audit",     provider: "DataForSEO", cost: 0.75, cached: false, time: "2h ago" },
-  { id: "J-2032", client: "NorthPeak Dental",  type: "content",   provider: "Anthropic",  cost: 1.12, cached: false, time: "3h ago" },
-  { id: "J-2031", client: "Verde Cafe",        type: "backlinks", provider: "Serper",     cost: 0.30, cached: false, time: "4h ago" },
-  { id: "J-2030", client: "Meridian Wealth",   type: "audit",     provider: "DataForSEO", cost: 0.00, cached: true,  time: "5h ago" },
-];
-
 // --- Cost dial (per-feature mode) -------------------------------------------
 // The dial the admin turns: API = call the paid provider, By hand = queue for
 // manual review before spend, Off = stub/skip the call entirely.
@@ -168,15 +140,6 @@ export type DialFeature = {
   note: string;
 };
 
-export const dial_seed: DialFeature[] = [
-  { key: "tech_audit", label: "Technical Audit",  icon: "troubleshoot", provider: "DataForSEO", mode: "api",    note: "Live crawl + rank data" },
-  { key: "cwv",        label: "Core Web Vitals",  icon: "speed",        provider: "PageSpeed",  mode: "api",    note: "Free tier — always on" },
-  { key: "content",    label: "Content Pipeline", icon: "article",      provider: "Anthropic",  mode: "api",    note: "Claude drafting, ~$0.90/pg" },
-  { key: "backlinks",  label: "Backlink Manager", icon: "hub",          provider: "Serper",     mode: "byhand", note: "Paid — review before pull" },
-  { key: "local_seo",  label: "Local SEO",        icon: "storefront",   provider: "Places",     mode: "byhand", note: "GBP + map-pack lookups" },
-  { key: "keywords",   label: "Keyword Research", icon: "search",       provider: "Serper",     mode: "off",    note: "Paused this cycle" },
-];
-
 export const DIAL_MODE_META: Record<DialMode, { label: string; icon: string }> = {
   api:    { label: "API",     icon: "bolt" },
   byhand: { label: "By hand", icon: "back_hand" },
@@ -184,17 +147,9 @@ export const DIAL_MODE_META: Record<DialMode, { label: string; icon: string }> =
 };
 export const DIAL_MODES: DialMode[] = ["api", "byhand", "off"];
 
-// --- Spend by provider, month-to-date (USD) ---------------------------------
-export const providerSpend_seed: { provider: Provider; amount: number }[] = [
-  { provider: "Anthropic",  amount: 612 },
-  { provider: "DataForSEO", amount: 428 },
-  { provider: "Serper",     amount: 236 },
-  { provider: "Places",     amount: 148 },
-  { provider: "PageSpeed",  amount: 15 },
-];
-
 // --- Global settings --------------------------------------------------------
-export const jobsThisMonth = 247;
+// Fallback shown only while GET /cost/spend-stop is loading; the live value
+// (SpendStopResponse.dailyStop) is authoritative once the query resolves.
 export const dailyStopDefault = 75; // daily spend-stop threshold (USD)
 
 export const usd = (n: number, dp = 0) =>

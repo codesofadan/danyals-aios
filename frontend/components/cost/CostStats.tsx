@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
+import { usd } from "@/lib/cost";
 
 function useCountUp(target: number, format: (n: number) => string) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -33,9 +34,9 @@ function Value({ value, format }: { value: number; format: (n: number) => string
   return <div className="val"><span ref={ref}>{format(0)}</span></div>;
 }
 
-type Props = { spend: number; budgetUsed: number; jobs: number; armed: boolean };
+type Props = { spend: number; budgetUsed: number; jobs: number; armed: boolean; todaySpent: number };
 
-export default function CostStats({ spend, budgetUsed, jobs, armed }: Props) {
+export default function CostStats({ spend, budgetUsed, jobs, armed, todaySpent }: Props) {
   return (
     <section className="kpis">
       <div className="kpi hero">
@@ -43,7 +44,7 @@ export default function CostStats({ spend, budgetUsed, jobs, armed }: Props) {
         <div className="lab">Spend this month</div>
         <Value value={spend} format={money} />
         <div className="sub">
-          <span className="delta up"><span className="material-symbols-rounded">trending_up</span>8.4%</span> vs. last month
+          <span className="delta"><span className="material-symbols-rounded">today</span>{usd(todaySpent, 2)}</span> spent today
         </div>
       </div>
 
@@ -60,9 +61,7 @@ export default function CostStats({ spend, budgetUsed, jobs, armed }: Props) {
         <div className="ic"><span className="material-symbols-rounded">conveyor_belt</span></div>
         <div className="lab">Jobs run</div>
         <Value value={jobs} format={whole} />
-        <div className="sub">
-          <span className="delta up"><span className="material-symbols-rounded">trending_up</span>31</span> this month
-        </div>
+        <div className="sub">distinct jobs in the cost log</div>
       </div>
 
       <div className={`kpi cst-stopkpi ${armed ? "armed" : "tripped"}`}>

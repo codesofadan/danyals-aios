@@ -1,13 +1,20 @@
 "use client";
 
+import { usd } from "@/lib/cost";
+
 type Props = {
   armed: boolean;
   threshold: number;
+  todaySpent: number;
   onToggle: () => void;
   onThreshold: (v: number) => void;
 };
 
-export default function SpendStopCard({ armed, threshold, onToggle, onThreshold }: Props) {
+export default function SpendStopCard({ armed, threshold, todaySpent, onToggle, onThreshold }: Props) {
+  // Today's live paid spend against the daily stop — the figure the stop trips on.
+  const pctOfStop = threshold > 0 ? Math.min(100, Math.round((todaySpent / threshold) * 100)) : 0;
+  const barColor =
+    pctOfStop >= 100 ? "var(--crit)" : pctOfStop >= 80 ? "var(--warn)" : "var(--ok)";
   return (
     <section className={`card cst-stop ${armed ? "armed" : "tripped"}`}>
       <div className="card-h">
@@ -55,6 +62,19 @@ export default function SpendStopCard({ armed, threshold, onToggle, onThreshold 
           </div>
           <div className="cst-thr-hint">
             Auto-trips if a single day&apos;s paid spend crosses this line.
+          </div>
+
+          <div className="cst-thr-today">
+            <div className="cst-thr-today-row">
+              <span>Today so far</span>
+              <b>{usd(todaySpent, 2)}</b>
+            </div>
+            <div className="cst-thr-today-bar">
+              <span style={{ width: `${pctOfStop}%`, background: barColor }} />
+            </div>
+            <div className="cst-thr-today-cap">
+              {pctOfStop}% of the {usd(threshold)}/day stop
+            </div>
           </div>
         </div>
       </div>
