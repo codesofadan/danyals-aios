@@ -1,11 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useContentJobs, useCreateContentJob, useReviewContentJob } from "@/lib/hooks/content";
 import ContentKpis from "./ContentKpis";
 import PipelineBoard from "./PipelineBoard";
 import ReviewGate, { type ReviewAction } from "./ReviewGate";
+import ReviewPreview from "./ReviewPreview";
 import NewJobForm, { type NewJob } from "./NewJobForm";
-import Frameworks from "./Frameworks";
 
 export default function ContentWorkspace() {
   const jobsQ = useContentJobs(); // live: GET /content/jobs, polls while the worker moves a job
@@ -13,6 +14,12 @@ export default function ContentWorkspace() {
   const reviewJob = useReviewContentJob();
 
   const jobs = jobsQ.data ?? [];
+
+  // The job selected for the framed draft preview. Kept by id (not the object) so the
+  // preview tracks the SAME job across refetches - e.g. it follows a job from
+  // needs_review through publishing to done, then shows the live URL + open action.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = jobs.find((j) => j.id === selectedId) ?? null;
 
   // The server snapshots the client name/color, resolves Auto → framework + the
   // JSON-LD schema, seeds source_pack, and returns the queued job — the board then
@@ -56,14 +63,15 @@ export default function ContentWorkspace() {
 
       <PipelineBoard jobs={jobs} />
 
+      {selected && (
+        <ReviewPreview job={selected} onAction={handleReview} onClose={() => setSelectedId(null)} />
+      )}
+
       <div className="row">
-        <ReviewGate jobs={needsReview} onAction={handleReview} />
+        <ReviewGate jobs={needsReview} onAction={handleReview} onPreview={setSelectedId} />
         <NewJobForm onCreate={handleCreate} />
       </div>
 
-      <div className="row-single">
-        <Frameworks />
-      </div>
     </>
   );
 }

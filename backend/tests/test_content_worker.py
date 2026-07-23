@@ -197,6 +197,36 @@ def test_full_pipeline_advances_to_needs_review_with_rich_columns() -> None:
     # Both the research + generation dials were billed.
     billed = {feature for feature, _c, _cached in cost_store.records}
     assert "content_research" in billed and "content" in billed
+    # The content guard picked a deterministic layout for the Review preview.
+    assert store.row["outline"]["layout"]["key"]
+
+
+# --------------------------------------------------------------------------- #
+# 1b. The content guard runs in-pipeline: the stored draft is em/en-dash-free even
+#     when the WRITER emits dashes (the unconditional hard strip is the guarantee).
+# --------------------------------------------------------------------------- #
+def test_pipeline_output_is_em_dash_free_even_when_writer_emits_dashes() -> None:
+    store = FakeContentStore(_job_row())
+
+    class _DashWriter:
+        """Every section the writer phrases comes back stuffed with em/en dashes."""
+
+        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+            em, en = chr(0x2014), chr(0x2013)
+            body = f"Fresh brunch{em}served daily{en}book 9{en}11 weekends, world-class and cutting-edge."
+            return LLMResult(text=body, input_tokens=8, output_tokens=8)
+
+    providers = replace(content_providers_for_tests(), writer=_DashWriter())
+    out = execute_content_job(
+        store, providers, "CJ-4200", settings=_settings(), gate=_gate(), fetcher=FakePageFetcher()
+    )
+
+    assert out.status == "needs_review"
+    draft = store.row["draft_md"]
+    # THE guarantee: not a single em (U+2014) or en (U+2013) dash survives to storage.
+    assert chr(0x2014) not in draft and chr(0x2013) not in draft
+    # And the title/answer fields were cleaned too (they feed schema + QA + publish).
+    assert chr(0x2014) not in store.row["stage"]
 
 
 # --------------------------------------------------------------------------- #
@@ -377,9 +407,11 @@ def test_publish_passes_to_wordpress() -> None:
     assert out.state == "published"
     assert out.status == "done"
     assert store.row["status"] == "done"
-    assert store.row["stage"] == "Published"
+    assert store.row["stage"].startswith("Published")  # carries the live URL when present
     assert store.row["wp_post_id"]  # recorded for idempotent re-publish
     assert out.url
+    # The live URL is surfaced on the wire-visible stage label for the dashboard.
+    assert out.url in store.row["stage"]
 
 
 def test_publish_wordpress_idempotent_update_reuses_post_id() -> None:

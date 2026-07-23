@@ -98,6 +98,25 @@ def execute_citation_submit(
         if status != "queued":
             return {"state": "skipped", "reason": f"submit_status={status}"}
 
+        # HONEST-STATE GUARD: a citation with no business name has no NAP to submit -
+        # the joined business_profile is empty (the client never had one). Dispatching
+        # it anyway sends an empty listing that the directory rejects, and the row comes
+        # back 'failed' as if the ENGINE broke, when in truth we simply had no data. Mark
+        # it 'blocked' with the real reason instead, and never spend the gate on it. This
+        # is the root of "citation submit shows failed" for a client whose NAP was never
+        # captured; the fix upstream (0051 + derive-on-campaign) means this should be rare.
+        if not str(row.get("bp_business_name") or "").strip():
+            store.update_citation(
+                citation_id,
+                {
+                    "submit_status": "blocked",
+                    "error": "no business profile / NAP for this client - capture its "
+                    "name and address before submitting (nothing was sent)",
+                },
+            )
+            logger.info("citation_submit_no_nap", citation_id=citation_id)
+            return {"state": "blocked", "reason": "no business profile / NAP"}
+
         tier = str(row.get("directory_tier") or "")
         client_id = row.get("client_id")
         ctx = GateContext(

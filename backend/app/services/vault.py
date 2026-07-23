@@ -122,6 +122,26 @@ def _open(sealed: bytes) -> str:
     return plaintext.decode("utf-8")
 
 
+def seal_value(plaintext: str) -> bytes:
+    """Public seal: ``plaintext`` -> ``nonce || ciphertext+tag`` under the master key.
+
+    A thin wrapper over the internal :func:`_seal` so callers OUTSIDE the API-key
+    vault (e.g. the login-credential store) reuse the exact same AES-256-GCM
+    construction and master key without touching ``vault_keys``. Raises
+    :class:`VaultNotConfiguredError` when ``VAULT_MASTER_KEY`` is unset/malformed.
+    """
+    return _seal(plaintext)
+
+
+def open_sealed(sealed: bytes) -> str:
+    """Public open: a blob produced by :func:`seal_value` -> its plaintext.
+
+    Raises :class:`VaultSecretError` on any authentication failure (tamper,
+    truncation, wrong key) and yields NO plaintext in that case.
+    """
+    return _open(sealed)
+
+
 def _as_uuid(key_id: str) -> uuid.UUID | None:
     """Parse ``key_id`` as a UUID or return ``None`` (a malformed id -> 404)."""
     try:

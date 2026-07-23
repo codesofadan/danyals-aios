@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Verified } from "@/lib/offpage";
-import { useApproveWeb2, useWeb2 } from "@/lib/hooks/offpage";
+import { useApproveWeb2, useWeb2, useWeb2Status } from "@/lib/hooks/offpage";
 import Web2PlanModal from "./Web2PlanModal";
+import Web2StatusBoard from "./Web2StatusBoard";
 
 type FilterKey = "all" | Web2Verified;
 
@@ -24,6 +25,7 @@ const PIPELINE_META: Record<Web2PipelineStatus, { label: string; cls: string }> 
 
 export default function Web2Tab() {
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [view, setView] = useState<"ledger" | "status">("ledger");
   const web2Q = useWeb2();
   const web2Properties = web2Q.data ?? [];
   const approve = useApproveWeb2();
@@ -61,12 +63,18 @@ export default function Web2Tab() {
         </div>
         <div className="op-toolset">
           <div className="seg">
-            {FILTERS.map((f) => (
-              <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
-                {f.label}
-              </button>
-            ))}
+            <button className={view === "ledger" ? "on" : undefined} onClick={() => setView("ledger")}>Placements</button>
+            <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>API status</button>
           </div>
+          {view === "ledger" && (
+            <div className="seg">
+              {FILTERS.map((f) => (
+                <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
           <button className="primary-btn" onClick={() => setShowPlan(true)}>
             <span className="material-symbols-rounded">add</span>
             Plan property
@@ -74,7 +82,9 @@ export default function Web2Tab() {
         </div>
       </div>
 
-      {needsReviewCount > 0 && (
+      {view === "status" && <Web2StatusBoard />}
+
+      {view === "ledger" && needsReviewCount > 0 && (
         <div className="op-flash" style={{ position: "static" }}>
           <span className="material-symbols-rounded">hourglass_top</span>
           {needsReviewCount} propert{needsReviewCount > 1 ? "ies" : "y"} awaiting a lead&apos;s review below.
@@ -87,6 +97,7 @@ export default function Web2Tab() {
         </div>
       )}
 
+      {view === "ledger" && (
       <div className="tbl-wrap">
         <table className="tbl op-tbl">
           <thead>
@@ -168,6 +179,7 @@ export default function Web2Tab() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

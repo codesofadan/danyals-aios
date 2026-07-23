@@ -1581,3 +1581,47 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
   .topbar-progress { transition: opacity .2s ease; }
   .topbar-progress.on { transform: scaleX(1); transition: opacity .2s ease; }
 }
+
+/* ---- Team roster: reveal/copy login credentials -------------------------- */
+.cred-show {
+  font-family: inherit; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer;
+  background: var(--raise); border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px;
+}
+.cred-show:hover { color: var(--lilac); border-color: var(--line-2); background: var(--hover); }
+.cred-show .material-symbols-rounded { font-size: 16px; }
+
+.cred-box {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--well); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px; min-width: 210px;
+}
+.cred-row { display: flex; align-items: center; gap: 8px; }
+.cred-k {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted-2); width: 34px; flex: none;
+}
+.cred-v {
+  font-size: 12.5px; color: var(--ink); font-weight: 600; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cred-pw { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; letter-spacing: .01em; }
+.cred-na { color: var(--muted-2); font-weight: 500; font-style: italic; font-size: 11.5px; }
+.cred-copy {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+  background: var(--raise); border: 1px solid var(--line); color: var(--muted);
+}
+.cred-copy:hover { color: var(--lilac); border-color: var(--line-2); background: var(--hover); }
+.cred-copy .material-symbols-rounded { font-size: 15px; }
+.cred-actions { display: flex; gap: 12px; margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--line); }
+.cred-link {
+  font-family: inherit; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; color: var(--muted); cursor: pointer;
+  background: none; border: none; padding: 0;
+}
+.cred-link:hover:not(:disabled) { color: var(--lilac); }
+.cred-link:disabled { opacity: .5; cursor: default; }
+.cred-link .material-symbols-rounded { font-size: 15px; }
+.cred-muted { font-size: 12px; color: var(--muted); padding: 4px 2px; }
+.cred-err { color: var(--warn); }

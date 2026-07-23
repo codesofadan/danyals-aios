@@ -21,8 +21,13 @@ class VaultRepo:
         self._user_id = user_id
 
     def list_keys(self) -> _Rows:
+        # Excludes the reserved '__login__' rows (members' own login passwords, kept
+        # for the Team-screen credential-reveal tool) - they are not integration keys
+        # and must never surface on the Key Vault screen.
         with rls_connection(self._user_id) as cur:
-            cur.execute("select * from public.vault_keys order by created_at")
+            cur.execute(
+                "select * from public.vault_keys where provider <> '__login__' order by created_at"
+            )
             return cur.fetchall()
 
 

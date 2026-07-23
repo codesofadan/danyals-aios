@@ -1,4 +1,4 @@
-import SourceMonitor from "./SourceMonitor";
+import AskBox from "./AskBox";
 import ChangeFeed from "./ChangeFeed";
 import KnowledgeBase from "./KnowledgeBase";
 import Recommendations from "./Recommendations";
@@ -6,26 +6,20 @@ import Recommendations from "./Recommendations";
 export default function PolicyWorkspace() {
   return (
     <div className="pr-wrap">
-      <div className="pr-loop">
-        <span className="pr-loop-t"><span className="material-symbols-rounded">all_inclusive</span>Closed loop</span>
-        {["Watch", "Detect", "Research", "Flag", "Recommend", "Confirm"].map((s, i) => (
-          <span className="pr-loop-step" key={s}>
-            <span className="pr-loop-n">{i + 1}</span>{s}
-          </span>
-        ))}
+      <div className="row-single">
+        <AskBox />
       </div>
 
-      <div className="row b">
-        <SourceMonitor />
+      <div className="row-single">
+        <Recommendations />
+      </div>
+
+      <div className="row-single">
         <ChangeFeed />
       </div>
 
       <div className="row-single">
         <KnowledgeBase />
-      </div>
-
-      <div className="row-single">
-        <Recommendations />
       </div>
     </div>
   );

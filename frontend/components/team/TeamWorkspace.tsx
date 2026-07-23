@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { TeamRole, PermKey, TaskStatus } from "@/lib/data";
 import {
-  useMembers, useTasks, useActivity, useRbac,
+  useMembers, useTeamMembers, useTasks, useActivity, useRbac,
   useAddMember, useAssignTask, useAdvanceTask, useReviewTask, useTogglePerm,
 } from "@/lib/hooks/team";
 import { useClients } from "@/lib/hooks/clients";
@@ -39,12 +39,17 @@ export default function TeamWorkspace() {
   const [tab, setTab] = useState<TabKey>("roster");
 
   const membersQ = useMembers();
+  const teamMembersQ = useTeamMembers();
   const tasksQ = useTasks();
   const activityQ = useActivity();
   const rbacQ = useRbac();
   const clientsQ = useClients();
 
   const members = membersQ.data ?? [];
+  // The assignee picker's eligible list: every staff member (incl. invited), from the
+  // assign_tasks-gated /team/members. Falls back to the admin roster if that endpoint
+  // is unavailable, so the picker still works either way.
+  const assignableMembers = teamMembersQ.data ?? members;
   const tasks = tasksQ.data ?? [];
   const activity = activityQ.data ?? [];
   const rolePerms = rbacQ.data ?? ({} as Record<TeamRole, PermKey[]>);
@@ -142,7 +147,7 @@ export default function TeamWorkspace() {
             )}
             <AssignTasks
               tasks={tasks}
-              members={members}
+              members={assignableMembers}
               clients={clients}
               onAssign={handleAssign}
               onStatusChange={handleStatusChange}

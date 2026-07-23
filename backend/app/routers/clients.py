@@ -24,6 +24,10 @@ from app.schemas.clients import (
     SiteCreate,
     SiteResponse,
 )
+from app.schemas.clients_business import (
+    ClientBusinessProfileInput,
+    ClientBusinessProfileResponse,
+)
 from app.schemas.identity import MemberResponse, PortalUserRequest
 from app.services.activity import record_activity
 from app.services.notifications import notify
@@ -57,12 +61,25 @@ async def create_client(body: ClientCreate, repo: ClientsRepoDep, actor: ManageC
     fail, or roll back, a client creation that has otherwise succeeded.
     """
     row = await asyncio.to_thread(repo.insert_client, body.to_row())
+    client_id = str(row["id"])
     await record_activity(
         actor, kind="client", action="created client", target=body.cn,
-        entity_type="client", entity_id=str(row["id"]),
+        entity_type="client", entity_id=client_id,
     )
+    # Persist the client's own NAP when the wizard collected one. BEST-EFFORT (same
+    # contract as the onboarding seed below): a NAP hiccup must never fail, or roll
+    # back, a client creation that already succeeded - the operator can still add it
+    # from the Edit modal. Only written when the operator actually entered something.
+    if body.business is not None and body.business.has_content():
+        try:
+            await asyncio.to_thread(
+                repo.upsert_business_profile,
+                client_id=client_id, client_name=body.cn, fields=body.business.to_row(),
+            )
+        except Exception:
+            logger.warning("client_business_profile_seed_failed", client_id=client_id)
     await asyncio.to_thread(
-        seed_onboarding_for_client, actor.id, str(row["id"]), body.cn, actor.id, actor.name
+        seed_onboarding_for_client, actor.id, client_id, body.cn, actor.id, actor.name
     )
     return ClientResponse.from_row(row, site_count=0)
 
@@ -74,6 +91,48 @@ async def get_client(client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep
         raise _CLIENT_NOT_FOUND
     count = await asyncio.to_thread(repo.site_counts)
     return ClientResponse.from_row(row, site_count=count.get(client_id, 0))
+
+
+@router.get("/clients/{client_id}/business-profile", response_model=ClientBusinessProfileResponse)
+async def get_client_business_profile(
+    client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep
+) -> ClientBusinessProfileResponse:
+    """The client's stored NAP (name/address/phone/categories/hours). 404s if the
+    client is unknown/invisible OR if no NAP was ever captured for it (the caller then
+    knows to collect one before running a citation campaign). RLS-scoped."""
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    row = await asyncio.to_thread(repo.get_business_profile, client_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No business profile for this client"
+        )
+    return ClientBusinessProfileResponse.from_row(row)
+
+
+@router.put("/clients/{client_id}/business-profile", response_model=ClientBusinessProfileResponse)
+async def put_client_business_profile(
+    client_id: str, body: ClientBusinessProfileInput, repo: ClientsRepoDep, actor: ManageClients
+) -> ClientBusinessProfileResponse:
+    """Create or replace a client's NAP (lead-only, upsert - one record per client).
+    Backs the Edit modal's business-profile fields. 404s if the client is unknown."""
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    row = await asyncio.to_thread(
+        repo.upsert_business_profile,
+        client_id=client_id, client_name=client.get("name", ""), fields=body.to_row(),
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Could not save the business profile"
+        )
+    await record_activity(
+        actor, kind="client", action="updated business profile", target=client.get("name", client_id),
+        entity_type="client", entity_id=client_id,
+    )
+    return ClientBusinessProfileResponse.from_row(row)
 
 
 @router.patch("/clients/{client_id}", response_model=ClientResponse)

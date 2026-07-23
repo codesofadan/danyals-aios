@@ -1,0 +1,191 @@
+/* Wave 4 scoped styles: the NAP block (wizard/edit), the citation gap panel, and the
+   Web 2.0 / engine API status boards. Scoped via CSS Modules so nothing here touches the
+   global stylesheet; every value leans on the app's CSS variables so it inherits the
+   active theme. */
+
+.napBlock {
+  margin-top: 4px;
+  padding: 14px;
+  border: 1px solid var(--line, #e8d2d7);
+  border-radius: 12px;
+  background: var(--panel-2, rgba(0, 0, 0, 0.02));
+}
+
+.napHead {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.napHead .material-symbols-rounded {
+  color: var(--accent, #6e1423);
+}
+
+.napTitle {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.napSub {
+  font-size: 12px;
+  color: var(--muted, #7a7a7a);
+  margin-top: 2px;
+  max-width: 52ch;
+}
+
+.optTag {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--muted, #7a7a7a);
+  border: 1px solid var(--line, #e8d2d7);
+}
+
+.napFlash {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ok, #1f8a4c);
+  margin-top: 8px;
+}
+
+/* --- status / gap boards --- */
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.card {
+  border: 1px solid var(--line, #e8d2d7);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--panel-2, rgba(0, 0, 0, 0.015));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardName {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+
+.dotOn {
+  background: var(--ok, #1f8a4c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #1f8a4c) 22%, transparent);
+}
+
+.dotOff {
+  background: var(--warn, #c98a00);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn, #c98a00) 22%, transparent);
+}
+
+.dotMut {
+  background: var(--muted, #9a9a9a);
+}
+
+.reason {
+  font-size: 12.5px;
+  color: var(--ink, #241015);
+  line-height: 1.45;
+}
+
+.meta {
+  font-size: 11.5px;
+  color: var(--muted, #7a7a7a);
+  word-break: break-word;
+}
+
+.external {
+  font-size: 11px;
+  color: var(--muted, #8a8a8a);
+  font-style: italic;
+  border-top: 1px dashed var(--line, #e8d2d7);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+.rollup {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 6px 0 2px;
+  font-size: 13px;
+  color: var(--muted, #7a7a7a);
+}
+
+.rollup b {
+  color: var(--ink, #241015);
+}
+
+/* --- gap stat tiles --- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.stat {
+  border: 1px solid var(--line, #e8d2d7);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel-2, rgba(0, 0, 0, 0.015));
+}
+
+.statNum {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.statLbl {
+  font-size: 11.5px;
+  color: var(--muted, #7a7a7a);
+  margin-top: 4px;
+}
+
+.missList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #e8d2d7);
+  color: var(--ink, #241015);
+}
+
+.urlRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  padding: 4px 0;
+}

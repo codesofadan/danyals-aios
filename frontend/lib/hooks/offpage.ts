@@ -19,10 +19,13 @@ import type {
   CitationAction,
   CitationCampaignInput,
   CitationCampaignResult,
+  CitationEngineBoard,
+  CitationGap,
   Directory,
   DirectoryTier,
   OffpageKpis,
   Web2Property,
+  Web2Status,
 } from "@/lib/offpage";
 
 export const BACKLINKS_KEY = ["offpage", "backlinks"] as const;
@@ -140,6 +143,51 @@ export function useDirectories(filters?: { market?: BusinessMarket[]; tier?: Dir
   });
 }
 
+// --- Wave 4: NAP gap analysis + auto-derive submission profile ---------------
+export const CITATION_GAP_KEY = ["citation-builder", "gap-analysis"] as const;
+
+/** Reconcile a client's citations vs the catalog: existing/covered/missing + live URLs
+ * + the resolved NAP source (so the UI stops showing "No business profile yet"). */
+export function useCitationGap(clientId?: string) {
+  return useQuery({
+    queryKey: [...CITATION_GAP_KEY, clientId ?? ""],
+    queryFn: () => api.get<CitationGap>(`/citation-builder/gap-analysis?clientId=${clientId}`),
+    enabled: !!clientId,
+  });
+}
+
+/** Resolve (deriving from the client's own NAP when needed) a submission profile for a
+ * client. Lead-only at the backend; on success the profiles list refetches. */
+export function useEnsureBusinessProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clientId: string) =>
+      api.post<BusinessProfile>(`/citation-builder/clients/${clientId}/ensure-profile`, {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: BUSINESS_PROFILES_KEY }),
+  });
+}
+
+// --- Wave 4: API status boards -----------------------------------------------
+export const WEB2_STATUS_KEY = ["citation-builder", "web2-status"] as const;
+export const ENGINE_STATUS_KEY = ["citation-builder", "engine-status"] as const;
+
+/** The Web 2.0 API status board: each platform CONNECTED (a vault credential exists)
+ * vs MISSING, with the honest reason + external-API caveat. */
+export function useWeb2Status() {
+  return useQuery({
+    queryKey: WEB2_STATUS_KEY,
+    queryFn: () => api.get<Web2Status>("/citation-builder/web2-status"),
+  });
+}
+
+/** The citation-ENGINE status board (Bing/Foursquare/Apify/CAPTCHA/bot/proxy). */
+export function useCitationEngineStatus() {
+  return useQuery({
+    queryKey: ENGINE_STATUS_KEY,
+    queryFn: () => api.get<CitationEngineBoard>("/citation-builder/engine-status"),
+  });
+}
+
 // --- 7B-4: campaign dispatch --------------------------------------------------
 export function useCreateCitationCampaign() {
   const qc = useQueryClient();
@@ -149,6 +197,7 @@ export function useCreateCitationCampaign() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
       void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
+      void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
     },
   });
 }

@@ -86,3 +86,18 @@ export function useReviewContentJob() {
     },
   });
 }
+
+// GET /content/jobs/{code}/draft — the server-only draft markdown for the Review
+// preview (staff-only rich retrieval; the pipeline populates draft_md at
+// needs_review and it survives publish, so the preview works for done jobs too).
+export type ContentDraft = { id: string; draft: string | null };
+
+/** The reviewed draft markdown for a job, fetched lazily when a job is selected for
+ * preview. Not polled — the draft is settled once the job leaves the worker. */
+export function useContentDraft(code: string | null) {
+  return useQuery({
+    queryKey: ["content", "jobs", code, "draft"] as const,
+    queryFn: () => api.get<ContentDraft>(`/content/jobs/${code}/draft`),
+    enabled: !!code,
+  });
+}

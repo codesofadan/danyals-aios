@@ -31,6 +31,7 @@ from app.services.audit_artifacts import ArtifactStore, local_store_from_setting
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
+from app.services.notifications import notify_leads_sync
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult, run_audit
 from workers.celery_app import celery_app
 
@@ -318,6 +319,17 @@ def execute_audit(
             media_type="application/pdf",
             period=_month_label(finished),
         )
+    # Email + in-app the leads that a report is ready (best-effort; never fails the
+    # job). The audits ledger carries no requester column, so this addresses the
+    # review/lead queue. audit_done is a NOTIF_EVENTS key (email default on), so it
+    # fires through Resend when RESEND_API_KEY is present, else in-app only.
+    subject = row.get("client_name") or row.get("url") or "a client"
+    notify_leads_sync(
+        "audit_done",
+        f"Audit ready: {row.get('url') or subject}",
+        f"The audit for {subject} finished (score {result.score}). "
+        "The report is ready to review and deliver.",
+    )
     return {"audit_id": audit_id, "status": "done", "score": result.score}
 
 

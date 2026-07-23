@@ -291,8 +291,11 @@ def test_analysis_allowed_inserts_kb_and_rec_and_commits() -> None:
     assert rec["status"] == "new"
     # the change_event was stamped with the KB job (the triggered_job hook).
     assert store.triggered == [("chg-1", rec["kb_ref"])]
-    # gate.commit fired exactly once: the policy feature, the estimate, NOT cached.
-    assert cost.commits == [("policy", pytest.approx(0.01), False)]
+    # gate.commit fired exactly once with the RUNTIME token-derived cost (pricing.py),
+    # NOT the flat policy_analysis_cost_estimate (which is only the upfront pre-check).
+    assert len(cost.commits) == 1
+    feat, committed, cached = cost.commits[0]
+    assert feat == "policy" and cached is False and committed > 0.0
 
 
 def test_analysis_blocked_by_dial_off_degrades_without_insert() -> None:

@@ -21,6 +21,16 @@ export const WORKBOOKS_KEY = ["reports", "workbooks"] as const;
 export const SYNC_EVENTS_KEY = ["reports", "sync-events"] as const;
 export const REPORT_TYPES_KEY = ["reports", "types"] as const;
 export const CONNECTION_KEY = ["reports", "connection"] as const;
+export const SCHEDULED_JOBS_KEY = ["reports", "scheduled-jobs"] as const;
+
+// One background cron job (GET /reports/scheduled-jobs ≡ ScheduledJob). The list is
+// derived from the live Celery beat schedule, so it never drifts from what actually runs.
+export type ScheduledJob = {
+  name: string;
+  task: string;
+  description: string;
+  cadence: string;
+};
 
 // The Sheets-connection panel shape (GET /reports/connection ≡ ConnectionResponse).
 // `reports.ts` `sheetsConnection` is a plain const (not an exported type), so the
@@ -56,6 +66,14 @@ export function useReportTypes() {
   return useQuery({
     queryKey: REPORT_TYPES_KEY,
     queryFn: () => api.get<ReportType[]>("/reports/types"),
+  });
+}
+
+/** The live Celery beat schedule — background cron jobs (GET /reports/scheduled-jobs). */
+export function useScheduledJobs() {
+  return useQuery({
+    queryKey: SCHEDULED_JOBS_KEY,
+    queryFn: () => api.get<ScheduledJob[]>("/reports/scheduled-jobs"),
   });
 }
 

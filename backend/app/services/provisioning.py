@@ -23,9 +23,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.db.database import privileged_connection
+from app.logging_setup import get_logger
 from app.rbac import AccessLevel, UserRole
 from app.rbac.matrix import TEMPLATES
+from app.services.login_credentials import store_login_password
 from app.services.passwords import hash_password
+
+logger = get_logger("app.provisioning")
 
 
 def _template_grants(template_key: str | None) -> tuple[str, ...]:
@@ -122,4 +126,13 @@ def provision_user(
 
     if not row:  # pragma: no cover - the insert above just wrote this row
         raise RuntimeError("provisioned user row could not be read back")
+
+    # Store a sealed copy of the login password for the owner/admin credential-reveal
+    # tool (separate from the argon2id hash; reuses vault_keys, no DDL). Best-effort:
+    # a vault/DB hiccup here must never fail an otherwise-successful account creation.
+    try:
+        store_login_password(uid, password)
+    except Exception:  # reveal is a convenience — never block a successful provision
+        logger.warning("login_password_store_failed", user_id=uid)
+
     return row

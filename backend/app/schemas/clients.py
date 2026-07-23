@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.clients_business import ClientBusinessProfileInput
 from app.util.text import initials
 from app.util.timefmt import format_date, relative_ago
 
@@ -110,6 +111,10 @@ class ClientCreate(BaseModel):
     mrr: int = 0
     contact: ContactInput = Field(default_factory=ContactInput)
     portal: PortalInput = Field(default_factory=PortalInput)
+    # The client's own NAP, captured up front so the first citation campaign has a real
+    # name/address to submit. Optional: an omitted (or empty) profile is simply not
+    # persisted - the operator fills it in later from the Edit modal.
+    business: ClientBusinessProfileInput | None = None
 
     def to_row(self) -> dict[str, Any]:
         return {

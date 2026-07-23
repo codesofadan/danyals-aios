@@ -71,6 +71,8 @@ from app.services.content_generator import (
     SourcePack,
     generate,
 )
+from app.services.content_guard import guard_generated
+from app.services.content_layout import pick_layout
 from app.services.content_qa import Judge, QaScore, score
 from app.services.content_research import (
     ContentSpendBlocked,
@@ -111,6 +113,10 @@ _LLM_PROVIDER = "Anthropic"
 _IMAGE_PROVIDER = "images"
 _JOB_TYPE = "content"
 _ERROR_MAX = 500  # cap the stored error string; server-side only
+# Cap the content guard's de-AI writer rewrites per draft (each rides the content
+# dial + pricing.py, so bound them). The unconditional dash-strip still runs on
+# every block regardless, so the draft is em/en-dash-free even at the cap.
+_GUARD_MAX_REWRITES = 6
 
 # jsonb columns on content_jobs (values are wrapped for their jsonb column).
 _JSONB_COLS: frozenset[str] = frozenset(
@@ -788,6 +794,25 @@ def _run_pipeline(
     )
     stream("titles_meta")
 
+    # --- content guard (the AI / em-dash pass): rewrite any over-AI section via the
+    # SAME cost-gated writer (billed to the content dial + priced by pricing.py) and
+    # HARD-strip every em/en dash from the body + every text field. The strip is
+    # unconditional, so the draft QA scores + we store + publish is GUARANTEED em/en-
+    # dash-free even if a rewrite is spend-blocked or the writer errs (the guard
+    # degrades to a plain strip, never raises). Runs BEFORE schema/QA so both see the
+    # final, cleaned draft.
+    guarded = guard_generated(
+        content, writer=writer, model=providers.model_writer, max_rewrites=_GUARD_MAX_REWRITES
+    )
+    content = guarded.content
+    logger.info(
+        "content_guard_applied",
+        code=code,
+        em_before=guarded.result.before.em_dashes,
+        en_before=guarded.result.before.en_dashes,
+        rewritten=guarded.result.rewritten,
+    )
+
     # --- schema (build + validate the JSON-LD against the visible draft)
     stream("schema")
     page_type, business, page, visible = _schema_inputs(row, brief, source_pack, content)
@@ -801,6 +826,19 @@ def _run_pipeline(
         providers.images, content, gate, settings, client_id=client_id, code=code
     )
     stream("assemble")
+
+    # --- layout: a simple deterministic heuristic picks ONE presentation template
+    # from the finished draft's observable signals (page type, images, length, a Q&A
+    # block). Stored on the outline so the Review preview frames the draft correctly.
+    layout = pick_layout(
+        page_type,
+        images=image_count,
+        words=content.word_count,
+        has_faq=any(h.level == 3 for h in content.headings),
+        has_local=page_type == "local",
+    )
+    outline = _outline(content, brief)
+    outline["layout"] = layout.as_dict()
 
     # --- qa (the 14-dimension scorecard; attached so the reviewer sees it)
     qa = score(content, brief, schema_result, source_pack, judge=judge)
@@ -818,7 +856,7 @@ def _run_pipeline(
             "schema_type": schema_type,
             "draft_md": content.draft_md,
             "keyword_map": _keyword_map(brief),
-            "outline": _outline(content, brief),
+            "outline": outline,
             "entity_coverage": _entity_coverage(content, brief),
             "qa_score": _qa_dict(qa),
             "json_ld": json_ld,
@@ -1079,7 +1117,11 @@ def _publish_wordpress(
         wp_post_id=wp_post_id,  # set -> idempotent UPDATE, else CREATE
     )
     result: PublishResult = wp.publisher.publish(wp.site_url, post)
-    store.update(code, {"status": "done", "stage": "Published", "wp_post_id": str(result.post_id)})
+    # Surface the LIVE post URL on the wire-visible `stage` field so the dashboard's
+    # Review surface can display it + offer an "open live post" action (the wire
+    # ContentJob has no dedicated url column; the stage label carries it).
+    stage = f"Published: {result.url}" if result.url else "Published"
+    store.update(code, {"status": "done", "stage": stage, "wp_post_id": str(result.post_id)})
     _emit_content_deliverable(row, artifact_key=None)  # published to WP; no local artifact
     logger.info("content_published_wp", code=code, wp_post_id=result.post_id)
     return PublishOutcome(

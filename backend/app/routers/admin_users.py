@@ -31,14 +31,17 @@ from app.logging_setup import get_logger
 from app.rbac import FEATURE_KEYS, AccessLevel, effective_feature_level
 from app.schemas.identity import (
     InviteMemberRequest,
+    MemberCredentials,
     MemberInviteResponse,
     MemberResponse,
     ProvisionUserRequest,
+    SetPasswordRequest,
     UpdateGrantsRequest,
     UserGrantsResponse,
 )
 from app.services.activity import record_activity
 from app.services.credentials import generate_password, generate_username
+from app.services.login_credentials import reveal_password, set_password
 from app.services.notifications import notify
 from app.services.provisioning import provision_user
 from app.services.team_metrics import ZERO_METRICS, TeamMetricsDep
@@ -81,6 +84,16 @@ def _load_user_min(caller_id: str, target_id: str) -> dict[str, Any] | None:
     """Load ``{id, role}`` for ``target_id`` via the RLS-scoped path (staff reads roster)."""
     with rls_connection(caller_id) as cur:
         cur.execute("select id, role from public.users where id = %s limit 1", (target_id,))
+        return cur.fetchone()
+
+
+def _load_cred_target(caller_id: str, target_id: str) -> dict[str, Any] | None:
+    """Load ``{id, role, username, email, name}`` for the credential tool (RLS path)."""
+    with rls_connection(caller_id) as cur:
+        cur.execute(
+            "select id, role, username, email, name from public.users where id = %s limit 1",
+            (target_id,),
+        )
         return cur.fetchone()
 
 
@@ -346,3 +359,93 @@ async def set_grants(
 
     overrides = await asyncio.to_thread(_read_grant_overrides, current.id, user_id)
     return UserGrantsResponse(grants=_resolve_grants(role, overrides))
+
+
+# --- Reversible login credentials (resend-credentials tool) ------------------
+#
+# By product decision the Team screen can show + copy a member's login password so
+# an admin can hand it over at any time. The password is stored sealed (AES-256-GCM
+# under VAULT_MASTER_KEY, migration 0051) and opened here for an owner/admin. These
+# are the ONLY routes that return a plaintext login password; every reveal/reset is
+# recorded in the activity log, and only an owner may touch an owner/admin account
+# (the same escalation guard as create_user).
+
+
+def _guard_elevated_target(current: CurrentUser, role: str) -> None:
+    """Only a super-admin may reveal/reset an owner or admin account's credentials."""
+    if role in _ELEVATED_ROLES and not current.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a super-admin can access an owner/admin account's credentials",
+        )
+
+
+@router.get("/{user_id}/credentials", response_model=MemberCredentials)
+async def get_member_credentials(user_id: str, current: ManageTeam) -> MemberCredentials:
+    """Reveal a member's login + password (owner/admin; sealed copy opened server-side)."""
+    try:
+        target = await asyncio.to_thread(_load_cred_target, current.id, user_id)
+    except DatabaseNotConfiguredError as exc:
+        raise _DB_NOT_CONFIGURED from exc
+    if target is None:
+        raise _USER_NOT_FOUND
+    _guard_elevated_target(current, str(target["role"]))
+
+    password = await asyncio.to_thread(reveal_password, user_id)
+    await record_activity(
+        current, kind="access", action="revealed login credentials",
+        target=str(target.get("name") or target.get("username") or ""),
+        entity_type="user", entity_id=user_id,
+    )
+    return MemberCredentials(
+        id=str(target["id"]),
+        username=target.get("username"),
+        email=str(target.get("email") or ""),
+        password=password,
+        available=password is not None,
+    )
+
+
+@router.post("/{user_id}/password", response_model=MemberCredentials)
+async def set_member_password(
+    user_id: str, body: SetPasswordRequest, current: ManageTeam
+) -> MemberCredentials:
+    """Set/rotate a member's login password and return it once (owner/admin).
+
+    With no ``password`` in the body the server generates a strong one. The new
+    password is hashed (argon2id) AND sealed for future reveal; ``must_reset`` is
+    cleared so the shared password logs in directly.
+    """
+    try:
+        target = await asyncio.to_thread(_load_cred_target, current.id, user_id)
+    except DatabaseNotConfiguredError as exc:
+        raise _DB_NOT_CONFIGURED from exc
+    if target is None:
+        raise _USER_NOT_FOUND
+    role = str(target["role"])
+    _guard_elevated_target(current, role)
+    if role == "client":
+        # Portal-client passwords are managed through the client surface, not here.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the client portal to manage a client login",
+        )
+
+    new_password = (
+        body.password.get_secret_value() if body.password is not None else generate_password()
+    )
+    ok = await asyncio.to_thread(set_password, user_id, new_password)
+    if not ok:
+        raise _USER_NOT_FOUND
+    await record_activity(
+        current, kind="access", action="reset login password",
+        target=str(target.get("name") or target.get("username") or ""),
+        entity_type="user", entity_id=user_id,
+    )
+    return MemberCredentials(
+        id=str(target["id"]),
+        username=target.get("username"),
+        email=str(target.get("email") or ""),
+        password=new_password,
+        available=True,
+    )

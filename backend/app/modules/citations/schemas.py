@@ -179,7 +179,9 @@ class CitationCampaignRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     client_id: str = Field(min_length=1, alias="clientId")
-    business_profile_id: str = Field(min_length=1, alias="businessProfileId")
+    # Optional: when omitted, the campaign auto-resolves (or DERIVES from the client's
+    # own NAP) a submission profile, so "No business profile yet" never blocks a build.
+    business_profile_id: str | None = Field(default=None, alias="businessProfileId")
     markets: list[BusinessMarket] | None = None
     tiers: list[DirectoryTier] | None = None
     vertical: str | None = None
@@ -204,3 +206,80 @@ class CitationCampaignResponse(BaseModel):
     excluded_low_authority: int = Field(default=0, serialization_alias="excludedLowAuthority")
     excluded_marketplace: int = Field(default=0, serialization_alias="excludedMarketplace")
     capped: int = 0
+
+
+# --- gap analysis ----------------------------------------------------------------
+
+
+class CitationLiveUrl(BaseModel):
+    """One live listing already earned: which directory and its proof/listing URL."""
+
+    directory: str
+    url: str
+    status: str
+
+
+class GapAnalysisResponse(BaseModel):
+    """The reconciliation of a client's citations vs the automatable catalog: what is
+    covered, what is still MISSING (the build target, in build order), the live URLs
+    earned, and the honest per-status tallies. Also reports the resolved NAP so the UI
+    can stop showing "No business profile yet" once one is derived from the client."""
+
+    client: str
+    has_nap: bool = Field(serialization_alias="hasNap")
+    nap_source: Literal["submission_profile", "client_profile", "none"] = Field(
+        serialization_alias="napSource"
+    )
+    business_profile_id: str | None = Field(default=None, serialization_alias="businessProfileId")
+    resolved_vertical: str | None = Field(default=None, serialization_alias="resolvedVertical")
+    existing_count: int = Field(serialization_alias="existingCount")
+    covered_count: int = Field(serialization_alias="coveredCount")
+    missing_count: int = Field(serialization_alias="missingCount")
+    missing: list[DirectoryResponse]
+    live_urls: list[CitationLiveUrl] = Field(serialization_alias="liveUrls")
+    by_submit_status: dict[str, int] = Field(serialization_alias="bySubmitStatus")
+    by_nap_status: dict[str, int] = Field(serialization_alias="byNapStatus")
+
+
+# --- API status boards (Wave 4) --------------------------------------------------
+
+
+class Web2PlatformStatusResponse(BaseModel):
+    """One Web 2.0 platform's connection state for the status board."""
+
+    platform: str
+    connected: bool
+    draft_only: bool = Field(serialization_alias="draftOnly")
+    configured_count: int = Field(serialization_alias="configuredCount")
+    required_fields: list[str] = Field(serialization_alias="requiredFields")
+    vault_provider: str = Field(serialization_alias="vaultProvider")
+    reason: str
+    external_note: str = Field(serialization_alias="externalNote")
+
+
+class Web2StatusResponse(BaseModel):
+    """The Web 2.0 API status board: every platform CONNECTED vs MISSING, with reasons."""
+
+    connected_count: int = Field(serialization_alias="connectedCount")
+    live_count: int = Field(serialization_alias="liveCount")
+    total_count: int = Field(serialization_alias="totalCount")
+    platforms: list[Web2PlatformStatusResponse]
+
+
+class EngineStatusResponse(BaseModel):
+    """One citation submission engine's configuration state for the status board."""
+
+    key: str
+    label: str
+    connected: bool
+    reason: str
+    required_config: list[str] = Field(serialization_alias="requiredConfig")
+    external_note: str = Field(serialization_alias="externalNote")
+
+
+class EngineStatusBoardResponse(BaseModel):
+    """The citation-engine status board: each engine CONNECTED vs MISSING, with reasons."""
+
+    connected_count: int = Field(serialization_alias="connectedCount")
+    total_count: int = Field(serialization_alias="totalCount")
+    engines: list[EngineStatusResponse]

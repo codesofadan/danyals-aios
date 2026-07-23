@@ -9,10 +9,11 @@ const PAGE_LABEL: Record<ContentJob["pageType"], string> = {
 };
 
 export default function ReviewGate({
-  jobs, onAction,
+  jobs, onAction, onPreview,
 }: {
   jobs: ContentJob[];
   onAction: (id: string, action: ReviewAction) => void;
+  onPreview?: (id: string) => void;
 }) {
   return (
     <section className="card co-review-card">
@@ -56,6 +57,11 @@ export default function ReviewGate({
                 </div>
               </div>
               <div className="co-gate-actions">
+                {onPreview && (
+                  <button className="ghostbtn" onClick={() => onPreview(j.id)}>
+                    <span className="material-symbols-rounded">visibility</span>Preview
+                  </button>
+                )}
                 <button className="primary-btn co-approve" onClick={() => onAction(j.id, "approve")}>
                   <span className="material-symbols-rounded">check</span>Approve
                 </button>

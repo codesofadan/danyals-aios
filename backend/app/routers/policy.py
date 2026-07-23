@@ -27,19 +27,32 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
 from app.db.policy_repo import PolicyRepoDep
 from app.schemas.policy import (
     ChangeEventResponse,
     KBEntryResponse,
     OverlayResponse,
+    PolicyAskRequest,
+    PolicyAskResponse,
     RecommendationAction,
     RecommendationResponse,
     SourceResponse,
     action_to_status,
 )
 from app.services.activity import record_activity
+from app.services.cost_gate import CostGate
+from app.services.policy_ask import (
+    build_ask_gate,
+    build_ask_searcher,
+    build_ask_summarizer,
+    run_policy_ask,
+)
 from app.services.policy_radar import apply_recommendation
+from app.services.policy_watch import PolicyFetcher, SsrfGuardedPolicyFetcher
+from integrations.content_research import SerpResearcher
+from integrations.llm import Summarizer
 
 router = APIRouter(tags=["policy"])
 
@@ -47,6 +60,33 @@ router = APIRouter(tags=["policy"])
 ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
 # Driving a recommendation = the leads (owner/admin/manager); owner auto-passes.
 ManageRecs = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))]
+
+
+# --- on-demand lookup seams (injected so tests swap in fakes) ---------------- #
+def get_ask_searcher(settings: SettingsDep) -> SerpResearcher | None:
+    """Dependency: the key-gated Serper researcher (or ``None`` degraded). Overridable in tests."""
+    return build_ask_searcher(settings)
+
+
+def get_ask_summarizer(settings: SettingsDep) -> Summarizer | None:
+    """Dependency: the key-gated Haiku summarizer (or ``None`` degraded). Overridable in tests."""
+    return build_ask_summarizer(settings)
+
+
+def get_ask_fetcher() -> PolicyFetcher:
+    """Dependency: the SSRF-guarded page fetcher (re-validated every redirect hop)."""
+    return SsrfGuardedPolicyFetcher()
+
+
+def get_ask_gate() -> CostGate:
+    """Dependency: the real cost gate over the Postgres store. Overridable in tests."""
+    return build_ask_gate()
+
+
+AskSearcherDep = Annotated[SerpResearcher | None, Depends(get_ask_searcher)]
+AskSummarizerDep = Annotated[Summarizer | None, Depends(get_ask_summarizer)]
+AskFetcherDep = Annotated[PolicyFetcher, Depends(get_ask_fetcher)]
+AskGateDep = Annotated[CostGate, Depends(get_ask_gate)]
 
 # The activity verb for each recommendation transition.
 _ACTION_VERB: dict[str, str] = {
@@ -71,6 +111,48 @@ async def list_changes(
     """List detected change events (newest detection first)."""
     rows = await asyncio.to_thread(repo.list_changes, limit=page.limit, offset=page.offset)
     return [ChangeEventResponse.from_row(r) for r in rows]
+
+
+@router.post("/policy/ask", response_model=PolicyAskResponse)
+async def policy_ask(
+    body: PolicyAskRequest,
+    _user: ViewReports,
+    settings: SettingsDep,
+    searcher: AskSearcherDep,
+    summarizer: AskSummarizerDep,
+    fetcher: AskFetcherDep,
+    gate: AskGateDep,
+) -> PolicyAskResponse:
+    """On-demand policy lookup (staff-gated). Runs a live Serper search scoped to
+    Google's official surfaces, SSRF-guarded-fetches the top authoritative result, and
+    has Claude Haiku distil a structured answer (a concise answer, an urgency label, the
+    key rules, and source URLs).
+
+    Both paid calls (Serper + Haiku) are metered under the EXISTING ``policy`` money-dial;
+    a missing key or a dial/budget block DEGRADES (200, ``status='degraded'``) rather than
+    crashing, and the gate is never bypassed. The blocking search / fetch / summarize + the
+    sync gate store run off the event loop via ``to_thread``."""
+
+    def _run() -> PolicyAskResponse:
+        result = run_policy_ask(
+            body.topic,
+            searcher=searcher,
+            fetcher=fetcher,
+            summarizer=summarizer,
+            gate=gate,
+            settings=settings,
+        )
+        return PolicyAskResponse(
+            topic=result.topic,
+            status=result.status,  # type: ignore[arg-type]
+            answer=result.answer,
+            urgency=result.urgency,  # type: ignore[arg-type]
+            rules=result.rules,
+            sources=result.sources,
+            reason=result.reason,
+        )
+
+    return await asyncio.to_thread(_run)
 
 
 @router.get("/policy/kb", response_model=list[KBEntryResponse])

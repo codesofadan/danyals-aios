@@ -2,9 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { TIER_PRICE, type ClientRecord, type SubStatus, type SubTier } from "@/lib/data";
-import type { ClientUpdate } from "@/lib/hooks/clients";
+import {
+  useClientBusinessProfile, useSaveClientBusinessProfile, type ClientUpdate,
+} from "@/lib/hooks/clients";
+import type { BusinessMarket } from "@/lib/offpage";
+import nap from "@/components/offpage/Wave4.module.css";
 
 const TIERS: SubTier[] = ["Starter", "Growth", "Scale"];
+const MARKETS: BusinessMarket[] = ["US", "UK", "CA", "AU", "GLOBAL"];
 const STATUSES: { key: SubStatus; label: string }[] = [
   { key: "active", label: "Active" },
   { key: "trial", label: "Trial" },
@@ -33,6 +38,60 @@ export default function EditClientModal({
   const [tier, setTier] = useState<SubTier>(client.tier);
   const [status, setStatus] = useState<SubStatus>(client.status);
   const [mrr, setMrr] = useState(String(client.mrr));
+
+  // The client's own NAP (client_business_profiles, 0051): loaded independently and
+  // saved with its own action (a separate PUT), so a NAP edit never depends on an
+  // account-field change and vice versa.
+  const napQ = useClientBusinessProfile(client.id);
+  const saveNap = useSaveClientBusinessProfile();
+  const [napBusiness, setNapBusiness] = useState("");
+  const [napAddress, setNapAddress] = useState("");
+  const [napCity, setNapCity] = useState("");
+  const [napRegion, setNapRegion] = useState("");
+  const [napPostal, setNapPostal] = useState("");
+  const [napMarket, setNapMarket] = useState<BusinessMarket>("US");
+  const [napPhone, setNapPhone] = useState("");
+  const [napWebsite, setNapWebsite] = useState("");
+  const [napCategory, setNapCategory] = useState("");
+  const [napDescription, setNapDescription] = useState("");
+  const [napSaved, setNapSaved] = useState(false);
+
+  // Prefill the NAP fields once the stored profile loads.
+  useEffect(() => {
+    const p = napQ.data;
+    if (!p) return;
+    setNapBusiness(p.businessName);
+    setNapAddress(p.addressLine1);
+    setNapCity(p.city);
+    setNapRegion(p.region);
+    setNapPostal(p.postalCode);
+    setNapMarket(p.market);
+    setNapPhone(p.phone);
+    setNapWebsite(p.websiteUrl);
+    setNapCategory(p.primaryCategory);
+    setNapDescription(p.description);
+  }, [napQ.data]);
+
+  function saveBusinessProfile() {
+    if (saveNap.isPending) return;
+    saveNap.mutate(
+      {
+        clientId: client.id,
+        nap: {
+          businessName: napBusiness.trim(), addressLine1: napAddress.trim(),
+          city: napCity.trim(), region: napRegion.trim(), postalCode: napPostal.trim(),
+          market: napMarket, phone: napPhone.trim(), websiteUrl: napWebsite.trim(),
+          primaryCategory: napCategory.trim(), description: napDescription.trim(),
+        },
+      },
+      {
+        onSuccess: () => {
+          setNapSaved(true);
+          window.setTimeout(() => setNapSaved(false), 2600);
+        },
+      },
+    );
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -109,6 +168,87 @@ export default function EditClientModal({
                 <label>MRR ($ / month)</label>
                 <input type="number" min={0} value={mrr} onChange={(e) => setMrr(e.target.value)} placeholder="290" />
               </div>
+            </div>
+
+            <div className={nap.napBlock}>
+              <div className={nap.napHead}>
+                <span className="material-symbols-rounded">storefront</span>
+                <div>
+                  <div className={nap.napTitle}>Business profile / NAP</div>
+                  <div className={nap.napSub}>
+                    The canonical name, address &amp; phone citations submit against. Saved
+                    separately from the account fields above.
+                  </div>
+                </div>
+              </div>
+              {napQ.isLoading ? (
+                <div className="op-muted">Loading business profile…</div>
+              ) : (
+                <>
+                  <div className="fld-row">
+                    <div className="fld">
+                      <label>Business name</label>
+                      <input value={napBusiness} onChange={(e) => setNapBusiness(e.target.value)} placeholder={client.cn} />
+                    </div>
+                    <div className="fld">
+                      <label>Primary category</label>
+                      <input value={napCategory} onChange={(e) => setNapCategory(e.target.value)} placeholder="Dentist" />
+                    </div>
+                  </div>
+                  <div className="fld">
+                    <label>Address</label>
+                    <input value={napAddress} onChange={(e) => setNapAddress(e.target.value)} placeholder="123 Main St" />
+                  </div>
+                  <div className="fld-row">
+                    <div className="fld">
+                      <label>City</label>
+                      <input value={napCity} onChange={(e) => setNapCity(e.target.value)} placeholder="Bellevue" />
+                    </div>
+                    <div className="fld">
+                      <label>Region / state</label>
+                      <input value={napRegion} onChange={(e) => setNapRegion(e.target.value)} placeholder="WA" />
+                    </div>
+                    <div className="fld">
+                      <label>Postal code</label>
+                      <input value={napPostal} onChange={(e) => setNapPostal(e.target.value)} placeholder="98004" />
+                    </div>
+                    <div className="fld">
+                      <label>Market</label>
+                      <select value={napMarket} onChange={(e) => setNapMarket(e.target.value as BusinessMarket)} aria-label="Market">
+                        {MARKETS.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="fld-row">
+                    <div className="fld">
+                      <label>Phone</label>
+                      <input value={napPhone} onChange={(e) => setNapPhone(e.target.value)} placeholder="555-0100" />
+                    </div>
+                    <div className="fld">
+                      <label>Website</label>
+                      <input value={napWebsite} onChange={(e) => setNapWebsite(e.target.value)} placeholder="https://harbordental.com" />
+                    </div>
+                  </div>
+                  <div className="fld">
+                    <label>Description</label>
+                    <input value={napDescription} onChange={(e) => setNapDescription(e.target.value)} placeholder="Family &amp; cosmetic dentistry in Bellevue, WA" />
+                  </div>
+                  <div className="modal-f" style={{ marginTop: 4 }}>
+                    <button type="button" className="ghostbtn" onClick={saveBusinessProfile} disabled={saveNap.isPending}>
+                      <span className="material-symbols-rounded">save</span>
+                      {saveNap.isPending ? "Saving…" : "Save business profile"}
+                    </button>
+                    {napSaved && (
+                      <span className={nap.napFlash}>
+                        <span className="material-symbols-rounded">task_alt</span>NAP saved.
+                      </span>
+                    )}
+                    {saveNap.error instanceof Error && (
+                      <span className="op-muted">Couldn&apos;t save - {saveNap.error.message}</span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {error && (

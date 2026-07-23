@@ -151,6 +151,65 @@ async def notify(
 
 
 # --------------------------------------------------------------------------- #
+# Lead fan-out + SYNC wrappers
+#
+# Some events belong to the review/lead QUEUE rather than a single named recipient
+# (a content draft hitting the review gate, an audit finishing) - notify_leads
+# fans one notification out to every active lead. And a SYNC Celery worker cannot
+# ``await notify(...)`` - notify_sync / notify_leads_sync drive it via asyncio.run
+# (mirroring ``notify_offpage_changes`` below). All are BEST-EFFORT (never raise).
+# --------------------------------------------------------------------------- #
+def _active_lead_ids() -> list[str]:
+    """The active owner/admin/manager user ids (the review/lead queue). Blocking.
+
+    Reuses the SAME predicate as ``_persist_alert`` (leads, minus never-signed-in
+    invitees) so a lead-addressed notification and a lead-addressed alert reach the
+    same set. Read on the privileged pool (the recipients are not the actor)."""
+    with privileged_connection() as cur:
+        cur.execute(
+            "select id from public.users "
+            "where role in ('owner', 'admin', 'manager') and status <> 'invited'",
+        )
+        return [str(r["id"]) for r in cur.fetchall()]
+
+
+async def notify_leads(
+    kind: str, title: str, body: str = "", *, email_sender: EmailSender | None = None
+) -> None:
+    """Best-effort: deliver one notification to every active lead. Never raises.
+
+    Each lead's own ``notification_prefs`` still govern their email/in-app legs, so a
+    known event key (``content_review`` / ``audit_done``) emails through Resend when a
+    key is present and degrades to in-app only when it is not - exactly like ``notify``."""
+    try:
+        lead_ids = await asyncio.to_thread(_active_lead_ids)
+    except Exception:
+        logger.warning("notify_leads_failed", kind=kind)
+        return
+    for uid in lead_ids:
+        await notify(uid, kind=kind, title=title, body=body, email_sender=email_sender)
+
+
+def notify_sync(user_id: str, kind: str, title: str, body: str = "") -> None:
+    """Synchronous best-effort ``notify`` for a SYNC Celery worker. Never raises.
+
+    A prefork worker has no running event loop, so it drives the async ``notify`` via
+    ``asyncio.run`` (mirrors ``notify_offpage_changes``). Any failure is swallowed."""
+    try:
+        asyncio.run(notify(user_id, kind=kind, title=title, body=body))
+    except Exception:
+        logger.warning("notify_sync_failed", kind=kind)
+
+
+def notify_leads_sync(kind: str, title: str, body: str = "") -> None:
+    """Synchronous best-effort ``notify_leads`` for a SYNC Celery worker. Never raises."""
+    try:
+        asyncio.run(notify_leads(kind, title, body))
+    except Exception:
+        logger.warning("notify_leads_sync_failed", kind=kind)
+
+
+# --------------------------------------------------------------------------- #
 # Staff alert
 # --------------------------------------------------------------------------- #
 def _persist_alert(

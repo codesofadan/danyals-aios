@@ -235,3 +235,94 @@ export type CitationCampaignResult = {
   excludedMarketplace?: number;
   capped?: number;
 };
+
+// --- Wave 4: gap analysis ----------------------------------------------------
+// Where the NAP a campaign submits against came from: an existing submission
+// profile, DERIVED from the client's own NAP (0051), or none captured yet.
+export type NapSource = "submission_profile" | "client_profile" | "none";
+
+export type CitationLiveUrl = { directory: string; url: string; status: string };
+
+export type CitationGap = {
+  client: string;
+  hasNap: boolean;
+  napSource: NapSource;
+  businessProfileId: string | null;
+  resolvedVertical: string | null;
+  existingCount: number;
+  coveredCount: number;
+  missingCount: number;
+  missing: Directory[];
+  liveUrls: CitationLiveUrl[];
+  bySubmitStatus: Record<string, number>;
+  byNapStatus: Record<string, number>;
+};
+
+// --- Wave 4: client business profile (NAP captured at creation) --------------
+export type ClientBusinessProfile = {
+  id: string;
+  client: string;
+  businessName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  market: BusinessMarket;
+  phone: string;
+  websiteUrl: string;
+  primaryCategory: string;
+  extraCategories: string[];
+  hours: Record<string, string>;
+  description: string;
+};
+
+export type ClientBusinessProfileInput = {
+  businessName?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  region?: string;
+  postalCode?: string;
+  market?: BusinessMarket;
+  phone?: string;
+  websiteUrl?: string;
+  primaryCategory?: string;
+  extraCategories?: string[];
+  hours?: Record<string, string>;
+  description?: string;
+};
+
+// --- Wave 4: API status boards ----------------------------------------------
+export type Web2PlatformStatus = {
+  platform: string;
+  connected: boolean;
+  draftOnly: boolean;
+  configuredCount: number;
+  requiredFields: string[];
+  vaultProvider: string;
+  reason: string;
+  externalNote: string;
+};
+
+export type Web2Status = {
+  connectedCount: number;
+  liveCount: number;
+  totalCount: number;
+  platforms: Web2PlatformStatus[];
+};
+
+export type CitationEngineStatus = {
+  key: string;
+  label: string;
+  connected: boolean;
+  reason: string;
+  requiredConfig: string[];
+  externalNote: string;
+};
+
+export type CitationEngineBoard = {
+  connectedCount: number;
+  totalCount: number;
+  engines: CitationEngineStatus[];
+};

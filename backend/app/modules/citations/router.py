@@ -18,13 +18,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
-from app.modules.citations.repo import CitationsRepoDep
+from app.modules.citations.repo import CitationsRepoDep, web2_credential_counts
 from app.modules.citations.schemas import (
     AUTOMATABLE_TIERS,
     DEFAULT_CAMPAIGN_CAP,
@@ -33,16 +33,25 @@ from app.modules.citations.schemas import (
     BusinessProfileResponse,
     CitationCampaignRequest,
     CitationCampaignResponse,
+    CitationLiveUrl,
     DirectoryResponse,
+    EngineStatusBoardResponse,
+    EngineStatusResponse,
+    GapAnalysisResponse,
+    Web2PlatformStatusResponse,
+    Web2StatusResponse,
 )
 from app.modules.citations.service import (
     automatable_directories,
+    compute_citation_gap,
     estimate_campaign_cost,
     select_campaign_directories,
     submit_method_label,
 )
 from app.modules.citations.verticals import normalize_vertical
 from app.services.activity import record_activity
+from integrations.citation_status import citation_engine_board
+from integrations.web2_status import web2_status_board
 
 router = APIRouter(prefix="/citation-builder", tags=["citation-builder"])
 
@@ -140,6 +149,31 @@ async def update_business_profile(
     return BusinessProfileResponse.from_row(row)
 
 
+@router.post(
+    "/clients/{client_id}/ensure-profile",
+    response_model=BusinessProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ensure_business_profile(
+    client_id: str, repo: CitationsRepoDep, actor: Lead
+) -> BusinessProfileResponse:
+    """Resolve a client's SUBMISSION profile, deriving one from the client's own NAP
+    (captured at creation) when none exists yet (lead-only). This is what makes "No
+    business profile yet for this client" self-heal: the citation-builder reuses the
+    name/address the Add-Client wizard already collected instead of demanding a re-entry.
+    404s if the client is unknown, or if it has no NAP at all to derive from."""
+    name = await asyncio.to_thread(repo.client_name_for, client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    row = await asyncio.to_thread(repo.ensure_business_profile, client_id=client_id, client_name=name)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No NAP for this client yet - add its business profile first.",
+        )
+    return BusinessProfileResponse.from_row(row)
+
+
 # --- directory catalog -----------------------------------------------------------
 
 
@@ -177,9 +211,20 @@ async def create_campaign(
     if client is None:
         raise _CLIENT_NOT_FOUND
     name = str(client.get("name") or "")
-    profile = await asyncio.to_thread(repo.get_business_profile, body.business_profile_id)
+    # Resolve the submission profile: an explicit id wins; otherwise DERIVE one from the
+    # client's own NAP (0051) so a campaign is never blocked on "No business profile yet"
+    # when the wizard already collected the name/address. A missing/invisible explicit id
+    # falls back to the same auto-resolution rather than 404-ing outright.
+    profile = None
+    if body.business_profile_id:
+        profile = await asyncio.to_thread(repo.get_business_profile, body.business_profile_id)
+    if profile is None:
+        profile = await asyncio.to_thread(
+            repo.ensure_business_profile, client_id=body.client_id, client_name=name
+        )
     if profile is None:
         raise _PROFILE_NOT_FOUND
+    business_profile_id = str(profile["id"])
 
     # Resolve the client's vertical: an explicit override wins, else derive it from the
     # client's free-text industry. Unresolvable -> None -> general directories only.
@@ -230,7 +275,7 @@ async def create_campaign(
                 client_name=name,
                 directory_id=did,
                 directory_name=str(directory.get("name", "")),
-                business_profile_id=body.business_profile_id,
+                business_profile_id=business_profile_id,
                 submit_method=submit_method_label(directory),
             )
         if row is None:
@@ -255,4 +300,118 @@ async def create_campaign(
         excluded_low_authority=selection.excluded_low_authority,
         excluded_marketplace=selection.excluded_marketplace,
         capped=selection.capped,
+    )
+
+
+# --- gap analysis -----------------------------------------------------------------
+
+
+@router.get("/gap-analysis", response_model=GapAnalysisResponse)
+async def gap_analysis(
+    repo: CitationsRepoDep,
+    _user: ViewReports,
+    client_id: Annotated[str, Query(alias="clientId", min_length=1)],
+) -> GapAnalysisResponse:
+    """Reconcile a client's citations against the automatable catalog: (a) analyse what
+    exists (count + per-status tally + the live URLs earned), (b) compute which
+    directories are still MISSING (the exact build target, in build order), and report
+    the resolved NAP so the UI stops showing "No business profile yet" once one can be
+    resolved from the client. Read-only - it never inserts a profile or queues work."""
+    client = await asyncio.to_thread(repo.client_meta_for, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+
+    # Resolve the NAP WITHOUT writing (this is a read endpoint, staff-wide): a submission
+    # profile if one already exists, else the client's own NAP (which a lead-gated build
+    # would DERIVE from). "none" is the honest answer when neither is present yet.
+    profiles = await asyncio.to_thread(repo.list_business_profiles, client_id=client_id)
+    profile = profiles[0] if profiles else None
+    nap_source: Literal["submission_profile", "client_profile", "none"]
+    if profile is not None:
+        nap_source = "submission_profile"
+        market = str(profile.get("market") or "US")
+    else:
+        client_nap = await asyncio.to_thread(repo.client_business_profile_for, client_id)
+        if client_nap is not None and str(client_nap.get("business_name") or "").strip():
+            nap_source = "client_profile"
+            market = str(client_nap.get("market") or "US")
+        else:
+            nap_source = "none"
+            market = "US"
+
+    vertical = normalize_vertical(str(client.get("industry") or ""))
+    markets = [market, "GLOBAL"]
+    directories = await asyncio.to_thread(repo.list_directories, markets=markets, tiers=None)
+    existing = await asyncio.to_thread(repo.list_citations_for_client, client_id)
+    gap = compute_citation_gap(
+        directories=directories, existing_citations=existing, vertical=vertical
+    )
+    return GapAnalysisResponse(
+        client=str(client.get("name") or ""),
+        has_nap=nap_source != "none",
+        nap_source=nap_source,
+        business_profile_id=str(profile["id"]) if profile is not None else None,
+        resolved_vertical=vertical,
+        existing_count=gap.existing_count,
+        covered_count=gap.covered_count,
+        missing_count=len(gap.missing),
+        missing=[DirectoryResponse.from_row(d) for d in gap.missing],
+        live_urls=[CitationLiveUrl(**u) for u in gap.live_urls],
+        by_submit_status=gap.by_submit_status,
+        by_nap_status=gap.by_nap_status,
+    )
+
+
+# --- API status boards (Wave 4) ---------------------------------------------------
+
+
+@router.get("/web2-status", response_model=Web2StatusResponse)
+async def web2_status(_user: ViewReports) -> Web2StatusResponse:
+    """The Web 2.0 API status board: every platform CONNECTED (a per-client vault
+    credential exists) vs MISSING, with the exact reason and the note that even a
+    connected platform can be refused by the EXTERNAL API. Vault COUNTS only - no secret
+    is read; an unconfigured DB degrades to an all-MISSING board rather than a 500."""
+    counts = await asyncio.to_thread(web2_credential_counts)
+    board = web2_status_board(counts)
+    return Web2StatusResponse(
+        connected_count=board.connected_count,
+        live_count=board.live_count,
+        total_count=board.total_count,
+        platforms=[
+            Web2PlatformStatusResponse(
+                platform=p.platform,
+                connected=p.connected,
+                draft_only=p.draft_only,
+                configured_count=p.configured_count,
+                required_fields=list(p.required_fields),
+                vault_provider=p.vault_provider,
+                reason=p.reason,
+                external_note=p.external_note,
+            )
+            for p in board.platforms
+        ],
+    )
+
+
+@router.get("/engine-status", response_model=EngineStatusBoardResponse)
+async def engine_status(_user: ViewReports) -> EngineStatusBoardResponse:
+    """The citation-ENGINE status board: each submission engine (Bing/Foursquare direct
+    API, the Apify fallback, the CAPTCHA solver, the self-hosted bot, the proxy)
+    CONNECTED vs MISSING, with the reason and the external-API caveat. Derived from
+    settings presence only - never a live probe, never a spend."""
+    board = citation_engine_board(get_settings())
+    return EngineStatusBoardResponse(
+        connected_count=board.connected_count,
+        total_count=board.total_count,
+        engines=[
+            EngineStatusResponse(
+                key=e.key,
+                label=e.label,
+                connected=e.connected,
+                reason=e.reason,
+                required_config=list(e.required_config),
+                external_note=e.external_note,
+            )
+            for e in board.engines
+        ],
     )

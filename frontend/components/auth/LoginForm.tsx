@@ -17,6 +17,8 @@ export default function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [expired, setExpired] = useState(false);
+  // Show the actual password by default (visible), with a toggle to mask it.
+  const [showPw, setShowPw] = useState(true);
 
   // Bounced here by a 401 (expired/absent token)? Read the flag client-side
   // (avoids useSearchParams' Suspense requirement on this route).
@@ -75,7 +77,6 @@ export default function LoginForm() {
               className={portal === p ? "on" : undefined}
               onClick={() => setPortal(p)}
             >
-              <span className="material-symbols-rounded">{ROLE_META[p].icon}</span>
               {ROLE_META[p].label}
             </button>
           ))}
@@ -111,13 +112,24 @@ export default function LoginForm() {
             <div className="login-input">
               <span className="material-symbols-rounded">lock</span>
               <input
-                type="password"
+                type={showPw ? "text" : "password"}
                 name="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••"
+                placeholder="your password"
                 autoComplete="current-password"
               />
+              <button
+                type="button"
+                className="login-pw-eye"
+                onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? "Hide password" : "Show password"}
+                title={showPw ? "Hide password" : "Show password"}
+              >
+                <span className="material-symbols-rounded">
+                  {showPw ? "visibility_off" : "visibility"}
+                </span>
+              </button>
             </div>
           </label>
 

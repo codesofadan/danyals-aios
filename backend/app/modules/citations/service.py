@@ -190,6 +190,140 @@ def submitter_for(
     return None, f"no automatable engine for submit_method={submit_method!r}"
 
 
+# --------------------------------------------------------------------------- #
+# NAP bridge: derive a submission business_profile from the client's own NAP
+# (client_business_profiles, 0051). PURE - the repo does the actual insert.
+# --------------------------------------------------------------------------- #
+def derive_business_profile_fields(client_nap: dict[str, Any]) -> dict[str, Any]:
+    """Map a ``client_business_profiles`` row (the client's identity captured at
+    creation) onto the column dict for a ``business_profiles`` SUBMISSION row.
+
+    The primary category leads the ordered ``categories`` list (a listing form fills
+    the primary first), then the extras. ``label``/``is_primary`` mark it the client's
+    canonical location. This is why "No business profile yet for this client" no longer
+    dead-ends: the citation-builder derives its first submission profile from the NAP the
+    wizard already collected, instead of demanding the operator re-enter it."""
+    primary = str(client_nap.get("primary_category") or "").strip()
+    extras = [str(c).strip() for c in (client_nap.get("extra_categories") or []) if str(c).strip()]
+    categories = ([primary] if primary else []) + [c for c in extras if c != primary]
+    hours = client_nap.get("hours")
+    return {
+        "label": "Primary",
+        "business_name": str(client_nap.get("business_name") or ""),
+        "address_line1": str(client_nap.get("address_line1") or ""),
+        "address_line2": str(client_nap.get("address_line2") or ""),
+        "city": str(client_nap.get("city") or ""),
+        "region": str(client_nap.get("region") or ""),
+        "postal_code": str(client_nap.get("postal_code") or ""),
+        "market": str(client_nap.get("market") or "US"),
+        "phone": str(client_nap.get("phone") or ""),
+        "website_url": str(client_nap.get("website_url") or ""),
+        "categories": categories,
+        "hours": dict(hours) if isinstance(hours, dict) else {},
+        "is_primary": True,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Gap analysis: what is already cited vs what the catalog says is still missing.
+# PURE (no DB, no network) so the whole decision is unit-testable.
+# --------------------------------------------------------------------------- #
+# A citation row COVERS its directory when it is in-flight or live; a blocked/failed/
+# never-started+missing row does NOT (it is retryable - still a gap to close).
+_COVERING_SUBMIT: frozenset[str] = frozenset({"queued", "submitting", "submitted", "verified"})
+_LIVE_SUBMIT: frozenset[str] = frozenset({"submitted", "verified"})
+_COVERING_NAP: frozenset[str] = frozenset({"consistent", "inconsistent"})
+
+
+def _norm_directory(name: str) -> str:
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def _row_covers(row: dict[str, Any]) -> bool:
+    """Whether an existing citation counts as coverage of its directory. A monitoring
+    row that FOUND a listing (nap consistent/inconsistent) covers it; a submission row
+    that is queued/live covers it; a blocked/failed row is an open gap, not coverage."""
+    submit = str(row.get("submit_status") or "not_started")
+    nap = str(row.get("nap_status") or "")
+    if submit in _COVERING_SUBMIT:
+        return True
+    return submit not in ("failed", "blocked") and nap in _COVERING_NAP
+
+
+@dataclass
+class CitationGap:
+    """The reconciliation of a client's existing citations against the automatable
+    catalog: what is covered, what is still MISSING (the build target), the live listing
+    URLs already earned, and an honest per-status tally."""
+
+    existing_count: int = 0
+    covered_count: int = 0
+    missing: list[dict[str, Any]] = field(default_factory=list)
+    live_urls: list[dict[str, str]] = field(default_factory=list)
+    by_submit_status: dict[str, int] = field(default_factory=dict)
+    by_nap_status: dict[str, int] = field(default_factory=dict)
+
+
+def compute_citation_gap(
+    *,
+    directories: list[dict[str, Any]],
+    existing_citations: list[dict[str, Any]],
+    vertical: str | None = None,
+    cap: int | None = DEFAULT_CAMPAIGN_CAP,
+    min_authority: int | None = DEFAULT_MIN_AUTHORITY,
+    include_marketplaces: bool = False,
+) -> CitationGap:
+    """Reconcile existing citations against the catalog and report the gap.
+
+    (a) analyse existing citations - count them + tally where they stand (per submit and
+        per NAP status), and collect the live listing URLs already earned;
+    (b) compute MISSING directories - apply the SAME reference-plan selection a campaign
+        uses (vertical match, spam-tail floor, marketplace gate, build-order sort, cap),
+        then subtract every directory already COVERED (matched by directory_id, else by
+        normalized name so a legacy monitoring row with no directory_id still counts).
+
+    The result's ``missing`` is exactly what "build only the missing ones" should queue,
+    in build order (core -> tier1 -> tier2)."""
+    gap = CitationGap(existing_count=len(existing_citations))
+
+    covered_ids: set[str] = set()
+    covered_names: set[str] = set()
+    for row in existing_citations:
+        submit = str(row.get("submit_status") or "not_started")
+        nap = str(row.get("nap_status") or "unknown")
+        gap.by_submit_status[submit] = gap.by_submit_status.get(submit, 0) + 1
+        gap.by_nap_status[nap] = gap.by_nap_status.get(nap, 0) + 1
+        proof = str(row.get("proof_url") or "")
+        if submit in _LIVE_SUBMIT and proof:
+            gap.live_urls.append(
+                {"directory": str(row.get("directory") or ""), "url": proof, "status": submit}
+            )
+        if _row_covers(row):
+            gap.covered_count += 1
+            did = row.get("directory_id")
+            if did:
+                covered_ids.add(str(did))
+            name = str(row.get("directory") or "")
+            if name:
+                covered_names.add(_norm_directory(name))
+
+    candidates = automatable_directories(directories)
+    selection = select_campaign_directories(
+        candidates,
+        vertical=vertical,
+        cap=cap,
+        min_authority=min_authority,
+        include_marketplaces=include_marketplaces,
+    )
+    gap.missing = [
+        d
+        for d in selection.selected
+        if str(d.get("id")) not in covered_ids
+        and _norm_directory(str(d.get("name") or "")) not in covered_names
+    ]
+    return gap
+
+
 def job_from_row(row: dict[str, Any]) -> CitationJob:
     """Build the engine-facing ``CitationJob`` from a joined citation+directory+
     business_profile row (see ``repo.load_citation_with_directory``)."""

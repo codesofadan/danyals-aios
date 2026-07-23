@@ -39,6 +39,7 @@ from app.schemas.reports import (
 )
 from app.services.activity import record_activity
 from app.services.deliverables import emit_deliverable
+from app.services.scheduled_jobs import ScheduledJob, scheduled_jobs
 from app.services.sheetstore import DATASET_TAB, FlushResult, SheetStore
 from integrations.sheets import connection_info_from_settings, sheets_client_from_settings
 
@@ -161,6 +162,14 @@ async def list_report_types(_user: ViewReports) -> list[ReportTypeResponse]:
     """What each report type writes to its tab (audit / content / milestones + the
     exact columns). A static, key-free catalogue."""
     return REPORT_TYPES
+
+
+@router.get("/reports/scheduled-jobs", response_model=list[ScheduledJob])
+async def list_scheduled_jobs(_user: ViewReports) -> list[ScheduledJob]:
+    """The LIVE Celery beat schedule: each background job, what it does, and its
+    human-readable cadence. Read from the SAME ``beat_schedule`` the beat process
+    runs, so the panel never drifts from what is actually scheduled."""
+    return await asyncio.to_thread(scheduled_jobs)
 
 
 @router.get("/reports/connection", response_model=ConnectionResponse)

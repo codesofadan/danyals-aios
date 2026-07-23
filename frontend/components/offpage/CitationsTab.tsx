@@ -2,8 +2,16 @@
 
 import { useMemo, useState } from "react";
 import { NAP_META, SUBMIT_STATUS_META, type Citation, type NapStatus } from "@/lib/offpage";
-import { useActOnCitation, useBulkUpdateCitations, useCitations } from "@/lib/hooks/offpage";
+import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap } from "@/lib/hooks/offpage";
+import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
+import w from "./Wave4.module.css";
+
+const NAP_SOURCE_LABEL: Record<string, string> = {
+  submission_profile: "a saved submission profile",
+  client_profile: "the client's own NAP (auto-derived)",
+  none: "none captured yet",
+};
 
 type FilterKey = "all" | NapStatus;
 
@@ -22,6 +30,10 @@ export default function CitationsTab() {
   const act = useActOnCitation();
   const [flash, setFlash] = useState<string | null>(null);
   const [showCampaign, setShowCampaign] = useState(false);
+  const [gapClient, setGapClient] = useState("");
+  const clientsQ = useClients();
+  const gapQ = useCitationGap(gapClient || undefined);
+  const gap = gapQ.data;
 
   // Mark ONE listing handled — Submit a missing one or Update a drifted one.
   function actOnRow(c: Citation) {
@@ -96,6 +108,90 @@ export default function CitationsTab() {
       {flash && (
         <div className="op-flash">
           <span className="material-symbols-rounded">task_alt</span>{flash}
+        </div>
+      )}
+
+      {/* Gap analysis: reconcile a client's citations against the catalog. */}
+      <div className="fld" style={{ marginTop: 4 }}>
+        <label>Gap analysis - pick a client to see what is covered vs still missing</label>
+        <select value={gapClient} onChange={(e) => setGapClient(e.target.value)}>
+          <option value="">Choose a client…</option>
+          {(clientsQ.data ?? []).map((c) => (
+            <option key={c.id} value={c.id}>{c.cn}</option>
+          ))}
+        </select>
+      </div>
+
+      {gapClient && gapQ.isLoading && <div className="op-muted">Analysing citations…</div>}
+      {gapClient && gapQ.isError && (
+        <div className="op-muted">Couldn&apos;t run gap analysis - {(gapQ.error as Error)?.message ?? "try again"}.</div>
+      )}
+      {gap && (
+        <div>
+          <div className={w.rollup}>
+            <span>
+              NAP source: <b>{NAP_SOURCE_LABEL[gap.napSource] ?? gap.napSource}</b>
+            </span>
+            <span>Vertical: <b>{gap.resolvedVertical ?? "general only"}</b></span>
+            {!gap.hasNap && (
+              <span className="status-pill warn">
+                No business profile yet - add its NAP (Clients &gt; Edit) so a build has real data.
+              </span>
+            )}
+          </div>
+          <div className={w.stats}>
+            <div className={w.stat}>
+              <div className={w.statNum}>{gap.existingCount}</div>
+              <div className={w.statLbl}>Existing citations</div>
+            </div>
+            <div className={w.stat}>
+              <div className={w.statNum}>{gap.coveredCount}</div>
+              <div className={w.statLbl}>Covered (in-flight or live)</div>
+            </div>
+            <div className={w.stat}>
+              <div className={w.statNum}>{gap.missingCount}</div>
+              <div className={w.statLbl}>Missing from the catalog</div>
+            </div>
+            <div className={w.stat}>
+              <div className={w.statNum}>{gap.liveUrls.length}</div>
+              <div className={w.statLbl}>Live listing URLs</div>
+            </div>
+          </div>
+
+          {gap.missing.length > 0 && (
+            <>
+              <div className="op-muted" style={{ marginTop: 10 }}>
+                Missing directories (build order - the exact target a campaign queues):
+              </div>
+              <div className={w.missList}>
+                {gap.missing.slice(0, 24).map((d) => (
+                  <span key={d.id} className={w.chip}>{d.name}</span>
+                ))}
+                {gap.missing.length > 24 && <span className={w.chip}>+{gap.missing.length - 24} more</span>}
+              </div>
+            </>
+          )}
+
+          {gap.liveUrls.length > 0 && (
+            <>
+              <div className="op-muted" style={{ marginTop: 10 }}>Live listings already earned:</div>
+              {gap.liveUrls.slice(0, 12).map((u, i) => (
+                <div key={i} className={w.urlRow}>
+                  <span className="status-pill ok">{u.status}</span>
+                  <a className="op-url" href={u.url} target="_blank" rel="noreferrer">
+                    {u.directory} <span className="material-symbols-rounded">open_in_new</span>
+                  </a>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div className="op-toolset" style={{ marginTop: 12 }}>
+            <button className="primary-btn" onClick={() => setShowCampaign(true)}>
+              <span className="material-symbols-rounded">rocket_launch</span>
+              Build the {gap.missingCount} missing
+            </button>
+          </div>
         </div>
       )}
 

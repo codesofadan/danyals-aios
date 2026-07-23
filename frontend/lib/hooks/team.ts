@@ -22,17 +22,33 @@ import type {
 } from "@/lib/data";
 
 export const MEMBERS_KEY = ["members"] as const;
+export const TEAM_MEMBERS_KEY = ["team", "members"] as const;
 export const TASKS_KEY = ["tasks"] as const;
 export const ACTIVITY_KEY = ["activity"] as const;
 export const RBAC_ROLES_KEY = ["rbac", "roles"] as const;
 
 // --- reads --------------------------------------------------------------------
 
-/** The agency roster with live performance metrics (GET /admin/users). */
+/** The agency roster with live performance metrics (GET /admin/users, manage_team). */
 export function useMembers() {
   return useQuery({
     queryKey: MEMBERS_KEY,
     queryFn: () => api.get<TeamMemberRecord[]>("/admin/users"),
+  });
+}
+
+/**
+ * The eligible-ASSIGNEE staff roster (GET /team/members) — the list the Assign-Tasks
+ * picker chooses from. Distinct from `useMembers`: it is gated on `assign_tasks`
+ * (owner/admin/manager) rather than `manage_team`, so a manager can load it, and it
+ * returns EVERY eligible staff member including invited-but-not-yet-signed-in ones
+ * (the backend accepts any non-client assignee). This is the fix for members not
+ * appearing in the assignee picker.
+ */
+export function useTeamMembers() {
+  return useQuery({
+    queryKey: TEAM_MEMBERS_KEY,
+    queryFn: () => api.get<TeamMemberRecord[]>("/team/members"),
   });
 }
 
@@ -125,6 +141,39 @@ export function useAddMember() {
   });
 }
 
+// --- login credentials (owner/admin resend-credentials tool) ------------------
+
+/** A member's login + reversible password (GET /admin/users/{id}/credentials). */
+export type MemberCredentials = {
+  id: string;
+  username: string | null;
+  email: string;
+  password: string | null; // null => not captured yet (reset to set one)
+  available: boolean;
+};
+
+/**
+ * Reveal a member's login + password on demand (NOT prefetched — a click per row).
+ * The password is opened server-side from the AES-256-GCM sealed copy; `available`
+ * is false for accounts provisioned before the feature (offer a reset then).
+ */
+export function useRevealCredentials() {
+  return useMutation({
+    mutationFn: (userId: string) => api.get<MemberCredentials>(`/admin/users/${userId}/credentials`),
+  });
+}
+
+/**
+ * Set/rotate a member's login password (POST /admin/users/{id}/password). With no
+ * `password` the server generates a strong one. Returns the new pair to copy+send.
+ */
+export function useSetPassword() {
+  return useMutation({
+    mutationFn: ({ userId, password }: { userId: string; password?: string }) =>
+      api.post<MemberCredentials>(`/admin/users/${userId}/password`, password ? { password } : {}),
+  });
+}
+
 export type AssignTaskInput = {
   title: string;
   client_id: string;
@@ -142,6 +191,7 @@ export function useAssignTask() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: TASKS_KEY });
       void qc.invalidateQueries({ queryKey: MEMBERS_KEY }); // activeTasks metric moves
+      void qc.invalidateQueries({ queryKey: TEAM_MEMBERS_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
     },
   });
@@ -158,6 +208,7 @@ export function useAdvanceTask() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: TASKS_KEY });
       void qc.invalidateQueries({ queryKey: MEMBERS_KEY });
+      void qc.invalidateQueries({ queryKey: TEAM_MEMBERS_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
     },
   });
@@ -171,6 +222,10 @@ export function useReviewTask() {
       api.post<Task>(`/tasks/${code}/review`, { action }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: TASKS_KEY });
+      // Approving/rejecting moves a task done/in_progress — that changes completed,
+      // active AND the QA pass-rate, so the performance roster must refetch too.
+      void qc.invalidateQueries({ queryKey: MEMBERS_KEY });
+      void qc.invalidateQueries({ queryKey: TEAM_MEMBERS_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
     },
   });

@@ -215,3 +215,28 @@ class MemberInviteResponse(BaseModel):
     member: MemberResponse
     username: str
     temp_password: str = Field(serialization_alias="tempPassword")
+
+
+# --- Reversible login credentials (owner/admin resend-credentials tool) ------
+
+
+class MemberCredentials(BaseModel):
+    """A member's login + reversible password for the resend-credentials tool.
+
+    ``password`` is the plaintext opened from the AES-256-GCM sealed copy (0051);
+    it is ``None`` (``available=False``) when the account predates the feature or
+    was provisioned with no vault key - the caller then offers a reset to capture
+    one. NOT contract-locked to a frontend type (it is a bespoke admin payload).
+    """
+
+    id: str
+    username: str | None
+    email: str
+    password: str | None
+    available: bool
+
+
+class SetPasswordRequest(BaseModel):
+    """Set/rotate a member's login password. ``password`` absent -> server generates."""
+
+    password: SecretStr | None = Field(default=None, min_length=8)

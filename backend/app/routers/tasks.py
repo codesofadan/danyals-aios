@@ -33,7 +33,7 @@ from app.schemas.tasks import (
     type_to_db,
 )
 from app.services.activity import record_activity
-from app.services.notifications import notify
+from app.services.notifications import notify, notify_leads
 
 router = APIRouter(tags=["tasks"])
 
@@ -195,6 +195,20 @@ async def advance_task(code: str, repo: TasksRepoDep, actor: ViewReports) -> Tas
         actor, kind=kind, action=_advance_action(nxt), target=task.get("client_name", ""),
         entity_type=ent_type, entity_id=ent_id,
     )
+    # A content task entering the review gate needs a reviewer: email + in-app the
+    # leads who own the sign-off (best-effort; honours each lead's notification_prefs,
+    # never blocks the advance). content_review is a NOTIF_EVENTS key (email default
+    # on), so this fires through Resend when RESEND_API_KEY is present, else in-app only.
+    if nxt == "review":
+        await notify_leads(
+            kind="content_review",
+            title=f"Content ready for review: {task.get('title', '')}",
+            body=(
+                f'"{task.get("title", "A draft")}" for '
+                f'{task.get("client_name", "a client")} has been submitted for review. '
+                "Approve it or send it back from the review queue."
+            ),
+        )
     return TaskResponse.from_row(updated)
 
 

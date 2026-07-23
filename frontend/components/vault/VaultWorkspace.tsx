@@ -69,7 +69,7 @@ export default function VaultWorkspace() {
       <section className="kpis">
         <NumKpi
           hero icon="vpn_key" label="Keys stored" value={stats.stored}
-          sub={<><span className="delta up"><span className="material-symbols-rounded">lock</span>encrypted</span> in Supabase Vault</>}
+          sub={<><span className="delta up"><span className="material-symbols-rounded">lock</span>encrypted</span> in the key vault</>}
         />
         <NumKpi
           icon="hub" label="Providers connected" value={stats.providersConnected}
@@ -122,7 +122,7 @@ export default function VaultWorkspace() {
         </section>
 
         <div className="kv-side">
-          <ProvidersOverview keys={keys} />
+          <ProvidersOverview />
           <AddKeyForm onAdd={handleAdd} />
           {addKey.isError && (
             <div className="panel-hint" role="alert" style={{ color: "var(--warn, #A96913)" }}>

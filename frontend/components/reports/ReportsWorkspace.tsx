@@ -12,6 +12,7 @@ import WorkbooksTable from "./WorkbooksTable";
 import SheetsConnection from "./SheetsConnection";
 import ReportTypes from "./ReportTypes";
 import SyncActivity from "./SyncActivity";
+import ScheduledJobs from "./ScheduledJobs";
 
 export default function ReportsWorkspace() {
   const workbooksQ = useWorkbooks(); // GET /reports/workbooks (freshest sync first)
@@ -80,6 +81,10 @@ export default function ReportsWorkspace() {
       <div className="row">
         <SyncActivity log={log} loading={eventsQ.isLoading} error={eventsErr} />
         <ReportTypes />
+      </div>
+
+      <div className="row">
+        <ScheduledJobs />
       </div>
     </>
   );

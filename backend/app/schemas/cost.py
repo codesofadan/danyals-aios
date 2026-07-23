@@ -70,6 +70,10 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # registration is MANDATORY: an unregistered key is unswitchable-on (dead on
     # arrival) — dial_mode() falls back to "off" and PATCH /cost/dials rejects it.
     DialFeatureMeta(key="policy", label="Policy Radar", icon="policy", provider="Anthropic", note="Change analysis (Claude Haiku)", default_mode="api"),
+    # GMB post drafting (Claude). Defaults to byhand: an operator reviews each generated
+    # Google Business Profile post before use (Google posting itself is approval-gated /
+    # dormant). Same MANDATORY-registration rule as every dial above.
+    DialFeatureMeta(key="gmb", label="GMB Posts", icon="storefront", provider="Anthropic", note="GBP post drafting (Claude)", default_mode="byhand"),
     # Part 8 - the tool modules' paid spends. EVERY key a module passes to the gate
     # MUST be registered here: dial_mode() falls back to "off" for an unknown key
     # (cost_store.py) AND the PATCH /cost/dials guard rejects a key not in DIAL_KEYS

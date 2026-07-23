@@ -24,6 +24,7 @@ from app.modules.citations import router as citations_router
 from app.modules.client_onboarding import router as client_onboarding_router
 from app.modules.competitor_intel import router as competitor_intel_router
 from app.modules.data_import import router as data_import_router
+from app.modules.gmb import router as gmb_router
 from app.modules.keyword_research import router as keyword_research_router
 from app.modules.local_seo import router as local_seo_router
 from app.modules.on_page import router as on_page_router
@@ -52,4 +53,8 @@ MODULE_ROUTERS: list[APIRouter] = [
     citations_router,
     # 7C: live Google Search Console + GA4 (read-only), admin-dashboard facing.
     site_analytics_router,
+    # Wave 5: the GMB (Google Business Profile) post generator - AI-drafted, policy-
+    # checked posts with a review gate; actual Google posting is dormant. Synchronous
+    # generation (no Celery task), cost-gated on the ``gmb`` dial.
+    gmb_router,
 ]

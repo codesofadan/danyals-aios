@@ -14,7 +14,8 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
-from app.db.database import privileged_connection, rls_connection
+from app.db.database import DatabaseNotConfiguredError, privileged_connection, rls_connection
+from app.modules.citations.service import derive_business_profile_fields
 
 _Rows = list[dict[str, Any]]
 
@@ -89,6 +90,51 @@ class CitationsRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute(stmt, [client_id, client_name, *fields.values()])
             return cur.fetchone()
+
+    def client_business_profile_for(self, client_id: str) -> dict[str, Any] | None:
+        """The client's OWN stored NAP (``client_business_profiles``, 0051) - the
+        identity captured at creation. ``None`` when the wizard skipped it (or the
+        client is invisible to the caller). RLS-scoped."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.client_business_profiles where client_id = %s limit 1",
+                (client_id,),
+            )
+            return cur.fetchone()
+
+    def ensure_business_profile(
+        self, *, client_id: str, client_name: str
+    ) -> dict[str, Any] | None:
+        """Return a SUBMISSION ``business_profiles`` row for a client, deriving one from
+        the client's own NAP (0051) when none exists yet.
+
+        This is the fix for "No business profile yet for this client": the operator no
+        longer has to re-enter a NAP the Add-Client wizard already collected. Prefers an
+        existing primary profile; else derives + inserts one from
+        ``client_business_profiles`` (only when that NAP carries a business name -
+        deriving an empty profile would just move the "no NAP" problem downstream);
+        else ``None`` (the caller reports the honest "capture a NAP first")."""
+        existing = self.list_business_profiles(client_id=client_id)
+        if existing:
+            return existing[0]  # already sorted is_primary desc, created_at
+        client_nap = self.client_business_profile_for(client_id)
+        if client_nap is None or not str(client_nap.get("business_name") or "").strip():
+            return None
+        fields = derive_business_profile_fields(client_nap)
+        return self.create_business_profile(
+            client_id=client_id, client_name=client_name, fields=fields
+        )
+
+    def list_citations_for_client(self, client_id: str) -> _Rows:
+        """Every citation row for a client (submission + monitoring), for gap analysis -
+        the columns the pure ``compute_citation_gap`` reads. RLS-scoped."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, directory, directory_id, nap_status, submit_status, proof_url "
+                "from public.citations where client_id = %s",
+                (client_id,),
+            )
+            return cur.fetchall()
 
     def update_business_profile(self, profile_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
         changes = _adapt_jsonb(changes)
@@ -282,3 +328,28 @@ class ServiceCitationsStore:
 def service_citations_store() -> ServiceCitationsStore:
     """The privileged citations store the citation_submit_job worker uses."""
     return ServiceCitationsStore()
+
+
+def web2_credential_counts() -> dict[str, int]:
+    """``{platform: count}`` of stored per-client Web 2.0 vault credentials, for the
+    API status board. Counts ONLY (no secret is read), grouped from the
+    ``provider = 'web2:<platform>'`` convention. A system status read, so it runs on
+    the privileged connection; an unconfigured DB degrades to an empty board (every
+    platform then reads MISSING) rather than raising - the status board must never 500."""
+    counts: dict[str, int] = {}
+    try:
+        with privileged_connection() as cur:
+            cur.execute(
+                "select provider, count(*) as n from public.vault_keys "
+                "where provider like %s group by provider",
+                ("web2:%",),
+            )
+            rows = cur.fetchall()
+    except DatabaseNotConfiguredError:
+        return {}
+    for row in rows:
+        provider = str(row.get("provider") or "")
+        platform = provider.split(":", 1)[1] if ":" in provider else provider
+        if platform:
+            counts[platform] = int(row.get("n") or 0)
+    return counts

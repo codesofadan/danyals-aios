@@ -1,0 +1,126 @@
+/* ============================================================
+   AIOS · GMB (Google Business Profile) module styles (Wave 5)
+   Self-contained: reuses the global .card / .primary-btn / .ghostbtn / .pill-tag /
+   .material-symbols-rounded, and defines its own gmb-* layout + a few local helpers
+   (gmb-jid / gmb-dot / gmb-sep / gmb-empty) so the page needs no content.css.
+   ============================================================ */
+
+.gmb-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.gmb-kpi {
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #e8d2d7);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+.gmb-kpi-n { font-size: 30px; font-weight: 800; line-height: 1; }
+.gmb-kpi-l { font-size: 12px; opacity: 0.66; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.gmb-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 5fr) minmax(360px, 7fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1080px) { .gmb-grid { grid-template-columns: 1fr; } }
+
+/* --- composer --- */
+.gmb-field { display: block; margin: 12px 0; }
+.gmb-field > span {
+  display: block; font-size: 12px; font-weight: 700; opacity: 0.72;
+  margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.gmb-field select,
+.gmb-field input,
+.gmb-field textarea {
+  width: 100%;
+  border: 1px solid var(--line, #e8d2d7);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  background: var(--panel, #fff);
+  color: inherit;
+}
+.gmb-field textarea { resize: vertical; }
+.gmb-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .gmb-row2 { grid-template-columns: 1fr; } }
+
+.gmb-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.gmb-chip {
+  border: 1px solid var(--line, #e8d2d7);
+  background: transparent;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font: inherit; font-size: 13px;
+  cursor: pointer;
+  color: inherit;
+}
+.gmb-chip.on {
+  background: var(--maroon, #6e1423);
+  border-color: var(--maroon, #6e1423);
+  color: #fff;
+}
+.gmb-composer-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; flex-wrap: wrap;
+}
+
+/* --- review list --- */
+.gmb-list { display: flex; flex-direction: column; gap: 12px; }
+.gmb-post {
+  border: 1px solid var(--line, #e8d2d7);
+  border-left: 3px solid var(--acc, var(--maroon, #6e1423));
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.gmb-post-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gmb-jid { font-weight: 800; font-size: 13px; }
+.gmb-type {
+  font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+  background: var(--blush, #f8ecee); color: var(--maroon, #6e1423);
+}
+.gmb-status { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+.gmb-status.s-needs_review { background: rgba(255,159,28,0.16); color: #b46a00; }
+.gmb-status.s-approved { background: rgba(34,224,192,0.16); color: #12866f; }
+.gmb-status.s-posted { background: rgba(76,201,240,0.18); color: #2076a0; }
+.gmb-status.s-rejected { background: rgba(255,77,157,0.16); color: #b02866; }
+.gmb-status.s-draft { background: rgba(120,120,120,0.16); color: #666; }
+
+.gmb-post-meta { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.78; margin-left: auto; }
+.gmb-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.gmb-sep { opacity: 0.4; margin: 0 2px; }
+
+.gmb-post-title { font-weight: 800; margin: 8px 0 4px; }
+.gmb-post-body { margin: 8px 0; line-height: 1.55; white-space: pre-wrap; }
+.gmb-post-body.muted { opacity: 0.6; font-style: italic; }
+
+.gmb-policy { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.gmb-issue {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; padding: 5px 10px; border-radius: 8px; line-height: 1.3;
+}
+.gmb-issue .material-symbols-rounded { font-size: 16px; }
+.gmb-issue.viol { background: rgba(255,77,93,0.12); color: #c02a33; border: 1px solid rgba(255,77,93,0.3); }
+.gmb-issue.warn { background: rgba(255,159,28,0.12); color: #a9670a; border: 1px solid rgba(255,159,28,0.28); }
+
+.gmb-post-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.gmb-dormant {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  font-size: 13px; padding: 9px 12px; border-radius: 9px;
+  background: rgba(120,120,120,0.1); border: 1px dashed var(--line, #cbb9bd);
+}
+
+.gmb-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 34px 16px; text-align: center; opacity: 0.66;
+}
+.gmb-empty .material-symbols-rounded { font-size: 34px; }
+
+@media (prefers-color-scheme: dark) {
+  .gmb-kpi, .gmb-post, .gmb-field select, .gmb-field input, .gmb-field textarea { background: rgba(255,255,255,0.02); }
+  .gmb-type { background: rgba(140,29,46,0.25); color: #e78aa0; }
+}

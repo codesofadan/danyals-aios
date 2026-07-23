@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   clientReports, reportBundles, REPORT_GROUP_COLOR, TIER_PRICE,
-  type ClientReport, type SubTier, type NewClient,
+  type ClientReport, type SubTier,
 } from "@/lib/data";
+import type { NewClientInput } from "@/lib/hooks/clients";
+import type { BusinessMarket } from "@/lib/offpage";
+import nap from "@/components/offpage/Wave4.module.css";
+
+const MARKETS: BusinessMarket[] = ["US", "UK", "CA", "AU", "GLOBAL"];
 
 // 6 shard vectors (hexagon burst) — reused by every bubble pop.
 const SHARDS = [
@@ -46,7 +51,7 @@ function genLogin(email: string, client: string): string {
 type Step = 1 | 2 | 3;
 const STEP_LABELS = ["Report Access", "Details", "Credentials"];
 
-export default function AddClientWizard({ onClose, onAdd }: { onClose: () => void; onAdd: (c: NewClient) => void }) {
+export default function AddClientWizard({ onClose, onAdd }: { onClose: () => void; onAdd: (c: NewClientInput) => void }) {
   const [step, setStep] = useState<Step>(1);
   const [granted, setGranted] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState<string>(""); // "" = custom
@@ -60,6 +65,19 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
   const [adminPass, setAdminPass] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // The client's own NAP, captured up front so the first citation campaign has a real
+  // name/address to submit (no "No business profile yet"). Entirely optional - the
+  // section can be left blank and filled in later from the Edit modal.
+  const [napBusiness, setNapBusiness] = useState("");
+  const [napAddress, setNapAddress] = useState("");
+  const [napCity, setNapCity] = useState("");
+  const [napRegion, setNapRegion] = useState("");
+  const [napPostal, setNapPostal] = useState("");
+  const [napMarket, setNapMarket] = useState<BusinessMarket>("US");
+  const [napPhone, setNapPhone] = useState("");
+  const [napWebsite, setNapWebsite] = useState("");
+  const [napCategory, setNapCategory] = useState("");
+  const [napDescription, setNapDescription] = useState("");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -124,6 +142,9 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
     }).catch(() => {});
   }
 
+  const napFilled = [napBusiness, napAddress, napCity, napPhone, napWebsite, napCategory, napDescription]
+    .some((v) => v.trim().length > 0);
+
   function finish() {
     onAdd({
       cn: cn.trim(),
@@ -135,6 +156,22 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
       adminPass,
       bundle: b ? b.label : "Custom",
       reports: [...granted],
+      // Only send a NAP when the operator actually entered one; the backend also
+      // ignores a wholly empty profile, so this is belt-and-braces.
+      nap: napFilled
+        ? {
+            businessName: napBusiness.trim() || cn.trim(),
+            addressLine1: napAddress.trim(),
+            city: napCity.trim(),
+            region: napRegion.trim(),
+            postalCode: napPostal.trim(),
+            market: napMarket,
+            phone: napPhone.trim(),
+            websiteUrl: napWebsite.trim(),
+            primaryCategory: napCategory.trim(),
+            description: napDescription.trim(),
+          }
+        : undefined,
     });
   }
 
@@ -253,6 +290,64 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
               <div className="fld">
                 <label>Contact email</label>
                 <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="sana@harbordental.com" />
+              </div>
+
+              <div className={nap.napBlock}>
+                <div className={nap.napHead}>
+                  <span className="material-symbols-rounded">storefront</span>
+                  <div>
+                    <div className={nap.napTitle}>Business profile / NAP <span className={nap.optTag}>optional</span></div>
+                    <div className={nap.napSub}>Captured once so the first citation campaign has a real name, address &amp; phone to submit. Fill it in later from the Edit modal if you prefer.</div>
+                  </div>
+                </div>
+                <div className="fld-row">
+                  <div className="fld">
+                    <label>Business name</label>
+                    <input value={napBusiness} onChange={(e) => setNapBusiness(e.target.value)} placeholder={cn || "Harbor Dental Group"} />
+                  </div>
+                  <div className="fld">
+                    <label>Primary category</label>
+                    <input value={napCategory} onChange={(e) => setNapCategory(e.target.value)} placeholder="Dentist" />
+                  </div>
+                </div>
+                <div className="fld">
+                  <label>Address</label>
+                  <input value={napAddress} onChange={(e) => setNapAddress(e.target.value)} placeholder="123 Main St" />
+                </div>
+                <div className="fld-row">
+                  <div className="fld">
+                    <label>City</label>
+                    <input value={napCity} onChange={(e) => setNapCity(e.target.value)} placeholder="Bellevue" />
+                  </div>
+                  <div className="fld">
+                    <label>Region / state</label>
+                    <input value={napRegion} onChange={(e) => setNapRegion(e.target.value)} placeholder="WA" />
+                  </div>
+                  <div className="fld">
+                    <label>Postal code</label>
+                    <input value={napPostal} onChange={(e) => setNapPostal(e.target.value)} placeholder="98004" />
+                  </div>
+                  <div className="fld">
+                    <label>Market</label>
+                    <select value={napMarket} onChange={(e) => setNapMarket(e.target.value as BusinessMarket)} aria-label="Market">
+                      {MARKETS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="fld-row">
+                  <div className="fld">
+                    <label>Phone</label>
+                    <input value={napPhone} onChange={(e) => setNapPhone(e.target.value)} placeholder="555-0100" />
+                  </div>
+                  <div className="fld">
+                    <label>Website</label>
+                    <input value={napWebsite} onChange={(e) => setNapWebsite(e.target.value)} placeholder="https://harbordental.com" />
+                  </div>
+                </div>
+                <div className="fld">
+                  <label>Description</label>
+                  <input value={napDescription} onChange={(e) => setNapDescription(e.target.value)} placeholder="Family &amp; cosmetic dentistry in Bellevue, WA" />
+                </div>
               </div>
 
               <div className="wiz-recap">

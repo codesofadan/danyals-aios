@@ -7,6 +7,7 @@ import {
   useCreateBusinessProfile,
   useCreateCitationCampaign,
   useDirectories,
+  useEnsureBusinessProfile,
 } from "@/lib/hooks/offpage";
 import {
   AUTOMATABLE_TIERS,
@@ -43,6 +44,15 @@ export default function CitationCampaignModal({ onClose }: { onClose: () => void
 
   const createProfile = useCreateBusinessProfile();
   const createCampaign = useCreateCitationCampaign();
+  const ensureProfile = useEnsureBusinessProfile();
+
+  // Derive a submission profile from the client's OWN NAP (captured at creation), so the
+  // operator does not have to re-key an address the wizard already collected. On success
+  // the derived profile becomes the selected one.
+  function deriveFromSavedNap() {
+    if (!clientId || ensureProfile.isPending) return;
+    ensureProfile.mutate(clientId, { onSuccess: (row) => setProfileId(row.id) });
+  }
 
   const [markets, setMarkets] = useState<Set<BusinessMarket>>(new Set(["US", "GLOBAL"]));
   const [tiers, setTiers] = useState<Set<DirectoryTier>>(new Set(AUTOMATABLE_TIERS));
@@ -158,12 +168,29 @@ export default function CitationCampaignModal({ onClose }: { onClose: () => void
                     ))}
                   </select>
                 ) : (
-                  <div className="op-muted">No business profile yet for this client.</div>
+                  <div className="op-muted">
+                    No submission profile yet. Derive one from the client&apos;s saved NAP
+                    (captured at creation), or add a location by hand below. If neither exists,
+                    add the NAP first from Clients → Edit.
+                  </div>
                 )}
-                <button type="button" className="ghostbtn" style={{ marginTop: 8 }} onClick={() => setShowNewProfile(true)}>
-                  <span className="material-symbols-rounded">add_business</span>
-                  {profiles.length > 0 ? "Add another location" : "Add the business profile"}
-                </button>
+                <div className="op-toolset" style={{ marginTop: 8 }}>
+                  {profiles.length === 0 && (
+                    <button type="button" className="op-act update" onClick={deriveFromSavedNap} disabled={ensureProfile.isPending}>
+                      <span className="material-symbols-rounded">auto_fix_high</span>
+                      {ensureProfile.isPending ? "Deriving…" : "Use the client's saved NAP"}
+                    </button>
+                  )}
+                  <button type="button" className="ghostbtn" onClick={() => setShowNewProfile(true)}>
+                    <span className="material-symbols-rounded">add_business</span>
+                    {profiles.length > 0 ? "Add another location" : "Add a location by hand"}
+                  </button>
+                </div>
+                {ensureProfile.error instanceof Error && (
+                  <div className="op-muted" style={{ marginTop: 6 }}>
+                    Couldn&apos;t derive - {ensureProfile.error.message}. Add the client&apos;s NAP first (Clients &gt; Edit).
+                  </div>
+                )}
               </div>
             )}
 

@@ -29,7 +29,11 @@ export default function AssignTasks({
   onAssign: (t: NewTask) => void;
   onStatusChange: (id: string, s: TaskStatus) => void;
 }) {
-  const assignable = members.filter((m) => m.status !== "invited");
+  // Every eligible staff member is assignable — the backend accepts any non-client
+  // assignee, including a member who has been invited but has not yet signed in for
+  // the first time. Hiding invited members here is exactly what made newly-added
+  // staff vanish from this picker, so they are kept (and tagged) instead.
+  const assignable = members;
   const [title, setTitle] = useState("");
   const [clientId, setClientId] = useState("");
   const [type, setType] = useState<TaskType>("Technical Audit");
@@ -85,7 +89,9 @@ export default function AssignTasks({
           <label>Assign to</label>
           <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
             {assignable.map((m) => (
-              <option key={m.id} value={m.id}>{m.name} — {m.title} ({m.activeTasks} active)</option>
+              <option key={m.id} value={m.id}>
+                {m.name} — {m.title} ({m.activeTasks} active){m.status === "invited" ? " · invited" : ""}
+              </option>
             ))}
           </select>
         </div>

@@ -19,6 +19,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import Depends
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import rls_connection
@@ -74,6 +75,45 @@ class ClientsRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute("delete from public.clients where id = %s returning id", (client_id,))
             return bool(cur.fetchall())
+
+    # --- client business profile (NAP, 0051) ----------------------------------
+    def get_business_profile(self, client_id: str) -> dict[str, Any] | None:
+        """The client's stored NAP (``client_business_profiles``), or ``None`` when the
+        wizard skipped it. RLS-scoped, so a client the caller cannot see reads ``None``."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.client_business_profiles where client_id = %s limit 1",
+                (client_id,),
+            )
+            return cur.fetchone()
+
+    def upsert_business_profile(
+        self, *, client_id: str, client_name: str, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Insert or update the ONE NAP record for a client (``unique (client_id)``), so a
+        re-save from the Edit modal overwrites rather than duplicates. ``hours`` is a
+        jsonb column, so it is wrapped in ``Jsonb`` (psycopg3 will not adapt a raw dict
+        through a ``%s`` placeholder); ``extra_categories`` is ``text[]``, adapted natively.
+        client_id/client_name come from the verified client, never from the wire."""
+        if isinstance(fields.get("hours"), dict):
+            fields = {**fields, "hours": Jsonb(fields["hours"])}
+        cols = ["client_id", "client_name", *fields.keys()]
+        placeholders = sql.SQL(", ").join([sql.Placeholder()] * len(cols))
+        updates = sql.SQL(", ").join(
+            sql.SQL("{} = excluded.{}").format(sql.Identifier(c), sql.Identifier(c))
+            for c in ("client_name", *fields.keys())
+        )
+        stmt = sql.SQL(
+            "insert into public.client_business_profiles ({cols}) values ({vals}) "
+            "on conflict (client_id) do update set {updates} returning *"
+        ).format(
+            cols=sql.SQL(", ").join(sql.Identifier(c) for c in cols),
+            vals=placeholders,
+            updates=updates,
+        )
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, [client_id, client_name, *fields.values()])
+            return cur.fetchone()
 
     # --- sites ----------------------------------------------------------------
     def site_counts(self) -> dict[str, int]:

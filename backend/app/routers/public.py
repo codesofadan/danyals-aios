@@ -107,6 +107,7 @@ class PublicAuditsGateway(Protocol):
     def find_by_email(self, email: str) -> dict[str, Any] | None: ...
     def insert(self, email: str, url: str, source: str) -> dict[str, Any]: ...
     def get_by_token(self, report_token: str) -> dict[str, Any] | None: ...
+    def delete_by_id(self, public_audit_id: str) -> None: ...
 
 
 class PrivilegedPublicAuditsGateway:
@@ -146,6 +147,10 @@ class PrivilegedPublicAuditsGateway:
                 (report_token,),
             )
             return cur.fetchone()
+
+    def delete_by_id(self, public_audit_id: str) -> None:
+        with privileged_connection() as cur:
+            cur.execute("delete from public.public_audits where id = %s", (public_audit_id,))
 
 
 def get_public_gateway() -> PublicAuditsGateway:
@@ -254,7 +259,22 @@ async def create_public_audit(
         raise _DUPLICATE_EMAIL from exc
 
     public_audit_id = str(row["id"])
-    enqueue(public_audit_id)
+    # Enqueue the worker. If the broker (Redis) is unreachable the job can NEVER run,
+    # so don't leave an orphaned 'queued' row that also blocks this email forever
+    # (one-audit-per-email → a permanent 409). Roll the row back and return a clean
+    # 503 the funnel can retry, instead of a raw 500.
+    try:
+        enqueue(public_audit_id)
+    except Exception as exc:
+        logger.warning("public_audit_enqueue_failed", public_audit_id=public_audit_id)
+        try:
+            await asyncio.to_thread(gateway.delete_by_id, public_audit_id)
+        except Exception:
+            logger.warning("public_audit_rollback_failed", public_audit_id=public_audit_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The audit service is temporarily unavailable. Please try again shortly.",
+        ) from exc
     # Funnel-entry $0 cost (Free). Never fail the 201 on a cost-logging hiccup.
     try:
         await asyncio.to_thread(log_cost, public_audit_id)

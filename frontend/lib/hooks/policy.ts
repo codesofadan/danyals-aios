@@ -56,6 +56,31 @@ export function useRecommendations() {
   });
 }
 
+// ---- on-demand topic lookup (POST /policy/ask) ---------------------------------
+// Ask the Policy Radar a live question: the backend runs a Serper search scoped to
+// Google's official surfaces, SSRF-guarded-fetches the top authoritative result, and
+// has Claude Haiku distil a structured answer — all metered under the `policy` money
+// dial. Keyless or dial-blocked returns 200 with `status: "degraded"` (never an error).
+export type PolicyAskUrgency = "urgent" | "informational";
+
+export type PolicyAskResult = {
+  topic: string;
+  status: "ok" | "degraded";
+  answer: string;
+  urgency: PolicyAskUrgency;
+  rules: string[];
+  sources: string[];
+  reason: string;
+};
+
+/** Run one on-demand policy lookup. `retry: 0` (the client default) so a transient
+ *  failure never double-spends the gated Serper + Haiku calls. */
+export function usePolicyAsk() {
+  return useMutation({
+    mutationFn: (topic: string) => api.post<PolicyAskResult>("/policy/ask", { topic }),
+  });
+}
+
 export type RecAction = "acknowledge" | "apply" | "dismiss";
 
 /**

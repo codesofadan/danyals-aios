@@ -6,6 +6,7 @@ import {
   type TeamMemberRecord, type TeamRole,
 } from "@/lib/data";
 import AddMemberWizard from "./AddMemberWizard";
+import CredentialCell from "./CredentialCell";
 
 export type NewMember = {
   name: string;
@@ -25,7 +26,10 @@ function RoleChip({ role }: { role: TeamRole }) {
 }
 
 function StatusDot({ status }: { status: TeamMemberRecord["status"] }) {
-  const s = STATUS_META[status];
+  // Team members are real staff, not pending invites — show provisioned ("invited")
+  // accounts as Active in the roster rather than a perpetual "Invited".
+  const shown = status === "invited" ? "active" : status;
+  const s = STATUS_META[shown];
   return (
     <span className="status-dot">
       <span className="dot" style={{ background: s.c, boxShadow: `0 0 8px ${s.c}` }} />
@@ -63,6 +67,7 @@ export default function TeamRoster({ members, onAdd }: { members: TeamMemberReco
               <th>Status</th>
               <th className="num">Active tasks</th>
               <th className="num">Utilization</th>
+              <th>Login &amp; password</th>
             </tr>
           </thead>
           <tbody>
@@ -86,6 +91,7 @@ export default function TeamRoster({ members, onAdd }: { members: TeamMemberReco
                     <span className="util-n">{m.utilization}%</span>
                   </div>
                 </td>
+                <td><CredentialCell userId={m.id} /></td>
               </tr>
             ))}
           </tbody>

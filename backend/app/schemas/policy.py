@@ -67,6 +67,39 @@ def action_to_status(action: str) -> RecStatus:
     return _ACTION_TO_STATUS[action]
 
 
+# --- on-demand lookup (POST /policy/ask) ------------------------------------- #
+# The ad-hoc topic search + its structured answer. These are NOT contract-locked
+# against ``policy.ts`` (there is no build-time mirror for an on-demand query), so
+# they sit deliberately OUTSIDE ``test_contract_lock`` like ``OverlayResponse``.
+AskStatus = Literal["ok", "degraded"]
+Urgency = Literal["urgent", "informational"]
+
+
+class PolicyAskRequest(BaseModel):
+    """An operator's ad-hoc policy question. ``topic`` is a short free-text subject
+    (e.g. "site reputation abuse" or "August core update"); empty -> 422 at the edge."""
+
+    topic: str = Field(min_length=1, max_length=200)
+
+
+class PolicyAskResponse(BaseModel):
+    """The structured on-demand answer (small + honest).
+
+    ``answer`` is the summarizer's bounded prose on the happy path, or a clear
+    degraded message when keyless / dial-blocked / no source found. ``urgency`` flags
+    whether the operator should act soon; ``rules`` are the concrete requirements
+    distilled from the source; ``sources`` are the official Google URLs cited.
+    ``reason`` is populated only when ``status='degraded'``."""
+
+    topic: str
+    status: AskStatus
+    answer: str
+    urgency: Urgency
+    rules: list[str]
+    sources: list[str]
+    reason: str = ""
+
+
 # --- responses --------------------------------------------------------------- #
 
 

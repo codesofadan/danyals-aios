@@ -14,9 +14,19 @@ import {
   type SubTier,
   type Ticket,
 } from "@/lib/data";
+import type { ClientBusinessProfile, ClientBusinessProfileInput } from "@/lib/offpage";
 
 export const CLIENTS_KEY = ["clients"] as const;
 export const TICKETS_KEY = ["tickets"] as const;
+
+/** The Add-Client payload PLUS the optional NAP the wizard collects at creation. The
+ * NAP is a separate table (client_business_profiles, 0051); it rides in the POST body as
+ * `business` and is persisted alongside the client. Defined here (not in the reserved
+ * data.ts) so the wizard can carry it without changing the shared NewClient shape. */
+export type NewClientInput = NewClient & { nap?: ClientBusinessProfileInput };
+
+export const clientBusinessProfileKey = (clientId: string) =>
+  ["clients", clientId, "business-profile"] as const;
 
 /** The support-ticket queue (GET /tickets, newest first) for the Directory feed. */
 export function useTickets() {
@@ -99,7 +109,7 @@ export function useSaveGrants() {
 export function useCreateClient() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: NewClient): Promise<ClientRecord & { portalWarning?: string }> => {
+    mutationFn: async (input: NewClientInput): Promise<ClientRecord & { portalWarning?: string }> => {
       const created = await api.post<ClientRecord>("/clients", {
         cn: input.cn,
         industry: input.industry,
@@ -107,6 +117,9 @@ export function useCreateClient() {
         mrr: TIER_PRICE[input.tier],
         contact: { name: input.contactName, email: input.contactEmail },
         portal: { admin: input.adminLogin },
+        // The NAP the wizard collected (persisted into client_business_profiles); an
+        // omitted/empty profile is simply not written server-side.
+        ...(input.nap ? { business: input.nap } : {}),
       });
       if (input.reports.length > 0) {
         await api.put<string[]>(`/clients/${created.id}/report-grants`, {
@@ -158,6 +171,29 @@ export function useUpdateClient() {
       api.patch<ClientRecord>(`/clients/${id}`, changes),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CLIENTS_KEY });
+    },
+  });
+}
+
+/** A client's stored NAP (GET /clients/{id}/business-profile). 404 (no profile yet) is
+ * surfaced as an error the caller treats as "empty", never a crash. */
+export function useClientBusinessProfile(clientId: string | null) {
+  return useQuery({
+    queryKey: clientBusinessProfileKey(clientId ?? ""),
+    queryFn: () => api.get<ClientBusinessProfile>(`/clients/${clientId}/business-profile`),
+    enabled: !!clientId,
+    retry: false, // a 404 (no NAP captured yet) is an expected state, not a transient fault
+  });
+}
+
+/** Create or replace a client's NAP (PUT /clients/{id}/business-profile). Lead-only. */
+export function useSaveClientBusinessProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, nap }: { clientId: string; nap: ClientBusinessProfileInput }) =>
+      api.put<ClientBusinessProfile>(`/clients/${clientId}/business-profile`, nap),
+    onSuccess: (_row, { clientId }) => {
+      void qc.invalidateQueries({ queryKey: clientBusinessProfileKey(clientId) });
     },
   });
 }

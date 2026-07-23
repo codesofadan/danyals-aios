@@ -3,11 +3,11 @@
 import { useMemo, useState } from "react";
 import {
   clientReports, REPORT_GROUP_COLOR, TIER_COLOR,
-  type ClientRecord, type SubStatus, type NewClient,
+  type ClientRecord, type SubStatus,
 } from "@/lib/data";
 import {
   useClients, useAllReportGrants, useCreateClient, useSaveGrants,
-  useUpdateClient, useDeleteClient, type ClientUpdate,
+  useUpdateClient, useDeleteClient, type ClientUpdate, type NewClientInput,
 } from "@/lib/hooks/clients";
 import CopyButton from "@/components/CopyButton";
 import AddClientWizard from "./AddClientWizard";
@@ -115,7 +115,7 @@ export default function ClientDirectory() {
     deleteClient.mutate(id);
   }
 
-  function handleAddClient(input: NewClient) {
+  function handleAddClient(input: NewClientInput) {
     createClient.mutate(input, {
       onSuccess: (created) => {
         setAddOpen(false);
