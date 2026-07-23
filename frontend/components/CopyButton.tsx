@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { copyText } from "@/lib/clipboard";
 
 // A tiny copy-to-clipboard icon button. Reuses the small icon-button chrome
 // (`pass-eye` by default) so it drops into credential rows without new styling.
@@ -17,12 +18,9 @@ export default function CopyButton({
   const [copied, setCopied] = useState(false);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
-    } catch {
-      /* clipboard blocked — no-op */
     }
   }
 

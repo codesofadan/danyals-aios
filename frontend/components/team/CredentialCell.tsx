@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { copyText } from "@/lib/clipboard";
 import { useRevealCredentials, useSetPassword, type MemberCredentials } from "@/lib/hooks/team";
 
 // A small copy-to-clipboard button with a 1.2s "copied" tick.
@@ -13,7 +14,7 @@ function CopyBtn({ value, label }: { value: string; label: string }) {
       title={`Copy ${label}`}
       onClick={async () => {
         try {
-          await navigator.clipboard.writeText(value);
+          await copyText(value);
           setCopied(true);
           setTimeout(() => setCopied(false), 1200);
         } catch {

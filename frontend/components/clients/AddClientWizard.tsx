@@ -21,7 +21,6 @@ const ADJ = ["Solar", "Rapid", "Cobalt", "Lunar", "Amber", "Quartz", "Nimbus", "
 const NOUN = ["Falcon", "Harbor", "Cipher", "Meadow", "Quasar", "Lynx", "Beacon", "Vertex", "Willow", "Ember", "Comet", "Delta"];
 const SYM = "!@#$%&*?";
 
-const TIERS: SubTier[] = ["Starter", "Growth", "Scale"];
 
 // Crypto-random index — this password is the REAL stored portal credential (the
 // server hashes exactly what the wizard shows), so Math.random isn't enough.
@@ -58,7 +57,10 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
   const [popping, setPopping] = useState<Set<string>>(new Set());
   const [cn, setCn] = useState("");
   const [industry, setIndustry] = useState("");
-  const [tier, setTier] = useState<SubTier>("Growth");
+  // Plan is a free monthly $ amount the admin types (any value); the SubTier enum
+  // label is derived from it purely for categorisation/colour.
+  const [mrr, setMrr] = useState<number>(690);
+  const tier: SubTier = mrr < 500 ? "Starter" : mrr < 1000 ? "Growth" : "Scale";
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [adminLogin, setAdminLogin] = useState("");
@@ -150,6 +152,7 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
       cn: cn.trim(),
       industry: industry.trim() || "General",
       tier,
+      mrr,
       contactName: contactName.trim(),
       contactEmail: contactEmail.trim(),
       adminLogin,
@@ -272,15 +275,16 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
                   <input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. Healthcare" />
                 </div>
                 <div className="fld">
-                  <label>Plan tier</label>
-                  <div className="tpl-select">
-                    <span className="material-symbols-rounded tpl-ic">workspace_premium</span>
-                    <select value={tier} onChange={(e) => setTier(e.target.value as SubTier)} aria-label="Plan tier">
-                      {TIERS.map((t) => (
-                        <option key={t} value={t}>{t} — ${TIER_PRICE[t]}/mo</option>
-                      ))}
-                    </select>
-                  </div>
+                  <label>Monthly plan ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={10}
+                    value={mrr}
+                    onChange={(e) => setMrr(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                    aria-label="Monthly plan amount in dollars"
+                    placeholder="Any amount, e.g. 750"
+                  />
                 </div>
               </div>
               <div className="fld">
@@ -379,7 +383,7 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
                 </span>
                 <div>
                   <div className="cred-name">{cn}</div>
-                  <div className="cred-role">{tier} · {granted.size} reports visible</div>
+                  <div className="cred-role">${mrr}/mo · {granted.size} reports visible</div>
                 </div>
                 <span className="cred-ok"><span className="material-symbols-rounded">verified</span>Ready</span>
               </div>

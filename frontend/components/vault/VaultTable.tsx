@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { copyText } from "@/lib/clipboard";
 import { FALLBACK_PROVIDER, providerById, STATUS_META, type VaultKey } from "@/lib/vault";
 import { useRevealVaultKey } from "@/lib/hooks/vault";
 
@@ -47,7 +48,7 @@ export default function VaultTable({ keys }: Props) {
     const value = secrets[k.id];
     if (value === undefined) return; // can only copy a secret that's been revealed
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(k.id);
       setTimeout(() => setCopied((c) => (c === k.id ? null : c)), 1400);
     } catch {

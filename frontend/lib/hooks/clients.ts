@@ -23,7 +23,9 @@ export const TICKETS_KEY = ["tickets"] as const;
  * NAP is a separate table (client_business_profiles, 0051); it rides in the POST body as
  * `business` and is persisted alongside the client. Defined here (not in the reserved
  * data.ts) so the wizard can carry it without changing the shared NewClient shape. */
-export type NewClientInput = NewClient & { nap?: ClientBusinessProfileInput };
+// `mrr` is the free monthly amount the wizard collects (any value); when omitted we
+// fall back to the tier's preset price (TIER_PRICE) for older callers.
+export type NewClientInput = NewClient & { nap?: ClientBusinessProfileInput; mrr?: number };
 
 export const clientBusinessProfileKey = (clientId: string) =>
   ["clients", clientId, "business-profile"] as const;
@@ -114,7 +116,7 @@ export function useCreateClient() {
         cn: input.cn,
         industry: input.industry,
         tier: input.tier,
-        mrr: TIER_PRICE[input.tier],
+        mrr: input.mrr ?? TIER_PRICE[input.tier],
         contact: { name: input.contactName, email: input.contactEmail },
         portal: { admin: input.adminLogin },
         // The NAP the wizard collected (persisted into client_business_profiles); an

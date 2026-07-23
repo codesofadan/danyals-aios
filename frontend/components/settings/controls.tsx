@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { copyText } from "@/lib/clipboard";
 
 // ---- Toggle switch --------------------------------------------------------
 export function Switch({
@@ -94,7 +95,7 @@ export function PasswordField({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch { /* clipboard blocked — no-op */ }

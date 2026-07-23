@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AiosStoreProvider } from "@/lib/store";
 import { AuthProvider } from "@/lib/auth";
@@ -8,9 +8,13 @@ import { LoaderProvider } from "@/components/loader/LoaderProvider";
 import DemoSwitcher from "@/components/DemoSwitcher";
 import ClickFX from "@/components/ClickFX";
 
-const bricolage = Bricolage_Grotesque({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+// Self-hosted (bundled) Bricolage Grotesque variable font. Uses next/font/local so
+// the font is compiled INTO the build and renders identically in `next dev` and the
+// Docker production build - next/font/google fetches at build time, which fails in
+// the offline container build and silently falls back to system-ui.
+const bricolage = localFont({
+  src: "./fonts/BricolageGrotesque.woff2",
+  weight: "200 800",
   variable: "--font-bricolage",
   display: "swap",
 });
