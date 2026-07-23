@@ -44,7 +44,9 @@ function ContactCell({ c }: { c: ClientRecord["contact"] }) {
 }
 
 function PassCell({ pass }: { pass: string }) {
-  const [shown, setShown] = useState(false);
+  // Admin credentials are shown by default across the admin dashboard (the admin owns
+  // these client portal logins and shares them manually); the eye toggle still hides.
+  const [shown, setShown] = useState(true);
   return (
     <div className="pass-cell">
       <code className="pass-val">{shown ? pass : "•".repeat(pass.length)}</code>
@@ -181,7 +183,7 @@ export default function ClientDirectory() {
       {mode === "portal" && (
         <div className="sec-note">
           <span className="material-symbols-rounded">lock</span>
-          Admin passes are masked by default — reveal only when needed. Actions are recorded in the activity log.
+          Admin credentials are shown by default; use the eye to hide one. Copy actions are recorded in the activity log.
         </div>
       )}
       {mode === "access" && (

@@ -86,9 +86,11 @@ export function PasswordField({
   canGenerate?: boolean;
   id?: string;
 }) {
-  const [shown, setShown] = useState(false);
-  const [copied, setCopied] = useState(false);
   const readOnly = !onChange;
+  // Stored credentials (read-only displays) are shown by default across the admin
+  // dashboard; an editable password entry you are typing stays masked.
+  const [shown, setShown] = useState(readOnly);
+  const [copied, setCopied] = useState(false);
 
   async function copy() {
     try {
