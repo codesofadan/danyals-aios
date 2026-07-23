@@ -1,6 +1,6 @@
 // AIOS · Upsells module mock data — swap for FastAPI/Postgres later.
 // Upsell cards deliberately link OUT to the agency's Fiverr gigs (not
-// internal services) to keep Xegents' Fiverr-centered public brand front
+// internal services) to keep the agency's Fiverr-centered public brand front
 // and center inside the client portal. Admin curates them here; the active
 // ones render as clickable gig cards for every client.
 import { SERIES } from "@/lib/data";
@@ -27,7 +27,7 @@ export const upsells: Upsell[] = [
     id: "up-01",
     title: "Premium Backlink Package",
     description: "20 high-authority editorial backlinks from DA70+ niche sites — white-hat, manually placed.",
-    fiverrUrl: "https://www.fiverr.com/xegents/build-premium-high-authority-seo-backlinks",
+    fiverrUrl: "https://www.fiverr.com/iamdaani",
     active: true,
     clicks30d: 412,
     price: 149,
@@ -40,7 +40,7 @@ export const upsells: Upsell[] = [
     id: "up-02",
     title: "Google Business Profile Optimization",
     description: "Full GBP setup & optimization — categories, services, geo-tagged posts and review strategy.",
-    fiverrUrl: "https://www.fiverr.com/xegents/optimize-your-google-business-profile",
+    fiverrUrl: "https://www.fiverr.com/iamdaani",
     active: true,
     clicks30d: 356,
     price: 89,
@@ -53,7 +53,7 @@ export const upsells: Upsell[] = [
     id: "up-03",
     title: "Website Speed Boost",
     description: "Core Web Vitals tune-up — image compression, caching, lazy-load and render-blocking fixes.",
-    fiverrUrl: "https://www.fiverr.com/xegents/boost-your-website-speed-and-core-web-vitals",
+    fiverrUrl: "https://www.fiverr.com/iamdaani",
     active: true,
     clicks30d: 288,
     price: 119,
@@ -66,7 +66,7 @@ export const upsells: Upsell[] = [
     id: "up-04",
     title: "Local Citation Building",
     description: "50 accurate NAP citations across top local directories to strengthen map-pack rankings.",
-    fiverrUrl: "https://www.fiverr.com/xegents/build-local-seo-citations-for-your-business",
+    fiverrUrl: "https://www.fiverr.com/iamdaani",
     active: true,
     clicks30d: 203,
     price: 65,
@@ -79,7 +79,7 @@ export const upsells: Upsell[] = [
     id: "up-05",
     title: "Monthly SEO Retainer",
     description: "Done-for-you monthly SEO — content, links and reporting managed by a dedicated strategist.",
-    fiverrUrl: "https://www.fiverr.com/xegents/manage-your-monthly-seo-campaign",
+    fiverrUrl: "https://www.fiverr.com/iamdaani",
     active: false,
     clicks30d: 141,
     price: 499,
@@ -92,7 +92,7 @@ export const upsells: Upsell[] = [
     id: "up-06",
     title: "Logo & Brand Refresh",
     description: "Modern logo redesign with a mini brand kit — colors, fonts and social avatars included.",
-    fiverrUrl: "https://www.fiverr.com/xegents/design-a-modern-logo-and-brand-kit",
+    fiverrUrl: "https://www.fiverr.com/iamdaani",
     active: false,
     clicks30d: 97,
     price: 79,

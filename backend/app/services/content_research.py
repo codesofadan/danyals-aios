@@ -317,7 +317,7 @@ class SsrfSafePageFetcher:
     ``httpx`` is lazy-imported so importing this module stays network-free.
     """
 
-    def __init__(self, *, user_agent: str = "XegentsContentBot/1.0") -> None:
+    def __init__(self, *, user_agent: str = "AIOSContentBot/1.0") -> None:
         self._ua = user_agent
 
     def fetch(self, url: str, *, timeout: float) -> FetchedPage | None:

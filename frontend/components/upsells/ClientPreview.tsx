@@ -22,7 +22,7 @@ export default function ClientPreview({ list }: { list: Upsell[] }) {
       <div className="up-portal">
         <div className="up-portal-bar">
           <span className="up-portal-dot" /><span className="up-portal-dot" /><span className="up-portal-dot" />
-          <span className="up-portal-url">portal.xegents.ai/recommended</span>
+          <span className="up-portal-url">portal.qanry.com/recommended</span>
         </div>
 
         <div className="up-portal-head">

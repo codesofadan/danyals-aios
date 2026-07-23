@@ -78,7 +78,7 @@ export default function Sidebar() {
         <div className="logo" />
         <div className="wm">
           <div className="n">AIOS</div>
-          <div className="s">Xegents</div>
+          <div className="s">AIOS</div>
         </div>
       </div>
 

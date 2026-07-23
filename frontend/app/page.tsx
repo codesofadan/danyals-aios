@@ -3,7 +3,7 @@ import FreeAuditFlow from "@/components/free-audit/FreeAuditFlow";
 import "./freeaudit.css";
 
 export const metadata: Metadata = {
-  title: "Free SEO Audit · Xegents",
+  title: "Free SEO Audit · AIOS",
   description: "Get a free, instant SEO audit of your website — technical health and on-page fixes, scored and explained.",
 };
 

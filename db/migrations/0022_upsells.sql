@@ -1,7 +1,7 @@
 -- 0022_upsells.sql - Part 7 Module (Upsells): the Fiverr upsell catalogue.
 --
 -- Upsell cards deliberately link OUT to the agency's Fiverr gigs (not internal
--- services) to keep Xegents' Fiverr-centered public brand front and center inside
+-- services) to keep the agency's Fiverr-centered public brand front and center inside
 -- the client portal. Admin CURATES them here; the active ones render as clickable
 -- gig cards for every client. Shapes mirror frontend/lib/upsells.ts (Upsell).
 --

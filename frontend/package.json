@@ -2,7 +2,7 @@
   "name": "aios-dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "AIOS — SEO automation platform dashboard (Xegents AI)",
+  "description": "AIOS — SEO automation platform dashboard",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

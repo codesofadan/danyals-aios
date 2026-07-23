@@ -37,8 +37,8 @@ end $$;
 -- always finds a row even before the first save.
 create table if not exists public.workspace_settings (
   id            integer primary key default 1 check (id = 1),
-  agency_name   text not null default 'Xegents AI',            -- contract `agencyName`
-  support_email text not null default 'support@xegents.ai',    -- contract `supportEmail`
+  agency_name   text not null default 'AIOS',                  -- contract `agencyName`
+  support_email text not null default 'support@qanry.com',     -- contract `supportEmail`
   timezone      text not null default 'Asia/Karachi (PKT)',
   language      text not null default 'English (US)',
   week_start    public.week_start not null default 'Monday',   -- contract `weekStart`

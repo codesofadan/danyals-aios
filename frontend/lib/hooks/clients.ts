@@ -6,7 +6,14 @@
 // view + the Add-Client wizard.
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { TIER_PRICE, type ClientRecord, type NewClient, type Ticket } from "@/lib/data";
+import {
+  TIER_PRICE,
+  type ClientRecord,
+  type NewClient,
+  type SubStatus,
+  type SubTier,
+  type Ticket,
+} from "@/lib/data";
 
 export const CLIENTS_KEY = ["clients"] as const;
 export const TICKETS_KEY = ["tickets"] as const;
@@ -124,6 +131,44 @@ export function useCreateClient() {
     onSuccess: (created) => {
       void qc.invalidateQueries({ queryKey: CLIENTS_KEY });
       void qc.invalidateQueries({ queryKey: reportGrantsKey(created.id) });
+    },
+  });
+}
+
+/**
+ * Partial account-field edit accepted by PATCH /clients/{id} (ClientUpdate) — only
+ * the provided fields are written server-side. The portal password lives elsewhere
+ * (never here), and report grants are their own PUT.
+ */
+export type ClientUpdate = {
+  cn?: string;
+  industry?: string;
+  since?: number;
+  tier?: SubTier;
+  status?: SubStatus;
+  renews?: string;
+  mrr?: number;
+};
+
+/** Edit a client's account fields (PATCH /clients/{id} → the updated ClientRecord). */
+export function useUpdateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, changes }: { id: string; changes: ClientUpdate }) =>
+      api.patch<ClientRecord>(`/clients/${id}`, changes),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CLIENTS_KEY });
+    },
+  });
+}
+
+/** Remove a client account (DELETE /clients/{id} → 204, ManageClients only). */
+export function useDeleteClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/clients/${id}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CLIENTS_KEY });
     },
   });
 }

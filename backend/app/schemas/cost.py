@@ -61,6 +61,15 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # THIS gate (the client never holds a key), so ops throttle it off/byhand/api on
     # the money-dial exactly like context; a block DEGRADES the reply, never crashes.
     DialFeatureMeta(key="ai_assist", label="In-Product AI", icon="assistant", provider="Anthropic", note="Dashboard AI assist (Claude)", default_mode="api"),
+    # Part 7 Module 05 — the Policy Radar change-detection WATCHER's analysis spend.
+    # When a watched Google policy/algorithm source changes, the watcher distils it
+    # into a KB entry + recommendation via a cost-gated Claude Haiku call. It flows
+    # through the SAME gate as every other paid call (analyze_change), so ops throttle
+    # it off/byhand/api on the money-dial; a block (or no key) DEGRADES the analysis —
+    # the change_event still stands, the KB is just not enriched — never a crash. This
+    # registration is MANDATORY: an unregistered key is unswitchable-on (dead on
+    # arrival) — dial_mode() falls back to "off" and PATCH /cost/dials rejects it.
+    DialFeatureMeta(key="policy", label="Policy Radar", icon="policy", provider="Anthropic", note="Change analysis (Claude Haiku)", default_mode="api"),
     # Part 8 - the tool modules' paid spends. EVERY key a module passes to the gate
     # MUST be registered here: dial_mode() falls back to "off" for an unknown key
     # (cost_store.py) AND the PATCH /cost/dials guard rejects a key not in DIAL_KEYS

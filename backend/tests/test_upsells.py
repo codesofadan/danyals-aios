@@ -30,7 +30,7 @@ def _row(**over: Any) -> dict[str, Any]:
         "id": "00000000-0000-0000-0000-000000000001",
         "title": "Premium Backlink Package",
         "description": "20 high-authority editorial backlinks.",
-        "fiverr_url": "https://www.fiverr.com/xegents/build-premium-backlinks",
+        "fiverr_url": "https://www.fiverr.com/danyalseo/build-premium-backlinks",
         "active": True,
         "clicks30d": 412,
         "price": 149,

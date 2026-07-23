@@ -7,9 +7,12 @@ import {
 } from "@/lib/data";
 import {
   useClients, useAllReportGrants, useCreateClient, useSaveGrants,
+  useUpdateClient, useDeleteClient, type ClientUpdate,
 } from "@/lib/hooks/clients";
+import CopyButton from "@/components/CopyButton";
 import AddClientWizard from "./AddClientWizard";
 import ClientAccessEditor from "./ClientAccessEditor";
+import EditClientModal from "./EditClientModal";
 
 // Centred muted state message (loading / error / empty), self-styled so it never
 // depends on a class that might not exist.
@@ -53,6 +56,7 @@ function PassCell({ pass }: { pass: string }) {
       >
         <span className="material-symbols-rounded">{shown ? "visibility_off" : "visibility"}</span>
       </button>
+      <CopyButton value={pass} label="admin password" />
     </div>
   );
 }
@@ -88,11 +92,26 @@ export default function ClientDirectory() {
   const { grants } = useAllReportGrants(clients.map((c) => c.id));
   const createClient = useCreateClient();
   const saveGrants = useSaveGrants();
+  const updateClient = useUpdateClient();
+  const deleteClient = useDeleteClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [infoEditId, setInfoEditId] = useState<string | null>(null);
   const [portalWarning, setPortalWarning] = useState<string | null>(null);
 
   const editClient = useMemo(() => clients.find((c) => c.id === editId) ?? null, [clients, editId]);
+  const infoEditClient = useMemo(() => clients.find((c) => c.id === infoEditId) ?? null, [clients, infoEditId]);
+
+  function handleUpdateClient(changes: ClientUpdate) {
+    if (!infoEditId) return;
+    updateClient.mutate({ id: infoEditId, changes }, { onSuccess: () => setInfoEditId(null) });
+  }
+
+  function handleDeleteClient(id: string, name: string) {
+    if (deleteClient.isPending) return;
+    if (!window.confirm(`Delete ${name}? This permanently removes the client account and can't be undone.`)) return;
+    deleteClient.mutate(id);
+  }
 
   function handleAddClient(input: NewClient) {
     createClient.mutate(input, {
@@ -153,6 +172,12 @@ export default function ClientDirectory() {
           Couldn&apos;t create the client — {createClient.error.message}
         </div>
       )}
+      {deleteClient.error instanceof Error && (
+        <div className="login-error" role="alert">
+          <span className="material-symbols-rounded">error</span>
+          Couldn&apos;t delete the client — {deleteClient.error.message}
+        </div>
+      )}
       {mode === "portal" && (
         <div className="sec-note">
           <span className="material-symbols-rounded">lock</span>
@@ -184,6 +209,7 @@ export default function ClientDirectory() {
                 <th>Subscription</th>
                 <th className="num">Sites</th>
                 <th className="num">MRR</th>
+                <th className="num">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -207,6 +233,21 @@ export default function ClientDirectory() {
                     </td>
                     <td className="num">{c.sites}</td>
                     <td className="num mrr">{c.mrr ? `$${c.mrr.toLocaleString()}` : "—"}</td>
+                    <td className="num">
+                      <div className="cd-rowactions">
+                        <button className="cd-manage" onClick={() => setInfoEditId(c.id)} title={`Edit ${c.cn}`}>
+                          <span className="material-symbols-rounded">edit</span>Edit
+                        </button>
+                        <button
+                          className="cd-manage danger"
+                          onClick={() => handleDeleteClient(c.id, c.cn)}
+                          disabled={deleteClient.isPending}
+                          title={`Delete ${c.cn}`}
+                        >
+                          <span className="material-symbols-rounded">delete</span>Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -235,7 +276,12 @@ export default function ClientDirectory() {
                       <div className="cd-meta">{c.contact.name}</div>
                     </div>
                   </td>
-                  <td><code className="login-val">{c.portal.admin}</code></td>
+                  <td>
+                    <div className="pass-cell">
+                      <code className="login-val">{c.portal.admin}</code>
+                      <CopyButton value={c.portal.admin} label="admin login" />
+                    </div>
+                  </td>
                   <td><PassCell pass={c.portal.pass} /></td>
                   <td className="num">{c.portal.seats}</td>
                   <td>
@@ -306,6 +352,15 @@ export default function ClientDirectory() {
           current={grants[editClient.id] ?? []}
           onClose={() => setEditId(null)}
           onSave={handleSaveGrants}
+        />
+      )}
+      {infoEditClient && (
+        <EditClientModal
+          client={infoEditClient}
+          busy={updateClient.isPending}
+          error={updateClient.error instanceof Error ? updateClient.error.message : null}
+          onClose={() => setInfoEditId(null)}
+          onSave={handleUpdateClient}
         />
       )}
     </section>

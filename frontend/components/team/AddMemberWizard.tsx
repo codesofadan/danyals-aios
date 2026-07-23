@@ -227,7 +227,7 @@ export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => voi
               </div>
               <div className="fld">
                 <label>Work email</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ali@xegents.ai" />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ali@qanry.com" />
               </div>
               <div className="wiz-recap">
                 <span className="material-symbols-rounded">{tpl ? tpl.icon : "category"}</span>

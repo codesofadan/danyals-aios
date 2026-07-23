@@ -1,5 +1,5 @@
 -- 0046_directories_seed.sql - seeds public.directories (0045) with the full
--- citation-directory catalog from the 17 Jul 2026 Xegents reference (155 sites
+-- citation-directory catalog from the 17 Jul 2026 agency reference (155 sites
 -- across 4 markets + the data-aggregator/global-API layer). Idempotent
 -- (on conflict (name, market) do nothing) so re-running this file after an
 -- edit never duplicates rows; editing a site's tier/pricing going forward is a

@@ -3,7 +3,7 @@ name = "seo-audit-os"
 version = "0.1.0"
 description = "Multi-agent SEO audit system for local SEO agencies, run as a Claude Code slash command"
 authors = [
-    { name = "Xegents AI", email = "business.zainsaeed@gmail.com" }
+    { name = "AIOS", email = "business.zainsaeed@gmail.com" }
 ]
 requires-python = ">=3.11"
 license = { text = "Proprietary" }

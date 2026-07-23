@@ -84,7 +84,7 @@ class CrawlConfig:
     max_pages_full: int = 500
     max_concurrent: int = 8
     request_timeout_sec: float = 15.0
-    user_agent: str = "SEO-AUDIT-OS/0.1 (+https://github.com/xegents/seo-audit-os)"
+    user_agent: str = "SEO-AUDIT-OS/0.1 (+https://github.com/aios/seo-audit-os)"
     respect_robots: bool = True
     follow_redirects: bool = True
     max_redirects: int = 5

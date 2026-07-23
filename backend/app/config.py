@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     context_summarize_cost_estimate: float = 0.02
     context_embed_cost_estimate: float = 0.001
 
+    # --- Policy Radar module (Part 7 Module 05) LIVE change-detection watcher. The
+    # beat sweeps the curated Google policy sources every policy_watch_seconds (6h),
+    # diffs each by content hash, and on a change runs a cost-gated Claude Haiku
+    # analysis (the `policy` money-dial) to distil it into a KB entry + recommendation.
+    # Both knobs are additive + optional (never required in prod); a keyless deploy
+    # still detects + records changes and simply SKIPS the analysis (degraded). ---
+    policy_watch_seconds: int = 21600  # 6h beat cadence for the source sweep
+    policy_analysis_cost_estimate: float = 0.01  # one Haiku change-analysis call
+
     # --- Web in-product AI-assist surface (P9-5). The dashboard/portal calls OUR
     # backend, which calls Claude through the EXISTING summarizer seam
     # (integrations/llm.py) wrapped in the EXISTING cost gate (the `ai_assist`

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { auditTypes, type AuditTypeKey } from "@/lib/audit";
 import { useCreatePublicAudit, usePublicReport } from "@/lib/hooks/publicAudit";
 import FreeAuditReport from "./FreeAuditReport";
 import FiverrUpsells from "./FiverrUpsells";
@@ -12,9 +11,9 @@ type View = "landing" | "form" | "working";
 // report, whose `fiverr_url` is the backend-owned source of truth).
 const FIVERR_PROFILE = "https://www.fiverr.com/iamdaani";
 
-// The free audit runs the two non-paid engine types; a prospect may narrow the
-// focus but never reach a paid type (the backend 400s those anyway).
-const FREE_TYPES = auditTypes.filter((t) => !t.paid);
+// The free audit always runs one full-spectrum condensed audit (on-page,
+// technical, AI/GEO and strategy) — there is no focus selector; the deterministic
+// free engine run already covers every non-paid dimension.
 
 // Decorative loading beats for the 3D stage — narration only. The REAL job
 // status (queued/running) drives the copy below; these just animate the scene.
@@ -39,7 +38,7 @@ function createErrorCopy(err: unknown): { title: string; body: string } {
   if (status === 400) {
     return {
       title: "We can't audit that URL",
-      body: message || "Enter a public website URL — the free audit covers on-page and technical checks.",
+      body: message || "Enter a public website URL — the free audit covers on-page, technical, AI/GEO and strategy checks.",
     };
   }
   return {
@@ -52,7 +51,6 @@ export default function FreeAuditFlow() {
   const [view, setView] = useState<View>("landing");
   const [url, setUrl] = useState("");
   const [email, setEmail] = useState("");
-  const [types, setTypes] = useState<AuditTypeKey[]>(FREE_TYPES.map((t) => t.key));
   const [token, setToken] = useState<string | null>(null);
   const [genStep, setGenStep] = useState(0);
 
@@ -62,7 +60,7 @@ export default function FreeAuditFlow() {
 
   const urlValid = url.trim().length > 3 && /\.[a-z]{2,}/i.test(url);
   const emailValid = EMAIL_RE.test(email);
-  const canSubmit = urlValid && emailValid && types.length > 0;
+  const canSubmit = urlValid && emailValid;
 
   // Working sub-states, derived from the real mutation + query.
   const createFailed = view === "working" && create.isError;
@@ -79,22 +77,12 @@ export default function FreeAuditFlow() {
     return () => window.clearInterval(id);
   }, [generating]);
 
-  const toggleType = (key: AuditTypeKey) => {
-    setTypes((prev) => {
-      if (prev.includes(key)) {
-        // Keep at least one focus selected.
-        return prev.length > 1 ? prev.filter((k) => k !== key) : prev;
-      }
-      return [...prev, key];
-    });
-  };
-
   const submit = () => {
     if (!canSubmit || create.isPending) return;
     setGenStep(0);
     setView("working");
     create.mutate(
-      { email: email.trim(), url: url.trim(), types },
+      { email: email.trim(), url: url.trim() },
       { onSuccess: (data) => setToken(data.report_token) }
     );
   };
@@ -130,7 +118,7 @@ export default function FreeAuditFlow() {
             <span className="fa-brand-logo" />
             <div>
               <div className="fa-brand-n">AIOS</div>
-              <div className="fa-brand-s">by Xegents</div>
+              <div className="fa-brand-s">by AIOS</div>
             </div>
           </div>
           <div className="fa-topbar-actions">
@@ -222,27 +210,6 @@ export default function FreeAuditFlow() {
                 </div>
               </label>
 
-              <div className="fa-fld">
-                <span>Focus areas</span>
-                <div className="fa-chips">
-                  {FREE_TYPES.map((t) => {
-                    const on = types.includes(t.key);
-                    return (
-                      <button
-                        key={t.key}
-                        type="button"
-                        className={`fa-chip ${on ? "on" : ""}`}
-                        aria-pressed={on}
-                        onClick={() => toggleType(t.key)}
-                      >
-                        <span className="material-symbols-rounded">{on ? "check" : t.icon}</span>
-                        {t.short}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               <button className="primary-btn wide" type="submit" disabled={!canSubmit}>
                 <span className="material-symbols-rounded">rocket_launch</span>
                 Run my free audit
@@ -320,7 +287,7 @@ export default function FreeAuditFlow() {
           <FreeAuditReport report={report} token={token} />
           <FiverrUpsells fiverrUrl={fiverrUrl} />
           <div className="fa-report-foot">
-            Built by Xegents AI · <a href={fiverrUrl} target="_blank" rel="noopener noreferrer">See all our services on Fiverr →</a>
+            Built by AIOS · <a href={fiverrUrl} target="_blank" rel="noopener noreferrer">See all our services on Fiverr →</a>
           </div>
         </main>
       )}

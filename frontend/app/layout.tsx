@@ -16,8 +16,8 @@ const bricolage = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "AIOS · Xegents",
-  description: "SEO automation platform for the agency — audits, content, clients and Policy Radar. Built by Xegents AI.",
+  title: "AIOS",
+  description: "SEO automation platform for the agency — audits, content, clients and Policy Radar.",
 };
 
 // Root shell holds only the document chrome + ambient glow, plus the public

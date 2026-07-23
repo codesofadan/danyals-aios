@@ -209,7 +209,7 @@ class SsrfGuardedFetcher:
     ``asyncio.to_thread``.
     """
 
-    def __init__(self, *, user_agent: str = "XegentsOnPageBot/1.0") -> None:
+    def __init__(self, *, user_agent: str = "AIOSOnPageBot/1.0") -> None:
         self._ua = user_agent
 
     def fetch(self, url: str, *, timeout: float) -> FetchedPage | None:

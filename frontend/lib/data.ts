@@ -354,14 +354,14 @@ export type TeamMemberRecord = {
 };
 
 export const teamMembers: TeamMemberRecord[] = [
-  { id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1, title: "Founder / Super Admin", email: "danyal@xegents.ai", role: "Owner", status: "active", activeTasks: 3, completed: 61, onTime: 98, utilization: 72, quality: 99, joined: "Jan 2023" },
-  { id: "u-ayesha", name: "Ayesha Raza", init: "AY", c: SERIES.c1, title: "Content Lead", email: "ayesha@xegents.ai", role: "Manager", status: "active", activeTasks: 6, completed: 48, onTime: 94, utilization: 88, quality: 96, joined: "Mar 2023" },
-  { id: "u-bilal", name: "Bilal Anwar", init: "BI", c: SERIES.c2, title: "Technical SEO Specialist", email: "bilal@xegents.ai", role: "Specialist", status: "active", activeTasks: 5, completed: 41, onTime: 91, utilization: 84, quality: 93, joined: "May 2023" },
-  { id: "u-hina", name: "Hina Shah", init: "HI", c: SERIES.c4, title: "Content Writer", email: "hina@xegents.ai", role: "Specialist", status: "away", activeTasks: 4, completed: 37, onTime: 89, utilization: 76, quality: 95, joined: "Aug 2023" },
-  { id: "u-usman", name: "Usman Tariq", init: "US", c: SERIES.c3, title: "Backlink Analyst", email: "usman@xegents.ai", role: "Analyst", status: "active", activeTasks: 3, completed: 29, onTime: 92, utilization: 68, quality: 90, joined: "Nov 2023" },
-  { id: "u-zoya", name: "Zoya Kamal", init: "ZO", c: SERIES.c5, title: "Local SEO Specialist", email: "zoya@xegents.ai", role: "Specialist", status: "active", activeTasks: 4, completed: 22, onTime: 88, utilization: 71, quality: 92, joined: "Feb 2024" },
-  { id: "u-sara", name: "Sara Naveed", init: "SN", c: SERIES.c2, title: "Operations Admin", email: "sara@xegents.ai", role: "Admin", status: "active", activeTasks: 2, completed: 34, onTime: 96, utilization: 63, quality: 97, joined: "Jun 2024" },
-  { id: "u-imran", name: "Imran Qureshi", init: "IQ", c: SERIES.c4, title: "Client Success", email: "imran@xegents.ai", role: "Viewer", status: "invited", activeTasks: 0, completed: 0, onTime: 0, utilization: 0, quality: 0, joined: "Jul 2026" },
+  { id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1, title: "Founder / Super Admin", email: "danyal@qanry.com", role: "Owner", status: "active", activeTasks: 3, completed: 61, onTime: 98, utilization: 72, quality: 99, joined: "Jan 2023" },
+  { id: "u-ayesha", name: "Ayesha Raza", init: "AY", c: SERIES.c1, title: "Content Lead", email: "ayesha@qanry.com", role: "Manager", status: "active", activeTasks: 6, completed: 48, onTime: 94, utilization: 88, quality: 96, joined: "Mar 2023" },
+  { id: "u-bilal", name: "Bilal Anwar", init: "BI", c: SERIES.c2, title: "Technical SEO Specialist", email: "bilal@qanry.com", role: "Specialist", status: "active", activeTasks: 5, completed: 41, onTime: 91, utilization: 84, quality: 93, joined: "May 2023" },
+  { id: "u-hina", name: "Hina Shah", init: "HI", c: SERIES.c4, title: "Content Writer", email: "hina@qanry.com", role: "Specialist", status: "away", activeTasks: 4, completed: 37, onTime: 89, utilization: 76, quality: 95, joined: "Aug 2023" },
+  { id: "u-usman", name: "Usman Tariq", init: "US", c: SERIES.c3, title: "Backlink Analyst", email: "usman@qanry.com", role: "Analyst", status: "active", activeTasks: 3, completed: 29, onTime: 92, utilization: 68, quality: 90, joined: "Nov 2023" },
+  { id: "u-zoya", name: "Zoya Kamal", init: "ZO", c: SERIES.c5, title: "Local SEO Specialist", email: "zoya@qanry.com", role: "Specialist", status: "active", activeTasks: 4, completed: 22, onTime: 88, utilization: 71, quality: 92, joined: "Feb 2024" },
+  { id: "u-sara", name: "Sara Naveed", init: "SN", c: SERIES.c2, title: "Operations Admin", email: "sara@qanry.com", role: "Admin", status: "active", activeTasks: 2, completed: 34, onTime: 96, utilization: 63, quality: 97, joined: "Jun 2024" },
+  { id: "u-imran", name: "Imran Qureshi", init: "IQ", c: SERIES.c4, title: "Client Success", email: "imran@qanry.com", role: "Viewer", status: "invited", activeTasks: 0, completed: 0, onTime: 0, utilization: 0, quality: 0, joined: "Jul 2026" },
 ];
 
 // --- Tasks ------------------------------------------------------------------
@@ -546,7 +546,7 @@ export type OperatorProfile = {
 
 export const operatorProfile: OperatorProfile = {
   id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1,
-  title: "Founder / Super Admin", email: "danyal@xegents.ai", role: "Owner",
+  title: "Founder / Super Admin", email: "danyal@qanry.com", role: "Owner",
   twoFA: true, phone: "+92 300 1234567",
 };
 
@@ -612,7 +612,7 @@ export type WorkspaceSettingsData = {
 };
 
 export const workspaceDefaults: WorkspaceSettingsData = {
-  agencyName: "Xegents AI", supportEmail: "support@xegents.ai",
+  agencyName: "AIOS", supportEmail: "support@qanry.com",
   timezone: "Asia/Karachi (PKT)", language: "English (US)", weekStart: "Monday",
   defaultTier: "Growth", brandColor: SERIES.c1,
 };

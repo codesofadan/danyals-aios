@@ -4,23 +4,15 @@ import { useState, type ReactNode } from "react";
 import { type TeamRole, type PermKey } from "@/lib/data";
 import { useRbac } from "@/lib/hooks/team";
 import AccessControl from "@/components/team/AccessControl";
-import AccountSettings from "./AccountSettings";
 import ClientCredentials from "./ClientCredentials";
 import TeamCredentials from "./TeamCredentials";
-import SecuritySettings from "./SecuritySettings";
-import NotificationSettings from "./NotificationSettings";
-import WorkspaceSettings from "./WorkspaceSettings";
 
-type TabKey = "account" | "clients" | "team" | "access" | "security" | "notifications" | "workspace";
+type TabKey = "clients" | "team" | "access";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: "account", label: "Account", icon: "account_circle" },
   { key: "clients", label: "Client Access", icon: "key" },
   { key: "team", label: "Team Access", icon: "manage_accounts" },
   { key: "access", label: "Roles & Permissions", icon: "admin_panel_settings" },
-  { key: "security", label: "Security", icon: "security" },
-  { key: "notifications", label: "Notifications", icon: "notifications" },
-  { key: "workspace", label: "Workspace", icon: "tune" },
 ];
 
 // Centred muted state for a tab panel (loading / error). Self-styled so it never
@@ -36,7 +28,7 @@ function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }
 }
 
 export default function SettingsWorkspace() {
-  const [tab, setTab] = useState<TabKey>("account");
+  const [tab, setTab] = useState<TabKey>("clients");
   // The role×permission matrix is server-side REFERENCE data (GET /rbac/roles):
   // versioned platform code with NO per-role toggle route, so it is rendered
   // READ-ONLY here — the no-op onToggle persists nothing (an honest matrix, not a
@@ -60,7 +52,7 @@ export default function SettingsWorkspace() {
       <div className="card-h">
         <div>
           <div className="ct">Settings</div>
-          <div className="cs">Credentials, roles, access, security &amp; workspace preferences — one control panel.</div>
+          <div className="cs">Client &amp; team credentials, roles &amp; access — one control panel.</div>
         </div>
       </div>
 
@@ -80,13 +72,9 @@ export default function SettingsWorkspace() {
       </div>
 
       <div className="tw-panel" role="tabpanel">
-        {tab === "account" && <AccountSettings onLog={onLog} />}
         {tab === "clients" && <ClientCredentials onLog={onLog} />}
         {tab === "team" && <TeamCredentials onLog={onLog} />}
         {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} onToggle={noopToggle} />)}
-        {tab === "security" && <SecuritySettings onLog={onLog} />}
-        {tab === "notifications" && <NotificationSettings onLog={onLog} />}
-        {tab === "workspace" && <WorkspaceSettings onLog={onLog} />}
       </div>
 
       {toast && (

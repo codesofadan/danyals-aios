@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useClients } from "@/lib/hooks/clients";
+import CopyButton from "@/components/CopyButton";
 import { Switch, PasswordField } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
@@ -75,7 +76,10 @@ export default function ClientCredentials({ onLog }: { onLog: LogFn }) {
               <div className="cc-fields">
                 <div className="fld">
                   <label htmlFor={`u-${c.id}`}>Portal username / login email</label>
-                  <input id={`u-${c.id}`} value={cr.admin} onChange={(e) => edit(c.id, cr, { admin: e.target.value })} spellCheck={false} autoComplete="off" />
+                  <div className="pass-field">
+                    <input id={`u-${c.id}`} value={cr.admin} onChange={(e) => edit(c.id, cr, { admin: e.target.value })} spellCheck={false} autoComplete="off" />
+                    <CopyButton value={cr.admin} label="portal username" className="pf-btn" />
+                  </div>
                 </div>
                 <div className="fld">
                   <label htmlFor={`p-${c.id}`}>Admin password</label>

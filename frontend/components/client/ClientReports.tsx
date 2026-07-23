@@ -1,12 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { DELIVERABLE_COLOR } from "@/lib/client";
-import { clientReports } from "@/lib/data";
 import { openFile, downloadFile } from "@/lib/api";
 import { useClientDeliverables } from "@/lib/hooks/portalClient";
-import { useClient } from "./ClientContext";
 import ClientHeader from "./ClientHeader";
 
 // The Reports section — downloadable deliverables (audits, monthly rollups,
@@ -14,14 +11,11 @@ import ClientHeader from "./ClientHeader";
 // client's granted, visible deliverables (an ungranted one is hidden by the
 // RLS view); ungranted report TYPES surface as locked upsell rows.
 export default function ClientReports() {
-  const { isGranted } = useClient();
   const deliverablesQ = useClientDeliverables();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
 
   const available = deliverablesQ.data ?? [];
-  // Report surfaces not in the client's plan — an upsell to "request access".
-  const lockedTypes = clientReports.filter((r) => !isGranted(r.key)).map((r) => r.key);
 
   async function view(id: string) {
     if (busyId) return;
@@ -129,35 +123,6 @@ export default function ClientReports() {
           </div>
         )}
       </section>
-
-      {lockedTypes.length > 0 && (
-        <section className="card">
-          <div className="card-h">
-            <div>
-              <div className="ct">Available on request</div>
-              <div className="cs">Reports outside your current plan — ask your account manager to enable them.</div>
-            </div>
-          </div>
-          <div className="cl-rp-locked">
-            {lockedTypes.map((key) => {
-              const meta = clientReports.find((r) => r.key === key);
-              if (!meta) return null;
-              return (
-                <div className="cl-rp-lockrow" key={key}>
-                  <span className="cl-rp-lockic material-symbols-rounded">lock</span>
-                  <div className="cl-rp-main">
-                    <div className="cl-rp-t">{meta.label}</div>
-                    <div className="cl-rp-meta">{meta.desc}</div>
-                  </div>
-                  <Link href="/client/requests" className="ghostbtn">
-                    <span className="material-symbols-rounded">lock_open</span>Request
-                  </Link>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
     </div>
   );
 }

@@ -69,7 +69,7 @@ export default function AddUpsellModal({
         <div className="fld-row">
           <div className="fld">
             <label>Fiverr URL</label>
-            <input value={fiverrUrl} onChange={(e) => setFiverrUrl(e.target.value)} placeholder="https://www.fiverr.com/xegents/…" />
+            <input value={fiverrUrl} onChange={(e) => setFiverrUrl(e.target.value)} placeholder="https://www.fiverr.com/iamdaani" />
           </div>
           <div className="fld">
             <label>Starting price ($)</label>

@@ -447,6 +447,10 @@ body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + v
   border: 1px solid var(--line-2); background: var(--raise); transition: .16s; }
 .cd-manage:hover { color: var(--fg-strong); border-color: var(--violet-soft); background: var(--hover); }
 .cd-manage .material-symbols-rounded { font-size: 15px; }
+.cd-manage:disabled { opacity: .5; cursor: not-allowed; }
+.cd-rowactions { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.cd-manage.danger { color: var(--danger, #E5484D); }
+.cd-manage.danger:hover { color: #fff; border-color: var(--danger, #E5484D); background: var(--danger, #E5484D); }
 
 /* ---- Support Activity ---- */
 .ticket-list { margin-top: 12px; display: flex; flex-direction: column; }

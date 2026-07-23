@@ -6,10 +6,9 @@ import { useRevealVaultKey } from "@/lib/hooks/vault";
 
 type Props = {
   keys: VaultKey[];
-  onRotate: (id: string) => void;
 };
 
-export default function VaultTable({ keys, onRotate }: Props) {
+export default function VaultTable({ keys }: Props) {
   // The list never carries a secret (reveal is a separate owner-only call). We
   // fetch a plaintext value ON DEMAND and hold it ONLY in transient local state
   // keyed by id — never in the Query cache, never persisted. A row is "revealed"
@@ -148,14 +147,6 @@ export default function VaultTable({ keys, onRotate }: Props) {
                         <span className={`material-symbols-rounded${loading ? " spin" : ""}`}>
                           {loading ? "progress_activity" : show ? "visibility_off" : "visibility"}
                         </span>
-                      </button>
-                      <button
-                        className="kv-iconbtn"
-                        onClick={() => onRotate(k.id)}
-                        title="Rotate key"
-                        aria-label="Rotate key"
-                      >
-                        <span className="material-symbols-rounded">cached</span>
                       </button>
                       <button
                         className={`kv-iconbtn${copied === k.id ? " ok" : ""}`}

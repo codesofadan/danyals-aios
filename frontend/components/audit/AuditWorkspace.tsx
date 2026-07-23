@@ -11,7 +11,6 @@ import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
 import { downloadFile } from "@/lib/api";
 import AuditStats from "./AuditStats";
-import AuditCoverage from "./AuditCoverage";
 import AuditScoreHistogram from "./AuditScoreHistogram";
 
 const STATUS_META: Record<JobStatus, { pill: string; label: string; icon: string }> = {
@@ -252,10 +251,6 @@ export default function AuditWorkspace() {
 
       <div className="row-single">
         <AuditScoreHistogram rows={rows} />
-      </div>
-
-      <div className="row-single">
-        <AuditCoverage />
       </div>
     </>
   );

@@ -18,7 +18,6 @@ export default function CommandCenter() {
   return (
     <>
       <TopBar
-        eyebrow="SEO Automation · Agency Overview"
         title="Admin Dashboard"
         searchPlaceholder="Search clients, sites, audits…"
       />

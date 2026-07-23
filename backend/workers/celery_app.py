@@ -49,6 +49,11 @@ celery_app = Celery(
         "workers.tasks.content",
         "workers.tasks.context",
         "workers.tasks.context_reconcile",
+        # Part 7 Module 05: the LIVE Policy-Radar change-detection watcher
+        # (watch_policy_sources). BEAT-driven (see the schedule below); it CLAIMS due
+        # sources FOR UPDATE SKIP LOCKED so overlapping ticks never double-poll a
+        # source, and it never re-raises (the acks_late double-spend guard).
+        "workers.tasks.policy",
         # 7B-3: the Web 2.0 publish drivers (web2_write / web2_publish) + the backlink/
         # citation monitoring sweep (monitor_offpage). All are event-driven plain tasks
         # (the publish is enqueued on a lead's approval; monitoring is enqueued per
@@ -143,6 +148,16 @@ celery_app.conf.beat_schedule = {
     "reconcile-context-vectors": {
         "task": "reconcile_context_vectors",
         "schedule": float(settings.context_reconcile_seconds),
+    },
+    # Part 7 Module 05 - the LIVE Policy Radar watcher. It sweeps the curated Google
+    # policy sources every policy_watch_seconds (6h by default): a source's content is
+    # re-fetched, hashed, and diffed against the stored anchor; a diff appends a
+    # change_event and (cost-gated) enriches the KB. Deliberately slow - a policy page
+    # does not move hourly and each change fans out a paid Haiku call. It CLAIMS due
+    # sources FOR UPDATE SKIP LOCKED, so an overlapping tick simply grabs nothing.
+    "watch-policy-sources": {
+        "task": "watch_policy_sources",
+        "schedule": float(settings.policy_watch_seconds),
     },
     "mark-past-due-invoices": {
         "task": "mark_past_due",

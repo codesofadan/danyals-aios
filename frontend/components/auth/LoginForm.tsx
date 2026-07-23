@@ -57,7 +57,7 @@ export default function LoginForm() {
           <div className="logo" />
           <div>
             <div className="login-brand-n">AIOS</div>
-            <div className="login-brand-s">Xegents</div>
+            <div className="login-brand-s">AIOS</div>
           </div>
         </div>
 
@@ -99,7 +99,7 @@ export default function LoginForm() {
                 name="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="you@xegents.ai"
+                placeholder="you@qanry.com"
                 autoComplete="username"
                 autoFocus
               />
@@ -140,7 +140,7 @@ export default function LoginForm() {
         </div>
       </div>
 
-      <div className="login-foot">Provisioned by your agency admin · Built by Xegents AI</div>
+      <div className="login-foot">Provisioned by your agency admin · AIOS</div>
     </div>
   );
 }

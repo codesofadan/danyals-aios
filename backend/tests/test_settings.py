@@ -74,7 +74,7 @@ def test_notifpref_matches_frontend_type_keys() -> None:
 def test_workspace_from_row_falls_back_to_defaults() -> None:
     resp = WorkspaceSettingsResponse.from_row(None).model_dump(by_alias=True)
     assert set(resp) == _WORKSPACE_KEYS
-    assert resp["agencyName"] == "Xegents AI"
+    assert resp["agencyName"] == "AIOS"
     assert resp["weekStart"] == "Monday"
     assert resp["defaultTier"] == "Growth"
     assert resp["brandColor"] == "#7B69EE"
@@ -308,9 +308,9 @@ async def test_reset_restores_defaults_for_owner(
     resp = await client.post("/api/v1/settings/danger/reset")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["workspace"]["agencyName"] == "Xegents AI"
+    assert body["workspace"]["agencyName"] == "AIOS"
     assert body["security"]["minPassLength"] == 12
-    assert repo.workspace["agency_name"] == "Xegents AI"
+    assert repo.workspace["agency_name"] == "AIOS"
 
 
 async def test_purge_activity_forbidden_for_admin(

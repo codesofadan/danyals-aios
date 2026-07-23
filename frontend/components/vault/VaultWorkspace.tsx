@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import anime from "animejs";
-import { useVaultKeys, useAddVaultKey, useRotateVaultKey } from "@/lib/hooks/vault";
+import { useVaultKeys, useAddVaultKey } from "@/lib/hooks/vault";
 import VaultTable from "./VaultTable";
 import ProvidersOverview from "./ProvidersOverview";
 import AddKeyForm, { type NewKey } from "./AddKeyForm";
-import RotateKeyModal from "./RotateKeyModal";
 
 // count-up hook (respects reduced motion)
 function useCountUp(target: number, dur = 1100) {
@@ -45,10 +44,7 @@ function NumKpi({ icon, label, value, sub, hero }: {
 export default function VaultWorkspace() {
   const keysQ = useVaultKeys();
   const addKey = useAddVaultKey();
-  const rotateKey = useRotateVaultKey();
   const keys = keysQ.data ?? [];
-  const [rotateId, setRotateId] = useState<string | null>(null);
-  const rotateTarget = keys.find((k) => k.id === rotateId) ?? null;
 
   const stats = useMemo(() => {
     const providersConnected = new Set(keys.map((k) => k.provider)).size;
@@ -56,20 +52,6 @@ export default function VaultWorkspace() {
     const expiring = keys.filter((k) => k.status === "expiring").length;
     return { stored: keys.length, providersConnected, rotate, expiring };
   }, [keys]);
-
-  // Rotate on the backend REQUIRES a new secret (POST /vault/keys/{id}/rotate
-  // { secret }) — the table's row button opens a modal to collect it, then confirms.
-  function handleRotate(id: string) {
-    setRotateId(id);
-  }
-
-  function confirmRotate(secret: string) {
-    if (!rotateTarget) return;
-    rotateKey.mutate(
-      { id: rotateTarget.id, secret },
-      { onSuccess: () => setRotateId(null) },
-    );
-  }
 
   // Add → POST /vault/keys; the list refetches on success. The response is masked
   // metadata only (no secret), so nothing plaintext is ever cached.
@@ -125,7 +107,7 @@ export default function VaultWorkspace() {
           <div className="card-h">
             <div>
               <div className="ct">Encrypted key vault</div>
-              <div className="cs">Every API key &amp; password — masked by default, reveal &amp; rotate on demand.</div>
+              <div className="cs">Every API key &amp; password — masked by default, reveal on demand.</div>
             </div>
           </div>
           {keysQ.isLoading ? (
@@ -135,7 +117,7 @@ export default function VaultWorkspace() {
               Couldn&apos;t load vault keys — {(keysQ.error as Error)?.message ?? "try again"}.
             </div>
           ) : (
-            <VaultTable keys={keys} onRotate={handleRotate} />
+            <VaultTable keys={keys} />
           )}
         </section>
 
@@ -149,16 +131,6 @@ export default function VaultWorkspace() {
           )}
         </div>
       </div>
-
-      {rotateTarget && (
-        <RotateKeyModal
-          keyRow={rotateTarget}
-          busy={rotateKey.isPending}
-          error={rotateKey.isError ? ((rotateKey.error as Error)?.message ?? "Couldn't rotate key.") : null}
-          onClose={() => setRotateId(null)}
-          onConfirm={confirmRotate}
-        />
-      )}
     </div>
   );
 }

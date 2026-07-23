@@ -37,8 +37,8 @@ _SUB_TIERS: frozenset[str] = frozenset({"Starter", "Growth", "Scale"})
 # The frontend defaults (data.ts workspaceDefaults) - one source of truth for the
 # GET fallback + the danger-zone reset.
 WORKSPACE_DEFAULTS: dict[str, Any] = {
-    "agency_name": "Xegents AI",
-    "support_email": "support@xegents.ai",
+    "agency_name": "AIOS",
+    "support_email": "support@qanry.com",
     "timezone": "Asia/Karachi (PKT)",
     "language": "English (US)",
     "week_start": "Monday",
