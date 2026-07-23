@@ -15,13 +15,16 @@ const SECTIONS: Section[] = [
     title: "Overview",
     items: [
       { icon: "space_dashboard", label: "Admin Dashboard", href: "/admin" },
-      { icon: "grid_view", label: "Features", href: "/admin/features" },
+      // Features tab hidden for now (not needed). The /admin/features route still
+      // exists — re-enable by uncommenting this nav item.
+      // { icon: "grid_view", label: "Features", href: "/admin/features" },
     ],
   },
   {
     title: "SEO Engine",
     items: [
       { icon: "fact_check", label: "Audit", href: "/admin/audit" },
+      { icon: "contact_mail", label: "Free Audits", href: "/admin/leads" },
       { icon: "article", label: "Content", href: "/admin/content" },
       { icon: "storefront", label: "Citations", href: "/admin/citations" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2" },
@@ -47,6 +50,12 @@ const SECTIONS: Section[] = [
     ],
   },
 ];
+
+// Tabs LOCKED in PRODUCTION until the module is fully built. They stay visible in
+// `next dev` (NODE_ENV !== 'production') so the team keeps building them; the prod
+// bundle hides them. To relaunch a tab, remove its href from this set.
+const LOCKED_IN_PROD = new Set<string>(["/admin/citations", "/admin/web2"]);
+const HIDE_LOCKED = process.env.NODE_ENV === "production";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -86,7 +95,9 @@ export default function Sidebar() {
         {SECTIONS.map((sec) => (
           <div key={sec.title}>
             <div className="sec">{sec.title}</div>
-            {sec.items.map((it) => {
+            {sec.items
+              .filter((it) => !(HIDE_LOCKED && LOCKED_IN_PROD.has(it.href)))
+              .map((it) => {
               const active =
                 it.href !== "#" &&
                 (pathname === it.href || (it.href !== "/admin" && pathname.startsWith(`${it.href}/`)));

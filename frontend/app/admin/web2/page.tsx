@@ -1,8 +1,10 @@
 import TopBar from "@/components/TopBar";
 import "../off-page/offpage.css";
 import Web2Tab from "@/components/offpage/Web2Tab";
+import { blockIfLockedInProd } from "@/lib/lockedInProd";
 
 export default function Web2Page() {
+  blockIfLockedInProd();
   return (
     <>
       <TopBar

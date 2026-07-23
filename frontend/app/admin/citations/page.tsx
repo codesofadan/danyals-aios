@@ -1,8 +1,10 @@
 import TopBar from "@/components/TopBar";
 import "../off-page/offpage.css";
 import CitationsTab from "@/components/offpage/CitationsTab";
+import { blockIfLockedInProd } from "@/lib/lockedInProd";
 
 export default function CitationsPage() {
+  blockIfLockedInProd();
   return (
     <>
       <TopBar
