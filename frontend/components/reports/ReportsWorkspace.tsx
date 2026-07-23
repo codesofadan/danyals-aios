@@ -13,6 +13,7 @@ import SheetsConnection from "./SheetsConnection";
 import ReportTypes from "./ReportTypes";
 import SyncActivity from "./SyncActivity";
 import ScheduledJobs from "./ScheduledJobs";
+import ReportsLibrary from "./ReportsLibrary";
 
 export default function ReportsWorkspace() {
   const workbooksQ = useWorkbooks(); // GET /reports/workbooks (freshest sync first)
@@ -65,6 +66,10 @@ export default function ReportsWorkspace() {
   return (
     <>
       <ReportsKpis workbooks={books.length} lastSync={lastSync} rowsToday={rowsToday} health={health} />
+
+      <div className="row">
+        <ReportsLibrary />
+      </div>
 
       <div className="row">
         <WorkbooksTable
