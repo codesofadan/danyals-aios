@@ -20,15 +20,17 @@ from app.util.timefmt import format_runtime, format_when
 
 AuditTier = Literal["Free", "Paid"]
 AuditStatus = Literal["queued", "running", "done", "failed"]
-AuditTypeKey = Literal["technical", "actionable", "local", "geo", "backlink"]
+# The audit-type picker (frontend ``lib/audit.ts`` ``AuditTypeKey``). On-Page +
+# Technical are the FREE deterministic dimensions; Off-Page / Local SEO / AI (GEO)
+# / Strategy each rely on a paid provider or the AI agents.
+AuditTypeKey = Literal["onpage", "offpage", "technical", "local", "geo", "strategy"]
 
-# Types that rely on a paid data source (``audit.ts`` ``paid: true``) - gated
-# off on the Free tier so a Free run makes zero paid-provider spend.
-PAID_AUDIT_TYPES: frozenset[str] = frozenset({"local", "geo", "backlink"})
+# Types that rely on a paid data source or the AI agents (``audit.ts`` ``paid:
+# true``) - gated off on the Free tier so a Free run makes zero paid-provider spend.
+PAID_AUDIT_TYPES: frozenset[str] = frozenset({"offpage", "local", "geo", "strategy"})
 _ALL_TYPES: frozenset[str] = frozenset(
-    {"technical", "actionable", "local", "geo", "backlink"}
+    {"onpage", "offpage", "technical", "local", "geo", "strategy"}
 )
-_DEFAULT_TYPES: tuple[AuditTypeKey, ...] = ("technical", "actionable")
 
 
 def tier_to_db(tier: AuditTier) -> str:
@@ -44,6 +46,10 @@ def tier_from_db(value: str | None) -> AuditTier:
 class AuditCreate(BaseModel):
     """POST /audits body: the client, the target URL, the tier, and the types.
 
+    ``types`` is the audit-type picker. It is OPTIONAL: an empty list (the
+    default) runs a FULL audit (every type); a non-empty subset scopes the run to
+    only those dimensions. Each value is validated against ``AuditTypeKey``.
+
     ``url`` is only shape-validated here; the endpoint runs the SSRF guard
     (``validate_public_host`` off the event loop) before enqueuing.
     """
@@ -51,17 +57,16 @@ class AuditCreate(BaseModel):
     client_id: str = Field(min_length=1)
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
-    types: list[AuditTypeKey] = Field(default_factory=lambda: list(_DEFAULT_TYPES))
+    types: list[AuditTypeKey] = Field(default_factory=list)
 
     @field_validator("types")
     @classmethod
-    def _dedupe_nonempty(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+    def _dedupe(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+        # Empty is allowed (= full audit); just de-duplicate while preserving order.
         seen: list[AuditTypeKey] = []
         for t in value:
             if t not in seen:
                 seen.append(t)
-        if not seen:
-            raise ValueError("at least one audit type is required")
         return seen
 
     def paid_types(self) -> list[str]:
@@ -112,17 +117,16 @@ class PortalAuditCreate(BaseModel):
 
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
-    types: list[AuditTypeKey] = Field(default_factory=lambda: list(_DEFAULT_TYPES))
+    types: list[AuditTypeKey] = Field(default_factory=list)
 
     @field_validator("types")
     @classmethod
-    def _dedupe_nonempty(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+    def _dedupe(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+        # Empty is allowed (= full audit); de-duplicate while preserving order.
         seen: list[AuditTypeKey] = []
         for t in value:
             if t not in seen:
                 seen.append(t)
-        if not seen:
-            raise ValueError("at least one audit type is required")
         return seen
 
     def paid_types(self) -> list[str]:

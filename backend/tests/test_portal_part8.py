@@ -317,7 +317,8 @@ def test_audit_worker_emits_audit_deliverable(monkeypatch: pytest.MonkeyPatch) -
             return f"{audit_id}/report.pdf", None
 
     def runner(
-        cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+        cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False,
+        types: list[str] | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(ok=True, run_uuid="u-1", artifact_dir="/a", score=88,
                               scores={"overall": 88}, runtime_seconds=100, exit_code=0)

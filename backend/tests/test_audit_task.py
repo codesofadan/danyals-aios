@@ -69,7 +69,14 @@ def _row(**over: Any) -> dict[str, Any]:
 
 
 def _ok_runner(score: int) -> Any:
-    def _run(cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False) -> AuditRunResult:
+    def _run(
+        cfg: AuditEngineConfig,
+        *,
+        url: str,
+        tier: str,
+        comprehensive: bool = False,
+        types: list[str] | None = None,
+    ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=score,
             scores={"overall": score, "technical": 90}, runtime_seconds=372, exit_code=0,
@@ -102,7 +109,14 @@ def test_paid_run_logs_estimated_cost() -> None:
 
 
 def test_engine_failure_marks_failed_never_running() -> None:
-    def _fail(cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False) -> AuditRunResult:
+    def _fail(
+        cfg: AuditEngineConfig,
+        *,
+        url: str,
+        tier: str,
+        comprehensive: bool = False,
+        types: list[str] | None = None,
+    ) -> AuditRunResult:
         return AuditRunResult(ok=False, run_uuid="u-9", runtime_seconds=5, error="engine timed out after 1500s")
 
     store = FakeStore(_row(tier="paid"))
@@ -158,7 +172,14 @@ def test_cost_log_failure_never_breaks_job() -> None:
 # C1: the audit worker routes a PAID run through the cost gate BEFORE spending.
 # --------------------------------------------------------------------------- #
 def _tracking_runner(ran: list[bool], score: int = 90) -> Any:
-    def _run(cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False) -> AuditRunResult:
+    def _run(
+        cfg: AuditEngineConfig,
+        *,
+        url: str,
+        tier: str,
+        comprehensive: bool = False,
+        types: list[str] | None = None,
+    ) -> AuditRunResult:
         ran.append(True)  # records that the (paid) engine actually executed
         return _ok_runner(score)(cfg, url=url, tier=tier)
     return _run

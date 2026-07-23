@@ -49,7 +49,7 @@ _COST_FEATURE = "tech_audit"
 _COST_PROVIDER = "audit_engine"
 _COST_JOB_TYPE = "public_audit"
 
-_DEFAULT_TYPES: tuple[AuditTypeKey, ...] = ("technical", "actionable")
+_DEFAULT_TYPES: tuple[AuditTypeKey, ...] = ("onpage", "technical")
 
 _DUPLICATE_EMAIL = HTTPException(
     status_code=status.HTTP_409_CONFLICT,

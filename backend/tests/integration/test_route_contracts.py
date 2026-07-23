@@ -287,7 +287,7 @@ def env() -> Any:
             cur.execute(
                 "insert into public.audits (client_id, client_name, url, types, tier, status) "
                 "values (%s, 'Contract Test Co', %s, %s, 'free', 'queued') returning id",
-                (tenant_id, _PUBLIC_URL, ["technical", "actionable"]),
+                (tenant_id, _PUBLIC_URL, ["technical", "onpage"]),
             )
             audit_a_id = str(cur.fetchone()["id"])
             cleanup_audits.append(audit_a_id)

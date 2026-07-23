@@ -81,7 +81,8 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
     pdf_src, findings_src = _engine_artifacts(tmp_path)
 
     def _runner(
-        cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+        cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False,
+        types: list[str] | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir=str(tmp_path / "engine"), score=80,

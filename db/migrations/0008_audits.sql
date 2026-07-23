@@ -32,7 +32,10 @@ create table public.audits (
   site_id      uuid references public.sites (id) on delete set null,
   client_name  text not null default '',
   url          text not null,
-  -- AuditTypeKey[]: technical | actionable | local | geo | backlink.
+  -- AuditTypeKey[] audit-type picker (frontend lib/audit.ts): onpage | offpage |
+  -- technical | local | geo | strategy. Empty {} = a FULL audit (every type); a
+  -- subset scopes which dimensions/providers the engine runs. Stored as-is here;
+  -- no enum constraint (the app validates against AuditTypeKey).
   types        text[] not null default '{}',
   tier         public.audit_tier not null default 'free',
   status       public.audit_status not null default 'queued',

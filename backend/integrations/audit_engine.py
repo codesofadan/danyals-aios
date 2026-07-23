@@ -63,6 +63,13 @@ _PDF_CANDIDATES: tuple[str, ...] = (
 _FINDINGS_FILE = "findings.json"
 _RUN_FILE = "run.json"
 
+# The dashboard audit-type picker keys the engine can scope a run by. Mirrors
+# ``app/schemas/audits.py`` ``AuditTypeKey`` (kept local so integrations never
+# import ``app.*``). Empty selection = the full comprehensive audit.
+_ENGINE_TYPES: frozenset[str] = frozenset(
+    {"onpage", "offpage", "technical", "local", "geo", "strategy"}
+)
+
 # The `Run UUID: <uuid4>` line is only 46 chars, so it never wraps at 80 cols.
 _RUN_UUID_RE = re.compile(r"^Run UUID:\s+([0-9a-fA-F-]{36})", re.MULTILINE)
 
@@ -111,15 +118,32 @@ def domain_to_slug(domain: str) -> str:
 
 
 def build_argv(
-    *, domain: str, mode: str, max_pages: int, profile: str, comprehensive: bool = False
+    *,
+    domain: str,
+    mode: str,
+    max_pages: int,
+    profile: str,
+    comprehensive: bool = False,
+    types: list[str] | None = None,
 ) -> list[str]:
     """Build the ``python -m audit_engine.cli.main full ...`` argument vector.
 
-    ``comprehensive=True`` (the authenticated dashboard audit) runs the FULL
-    consulting pipeline: the on-page + technical deterministic checks PLUS off-page
-    (Serper SERP/competitors), local (Places/citations when ``profile=local``), the
-    21 AI specialist agents, and the narrative. It runs in ``--mode paid`` so the
-    paid data sources actually fire. This is the "real audit that takes full time".
+    ``comprehensive=True`` (the authenticated dashboard audit) runs the consulting
+    pipeline. ``types`` is the audit-type picker; it SCOPES which paid providers +
+    AI agents fire:
+
+    * **empty** ``types`` = the FULL audit (every dimension + all 21 agents +
+      narrative, ``--mode paid``) - the pre-existing comprehensive behavior.
+    * a **subset** scopes the run. The deterministic crawl (on-page + technical +
+      the AI-search checks) ALWAYS runs and CANNOT be isolated - the engine has no
+      per-dimension CLI flag - so a subset only gates the PAID work:
+        - ``technical`` -> ``--psi`` (PageSpeed / CWV); else ``--no-psi``.
+        - ``offpage`` or ``strategy`` -> ``--serper`` (SERP + competitor gap).
+        - ``local`` -> ``--profile local`` + ``--places`` + ``--citations`` (the
+          engine gates GBP/citations/Team D behind ``profile=local``).
+        - ``geo`` or ``strategy`` -> ``--agents on`` (the 21 specialists, incl. A5
+          GEO; the engine has no per-team flag, so agents are all-or-nothing).
+        - ``strategy`` -> ``--ai-narrative on`` (the strategy recommendation prose).
 
     ``comprehensive=False`` (the PUBLIC free-audit funnel) keeps the light, zero-spend
     on-page-only run: ``mode`` is the stored value (``free`` | ``paid``), agents +
@@ -131,12 +155,41 @@ def build_argv(
         "--profile", profile, "--max-pages", str(max_pages), "--no-moz",
     ]
     if comprehensive:
-        return [
-            *base,
-            "--mode", "paid",
-            "--serper", "--places", "--citations",
-            "--agents", "on", "--ai-narrative", "on",
+        selected = [t for t in (types or []) if t in _ENGINE_TYPES]
+        if not selected:
+            # Full audit: every dimension + all 21 agents + narrative (verbatim
+            # pre-existing comprehensive behavior).
+            return [
+                *base,
+                "--mode", "paid",
+                "--serper", "--places", "--citations",
+                "--agents", "on", "--ai-narrative", "on",
+            ]
+        # Scoped comprehensive: paid mode, but only the selected paid work fires.
+        profile_arg = "local" if "local" in selected else profile
+        argv = [
+            "-m", "audit_engine.cli.main", "full", domain,
+            "--profile", profile_arg, "--max-pages", str(max_pages),
+            "--no-moz", "--mode", "paid",
         ]
+        argv += ["--psi"] if "technical" in selected else ["--no-psi"]
+        argv += (
+            ["--serper"]
+            if ("offpage" in selected or "strategy" in selected)
+            else ["--no-serper"]
+        )
+        argv += (
+            ["--places", "--citations"]
+            if "local" in selected
+            else ["--no-places", "--no-citations"]
+        )
+        argv += (
+            ["--agents", "on"]
+            if ("geo" in selected or "strategy" in selected)
+            else ["--agents", "off"]
+        )
+        argv += ["--ai-narrative", "on"] if "strategy" in selected else ["--ai-narrative", "off"]
+        return argv
     argv = [*base, "--mode", mode, "--agents", "off", "--ai-narrative", "off"]
     if mode == "paid":
         argv += ["--serper", "--places", "--citations"]
@@ -178,15 +231,21 @@ def _find_pdf(artifact_dir: Path) -> str | None:
 
 
 def run_audit(
-    cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+    cfg: AuditEngineConfig,
+    *,
+    url: str,
+    tier: str,
+    comprehensive: bool = False,
+    types: list[str] | None = None,
 ) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
     ``tier`` is the stored value (``free`` | ``paid``); it selects the engine
-    ``--mode`` for the light path. ``comprehensive=True`` overrides that and runs the
-    full consulting pipeline (all dimensions + AI agents, paid mode) - used for the
-    authenticated dashboard audit. The URL is SSRF-validated here (defense in depth -
-    the endpoint already validated at enqueue) before any subprocess is spawned.
+    ``--mode`` for the light path. ``comprehensive=True`` runs the consulting
+    pipeline for the authenticated dashboard audit; ``types`` (the audit-type
+    picker) then SCOPES it - empty = the full run, a subset gates the paid work
+    (see ``build_argv``). The URL is SSRF-validated here (defense in depth - the
+    endpoint already validated at enqueue) before any subprocess is spawned.
     """
     # 1) SSRF guard. Sync context (a Celery worker, no event loop) so a direct
     # call is fine - no to_thread needed off the loop.
@@ -203,7 +262,7 @@ def run_audit(
     mode = "paid" if (tier == "paid" or comprehensive) else "free"
     argv = build_argv(
         domain=url, mode=mode, max_pages=cfg.max_pages, profile=cfg.profile,
-        comprehensive=comprehensive,
+        comprehensive=comprehensive, types=types,
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}

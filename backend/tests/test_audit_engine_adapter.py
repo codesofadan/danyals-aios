@@ -51,6 +51,94 @@ def test_build_argv_paid_enables_providers() -> None:
     assert argv[argv.index("--profile") + 1] == "local"
 
 
+def test_build_argv_comprehensive_empty_is_full_audit() -> None:
+    # Empty selection = the FULL comprehensive run: every provider + all agents.
+    argv = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=[],
+    )
+    assert argv[argv.index("--mode") + 1] == "paid"
+    for flag in ("--serper", "--places", "--citations"):
+        assert flag in argv
+    assert argv[argv.index("--agents") + 1] == "on"
+    assert argv[argv.index("--ai-narrative") + 1] == "on"
+
+
+def test_build_argv_scoped_local_forces_profile_and_places() -> None:
+    # Local SEO selected -> profile local + Places/citations on; no Serper; agents off.
+    argv = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=["local"],
+    )
+    assert argv[argv.index("--profile") + 1] == "local"
+    for flag in ("--places", "--citations"):
+        assert flag in argv
+    assert "--no-serper" in argv
+    assert argv[argv.index("--agents") + 1] == "off"
+    assert argv[argv.index("--ai-narrative") + 1] == "off"
+
+
+def test_build_argv_scoped_offpage_enables_serper_only() -> None:
+    argv = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=["offpage"],
+    )
+    assert "--serper" in argv and "--no-serper" not in argv
+    assert "--no-places" in argv and "--no-citations" in argv
+    assert argv[argv.index("--profile") + 1] == "general"  # not forced to local
+    assert argv[argv.index("--agents") + 1] == "off"
+
+
+def test_build_argv_scoped_geo_turns_agents_on() -> None:
+    argv = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=["geo"],
+    )
+    assert argv[argv.index("--agents") + 1] == "on"
+    assert "--no-serper" in argv  # geo needs agents, not Serper
+
+
+def test_build_argv_scoped_strategy_serper_agents_and_narrative() -> None:
+    argv = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=["strategy"],
+    )
+    assert "--serper" in argv and "--no-serper" not in argv
+    assert argv[argv.index("--agents") + 1] == "on"
+    assert argv[argv.index("--ai-narrative") + 1] == "on"
+
+
+def test_build_argv_scoped_technical_toggles_psi() -> None:
+    with_tech = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=["technical"],
+    )
+    assert "--psi" in with_tech and "--no-psi" not in with_tech
+    without_tech = build_argv(
+        domain="example.com", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, types=["onpage"],
+    )
+    assert "--no-psi" in without_tech
+
+
+def test_run_audit_forwards_types_to_argv(
+    engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = "https://example.com"
+    captured: dict[str, list[str]] = {}
+
+    def _side(args: list[str], kwargs: dict[str, Any]) -> None:
+        captured["argv"] = args
+        _write_artifacts(engine.engine_dir, url, _UUID, scores={"overall": 70})
+
+    _fake_run_factory(monkeypatch, returncode=0, stdout=f"Run UUID: {_UUID}\n", side=_side)
+    res = run_audit(engine, url=url, tier="paid", comprehensive=True, types=["local"])
+    assert res.ok is True
+    argv = captured["argv"]
+    assert argv[argv.index("--profile") + 1] == "local"  # local scoping reached the engine
+    assert "--places" in argv
+
+
 def test_parse_run_uuid() -> None:
     assert parse_run_uuid(f"some rule\nRun UUID: {_UUID}\nArtifact dir: /x") == _UUID
     assert parse_run_uuid("no uuid here") is None

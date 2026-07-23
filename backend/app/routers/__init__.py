@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.modules import MODULE_ROUTERS
 from app.routers.activity import router as activity_router
+from app.routers.admin_public_audits import router as admin_public_audits_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.ai_assist import router as ai_assist_router
 from app.routers.audits import router as audits_router
@@ -41,6 +42,7 @@ api_v1 = APIRouter()
 api_v1.include_router(auth_router)
 api_v1.include_router(rbac_router)
 api_v1.include_router(admin_users_router)
+api_v1.include_router(admin_public_audits_router)
 api_v1.include_router(clients_router)
 api_v1.include_router(vault_router)
 api_v1.include_router(activity_router)

@@ -1,0 +1,157 @@
+/* Free-Audit Leads screen — the admin funnel inbox.
+   Reuses the global .card / .kpi / .status-pill / .seg / .ghostbtn primitives
+   from globals.css; only the KPI row + the leads table are scoped here. */
+
+.lead-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.lead-kpi-n {
+  font-size: 34px;
+  font-weight: 800;
+  color: var(--fg-strong);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+.lead-search {
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 11px;
+  width: 220px;
+  outline: none;
+}
+.lead-search::placeholder { color: var(--muted-2); }
+.lead-search:focus { border-color: var(--line-2); }
+
+.lead-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0 10px;
+}
+
+.lead-tbl-wrap { overflow-x: auto; }
+.lead-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+.lead-tbl thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: var(--muted);
+  padding: 0 14px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.lead-tbl thead th.num { text-align: right; }
+.lead-tbl tbody td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  font-size: 13px;
+  color: var(--body);
+}
+.lead-tbl tbody tr:last-child td { border-bottom: none; }
+.lead-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.lead-email {
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: none;
+}
+.lead-email:hover { color: var(--lilac); text-decoration: underline; }
+
+.lead-err {
+  font-size: 11px;
+  color: var(--crit);
+  margin-top: 3px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--body);
+  text-decoration: none;
+  max-width: 280px;
+}
+.lead-url:hover { color: var(--lilac); }
+.lead-url .material-symbols-rounded { font-size: 16px; color: var(--muted-2); }
+
+.lead-src {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 8px;
+  text-transform: capitalize;
+}
+
+.lead-score {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.lead-score.ok { color: var(--ok); }
+.lead-score.warn { color: var(--warn); }
+.lead-score.crit { color: var(--crit); }
+.lead-dash { color: var(--muted-2); }
+
+.lead-when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+.lead-dl {
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.lead-dl:hover:not(:disabled) { color: var(--lilac); border-color: var(--line-2); background: var(--hover); }
+.lead-dl:disabled { opacity: 0.4; cursor: not-allowed; }
+.lead-dl .material-symbols-rounded { font-size: 16px; }
+
+.lead-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 34px 14px !important;
+}
+
+.lead-spin { animation: lead-rot 1s linear infinite; }
+@keyframes lead-rot { to { transform: rotate(360deg); } }
+
+@media (max-width: 900px) {
+  .lead-kpis { grid-template-columns: repeat(2, 1fr); }
+}

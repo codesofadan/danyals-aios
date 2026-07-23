@@ -6,6 +6,7 @@ import {
   TYPE_LABEL,
   type AuditTypeKey,
   type JobStatus,
+  type Tier,
 } from "@/lib/audit";
 import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
@@ -26,6 +27,11 @@ function scoreClass(score: number) {
   return "crit";
 }
 
+// Types that spend on a paid provider / the AI agents. A selection that touches
+// any of these runs as a Paid audit (cost-gated); an empty or free-only selection
+// stays Free. Derived from the single source of truth in lib/audit.ts.
+const PAID_TYPES = new Set<AuditTypeKey>(auditTypes.filter((t) => t.paid).map((t) => t.key));
+
 export default function AuditWorkspace() {
   const auditsQ = useAudits(); // live: GET /audits, polls while a job is in flight
   const statsQ = useAuditStats();
@@ -35,10 +41,11 @@ export default function AuditWorkspace() {
   const rows = auditsQ.data ?? [];
   const clients = clientsQ.data ?? [];
 
-  // Run-new-audit form state (URL + client only — every dashboard audit is the FULL
-  // comprehensive run, so there are no tier/type options to pick).
+  // Run-new-audit form state. `types` is the audit-type picker: empty = a FULL
+  // audit (every type); a subset scopes the run to only those dimensions.
   const [url, setUrl] = useState("");
   const [clientId, setClientId] = useState("");
+  const [types, setTypes] = useState<AuditTypeKey[]>([]);
   const effectiveClientId = clientId || clients[0]?.id || "";
 
   // Table filters
@@ -47,22 +54,28 @@ export default function AuditWorkspace() {
 
   const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending;
 
+  const toggleType = (k: AuditTypeKey) =>
+    setTypes((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+
   const runAudit = () => {
     if (!canRun) return;
     const clean = url.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    // The backend ALWAYS runs the full comprehensive audit (on-page + technical +
-    // off-page + local + 21 AI agents + PDF) for dashboard runs; the tier/types below
-    // are just the free-allowed defaults the worker ignores for depth.
+    // Empty selection = the full comprehensive run (on-page + technical + off-page +
+    // local + 21 AI agents + PDF); a subset scopes the engine to those dimensions.
+    // A selection that touches a paid dimension runs as Paid (cost-gated); an empty
+    // or free-only selection stays Free.
+    const tier: Tier = types.some((t) => PAID_TYPES.has(t)) ? "Paid" : "Free";
     createAudit.mutate(
-      { client_id: effectiveClientId, url: clean, tier: "Free", types: ["technical", "actionable"] },
-      { onSuccess: () => setUrl("") },
+      { client_id: effectiveClientId, url: clean, tier, types },
+      { onSuccess: () => { setUrl(""); setTypes([]); } },
     );
   };
 
   const shown = rows.filter(
     (r) =>
       (statusFilter === "all" || r.status === statusFilter) &&
-      (typeFilter === "all" || r.types.includes(typeFilter)),
+      // A full audit (empty types) ran every dimension, so it matches every type filter.
+      (typeFilter === "all" || r.types.length === 0 || r.types.includes(typeFilter)),
   );
 
   const runningCount = rows.filter((r) => r.status === "running").length;
@@ -137,9 +150,13 @@ export default function AuditWorkspace() {
                       <td><span className="au-url"><span className="material-symbols-rounded">link</span>{r.url}</span></td>
                       <td>
                         <div className="au-types">
-                          {r.types.map((k) => (
-                            <span key={k} className="au-type-tag">{TYPE_LABEL[k]}</span>
-                          ))}
+                          {r.types.length === 0 ? (
+                            <span className="au-type-tag au-type-full">Full audit</span>
+                          ) : (
+                            r.types.map((k) => (
+                              <span key={k} className="au-type-tag">{TYPE_LABEL[k]}</span>
+                            ))
+                          )}
                         </div>
                       </td>
                       <td><span className={`au-tier ${r.tier.toLowerCase()}`}>{r.tier}</span></td>
@@ -226,15 +243,37 @@ export default function AuditWorkspace() {
             </select>
           </div>
 
+          <div className="fld">
+            <label>Audit types</label>
+            <div className="au-pick">
+              {auditTypes.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className={`chip${types.includes(t.key) ? " on" : ""}`}
+                  onClick={() => toggleType(t.key)}
+                  title={`${t.blurb}${t.paid ? " (paid data source)" : " (free)"}`}
+                >
+                  {t.short}
+                  {t.paid && <span className="au-pick-paid" aria-label="paid">$</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="fld-hint" style={{ margin: "2px 0 10px" }}>
-            <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: "16px" }}>bolt</span>{" "}
-            Every audit is the <b>full run</b> — on-page, technical, off-page, local, AI
-            analysis + a branded PDF report. No options to pick.
+            <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: "16px" }}>info</span>{" "}
+            Leave empty to run a <b>full audit</b> (all types). Pick a subset to scope the
+            run; any paid dimension ($) runs behind the cost gate.
           </div>
 
           <button className="primary-btn wide" onClick={runAudit} disabled={!canRun}>
             <span className="material-symbols-rounded">rocket_launch</span>
-            {createAudit.isPending ? "Starting…" : "Run audit"}
+            {createAudit.isPending
+              ? "Starting…"
+              : types.length === 0
+                ? "Run full audit"
+                : `Run ${types.length}-type audit`}
           </button>
           {createErr && (
             <div className="au-run-note" role="alert" style={{ color: "var(--warn, #A96913)" }}>

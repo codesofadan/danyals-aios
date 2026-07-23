@@ -115,11 +115,12 @@ async def test_create_enqueues_queued_row(
     wire("manager")
     resp = await client.post(
         "/api/v1/audits",
-        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": ["technical", "actionable"]},
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": ["technical", "onpage"]},
     )
     assert resp.status_code == 201
     body = resp.json()
     assert set(body) == {"id", "client", "url", "types", "tier", "status", "score", "runtime", "when", "pdf", "json"}
+    assert body["types"] == ["technical", "onpage"]
     assert body["status"] == "queued"
     assert body["tier"] == "Free"
     assert body["client"] == "Verde Cafe"
@@ -128,6 +129,24 @@ async def test_create_enqueues_queued_row(
     assert body["pdf"] is False and body["json"] is False
     # exactly one job enqueued, for the new row id
     assert enqueued == [body["id"]]
+
+
+async def test_create_empty_types_is_full_audit(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, enqueued: list[str], wire: Callable[..., None]
+) -> None:
+    # No types selected = a FULL audit (every type). It must be accepted (not a 422),
+    # persist an empty selection, and enqueue - even on the Free tier (paid_types is
+    # empty, so the Free-tier paid gate never trips).
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": []},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["types"] == []
+    assert enqueued == [body["id"]]
+    assert repo.rows[body["id"]]["types"] == []
 
 
 async def test_create_requires_run_audits(

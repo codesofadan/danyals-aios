@@ -88,7 +88,13 @@ class AuditStore(Protocol):
 
 class _Runner(Protocol):
     def __call__(
-        self, cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False
+        self,
+        cfg: AuditEngineConfig,
+        *,
+        url: str,
+        tier: str,
+        comprehensive: bool = False,
+        types: list[str] | None = None,
     ) -> AuditRunResult: ...
 
 
@@ -229,11 +235,17 @@ def execute_audit(
     store.update(audit_id, {"status": "running", "started_at": _utcnow().isoformat()})
 
     try:
-        # The authenticated dashboard audit ALWAYS runs the full consulting pipeline:
-        # on-page + technical + off-page (Serper) + local (Places) + the 21 AI agents +
-        # narrative + PDF. (The public homepage funnel stays light/$0 - see below.)
+        # The authenticated dashboard audit runs the consulting pipeline, SCOPED by
+        # the audit-type picker stored on the row (``types``): empty = the full run
+        # (on-page + technical + off-page + local + the 21 AI agents + narrative +
+        # PDF); a subset gates the paid providers + agents to the selection (see
+        # ``build_argv``). The public homepage funnel stays light/$0 - see below.
         result = runner(
-            _config_from_settings(settings), url=row["url"], tier=tier, comprehensive=True
+            _config_from_settings(settings),
+            url=row["url"],
+            tier=tier,
+            comprehensive=True,
+            types=row.get("types"),
         )
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("audit_job_crashed", audit_id=audit_id)

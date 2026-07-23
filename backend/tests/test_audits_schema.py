@@ -23,7 +23,7 @@ def _row(**over: object) -> dict[str, object]:
         "id": "aud-1",
         "client_name": "NorthPeak Dental",
         "url": "northpeakdental.com",
-        "types": ["technical", "actionable", "local"],
+        "types": ["technical", "onpage", "local"],
         "tier": "paid",
         "status": "done",
         "score": 82,
@@ -50,7 +50,7 @@ def test_response_matches_auditrow_shape() -> None:
     assert body["runtime"] == "6m 12s"
     assert body["pdf"] is True
     assert body["json"] is True  # serialization alias, not the field name json_
-    assert body["types"] == ["technical", "actionable", "local"]
+    assert body["types"] == ["technical", "onpage", "local"]
 
 
 def test_response_pending_row() -> None:
@@ -69,18 +69,18 @@ def test_response_filters_unknown_types() -> None:
     assert body.types == ["technical", "geo"]
 
 
-def test_create_defaults_and_dedupe() -> None:
+def test_create_defaults_to_empty_full_audit_and_dedupes() -> None:
     c = AuditCreate(client_id="cl-1", url="example.com")
     assert c.tier == "Free"
-    assert c.types == ["technical", "actionable"]
+    assert c.types == []  # empty = a FULL audit (every type)
     c2 = AuditCreate(client_id="cl-1", url="example.com", types=["local", "local", "technical"])
-    assert c2.types == ["local", "technical"]
+    assert c2.types == ["local", "technical"]  # de-duplicated, order preserved
 
 
 def test_create_paid_types_helper() -> None:
     c = AuditCreate(client_id="cl-1", url="x.com", tier="Paid", types=["technical", "local", "geo"])
     assert set(c.paid_types()) == {"local", "geo"}
-    assert set(PAID_AUDIT_TYPES) == {"local", "geo", "backlink"}
+    assert set(PAID_AUDIT_TYPES) == {"offpage", "local", "geo", "strategy"}
 
 
 def test_tier_roundtrip() -> None:

@@ -20,6 +20,11 @@
 .au-types { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; }
 .au-type-tag { font-size: 10px; font-weight: 800; letter-spacing: .01em; color: var(--lilac);
   background: var(--hover); border: 1px solid var(--line); padding: 2px 7px; border-radius: 999px; }
+.au-type-full { color: var(--accent, var(--lilac)); border-color: color-mix(in srgb, var(--lilac) 45%, transparent); }
+
+/* ---- audit-type picker (Run New Audit card) ---- */
+.au-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.au-pick-paid { margin-left: 4px; font-weight: 900; opacity: .7; }
 
 .au-tier { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
   padding: 3px 9px; border-radius: 999px; border: 1px solid transparent; }

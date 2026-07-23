@@ -113,12 +113,12 @@ def test_client_series_uses_latest_audit_type_and_score() -> None:
     ]
     audits = [
         _audit(datetime(2026, 6, 1, tzinfo=UTC), client="Acme", score=70, types=["local"]),
-        _audit(_NOW, client="Acme", score=91, types=["actionable"]),  # newer wins
+        _audit(_NOW, client="Acme", score=91, types=["technical"]),  # newer wins
     ]
     series = build_client_series(clients, audits)
     acme = next(c for c in series if c.cn == "Acme")
     globex = next(c for c in series if c.cn == "Globex")
-    assert acme.cd == "Actionable" and acme.p == 91   # latest audit
+    assert acme.cd == "Technical" and acme.p == 91   # latest audit
     assert globex.cd == "Starter client" and globex.p == 0  # no audit -> tier label
 
 
