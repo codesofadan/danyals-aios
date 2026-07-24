@@ -778,3 +778,54 @@ def score(
         provisional=PROVISIONAL,
         notes=notes,
     )
+
+
+# --------------------------------------------------------------------------- #
+# QA-driven rewrite guidance (the drafting-time improvement loop's feedback)
+# --------------------------------------------------------------------------- #
+# Per-dimension remediation directives: how the writer should revise the body prose
+# to lift a weak §11 dimension. Phrased as concrete, model-actionable instructions
+# (not the dimension name), so the guided rewrite targets the real deficiency.
+_DIMENSION_REMEDIATION: dict[str, str] = {
+    "intent_match": "match the search intent: lead with a direct answer and the format the query expects",
+    "eeat_experience": "add first-hand experience, specific results, credentials, and trust signals",
+    "entity_coverage": "cover the missing table-stakes subtopics a complete answer must address",
+    "keyword_handling": "front-load the primary keyword naturally and avoid stuffing or repetitive exact-match anchors",
+    "structure_readability": "improve readability with tighter sentences, a clear hierarchy, and plain language",
+    "snippet_extractability": "make it more extractable: a self-contained 40 to 55 word answer, Q&A sub-headings, and scannable lists",
+    "originality": "make it materially more original and non-boilerplate, worth reading even if search did not exist",
+    "fact_grounding": "ground every concrete claim in the provided facts, remove any unverifiable number, and resolve every [NEEDS:] gap",
+    "local_relevance": "strengthen local relevance: NAP, per-city specifics, and Google Business Profile alignment",
+    "schema_validity": "make the schema's claims visible in the body copy",
+    "internal_linking": "weave in varied, relevant references to related pillar and cluster topics",
+    "cta_ux": "add a clear, well-placed call to action and a people-first, scannable layout",
+    "information_gain": "add a real, provenance-backed differentiation angle beyond rehashing the top results",
+    "serp_format_fit": "match the page format the SERP rewards for this query",
+}
+
+
+def rewrite_guidance(qa: QaScore, *, target: int = WEIGHTED_TOTAL_THRESHOLD, max_dims: int = 4) -> str:
+    """Turn a :class:`QaScore` into a targeted, model-actionable rewrite instruction.
+
+    Selects the weakest dimensions still BELOW ``target`` (worst first, at most
+    ``max_dims``), maps each to a concrete remediation directive, and appends the
+    scorer's own per-dimension notes for those dimensions so the writer sees the
+    specific deficiency (e.g. which entity is missing, which claim is untraceable).
+    Returns ``""`` when nothing is below ``target`` (the draft already clears the bar
+    - the loop then stops). Pure + deterministic, so the loop is unit-testable."""
+    focus = sorted(
+        ((dim, sc) for dim, sc in qa.dimensions.items() if sc < target),
+        key=lambda kv: kv[1],
+    )[:max_dims]
+    if not focus:
+        return ""
+    focus_keys = {dim for dim, _ in focus}
+    lines = [
+        f"- {_DIMENSION_REMEDIATION.get(dim, f'improve {dim.replace(chr(95), chr(32))}')} (currently {sc}/100)"
+        for dim, sc in focus
+    ]
+    reasons = [n for n in qa.notes if any(n.startswith(f"{dim}:") for dim in focus_keys)][:6]
+    guidance = "Revise the draft to raise its SEO quality. Focus on:\n" + "\n".join(lines)
+    if reasons:
+        guidance += "\nSpecific issues to fix:\n" + "\n".join(f"- {r}" for r in reasons)
+    return guidance

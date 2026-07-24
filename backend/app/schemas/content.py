@@ -110,9 +110,19 @@ class ContentReviewRequest(BaseModel):
     """POST /content/{code}/review body: the reviewer's decision at the gate.
 
     ``approve`` -> publishing, ``reject`` -> rejected, ``edit`` -> back to drafting.
+
+    ``note`` is the reviewer's free-text GUIDED-EDIT instruction (e.g. "make the
+    intro punchier, add an FAQ, tighten the H2s"). It is only meaningful for the
+    ``edit`` action: the endpoint persists it on the job (``edit_instruction``) so
+    the worker re-drafts targeting exactly what the reviewer asked instead of
+    blind-regenerating. Ignored (harmless) for approve/reject; optional for edit (an
+    empty note simply re-runs the pipeline without steering).
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
     action: ReviewAction
+    note: str | None = Field(default=None, alias="editInstruction", max_length=4000)
 
 
 class ContentJobUpdate(BaseModel):

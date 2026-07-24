@@ -20,11 +20,13 @@ from app.services.content_generator import (
 from app.services.content_guard import (
     EM_DASH,
     EN_DASH,
+    apply_edit_instruction,
     count_dashes,
     deai_draft,
     find_ai_tells,
     guard_generated,
     has_forbidden_dashes,
+    revise_draft,
     scan,
     split_blocks,
     strip_dashes,
@@ -326,3 +328,91 @@ def test_guard_generated_dash_free_even_with_adversarial_writer() -> None:
     )
     guarded = guard_generated(content, writer=_DashInjectingWriter())
     assert count_dashes(guarded.content.draft_md) == (0, 0)
+
+
+# --------------------------------------------------------------------------- #
+# revise_draft - the GUIDED-EDIT rewrite (the reviewer's edit-request note)
+# --------------------------------------------------------------------------- #
+def test_revise_draft_steers_every_prose_block_with_the_instruction() -> None:
+    writer = _CleanWriter()
+    draft = "# Brunch\n\nOur intro paragraph sits here.\n\n- a grounded bullet\n"
+    result = revise_draft(draft, instruction="make the intro punchier", writer=writer, model="fake")
+    # The prose block was revised (even though it carried no dash / no AI tell - a
+    # guided edit steers EVERY prose block, unlike the de-AI pass which is flag-gated).
+    assert result.revised == 1
+    assert writer.calls == 1
+    # The reviewer's instruction was actually carried into the writer prompt.
+    assert "REVIEWER INSTRUCTION" in writer.prompts[0]
+    assert "make the intro punchier" in writer.prompts[0]
+    # The list block was never sent to the writer; the result is dash-free.
+    assert "- a grounded bullet" in result.draft_md
+    assert count_dashes(result.draft_md) == (0, 0)
+
+
+def test_revise_draft_empty_instruction_only_strips_no_writer_calls() -> None:
+    writer = _CleanWriter()
+    draft = f"# Brunch\n\nOpen early{EM_DASH}very early for brunch.\n"
+    result = revise_draft(draft, instruction="   ", writer=writer, model="fake")
+    assert writer.calls == 0  # no steer -> nothing rephrased
+    assert result.revised == 0
+    assert count_dashes(result.draft_md) == (0, 0)  # but still dash-free
+
+
+def test_revise_draft_protects_the_answer_block() -> None:
+    answer = f"Best brunch in Portland{EM_DASH}served fresh daily by our team, booked online now."
+    writer = _CleanWriter()
+    draft = f"# Brunch\n\n{answer}\n\nOur regular intro paragraph goes here.\n"
+    result = revise_draft(
+        draft, instruction="tighten the copy", writer=writer, model="fake", protect=frozenset({answer})
+    )
+    assert all(answer not in p for p in writer.prompts)  # the answer block was never sent
+    assert "Best brunch in Portland - served fresh daily" in result.draft_md
+    assert count_dashes(result.draft_md) == (0, 0)
+
+
+def test_revise_draft_writer_failure_falls_back_to_strip_never_raises() -> None:
+    draft = f"# Brunch\n\nOpen early{EM_DASH}very early for brunch.\n"
+    result = revise_draft(draft, instruction="punch it up", writer=_ExplodingWriter(), model="fake")
+    assert count_dashes(result.draft_md) == (0, 0)  # never raises; still dash-free
+    assert result.writer_calls == 0  # the failed call is not counted as a spend
+
+
+def test_revise_draft_hard_strips_even_when_writer_injects_a_dash() -> None:
+    draft = "# Brunch\n\nOur regular intro paragraph goes here for brunch fans.\n"
+    result = revise_draft(draft, instruction="add urgency", writer=_DashInjectingWriter(), model="fake")
+    assert count_dashes(result.draft_md) == (0, 0)  # THE guarantee holds vs a hostile provider
+    assert result.revised == 1
+
+
+def test_revise_draft_max_rewrites_caps_writer_calls() -> None:
+    writer = _CleanWriter()
+    draft = "\n\n".join(f"Prose paragraph number {i} sits here." for i in range(5))
+    result = revise_draft(draft, instruction="tighten", writer=writer, model="fake", max_rewrites=2)
+    assert writer.calls == 2  # capped
+    assert count_dashes(result.draft_md) == (0, 0)
+
+
+# --------------------------------------------------------------------------- #
+# apply_edit_instruction - the GeneratedContent adapter for the guided edit
+# --------------------------------------------------------------------------- #
+def test_apply_edit_instruction_revises_body_and_records_a_note() -> None:
+    writer = _CleanWriter()
+    content = _content(
+        draft_md="# Brunch\n\nOur intro paragraph sits here for weekend diners.\n",
+        answer_block="",
+        notes=[],
+    )
+    out = apply_edit_instruction(content, instruction="make it punchier", writer=writer, model="fake")
+    assert "REVIEWER INSTRUCTION" in writer.prompts[0]
+    assert count_dashes(out.draft_md) == (0, 0)
+    assert out.word_count > 0
+    assert any("guided edit" in n for n in out.notes)
+
+
+def test_apply_edit_instruction_no_writer_degrades_to_strip_only() -> None:
+    content = _content(
+        draft_md=f"# Brunch\n\nOpen early{EM_DASH}very early for brunch.\n", answer_block="", notes=[]
+    )
+    out = apply_edit_instruction(content, instruction="punch it up", writer=None)
+    assert count_dashes(out.draft_md) == (0, 0)  # still dash-free
+    assert not any("guided edit" in n for n in out.notes)  # nothing was revised

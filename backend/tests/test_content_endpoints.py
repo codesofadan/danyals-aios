@@ -253,6 +253,24 @@ async def test_rich_retrieval_returns_server_columns(
     assert (await client.get("/api/v1/content/jobs/CJ-7/schema")).json()["schema"] == {"@graph": [1]}
 
 
+async def test_rich_retrieval_outline_links_entities_for_preview(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(
+        code="CJ-8",
+        outline={"headings": [{"level": 1, "text": "T"}], "meta": {"title": "T", "description": "D"}},
+        internal_links={"links": [{"anchor": "a", "url": "/x", "keyword": "k"}]},
+        entity_coverage={"covered": ["x"], "missing": []},
+    )
+    wire("specialist")
+    outline = (await client.get("/api/v1/content/jobs/CJ-8/outline")).json()["outline"]
+    assert outline["meta"]["title"] == "T"  # META tab source
+    links = (await client.get("/api/v1/content/jobs/CJ-8/links")).json()["links"]
+    assert links["links"][0]["anchor"] == "a"  # internal-link coverage
+    entities = (await client.get("/api/v1/content/jobs/CJ-8/entities")).json()["entities"]
+    assert entities["covered"] == ["x"]
+
+
 async def test_rich_retrieval_unknown_column_404(
     client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
 ) -> None:
@@ -412,6 +430,37 @@ async def test_review_edit_to_drafting_no_publish(
     resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "edit"})
     assert resp.json()["status"] == "drafting"
     assert published == []
+
+
+async def test_review_edit_persists_note_and_reenqueues_pipeline(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str],
+    published: list[str], wire: Callable[..., None],
+) -> None:
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review",
+        json={"action": "edit", "note": "make the intro punchier, add an FAQ"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "drafting"
+    # The guided-edit instruction was persisted on the job for the worker to apply.
+    assert repo.jobs["CJ-1"]["edit_instruction"] == "make the intro punchier, add an FAQ"
+    # The pipeline was RE-ENQUEUED for a guided re-draft; publish was NOT.
+    assert enqueued == ["CJ-1"]
+    assert published == []
+
+
+async def test_review_edit_without_note_persists_empty_instruction(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str], wire: Callable[..., None],
+) -> None:
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("admin")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "edit"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "drafting"
+    assert repo.jobs["CJ-1"]["edit_instruction"] == ""  # empty note -> unsteered re-draft
+    assert enqueued == ["CJ-1"]
 
 
 async def test_review_reject_to_rejected_no_publish(

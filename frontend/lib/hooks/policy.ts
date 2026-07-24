@@ -57,10 +57,10 @@ export function useRecommendations() {
 }
 
 // ---- on-demand topic lookup (POST /policy/ask) ---------------------------------
-// Ask the Policy Radar a live question: the backend runs a Serper search scoped to
-// Google's official surfaces, SSRF-guarded-fetches the top authoritative result, and
-// has Claude Haiku distil a structured answer — all metered under the `policy` money
-// dial. Keyless or dial-blocked returns 200 with `status: "degraded"` (never an error).
+// Ask the Policy Radar a live question: the backend has Claude research the topic itself
+// via the Anthropic server-side web_search tool and synthesize a structured, cited answer
+// — metered under the `policy` money dial (token cost + web-search cost). Keyless,
+// dial-blocked, or a research failure returns 200 with `status: "degraded"` (never an error).
 export type PolicyAskUrgency = "urgent" | "informational";
 
 export type PolicyAskResult = {

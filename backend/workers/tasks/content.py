@@ -71,9 +71,9 @@ from app.services.content_generator import (
     SourcePack,
     generate,
 )
-from app.services.content_guard import guard_generated
+from app.services.content_guard import apply_edit_instruction, guard_generated, guided_rewrite
 from app.services.content_layout import pick_layout
-from app.services.content_qa import Judge, QaScore, score
+from app.services.content_qa import Judge, QaScore, rewrite_guidance, score
 from app.services.content_research import (
     ContentSpendBlocked,
     GatedResearcher,
@@ -163,6 +163,23 @@ class ContentStore(Protocol):
 
     def load(self, code: str) -> dict[str, Any] | None: ...
     def update(self, code: str, fields: dict[str, Any]) -> dict[str, Any] | None: ...
+
+
+class QaScorer(Protocol):
+    """The QA scorer seam - defaults to :func:`app.services.content_qa.score`, injected
+    so a unit test can script a deterministic ``fails-twice-then-passes`` (or
+    ``always-fails``) sequence and drive the drafting-time improvement loop by exact
+    pass count. Mirrors ``score``'s signature verbatim."""
+
+    def __call__(
+        self,
+        content: GeneratedContent,
+        brief: ResearchBrief,
+        schema_result: ValidationResult | None,
+        source_pack: SourcePack,
+        *,
+        judge: Judge | None = None,
+    ) -> QaScore: ...
 
 
 class PrivilegedContentStore:
@@ -296,6 +313,7 @@ class ContentJobOutcome:
     cost: float = 0.0
     passed: bool | None = None
     reason: str = ""
+    qa_loops: int = 0  # drafting-time QA improvement rewrite passes actually run
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -306,6 +324,7 @@ class ContentJobOutcome:
             "cost": self.cost,
             "passed": self.passed,
             "reason": self.reason,
+            "qa_loops": self.qa_loops,
         }
 
 
@@ -478,6 +497,10 @@ def _outline(content: GeneratedContent, brief: ResearchBrief) -> dict[str, Any]:
         "section_roles": content.section_roles,
         "heading_blueprint": brief.teardown.heading_blueprint,
         "answer_block": content.answer_block,
+        # The rendered META tags (title + description) so the Review preview can show
+        # the exact <title>/<meta description> alongside the SERP snippet; they are
+        # not first-class ContentJob columns, so the outline jsonb carries them.
+        "meta": {"title": content.title, "description": content.meta_description},
         "differentiation_angle": {
             "kind": angle.kind,
             "statement": angle.statement,
@@ -674,6 +697,7 @@ def execute_content_job(
     gate: CostGate,
     fetcher: PageFetcher | None = None,
     judge: Judge | None = None,
+    scorer: QaScorer | None = None,
 ) -> ContentJobOutcome:
     """Drive one content job through the canonical pipeline to the human gate.
 
@@ -718,7 +742,8 @@ def execute_content_job(
     try:
         return _run_pipeline(
             store, providers, code, row,
-            settings=settings, gate=gate, fetcher=fetcher, judge=judge, client_id=client_id,
+            settings=settings, gate=gate, fetcher=fetcher, judge=judge,
+            scorer=scorer or score, client_id=client_id,
         )
     except ContentSpendBlocked as blocked:
         # A gate block landed mid-generation: no half-write (the needs_review write
@@ -739,12 +764,17 @@ def _run_pipeline(
     gate: CostGate,
     fetcher: PageFetcher | None,
     judge: Judge | None,
+    scorer: QaScorer,
     client_id: str | None,
 ) -> ContentJobOutcome:
-    """The happy-path composition (research -> ... -> qa -> needs_review)."""
+    """The happy-path composition (research -> ... -> qa loop -> needs_review)."""
     keyword = str(row.get("topic") or "")
     source_pack = _source_pack_from_row(row)
     geo = _geo_for(row, source_pack)
+    # The reviewer's guided-edit instruction (set by a lead on the needs_review->
+    # drafting `edit` transition). When present this run is a GUIDED re-draft: after
+    # generation the body prose is rewritten to satisfy it (below), then cleared.
+    edit_instruction = str(row.get("edit_instruction") or "").strip()
 
     def stream(stage_key: str) -> None:
         # Same-status streaming write (drafting->drafting): stage label + live cost.
@@ -794,13 +824,29 @@ def _run_pipeline(
     )
     stream("titles_meta")
 
-    # --- content guard (the AI / em-dash pass): rewrite any over-AI section via the
-    # SAME cost-gated writer (billed to the content dial + priced by pricing.py) and
-    # HARD-strip every em/en dash from the body + every text field. The strip is
-    # unconditional, so the draft QA scores + we store + publish is GUARANTEED em/en-
-    # dash-free even if a rewrite is spend-blocked or the writer errs (the guard
-    # degrades to a plain strip, never raises). Runs BEFORE schema/QA so both see the
-    # final, cleaned draft.
+    # --- guided edit (only when a reviewer requested changes): re-draft the body
+    # prose to satisfy the instruction, reusing the SAME cost-gated writer (billed to
+    # the content dial) + content_guard's per-section rewrite + hard dash-strip. This
+    # is a GUIDED edit, not a blind regen - the reviewer's note steers each prose
+    # block; headings + the extractable answer block are untouched so QA structure
+    # holds. Runs BEFORE the em-dash guard + schema/QA so all of them see the edited
+    # draft. A spend-blocked / erroring writer degrades per-block to a plain strip.
+    if edit_instruction:
+        content = apply_edit_instruction(
+            content,
+            instruction=edit_instruction,
+            writer=writer,
+            model=providers.model_writer,
+            max_rewrites=_GUARD_MAX_REWRITES,
+        )
+        logger.info("content_guided_edit_applied", code=code)
+
+    # --- content guard (single em-dash / de-AI pass): rewrite any over-AI section via
+    # the SAME cost-gated writer (billed to the content dial + priced by pricing.py)
+    # and HARD-strip every em/en dash from the body + every text field. The strip is
+    # unconditional, so the stored + published draft is GUARANTEED em/en-dash-free even
+    # if a rewrite is spend-blocked or the writer errs. Runs ONCE, before the QA loop,
+    # so every scored candidate is already clean.
     guarded = guard_generated(
         content, writer=writer, model=providers.model_writer, max_rewrites=_GUARD_MAX_REWRITES
     )
@@ -813,12 +859,57 @@ def _run_pipeline(
         rewritten=guarded.result.rewritten,
     )
 
-    # --- schema (build + validate the JSON-LD against the visible draft)
-    stream("schema")
-    page_type, business, page, visible = _schema_inputs(row, brief, source_pack, content)
-    json_ld = build_json_ld(page_type, business, page)
-    schema_result: ValidationResult = validate_json_ld(json_ld, visible)
-    schema_type = schema_result.primary_type or schema_for(page_type)
+    page_type = str(row.get("page_type") or "blog")
+
+    def _score_candidate(cand: GeneratedContent) -> tuple[QaScore, dict[str, Any], str]:
+        # Build + validate the JSON-LD against THIS candidate's visible draft, then
+        # score it with the 14-dimension §11 scorecard. Pure + free (no provider
+        # spend), so it is safe to re-run on every loop pass.
+        pt, business, page, visible = _schema_inputs(row, brief, source_pack, cand)
+        graph = build_json_ld(pt, business, page)
+        result: ValidationResult = validate_json_ld(graph, visible)
+        cand_qa = scorer(cand, brief, result, source_pack, judge=judge)
+        return cand_qa, graph, (result.primary_type or schema_for(pt))
+
+    # --- QA IMPROVEMENT LOOP (drafting-time): the worker does NOT accept the first
+    # draft. It scores the guarded draft and, while it is below the TOP-1% target
+    # (>= the publish floor), feeds the failing dimensions + notes back as a targeted
+    # rewrite (the SAME cost-gated writer + revise machinery the human edit uses,
+    # driven by rewrite_guidance instead of a human note) and re-scores. Bounded by
+    # settings.content_qa_max_loops; EVERY rewrite is cost-gated, so a spend block does
+    # ZERO writer work -> the loop stops and advances with the BEST draft so far. Never
+    # spins forever, never raises. Only after the loop does the job advance to review.
+    stream("qa")
+    target = settings.content_qa_target_score
+    max_loops = max(0, settings.content_qa_max_loops)
+    qa, json_ld, schema_type = _score_candidate(content)
+    best_content, best_qa, best_json_ld, best_schema_type = content, qa, json_ld, schema_type
+    qa_loops = 0
+    while not (qa.passed and qa.weighted_total >= target) and qa_loops < max_loops:
+        guidance = rewrite_guidance(qa, target=target)
+        if not guidance:  # nothing below target to steer (defensive; while-cond implies some)
+            break
+        rewrite = guided_rewrite(
+            content, instruction=guidance, writer=writer, model=providers.model_writer,
+            max_rewrites=_GUARD_MAX_REWRITES, note_label="QA auto-revise",
+        )
+        if rewrite.result.writer_calls == 0:
+            # Cost-blocked (or no revisable prose): stop, advance with the best draft.
+            logger.info("content_qa_loop_cost_stopped", code=code, loops=qa_loops)
+            break
+        content = rewrite.content
+        qa_loops += 1
+        qa, json_ld, schema_type = _score_candidate(content)
+        if qa.weighted_total > best_qa.weighted_total:
+            best_content, best_qa, best_json_ld, best_schema_type = content, qa, json_ld, schema_type
+        stream("qa")
+
+    # Advance with the BEST-scoring candidate (a later pass can regress; keep the best).
+    content, qa, json_ld, schema_type = best_content, best_qa, best_json_ld, best_schema_type
+    logger.info(
+        "content_qa_loop_done", code=code, loops=qa_loops,
+        passed=qa.passed, weighted_total=qa.weighted_total,
+    )
 
     # --- images (bounded, gated) -> assemble
     stream("images")
@@ -840,32 +931,34 @@ def _run_pipeline(
     outline = _outline(content, brief)
     outline["layout"] = layout.as_dict()
 
-    # --- qa (the 14-dimension scorecard; attached so the reviewer sees it)
-    qa = score(content, brief, schema_result, source_pack, judge=judge)
-
     # --- drafting -> needs_review (STOP at the human gate; carry every rich column)
     final_cost = round(getattr(gate, "spent", 0.0), 2)
-    store.update(
-        code,
-        {
-            "status": "needs_review",
-            "stage": _STAGE_LABEL["review"],
-            "cost": final_cost,
-            "words": content.word_count,
-            "images": image_count,
-            "schema_type": schema_type,
-            "draft_md": content.draft_md,
-            "keyword_map": _keyword_map(brief),
-            "outline": outline,
-            "entity_coverage": _entity_coverage(content, brief),
-            "qa_score": _qa_dict(qa),
-            "json_ld": json_ld,
-            "internal_links": _internal_links(content),
-        },
+    fields: dict[str, Any] = {
+        "status": "needs_review",
+        "stage": _STAGE_LABEL["review"],
+        "cost": final_cost,
+        "words": content.word_count,
+        "images": image_count,
+        "schema_type": schema_type,
+        "draft_md": content.draft_md,
+        "keyword_map": _keyword_map(brief),
+        "outline": outline,
+        "entity_coverage": _entity_coverage(content, brief),
+        "qa_score": _qa_dict(qa),
+        "json_ld": json_ld,
+        "internal_links": _internal_links(content),
+    }
+    if edit_instruction:
+        # Applied - clear it so a later unrelated re-run does not re-apply it.
+        fields["edit_instruction"] = ""
+    store.update(code, fields)
+    logger.info(
+        "content_job_needs_review",
+        code=code, passed=qa.passed, weighted_total=qa.weighted_total, qa_loops=qa_loops,
     )
-    logger.info("content_job_needs_review", code=code, passed=qa.passed, weighted_total=qa.weighted_total)
     return ContentJobOutcome(
-        code, "needs_review", "advanced", stage=_STAGE_LABEL["review"], cost=final_cost, passed=qa.passed
+        code, "needs_review", "advanced", stage=_STAGE_LABEL["review"], cost=final_cost,
+        passed=qa.passed, qa_loops=qa_loops,
     )
 
 

@@ -177,6 +177,17 @@ class Settings(BaseSettings):
     policy_watch_seconds: int = 21600  # 6h beat cadence for the source sweep
     policy_analysis_cost_estimate: float = 0.01  # one Haiku change-analysis call
 
+    # --- On-demand Policy-Radar lookup (POST /policy/ask). The operator types a topic
+    # and Claude researches it LIVE via the Anthropic SERVER-SIDE web_search tool,
+    # returning a real, cited answer (far more reliable than scraping one page). Metered
+    # under the SAME `policy` money-dial: the committed spend is the Anthropic token cost
+    # PLUS the web-search cost (searches x price_web_search_per_search). Reuses the shared
+    # `anthropic_api_key`; keyless / a dial-block / an SDK-or-model that can't web-search
+    # all DEGRADE (200, status='degraded'), never crash. web_search_20250305 works on the
+    # Haiku default, so no heavier model is needed. ---
+    policy_research_model: str = "claude-haiku-4-5"  # web-search-capable Claude for /policy/ask
+    policy_research_max_searches: int = 5  # web_search tool max_uses per lookup (<=5)
+
     # --- Web in-product AI-assist surface (P9-5). The dashboard/portal calls OUR
     # backend, which calls Claude through the EXISTING summarizer seam
     # (integrations/llm.py) wrapped in the EXISTING cost gate (the `ai_assist`
@@ -226,6 +237,17 @@ class Settings(BaseSettings):
     # side (defers a borderline job rather than half-spending then blocking).
     content_precheck_research_calls: int = 10  # ~ serp + up-to-8 metrics + teardown
     content_precheck_writer_calls: int = 14    # ~ one writer call per drafted section
+    # --- Content QA IMPROVEMENT LOOP (drafting-time). The worker does NOT accept the
+    # first draft: while the job is still `drafting` it scores each candidate with the
+    # §11 scorecard and, when it is below the TARGET, feeds the failing dimensions +
+    # notes back as a targeted rewrite and re-runs - pushing toward a "top 1%" draft
+    # rather than merely clearing the publish floor (which stays 70/85 in content_qa).
+    # `target_score` is the weighted total the loop aims for (>= the publish bar; a
+    # passed draft that scores below it is still refined); `max_loops` hard-caps the
+    # rewrite passes so it can never spin forever. Every pass is cost-gated, so the
+    # spend-stop / client cap can stop the loop early (advance with the best draft). ---
+    content_qa_target_score: int = 90   # the top-1% weighted-total the loop aims for
+    content_qa_max_loops: int = 3       # hard cap on drafting-time rewrite passes
 
     # --- Off-page module provider seams (7B). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic fakes
@@ -442,6 +464,14 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr | None = None  # Resend transactional-email API key
     resend_from_email: str = "AIOS <noreply@mail.qanry.com>"  # verified Resend sending domain
     slack_webhook_url: SecretStr | None = None  # Slack incoming-webhook URL (embeds a token)
+    # Where a fixed-recipient operator alert (e.g. a new client-portal request) is
+    # emailed. NOT a per-user notification (no prefs / no DB user row) - it targets one
+    # standing inbox. Overridable via ADMIN_NOTIFY_EMAIL; key-gated exactly like every
+    # email leg (no RESEND_API_KEY -> the send is skipped, the mutation still succeeds).
+    admin_notify_email: str = "business.zainsaeed@gmail.com"  # operator inbox for portal alerts
+    # Base URL of the admin dashboard, used to build a deep link into an email alert
+    # (e.g. the client directory where a new portal request surfaces). Not a secret.
+    admin_base_url: str = "http://localhost:3000"
     # --- Backups module (7G-1). Nightly/manual Postgres snapshots via pg_dump, a
     # guarded restore via pg_restore, and an OPTIONAL Backblaze B2 offsite copy. ALL
     # optional and NOT in _REQUIRED_IN_PROD: the module builds + unit-tests NOW
@@ -479,6 +509,10 @@ class Settings(BaseSettings):
     price_anthropic_opus_output_per_mtok: float = 25.00  # claude-opus-* output $/MTok
     # Serper.dev is billed per SERP query (~ $1 / 1,000 queries on the paid plan).
     price_serper_per_query: float = 0.001
+    # Anthropic server-side web_search tool billed per search request (~ $10 / 1,000
+    # searches). Multiplied by the number of searches Claude actually ran on a
+    # /policy/ask lookup (read from usage.server_tool_use.web_search_requests).
+    price_web_search_per_search: float = 0.01
     # Google paid APIs billed per call (Places/geocode ~ $0.005/call blended; env-tune
     # per SKU). GSC/GA4/PageSpeed are FREE-tier and priced at $0 by their own settings.
     price_google_per_call: float = 0.005

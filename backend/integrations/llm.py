@@ -113,6 +113,187 @@ class AnthropicSummarizer:
         )
 
 
+# --------------------------------------------------------------------------- #
+# Web-search research seam (Policy-Radar on-demand lookup, POST /policy/ask)
+# --------------------------------------------------------------------------- #
+# The on-demand lookup does NOT scrape one page; it lets Claude search the web
+# ITSELF via the Anthropic SERVER-SIDE web_search tool and synthesize a cited
+# answer. This is a SEPARATE seam from ``Summarizer`` (a different call shape:
+# it passes ``tools=[web_search]`` and reads the tool-result citation URLs +
+# server-tool usage off the response), reachable only through this Protocol so
+# it stays cost-gated + fake-injectable in tests.
+_WEB_SEARCH_TOOL_TYPE = "web_search_20250305"  # basic variant; works on the Haiku default
+_WEB_SEARCH_TOOL_NAME = "web_search"
+
+
+@dataclass(frozen=True)
+class ResearchResult:
+    """One web-search research result: the synthesized answer text, the source URLs
+    Claude actually retrieved, token usage, and the number of searches it ran.
+
+    ``sources`` are the web_search citation URLs (authoritative - what the tool
+    returned), deduped in first-seen order. ``searches`` is ``None`` when the SDK did
+    not surface the server-tool usage count (the caller then estimates ``max_uses``);
+    a real ``0`` means Claude answered without searching. ``input_tokens`` /
+    ``output_tokens`` + ``searches`` feed the cost path (token spend + web-search spend).
+    """
+
+    text: str
+    sources: list[str]
+    input_tokens: int
+    output_tokens: int
+    searches: int | None
+
+
+@runtime_checkable
+class Researcher(Protocol):
+    """Answer ``prompt`` using server-side web search, returning the synthesized text,
+    the cited source URLs, and token/search usage for cost accounting.
+
+    ``max_searches`` bounds the web_search tool's ``max_uses`` for one lookup.
+    """
+
+    def research(
+        self, prompt: str, *, model: str, max_tokens: int, max_searches: int
+    ) -> ResearchResult: ...
+
+
+# Frozen, factual system prompt for the on-demand lookup. Instructs Claude to research
+# the topic via web_search against Google's official surfaces and return STRICT JSON.
+_RESEARCH_SYSTEM_PROMPT = (
+    "You are a senior SEO and Google Search policy expert advising an agency operator. "
+    "Use the web_search tool to research the operator's topic against Google's official, "
+    "authoritative surfaces (developers.google.com / Search Central, blog.google, the "
+    "Search Status dashboard, the Search Quality Rater Guidelines) and other reputable "
+    "sources, then synthesize ONE accurate answer grounded in what you actually found. "
+    "Respond with STRICT JSON ONLY - no prose, no markdown, no code fences - with EXACTLY "
+    "these keys: answer (a concise 2-4 sentence plain-language answer to the operator's "
+    "question), urgency (one of \"urgent\" or \"informational\" - \"urgent\" ONLY if the "
+    "operator should act soon, e.g. an active rollout, a newly required change, or a "
+    "manual-action risk), key_rules (an array of short strings, each a concrete rule or "
+    "requirement), sources (an array of the source URLs you used). Do not invent rules or "
+    "URLs; ground every claim in a source you actually retrieved."
+)
+
+
+class AnthropicResearcher:
+    """Real ``Researcher`` backed by Claude's SERVER-SIDE web_search tool; lazy-imports
+    the ``anthropic`` SDK (optional ``[ai]`` extra, exactly like ``AnthropicSummarizer``).
+
+    Absent SDK / key -> ``ProviderNotConfiguredError`` naming the fix (the builder turns
+    that into a clean keyless degrade). ``model`` defaults to the web-search-capable Haiku;
+    the ``research`` ``model`` arg is authoritative per call.
+    """
+
+    def __init__(self, *, api_key: str, model: str = "claude-haiku-4-5") -> None:
+        if not api_key:
+            raise ProviderNotConfiguredError(f"Anthropic researcher unavailable: {_INSTALL_HINT}")
+        try:
+            import anthropic
+        except ImportError as exc:  # SDK not installed (base install omits the [ai] extra)
+            raise ProviderNotConfiguredError(
+                f"Anthropic researcher unavailable: {_INSTALL_HINT}"
+            ) from exc
+        self._client = anthropic.Anthropic(api_key=api_key)
+        self.model = model
+
+    def research(
+        self, prompt: str, *, model: str, max_tokens: int, max_searches: int
+    ) -> ResearchResult:
+        message = self._client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": _RESEARCH_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            tools=[
+                {
+                    "type": _WEB_SEARCH_TOOL_TYPE,
+                    "name": _WEB_SEARCH_TOOL_NAME,
+                    "max_uses": max(1, max_searches),
+                }
+            ],
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text_parts: list[str] = []
+        sources: list[str] = []
+        seen: set[str] = set()
+
+        def _add_source(url: object) -> None:
+            if isinstance(url, str) and url and url not in seen:
+                seen.add(url)
+                sources.append(url)
+
+        for block in message.content:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                text_parts.append(getattr(block, "text", "") or "")
+                for cite in getattr(block, "citations", None) or []:
+                    _add_source(getattr(cite, "url", None))
+            elif btype == "web_search_tool_result":
+                # ``.content`` is a LIST of web_search_result on success, or a single
+                # error object on failure (e.g. {"error_code": ...}) - only lists cite.
+                content = getattr(block, "content", None)
+                if isinstance(content, list):
+                    for item in content:
+                        _add_source(getattr(item, "url", None))
+
+        usage = message.usage
+        searches: int | None = None
+        server_use = getattr(usage, "server_tool_use", None)
+        if server_use is not None:
+            requests = getattr(server_use, "web_search_requests", None)
+            if requests is not None:
+                searches = int(requests)
+
+        return ResearchResult(
+            text="".join(text_parts),
+            sources=sources,
+            input_tokens=int(usage.input_tokens),
+            output_tokens=int(usage.output_tokens),
+            searches=searches,
+        )
+
+
+class FakeResearcher:
+    """Deterministic, offline ``Researcher`` for unit tests + degraded golden runs.
+
+    Returns a fixed STRICT-JSON answer plus a fixed source list, with token counts
+    derived from lengths and a stable search count. No network; identical input always
+    yields an identical ``ResearchResult``.
+    """
+
+    def __init__(
+        self,
+        *,
+        payload: str = (
+            '{"answer": "A researched answer about the topic.", "urgency": '
+            '"informational", "key_rules": ["A concrete rule."], "sources": '
+            '["https://developers.google.com/search"]}'
+        ),
+        sources: list[str] | None = None,
+        searches: int | None = 1,
+    ) -> None:
+        self._payload = payload
+        self._sources = ["https://developers.google.com/search"] if sources is None else sources
+        self._searches = searches
+
+    def research(
+        self, prompt: str, *, model: str, max_tokens: int, max_searches: int
+    ) -> ResearchResult:
+        return ResearchResult(
+            text=self._payload,
+            sources=list(self._sources),
+            input_tokens=max(1, len(prompt) // 4),
+            output_tokens=max(1, len(self._payload) // 4),
+            searches=self._searches,
+        )
+
+
 class FakeSummarizer:
     """Deterministic, offline ``Summarizer`` for unit tests + degraded golden runs.
 

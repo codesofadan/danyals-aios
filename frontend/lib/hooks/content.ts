@@ -72,14 +72,20 @@ export function useCreateContentJob() {
 }
 
 // POST /content/jobs/{code}/review — the human review gate (approve → publishing,
-// edit → drafting, reject → rejected). `code` is the public CJ-#### id.
-export type ReviewContentInput = { code: string; action: "approve" | "edit" | "reject" };
+// edit → drafting, reject → rejected). `code` is the public CJ-#### id. `note` is
+// the reviewer's GUIDED-EDIT instruction (only meaningful for `edit`): the server
+// persists it and the worker re-drafts targeting exactly what was asked.
+export type ReviewContentInput = {
+  code: string;
+  action: "approve" | "edit" | "reject";
+  note?: string;
+};
 
 export function useReviewContentJob() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ code, action }: ReviewContentInput) =>
-      api.post<ContentJob>(`/content/jobs/${code}/review`, { action }),
+    mutationFn: ({ code, action, note }: ReviewContentInput) =>
+      api.post<ContentJob>(`/content/jobs/${code}/review`, { action, note }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
@@ -87,17 +93,86 @@ export function useReviewContentJob() {
   });
 }
 
-// GET /content/jobs/{code}/draft — the server-only draft markdown for the Review
-// preview (staff-only rich retrieval; the pipeline populates draft_md at
-// needs_review and it survives publish, so the preview works for done jobs too).
-export type ContentDraft = { id: string; draft: string | null };
+// --- Rich retrieval (GET /content/jobs/{code}/{column}) -----------------------
+// The server-only pipeline columns the full SEO Review preview reads. Each endpoint
+// returns { id, <column>: value }. All are staff-only and settle once the job
+// leaves the worker, so they are fetched lazily (never polled).
 
-/** The reviewed draft markdown for a job, fetched lazily when a job is selected for
- * preview. Not polled — the draft is settled once the job leaves the worker. */
-export function useContentDraft(code: string | null) {
+/** Generic lazy fetch of one rich column for a job (keyed by column so each tab
+ * caches independently). */
+function useContentColumn<T>(code: string | null, column: string) {
   return useQuery({
-    queryKey: ["content", "jobs", code, "draft"] as const,
-    queryFn: () => api.get<ContentDraft>(`/content/jobs/${code}/draft`),
+    queryKey: ["content", "jobs", code, column] as const,
+    queryFn: () => api.get<T>(`/content/jobs/${code}/${column}`),
     enabled: !!code,
   });
+}
+
+// (a) ARTICLE — the draft markdown, rendered to HTML in the preview iframe.
+export type ContentDraft = { id: string; draft: string | null };
+export function useContentDraft(code: string | null) {
+  return useContentColumn<ContentDraft>(code, "draft");
+}
+
+// (b) SCHEMA — the assembled JSON-LD graph (the schema.org markup + @type).
+export type ContentSchema = { id: string; schema: Record<string, unknown> | null };
+export function useContentSchema(code: string | null) {
+  return useContentColumn<ContentSchema>(code, "schema");
+}
+
+// (c) META + (d) OUTLINE — headings, layout, and the rendered <title>/<meta
+// description> (outline.meta) the pipeline persists for the preview.
+export type ContentOutline = {
+  id: string;
+  outline: {
+    headings?: { level: number; text: string }[];
+    meta?: { title?: string; description?: string };
+    heading_blueprint?: string[];
+    section_roles?: string[];
+    needs?: string[];
+    layout?: { key?: string; label?: string } & Record<string, unknown>;
+    [k: string]: unknown;
+  } | null;
+};
+export function useContentOutline(code: string | null) {
+  return useContentColumn<ContentOutline>(code, "outline");
+}
+
+// (d) KEYWORD coverage — the primary/secondary/semantic keyword plan.
+export type ContentKeywords = {
+  id: string;
+  keywords: {
+    primary?: string;
+    secondary?: string[];
+    semantic_entities?: string[];
+    questions?: string[];
+    intent?: string;
+    [k: string]: unknown;
+  } | null;
+};
+export function useContentKeywords(code: string | null) {
+  return useContentColumn<ContentKeywords>(code, "keywords");
+}
+
+// (d) INTERNAL-LINK coverage — the pillar↔cluster anchor suggestions.
+export type ContentLinks = {
+  id: string;
+  links: { links?: { anchor: string; url: string; keyword: string }[] } | null;
+};
+export function useContentLinks(code: string | null) {
+  return useContentColumn<ContentLinks>(code, "links");
+}
+
+// (e) QA SCORECARD — the 14-dimension result (pass/fail per dimension + total).
+export type QaScorecard = {
+  dimensions: Record<string, number>;
+  weighted_total: number;
+  passed: boolean;
+  blocked_by: string[];
+  provisional: boolean;
+  notes: string[];
+};
+export type ContentQa = { id: string; qa: QaScorecard | null };
+export function useContentQa(code: string | null) {
+  return useContentColumn<ContentQa>(code, "qa");
 }

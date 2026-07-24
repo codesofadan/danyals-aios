@@ -1,15 +1,30 @@
 "use client";
 
 // ============================================================
-// AIOS · content Review PREVIEW (Wave 5)
-// A framed, embedded HTML preview of a draft on the Review surface. Fetches the
-// server-only draft markdown (GET /content/jobs/{code}/draft), renders it to HTML
-// inside a sandboxed <iframe srcDoc> so it reads like the published page, and - for a
-// published job - surfaces the LIVE post URL with an "open live post" test action.
-// (The live URL rides on the wire-visible `stage` label: "Published: <url>".)
+// AIOS · content Review PREVIEW — the FULL SEO package
+// A tabbed reviewer surface that shows the COMPLETE SEO deliverable, not just the
+// body, so a lead can sign off on SEO compliance at a glance. Five sections, each
+// wired to the real staff-only rich-retrieval endpoints
+// (GET /content/jobs/{code}/{column}):
+//   (a) ARTICLE   — the rendered draft HTML            (…/draft)
+//   (b) META      — <title> + <meta description> + SERP snippet (…/outline → meta)
+//   (c) SCHEMA    — the JSON-LD block, pretty-printed  (…/schema)
+//   (d) OUTLINE   — H1/H2/H3 structure + keyword + internal-link coverage
+//                   (headings parsed from the draft; …/keywords + …/links)
+//   (e) QA        — the 14-dimension scorecard, pass/fail per dimension (…/qa)
+// Plus an "Request edit" action that sends the edit action + a free-text
+// instruction note to POST /content/{code}/review (the GUIDED-EDIT flow).
 // ============================================================
 
-import { useContentDraft } from "@/lib/hooks/content";
+import { useState } from "react";
+import {
+  useContentDraft,
+  useContentSchema,
+  useContentOutline,
+  useContentKeywords,
+  useContentLinks,
+  useContentQa,
+} from "@/lib/hooks/content";
 import type { ContentJob } from "@/lib/content";
 import type { ReviewAction } from "./ReviewGate";
 
@@ -77,23 +92,71 @@ function liveUrlFromStage(job: ContentJob): string | null {
   return m ? m[0] : null;
 }
 
+// Parse the H1/H2/H3 outline straight out of the draft markdown (deliverable d).
+type Head = { level: number; text: string };
+function headingsFromMd(md: string): Head[] {
+  const out: Head[] = [];
+  for (const raw of md.split(/\r?\n/)) {
+    const m = raw.match(/^(#{1,3})\s+(.*)$/);
+    if (m) out.push({ level: m[1].length, text: m[2].trim() });
+  }
+  return out;
+}
+
+const TABS = [
+  { key: "article", label: "Article", icon: "article" },
+  { key: "meta", label: "Meta", icon: "title" },
+  { key: "schema", label: "Schema", icon: "data_object" },
+  { key: "outline", label: "Outline & coverage", icon: "format_list_bulleted" },
+  { key: "qa", label: "QA scorecard", icon: "fact_check" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
+// A QA dimension passes at/above the doctrine per-dimension floor (70).
+const QA_FLOOR = 70;
+const prettyDim = (d: string) => d.replace(/_/g, " ");
+
 export default function ReviewPreview({
   job, onAction, onClose,
 }: {
   job: ContentJob;
-  onAction: (id: string, action: ReviewAction) => void;
+  onAction: (id: string, action: ReviewAction, note?: string) => void;
   onClose: () => void;
 }) {
   const draftQ = useContentDraft(job.id);
+  const schemaQ = useContentSchema(job.id);
+  const outlineQ = useContentOutline(job.id);
+  const keywordsQ = useContentKeywords(job.id);
+  const linksQ = useContentLinks(job.id);
+  const qaQ = useContentQa(job.id);
+
+  const [tab, setTab] = useState<TabKey>("article");
+  const [editOpen, setEditOpen] = useState(false);
+  const [note, setNote] = useState("");
+
   const md = draftQ.data?.draft ?? "";
   const liveUrl = liveUrlFromStage(job);
   const inReview = job.status === "needs_review";
+
+  const meta = outlineQ.data?.outline?.meta ?? {};
+  const metaTitle = meta.title ?? "";
+  const metaDesc = meta.description ?? "";
+  const heads = headingsFromMd(md);
+  const kw = keywordsQ.data?.keywords ?? null;
+  const links = linksQ.data?.links?.links ?? [];
+  const qa = qaQ.data?.qa ?? null;
+
+  function sendEdit() {
+    onAction(job.id, "edit", note.trim());
+    setEditOpen(false);
+    setNote("");
+  }
 
   return (
     <section className="card co-preview-card" style={{ marginTop: 12 }}>
       <div className="card-h">
         <div>
-          <div className="ct">Draft preview · {job.id}</div>
+          <div className="ct">SEO review · {job.id}</div>
           <div className="cs">
             {PAGE_LABEL[job.pageType]} · {job.framework} · {job.words.toLocaleString()} words ·{" "}
             {job.schema || "no schema"} · {job.images} image{job.images === 1 ? "" : "s"}
@@ -106,7 +169,7 @@ export default function ReviewPreview({
         </div>
       </div>
 
-      {/* Published banner + the live-URL "open" test action (deliverable 4). */}
+      {/* Published banner + the live-URL "open" test action. */}
       {job.status === "done" && (
         <div
           role="status"
@@ -137,35 +200,159 @@ export default function ReviewPreview({
         </div>
       )}
 
-      {/* The framed HTML preview. */}
-      {draftQ.isLoading ? (
-        <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span>
-          <div>Loading the draft…</div></div>
-      ) : draftQ.isError ? (
-        <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span>
-          <div>Couldn&apos;t load the draft — {(draftQ.error as Error)?.message ?? "try again"}.</div></div>
-      ) : !md ? (
-        <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_empty</span>
-          <div>No draft yet — the pipeline is still writing this one.</div></div>
-      ) : (
-        <iframe
-          title={`Draft preview for ${job.id}`}
-          sandbox=""
-          srcDoc={frameDoc(mdToHtml(md))}
-          style={{
-            width: "100%", height: 460, border: "1px solid var(--line, #e8d2d7)",
-            borderRadius: 12, background: "#fff",
-          }}
-        />
+      {/* Tab bar */}
+      <div
+        role="tablist"
+        style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "0 0 12px",
+          borderBottom: "1px solid var(--line, #e8d2d7)", paddingBottom: 8 }}
+      >
+        {TABS.map((t) => {
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={active}
+              className="ghostbtn"
+              onClick={() => setTab(t.key)}
+              style={{
+                fontWeight: active ? 700 : 500,
+                color: active ? "var(--maroon-2, #8C1D2E)" : undefined,
+                borderColor: active ? "var(--maroon-2, #8C1D2E)" : "transparent",
+                background: active ? "var(--blush, #F8ECEE)" : "transparent",
+              }}
+            >
+              <span className="material-symbols-rounded">{t.icon}</span>{t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* (a) ARTICLE */}
+      {tab === "article" && (
+        draftQ.isLoading ? (
+          <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span>
+            <div>Loading the draft…</div></div>
+        ) : draftQ.isError ? (
+          <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span>
+            <div>Couldn&apos;t load the draft — {(draftQ.error as Error)?.message ?? "try again"}.</div></div>
+        ) : !md ? (
+          <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_empty</span>
+            <div>No draft yet — the pipeline is still writing this one.</div></div>
+        ) : (
+          <iframe
+            title={`Draft preview for ${job.id}`}
+            sandbox=""
+            srcDoc={frameDoc(mdToHtml(md))}
+            style={{
+              width: "100%", height: 460, border: "1px solid var(--line, #e8d2d7)",
+              borderRadius: 12, background: "#fff",
+            }}
+          />
+        )
+      )}
+
+      {/* (b) META — the <title> + <meta description> + a Google SERP-style snippet */}
+      {tab === "meta" && (
+        <div style={{ display: "grid", gap: 12 }}>
+          <MetaRow
+            label="Title tag"
+            value={metaTitle}
+            limit={60}
+            loading={outlineQ.isLoading}
+          />
+          <MetaRow
+            label="Meta description"
+            value={metaDesc}
+            limit={160}
+            loading={outlineQ.isLoading}
+          />
+          {/* SERP snippet mock */}
+          <div style={{ padding: "14px 16px", borderRadius: 12, border: "1px solid var(--line, #e8d2d7)" }}>
+            <div className="cs" style={{ marginBottom: 6 }}>Search preview</div>
+            <div style={{ color: "#1a0dab", fontSize: 18, lineHeight: 1.3 }}>
+              {metaTitle || job.topic}
+            </div>
+            <div style={{ color: "#0b7a34", fontSize: 13, margin: "2px 0 4px" }}>
+              {liveUrl ?? "example.com › " + job.topic.toLowerCase().replace(/\s+/g, "-")}
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.85 }}>
+              {metaDesc || "The meta description will appear here once the draft is written."}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* (c) SCHEMA — the JSON-LD block, pretty-printed, with the @type */}
+      {tab === "schema" && (
+        <SchemaTab loading={schemaQ.isLoading} error={schemaQ.error as Error | null}
+          data={schemaQ.data?.schema ?? null} fallbackType={job.schema} />
+      )}
+
+      {/* (d) OUTLINE — headings + keyword + internal-link coverage */}
+      {tab === "outline" && (
+        <div style={{ display: "grid", gap: 16 }}>
+          <div>
+            <div className="cs" style={{ marginBottom: 6 }}>Headings (H1 / H2 / H3)</div>
+            {heads.length === 0 ? (
+              <div className="cs" style={{ opacity: 0.7 }}>No headings yet.</div>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 3 }}>
+                {heads.map((h, i) => (
+                  <li key={i} style={{ paddingLeft: (h.level - 1) * 18, fontSize: 14,
+                    fontWeight: h.level === 1 ? 700 : h.level === 2 ? 600 : 400 }}>
+                    <span className="cs" style={{ opacity: 0.55, marginRight: 8 }}>H{h.level}</span>
+                    {h.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <div className="cs" style={{ marginBottom: 6 }}>Keyword coverage</div>
+            {!kw ? (
+              <div className="cs" style={{ opacity: 0.7 }}>{keywordsQ.isLoading ? "Loading…" : "No keyword map."}</div>
+            ) : (
+              <div style={{ display: "grid", gap: 6 }}>
+                {kw.primary && <ChipRow label="Primary" items={[kw.primary]} accent />}
+                {kw.secondary?.length ? <ChipRow label="Secondary" items={kw.secondary} /> : null}
+                {kw.semantic_entities?.length ? <ChipRow label="Entities" items={kw.semantic_entities} /> : null}
+                {kw.questions?.length ? <ChipRow label="Questions" items={kw.questions} /> : null}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="cs" style={{ marginBottom: 6 }}>Internal links ({links.length})</div>
+            {links.length === 0 ? (
+              <div className="cs" style={{ opacity: 0.7 }}>{linksQ.isLoading ? "Loading…" : "No internal links suggested."}</div>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 4 }}>
+                {links.map((l, i) => (
+                  <li key={i} style={{ fontSize: 14 }}>
+                    <span className="material-symbols-rounded" style={{ fontSize: 15, verticalAlign: "-2px", opacity: 0.6 }}>link</span>{" "}
+                    <strong>{l.anchor}</strong> <span style={{ opacity: 0.6 }}>→ {l.url}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* (e) QA SCORECARD — pass/fail per dimension incl. schema validity */}
+      {tab === "qa" && (
+        <QaTab loading={qaQ.isLoading} error={qaQ.error as Error | null} qa={qa} />
       )}
 
       {/* Review actions (only meaningful while the job awaits review). */}
       {inReview && (
-        <div className="co-gate-actions" style={{ marginTop: 12 }}>
+        <div className="co-gate-actions" style={{ marginTop: 14 }}>
           <button className="primary-btn co-approve" onClick={() => onAction(job.id, "approve")}>
             <span className="material-symbols-rounded">check</span>Approve &amp; publish
           </button>
-          <button className="ghostbtn" onClick={() => onAction(job.id, "edit")}>
+          <button className="ghostbtn" onClick={() => setEditOpen((v) => !v)} aria-expanded={editOpen}>
             <span className="material-symbols-rounded">edit</span>Request edit
           </button>
           <button className="ghostbtn co-reject" onClick={() => onAction(job.id, "reject")}>
@@ -173,6 +360,158 @@ export default function ReviewPreview({
           </button>
         </div>
       )}
+
+      {/* The guided-edit instruction panel. */}
+      {inReview && editOpen && (
+        <div style={{ marginTop: 12, padding: 14, borderRadius: 12,
+          border: "1px solid var(--line, #e8d2d7)", background: "var(--blush, #F8ECEE)" }}>
+          <label htmlFor="co-edit-note" className="cs" style={{ display: "block", marginBottom: 6 }}>
+            What should the re-draft change? The pipeline re-drafts targeting exactly this note.
+          </label>
+          <textarea
+            id="co-edit-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. make the intro punchier, add an FAQ section, tighten the H2s, cut the fluff"
+            rows={3}
+            style={{ width: "100%", resize: "vertical", padding: "10px 12px", borderRadius: 10,
+              border: "1px solid var(--line, #e8d2d7)", font: "inherit", fontSize: 14 }}
+          />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+            <button className="ghostbtn" onClick={() => { setEditOpen(false); setNote(""); }}>Cancel</button>
+            <button className="primary-btn" onClick={sendEdit} disabled={!note.trim()}>
+              <span className="material-symbols-rounded">send</span>Send edit request
+            </button>
+          </div>
+        </div>
+      )}
     </section>
+  );
+}
+
+// --- small presentational helpers -------------------------------------------
+function MetaRow({ label, value, limit, loading }: {
+  label: string; value: string; limit: number; loading: boolean;
+}) {
+  const len = value.length;
+  const over = len > limit;
+  return (
+    <div style={{ padding: "12px 16px", borderRadius: 12, border: "1px solid var(--line, #e8d2d7)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div className="cs">{label}</div>
+        <div className="cs" style={{ color: over ? "var(--warn, #C0392B)" : undefined }}>
+          {loading ? "…" : `${len} / ${limit}`}
+        </div>
+      </div>
+      <div style={{ fontSize: 15, marginTop: 4 }}>{value || (loading ? "Loading…" : "—")}</div>
+    </div>
+  );
+}
+
+function ChipRow({ label, items, accent }: { label: string; items: string[]; accent?: boolean }) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <span className="cs" style={{ minWidth: 78, opacity: 0.7 }}>{label}</span>
+      {items.map((it, i) => (
+        <span key={i} className="pill-tag" style={accent ? { background: "var(--blush-2, #F1DADE)", fontWeight: 700 } : undefined}>
+          {it}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SchemaTab({ loading, error, data, fallbackType }: {
+  loading: boolean; error: Error | null; data: Record<string, unknown> | null; fallbackType: string;
+}) {
+  if (loading) return <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span><div>Loading schema…</div></div>;
+  if (error) return <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span><div>Couldn&apos;t load the schema — {error.message}.</div></div>;
+  const empty = !data || Object.keys(data).length === 0;
+  if (empty) {
+    return (
+      <div className="co-gate-empty"><span className="material-symbols-rounded">data_object</span>
+        <div>{fallbackType ? `No JSON-LD assembled yet (@type ${fallbackType}).` : "This page type carries no JSON-LD."}</div></div>
+    );
+  }
+  // Pull the primary @type out of the graph for the badge.
+  const graph = (data["@graph"] as Array<Record<string, unknown>> | undefined) ?? [];
+  const primaryType = fallbackType
+    || (graph.map((n) => n["@type"]).find(Boolean) as string | undefined)
+    || (data["@type"] as string | undefined)
+    || "";
+  return (
+    <div>
+      {primaryType && (
+        <div style={{ marginBottom: 8 }}>
+          <span className="pill-tag ok"><span className="material-symbols-rounded">verified</span>@type: {primaryType}</span>
+        </div>
+      )}
+      <pre style={{ margin: 0, padding: "14px 16px", borderRadius: 12, overflowX: "auto",
+        background: "var(--blush, #F8ECEE)", border: "1px solid var(--line, #e8d2d7)",
+        fontSize: 12.5, lineHeight: 1.5 }}>
+        <code>{JSON.stringify(data, null, 2)}</code>
+      </pre>
+    </div>
+  );
+}
+
+function QaTab({ loading, error, qa }: {
+  loading: boolean; error: Error | null;
+  qa: { dimensions: Record<string, number>; weighted_total: number; passed: boolean;
+    blocked_by: string[]; provisional: boolean; notes: string[] } | null;
+}) {
+  if (loading) return <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span><div>Loading QA…</div></div>;
+  if (error) return <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span><div>Couldn&apos;t load the QA scorecard — {error.message}.</div></div>;
+  if (!qa || Object.keys(qa.dimensions ?? {}).length === 0) {
+    return <div className="co-gate-empty"><span className="material-symbols-rounded">fact_check</span><div>No QA scorecard yet — it is attached when the draft reaches review.</div></div>;
+  }
+  const dims = Object.entries(qa.dimensions);
+  return (
+    <div>
+      {/* Headline verdict */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <span className={`pill-tag ${qa.passed ? "ok" : "warn"}`}>
+          <span className="material-symbols-rounded">{qa.passed ? "check_circle" : "gpp_maybe"}</span>
+          {qa.passed ? "Passes the publish gate" : "Below the publish gate"}
+        </span>
+        <span className="pill-tag"><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</span>
+        {qa.provisional && <span className="pill-tag" style={{ opacity: 0.8 }}>provisional weights</span>}
+      </div>
+
+      {qa.blocked_by.length > 0 && (
+        <div role="alert" style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 10,
+          background: "rgba(192,57,43,0.10)", border: "1px solid rgba(192,57,43,0.35)", fontSize: 13 }}>
+          Hard-blocked by: {qa.blocked_by.map(prettyDim).join(", ")}
+        </div>
+      )}
+
+      {/* Per-dimension grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+        {dims.map(([dim, sc]) => {
+          const pass = sc >= QA_FLOOR;
+          return (
+            <div key={dim} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+              gap: 8, padding: "8px 12px", borderRadius: 10, border: "1px solid var(--line, #e8d2d7)" }}>
+              <span style={{ fontSize: 13, textTransform: "capitalize" }}>{prettyDim(dim)}</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700, fontSize: 13,
+                color: pass ? "#12b48f" : "var(--warn, #C0392B)" }}>
+                <span className="material-symbols-rounded" style={{ fontSize: 16 }}>
+                  {pass ? "check_circle" : "cancel"}
+                </span>{sc}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {qa.notes.length > 0 && (
+        <details style={{ marginTop: 12 }}>
+          <summary className="cs" style={{ cursor: "pointer" }}>Why ({qa.notes.length} note{qa.notes.length === 1 ? "" : "s"})</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13, opacity: 0.85 }}>
+            {qa.notes.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }

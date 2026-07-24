@@ -3445,12 +3445,18 @@ def build_offpage_complete_section(
     scores: dict,
     off_issues: list[dict],
     off_passes: list[str],
+    condensed: bool = False,
 ) -> str:
     """Render the comprehensive Off-page + Business Citations section that
     mirrors the manual GMB Audit spreadsheet (Location Data / Citation Audit
     / Compare with Competitors / Audit / Cit Gap). Every block degrades
     gracefully when its source data is missing. Returns a single
     .reg-flow.dim-section block ready to slot into pages_html.
+
+    ``condensed=True`` (free tier) keeps the citation snapshot, competitor
+    comparison, and the anchor priority directories, but compresses the full
+    20-row directory list and the 6-group GBP self-audit checklist into compact
+    summaries so the free report stays short while still covering off-page.
     """
     citations  = _read_citations_data(artifact_dir)
     competitors = _read_competitor_data(artifact_dir)
@@ -3566,25 +3572,39 @@ def build_offpage_complete_section(
         )
 
     # ---- 5. GMB self-audit checklist (mirrors xlsx "Audit" tab) ----
-    checklist_html_parts: list[str] = []
-    for group_title, items in _GMB_SELF_AUDIT:
-        items_html = "".join(
-            f'<li><span class="gmb-check-box"></span>{md_inline(item)}</li>'
-            for item in items
+    if condensed:
+        # Compact summary: the 6 group titles as a single list, plus one lead
+        # item per group, instead of the full ~35-box grid. The complete
+        # checklist ships in the full audit.
+        summary_items = "".join(
+            f'<li><strong>{md_inline(group_title)}:</strong> {md_inline(items[0])}</li>'
+            for group_title, items in _GMB_SELF_AUDIT
         )
-        checklist_html_parts.append(
-            '<div class="gmb-check-group">'
-            f'<div class="gmb-check-group-title">{md_inline(group_title)}</div>'
-            f'<ul class="gmb-check-list">{items_html}</ul>'
-            '</div>'
+        flow_parts.append(
+            '<div class="cit-priority-lead" style="margin-top:18pt;">Google Business Profile self-audit</div>'
+            '<div class="cit-priority-sub">Six areas to work through inside business.google.com, one focused pass per week. The full item-by-item checklist is in the complete audit.</div>'
+            f'<ul class="passes-list">{summary_items}</ul>'
         )
-    flow_parts.append(
-        '<div class="cit-priority-lead" style="margin-top:18pt;">Google Business Profile self-audit checklist</div>'
-        '<div class="cit-priority-sub">Walk through these items inside business.google.com. Each unchecked box is an item to fix this quarter. Hours, photos, services, and reviews each have their own block; the right cadence is one focused pass per week.</div>'
-        + '<div class="gmb-checklist-grid">'
-        + "".join(checklist_html_parts)
-        + '</div>'
-    )
+    else:
+        checklist_html_parts: list[str] = []
+        for group_title, items in _GMB_SELF_AUDIT:
+            items_html = "".join(
+                f'<li><span class="gmb-check-box"></span>{md_inline(item)}</li>'
+                for item in items
+            )
+            checklist_html_parts.append(
+                '<div class="gmb-check-group">'
+                f'<div class="gmb-check-group-title">{md_inline(group_title)}</div>'
+                f'<ul class="gmb-check-list">{items_html}</ul>'
+                '</div>'
+            )
+        flow_parts.append(
+            '<div class="cit-priority-lead" style="margin-top:18pt;">Google Business Profile self-audit checklist</div>'
+            '<div class="cit-priority-sub">Walk through these items inside business.google.com. Each unchecked box is an item to fix this quarter. Hours, photos, services, and reviews each have their own block; the right cadence is one focused pass per week.</div>'
+            + '<div class="gmb-checklist-grid">'
+            + "".join(checklist_html_parts)
+            + '</div>'
+        )
 
     # ---- 6. Competitor GMB comparison (mirrors xlsx "Compare with Competitors") ----
     if competitors:
@@ -3607,6 +3627,9 @@ def build_offpage_complete_section(
         )
 
     # ---- 7. Citation Gap - priority directories with DR (universal) ----
+    # Free tier shows only the anchor directories (top 6); the full 20-row list
+    # ships in the complete audit. Paid shows all 20.
+    directories = _PRIORITY_DIRECTORIES[:6] if condensed else _PRIORITY_DIRECTORIES
     priority_rows = "".join(
         '<tr>'
         f'<td><strong>{md_inline(d["name"])}</strong></td>'
@@ -3614,7 +3637,12 @@ def build_offpage_complete_section(
         f'<td><span class="cit-cat-chip cit-cat-{d["category"].lower().replace(" ", "-").replace("/", "-")}">{md_inline(d["category"])}</span></td>'
         f'<td>{md_inline(d["note"])}</td>'
         '</tr>'
-        for d in _PRIORITY_DIRECTORIES
+        for d in directories
+    )
+    remaining = len(_PRIORITY_DIRECTORIES) - len(directories)
+    more_note = (
+        f'<div class="cit-priority-sub">Plus {remaining} further aggregator and trust-signal directories in the complete audit.</div>'
+        if remaining > 0 else ''
     )
     flow_parts.append(
         '<div class="cit-priority-lead" style="margin-top:18pt;">Priority directories to claim, ranked by domain rating</div>'
@@ -3623,6 +3651,7 @@ def build_offpage_complete_section(
         '<thead><tr><th>Directory</th><th>DR</th><th>Type</th><th>Why it matters</th></tr></thead>'
         f'<tbody>{priority_rows}</tbody>'
         '</table>'
+        + more_note
     )
 
     # ---- 8. Passes card (tucked at the end) ----
@@ -3636,6 +3665,7 @@ def build_dimension_section_pages(
     all_issues: list[dict],
     pages_crawled: int,
     scores: dict,
+    condensed: bool = False,
 ) -> list[str]:
     """Render the 6 dimension sections. Each dimension is ONE continuous
     .reg-flow block that paginates naturally with `page-break-before: always`
@@ -3684,6 +3714,7 @@ def build_dimension_section_pages(
             off_passes = passes.get("offpage", [])
             pages_out.append(build_offpage_complete_section(
                 artifact_dir, run_meta, scores, off_issues, off_passes,
+                condensed=condensed,
             ))
             continue
 
@@ -3694,10 +3725,11 @@ def build_dimension_section_pages(
         mins = [e for e in dim_issues if e["severity"] == "minor"]
         total = len(crit) + len(majs) + len(mins)
         dim_passes = passes.get(dim_key, [])
-        # The off-page section always renders because it carries the
-        # business-citations directory block. Other dimensions skip on empty.
-        if dim_key != "offpage" and not (total or dim_passes):
-            continue
+        # Every dimension renders, in order, even when it holds no findings.
+        # The report contract is a fixed 7-section sequence (Strategy, Content,
+        # On-page, Technical, Off-page, Local SEO, GEO); a section with nothing
+        # to flag shows a clean-baseline note plus its passes card rather than
+        # vanishing, so a light (free-tier) audit is never "just technical".
 
         score = score_for_dim.get(dim_key)
         score_chip = ""
@@ -3765,6 +3797,20 @@ def build_dimension_section_pages(
                 '</tr></thead><tbody>'
                 f'{rows_html}'
                 '</tbody></table>'
+            )
+
+        # Clean-baseline note when the section flagged nothing at all, so the
+        # dimension still reads as intentionally reviewed rather than skipped.
+        if not (crit or majs or mins):
+            flow_parts.append(
+                '<div class="passes-card">'
+                f'<div class="passes-card-head">No blocking issues found in '
+                f'{md_inline(dim_label)}</div>'
+                '<div class="passes-empty">This section cleared the checks run in '
+                'this audit. Treat a clean result as a baseline to maintain: the '
+                'standing best-practice checklist for this area still applies, and '
+                'the next audit re-verifies it.</div>'
+                '</div>'
             )
 
         # "What is working" tucked at the end of the same flow.
@@ -3899,6 +3945,12 @@ def build_closing_cta_page(cta_md: str = "") -> str:
     title = m.group(1).strip() if m else "Can these issues be fixed?"
     body = (m.group(2).strip() if m else text).strip()
     body_paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    # The closing CTA MUST carry the branding contact email (M5 contract). If a
+    # writer-supplied section-11 markdown omitted it, append the contact line so
+    # the invariant always holds regardless of the source prose.
+    email = BRANDING["contact_email"]
+    if email and not any(email in p for p in body_paras):
+        body_paras.append(f"If you want these issues fixed for you, contact: {email}")
     body_html = "".join(f'<p>{md_inline(p)}</p>' for p in body_paras)
     return f"""
 <div class="page">
@@ -5318,6 +5370,236 @@ def _synthesize_action_md_from_quick_artifacts(root: Path) -> str | None:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Report assembly as a reusable callable.
+#
+# The CLI `main()` renders the reference PDF from this; the AIOS platform bundle
+# (audit_engine/reporters/bundle.py) imports `build_report_html` to emit the
+# SAME consulting-grade report.html + report.pdf for BOTH tiers - free = the
+# condensed variant, paid = the full inventory - so the dashboard viewer and the
+# free funnel serve the identical design instead of a separate simpler report.
+# Every reader below degrades gracefully when an agent-written markdown file,
+# the SQLite pages table, or citations.json is absent, so a deterministic-only
+# platform run still produces every section (falling back to standing content
+# and generated prose), never crashing.
+# ---------------------------------------------------------------------------
+
+# In the condensed (free-tier) variant, cap the DETAILED issue cards shown per
+# dimension so the report lands near 10-15 A4 pages while keeping ALL 7 sections
+# and the (compressed) off-page / citations standing content. Two cards keeps
+# each dimension to roughly one page; the free reader still sees EVERY critical
+# and major issue in the index and the TRUE totals in the scare-stat tiles, so
+# nothing is hidden - only the per-section detail is a teaser for the full audit.
+# Measured (A4, rendered): a realistic free crawl lands ~19 pages at this value.
+_CONDENSED_PER_DIM = 3
+_CONDENSED_QUICK_WINS = 6
+
+
+def _document_html(pages_html: list[str], client: str) -> str:
+    """Wrap the assembled page blocks into one self-contained HTML document
+    (CSS inlined in a <style> block). This is exactly what the CLI renders to
+    PDF and what the AIOS dashboard viewer displays, so screen and print match.
+    """
+    body = "\n".join(pages_html)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SEO Audit Report - {client}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>{CSS}</style>
+</head>
+<body>
+{body}
+</body>
+</html>
+"""
+
+
+def _locate_action_md(root: Path) -> str | None:
+    """Concatenate whatever action-plan markdown exists (legacy single file, or
+    the split quick-wins + sprint files), or synthesize one from findings.json
+    when none is present. Returns None only when there is nothing to build from
+    (no section-0X-action*.md AND no usable findings.json)."""
+    legacy_action = root / "section-08-action.md"
+    if not legacy_action.exists():
+        legacy_action = root / "section-06-action-plan.md"
+    qw_path = root / "section-07-quick-wins.md"
+    sprint_path = root / "section-08-sprint-plan.md"
+
+    md_parts: list[str] = []
+    if legacy_action.exists():
+        md_parts.append(legacy_action.read_text(encoding="utf-8"))
+    if qw_path.exists():
+        md_parts.append(qw_path.read_text(encoding="utf-8"))
+    if sprint_path.exists():
+        md_parts.append(sprint_path.read_text(encoding="utf-8"))
+    if md_parts:
+        return "\n\n".join(md_parts)
+    return _synthesize_action_md_from_quick_artifacts(root)
+
+
+def assemble_report_pages(
+    root: Path,
+    *,
+    client: str,
+    industry: str = "",
+    location: str = "",
+    date: str = "",
+    condensed: bool = False,
+    use_semrush: bool = True,
+) -> dict:
+    """Read the artifact dir and build the ordered list of page-HTML blocks for
+    the consulting report, in the fixed contract order: Cover -> Index ->
+    Executive summary -> Strategy recommendation -> 7 dimension sections
+    (Strategy, Content, On-page, Technical, Off-page, Local SEO, GEO) -> Quick
+    wins -> URL appendix (full only) -> Methodology -> Closing CTA.
+
+    Returns everything a caller needs to either render to PDF (the CLI) or emit
+    a self-contained report.html (the platform bundle):
+    ``{pages_html, index_entries, inventory, pages_crawled, semrush_data}``.
+
+    ``condensed=True`` caps the findings shown per dimension (free tier) but
+    keeps all 7 sections and the standing off-page / citations content, so a
+    free audit is a smaller version of the same document, never "just technical".
+    """
+    industry = (industry or "").strip() or "-"
+    location = (location or "").strip() or "-"
+    if not (date or "").strip():
+        from datetime import datetime
+        date = datetime.now().strftime("%d %B %Y")
+
+    action_md = _locate_action_md(root) or ""
+
+    quick_wins = parse_quick_wins(action_md, limit=20)
+    if condensed:
+        quick_wins = quick_wins[:_CONDENSED_QUICK_WINS]
+
+    def _read(name: str) -> str:
+        p = root / name
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+
+    # Prose sections read the agent-written markdown when present; each builder
+    # falls back to generated prose when its file is absent.
+    exec_summary_md = _read("section-00-executive-summary.md") or _read("section-01-executive.md")
+    strategy_rec_md = _read("section-strategy-recommendation.md")
+    closing_cta_md  = _read("section-11-closing-cta.md")
+    sec_method_md   = _read("section-10-methodology.md") or _read("section-07-methodology.md")
+
+    run_meta: dict = {}
+    run_path = root / "run.json"
+    if run_path.exists():
+        try:
+            run_meta = json.loads(run_path.read_text(encoding="utf-8"))
+        except Exception:
+            run_meta = {}
+    scores = run_meta.get("scores") or run_meta.get("scorecard") or {}
+    pages_crawled = run_meta.get("pages_crawled") or 38
+
+    # Scare-stat inventory (true totals, always) + the deduped full issue list
+    # (ONE row per issue TYPE - check_id - never one per page-level instance).
+    inventory = compute_issue_inventory(root)
+    full_issues = compute_full_issue_list(root, pages_total=pages_crawled)
+
+    # Index entries: EVERY critical + major issue TYPE, uncapped, in both tiers.
+    # This keeps the index count equal to inventory.critical + inventory.major
+    # (an M5 report-contract invariant) and gives the free reader the complete
+    # issue list even when the per-dimension CARDS below are capped. Page numbers
+    # stay 0 here and are reconciled to the physical page only when a PDF is
+    # rendered (CLI path); the index cell renders blank for 0.
+    index_entries: list[dict] = []
+    for e in full_issues:
+        if e["severity"] in ("critical", "major"):
+            index_entries.append({
+                "problem": e.get("name", e.get("check_id", "")),
+                "area":    e.get("area_label", ""),
+                "severity": e["severity"],
+                "page":     0,
+                "group":    "issue",
+                "check_id": e["check_id"],
+            })
+
+    # Condensed (free): cap the DETAILED issue cards to the worst N per dimension
+    # (the list is already sorted worst-first) so the report stays compact. The
+    # index above and the scare-stat tiles keep the true totals, so nothing is
+    # hidden - the free reader sees every issue listed, with the top N detailed.
+    dim_issues = full_issues
+    if condensed:
+        per_dim: dict[str, int] = {}
+        capped: list[dict] = []
+        for e in full_issues:
+            key = e.get("area_key", "onpage")
+            if per_dim.get(key, 0) >= _CONDENSED_PER_DIM:
+                continue
+            per_dim[key] = per_dim.get(key, 0) + 1
+            capped.append(e)
+        dim_issues = capped
+
+    semrush_data = _fetch_semrush_overview(client) if use_semrush else None
+
+    pages_html: list[str] = []
+    pages_html.append(build_cover(client, industry, location, date, pages_crawled))
+    pages_html.append(build_issue_dashboard_page(
+        client, inventory, pages_crawled, index_entries=index_entries,
+        semrush=semrush_data,
+    ))
+    pages_html.append(build_executive_summary_page(exec_summary_md, run_meta))
+    pages_html.extend(build_strategy_recommendation_page(strategy_rec_md))
+    pages_html.extend(build_dimension_section_pages(
+        root, dim_issues, pages_crawled, scores, condensed=condensed,
+    ))
+    if quick_wins:
+        for i in range(0, len(quick_wins), 10):
+            suffix = "" if i == 0 else " (continued)"
+            pages_html.append(build_quick_wins_page(quick_wins, i, i + 10, page_title_suffix=suffix))
+    # URL appendix: skipped in the condensed free variant to hold the page count
+    # down; the full (paid) report includes it when a page list can be built.
+    if not condensed:
+        url_page = build_url_appendix_page(root, pages_crawled)
+        if url_page:
+            pages_html.append(url_page)
+    if sec_method_md:
+        pages_html.extend(build_deepdive_pages_from_section(
+            sec_method_md, "Methodology",
+            max_per_subsection=1, body_char_cap=3000,
+            runtime_stats=None, severity_chart_html=None,
+            max_total_pages=1, merge_subsections=True,
+        ))
+    pages_html.append(build_closing_cta_page(closing_cta_md))
+
+    return {
+        "pages_html": pages_html,
+        "index_entries": index_entries,
+        "inventory": inventory,
+        "pages_crawled": pages_crawled,
+        "semrush_data": semrush_data,
+    }
+
+
+def build_report_html(
+    artifact_dir,
+    *,
+    client: str = "www.example.com",
+    industry: str = "",
+    location: str = "",
+    date: str = "",
+    condensed: bool = False,
+) -> str:
+    """Public entry point for the AIOS platform bundle: return the self-contained
+    consulting report HTML (CSS inlined) for an artifact dir, WITHOUT rendering a
+    PDF or writing any file. ``condensed=True`` for the free tier (fewer findings
+    per dimension, all 7 sections retained); ``condensed=False`` for the full
+    paid inventory. Never performs a network call (Semrush is skipped)."""
+    root = Path(artifact_dir).resolve()
+    ctx = assemble_report_pages(
+        root, client=client, industry=industry, location=location,
+        date=date, condensed=condensed, use_semrush=False,
+    )
+    return _document_html(ctx["pages_html"], client)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("artifact_dir")
@@ -5343,220 +5625,26 @@ def main() -> int:
     # once here rather than at every consumer.
     root = root.resolve()
 
-    # --- Locate the action-plan file. Support both legacy and new naming. ---
-    # /audit-quick only writes findings.json + report-full.md, so when no
-    # legacy section-0X-action*.md is present we synthesize a minimal action
-    # plan from those artifacts. The synthesized markdown feeds the same
-    # parse_top_findings / parse_quick_wins parsers used for real plans.
-    # The action plan can come from one of three shapes:
-    # 1. Legacy: a single section-08-action.md (or section-06-action-plan.md)
-    #    with "Top N findings" + "Top N quick wins" + Sprint blocks merged.
-    # 2. New (2026-06-16): split across section-07-quick-wins.md +
-    #    section-08-sprint-plan.md (no priority-finding block - that role
-    #    is taken over by the index page + dimension issue cards).
-    # 3. Synthesized from findings.json (e.g. /audit-quick artifacts).
-    # We concatenate whatever exists so parse_top_findings / parse_quick_wins
-    # / parse_sprints each see the headings they expect.
-    legacy_action = root / "section-08-action.md"
-    if not legacy_action.exists():
-        legacy_action = root / "section-06-action-plan.md"
-    qw_path = root / "section-07-quick-wins.md"
-    sprint_path = root / "section-08-sprint-plan.md"
+    # The action plan is required (a legacy section-0X-action*.md, the split
+    # quick-wins + sprint files, or a synthesis from findings.json). If none of
+    # those can be built, there is nothing to report on - keep the hard error.
+    if _locate_action_md(root) is None:
+        print(f"[err] action plan file not found in {root}", file=sys.stderr)
+        return 1
 
-    md_parts: list[str] = []
-    if legacy_action.exists():
-        md_parts.append(legacy_action.read_text(encoding="utf-8"))
-    if qw_path.exists():
-        md_parts.append(qw_path.read_text(encoding="utf-8"))
-    if sprint_path.exists():
-        md_parts.append(sprint_path.read_text(encoding="utf-8"))
-
-    if not md_parts:
-        synthesized = _synthesize_action_md_from_quick_artifacts(root)
-        if synthesized is None:
-            print(f"[err] action plan file not found in {root}", file=sys.stderr); return 1
-        print(f"[info] synthesized action plan from findings.json "
-              f"(no section-0X-action*.md in {root.name})", file=sys.stderr)
-        md_parts.append(synthesized)
-    action_md = "\n\n".join(md_parts)
-
-    # No page cap. Always render every priority finding the writer surfaced
-    # and every quick win. The 6 dimension sections below carry every issue
-    # from findings.json regardless of what made the priority-finding list.
-    findings = parse_top_findings(action_md, limit=10)
-    quick_wins = parse_quick_wins(action_md, limit=20)
-    print(f"[info] parsed {len(findings)} priority findings · {len(quick_wins)} quick wins")
-
-    def _read(name: str) -> str:
-        p = root / name
-        return p.read_text(encoding="utf-8") if p.exists() else ""
-
-    # New (2026-06-16) structural files. Falls back to legacy names so older
-    # runs still render.
-    exec_summary_md = _read("section-00-executive-summary.md") or _read("section-01-executive.md")
-    strategy_rec_md = _read("section-strategy-recommendation.md")
-    closing_cta_md  = _read("section-11-closing-cta.md")
-
-    # Dimension MDs (kept for any future deep-dive rendering)
-    sec_strategy_md = _read("section-01-strategy.md") or _read("section-02-strategy.md")
-    sec_content_md  = _read("section-02-content.md") or _read("section-03-content.md")
-    sec_onpage_md   = _read("section-03-onpage.md") or _read("section-04-onpage.md") or _read("section-02-onpage.md")
-    sec_tech_md     = _read("section-04-technical.md") or _read("section-05-technical.md") or _read("section-03-technical.md")
-    sec_offlocal_md = _read("section-05-offpage-local.md") or _read("section-06-offpage-local.md") or (_read("section-04-offpage-ai.md") + "\n\n" + _read("section-05-local.md")).strip()
-    sec_geo_md      = _read("section-06-geo.md") or _read("section-07-geo.md") or _read("section-04-offpage-ai.md")
-    sec_evidence_md = _read("section-09-evidence.md") or _read("section-08-evidence.md")
-    sec_method_md   = _read("section-10-methodology.md") or _read("section-07-methodology.md")
-
-    ai_context = extract_ai_context(sec_geo_md) if sec_geo_md else {}
-    local_cards = extract_local_cards(sec_offlocal_md) if sec_offlocal_md else []
-    content_cards = extract_content_cards(sec_content_md or sec_onpage_md, action_md) if (sec_content_md or sec_onpage_md) else []
-
-    run_meta = {}
-    run_path = root / "run.json"
-    if run_path.exists():
-        try: run_meta = json.loads(run_path.read_text(encoding="utf-8"))
-        except Exception: run_meta = {}
-    scores = run_meta.get("scores") or run_meta.get("scorecard") or {}
-    pages_crawled = run_meta.get("pages_crawled") or 38
-
-    # Build the section-by-section issue inventory once - used by the
-    # dashboard "scare page" and the runtime stat strips on deep-dive pages.
-    inventory = compute_issue_inventory(root)
-
-    # ---- Section cards (one card per section, read from section-cards.json).
-    #      Loaded HERE (before assembly) because the issue-index page needs the
-    #      card headlines + page numbers. Per-domain + data-driven; the
-    #      generator produces correct content for any client, not a hardcoded one.
-    section_cards: list[dict] = []
-    cards_path = root / "section-cards.json"
-    if cards_path.exists():
-        try:
-            loaded = json.loads(cards_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                loaded = loaded.get("cards", [])
-            if isinstance(loaded, list):
-                section_cards = [c for c in loaded if isinstance(c, dict) and c.get("headline")]
-        except Exception as exc:
-            print(f"[warn] section-cards.json unreadable: {exc}", file=sys.stderr)
-    if not section_cards:
-        print("[warn] no section-cards.json found - section card pages will be skipped", file=sys.stderr)
-
-    # ============================================================
-    # ASSEMBLE THE PDF - sales-conversion order:
-    #   Cover -> Issue Dashboard (scare page) -> Top 6 priority findings
-    #   -> 6 section pages (Strategy / Content / On-page / Technical
-    #      / Off-page+Local / GEO) -> Quick Wins -> Evidence -> URL Appendix
-    #   -> Methodology
-    #
-    # The high-priority finding cards come BEFORE the section deep-dives so
-    # the client sees the worst problems in the first 4-5 page-flips. A
-    # prospect skimming the PDF on their phone sees: cover, scary dashboard,
-    # critical issue 1, critical issue 2, critical issue 3 - before they
-    # ever reach the diagnostic detail.
-    # ============================================================
-    # Map a high-priority finding to one of the 6 report areas for its index
-    # chip (the "On-page / Off-page" status the client wants on each line).
-    def _finding_area(f: dict) -> str:
-        text = f"{f.get('headline','')} {f.get('category','')} {f.get('broken','')}".lower()
-        if any(k in text for k in ("ai search", "ai overview", "chatgpt", "perplexity", "gemini", "generative", "llm")):
-            return "GEO (AI Search)"
-        bucket = _infer_category_from_text(text)
-        return {
-            "CONTENT": "Content", "ON-PAGE": "On-page",
-            "SCHEMA": "Technical", "TECHNICAL": "Technical",
-            "LOCAL": "Off-page + Local", "OFF-PAGE": "Off-page + Local",
-        }.get(bucket, "On-page")
-
-    # =========================================================================
-    # NEW PAGE ORDER (2026-06-16, per client requirements):
-    #   1. Cover
-    #   2. Index (every critical + major issue, stat cards, page anchors)
-    #   3. Executive summary (500-700 chars, plain English)
-    #   4-5. Strategy Recommendation (current + problem + recommended + competitors)
-    #   6+. 6 dimension sections, each with all its issues by severity + passes card
-    #   N. Quick wins
-    #   N+. 3 Sprints
-    #   N+. URL appendix
-    #   N+. Methodology
-    #   N+. Closing CTA card (the "Can these issues be fixed?" + email)
-    # No page cap. Every issue from findings.json renders.
-    # =========================================================================
-    full_issues = compute_full_issue_list(root, pages_total=pages_crawled)
-
-    # Build the index entries from EVERY critical + major issue (not just priority).
-    # Each entry gets its actual page number computed below after assembly.
-    index_entries: list[dict] = []
-    for e in full_issues:
-        if e["severity"] in ("critical", "major"):
-            index_entries.append({
-                "problem": e.get("name", e.get("check_id", "")),
-                "area":    e.get("area_label", ""),
-                "severity": e["severity"],
-                "page":     0,  # filled by _resolve_index_pages on the second pass
-                "group":    "issue",
-                "check_id": e["check_id"],
-            })
-
-    # Optional Semrush enrichment - returns None silently when the key is
-    # missing or the call fails. The dashboard treats None as "skip the row".
-    semrush_data = _fetch_semrush_overview(args.client)
-    if semrush_data:
-        print(f"[info] semrush: DA={semrush_data.get('domain_authority')}, "
-              f"traffic={semrush_data.get('monthly_traffic')}, "
-              f"keywords={semrush_data.get('monthly_keywords')}")
-    else:
-        print("[info] semrush: skipped (no SEMRUSH_API_KEY in env)")
-
-    pages_html = []
-    pages_html.append(build_cover(args.client, args.industry, args.location, args.date, pages_crawled))
-    # Index page (rebuilt by build_issue_dashboard_page - lists every crit+major).
-    pages_html.append(build_issue_dashboard_page(
-        args.client, inventory, pages_crawled, index_entries=index_entries,
-        semrush=semrush_data,
-    ))
-
-    # ---- Executive Summary (500-700 chars; plain English; one page). ----
-    pages_html.append(build_executive_summary_page(exec_summary_md, run_meta))
-
-    # ---- Strategy Recommendation (NEW, 1-2 pages). Reads
-    #      section-strategy-recommendation.md or falls back to a generic. ----
-    pages_html.extend(build_strategy_recommendation_page(strategy_rec_md))
-
-    # ---- 6 dimension sections, in order. Each renders all its issues by
-    #      severity, then a "What is working" passes card. No page cap. ----
-    pages_html.extend(build_dimension_section_pages(
-        root, full_issues, pages_crawled, scores,
-    ))
-
-    # ---- Quick wins (every win, not capped). 10 per page. ----
-    if quick_wins:
-        for i in range(0, len(quick_wins), 10):
-            suffix = "" if i == 0 else " (continued)"
-            pages_html.append(build_quick_wins_page(quick_wins, i, i + 10, page_title_suffix=suffix))
-
-    # ---- Sprint pages REMOVED (per client request 2026-06-16). The 90-day
-    #      execution roadmap was felt to be filler before the URL appendix.
-    #      build_sprint_page and parse_sprints remain in the file for future
-    #      use but are no longer wired into the default render path.
-
-    # ---- URL appendix (every page reviewed). Always rendered now. ----
-    url_page = build_url_appendix_page(root, pages_crawled)
-    if url_page:
-        pages_html.append(url_page)
-
-    # ---- Methodology (always last before the CTA). ----
-    if sec_method_md:
-        meth_pages = build_deepdive_pages_from_section(
-            sec_method_md, "Methodology",
-            max_per_subsection=1, body_char_cap=3000,
-            runtime_stats=None, severity_chart_html=None,
-            max_total_pages=1,
-            merge_subsections=True,
-        )
-        pages_html.extend(meth_pages)
-
-    # ---- Closing CTA card (final page). ----
-    pages_html.append(build_closing_cta_page(closing_cta_md))
+    # Assemble the full (paid) report: every issue, URL appendix included, plus
+    # optional Semrush enrichment. The same builder emits the condensed free
+    # variant when the platform bundle calls build_report_html(condensed=True).
+    ctx = assemble_report_pages(
+        root,
+        client=args.client, industry=args.industry, location=args.location,
+        date=args.date, condensed=False, use_semrush=True,
+    )
+    pages_html    = ctx["pages_html"]
+    index_entries = ctx["index_entries"]
+    inventory     = ctx["inventory"]
+    pages_crawled = ctx["pages_crawled"]
+    semrush_data  = ctx["semrush_data"]
 
     html_path = root / "report-final.html"
     pdf_path = root / "report-final.pdf"
@@ -5565,23 +5653,7 @@ def main() -> int:
         """Stitch pages_html into the final document, write the HTML, render to
         PDF. Called once, then a second time after the index page numbers are
         reconciled to the actual rendered pages."""
-        body = "\n".join(pages_html)
-        full_html = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<title>SEO Audit Report - {args.client}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-<style>{CSS}</style>
-</head>
-<body>
-{body}
-</body>
-</html>
-"""
-        html_path.write_text(full_html, encoding="utf-8")
+        html_path.write_text(_document_html(pages_html, args.client), encoding="utf-8")
         return render_with_playwright(html_path, pdf_path, header_html, footer_html)
 
     client_caps = args.client.upper().replace("WWW.", "")

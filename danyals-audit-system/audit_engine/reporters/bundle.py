@@ -8,15 +8,133 @@ opts into the paid AI mode and ANTHROPIC_API_KEY is set.
 
 from __future__ import annotations
 
+import importlib.util
+from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from audit_engine.config import TEMPLATES_DIR, get_branding
+from audit_engine.logging_setup import get_logger
 from audit_engine.reporters import consolidated as consolidated_reporter
 from audit_engine.reporters import html as html_reporter
 from audit_engine.reporters import markdown as md_reporter
 from audit_engine.reporters import narrative as narrative_reporter
 from audit_engine.reporters import pdf as pdf_reporter
+
+log = get_logger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _load_pdf_generator() -> ModuleType | None:
+    """Load ``scripts/generate_audit_pdf.py`` (the consulting-grade report
+    designer) as a module. It is a script, not a package member, so we load it
+    by path. Returns None if it cannot be found or imported - callers then fall
+    back to the simpler ``full.html.j2`` report so the bundle never crashes."""
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "generate_audit_pdf.py"
+    if not script.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("audit_pdf_generator", script)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pdf_generator_load_failed", error=f"{type(exc).__name__}: {exc}")
+        return None
+
+
+def _report_date(started_at: Any) -> str:
+    """Format the run's start date as ``24 July 2026`` for the report cover.
+    Falls back to today when the stored value cannot be parsed."""
+    s = str(started_at or "").strip()
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").strftime("%d %B %Y")
+    except (ValueError, TypeError):
+        return datetime.now().strftime("%d %B %Y")
+
+
+def _render_consulting_report_html(
+    *,
+    artifact_dir: Path,
+    domain: str,
+    run_metadata: dict[str, Any],
+    condensed: bool,
+) -> str | None:
+    """Build the self-contained consulting report.html via the shared designer,
+    then run the deterministic M5 report-design contract loop (validate -> patch
+    -> re-validate, up to 3 iterations) so the report never renders below the
+    design contract. The verdict is persisted to ``qa-report-contract.json`` in
+    the artifact dir. Returns the (possibly patched) HTML string, or None on any
+    failure (missing module, raised exception) so the caller can fall back to the
+    simpler template."""
+    mod = _load_pdf_generator()
+    if mod is None or not hasattr(mod, "build_report_html"):
+        return None
+    try:
+        html = mod.build_report_html(
+            artifact_dir,
+            client=domain,
+            industry="",
+            location="",
+            date=_report_date(run_metadata.get("started_at")),
+            condensed=condensed,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("consulting_report_html_failed", error=f"{type(exc).__name__}: {exc}")
+        return None
+
+    # Deterministic M5 report-design contract loop. Never fatal: on a residual
+    # structural blocker we still return the best-effort HTML and log the verdict.
+    try:
+        from audit_engine.quality import report_contract as rc
+
+        branding_email = ""
+        try:
+            branding_email = str(getattr(mod, "BRANDING", {}).get("contact_email") or "")
+        except Exception:  # noqa: BLE001
+            branding_email = ""
+
+        html, verdict, iterations = rc.enforce_report_contract(
+            html, branding_email=branding_email, max_iterations=3
+        )
+        try:
+            import json as _json
+
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            (artifact_dir / "qa-report-contract.json").write_text(
+                _json.dumps(
+                    {
+                        "passed": verdict.passed,
+                        "iterations": iterations,
+                        "blockers": verdict.blockers,
+                        "warnings": verdict.warnings,
+                        "facts": verdict.facts,
+                        "tier": "free" if condensed else "paid",
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        if not verdict.passed:
+            log.warning(
+                "report_contract_residual_blockers",
+                blockers=",".join(verdict.blockers),
+                iterations=iterations,
+            )
+        else:
+            log.info("report_contract_passed", iterations=iterations)
+    except Exception as exc:  # noqa: BLE001
+        # The contract loop must never break report generation.
+        log.warning("report_contract_loop_failed", error=f"{type(exc).__name__}: {exc}")
+
+    return html
 
 
 def _markdown_to_html(md_text: str) -> str:
@@ -150,15 +268,33 @@ def write_full_bundle(
     # The single self-contained deliverable: report.html (CSS inlined) is what the
     # AIOS dashboard viewer shows AND the source report.pdf is rendered from (via
     # write_all_pdfs below, which PDFs every *_html entry), so the on-screen report
-    # and the delivered PDF are the SAME document. Free mode renders the condensed
-    # (~10-15 page) variant of the identical layout; paid mode the full inventory.
-    report_html_path = html_reporter.render_report_html(
-        findings=findings,
-        run_metadata=run_meta,
+    # and the delivered PDF are the SAME document. It uses the CONSULTING-grade
+    # design (cover, index, executive summary, strategy, all 7 dimension sections,
+    # comprehensive off-page/GMB block, quick wins, methodology, closing CTA) -
+    # identical to the reference PDF. Free mode renders the condensed (~10-15 page)
+    # variant of that identical layout; paid mode renders the full inventory. If
+    # the consulting designer cannot be loaded/run for any reason, we fall back to
+    # the simpler full.html.j2 single-file report so a report.html is always
+    # produced and the backend has something to serve.
+    condensed = str(mode).lower() == "free"
+    report_html_path = artifact_dir / "report.html"
+    consulting_html = _render_consulting_report_html(
         artifact_dir=artifact_dir,
-        brand=brand,
-        condensed=(str(mode).lower() == "free"),
+        domain=domain,
+        run_metadata=run_meta,
+        condensed=condensed,
     )
+    if consulting_html is not None:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        report_html_path.write_text(consulting_html, encoding="utf-8")
+    else:
+        report_html_path = html_reporter.render_report_html(
+            findings=findings,
+            run_metadata=run_meta,
+            artifact_dir=artifact_dir,
+            brand=brand,
+            condensed=condensed,
+        )
     html_paths["report_html"] = report_html_path
 
     # ----- Consolidated narrative (free, deterministic) -----

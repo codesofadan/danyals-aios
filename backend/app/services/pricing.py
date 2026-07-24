@@ -80,6 +80,16 @@ def serper_cost(settings: Settings, *, queries: int = 1) -> float:
     return round(max(queries, 0) * settings.price_serper_per_query, 6)
 
 
+def web_search_cost(settings: Settings, *, searches: int = 1) -> float:
+    """ACTUAL Anthropic server-side web-search spend = searches run x per-search price.
+
+    ``searches`` is read from the response's ``usage.server_tool_use.web_search_requests``
+    when the SDK surfaces it; a caller that cannot read it estimates the tool's
+    ``max_uses`` so the logged spend errs high, never silently free.
+    """
+    return round(max(searches, 0) * settings.price_web_search_per_search, 6)
+
+
 def google_api_cost(settings: Settings, *, calls: int = 1) -> float:
     """ACTUAL Google paid-API spend (Places/geocode) = calls x per-call price."""
     return round(max(calls, 0) * settings.price_google_per_call, 6)

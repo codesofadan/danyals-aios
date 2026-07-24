@@ -36,6 +36,7 @@ from app.services.content_qa import (
     WEIGHTED_TOTAL_THRESHOLD,
     JudgeVerdict,
     QaScore,
+    rewrite_guidance,
     score,
 )
 from app.services.content_research import (
@@ -504,3 +505,49 @@ def test_gbp_post_not_applicable_dimensions_score_full() -> None:
     # None of the three inapplicable dims should ever trip the per-dimension floor.
     below_min = {dim for dim in QA_DIMENSIONS if result.dimensions[dim] < MIN_DIMENSION_SCORE}
     assert not {"internal_linking", "schema_validity", "serp_format_fit"} & below_min
+
+
+# --------------------------------------------------------------------------- #
+# rewrite_guidance - the QA scorecard -> targeted rewrite instruction (the loop
+# feedback that drives the drafting-time improvement loop).
+# --------------------------------------------------------------------------- #
+def _qa_score(dims: dict[str, int], *, notes: list[str] | None = None) -> QaScore:
+    full = dict.fromkeys(QA_DIMENSIONS, 95)
+    full.update(dims)
+    below = [d for d in QA_DIMENSIONS if full[d] < WEIGHTED_TOTAL_THRESHOLD]
+    return QaScore(
+        dimensions=full,
+        weighted_total=min(full.values()),
+        passed=not below,
+        blocked_by=[],
+        notes=notes or [],
+    )
+
+
+def test_rewrite_guidance_targets_weakest_dims_worst_first() -> None:
+    qa = _qa_score(
+        {"fact_grounding": 40, "keyword_handling": 65, "structure_readability": 88},
+        notes=["fact_grounding: untraceable claim 4200", "keyword_handling: density too high"],
+    )
+    guidance = rewrite_guidance(qa, target=90)
+    assert guidance  # non-empty: dims are below the target
+    # The worst dimension (fact_grounding, 40) is remediated FIRST and concretely.
+    assert "ground every concrete claim" in guidance
+    assert guidance.index("ground every concrete claim") < guidance.index("front-load the primary keyword")
+    # The scorer's own per-dimension notes are attached for specificity.
+    assert "untraceable claim 4200" in guidance
+    # structure_readability at 88 is below the 90 target too, so it is also included.
+    assert "readability" in guidance
+
+
+def test_rewrite_guidance_empty_when_all_dims_clear_the_target() -> None:
+    qa = _qa_score({}, notes=[])  # every dim defaults to 95 >= 90
+    assert rewrite_guidance(qa, target=90) == ""
+
+
+def test_rewrite_guidance_caps_the_number_of_focus_dims() -> None:
+    qa = _qa_score(dict.fromkeys(list(QA_DIMENSIONS)[:8], 30))  # 8 failing dims
+    guidance = rewrite_guidance(qa, target=90, max_dims=4)
+    # At most `max_dims` remediation bullets in the "Focus on" block.
+    focus_block = guidance.split("Specific issues", 1)[0]
+    assert focus_block.count("\n- ") == 4

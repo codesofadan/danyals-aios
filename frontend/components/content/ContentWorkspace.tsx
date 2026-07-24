@@ -36,9 +36,10 @@ export default function ContentWorkspace() {
 
   // The review gate; the DB trigger owns the transition. approve also hands the
   // publish worker the job (publishing → done happens server-side), so the board
-  // polls to completion rather than faking the final hop.
-  function handleReview(id: string, action: ReviewAction) {
-    reviewJob.mutate({ code: id, action });
+  // polls to completion rather than faking the final hop. `note` carries the
+  // reviewer's guided-edit instruction (edit action) → the worker re-drafts to it.
+  function handleReview(id: string, action: ReviewAction, note?: string) {
+    reviewJob.mutate({ code: id, action, note });
   }
 
   const needsReview = jobs.filter((j) => j.status === "needs_review");

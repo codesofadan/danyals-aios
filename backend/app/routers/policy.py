@@ -45,14 +45,11 @@ from app.services.activity import record_activity
 from app.services.cost_gate import CostGate
 from app.services.policy_ask import (
     build_ask_gate,
-    build_ask_searcher,
-    build_ask_summarizer,
+    build_ask_researcher,
     run_policy_ask,
 )
 from app.services.policy_radar import apply_recommendation
-from app.services.policy_watch import PolicyFetcher, SsrfGuardedPolicyFetcher
-from integrations.content_research import SerpResearcher
-from integrations.llm import Summarizer
+from integrations.llm import Researcher
 
 router = APIRouter(tags=["policy"])
 
@@ -63,19 +60,9 @@ ManageRecs = Annotated[CurrentUser, Depends(require_role("owner", "admin", "mana
 
 
 # --- on-demand lookup seams (injected so tests swap in fakes) ---------------- #
-def get_ask_searcher(settings: SettingsDep) -> SerpResearcher | None:
-    """Dependency: the key-gated Serper researcher (or ``None`` degraded). Overridable in tests."""
-    return build_ask_searcher(settings)
-
-
-def get_ask_summarizer(settings: SettingsDep) -> Summarizer | None:
-    """Dependency: the key-gated Haiku summarizer (or ``None`` degraded). Overridable in tests."""
-    return build_ask_summarizer(settings)
-
-
-def get_ask_fetcher() -> PolicyFetcher:
-    """Dependency: the SSRF-guarded page fetcher (re-validated every redirect hop)."""
-    return SsrfGuardedPolicyFetcher()
+def get_ask_researcher(settings: SettingsDep) -> Researcher | None:
+    """Dependency: the key-gated web-search researcher (or ``None`` degraded). Overridable in tests."""
+    return build_ask_researcher(settings)
 
 
 def get_ask_gate() -> CostGate:
@@ -83,9 +70,7 @@ def get_ask_gate() -> CostGate:
     return build_ask_gate()
 
 
-AskSearcherDep = Annotated[SerpResearcher | None, Depends(get_ask_searcher)]
-AskSummarizerDep = Annotated[Summarizer | None, Depends(get_ask_summarizer)]
-AskFetcherDep = Annotated[PolicyFetcher, Depends(get_ask_fetcher)]
+AskResearcherDep = Annotated[Researcher | None, Depends(get_ask_researcher)]
 AskGateDep = Annotated[CostGate, Depends(get_ask_gate)]
 
 # The activity verb for each recommendation transition.
@@ -118,27 +103,23 @@ async def policy_ask(
     body: PolicyAskRequest,
     _user: ViewReports,
     settings: SettingsDep,
-    searcher: AskSearcherDep,
-    summarizer: AskSummarizerDep,
-    fetcher: AskFetcherDep,
+    researcher: AskResearcherDep,
     gate: AskGateDep,
 ) -> PolicyAskResponse:
-    """On-demand policy lookup (staff-gated). Runs a live Serper search scoped to
-    Google's official surfaces, SSRF-guarded-fetches the top authoritative result, and
-    has Claude Haiku distil a structured answer (a concise answer, an urgency label, the
-    key rules, and source URLs).
+    """On-demand policy lookup (staff-gated). Claude researches the topic LIVE via the
+    Anthropic SERVER-SIDE web_search tool and returns a structured, cited answer (a concise
+    answer, an urgency label, the key rules, and the source URLs it actually retrieved).
 
-    Both paid calls (Serper + Haiku) are metered under the EXISTING ``policy`` money-dial;
-    a missing key or a dial/budget block DEGRADES (200, ``status='degraded'``) rather than
-    crashing, and the gate is never bypassed. The blocking search / fetch / summarize + the
-    sync gate store run off the event loop via ``to_thread``."""
+    The single paid call is metered under the EXISTING ``policy`` money-dial (the committed
+    spend is the Anthropic token cost PLUS the web-search cost); a missing key, a dial/budget
+    block, or a research failure DEGRADES (200, ``status='degraded'``) rather than crashing,
+    and the gate is never bypassed. The blocking Anthropic call + the sync gate store run off
+    the event loop via ``to_thread``."""
 
     def _run() -> PolicyAskResponse:
         result = run_policy_ask(
             body.topic,
-            searcher=searcher,
-            fetcher=fetcher,
-            summarizer=summarizer,
+            researcher=researcher,
             gate=gate,
             settings=settings,
         )

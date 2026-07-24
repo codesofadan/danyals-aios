@@ -32,7 +32,8 @@ from typing import Any
 import pytest
 
 from app.config import Settings
-from app.services.content_research import FakePageFetcher
+from app.services.content_qa import QA_DIMENSIONS, QaScore
+from app.services.content_research import ContentSpendBlocked, FakePageFetcher
 from app.services.cost_gate import DialMode, GateContext
 from integrations.content_providers import content_providers_for_tests
 from integrations.llm import LLMResult
@@ -227,6 +228,149 @@ def test_pipeline_output_is_em_dash_free_even_when_writer_emits_dashes() -> None
     assert chr(0x2014) not in draft and chr(0x2013) not in draft
     # And the title/answer fields were cleaned too (they feed schema + QA + publish).
     assert chr(0x2014) not in store.row["stage"]
+
+
+# --------------------------------------------------------------------------- #
+# 1c. GUIDED EDIT: a `drafting` job carrying an edit_instruction is re-drafted with
+#     that instruction fed to the writer, then the instruction is CLEARED.
+# --------------------------------------------------------------------------- #
+def test_guided_edit_redraft_applies_instruction_and_clears_it() -> None:
+    store = FakeContentStore(
+        _job_row(status="drafting", edit_instruction="make the intro punchier and mention brunch")
+    )
+
+    class _SpyWriter:
+        """Records every prompt so the test can prove the reviewer note reached it."""
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+            self.prompts.append(prompt)
+            return LLMResult(text="Fresh, direct brunch copy for weekend diners.", input_tokens=6, output_tokens=6)
+
+    spy = _SpyWriter()
+    providers = replace(content_providers_for_tests(), writer=spy)
+    out = execute_content_job(
+        store, providers, "CJ-4200", settings=_settings(), gate=_gate(), fetcher=FakePageFetcher()
+    )
+
+    assert out.status == "needs_review"  # a `drafting` job is worker-owned -> re-drafts
+    # The reviewer's guided-edit instruction reached the writer as a steered rewrite.
+    assert any("REVIEWER INSTRUCTION" in p for p in spy.prompts)
+    assert any("make the intro punchier" in p for p in spy.prompts)
+    # Once applied, the instruction is cleared so a later re-run does not re-apply it.
+    assert store.row["edit_instruction"] == ""
+
+
+# --------------------------------------------------------------------------- #
+# 1d. The Review preview's META tags (title + description) are persisted in outline.
+# --------------------------------------------------------------------------- #
+def test_pipeline_persists_meta_in_outline_for_the_preview() -> None:
+    store = FakeContentStore(_job_row())
+    out = execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(), gate=_gate(), fetcher=FakePageFetcher(),
+    )
+    assert out.status == "needs_review"
+    meta = store.row["outline"]["meta"]
+    assert meta["title"]  # the rendered <title> for the SERP preview
+    assert "description" in meta  # the <meta name=description>
+
+
+# --------------------------------------------------------------------------- #
+# 1e. THE QA IMPROVEMENT LOOP (drafting-time): the worker re-drafts against the §11
+#     scorecard until it clears the top-1% target OR the MAX_QA_LOOPS cap OR the
+#     spend-stop trips. Driven by an INJECTED scorer so the pass/fail sequence + the
+#     exact rewrite count are deterministic.
+# --------------------------------------------------------------------------- #
+def _qa(total: int, *, passed: bool) -> QaScore:
+    """A scripted QaScore. A failing one carries a below-target dim + a note so
+    ``rewrite_guidance`` yields a non-empty steer (the loop attempts a rewrite)."""
+    dims = dict.fromkeys(QA_DIMENSIONS, 95 if passed else 60)
+    if not passed:
+        dims["fact_grounding"] = 50
+    return QaScore(
+        dimensions=dims,
+        weighted_total=total,
+        passed=passed,
+        blocked_by=[] if passed else ["fact_grounding"],
+        notes=[] if passed else ["fact_grounding: an untraceable concrete claim"],
+    )
+
+
+class _ScriptedScorer:
+    """Returns a scripted QaScore per call (last entry repeats), counting calls."""
+
+    def __init__(self, scores: list[QaScore]) -> None:
+        self._scores = scores
+        self.calls = 0
+
+    def __call__(self, content: Any, brief: Any, schema_result: Any, source_pack: Any, *, judge: Any = None) -> QaScore:
+        qa = self._scores[min(self.calls, len(self._scores) - 1)]
+        self.calls += 1
+        return qa
+
+
+def test_qa_loop_fails_twice_then_passes_runs_exactly_two_rewrites() -> None:
+    store = FakeContentStore(_job_row())
+    scorer = _ScriptedScorer([_qa(60, passed=False), _qa(60, passed=False), _qa(95, passed=True)])
+
+    out = execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(content_qa_target_score=90, content_qa_max_loops=3),
+        gate=_gate(), fetcher=FakePageFetcher(), scorer=scorer,
+    )
+
+    assert out.status == "needs_review"
+    assert out.qa_loops == 2          # two targeted rewrite passes before it cleared
+    assert scorer.calls == 3          # initial score + one after each rewrite
+    assert out.passed is True         # advanced with the passing draft
+    assert store.row["qa_score"]["passed"] is True
+    assert store.row["qa_score"]["weighted_total"] == 95
+
+
+def test_qa_loop_caps_at_max_loops_and_advances_with_best() -> None:
+    store = FakeContentStore(_job_row())
+    scorer = _ScriptedScorer([_qa(60, passed=False)])  # ALWAYS fails
+
+    out = execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(content_qa_target_score=90, content_qa_max_loops=2),
+        gate=_gate(), fetcher=FakePageFetcher(), scorer=scorer,
+    )
+
+    assert out.status == "needs_review"   # still advances (the publish gate blocks later)
+    assert out.qa_loops == 2              # HARD cap honoured, never spins
+    assert scorer.calls == 3              # initial + 2 capped rewrites
+    assert out.passed is False            # advanced with the best (still sub-threshold)
+
+
+def test_qa_loop_cost_blocked_mid_loop_advances_with_best_never_spins() -> None:
+    store = FakeContentStore(_job_row())
+    scorer = _ScriptedScorer([_qa(60, passed=False)])  # would loop forever if uncapped
+
+    class _RewriteBlockedWriter:
+        """Writes normally for generation + the em-dash guard, but the spend-stop
+        trips on a QA-loop rewrite (its prompt carries the guided-rewrite marker) ->
+        that pass does ZERO writer work, so the loop must stop, not spin."""
+
+        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+            if "REVIEWER INSTRUCTION" in prompt:
+                raise ContentSpendBlocked("daily spend-stop")
+            return LLMResult(text="Grounded, clean brunch copy for weekend diners.", input_tokens=6, output_tokens=6)
+
+    providers = replace(content_providers_for_tests(), writer=_RewriteBlockedWriter())
+    out = execute_content_job(
+        store, providers, "CJ-4200",
+        settings=_settings(content_qa_target_score=90, content_qa_max_loops=3),
+        gate=_gate(), fetcher=FakePageFetcher(), scorer=scorer,
+    )
+
+    assert out.status == "needs_review"   # advanced with the best draft so far
+    assert out.qa_loops == 0              # the first rewrite was cost-blocked -> stop
+    assert scorer.calls == 1              # only the initial score ran
+    assert out.passed is False
 
 
 # --------------------------------------------------------------------------- #

@@ -113,6 +113,35 @@ def _email_html(title: str, body: str) -> str:
     return f"<h2>{html_escape(title)}</h2><p>{html_escape(body)}</p>"
 
 
+async def email_admin(
+    subject: str, html: str, text: str = "", *, email_sender: EmailSender | None = None
+) -> None:
+    """Best-effort: email the ONE configured operator inbox (``admin_notify_email``).
+
+    Sibling of :func:`notify`, but for a FIXED-recipient operator alert - a standing
+    inbox, not a ``users`` row - so it consults NO ``notification_prefs`` and writes NO
+    in-app row. Used for staff-facing signals like a new client-portal request. Key-
+    gated exactly like ``notify``'s email leg: with no ``RESEND_API_KEY`` (or no
+    ``admin_notify_email``) the send is simply skipped. A blank address, a keyless
+    provider, or a send failure are ALL swallowed to a warning - emailing the admin can
+    never break the caller's mutation. ``email_sender`` may be injected (tests); absent,
+    it is built from settings.
+    """
+    settings = get_settings()
+    to = (settings.admin_notify_email or "").strip()
+    if not to:
+        return
+    sender = email_sender if email_sender is not None else email_sender_from_settings(settings)
+    if sender is None:
+        return  # keyless -> email leg skipped
+    try:
+        await asyncio.to_thread(
+            sender.send, to=to, subject=subject, html=html, text=text or None
+        )
+    except Exception:
+        logger.warning("email_admin_failed")
+
+
 async def notify(
     user_id: str,
     kind: str,

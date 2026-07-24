@@ -12,9 +12,15 @@ export default function ReviewGate({
   jobs, onAction, onPreview,
 }: {
   jobs: ContentJob[];
-  onAction: (id: string, action: ReviewAction) => void;
+  onAction: (id: string, action: ReviewAction, note?: string) => void;
   onPreview?: (id: string) => void;
 }) {
+  // "Request edit" needs a free-text instruction, which lives in the full SEO
+  // preview. So the row-level edit button OPENS the preview (where the reviewer
+  // writes the note) rather than firing a blind, note-less edit; it only falls back
+  // to a direct edit if no preview handler is wired.
+  const requestEdit = (id: string) =>
+    onPreview ? onPreview(id) : onAction(id, "edit");
   return (
     <section className="card co-review-card">
       <div className="card-h">
@@ -65,7 +71,7 @@ export default function ReviewGate({
                 <button className="primary-btn co-approve" onClick={() => onAction(j.id, "approve")}>
                   <span className="material-symbols-rounded">check</span>Approve
                 </button>
-                <button className="ghostbtn" onClick={() => onAction(j.id, "edit")}>
+                <button className="ghostbtn" onClick={() => requestEdit(j.id)}>
                   <span className="material-symbols-rounded">edit</span>Request edit
                 </button>
                 <button className="ghostbtn co-reject" onClick={() => onAction(j.id, "reject")}>

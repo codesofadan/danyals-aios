@@ -67,6 +67,9 @@ _RICH_COLUMNS: dict[str, str] = {
     "keywords": "keyword_map",
     "qa": "qa_score",
     "schema": "json_ld",
+    "outline": "outline",          # headings + layout + meta (title/description)
+    "links": "internal_links",     # internal-link coverage
+    "entities": "entity_coverage", # entity/keyword coverage
 }
 
 _JOB_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content job not found")
@@ -260,13 +263,17 @@ async def review_content_job(
     code: str,
     body: ContentReviewRequest,
     repo: ContentRepoDep,
+    enqueue: ContentEnqueuerDep,
     enqueue_publish: ContentPublishEnqueuerDep,
     actor: LeadOnly,
 ) -> ContentJobResponse:
     """The human review gate (owner/admin/manager only). ``approve`` -> publishing
-    (and enqueue the publish worker), ``edit`` -> drafting, ``reject`` -> rejected.
-    409 unless the job is in needs_review (optimistic ``expect_status``). All three
-    transitions run on the RLS path, where the DB guard recognises the lead."""
+    (and enqueue the publish worker), ``edit`` -> drafting (persist the reviewer's
+    guided-edit note + RE-ENQUEUE the pipeline for a GUIDED re-draft), ``reject`` ->
+    rejected. 409 unless the job is in needs_review (optimistic ``expect_status``).
+    All three transitions run on the RLS path, where the DB guard recognises the lead
+    (its lead branch allows the status change + the ``edit_instruction`` column edit
+    together)."""
     job = await asyncio.to_thread(repo.get_job_by_code, code)
     if job is None:
         raise _JOB_NOT_FOUND
@@ -274,8 +281,14 @@ async def review_content_job(
         raise _NOT_IN_REVIEW
 
     new_status = {"approve": "publishing", "edit": "drafting", "reject": "rejected"}[body.action]
+    changes: dict[str, Any] = {"status": new_status}
+    if body.action == "edit":
+        # Persist the reviewer's guided-edit instruction so the worker's re-draft
+        # targets exactly what was asked (not a blind regen). Empty note is allowed.
+        changes["edit_instruction"] = (body.note or "").strip()
+        changes["stage"] = "Edit requested"
     updated = await asyncio.to_thread(
-        repo.update_job_by_code, code, {"status": new_status}, "needs_review"
+        repo.update_job_by_code, code, changes, "needs_review"
     )
     if updated is None:
         # A racing transition already moved the row (optimistic concurrency), or the
@@ -285,6 +298,10 @@ async def review_content_job(
     if body.action == "approve":
         # The worker owns publishing->done on the privileged pool; hand it off.
         enqueue_publish(code)
+    elif body.action == "edit":
+        # The job is back at drafting (worker-owned); re-enqueue the pipeline so it
+        # re-drafts applying the guided-edit instruction, then returns to review.
+        enqueue(code)
 
     action = {
         "approve": "approved content for publishing",

@@ -278,6 +278,54 @@ async def test_create_request_pins_tenant(
     assert body["id"] == "T-9001" and body["status"] == "open"
 
 
+async def test_portal_request_emails_admin_and_never_breaks_on_send_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A new portal request fires a best-effort admin alert to the configured operator
+    # inbox, and a failing/raising email provider can NEVER fail the submission.
+    from types import SimpleNamespace
+
+    from app.config import get_settings
+    from app.schemas.portal_requests import PortalRequestCreate
+    from app.services import client_requests as cr
+    from integrations.resend import FakeEmailSender
+
+    # Activity logging is a separate DB-backed best-effort leg; stub it so the test
+    # isolates the email behaviour with no database.
+    async def _noop_activity(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(cr, "record_activity", _noop_activity)
+
+    reader = SimpleNamespace(get_client=lambda: {"id": "cl-A", "name": "Acme Dental"})
+    scoped = SimpleNamespace(client_id="cl-A", user=SimpleNamespace(id="u-1"))
+    body = PortalRequestCreate(kind="Access", subject="Unlock backlinks", detail="please")
+
+    def _insert(row: dict[str, Any]) -> dict[str, Any]:
+        return {"code": "T-1", **row}
+
+    # Happy path: exactly one alert, to the operator inbox, naming the client + subject.
+    sender = FakeEmailSender()
+    row = await cr.create_client_request(
+        insert_request=_insert, reader=reader, scoped=scoped, body=body, email_sender=sender,
+    )
+    assert row["code"] == "T-1"
+    assert len(sender.sent) == 1
+    sent = sender.sent[0]
+    assert sent.to == get_settings().admin_notify_email
+    assert "Acme Dental" in sent.subject and "Unlock backlinks" in sent.subject
+
+    # A raising provider is swallowed: the request the client made still succeeds.
+    class _Boom:
+        def send(self, **_kw: Any) -> str:
+            raise RuntimeError("resend down")
+
+    row2 = await cr.create_client_request(
+        insert_request=_insert, reader=reader, scoped=scoped, body=body, email_sender=_Boom(),
+    )
+    assert row2["code"] == "T-1"
+
+
 # --------------------------------------------------------------------------- #
 # 5. Per-producer deliverable-emit (each producing worker emits a deliverable)
 # --------------------------------------------------------------------------- #

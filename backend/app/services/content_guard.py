@@ -548,3 +548,208 @@ def guard_generated(
         notes=notes,
     )
     return GuardedContent(content=cleaned, result=result)
+
+
+# --------------------------------------------------------------------------- #
+# Guided edit (the reviewer's edit-request note; writer-injected, strip-guaranteed)
+# --------------------------------------------------------------------------- #
+# Reuses the SAME per-section-rewrite machinery as :func:`deai_draft` (block split,
+# the injected cost-gated writer, the unconditional hard dash-strip, the answer-block
+# protection, the ``max_rewrites`` cap), but STEERS each prose block with the
+# reviewer's free-text instruction instead of the fixed de-AI system prompt. This is
+# the GUIDED-EDIT path the review gate's ``edit`` action drives: the reviewer says
+# what to change, the worker re-drafts only the body prose to match, and the em-dash
+# guard + QA gate still run afterwards. Structure the QA gate depends on (headings,
+# lists, the extractable answer block) is never sent to the writer, so a guided edit
+# cannot silently break the outline or the snippet block.
+_EDIT_SYSTEM = (
+    "You are revising an existing local-SEO / marketing draft to satisfy the "
+    "reviewer's instruction below. Apply ONLY the reviewer's instruction. STRICT "
+    "RULES: keep every fact, name, number, price, and claim EXACTLY as given - add "
+    "no new facts, invent nothing. Never use an em dash or en dash; use short "
+    "sentences, commas, or the word 'to' for ranges. Avoid AI-cliche phrases. Do not "
+    "add or remove markdown headings or lists. Return ONLY the revised passage.\n\n"
+)
+
+
+@dataclass(frozen=True)
+class RevisionResult:
+    """The verdict of one :func:`revise_draft` pass.
+
+    ``draft_md`` is the final draft, GUARANTEED dash-free. ``revised`` is the number
+    of prose blocks the writer rephrased under the instruction; ``writer_calls`` is
+    the number of real writer invocations (for cost accounting). ``before`` /
+    ``after`` are the whole-doc :class:`GuardReport`s.
+    """
+
+    draft_md: str
+    revised: int
+    writer_calls: int
+    before: GuardReport
+    after: GuardReport
+
+
+def _revise_block(
+    block: Block,
+    writer: Summarizer,
+    model: str,
+    *,
+    instruction: str,
+    thresholds: GuardThresholds,
+) -> tuple[str, bool]:
+    """Ask the writer to revise ONE prose block per the reviewer's instruction, then
+    hard-strip the result. Returns ``(text, writer_called)``. Any writer failure (a
+    spend block, a provider error) falls back to a plain strip, so this never raises
+    - the dash-free guarantee holds either way. A modest word ceiling permits a
+    reviewer's "expand"/"add detail" without letting a runaway provider inflate a
+    block."""
+    original_words = max(len(block.text.split()), 1)
+    ceiling = min(thresholds.rewrite_word_ceiling * 2, original_words * 3 + 60)
+    prompt = f"{_EDIT_SYSTEM}REVIEWER INSTRUCTION: {instruction.strip()}\n\nPASSAGE:\n{block.text.strip()}"
+    try:
+        result = writer.summarize(prompt, model=model, max_tokens=max(96, ceiling * 2))
+    except Exception:  # a spend block or a provider error -> plain strip fallback
+        return strip_dashes(block.text), False
+    revised = result.text.strip()
+    if not revised:
+        return strip_dashes(block.text), True
+    return strip_dashes(_bound_words(revised, ceiling)), True
+
+
+def revise_draft(
+    draft_md: str,
+    *,
+    instruction: str,
+    writer: Summarizer | None = None,
+    model: str = "content-writer",
+    thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
+    protect: frozenset[str] = frozenset(),
+    max_rewrites: int | None = None,
+) -> RevisionResult:
+    """Revise a draft per the reviewer's ``instruction``: rewrite each eligible prose
+    block via the injected ``writer`` (one block at a time, steered by the
+    instruction), then GUARANTEE a dash-free result via the hard strip.
+
+    An empty ``instruction`` (or ``writer=None``, or a spend-blocked / erroring
+    writer) rephrases nothing but STILL dash-strips every block, so the returned
+    ``draft_md`` is ALWAYS dash-free. ``protect`` is the set of exact block texts
+    (e.g. the extractable answer block) that are stripped only, never rephrased.
+    ``max_rewrites`` caps the writer calls (cost control); once a writer call fails
+    the remaining blocks fall back to a plain strip.
+    """
+    before = scan(draft_md, thresholds)
+    steer = instruction.strip()
+    blocks = split_blocks(draft_md)
+    protect_norm = {" ".join(p.split()) for p in protect}
+
+    out_parts: list[str] = []
+    revised = 0
+    writer_calls = 0
+    writer_live = writer is not None and bool(steer)
+
+    for block in blocks:
+        norm = " ".join(block.text.split())
+        wants_revise = (
+            writer_live
+            and block.kind == "prose"
+            and norm not in protect_norm
+            and (max_rewrites is None or writer_calls < max_rewrites)
+        )
+        if wants_revise and writer is not None:
+            text, called = _revise_block(block, writer, model, instruction=steer, thresholds=thresholds)
+            if called:
+                writer_calls += 1
+                revised += 1
+            else:
+                # The writer went away (spend block / error): stop calling it and
+                # plain-strip the rest so we make no further doomed provider calls.
+                writer_live = False
+            out_parts.append(text)
+        else:
+            out_parts.append(strip_dashes(block.text))
+
+    final = "\n\n".join(out_parts)
+    if not final.endswith("\n"):
+        final += "\n"
+    after = scan(final, thresholds)
+    return RevisionResult(
+        draft_md=final, revised=revised, writer_calls=writer_calls, before=before, after=after
+    )
+
+
+@dataclass(frozen=True)
+class GuidedRewrite:
+    """A guided-rewrite result: the new :class:`GeneratedContent` + the
+    :class:`RevisionResult` audit (``revised`` / ``writer_calls`` let a caller - e.g.
+    the QA improvement loop - tell whether the writer actually ran, so a cost-blocked
+    pass, which does zero writer work, is detectable and stops the loop)."""
+
+    content: GeneratedContent
+    result: RevisionResult
+
+
+def guided_rewrite(
+    content: GeneratedContent,
+    *,
+    instruction: str,
+    writer: Summarizer | None,
+    model: str = "content-writer",
+    thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
+    max_rewrites: int | None = None,
+    note_label: str = "guided edit",
+) -> GuidedRewrite:
+    """Revise a :class:`GeneratedContent`'s body prose per ``instruction`` and return
+    BOTH the new content and the :class:`RevisionResult`.
+
+    Revises only the body prose (steered per block by the instruction), protecting
+    the extractable answer block, and returns a new ``GeneratedContent`` with the
+    revised, dash-free ``draft_md`` + a recomputed ``word_count``. ``note_label``
+    prefixes the audit note (``"guided edit"`` for a human note, ``"QA auto-revise"``
+    for the improvement loop). Pure given a deterministic (or ``None``) writer; a
+    ``None`` / erroring / spend-blocked writer degrades to a plain dash-strip
+    (``writer_calls == 0``) and changes nothing else."""
+    result = revise_draft(
+        content.draft_md,
+        instruction=instruction,
+        writer=writer,
+        model=model,
+        thresholds=thresholds,
+        protect=frozenset({content.answer_block}) if content.answer_block else frozenset(),
+        max_rewrites=max_rewrites,
+    )
+    notes = list(content.notes)
+    if result.revised:
+        notes.append(f"{note_label}: revised {result.revised} section(s)")
+    new_content = replace(
+        content,
+        draft_md=result.draft_md,
+        word_count=_word_count(result.draft_md),
+        notes=notes,
+    )
+    return GuidedRewrite(content=new_content, result=result)
+
+
+def apply_edit_instruction(
+    content: GeneratedContent,
+    *,
+    instruction: str,
+    writer: Summarizer | None,
+    model: str = "content-writer",
+    thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
+    max_rewrites: int | None = None,
+) -> GeneratedContent:
+    """Apply a reviewer's guided-edit ``instruction`` to a :class:`GeneratedContent`.
+
+    A thin wrapper over :func:`guided_rewrite` (the human-note path): returns just the
+    revised ``GeneratedContent``. The caller is expected to run :func:`guard_generated`
+    afterwards (the worker does), so the title / meta / answer-block / heading text are
+    dash-stripped there."""
+    return guided_rewrite(
+        content,
+        instruction=instruction,
+        writer=writer,
+        model=model,
+        thresholds=thresholds,
+        max_rewrites=max_rewrites,
+        note_label="guided edit",
+    ).content

@@ -4,9 +4,10 @@ import { useState, type FormEvent } from "react";
 import { usePolicyAsk } from "@/lib/hooks/policy";
 
 // The on-demand lookup box: type a policy topic, get a live, source-cited answer.
-// The heavy lifting (Serper search + SSRF-guarded fetch + Claude Haiku) is all
-// server-side and cost-gated; this component only submits the topic and renders the
-// structured reply (answer + urgency + key rules + sources), degrading honestly.
+// The heavy lifting (Claude researches the topic itself via the Anthropic server-side
+// web_search tool) is all server-side and cost-gated; this component only submits the
+// topic and renders the structured reply (answer + urgency + key rules + sources),
+// degrading honestly.
 export default function AskBox() {
   const ask = usePolicyAsk();
   const [topic, setTopic] = useState("");
