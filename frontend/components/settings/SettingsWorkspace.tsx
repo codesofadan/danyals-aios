@@ -4,12 +4,14 @@ import { useState, type ReactNode } from "react";
 import { type TeamRole, type PermKey } from "@/lib/data";
 import { useRbac } from "@/lib/hooks/team";
 import AccessControl from "@/components/team/AccessControl";
+import AccountSettings from "./AccountSettings";
 import ClientCredentials from "./ClientCredentials";
 import TeamCredentials from "./TeamCredentials";
 
-type TabKey = "clients" | "team" | "access";
+type TabKey = "account" | "clients" | "team" | "access";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
+  { key: "account", label: "My Account", icon: "account_circle" },
   { key: "clients", label: "Client Access", icon: "key" },
   { key: "team", label: "Team Access", icon: "manage_accounts" },
   { key: "access", label: "Roles & Permissions", icon: "admin_panel_settings" },
@@ -28,31 +30,27 @@ function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }
 }
 
 export default function SettingsWorkspace() {
-  const [tab, setTab] = useState<TabKey>("clients");
+  const [tab, setTab] = useState<TabKey>("account");
   // The role×permission matrix is server-side REFERENCE data (GET /rbac/roles):
-  // versioned platform code with NO per-role toggle route, so it is rendered
-  // READ-ONLY here — the no-op onToggle persists nothing (an honest matrix, not a
-  // fake save). The visual toggle affordance lives inside AccessControl (a shared
-  // team component, out of this screen's scope to restyle).
+  // versioned platform code with NO per-role toggle route, so AccessControl renders
+  // it strictly read-only (no toggle affordance, no persist).
   const rbacQ = useRbac();
   const rolePerms = rbacQ.data ?? ({} as Record<TeamRole, PermKey[]>);
   const [toast, setToast] = useState<{ n: number; text: string } | null>(null);
 
-  // Shared audit-trail hook — every panel reports admin actions here.
+  // A transient on-screen confirmation for the panels that DO persist a real
+  // mutation (My Account → /me, Team Access → /admin/users/{id}/password). Read-only
+  // panels (Client Access, Roles & Permissions) never call this.
   function onLog(action: string, target: string, meta?: string) {
     setToast((prev) => ({ n: (prev?.n ?? 0) + 1, text: `${action} · ${target}${meta ? ` — ${meta}` : ""}` }));
   }
-
-  const noopToggle = () => {
-    /* read-only matrix — no persist route exists */
-  };
 
   return (
     <section className="card settings-card">
       <div className="card-h">
         <div>
           <div className="ct">Settings</div>
-          <div className="cs">Client &amp; team credentials, roles &amp; access — one control panel.</div>
+          <div className="cs">Your account, client &amp; team credentials, roles &amp; access — one control panel.</div>
         </div>
       </div>
 
@@ -72,16 +70,16 @@ export default function SettingsWorkspace() {
       </div>
 
       <div className="tw-panel" role="tabpanel">
-        {tab === "clients" && <ClientCredentials onLog={onLog} />}
+        {tab === "account" && <AccountSettings onLog={onLog} />}
+        {tab === "clients" && <ClientCredentials />}
         {tab === "team" && <TeamCredentials onLog={onLog} />}
-        {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} onToggle={noopToggle} />)}
+        {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} />)}
       </div>
 
       {toast && (
         <div className="set-toast" key={toast.n} role="status">
-          <span className="material-symbols-rounded">history</span>
+          <span className="material-symbols-rounded">check_circle</span>
           <span className="st-txt">{toast.text}</span>
-          <span className="st-tag">logged</span>
         </div>
       )}
     </section>

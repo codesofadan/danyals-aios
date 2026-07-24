@@ -12,6 +12,7 @@ activity entry linked to the ticket's client so the context layer stays fresh.
 from __future__ import annotations
 
 import asyncio
+from html import escape as html_escape
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -27,8 +28,15 @@ from app.schemas.tickets import (
     TicketStatusUpdate,
 )
 from app.services.activity import record_activity
+from app.services.notifications import email_client
 
 router = APIRouter(tags=["tickets"])
+
+# Client-facing label for the internal ticket status (the portal maps pending ->
+# in_review; the email uses the same client-facing wording).
+_CLIENT_STATUS_LABEL: dict[str, str] = {
+    "open": "open", "pending": "in review", "resolved": "resolved"
+}
 
 # All six staff roles hold view_reports; a portal client does NOT (mirrors
 # tasks.py / milestones.py - clients are confined out of the staff namespace).
@@ -94,6 +102,7 @@ async def update_ticket_status(
     ticket = await asyncio.to_thread(repo.get_ticket_by_code, code)
     if ticket is None:
         raise _TICKET_NOT_FOUND
+    prev_status = str(ticket.get("status") or "")  # snapshot BEFORE the update mutates it
     updated = await asyncio.to_thread(
         repo.update_ticket_by_code, code, {"status": body.status}
     )
@@ -112,4 +121,28 @@ async def update_ticket_status(
         entity_type="client" if client_id is not None else None,
         entity_id=str(client_id) if client_id is not None else None,
     )
+    # ADMIN/LEAD -> CLIENT: the client's request got a reply/answer (its status moved).
+    # Email the client (best-effort; key-gated; resolves the client's contact email),
+    # only on an ACTUAL status change to a client-linked ticket. Never blocks the triage.
+    if client_id is not None and body.status != prev_status:
+        await _email_client_ticket_update(
+            str(client_id), str(ticket.get("subject", "")), body.status
+        )
     return TicketResponse.from_row(updated)
+
+
+async def _email_client_ticket_update(client_id: str, subject: str, status_: str) -> None:
+    """Best-effort: email the client that their request's status changed."""
+    label = _CLIENT_STATUS_LABEL.get(status_, status_)
+    subj = f"Update on your request: {subject}" if subject else "Update on your request"
+    text = (
+        f'There is an update on your request "{subject}": it is now {label}. '
+        "Sign in to your client portal to see the details."
+    )
+    html = (
+        "<h2>Update on your request</h2>"
+        f'<p>Your request "{html_escape(subject)}" is now '
+        f"<strong>{html_escape(label)}</strong>.</p>"
+        "<p>Sign in to your client portal to see the details.</p>"
+    )
+    await email_client(client_id, subj, html, text)

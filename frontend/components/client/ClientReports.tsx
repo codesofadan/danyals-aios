@@ -6,6 +6,17 @@ import { openFile, downloadFile } from "@/lib/api";
 import { useClientDeliverables } from "@/lib/hooks/portalClient";
 import ClientHeader from "./ClientHeader";
 
+// Build a safe, human download filename that always carries a .pdf extension and
+// stays unique across same-titled rows (title + period). Strips characters
+// Windows forbids in filenames (\ / : * ? " < > |).
+function buildFilename(title: string, period: string): string {
+  const clean = (s: string) => s.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const base = clean(title);
+  const per = clean(period);
+  const stem = per && per.toLowerCase() !== "in progress" ? `${base} (${per})` : base;
+  return `${stem || "deliverable"}.pdf`;
+}
+
 // The Reports section — downloadable deliverables (audits, monthly rollups,
 // content & backlink reports). The backend already scopes the list to the
 // client's granted, visible deliverables (an ungranted one is hidden by the
@@ -16,6 +27,10 @@ export default function ClientReports() {
   const [errorId, setErrorId] = useState<string | null>(null);
 
   const available = deliverablesQ.data ?? [];
+  // Only "ready" deliverables are downloadable — the backend 404s a download
+  // while status === "generating", so an in-progress row must not be counted as
+  // "ready" in the header.
+  const readyCount = available.filter((d) => d.status === "ready").length;
 
   async function view(id: string) {
     if (busyId) return;
@@ -30,12 +45,17 @@ export default function ClientReports() {
     }
   }
 
-  async function download(id: string, title: string) {
+  async function download(id: string, title: string, period: string) {
     if (busyId) return;
     setBusyId(id);
     setErrorId(null);
     try {
-      await downloadFile(`/portal/deliverables/${id}/download`, title);
+      // A blob anchor's `download` attribute wins over the server's
+      // Content-Disposition, so the name MUST carry a .pdf extension (else the
+      // file saves extension-less and won't open by double-click on Windows).
+      // Include the period so two same-titled rows (e.g. two "Monthly SEO
+      // Report") don't collide to one filename.
+      await downloadFile(`/portal/deliverables/${id}/download`, buildFilename(title, period));
     } catch {
       setErrorId(id);
     } finally {
@@ -46,11 +66,10 @@ export default function ClientReports() {
   return (
     <div className="tw cl">
       <ClientHeader
-        eyebrow=""
         focus={
           <>
             <span className="cl-focus-k">Reports library</span>
-            <span className="cl-focus-v">{available.length} reports ready</span>
+            <span className="cl-focus-v">{readyCount} report{readyCount === 1 ? "" : "s"} ready</span>
             <span className="cl-focus-note">
               <span className="material-symbols-rounded">download</span>Download or view any report
             </span>
@@ -112,7 +131,7 @@ export default function ClientReports() {
                       <button className="ghostbtn" type="button" onClick={() => view(d.id)} disabled={busyId === d.id}>
                         <span className="material-symbols-rounded">visibility</span>View
                       </button>
-                      <button className="primary-btn sm" type="button" onClick={() => download(d.id, d.title)} disabled={busyId === d.id}>
+                      <button className="primary-btn sm" type="button" onClick={() => download(d.id, d.title, d.period)} disabled={busyId === d.id}>
                         <span className="material-symbols-rounded">download</span>Download
                       </button>
                     </div>

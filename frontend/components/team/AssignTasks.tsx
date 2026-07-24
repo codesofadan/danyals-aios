@@ -18,7 +18,12 @@ export type NewTask = {
 
 const PRIORITIES: TaskPriority[] = ["urgent", "high", "med", "low"];
 const PRIORITY_LABEL: Record<TaskPriority, string> = { urgent: "Urgent", high: "High", med: "Medium", low: "Low" };
-const STATUS_FLOW: TaskStatus[] = ["todo", "in_progress", "review", "done"];
+// The single legal forward step per status. `in_progress` advances one step
+// server-side (the backend picks review-vs-done by task type); `review` is resolved
+// by the Approve/Reject gate, never a free jump.
+const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
+  todo: "in_progress", in_progress: "review", review: "done", done: "done",
+};
 
 export default function AssignTasks({
   tasks, members, clients, onAssign, onStatusChange,
@@ -141,14 +146,28 @@ export default function AssignTasks({
                   {m ? <span className="av xs" style={{ background: m.c }}>{m.init}</span> : null}
                   <span className="task-due">Due {t.due}</span>
                 </div>
-                <select
-                  className={`task-status ${sm.cls}`}
-                  value={t.status}
-                  onChange={(e) => onStatusChange(t.id, e.target.value as TaskStatus)}
-                  aria-label={`Status for ${t.id}`}
-                >
-                  {STATUS_FLOW.map((s) => <option key={s} value={s}>{TASK_STATUS_META[s].label}</option>)}
-                </select>
+                <div className="task-lifecycle" style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+                  <span className={`status-pill ${sm.cls}`}>{sm.label}</span>
+                  {t.status === "review" ? (
+                    <>
+                      <button type="button" className="mini-btn" onClick={() => onStatusChange(t.id, "done")} title="Approve — sign off this task">
+                        <span className="material-symbols-rounded">check</span>Approve
+                      </button>
+                      <button type="button" className="mini-btn" onClick={() => onStatusChange(t.id, "in_progress")} title="Reject — send back for changes">
+                        <span className="material-symbols-rounded">close</span>Reject
+                      </button>
+                    </>
+                  ) : t.status !== "done" ? (
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      onClick={() => onStatusChange(t.id, NEXT_STATUS[t.status])}
+                      title="Advance to the next stage"
+                    >
+                      Advance<span className="material-symbols-rounded">arrow_forward</span>
+                    </button>
+                  ) : null}
+                </div>
               </div>
             );
           })}

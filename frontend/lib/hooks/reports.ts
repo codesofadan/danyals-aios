@@ -22,14 +22,32 @@ export const SYNC_EVENTS_KEY = ["reports", "sync-events"] as const;
 export const REPORT_TYPES_KEY = ["reports", "types"] as const;
 export const CONNECTION_KEY = ["reports", "connection"] as const;
 export const SCHEDULED_JOBS_KEY = ["reports", "scheduled-jobs"] as const;
+export const GENERATED_REPORTS_KEY = ["reports", "generated"] as const;
 
 // One background cron job (GET /reports/scheduled-jobs ≡ ScheduledJob). The list is
 // derived from the live Celery beat schedule, so it never drifts from what actually runs.
+// nextRun/lastRun are ISO strings (or null); lastStatus is the last run's outcome;
+// waitingOn is set when the job needs an absent provider key but stays scheduled.
 export type ScheduledJob = {
   name: string;
   task: string;
   description: string;
   cadence: string;
+  nextRun: string | null;
+  lastRun: string | null;
+  lastStatus: string | null;
+  waitingOn: string | null;
+};
+
+// One autonomously-produced, downloadable report (GET /reports/generated ≡
+// GeneratedReportResponse) — the monthly per-client SEO summary a scheduled job stores.
+export type GeneratedReport = {
+  id: string;
+  client: string;
+  title: string;
+  period: string;
+  headline: string;
+  when: string;
 };
 
 // The Sheets-connection panel shape (GET /reports/connection ≡ ConnectionResponse).
@@ -74,6 +92,14 @@ export function useScheduledJobs() {
   return useQuery({
     queryKey: SCHEDULED_JOBS_KEY,
     queryFn: () => api.get<ScheduledJob[]>("/reports/scheduled-jobs"),
+  });
+}
+
+/** The autonomously-produced, downloadable reports (GET /reports/generated). */
+export function useGeneratedReports() {
+  return useQuery({
+    queryKey: GENERATED_REPORTS_KEY,
+    queryFn: () => api.get<GeneratedReport[]>("/reports/generated"),
   });
 }
 

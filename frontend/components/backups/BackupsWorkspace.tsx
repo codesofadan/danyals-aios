@@ -5,8 +5,6 @@ import anime from "animejs";
 import {
   protectedStores,
   backupConfig,
-  storage,
-  storageUsedGB,
   resilience,
   type Snapshot,
 } from "@/lib/backups";
@@ -88,7 +86,8 @@ export default function BackupsWorkspace() {
   const barRef = useRef<HTMLElement>(null);
 
   const shown = list.filter((s) => filter === "All" || s.type === filter);
-  const freeGB = Math.max(0, storage.totalGB - storageUsedGB);
+  // Live backup-health signal, derived from the real snapshot ledger.
+  const failedCount = list.filter((s) => s.status === "failed").length;
 
   // Run a manual backup now → POST /backups/run; the ledger + config refetch on
   // success and the new row appears in the history table.
@@ -128,13 +127,13 @@ export default function BackupsWorkspace() {
       {/* KPI row */}
       <section className="kpis">
         <Kpi hero label="Last successful backup" value={cfg.lastBackupAgoH} unit="h ago"
-          sub={<><span className="delta up"><span className="material-symbols-rounded">check_circle</span>OK</span> Nightly · Today 02:00</>} />
+          sub={<><span className="delta up"><span className="material-symbols-rounded">check_circle</span>OK</span> Nightly · {cfg.nightlyTime}</>} />
         <Kpi label="Next scheduled backup" value={cfg.nextBackupInH} unit="h"
           sub={<>Tonight · {cfg.nightlyTime}</>} />
         <Kpi label="Snapshots retained" value={cfg.retained}
           sub={<>{cfg.retentionDays}-day rolling window</>} />
-        <Kpi label="Storage used" value={storageUsedGB} decimals={1} unit="GB"
-          sub={<>of {storage.totalGB} GB VPS volume</>} />
+        <Kpi label="Failed runs" value={failedCount}
+          sub={<>of {list.length} in history</>} />
       </section>
 
       {/* restore progress banner */}
@@ -219,9 +218,6 @@ export default function BackupsWorkspace() {
                         <button className="bk-ico" title="Restore this snapshot"
                           disabled={s.status !== "success"} onClick={() => setRestoreTarget(s)}>
                           <span className="material-symbols-rounded">settings_backup_restore</span>
-                        </button>
-                        <button className="bk-ico" title="Download" disabled={s.status !== "success"}>
-                          <span className="material-symbols-rounded">download</span>
                         </button>
                       </div>
                     </td>
@@ -320,31 +316,18 @@ export default function BackupsWorkspace() {
           </div>
         </section>
 
-        {/* Storage & resilience */}
+        {/* Resilience */}
         <section className="card">
           <div className="card-h">
             <div>
-              <div className="ct">Storage &amp; Resilience</div>
+              <div className="ct">Resilience</div>
               <div className="cs">VPS volume · artifacts stored locally</div>
             </div>
           </div>
 
-          <div className="bk-usage">
-            <span className="u1">{storageUsedGB.toFixed(1)} GB</span>
-            <span className="u2">used of {storage.totalGB} GB · {freeGB.toFixed(1)} GB free</span>
-          </div>
-          <div className="bk-meter">
-            <div className="bk-bar">
-              {storage.segments.map((sg) => (
-                <span key={sg.key} className="bk-seg" style={{ width: `${(sg.gb / storage.totalGB) * 100}%`, background: sg.color }} />
-              ))}
-            </div>
-            <div className="bk-lg">
-              {storage.segments.map((sg) => (
-                <span key={sg.key}><i style={{ background: sg.color }} />{sg.label} · {sg.gb} GB</span>
-              ))}
-              <span><i style={{ background: "rgba(33,27,41,.06)" }} />Free · {freeGB.toFixed(1)} GB</span>
-            </div>
+          <div className="bk-note">
+            <span className="material-symbols-rounded">hard_drive</span>
+            <span>Live disk-usage measurement isn&apos;t wired yet — per-snapshot sizes are shown in the history table above.</span>
           </div>
 
           <div className="bk-check">

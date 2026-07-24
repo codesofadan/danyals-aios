@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useContentJobs, useCreateContentJob, useReviewContentJob } from "@/lib/hooks/content";
+import { useSpendHalted } from "@/lib/hooks/cost";
 import ContentKpis from "./ContentKpis";
 import PipelineBoard from "./PipelineBoard";
 import ReviewGate, { type ReviewAction } from "./ReviewGate";
@@ -12,6 +13,7 @@ export default function ContentWorkspace() {
   const jobsQ = useContentJobs(); // live: GET /content/jobs, polls while the worker moves a job
   const createJob = useCreateContentJob();
   const reviewJob = useReviewContentJob();
+  const { halted } = useSpendHalted(); // global API-spend kill-switch
 
   const jobs = jobsQ.data ?? [];
 
@@ -51,12 +53,12 @@ export default function ContentWorkspace() {
     <>
       {jobsQ.isError && (
         <div className="cs" role="alert" style={{ color: "var(--warn)", marginBottom: 8 }}>
-          Couldn&apos;t load content jobs — {(jobsQ.error as Error)?.message ?? "try again"}.
+          Couldn&apos;t load content jobs. {(jobsQ.error as Error)?.message ?? "Try again"}.
         </div>
       )}
       {actionErr && (
         <div className="cs" role="alert" style={{ color: "var(--warn)", marginBottom: 8 }}>
-          {createErr ? "Couldn't queue the job" : "Couldn't apply the review"} — {actionErr}.
+          {createErr ? "Couldn't queue the job" : "Couldn't apply the review"}. {actionErr}.
         </div>
       )}
 
@@ -70,7 +72,7 @@ export default function ContentWorkspace() {
 
       <div className="row">
         <ReviewGate jobs={needsReview} onAction={handleReview} onPreview={setSelectedId} />
-        <NewJobForm onCreate={handleCreate} />
+        <NewJobForm onCreate={handleCreate} halted={halted} />
       </div>
 
     </>

@@ -103,7 +103,9 @@ export default function CitationsTab() {
         </div>
       </div>
 
-      {showCampaign && <CitationCampaignModal onClose={() => setShowCampaign(false)} />}
+      {showCampaign && (
+        <CitationCampaignModal onClose={() => setShowCampaign(false)} initialClientId={gapClient || undefined} />
+      )}
 
       {flash && (
         <div className="op-flash">

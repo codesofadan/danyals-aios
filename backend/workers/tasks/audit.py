@@ -18,6 +18,7 @@ real subprocess.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from html import escape as html_escape
 from typing import Any, Protocol
 
 from psycopg import sql
@@ -31,7 +32,7 @@ from app.services.audit_artifacts import ArtifactStore, local_store_from_setting
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
-from app.services.notifications import notify_leads_sync
+from app.services.notifications import email_client_sync, notify_leads_sync
 from integrations.audit_engine import AuditEngineConfig, AuditRunResult, run_audit
 from workers.celery_app import celery_app
 
@@ -116,7 +117,7 @@ class SupabaseAuditStore:
 
     def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
         """Pre-flight the paid audit spend through the SAME cost gate as every
-        other paid worker (dial -> client cap -> daily spend-stop). The caller
+        other paid worker (spend halt -> dial -> client cap). The caller
         does NOT run the engine unless the decision is ``call``. This is the
         missing gate: previously the worker only LOGGED the cost post-hoc, so a
         Paid audit - the largest single spend - bypassed the caps entirely."""
@@ -216,7 +217,7 @@ def execute_audit(
     tier = row.get("tier", "free")
 
     # Cost gate (PAID only): a Paid audit is the single largest spend, so it must
-    # clear the pre-flight gate (dial -> client cap -> daily spend-stop) BEFORE
+    # clear the pre-flight gate (spend halt -> dial -> client cap) BEFORE
     # the engine runs. A Free audit makes no paid-provider call, so it is never
     # gated ($0) - blocking a free run behind a budget cap would be wrong.
     if tier == "paid":
@@ -333,7 +334,34 @@ def execute_audit(
         f"The audit for {subject} finished (score {result.score}). "
         "The report is ready to review and deliver.",
     )
+    # ADMIN/LEAD -> CLIENT: email the client that their report is ready in the portal
+    # (best-effort; never fails the job). Only for a client-linked run (a public /
+    # unlinked audit has no tenant) that produced a downloadable PDF. email_client_sync
+    # resolves the client's contact email + is key-gated, so a keyless/failing provider
+    # or an unresolvable recipient degrades silently - it can never break the done job.
+    client_id = row.get("client_id")
+    if client_id and pdf_key:
+        _email_client_audit_ready(
+            str(client_id), str(row.get("client_name") or ""), str(row.get("url") or "")
+        )
     return {"audit_id": audit_id, "status": "done", "score": result.score}
+
+
+def _email_client_audit_ready(client_id: str, client_name: str, url: str) -> None:
+    """Best-effort: email the client that their SEO audit report is ready."""
+    who = client_name or "there"
+    site = f" for {url}" if url else ""
+    subject = "Your SEO audit report is ready"
+    text = (
+        f"Hi {who}, your SEO audit{site} is complete. Sign in to your client portal to "
+        "view the findings and download the full report."
+    )
+    html = (
+        f"<h2>Your SEO audit report is ready</h2>"
+        f"<p>Hi {html_escape(who)}, your SEO audit{html_escape(site)} is complete.</p>"
+        "<p>Sign in to your client portal to view the findings and download the full report.</p>"
+    )
+    email_client_sync(client_id, subject, html, text)
 
 
 @celery_app.task(name="run_audit")  # type: ignore[untyped-decorator]  # celery's decorator is untyped

@@ -3,6 +3,7 @@
 import { GROUP_COLOR } from "@/lib/data";
 import type { Cell, Tool } from "@/lib/tools";
 import EmptyState from "@/components/ui/EmptyState";
+import { getToolActions } from "./tools/registry";
 
 function CellView({ cell }: { cell: Cell }) {
   if (typeof cell === "string") return <>{cell}</>;
@@ -11,6 +12,9 @@ function CellView({ cell }: { cell: Cell }) {
 
 export default function ToolWorkspace({ tool }: { tool: Tool }) {
   const c = GROUP_COLOR[tool.group];
+  // The 8 Part-8 modules have a real, callable action panel; the other 9 tools are
+  // live readouts (their fetched KPIs/table below ARE the view) and have none.
+  const Actions = getToolActions(tool.slug);
 
   return (
     <div className="tw portal tool-ws">
@@ -25,6 +29,9 @@ export default function ToolWorkspace({ tool }: { tool: Tool }) {
           <span className="tool-granted"><span className="material-symbols-rounded">verified_user</span>Access granted</span>
         </div>
       </section>
+
+      {/* The working controls — a real form that calls this tool's live endpoints. */}
+      {Actions && <Actions accent={c} />}
 
       {tool.kpis.length > 0 ? (
         <section className="kpis tool-kpis">
@@ -48,13 +55,13 @@ export default function ToolWorkspace({ tool }: { tool: Tool }) {
           <EmptyState
             icon="monitoring"
             title="No current data"
-            hint="This tool isn't connected to a live data source yet — metrics will appear here once it's wired up and has records."
+            hint="This tool has no records yet — its live metrics will appear here as work runs through it."
           />
         </section>
       )}
 
-      <div className="row">
-        {tool.table && (
+      {tool.table && (
+        <div className="row-single">
           <section className="card">
             <div className="card-h">
               <div>
@@ -86,26 +93,8 @@ export default function ToolWorkspace({ tool }: { tool: Tool }) {
               <EmptyState icon="table_rows" title="No records yet" hint="Nothing to show here yet — records will appear once this tool has activity." compact />
             )}
           </section>
-        )}
-
-        <section className="card">
-          <div className="card-h">
-            <div>
-              <div className="ct">What you can do here</div>
-              <div className="cs">Capabilities unlocked by this grant.</div>
-            </div>
-          </div>
-          <ul className="tool-caps">
-            {tool.bullets.map((b) => (
-              <li key={b}><span className="material-symbols-rounded">check_circle</span>{b}</li>
-            ))}
-          </ul>
-          <div className="bk-note" style={{ marginTop: 16 }}>
-            <span className="material-symbols-rounded">bolt</span>
-            <span>This tool is available to you because an admin granted <b>{tool.label}</b>. Actions here run against your assigned clients.</span>
-          </div>
-        </section>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

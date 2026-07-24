@@ -232,7 +232,34 @@ services:
       - api
     restart: unless-stopped
 
+  # ------------------------------------------------ nginx + certbot (TLS proxy)
+  # The ONLY process facing the public network. Terminates HTTPS for
+  # app.qanry.com and reverse-proxies to web:3000, which in turn proxies
+  # /api/v1/* to api:8000 — one domain, one hop. Image = jonasal/nginx-certbot:
+  # plain nginx PLUS an integrated certbot that, on first deploy, drops in a
+  # dummy cert so nginx boots, then obtains the real Let's Encrypt cert over
+  # port 80 (ACME http-01 + the http→https redirect are handled INTERNALLY — do
+  # NOT add your own :80 server block) and auto-renews it. The server block lives
+  # in ./infra/deploy/nginx.conf (mounted read-only into user_conf.d); certs
+  # persist in the nginx_secrets volume across redeploys so we don't re-hit the
+  # Let's Encrypt rate limit. Requires: ports 80+443 open on the VPS firewall,
+  # CERTBOT_EMAIL set, and app.qanry.com's DNS A record already pointing here.
+  nginx:
+    image: jonasal/nginx-certbot:latest
+    environment:
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/deploy/nginx.conf:/etc/nginx/user_conf.d/app.conf:ro
+      - nginx_secrets:/etc/letsencrypt
+    depends_on:
+      - web
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
   aios_state:
+  nginx_secrets:

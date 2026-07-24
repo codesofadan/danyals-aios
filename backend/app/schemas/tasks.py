@@ -109,15 +109,30 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    """PATCH /tasks/{code} body: reassign / repriority / redue (lead-only).
+    """PATCH /tasks/{code} body: reassign / repriority / redue / set proof (lead-only).
 
     Every field is optional; only those provided are changed. Status is NEVER
-    patched here - it moves only through /advance and /review.
+    patched here - it moves only through /advance and /review. ``proof_url`` is the
+    proof-of-completion link a lead may set/clear on any task (the assignee sets
+    theirs via /advance).
     """
 
     assignee_id: str | None = Field(default=None, min_length=1)
     priority: TaskPriority | None = None
     due: date | None = None
+    proof_url: str | None = Field(default=None, max_length=2000)
+
+
+class TaskAdvanceRequest(BaseModel):
+    """POST /tasks/{code}/advance body: advance one step, optionally attaching proof.
+
+    ``proof_url`` lets the ASSIGNEE submit their proof-of-completion link (published
+    URL / delivered report) as they advance to review/done. Optional: the body may be
+    omitted entirely (a plain advance). The DB guard permits a non-lead to change
+    {status, proof_url} together along a legal transition.
+    """
+
+    proof_url: str | None = Field(default=None, max_length=2000)
 
 
 ReviewAction = Literal["approve", "reject"]
@@ -134,8 +149,9 @@ class TaskResponse(BaseModel):
 
     ``id`` is the public ``J-####`` code; ``client`` is the snapshotted name;
     ``assignee`` is the assignee's user id (``""`` if unassigned); ``type`` is the
-    display label. No internal column (UUID id, client_id, created_by, audit_id,
-    timestamps) is ever exposed.
+    display label; ``proofUrl`` is the proof-of-completion link (``""`` when unset).
+    No internal column (UUID id, client_id, created_by, audit_id, timestamps) is ever
+    exposed.
     """
 
     id: str
@@ -146,6 +162,7 @@ class TaskResponse(BaseModel):
     priority: TaskPriority
     status: TaskStatus
     due: str
+    proof_url: str = Field(default="", serialization_alias="proofUrl")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> TaskResponse:
@@ -161,4 +178,5 @@ class TaskResponse(BaseModel):
             priority=priority if priority in _PRIORITIES else "med",
             status=status if status in _STATUSES else "todo",
             due=format_due(row.get("due_date")),
+            proof_url=str(row.get("proof_url") or ""),
         )

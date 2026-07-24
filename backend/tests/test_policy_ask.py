@@ -244,7 +244,7 @@ def test_absent_usage_count_estimates_max_uses_for_the_search_cost() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     ("mode", "halted", "expected"),
-    [("off", False, "skip"), ("byhand", False, "manual"), ("api", True, "blocked_daily")],
+    [("off", False, "skip"), ("byhand", False, "manual"), ("api", True, "blocked_halt")],
 )
 def test_gate_block_degrades_without_calling_the_researcher(
     mode: str, halted: bool, expected: str

@@ -15,7 +15,7 @@ const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://127.0.0.1:8000";
 // existing bookmark/marketing link resolving instead of 404ing.
 const OLD_ADMIN_PATHS = [
   "audit", "content", "off-page", "policy-radar", "clients", "milestones",
-  "reports", "upsells", "tiers", "cost", "vault", "backups", "settings", "features",
+  "reports", "upsells", "tiers", "cost", "vault", "backups", "settings",
 ];
 
 const nextConfig = {

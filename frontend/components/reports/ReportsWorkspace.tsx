@@ -67,6 +67,12 @@ export default function ReportsWorkspace() {
     <>
       <ReportsKpis workbooks={books.length} lastSync={lastSync} rowsToday={rowsToday} health={health} />
 
+      {/* The autonomous cron jobs the platform runs on its own — surfaced up top so the
+          operator sees the live schedule + last run at a glance. */}
+      <div className="row">
+        <ScheduledJobs />
+      </div>
+
       <div className="row">
         <ReportsLibrary />
       </div>
@@ -86,10 +92,6 @@ export default function ReportsWorkspace() {
       <div className="row">
         <SyncActivity log={log} loading={eventsQ.isLoading} error={eventsErr} />
         <ReportTypes />
-      </div>
-
-      <div className="row">
-        <ScheduledJobs />
       </div>
     </>
   );

@@ -5,22 +5,25 @@ import {
   type TeamRole, type PermKey,
 } from "@/lib/data";
 
+// The role×permission matrix is server-side REFERENCE data (GET /rbac/roles):
+// versioned platform code with NO per-role persist endpoint (Owner is all-on and
+// locked). It is therefore rendered strictly READ-ONLY — a static check/dash grid,
+// not interactive switches — so nothing here implies a save that can't happen.
 export default function AccessControl({
-  rolePerms, onToggle,
+  rolePerms,
 }: {
   rolePerms: Record<TeamRole, PermKey[]>;
-  onToggle: (role: TeamRole, key: PermKey) => void;
 }) {
   return (
     <div className="panel-in">
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">admin_panel_settings</span>
-          Role-based access · toggle a capability to grant or revoke it
+          Role-based access · the capabilities each role includes
         </div>
         <div className="sec-note inline">
           <span className="material-symbols-rounded">lock</span>
-          Owner is all-access and locked. Changes are recorded in the activity log.
+          Reference — these are the platform&apos;s fixed role permissions. Owner is all-access.
         </div>
       </div>
 
@@ -50,21 +53,16 @@ export default function AccessControl({
                 </td>
                 {ROLE_ORDER.map((r) => {
                   const on = rolePerms[r].includes(p.key);
-                  const locked = r === "Owner";
                   return (
                     <td key={r} className="rbac-cell">
-                      <button
-                        className={`perm-tog${on ? " on" : ""}${locked ? " locked" : ""}`}
-                        onClick={() => !locked && onToggle(r, p.key)}
-                        disabled={locked}
-                        role="switch"
-                        aria-checked={on}
-                        aria-label={`${on ? "Revoke" : "Grant"} ${p.label} for ${r}`}
-                        title={locked ? "Owner always has full access" : on ? "Granted — click to revoke" : "Not granted — click to grant"}
+                      <span
+                        className={`perm-tog${on ? " on" : ""} static`}
+                        aria-label={`${p.label}: ${on ? "granted" : "not granted"} for ${r}`}
+                        title={on ? "Granted" : "Not granted"}
                         style={on ? { background: ROLE_META[r].c, borderColor: ROLE_META[r].c } : undefined}
                       >
                         <span className="material-symbols-rounded">{on ? "check" : "remove"}</span>
-                      </button>
+                      </span>
                     </td>
                   );
                 })}

@@ -1,22 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { REQUEST_KINDS, REQUEST_STATUS_META, type RequestKind } from "@/lib/client";
 import { useClient } from "./ClientContext";
 import ClientHeader from "./ClientHeader";
 
 // The Requests section — a lightweight channel from the client to the
-// agency admin. Raise a request (unlock a graph, ask for a report, flag an
-// issue) and track its status. Submitted requests land in the admin's
-// support queue (tickets) once the backend is wired.
+// agency admin. Raise a request (ask for a report, request access, flag an
+// issue) and track its status. Submitted requests POST to /portal/requests and
+// land in the admin's support queue; the history reads GET /portal/requests.
 export default function ClientRequests() {
-  const { requests, addRequest } = useClient();
+  const { requests, requestsLoading, requestsError, refetchRequests, addRequest } = useClient();
   const [kind, setKind] = useState<RequestKind>("Report");
   const [subject, setSubject] = useState("");
   const [detail, setDetail] = useState("");
   const [sent, setSent] = useState(false);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Track the transient "sent" banner timer so navigating away mid-flash can't
+  // fire setState on an unmounted component (an uncancelled timer).
+  const sentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (sentTimer.current) clearTimeout(sentTimer.current); }, []);
 
   const valid = subject.trim().length > 3;
   const open = requests.filter((r) => r.status !== "resolved").length;
@@ -36,7 +40,8 @@ export default function ClientRequests() {
           setBusy(false);
           setSubject(""); setDetail(""); setKind("Report");
           setSent(true);
-          setTimeout(() => setSent(false), 2600);
+          if (sentTimer.current) clearTimeout(sentTimer.current);
+          sentTimer.current = setTimeout(() => setSent(false), 2600);
         },
         onError: () => {
           setBusy(false);
@@ -49,7 +54,6 @@ export default function ClientRequests() {
   return (
     <div className="tw cl">
       <ClientHeader
-        eyebrow=""
         focus={
           <>
             <span className="cl-focus-k">Requests</span>
@@ -120,6 +124,27 @@ export default function ClientRequests() {
             </div>
           </div>
 
+          {requestsLoading ? (
+            <div className="pt-empty sm">
+              <span className="material-symbols-rounded spin">progress_activity</span>
+              <div className="pt-empty-t">Loading your requests…</div>
+            </div>
+          ) : requestsError ? (
+            <div className="pt-empty sm">
+              <span className="material-symbols-rounded">error</span>
+              <div className="pt-empty-t">Couldn&apos;t load your requests</div>
+              <div className="pt-empty-s">There was a problem reaching the server.</div>
+              <button className="primary-btn sm" type="button" onClick={refetchRequests} style={{ marginTop: 12 }}>
+                <span className="material-symbols-rounded">refresh</span>Retry
+              </button>
+            </div>
+          ) : requests.length === 0 ? (
+            <div className="pt-empty sm">
+              <span className="material-symbols-rounded">forum</span>
+              <div className="pt-empty-t">No requests yet</div>
+              <div className="pt-empty-s">Raise one on the left and we&apos;ll get right on it.</div>
+            </div>
+          ) : (
           <div className="cl-req-list">
             {requests.map((r) => {
               const kindMeta = REQUEST_KINDS.find((k) => k.key === r.kind);
@@ -151,6 +176,7 @@ export default function ClientRequests() {
               );
             })}
           </div>
+          )}
         </section>
       </div>
     </div>

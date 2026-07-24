@@ -24,6 +24,7 @@ import {
   useContentKeywords,
   useContentLinks,
   useContentQa,
+  useContentWp,
 } from "@/lib/hooks/content";
 import type { ContentJob } from "@/lib/content";
 import type { ReviewAction } from "./ReviewGate";
@@ -129,6 +130,11 @@ export default function ReviewPreview({
   const keywordsQ = useContentKeywords(job.id);
   const linksQ = useContentLinks(job.id);
   const qaQ = useContentQa(job.id);
+  // Only fetch the WordPress push URLs once the job reports it was pushed to the
+  // plugin (its live-polled stage flips to "Pushed to WordPress..."), so this never
+  // fetches for a job that will never be pushed.
+  const pluginPushed = job.status === "done" && job.stage.startsWith("Pushed to WordPress");
+  const wpQ = useContentWp(pluginPushed ? job.id : null);
 
   const [tab, setTab] = useState<TabKey>("article");
   const [editOpen, setEditOpen] = useState(false);
@@ -137,6 +143,16 @@ export default function ReviewPreview({
   const md = draftQ.data?.draft ?? "";
   const liveUrl = liveUrlFromStage(job);
   const inReview = job.status === "needs_review";
+  // The WordPress push result (once an approved job was pushed to the client's AIOS
+  // Publisher plugin as a draft). edit_url points the reviewer straight at the WP
+  // editor to publish it there; url is the (draft) permalink. Primary source is the
+  // real stored field; the URL embedded in the live stage label is an instant
+  // fallback so the button works while the fetch settles.
+  const wp = wpQ.data?.wp ?? null;
+  const stageUrl = pluginPushed ? job.stage.match(/https?:\/\/\S+/)?.[0] ?? null : null;
+  const wpEditUrl = wp?.edit_url || null;
+  const wpUrl = wp?.url || null;
+  const wpLink = wpEditUrl ?? wpUrl ?? stageUrl;
 
   const meta = outlineQ.data?.outline?.meta ?? {};
   const metaTitle = meta.title ?? "";
@@ -169,8 +185,32 @@ export default function ReviewPreview({
         </div>
       </div>
 
-      {/* Published banner + the live-URL "open" test action. */}
-      {job.status === "done" && (
+      {/* Pushed-to-WordPress (draft) banner: takes precedence when the approved page
+          was pushed to the client's site as a DRAFT and is published FROM WordPress. */}
+      {pluginPushed ? (
+        <div
+          role="status"
+          style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            margin: "0 0 12px", padding: "10px 14px", borderRadius: 10,
+            background: "rgba(140,29,46,0.10)", border: "1px solid rgba(140,29,46,0.30)",
+          }}
+        >
+          <span className="material-symbols-rounded" style={{ color: "#8C1D2E" }}>cloud_done</span>
+          <strong>Pushed to WordPress (draft).</strong>
+          <span style={{ opacity: 0.85 }}>Publish it on the site to take it live.</span>
+          <a
+            className="primary-btn"
+            href={wpLink ?? "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ marginLeft: "auto", textDecoration: "none" }}
+          >
+            <span className="material-symbols-rounded">open_in_new</span>Open in WordPress
+          </a>
+        </div>
+      ) : job.status === "done" ? (
+        /* Published banner + the live-URL "open" test action (legacy live-publish). */
         <div
           role="status"
           style={{
@@ -198,7 +238,7 @@ export default function ReviewPreview({
             <span style={{ opacity: 0.8 }}>{job.stage}</span>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Tab bar */}
       <div
@@ -274,7 +314,7 @@ export default function ReviewPreview({
               {metaTitle || job.topic}
             </div>
             <div style={{ color: "#0b7a34", fontSize: 13, margin: "2px 0 4px" }}>
-              {liveUrl ?? "example.com › " + job.topic.toLowerCase().replace(/\s+/g, "-")}
+              {wpUrl ?? stageUrl ?? liveUrl ?? "example.com › " + job.topic.toLowerCase().replace(/\s+/g, "-")}
             </div>
             <div style={{ fontSize: 13, opacity: 0.85 }}>
               {metaDesc || "The meta description will appear here once the draft is written."}

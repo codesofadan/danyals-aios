@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useChangePassword, useMe, useUpdateMe } from "@/lib/hooks/settings";
-import { Switch, SettingGroup, SettingRow, PasswordField, SavedFlash } from "./controls";
+import { SettingGroup, PasswordField, SavedFlash } from "./controls";
 
 type LogFn = (action: string, target: string, meta?: string) => void;
 
@@ -25,9 +25,9 @@ function strength(pw: string): { pct: number; label: string; cls: string } {
 }
 
 export default function AccountSettings({ onLog }: { onLog: LogFn }) {
-  // The signed-in operator's own record (GET /me · PATCH /me · POST /me/password).
-  // Phone & 2FA stay local-only — /me carries neither field yet (an intentionally
-  // narrower contract; see the plan note on MemberResponse).
+  // The signed-in operator's own record (GET /me · PATCH /me · POST /me/password) —
+  // the real self-service profile + password surface. Only fields the /me contract
+  // actually persists are editable here (no local-only 2FA/phone dressing).
   const meQ = useMe();
   const me = meQ.data;
   const updateMe = useUpdateMe();
@@ -36,8 +36,6 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [twoFA, setTwoFA] = useState(false);
 
   const [cur, setCur] = useState("");
   const [next, setNext] = useState("");
@@ -103,7 +101,7 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">account_circle</span>
-          Your profile, sign-in credentials &amp; two-factor authentication
+          Your profile &amp; sign-in credentials
         </div>
       </div>
 
@@ -123,7 +121,6 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
           <div className="fld"><label htmlFor="ac-name">Full name</label><input id="ac-name" value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="fld"><label htmlFor="ac-title">Job title</label><input id="ac-title" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
           <div className="fld"><label htmlFor="ac-email">Login email</label><input id="ac-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-          <div className="fld"><label htmlFor="ac-phone">Phone</label><input id="ac-phone" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
         </div>
         <div className="set-actions">
           <SavedFlash show={savedProfile} />
@@ -159,12 +156,6 @@ export default function AccountSettings({ onLog }: { onLog: LogFn }) {
             {changePassword.isPending ? "Updating…" : "Update password"}
           </button>
         </div>
-      </SettingGroup>
-
-      <SettingGroup title="Two-factor authentication" icon="verified_user">
-        <SettingRow icon="phonelink_lock" title="Authenticator app (TOTP)" desc="Require a 6-digit code from your authenticator at sign-in.">
-          <Switch checked={twoFA} onChange={(v) => { setTwoFA(v); onLog(v ? "enabled 2FA" : "disabled 2FA", "own account", "Security"); }} label="Toggle two-factor authentication" />
-        </SettingRow>
       </SettingGroup>
     </div>
   );

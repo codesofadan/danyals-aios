@@ -27,7 +27,7 @@ Design mirrors ``workers/tasks/audit.py`` + ``workers/tasks/context.py``:
   without a status change).
 * **R5 cost pre-check at entry.** Before any spend, the worker estimates the FULL
   job cost (research fan-out + generation) and evaluates it against the client
-  budget + daily spend-stop; a breach DEFERS the job (held, retried later) rather
+  budget cap (and the global spend halt); a breach DEFERS the job (held, retried later) rather
   than half-spending then blocking mid-pipeline.
 * **Never stuck, never re-raise, idempotent.** A redelivered terminal job is a
   no-op (``task_acks_late`` would otherwise redeliver + double-spend). No path
@@ -45,9 +45,11 @@ done``. No WP credential degrades to artifact-only, never a crash.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from html import escape as html_escape
 from typing import Any, Protocol
 
 from psycopg import sql
@@ -94,6 +96,7 @@ from app.services.content_schema import (
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
+from app.services.notifications import email_client_sync, notify_leads_sync
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import ImageGenerator
 from integrations.llm import LLMResult, Summarizer
@@ -101,6 +104,11 @@ from integrations.wordpress import (
     PostDraft,
     PublishResult,
     WordPressPublisher,
+)
+from integrations.wordpress_publisher import (
+    PluginPublisher,
+    WordPressPluginError,
+    resolve_plugin_target,
 )
 
 logger = get_logger("workers.content")
@@ -725,7 +733,7 @@ def execute_content_job(
     client_id = str(row["client_id"]) if row.get("client_id") else None
 
     # R5 cost pre-check: estimate the FULL job spend and defer if it would breach
-    # the client cap / daily spend-stop (or the content dial is off/byhand).
+    # the client cap / the global spend halt (or the content dial is off/byhand).
     precheck = GateContext(
         feature_key=_CONTENT_FEATURE,
         client_id=client_id,
@@ -956,6 +964,17 @@ def _run_pipeline(
         "content_job_needs_review",
         code=code, passed=qa.passed, weighted_total=qa.weighted_total, qa_loops=qa_loops,
     )
+    # TEAM/WORKER -> LEAD: a draft reached the review gate; email + in-app the leads who
+    # own the sign-off (best-effort; each lead's notification_prefs govern the email leg;
+    # content_review is a NOTIF_EVENTS key, email default on). Never fails the job.
+    client_name = str(row.get("client_name") or "a client")
+    topic = str(row.get("topic") or "A draft")
+    notify_leads_sync(
+        "content_review",
+        f"Content ready for review: {topic}",
+        f'"{topic}" for {client_name} has been drafted and is awaiting review. '
+        "Approve it or send it back from the content review queue.",
+    )
     return ContentJobOutcome(
         code, "needs_review", "advanced", stage=_STAGE_LABEL["review"], cost=final_cost,
         passed=qa.passed, qa_loops=qa_loops,
@@ -1122,6 +1141,254 @@ def _resolve_wp_from_vault(row: dict[str, Any], settings: Settings) -> WpTarget 
     return WpTarget(site_url=site_url, publisher=publisher)
 
 
+# --------------------------------------------------------------------------- #
+# AIOS Publisher plugin resolution (the host-independent WordPress push).
+# --------------------------------------------------------------------------- #
+# The companion WordPress plugin exposes its OWN endpoint + shared-key auth, so a
+# client site that strips the Authorization header / disables Application Passwords /
+# runs an anti-bot layer can still receive an approved page as a DRAFT. The shared
+# key lives in the vault under the EXISTING 'wordpress' provider (the ProviderId the
+# vault API already allows) with a distinct label PREFIX so it never collides with
+# the app-password row (label = the bare domain). One vault row per site:
+# provider='wordpress', label='aios-publisher:<domain>', secret = the plugin key.
+_WP_PLUGIN_LABEL_PREFIX = "aios-publisher:"
+
+
+def _plugin_key_default(settings: Settings) -> str:
+    """The single-site fallback plugin key from settings (revealed), or ''."""
+    key = settings.wp_plugin_api_key
+    return key.get_secret_value() if key is not None else ""
+
+
+def _plugin_key_by_domain(site_url: str, code: str) -> str | None:
+    """Reveal the per-site AIOS Publisher key from the vault by the label convention
+    (provider='wordpress', label='aios-publisher:<domain>'). Tries the host and its
+    ``www.``-toggled twin so the label matches however the site was added. Returns the
+    key or None; never raises."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(site_url).netloc or site_url).strip().lower()
+    if not host:
+        return None
+    hosts = [host]
+    if host.startswith("www."):
+        hosts.append(host[4:])
+    else:
+        hosts.append(f"www.{host}")
+    labels = [f"{_WP_PLUGIN_LABEL_PREFIX}{h}" for h in hosts]
+    try:
+        from app.db.database import privileged_connection
+        from app.services.vault import reveal_secret
+
+        with privileged_connection() as cur:
+            cur.execute(
+                "select id from public.vault_keys "
+                "where provider = 'wordpress' and lower(label) = any(%s) limit 1",
+                (labels,),
+            )
+            key_row = cur.fetchone()
+        if key_row is None:
+            return None
+        secret = (reveal_secret(str(key_row["id"])) or "").strip()
+    except Exception:
+        logger.warning("wp_plugin_key_reveal_failed", code=code)
+        return None
+    return secret or None
+
+
+def _resolve_wp_plugin(row: dict[str, Any], settings: Settings) -> PluginPublisher | None:
+    """Resolve a per-client AIOS Publisher target from the job + the vault/settings.
+
+    ``site_url`` comes from the job's ``source_pack`` (seeded by the router from the
+    client's site) or the single-site settings default; the shared key from the vault
+    (per the label convention) or the settings default. A missing site_url OR key
+    returns None -> the publish path keeps its existing behavior (app-password REST /
+    artifact), unchanged. Never raises."""
+    raw = _as_dict(row.get("source_pack"))
+    code = str(row.get("code", ""))
+    site_url = str(
+        raw.get("wp_site_url") or raw.get("site_url") or (settings.wp_plugin_site_url or "")
+    ).strip()
+    if not site_url:
+        return None
+    api_key = _plugin_key_by_domain(site_url, code) or _plugin_key_default(settings)
+    target = resolve_plugin_target(raw, default_site_url=site_url, default_api_key=api_key or "")
+    if target is None:
+        return None
+    try:
+        return target.publisher(
+            user_agent=settings.wp_plugin_browser_ua, timeout=settings.wp_plugin_timeout_seconds
+        )
+    except Exception:
+        logger.warning("wp_plugin_client_unavailable", code=code)
+        return None
+
+
+# --- Article-template component derivation (best-effort, from the finished draft).
+# The AIOS Publisher plugin renders these into styled, theme-native components (a key-
+# takeaways callout, an accessible FAQ + FAQPage JSON-LD, a closing CTA banner). Parsed
+# from the markdown the generator already produces; every piece is OPTIONAL (absent ->
+# the plugin simply omits that component), so this never fabricates content.
+_TAKEAWAY_HEADINGS: tuple[str, ...] = (
+    "key takeaway", "takeaway", "key point", "summary", "tl;dr", "tldr", "in short",
+)
+_FAQ_HEADINGS: tuple[str, ...] = ("faq", "frequently asked", "questions")
+
+
+def _strip_md(text: str) -> str:
+    """Reduce inline markdown (links, bold) to the plain text a data field needs."""
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _MD_BOLD_RE.sub(r"\1", text)
+    return text.strip().strip("*").strip()
+
+
+def _derive_takeaways(draft_md: str) -> list[str]:
+    """Key-takeaway bullets: an explicit takeaways/summary section if the draft has one,
+    else the first contiguous bullet list in the body (capped at 6)."""
+    lines = draft_md.splitlines()
+    explicit: list[str] = []
+    in_section = False
+    for line in lines:
+        s = line.strip()
+        heading = re.match(r"^#{1,6}\s+(.*)$", s)
+        if heading:
+            in_section = any(k in heading.group(1).strip().lower() for k in _TAKEAWAY_HEADINGS)
+            continue
+        if in_section and s.startswith("- "):
+            item = _strip_md(s[2:])
+            if item:
+                explicit.append(item)
+    if explicit:
+        return explicit[:6]
+    first: list[str] = []
+    for line in lines:
+        s = line.strip()
+        if s.startswith("- "):
+            item = _strip_md(s[2:])
+            if item:
+                first.append(item)
+        elif first:
+            break  # the first bullet list ended
+    return first[:6]
+
+
+def _derive_faq(draft_md: str) -> list[dict[str, str]]:
+    """FAQ pairs parsed from an FAQ section (H3 questions + the prose that follows)."""
+    in_faq = False
+    faq: list[dict[str, str]] = []
+    question: str | None = None
+    answer: list[str] = []
+
+    def flush() -> None:
+        nonlocal question, answer
+        if question and answer:
+            faq.append({"question": question, "answer": " ".join(answer).strip()})
+        question, answer = None, []
+
+    for line in draft_md.splitlines():
+        s = line.strip()
+        h2 = re.match(r"^##\s+(.*)$", s)
+        h3 = re.match(r"^###\s+(.*)$", s)
+        if h2:
+            flush()
+            in_faq = any(k in h2.group(1).strip().lower() for k in _FAQ_HEADINGS)
+        elif not in_faq:
+            continue
+        elif h3:
+            flush()
+            question = _strip_md(h3.group(1))
+        elif s and question is not None:
+            answer.append(_strip_md(s))
+    flush()
+    return faq[:8]
+
+
+def _derive_cta(row: dict[str, Any]) -> dict[str, str]:
+    """A closing call-to-action for the article (always present; best practice). The
+    button defaults to the client's own site."""
+    raw = _as_dict(row.get("source_pack"))
+    site_url = str(raw.get("wp_site_url") or raw.get("site_url") or "").strip()
+    client = str(raw.get("client_name") or row.get("client_name") or "our team").strip() or "our team"
+    topic = str(row.get("topic") or "your goals").strip() or "your goals"
+    return {
+        "heading": "Ready to take the next step?",
+        "text": f"Talk to {client} about {topic} and get expert guidance tailored to you.",
+        "button_label": "Get in touch",
+        "button_url": site_url,
+    }
+
+
+def _plugin_payload(row: dict[str, Any], draft_md: str, title: str) -> dict[str, Any]:
+    """Build the AIOS Publisher push body from the finished job (title, rendered HTML,
+    SEO meta, slug, focus keyword, JSON-LD, and the article-template components). Pushed
+    as a DRAFT so the admin publishes it on the WordPress site itself (the operator's
+    flow). The api_key is injected by the adapter, never assembled here."""
+    outline = _as_dict(row.get("outline"))
+    meta = _as_dict(outline.get("meta"))
+    keyword_map = _as_dict(row.get("keyword_map"))
+    payload: dict[str, Any] = {
+        "title": title,
+        "content": md_to_html(draft_md),
+        "status": "draft",  # push as a DRAFT - a human publishes it on WordPress
+        "post_type": "post",
+        "slug": _slug(title),
+        "meta_title": str(meta.get("title") or title),
+        "meta_description": str(meta.get("description") or ""),
+        "focus_keyword": str(keyword_map.get("primary") or ""),
+    }
+    json_ld = row.get("json_ld")
+    if isinstance(json_ld, dict) and json_ld.get("@graph"):
+        payload["schema_jsonld"] = json.dumps(json_ld)
+    # Article-template components (each optional; the plugin styles them theme-native).
+    takeaways = _derive_takeaways(draft_md)
+    if takeaways:
+        payload["key_takeaways"] = takeaways
+    faq = _derive_faq(draft_md)
+    if faq:
+        payload["faq"] = faq
+    payload["cta"] = _derive_cta(row)
+    return payload
+
+
+def _publish_via_plugin(
+    store: ContentStore,
+    code: str,
+    row: dict[str, Any],
+    publisher: PluginPublisher,
+    draft_md: str,
+    title: str,
+) -> PublishOutcome:
+    """Push the approved draft to the client's AIOS Publisher plugin + record the URLs.
+
+    Raises :class:`WordPressPluginError` on a push failure (the caller SWALLOWS it and
+    falls back to the legacy path - best-effort, never crashing the approve). On
+    success the job goes ``publishing -> done`` with the WordPress permalink + edit
+    link stored, and the reviewer is pointed at the WP draft to publish it there."""
+    result = publisher.publish(_plugin_payload(row, draft_md, title))
+    where = result.edit_url or result.url
+    stage = "Pushed to WordPress (draft) — publish it on the site"
+    if where:
+        stage = f"{stage}: {where}"
+    store.update(
+        code,
+        {
+            "status": "done",
+            "stage": stage,
+            "wp_post_id": str(result.post_id),
+            "wp_url": result.url,
+            "wp_edit_url": result.edit_url,
+        },
+    )
+    _emit_content_deliverable(row, artifact_key=None)  # pushed to WP; no local artifact
+    logger.info(
+        "content_pushed_to_plugin", code=code, wp_post_id=result.post_id, status=result.status
+    )
+    return PublishOutcome(
+        code, "done", "published", reason="pushed to WordPress plugin (draft)",
+        wp_post_id=result.post_id, url=result.url,
+    )
+
+
 def publish_content_job(
     store: ContentStore,
     providers: ContentProviders | None,
@@ -1130,16 +1397,21 @@ def publish_content_job(
     settings: Settings,
     artifacts: ContentArtifactStore | None = None,
     resolve_wp: Any = _resolve_wp_from_vault,
+    resolve_wp_plugin: Any = _resolve_wp_plugin,
 ) -> PublishOutcome:
     """Publish an APPROVED content job (the approve path moves it to ``publishing``
     first, then calls this).
 
     Re-checks the QA hard gate: a sub-threshold draft (``qa_score.passed`` not True)
-    is NEVER published - it raises :class:`PublishBlocked`. A passing job is pushed
-    to WordPress (per-site app-password from the vault, idempotent via ``wp_post_id``
-    - UPDATE if set else CREATE) when ``target=WordPress``, or rendered to PDF +
-    Markdown in the traversal-safe artifact store when ``target=PDF/Markdown``; then
-    ``publishing -> done``. No WP credential degrades to artifact-only (a marker,
+    is NEVER published - it raises :class:`PublishBlocked`. A passing ``WordPress`` job
+    is pushed, in order: (1) to the client's AIOS Publisher PLUGIN as a DRAFT (the
+    host-independent push - its own endpoint + shared key, bypassing header-stripping
+    / app-passwords) when a plugin target is configured, recording the returned
+    permalink + edit link; else (2) to WordPress over the REST app-password (per-site,
+    from the vault, idempotent via ``wp_post_id``); else (3) rendered to PDF + Markdown
+    in the traversal-safe artifact store. A ``PDF/Markdown`` target renders directly;
+    then ``publishing -> done``. A plugin push failure falls through to (2)/(3) - a
+    push never crashes the approve. No credential degrades to artifact-only (a marker,
     never a crash). Idempotent: a redelivered ``done`` job is a no-op.
     """
     row = store.load(code)
@@ -1171,7 +1443,9 @@ def publish_content_job(
 
     try:
         if target == "WordPress":
-            return _publish_wordpress(store, code, row, draft_md, title, settings, artifacts, resolve_wp)
+            return _publish_wordpress(
+                store, code, row, draft_md, title, settings, artifacts, resolve_wp, resolve_wp_plugin
+            )
         return _publish_artifact(store, code, row, draft_md, title, artifacts, degraded=False)
     except PublishBlocked:
         raise
@@ -1193,7 +1467,21 @@ def _publish_wordpress(
     settings: Settings,
     artifacts: ContentArtifactStore | None,
     resolve_wp: Any,
+    resolve_wp_plugin: Any,
 ) -> PublishOutcome:
+    # --- The AIOS Publisher PLUGIN path (host-independent; bypasses header-stripping
+    # + app-passwords). When a plugin target is configured for this client, push the
+    # approved page as a DRAFT so the admin publishes it on the WordPress site itself
+    # (the operator's flow). Best-effort: a push failure is logged and FALLS THROUGH
+    # to the legacy REST / artifact path (never crashes the approve). No plugin target
+    # configured leaves the existing behavior below completely unchanged.
+    plugin: PluginPublisher | None = resolve_wp_plugin(row, settings)
+    if plugin is not None:
+        try:
+            return _publish_via_plugin(store, code, row, plugin, draft_md, title)
+        except WordPressPluginError:
+            logger.warning("content_plugin_push_failed", code=code)
+
     wp: WpTarget | None = resolve_wp(row, settings)
     if wp is None:
         # Credential-degraded: artifact-only + a degraded-publish marker (job still
@@ -1258,7 +1546,12 @@ def _safe_stage(store: ContentStore, code: str, stage: str) -> None:
 
 def _emit_content_deliverable(row: dict[str, Any], *, artifact_key: str | None) -> None:
     """Publish a client deliverable for a PUBLISHED content job (best-effort; the
-    emit itself never raises). An unlinked job (no client) is skipped."""
+    emit itself never raises). An unlinked job (no client) is skipped.
+
+    Also emails the CLIENT that new content is live (ADMIN/LEAD -> CLIENT). Both legs
+    are best-effort + key-gated, so a keyless/failing provider or an unresolvable
+    recipient degrades silently and can never fail the completed publish.
+    """
     client_id = row.get("client_id")
     if not client_id:
         return
@@ -1275,6 +1568,20 @@ def _emit_content_deliverable(row: dict[str, Any], *, artifact_key: str | None) 
         artifact_key=artifact_key,
         media_type="application/pdf",
     )
+    topic = str(row.get("topic") or "New content")
+    who = str(row.get("client_name") or "there")
+    subject = f"New content published: {topic}"
+    text = (
+        f"Hi {who}, a new piece of content, \"{topic}\", has been published. "
+        "Sign in to your client portal to view it."
+    )
+    html = (
+        f"<h2>New content published</h2>"
+        f"<p>Hi {html_escape(who)}, a new piece of content, "
+        f"\"{html_escape(topic)}\", has been published.</p>"
+        "<p>Sign in to your client portal to view it.</p>"
+    )
+    email_client_sync(str(client_id), subject, html, text)
 
 
 # --------------------------------------------------------------------------- #

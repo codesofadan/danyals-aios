@@ -202,6 +202,37 @@ async def test_task_lifecycle_and_db_review_gate() -> None:
             )
         # update matches 0 rows under RLS (no error, just nothing changed)
         assert _update(cli_uid, t2, {"status": "done"}) == 0
+
+        # ================================= (F) PROOF LINK guard (migration 0056)
+        # The 0056 guard widens the non-lead column-lock by EXACTLY proof_url: an
+        # assignee may set {status, proof_url} together along a LEGAL transition, but
+        # nothing else; a lead may set/clear proof_url on any task.
+        t5 = _seed(type="content_sprint", status="in_progress", assignee_id=spec_uid)
+        # (F1) assignee submits for review AND attaches proof in one UPDATE - allowed.
+        assert _update(
+            spec_uid, t5, {"status": "review", "proof_url": "https://proof.example/published"}
+        ) == 1
+        row5 = _row(t5)
+        assert row5["status"] == "review"
+        assert row5["proof_url"] == "https://proof.example/published"
+
+        # (F2) assignee CANNOT smuggle a non-{status,proof_url} column even alongside a
+        # legal status move + proof_url (title stays locked) - the whole UPDATE fails.
+        t6 = _seed(type="technical_audit", status="in_progress", assignee_id=spec_uid)
+        with pytest.raises(psycopg.Error):
+            _update(spec_uid, t6, {"status": "done", "proof_url": "x", "title": "hijacked"})
+        assert _row(t6)["title"] != "hijacked"
+        assert _row(t6)["proof_url"] == ""  # the rejected UPDATE changed nothing
+
+        # (F3) the LEGAL {status, proof_url} move on that task IS allowed.
+        assert _update(
+            spec_uid, t6, {"status": "done", "proof_url": "https://deliver.example/report.pdf"}
+        ) == 1
+        assert _row(t6)["proof_url"] == "https://deliver.example/report.pdf"
+
+        # (F4) a LEAD may set/clear proof_url on any task with no status move.
+        assert _update(lead_uid, t6, {"proof_url": "https://lead.example/final"}) == 1
+        assert _row(t6)["proof_url"] == "https://lead.example/final"
     finally:
         with contextlib.suppress(Exception), privileged_connection(pool=admin_pool) as cur:
             for code in codes:

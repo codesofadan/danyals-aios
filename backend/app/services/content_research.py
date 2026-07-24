@@ -365,7 +365,7 @@ class FakePageFetcher:
 class ContentSpendBlocked(RuntimeError):  # noqa: N818 - a control-flow signal the orchestrator degrades on, deliberately not an *Error
     """Raised when the gate denies a content-research call (no external call
     happened). ``outcome`` is the gate's verdict (``skip`` / ``manual`` /
-    ``blocked_cap`` / ``blocked_daily``). The orchestrator catches it and returns
+    ``blocked_cap`` / ``blocked_halt``). The orchestrator catches it and returns
     a partial / low-confidence brief instead of crashing."""
 
     def __init__(self, outcome: GateOutcome) -> None:

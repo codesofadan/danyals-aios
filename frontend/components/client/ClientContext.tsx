@@ -26,6 +26,12 @@ export type PortalClient = {
 
 type ClientState = {
   client: PortalClient;
+  // Headline audit figures from GET /portal/dashboard — always-available real
+  // data (the tenant's most recent scored audit + total run count), surfaced on
+  // the portal home. `latestScore` is null until the first scored run lands.
+  latestScore: number | null;
+  latestAuditWhen: string;
+  totalAudits: number;
   // The report keys the admin granted this client (what CAN be unlocked).
   grants: Set<string>;
   // key → its live visualization — only GRANTED keys are present (an ungranted
@@ -39,8 +45,12 @@ type ClientState = {
   // True when the backend flagged this report's series as representative sample
   // data (`placeholder`) — the card must badge it "Sample", never "Live".
   isPlaceholder: (key: string) => boolean;
-  // Requests raised by the client.
+  // Requests raised by the client, plus the live query status so a screen can
+  // tell "no requests yet" apart from "still loading" / "the fetch failed".
   requests: ClientRequest[];
+  requestsLoading: boolean;
+  requestsError: boolean;
+  refetchRequests: () => void;
   addRequest: (
     r: { kind: RequestKind; subject: string; detail: string },
     opts?: { onSuccess?: () => void; onError?: () => void },
@@ -80,17 +90,20 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
   const requestsQ = useClientRequests();
   const createRequest = useCreateRequest();
 
-  // Which granted graphs this client has popped open. The unlock is a cosmetic
-  // reveal over data the admin already GRANTED (real access lives in `grants`),
-  // so it is persisted PER-CLIENT in localStorage rather than the DB: once a
-  // client unlocks a graph it stays unlocked across refreshes and revisits,
-  // while remaining cheap and requiring no server round-trip. Keyed by the
-  // company name so two tenants sharing a browser never see each other's state.
+  // Which granted graphs this client has popped open. The reveal is a cosmetic
+  // expand over data the admin already GRANTED (real access lives in `grants`),
+  // so it is persisted PER-TENANT in localStorage rather than the DB: once a
+  // client reveals a graph it stays open across refreshes and revisits, while
+  // remaining cheap and requiring no server round-trip. Keyed by a STABLE tenant
+  // id (the primary site's UUID, unique per tenant) rather than the display name,
+  // so two different tenants that happen to share a company name on one browser
+  // never collide on this cosmetic state. (Underlying data is RLS-scoped server
+  // side regardless — this key only guards which cards render already-expanded.)
   const [unlocked, setUnlocked] = useState<Set<string>>(EMPTY);
 
   const dash = dashboardQ.data;
-  const clientName = dash?.client ?? "";
-  const storageKey = clientName ? `aios:portal:unlocked:${clientName}` : "";
+  const tenantId = dash?.sites?.[0]?.id || dash?.client || "";
+  const storageKey = tenantId ? `aios:portal:unlocked:${tenantId}` : "";
 
   // Hydrate the persisted unlock set once the tenant identity resolves. Runs
   // client-side only (the provider gates children behind `dash`, so by the time
@@ -153,6 +166,14 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
   );
 
   const requests = requestsQ.data ?? EMPTY_REQUESTS;
+  const requestsLoading = requestsQ.isLoading;
+  const requestsError = requestsQ.isError;
+  // Depend on the (react-query-stable) refetch fn, not the whole query object,
+  // so this callback — and the context value that closes over it — stays stable.
+  const refetchRequestsFn = requestsQ.refetch;
+  const refetchRequests = useCallback(() => {
+    void refetchRequestsFn();
+  }, [refetchRequestsFn]);
 
   const isGranted = useCallback((key: string) => grants.has(key), [grants]);
   const isUnlocked = useCallback((key: string) => unlocked.has(key), [unlocked]);
@@ -174,6 +195,9 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<ClientState>(
     () => ({
       client,
+      latestScore: dash?.latestScore ?? null,
+      latestAuditWhen: dash?.latestAuditWhen ?? "",
+      totalAudits: dash?.totalAudits ?? 0,
       grants,
       reportViz,
       unlocked,
@@ -182,14 +206,44 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
       isUnlocked,
       isPlaceholder,
       requests,
+      requestsLoading,
+      requestsError,
+      refetchRequests,
       addRequest,
     }),
-    [client, grants, reportViz, unlocked, unlock, isGranted, isUnlocked, isPlaceholder, requests, addRequest],
+    [
+      client, dash, grants, reportViz, unlocked, unlock, isGranted, isUnlocked, isPlaceholder,
+      requests, requestsLoading, requestsError, refetchRequests, addRequest,
+    ],
   );
 
   // Until the tenant identity resolves, show the neutral splash — never a seed,
   // never another tenant. (A hard 401 is already bounced to /login by lib/api.)
+  // If the dashboard fetch HARD-FAILS (503 DB-unconfigured, 500, network) it
+  // must NOT hang on the splash forever — react-query won't retry a 4xx and gives
+  // up on a 5xx after two tries, leaving `dash` undefined. Surface an explicit
+  // error + retry instead of an eternal "Loading…".
   if (!dash) {
+    if (dashboardQ.isError) {
+      return (
+        <div className="auth-splash">
+          <div className="auth-splash-logo" />
+          <div className="auth-splash-txt">We couldn&apos;t load your dashboard.</div>
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={() => dashboardQ.refetch()}
+            disabled={dashboardQ.isFetching}
+            style={{ marginTop: 16 }}
+          >
+            <span className={`material-symbols-rounded${dashboardQ.isFetching ? " spin" : ""}`}>
+              {dashboardQ.isFetching ? "progress_activity" : "refresh"}
+            </span>
+            {dashboardQ.isFetching ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="auth-splash">
         <div className="auth-splash-logo" />

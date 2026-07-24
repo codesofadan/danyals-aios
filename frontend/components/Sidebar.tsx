@@ -15,9 +15,6 @@ const SECTIONS: Section[] = [
     title: "Overview",
     items: [
       { icon: "space_dashboard", label: "Admin Dashboard", href: "/admin" },
-      // Features tab hidden for now (not needed). The /admin/features route still
-      // exists — re-enable by uncommenting this nav item.
-      // { icon: "grid_view", label: "Features", href: "/admin/features" },
     ],
   },
   {
@@ -26,8 +23,10 @@ const SECTIONS: Section[] = [
       { icon: "fact_check", label: "Audit", href: "/admin/audit" },
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads" },
       { icon: "article", label: "Content", href: "/admin/content" },
+      { icon: "hub", label: "Off-page", href: "/admin/off-page" },
       { icon: "storefront", label: "Citations", href: "/admin/citations" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2" },
+      { icon: "add_business", label: "GMB Posts", href: "/admin/gmb" },
       { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", badge: "3" },
     ],
   },
@@ -36,15 +35,19 @@ const SECTIONS: Section[] = [
     items: [
       { icon: "diversity_3", label: "Clients", href: "/admin/clients" },
       { icon: "groups", label: "Team Management", href: "/admin/team" },
-      // { icon: "flag", label: "Milestones", href: "/admin/milestones" }, // hidden for now
+      { icon: "task_alt", label: "Task Manager", href: "/admin/tasks" },
+      { icon: "flag", label: "Milestones", href: "/admin/milestones" },
       { icon: "summarize", label: "Reports", href: "/admin/reports" },
     ],
   },
   {
     title: "Platform",
     items: [
+      { icon: "workspaces", label: "Service Tiers", href: "/admin/tiers" },
+      { icon: "sell", label: "Upsells", href: "/admin/upsells" },
       { icon: "savings", label: "Cost Controls", href: "/admin/cost" },
       { icon: "key", label: "Key Vault", href: "/admin/vault" },
+      { icon: "cloud_sync", label: "Backups", href: "/admin/backups" },
       { icon: "settings", label: "Settings", href: "/admin/settings" },
     ],
   },

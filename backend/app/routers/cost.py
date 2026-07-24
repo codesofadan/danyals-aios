@@ -1,7 +1,9 @@
-"""Cost-control endpoints: budgets, the per-feature dial, spend-stop, cost log.
+"""Cost-control endpoints: budgets, the per-feature dial, the spend halt, cost log.
 
 Reads = any staff. Budget writes = manage_clients (owner/admin/manager). The
-org-wide dial + spend-stop are higher-privilege = owner/admin.
+org-wide dial + the global API-spend HALT toggle are higher-privilege = owner/admin.
+The halt is a single agency-global kill-switch (there is no per-day dollar
+threshold): while engaged, the cost gate blocks every metered feature.
 """
 
 from __future__ import annotations
@@ -76,6 +78,9 @@ async def set_dial(
 
 
 # --- cost log ----------------------------------------------------------------
+# Newest-first, paginated via PageDep (?limit=&offset=, hard-capped 1..200). The
+# frontend pages/loads-more over this: a returned page shorter than ``limit`` means
+# there are no more rows. Response stays the contract-locked ``CostEntry`` list.
 @router.get("/log", response_model=list[CostEntryResponse])
 async def list_cost_log(
     repo: CostRepoDep,
@@ -86,13 +91,13 @@ async def list_cost_log(
     return [CostEntryResponse.from_row(r) for r in rows]
 
 
-# --- spend-stop --------------------------------------------------------------
+# --- spend halt (the global API-spend kill-switch) ---------------------------
 @router.get("/spend-stop", response_model=SpendStopResponse)
 async def get_spend_stop(repo: CostRepoDep, _user: CurrentUserDep) -> SpendStopResponse:
+    """Read the global API-spend HALT state (+ today's informational paid spend)."""
     settings = await asyncio.to_thread(repo.get_settings)
     today = await asyncio.to_thread(repo.today_spent)
     return SpendStopResponse(
-        daily_stop=float(settings.get("daily_stop", 75)),
         halted=bool(settings.get("halted", False)),
         today_spent=today,
     )
@@ -102,16 +107,20 @@ async def get_spend_stop(repo: CostRepoDep, _user: CurrentUserDep) -> SpendStopR
 async def set_spend_stop(
     body: SpendStopUpdate, repo: CostRepoDep, actor: OrgAdmin
 ) -> SpendStopResponse:
-    changes: dict[str, object] = {}
-    if body.daily_stop is not None:
-        changes["daily_stop"] = body.daily_stop
-    if body.halted is not None:
-        changes["halted"] = body.halted
-    settings = await asyncio.to_thread(repo.update_settings, changes)
+    """Toggle the global API-spend halt on/off (owner/admin only, activity-logged).
+
+    Turning it ON blocks every metered feature at the gate; turning it OFF restores
+    normal dial-governed behavior.
+    """
+    settings = await asyncio.to_thread(repo.update_settings, {"halted": body.halted})
     today = await asyncio.to_thread(repo.today_spent)
-    await record_activity(actor, kind="access", action="updated the daily spend-stop", target="cost controls")
+    await record_activity(
+        actor,
+        kind="access",
+        action="halted all API spend" if body.halted else "resumed API spend",
+        target="cost controls",
+    )
     return SpendStopResponse(
-        daily_stop=float(settings.get("daily_stop", 75)),
         halted=bool(settings.get("halted", False)),
         today_spent=today,
     )

@@ -271,7 +271,7 @@ def analyze_change(
     consulted BEFORE any spend, the provider is called only if allowed, then the
     estimated cost is committed. Returns ``None`` (degrade, no KB entry) when the
     summarizer is absent (no key) OR the gate blocks (dial off / by-hand / client cap /
-    daily spend-stop). The paid call is committed even if the reply does not parse -
+    global spend halt). The paid call is committed even if the reply does not parse -
     ``parse_analysis`` degrades to a minimal finding rather than dropping it."""
     if summarizer is None:
         return None

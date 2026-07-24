@@ -1,6 +1,11 @@
-"""P2-7 gate: the reusable per-call cost gate enforces the full chain.
+"""The reusable per-call cost gate enforces the full chain.
 
-dial -> cache -> client cap -> daily spend-stop -> call+log; a cached call is $0.
+spend halted? -> dial -> cache -> client cap -> call+log; a cached call is $0.
+
+The old per-day dollar spend-stop THRESHOLD was removed; a manual, agency-global
+HALT (checked FIRST, before any dial) replaces it: when engaged EVERY metered
+feature is blocked with the ``spend_halted`` signal, nothing is logged, and no
+provider call happens. Toggling it off restores normal dial-governed behavior.
 """
 
 from __future__ import annotations
@@ -9,7 +14,14 @@ from typing import Any
 
 import pytest
 
-from app.services.cost_gate import CostGate, DialMode, GateContext
+from app.services.cost_gate import (
+    SPEND_HALTED_CODE,
+    SPEND_HALTED_MESSAGE,
+    CostGate,
+    DialMode,
+    GateContext,
+    SpendHaltedError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -20,15 +32,11 @@ class FakeStore:
         *,
         mode: DialMode = "api",
         budget: tuple[float, float] | None = None,
-        daily_spent: float = 0.0,
-        daily_stop: float = 75.0,
         halted: bool = False,
     ) -> None:
         self._mode = mode
         self._budget = budget
-        self._daily_spent = daily_spent
-        self._daily_stop = daily_stop
-        self._halted = halted
+        self.halted = halted
         self.recorded: list[tuple[GateContext, float, bool]] = []
 
     def dial_mode(self, feature_key: str) -> DialMode:
@@ -37,14 +45,8 @@ class FakeStore:
     def client_budget(self, client_id: str) -> tuple[float, float] | None:
         return self._budget
 
-    def daily_spent(self) -> float:
-        return self._daily_spent
-
-    def daily_stop(self) -> float:
-        return self._daily_stop
-
     def is_halted(self) -> bool:
-        return self._halted
+        return self.halted
 
     def record_cost(self, ctx: GateContext, cost: float, *, cached: bool) -> None:
         self.recorded.append((ctx, cost, cached))
@@ -128,21 +130,69 @@ def test_uncapped_client_passes_cap_check() -> None:
     assert d.outcome == "call"
 
 
-def test_manual_halt_blocks() -> None:
-    store = FakeStore(mode="api", halted=True)
-    d = _gate(store).evaluate(_ctx())
-    assert d.outcome == "blocked_daily"
-    assert d.reason.startswith("daily spend-stop")
+# --- the daily-threshold spend-stop is GONE ---------------------------------- #
+def test_no_daily_threshold_blocks_a_large_spend() -> None:
+    # There is NO per-day dollar ceiling any more: an arbitrarily large estimated
+    # cost, with no client cap and no halt, is allowed. (Under the old spend-stop a
+    # >$75/day estimate would have tripped ``blocked_daily``; that concept is gone.)
+    store = FakeStore(mode="api", budget=None)
+    d = _gate(store).evaluate(_ctx(estimated_cost=10_000.0))
+    assert d.outcome == "call"
+    assert d.allowed
+    # The gate no longer consults any daily spend total or daily ceiling.
+    assert not hasattr(store, "daily_stop")
+    assert not hasattr(store, "daily_spent")
 
 
-def test_daily_threshold_blocks() -> None:
-    store = FakeStore(mode="api", daily_spent=70.0, daily_stop=75.0)
-    d = _gate(store).evaluate(_ctx(estimated_cost=10.0))  # 80 > 75
-    assert d.outcome == "blocked_daily"
+# --- the manual, agency-global spend HALT ------------------------------------ #
+@pytest.mark.parametrize("mode", ["api", "byhand", "off"])
+@pytest.mark.parametrize("cache_key", [None, "k1"])
+@pytest.mark.parametrize("budget", [None, (0.0, 0.0), (100.0, 10.0)])
+def test_halt_blocks_every_feature_regardless_of_dial_or_cache_or_cap(
+    mode: DialMode, cache_key: str | None, budget: tuple[float, float] | None
+) -> None:
+    # Halt overrides EVERYTHING: any dial mode, a warm cache, any budget -> blocked,
+    # with the spend_halted signal, and NOTHING is logged (no $0 cache row either).
+    store = FakeStore(mode=mode, budget=budget, halted=True)
+    cache = FakeCache({"k1": {"warm": 1}}) if cache_key else FakeCache()
+    d = _gate(store, cache).evaluate(_ctx(cache_key=cache_key, estimated_cost=0.75))
+    assert d.outcome == "blocked_halt"
+    assert d.halted is True
+    assert d.blocked is True
+    assert d.allowed is False
+    assert d.reason == SPEND_HALTED_MESSAGE
+    assert not store.recorded  # commits NO cost / makes NO provider call
+
+
+def test_halt_signal_constants_are_stable() -> None:
+    assert SPEND_HALTED_CODE == "spend_halted"
+    assert SPEND_HALTED_MESSAGE == "API spend is halted"
+
+
+def test_ensure_not_halted_raises_typed_refusal_only_when_halted() -> None:
+    # Engaged -> raises the typed 402 refusal carrying the machine code + message.
+    with pytest.raises(SpendHaltedError) as exc:
+        _gate(FakeStore(halted=True)).ensure_not_halted()
+    assert exc.value.reason == "spend_halted"
+    assert exc.value.status_code == 402
+    assert str(exc.value) == SPEND_HALTED_MESSAGE
+    # Not engaged -> no-op.
+    _gate(FakeStore(halted=False)).ensure_not_halted()
+
+
+def test_toggling_halt_off_restores_dial_governed_behavior() -> None:
+    # Same store instance: ON -> blocked_halt; flip OFF -> the dial governs (call).
+    store = FakeStore(mode="api", budget=(500.0, 100.0), halted=True)
+    gate = _gate(store)
+    assert gate.evaluate(_ctx()).outcome == "blocked_halt"
+    store.halted = False
+    restored = gate.evaluate(_ctx())
+    assert restored.outcome == "call"
+    assert restored.allowed
 
 
 def test_clear_path_allows_call() -> None:
-    store = FakeStore(mode="api", budget=(500.0, 100.0), daily_spent=10.0, daily_stop=75.0)
+    store = FakeStore(mode="api", budget=(500.0, 100.0))
     d = _gate(store).evaluate(_ctx(estimated_cost=0.75))
     assert d.outcome == "call"
     assert d.allowed
@@ -151,11 +201,18 @@ def test_clear_path_allows_call() -> None:
 
 
 def test_run_logs_allowed_call() -> None:
-    store = FakeStore(mode="api", daily_stop=75.0)
+    store = FakeStore(mode="api")
     d = _gate(store).run(_ctx(estimated_cost=0.75))
     assert d.outcome == "call"
     assert store.recorded[0][1] == 0.75
     assert store.recorded[0][2] is False  # not cached
+
+
+def test_run_when_halted_logs_nothing() -> None:
+    store = FakeStore(mode="api", halted=True)
+    d = _gate(store).run(_ctx(estimated_cost=0.75))
+    assert d.outcome == "blocked_halt"
+    assert not store.recorded
 
 
 def test_commit_logs_and_warms_cache() -> None:

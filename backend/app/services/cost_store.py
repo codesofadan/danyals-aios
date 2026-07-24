@@ -9,7 +9,6 @@ store's hand-SQL is exercised in the integration suite.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import cast
 
 from app.db.database import privileged_connection
@@ -47,19 +46,6 @@ class PostgresCostStore:
         if row is None:
             return None
         return float(row["cap"]), float(row["spent"])
-
-    def daily_spent(self) -> float:
-        start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        with privileged_connection() as cur:
-            cur.execute("select cost from public.cost_log where created_at >= %s", (start,))
-            rows = cur.fetchall()
-        return float(sum(float(r.get("cost", 0) or 0) for r in rows))
-
-    def daily_stop(self) -> float:
-        with privileged_connection() as cur:
-            cur.execute("select daily_stop from public.cost_settings limit 1")
-            row = cur.fetchone()
-        return float(row["daily_stop"]) if row else 75.0
 
     def is_halted(self) -> bool:
         with privileged_connection() as cur:

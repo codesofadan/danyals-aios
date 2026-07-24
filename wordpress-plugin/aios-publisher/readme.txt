@@ -1,0 +1,94 @@
+=== AIOS Publisher ===
+Contributors: xegentsai
+Tags: content, rest-api, publishing, seo, automation
+Requires at least: 5.6
+Tested up to: 6.6
+Requires PHP: 7.2
+Stable tag: 1.1.0
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
+Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress — even when the host strips the Authorization header and Application Passwords are disabled.
+
+== Description ==
+
+AIOS Publisher is a tiny companion plugin for the AIOS SEO platform. When an
+operator approves a generated content page in AIOS, AIOS PUSHES it to this plugin,
+which creates it on your site as a DRAFT. You then review it and press Publish from
+the "AIOS Content" screen — content only ever goes live when a human on the site
+says so.
+
+= Why not just use the WordPress REST API / Application Passwords? =
+
+Many managed hosts (for example Hostinger) STRIP the HTTP Authorization header
+before it reaches WordPress, DISABLE Application Passwords (the endpoint returns
+501), and run an anti-bot layer that blocks non-browser requests. On those sites
+the normal REST publish path simply does not work.
+
+This plugin BYPASSES all of that. It exposes its OWN REST endpoint authenticated by
+a shared key sent in the JSON REQUEST BODY (which is never stripped) — not the
+Authorization header, not an Application Password, and not XML-RPC. It works on
+effectively every host.
+
+= What it does =
+
+* Adds one REST endpoint: `POST /wp-json/aios/v1/publish` (shared-key auth).
+* Adds a connectivity probe: `GET /wp-json/aios/v1/ping`.
+* Creates each pushed page as a DRAFT (configurable) so you publish it yourself.
+* Sets the SEO title / meta description / focus keyword for BOTH Yoast SEO and
+  Rank Math, so it works with whichever you have installed.
+* Stores the JSON-LD schema AIOS generated and outputs it in the page `<head>`.
+* Sideloads a featured image when one is supplied and assigns categories.
+* Lists all AIOS-pushed content on an "AIOS Content" admin screen with Publish,
+  Edit and View actions.
+* Ships a polished, THEME-ADAPTIVE article template: pushed posts are skinned to look
+  native to the client's site by reading the ACTIVE theme's own colour/font tokens
+  (the `--wp--preset--*` custom properties), with a readable measure, an E-E-A-T
+  author/date/read-time line, an auto table of contents, a "Key takeaways" callout,
+  an accessible FAQ (details/summary) + FAQPage schema, and a closing CTA banner.
+
+== The article template ==
+
+Every pushed post is wrapped in `.aios-article` and styled by `templates/article.css`.
+That stylesheet is deliberately brand-agnostic: it reads the ACTIVE theme's design
+tokens (`--wp--preset--color--*`, `--wp--preset--font-family--*`, and
+`--wp--style--global--content-size`) with neutral fallbacks, so the same template
+renders in each client's own palette and fonts with no per-site editing. It is
+enqueued ONLY on singular posts marked `_aios_managed=1`, so it never affects the rest
+of the site. To re-brand, edit the `--aios-*` variables at the top of the stylesheet.
+
+== Installation ==
+
+1. Zip the `aios-publisher` folder (or upload it directly) and install it from
+   **Plugins → Add New → Upload Plugin**, then **Activate**.
+2. Open **AIOS Publisher** in the left admin menu.
+3. Copy the **Endpoint URL** and the **API Key** shown there.
+4. Paste them into AIOS (the client's WordPress settings / Key Vault): the endpoint
+   URL as the site URL and the API key as the AIOS Publisher key.
+5. (Optional) Set the default post status (Draft recommended), post type, category
+   and author, then **Save settings**.
+6. In AIOS, approve a content page. It appears under **AIOS Publisher → AIOS
+   Content** as a draft. Review it and click **Publish** to take it live.
+
+== Security ==
+
+* The endpoint is authenticated by a constant-time (`hash_equals`) comparison of a
+  shared key. Regenerating the key in Settings invalidates the old one immediately.
+* All pushed content is treated as DATA: text fields are sanitized, the post body
+  is filtered through `wp_kses_post`, image URLs through `esc_url_raw`, and the
+  JSON-LD is validated before it is stored or emitted.
+* Every admin action is protected by a capability check and a nonce.
+
+== Changelog ==
+
+= 1.1.0 =
+* Added the theme-adaptive article template (`templates/article.css` + renderer):
+  `.aios-article` wrapper styled from the active theme's `--wp--preset--*` tokens,
+  E-E-A-T meta line, auto table of contents, "Key takeaways" callout, accessible FAQ
+  (details/summary) with FAQPage JSON-LD, and a closing CTA banner. Enqueued only on
+  managed posts. The push payload now accepts `key_takeaways`, `faq` and `cta`.
+
+= 1.0.0 =
+* Initial release: shared-key `aios/v1/publish` + `aios/v1/ping` endpoints, Yoast +
+  Rank Math meta, JSON-LD schema output, featured-image sideload, categories, and
+  the "AIOS Content" managed-posts screen.

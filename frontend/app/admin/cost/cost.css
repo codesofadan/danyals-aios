@@ -174,6 +174,31 @@
 .cst-prov-track span { display: block; height: 100%; border-radius: 6px; transition: width .4s; }
 .cst-prov-use { font-size: 11px; color: var(--muted); margin-top: 6px; }
 
+/* --- API-spend HALT surfaces --------------------------------------------- */
+.cst-halt-banner { display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+  padding: 14px 18px; border-radius: 14px; background: color-mix(in srgb, var(--crit) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crit) 40%, transparent); color: var(--crit); }
+.cst-halt-banner .material-symbols-rounded { font-size: 26px; flex: none; }
+.cst-halt-banner b { font-weight: 800; letter-spacing: -.01em; }
+.cst-halt-banner span { color: color-mix(in srgb, var(--crit) 82%, var(--ink)); font-weight: 500; }
+
+.cst-dial-halt { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px 13px;
+  border-radius: 11px; background: color-mix(in srgb, var(--crit) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crit) 26%, transparent); color: var(--crit); font-size: 12px; line-height: 1.45; }
+.cst-dial-halt .material-symbols-rounded { font-size: 17px; flex: none; }
+.cst-dial-halt b { font-weight: 800; }
+.cst-dial-list.halted { opacity: .5; filter: grayscale(.5); pointer-events: none; }
+
+.cst-log-empty { text-align: center; color: var(--muted); padding: 22px 0; font-size: 13px; }
+
+.cst-pager { display: inline-flex; align-items: center; gap: 8px; }
+.cst-pager-pos { font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cst-pager-btn { display: inline-flex; align-items: center; gap: 2px; font-family: inherit; font-size: 12px; font-weight: 700;
+  color: var(--ink); background: var(--well-2); border: 1px solid var(--line); border-radius: 9px; padding: 5px 10px; cursor: pointer; transition: background .15s, transform .15s; }
+.cst-pager-btn .material-symbols-rounded { font-size: 16px; }
+.cst-pager-btn:hover:not(:disabled) { background: var(--well); transform: translateY(-1px); }
+.cst-pager-btn:disabled { opacity: .4; cursor: default; }
+
 @media (max-width: 1100px) {
   .cst-stop-body { flex-direction: column; }
 }

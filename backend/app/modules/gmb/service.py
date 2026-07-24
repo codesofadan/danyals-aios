@@ -8,7 +8,7 @@ are INJECTED, so :func:`run_gmb_generation` unit-tests deterministically with a
 
 * no Anthropic key (``summarizer is None``) -> a keyless degrade; the gate is never
   consulted and no provider call happens.
-* a cost-gate block (dial ``gmb`` off / by-hand, client cap, org daily spend-stop) ->
+* a cost-gate block (dial ``gmb`` off / by-hand, client cap, global spend halt) ->
   a blocked degrade; NO provider call happens and the gate is never bypassed.
 
 The generated body is ALWAYS run through the content guard's ``strip_dashes`` (the
@@ -177,7 +177,7 @@ def run_gmb_generation(
     )
     decision = gate.evaluate(ctx)
     if not decision.allowed:
-        # dial off / by-hand, client cap, or daily spend-stop: NO provider call.
+        # dial off / by-hand, client cap, or the global spend halt: NO provider call.
         return GmbGenerationResult(
             status="degraded",
             body="",

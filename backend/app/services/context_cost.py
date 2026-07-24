@@ -2,7 +2,7 @@
 
 Every context-module LLM (summarize) and embedding call MUST flow through the
 existing per-call cost gate (``app/services/cost_gate.py``) so no context AI spend
-can bypass the money-dial, per-client budget caps, or the org daily spend-stop.
+can bypass the money-dial, per-client budget caps, or the global spend halt.
 These wrappers are the ONLY way the compaction engine (P6B-5) touches a provider:
 it receives a ``Summarizer`` / ``Embedder`` (the Protocol), and because that is a
 ``GatedSummarizer`` / ``GatedEmbedder`` it CANNOT reach the raw provider -- every
@@ -12,7 +12,7 @@ The three-step gate contract is reused verbatim (mirrors ``workers/tasks/audit.p
 
     build GateContext -> gate.evaluate(ctx) -> if allowed: provider call + gate.commit
 
-* ``off`` / ``byhand`` / ``blocked_cap`` / ``blocked_daily`` -> the inner provider
+* ``off`` / ``byhand`` / ``blocked_cap`` / ``blocked_halt`` -> the inner provider
   is NEVER called and a typed ``ContextSpendBlocked(outcome)`` is raised. The
   compaction worker catches it and HOLDS the freshness watermark (degrade), it
   does not crash.
@@ -51,8 +51,8 @@ class ContextSpendBlocked(RuntimeError):  # noqa: N818 - a control-flow signal (
     """Raised when the gate denies a context AI call (no provider call happened).
 
     ``outcome`` is the gate's verdict: ``skip`` (dial off), ``manual`` (dial
-    by-hand), ``blocked_cap`` (client budget cap), or ``blocked_daily`` (org daily
-    spend-stop / manual halt). The compaction worker catches this and degrades
+    by-hand), ``blocked_cap`` (client budget cap), or ``blocked_halt`` (the global
+    manual API-spend halt). The compaction worker catches this and degrades
     (holds the watermark) instead of crashing.
     """
 
@@ -230,10 +230,10 @@ def resolve_budget_client(entity_type: str, entity_id: str) -> str | None:
     * ``site``   -> its owning ``client_id``.
     * ``user``   -> that user's ``client_id`` IFF it is a portal client (per
       migration 0010 ``client_id`` is set iff role='client'); a staff user has a
-      NULL ``client_id`` -> ``None`` (org-level, still under the daily spend-stop).
+      NULL ``client_id`` -> ``None`` (org-level, still under the global spend halt).
 
     Feeds ``GateContext.client_id``. ``None`` means org-level: no per-client cap
-    applies, but the org daily spend-stop still does. Uses the privileged
+    applies, but the global spend halt still does. Uses the privileged
     connection (workers hold no user JWT); all values are bound params.
     """
     if entity_type == "client":

@@ -1,0 +1,156 @@
+/* Task Manager — admin view of every team task, its progress + proof link.
+   Scoped to /admin/tasks; reuses the global card/tbl/status-pill/av tokens. */
+
+/* Filter bar */
+.tm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 16px;
+}
+.tm-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.tm-filter select {
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.tm-filter-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Assignee cell */
+.tm-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.tm-assignee .av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex: none;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+}
+.tm-assignee.none {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Priority chip */
+.tm-prio {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.tm-prio.urgent { color: var(--crit); background: color-mix(in srgb, var(--crit) 14%, transparent); }
+.tm-prio.high   { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.tm-prio.med    { color: var(--c4); background: color-mix(in srgb, var(--c4) 15%, transparent); }
+.tm-prio.low    { color: var(--muted); background: var(--hover); }
+
+/* Lifecycle progress: 4 steps todo -> in_progress -> review -> done */
+.tm-progress-cell { min-width: 150px; }
+.tm-progress {
+  display: flex;
+  gap: 3px;
+  margin-top: 6px;
+}
+.tm-step {
+  height: 5px;
+  flex: 1;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+/* Proof cell */
+.tm-proof {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 170px;
+}
+.tm-proof-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 210px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--c4);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-proof-link:hover { text-decoration: underline; }
+.tm-proof-link .material-symbols-rounded { font-size: 16px; flex: none; }
+.tm-proof-none { color: var(--muted); font-size: 12.5px; }
+
+.tm-proof-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.tm-proof-edit input {
+  flex: 1;
+  min-width: 120px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+.tm-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  flex: none;
+}
+.tm-iconbtn:hover { color: var(--ink); background: var(--hover); }
+.tm-iconbtn.save { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.tm-iconbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.tm-proof-err { color: var(--crit); font-size: 11.5px; font-weight: 700; }
+
+.tm-muted {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+}

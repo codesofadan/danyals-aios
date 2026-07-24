@@ -28,7 +28,7 @@ import {
   type TaskPriority,
 } from "@/lib/data";
 import { nextStatus, type ReviewAction } from "@/lib/portal";
-import { seedRequests, type ClientRequest, type RequestKind } from "@/lib/client";
+import { type ClientRequest, type RequestKind } from "@/lib/client";
 
 // --- Action input shapes (mirror the wizard payloads) -----------------------
 export type AddMemberInput = {
@@ -115,7 +115,9 @@ function seedState(): StoreShape {
     rolePerms: defaultRolePerms,
     memberGrants: seedMemberGrants,
     teamLogins: seedTeamLogins(),
-    requests: seedRequests,
+    // The client portal reads requests from GET /portal/requests, not this legacy
+    // demo store — so it starts empty here (no fabricated tickets).
+    requests: [],
   };
 }
 
@@ -240,6 +242,7 @@ export function AiosStoreProvider({ children }: { children: React.ReactNode }) {
       const task: Task = {
         id, title: input.title, client: input.client, type: input.type,
         assignee: input.assignee, priority: input.priority, status: "todo", due: input.due,
+        proofUrl: "",
       };
       return {
         ...s,

@@ -142,7 +142,7 @@ class StubResearchPort:
 
     def keyword_metrics(self, keyword: str) -> KeywordMetrics:
         if self._block == "metrics":
-            raise ContentSpendBlocked("blocked_daily")
+            raise ContentSpendBlocked("blocked_halt")
         self.metric_calls.append(keyword)
         return self._metrics.get(keyword, KeywordMetrics(keyword=keyword, volume=1000, difficulty=40.0))
 

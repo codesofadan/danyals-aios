@@ -6,7 +6,7 @@ import ClientMilestones from "@/components/client/ClientMilestones";
 export default function ClientMilestonesPage() {
   return (
     <>
-      <TopBar eyebrow="Client · Milestones" title="Project Progress" searchPlaceholder="Search milestones…" />
+      <TopBar eyebrow="Client · Milestones" title="Project Progress" searchPlaceholder="Jump to…" />
       <ClientMilestones />
     </>
   );

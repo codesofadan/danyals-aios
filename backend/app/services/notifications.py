@@ -142,6 +142,84 @@ async def email_admin(
         logger.warning("email_admin_failed")
 
 
+def _resolve_client_email(client_id: str) -> tuple[str, str] | None:
+    """Resolve a client's ``(email, name)`` for a client-addressed email. Blocking.
+
+    Prefers the client's designated ``contact_email`` (the primary contact on the
+    clients row); falls back to a provisioned portal login (``users`` role='client',
+    scoped to this ``client_id``). Returns ``None`` when neither resolves (nothing to
+    email). Read on the privileged pool (the recipient is the CLIENT, not the actor).
+    """
+    with privileged_connection() as cur:
+        cur.execute(
+            "select name, contact_email from public.clients where id = %s", (client_id,)
+        )
+        crow = cur.fetchone()
+        name = str(crow.get("name") or "") if crow else ""
+        contact = str((crow or {}).get("contact_email") or "").strip()
+        if contact:
+            return contact, name
+        # No primary contact recorded: fall back to a provisioned portal login.
+        cur.execute(
+            "select email from public.users "
+            "where role = 'client' and client_id = %s "
+            "order by created_at limit 1",
+            (client_id,),
+        )
+        urow = cur.fetchone()
+        portal_email = str((urow or {}).get("email") or "").strip()
+        if portal_email:
+            return portal_email, name
+    return None
+
+
+async def email_client(
+    client_id: str,
+    subject: str,
+    html: str,
+    text: str = "",
+    *,
+    email: str | None = None,
+    email_sender: EmailSender | None = None,
+) -> None:
+    """Best-effort: email a CLIENT (the tenant's contact). Never raises.
+
+    Sibling of :func:`email_admin`, but addressed to a CLIENT rather than the fixed
+    operator inbox - used for client-facing signals (an audit report is ready, content
+    was published to their site, a portal request was answered). The recipient is
+    resolved from the tenant: an explicit ``email`` wins, else the client's
+    ``contact_email``, else a provisioned portal login; when NONE resolves the send is
+    silently skipped (log + return), never a crash. Consults NO ``notification_prefs``
+    and writes NO in-app row (the client sees the deliverable/reply in their portal).
+    Key-gated exactly like ``email_admin``: with no ``RESEND_API_KEY`` the send is
+    skipped. A blank address, a keyless provider, or a send failure are ALL swallowed
+    to a warning - emailing a client can never break the caller's mutation.
+    ``email_sender`` may be injected (tests); absent, it is built from settings.
+    """
+    to = (email or "").strip()
+    if not to:
+        try:
+            resolved = await asyncio.to_thread(_resolve_client_email, client_id)
+        except Exception:
+            logger.warning("email_client_resolve_failed")
+            return
+        if resolved is None:
+            logger.info("email_client_skipped", reason="no recipient")
+            return
+        to = resolved[0]
+    if not to:
+        return
+    sender = email_sender if email_sender is not None else email_sender_from_settings(get_settings())
+    if sender is None:
+        return  # keyless -> email leg skipped
+    try:
+        await asyncio.to_thread(
+            sender.send, to=to, subject=subject, html=html, text=text or None
+        )
+    except Exception:
+        logger.warning("email_client_failed")
+
+
 async def notify(
     user_id: str,
     kind: str,
@@ -236,6 +314,19 @@ def notify_leads_sync(kind: str, title: str, body: str = "") -> None:
         asyncio.run(notify_leads(kind, title, body))
     except Exception:
         logger.warning("notify_leads_sync_failed", kind=kind)
+
+
+def email_client_sync(
+    client_id: str, subject: str, html: str, text: str = "", *, email: str | None = None
+) -> None:
+    """Synchronous best-effort :func:`email_client` for a SYNC Celery worker (a prefork
+    worker has no running loop, so it drives the async helper via ``asyncio.run``). Used
+    by the audit / content publish workers to email a client that their report/content
+    is ready. Any failure is swallowed - it can never fail the completed job."""
+    try:
+        asyncio.run(email_client(client_id, subject, html, text, email=email))
+    except Exception:
+        logger.warning("email_client_sync_failed")
 
 
 # --------------------------------------------------------------------------- #

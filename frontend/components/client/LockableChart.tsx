@@ -10,9 +10,13 @@ import { useClient } from "./ClientContext";
 type Phase = "locked" | "unlockable" | "unlocking" | "unlocked";
 const UNLOCK_MS = 1500;
 
-// A single dashboard report card with three faces:
+// A single dashboard report card with three faces. NOTE: the reveal is a
+// cosmetic EXPAND over data the admin already granted and the backend already
+// sent — tapping never grants new access (the access decision is the admin's
+// grant, already made), it only draws the card open. Copy reads "reveal", not
+// "unlock access", so a client is never misled into thinking a tap unlocks data.
 //   · locked      — not granted by the admin. Grayed out behind a padlock;
-//                   the client can only request access.
+//                   the client can only request access from their manager.
 //   · unlockable  — granted but not yet opened. A glowing padlock the client
 //                   pops to reveal the data.
 //   · unlocking   — the transition: the padlock springs open, a green success
@@ -89,7 +93,7 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
             className="cl-lock"
             onClick={granted ? startUnlock : () => router.push("/client/requests")}
             disabled={phase === "unlocking"}
-            title={granted ? "Tap to unlock this graph" : "Locked — request access from your account manager"}
+            title={granted ? "Tap to reveal this graph" : "Locked — request access from your account manager"}
           >
             <span className="cl-lock-badge">
               <span className="cl-lock-icon material-symbols-rounded">
@@ -97,7 +101,7 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
               </span>
             </span>
             <span className="cl-lock-txt">
-              {phase === "unlocking" ? "Unlocking…" : granted ? "Tap to unlock" : "Locked"}
+              {phase === "unlocking" ? "Revealing…" : granted ? "Tap to reveal" : "Locked"}
             </span>
             <span className="cl-lock-sub">
               {granted ? report.desc : "Not included in your plan — request access"}
@@ -136,7 +140,7 @@ function ChartBadge({ phase, sample }: { phase: Phase; sample?: boolean }) {
     );
   }
   if (phase === "unlocking") {
-    return <span className="cl-chart-badge unlocking"><span className="material-symbols-rounded">lock_open</span>Unlocking</span>;
+    return <span className="cl-chart-badge unlocking"><span className="material-symbols-rounded">lock_open</span>Revealing</span>;
   }
   if (phase === "unlockable") {
     return <span className="cl-chart-badge ready"><span className="material-symbols-rounded">lock_open</span>Ready</span>;

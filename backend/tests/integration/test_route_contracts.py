@@ -699,19 +699,19 @@ async def test_cost_writes_with_restore(env: Any) -> None:
     async with LifespanManager(app):
         dial = {f["key"]: f["mode"] for f in _body(await _req(app, "GET", "/api/v1/cost/dial", owner))}
         ss = _body(await _req(app, "GET", "/api/v1/cost/spend-stop", owner))
-        orig_keywords, orig_stop, orig_halt = dial["keywords"], ss["dailyStop"], ss["halted"]
+        orig_keywords, orig_halt = dial["keywords"], ss["halted"]
         t = env["ids"]["tenant"]
         try:
             r = await _req(app, "PUT", "/api/v1/cost/dial/keywords", owner, {"mode": "api"})
             assert r.status_code == 200, r.text
             assert _body(r)["mode"] == "api"
 
-            r = await _req(app, "PUT", "/api/v1/cost/spend-stop", owner, {"daily_stop": 42.0, "halted": True})
+            r = await _req(app, "PUT", "/api/v1/cost/spend-stop", owner, {"halted": True})
             assert r.status_code == 200, r.text
             assert not shape_errors(_body(r), SpendStopResponse)
 
             r = await _req(app, "GET", "/api/v1/cost/spend-stop", owner)
-            assert _body(r)["dailyStop"] == 42.0 and _body(r)["halted"] is True
+            assert _body(r)["halted"] is True
 
             # PUT budget (happy path) validates ClientBudgetResponse against a real row.
             r = await _req(app, "PUT", f"/api/v1/cost/budgets/{t}", owner, {"cap": 250})
@@ -721,7 +721,7 @@ async def test_cost_writes_with_restore(env: Any) -> None:
         finally:
             # Restore the org-wide singletons this test mutated + drop the budget row.
             await _req(app, "PUT", "/api/v1/cost/dial/keywords", owner, {"mode": orig_keywords})
-            await _req(app, "PUT", "/api/v1/cost/spend-stop", owner, {"daily_stop": orig_stop, "halted": orig_halt})
+            await _req(app, "PUT", "/api/v1/cost/spend-stop", owner, {"halted": orig_halt})
             with privileged_connection(pool=env["admin_pool"]) as cur:
                 cur.execute("delete from public.client_budgets where client_id = %s", (t,))
 

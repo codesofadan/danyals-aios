@@ -148,9 +148,9 @@ export const DIAL_MODE_META: Record<DialMode, { label: string; icon: string }> =
 export const DIAL_MODES: DialMode[] = ["api", "byhand", "off"];
 
 // --- Global settings --------------------------------------------------------
-// Fallback shown only while GET /cost/spend-stop is loading; the live value
-// (SpendStopResponse.dailyStop) is authoritative once the query resolves.
-export const dailyStopDefault = 75; // daily spend-stop threshold (USD)
+// The global API-spend HALT is a single agency-global kill-switch (owner/admin).
+// There is no per-day dollar threshold any more. GET /cost/spend-stop returns
+// only { halted, todaySpent }.
 
 export const usd = (n: number, dp = 0) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });

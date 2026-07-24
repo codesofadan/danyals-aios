@@ -12,10 +12,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { AuditRow } from "@/lib/audit";
 import type { ClientDeliverable, ClientRequest, ReportViz, RequestKind } from "@/lib/client";
 import type { ClientProject } from "@/lib/milestones";
 
 export const PORTAL_DASHBOARD_KEY = ["portal", "dashboard"] as const;
+export const PORTAL_AUDITS_KEY = ["portal", "audits"] as const;
 export const PORTAL_REPORTS_KEY = ["portal", "reports"] as const;
 export const PORTAL_DELIVERABLES_KEY = ["portal", "deliverables"] as const;
 export const PORTAL_MILESTONES_KEY = ["portal", "milestones"] as const;
@@ -43,6 +45,30 @@ export function useClientDashboard() {
   return useQuery({
     queryKey: PORTAL_DASHBOARD_KEY,
     queryFn: () => api.get<ClientDashboardResponse>("/portal/dashboard"),
+  });
+}
+
+// GET /portal/audits → the client's OWN audit runs (a safe column subset of the
+// staff AuditRow). It never carries the agency `client` name (the client IS the
+// tenant) and adds a `scores` per-category detail map. `pdf`/`json` are booleans
+// gating the download links; the artifact PATH is never returned.
+export type PortalAudit = Omit<AuditRow, "client"> & { scores?: Record<string, unknown> };
+
+const auditPending = (a: PortalAudit) => a.status === "queued" || a.status === "running";
+
+/**
+ * The signed-in client's own audit runs (newest first). Polls every 2.5s WHILE a
+ * run is queued/running (mirrors the staff useAudits), then stops — so a client
+ * watching a fresh audit sees it flip to done + its PDF/JSON links light up.
+ */
+export function useClientAudits() {
+  return useQuery({
+    queryKey: PORTAL_AUDITS_KEY,
+    queryFn: () => api.get<PortalAudit[]>("/portal/audits"),
+    refetchInterval: (query) => {
+      const rows = query.state.data as PortalAudit[] | undefined;
+      return rows?.some(auditPending) ? 2500 : false;
+    },
   });
 }
 

@@ -105,12 +105,12 @@ class CostRepo:
             rows = cur.fetchall()
         return float(sum(float(r.get("cost", 0) or 0) for r in rows))
 
-    # --- spend-stop settings --------------------------------------------------
+    # --- spend-halt settings --------------------------------------------------
     def get_settings(self) -> dict[str, Any]:
         with rls_connection(self._user_id) as cur:
             cur.execute("select * from public.cost_settings limit 1")
             row = cur.fetchone()
-        return row if row else {"daily_stop": 75, "halted": False}
+        return row if row else {"halted": False}
 
     def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
         if changes:

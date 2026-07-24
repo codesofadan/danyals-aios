@@ -2,8 +2,14 @@
 // Team Portal — tool catalog.
 // Every access feature the admin can grant maps to a real, usable
 // tool workspace here. A member only reaches a tool if their grant
-// (memberGrants) includes its key — the portal gates on that. Content
-// is demo data; swap for the per-tool API calls when the backend lands.
+// (memberGrants) includes its key — the portal gates on that.
+//
+// This file carries only static product copy (labels, icons, table
+// headers, group). The live numbers/rows come from GET /<slug>/workspace
+// (see lib/hooks/tools.ts · useToolWorkspace), and the 8 Part-8 modules
+// additionally render an interactive action panel wired to their real
+// endpoints (see components/portal/tools/*). The demo KPI/row constants
+// that used to live in EXTRAS are STRIPPED below (see the note there).
 // ============================================================
 import { accessFeatures, type AccessFeature } from "@/lib/data";
 

@@ -3,10 +3,10 @@
 import { useMemo, useState } from "react";
 import {
   jobTypeMeta, providerLabel, providerMeta, usd,
-  type CostEntry, type JobType,
+  type JobType,
 } from "@/lib/cost";
+import { useCostLogPage } from "@/lib/hooks/cost";
 
-type Props = { log: CostEntry[] };
 type Filter = "all" | JobType;
 
 const FILTERS: { key: Filter; label: string }[] = [
@@ -16,22 +16,36 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "backlinks", label: "Backlinks" },
 ];
 
-export default function CostLog({ log }: Props) {
-  const [filter, setFilter] = useState<Filter>("all");
+const PAGE_SIZE = 25; // default page size (real server pagination, newest-first)
 
+export default function CostLog() {
+  const [filter, setFilter] = useState<Filter>("all");
+  const [page, setPage] = useState(0); // zero-based page index
+
+  const q = useCostLogPage(page * PAGE_SIZE, PAGE_SIZE);
+  const pageRows = q.data ?? [];
+  // has-more signal: a full page means there may be another page after it.
+  const hasMore = pageRows.length === PAGE_SIZE;
+
+  // The type filter narrows the CURRENT page (server paginates the full log).
   const rows = useMemo(
-    () => (filter === "all" ? log : log.filter((r) => r.type === filter)),
-    [log, filter],
+    () => (filter === "all" ? pageRows : pageRows.filter((r) => r.type === filter)),
+    [pageRows, filter],
   );
   const shown = rows.reduce((s, r) => s + r.cost, 0);
   const cachedCount = rows.filter((r) => r.cached).length;
+
+  function changeFilter(f: Filter) {
+    setFilter(f);
+    setPage(0); // filtering restarts from the newest page
+  }
 
   return (
     <section className="card cst-log">
       <div className="card-h">
         <div>
           <div className="ct">Cost Log</div>
-          <div className="cs">Every gated call, logged per job — cached hits cost nothing.</div>
+          <div className="cs">Every gated call, logged per job. Cached hits cost nothing.</div>
         </div>
         <div className="tools">
           <div className="log-filters">
@@ -39,7 +53,7 @@ export default function CostLog({ log }: Props) {
               <button
                 key={f.key}
                 className={filter === f.key ? "chip on" : "chip"}
-                onClick={() => setFilter(f.key)}
+                onClick={() => changeFilter(f.key)}
               >
                 {f.label}
               </button>
@@ -64,7 +78,7 @@ export default function CostLog({ log }: Props) {
           <tbody>
             {rows.map((r, i) => {
               // Tolerant lookups: the backend logs free-form provider/type
-              // strings (audit_engine, serper, …) — never crash on one.
+              // strings (audit_engine, serper, ...); never crash on one.
               const jt = jobTypeMeta(r.type);
               const pv = providerMeta(r.provider);
               return (
@@ -96,13 +110,40 @@ export default function CostLog({ log }: Props) {
                 </tr>
               );
             })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={7} className="cst-log-empty">
+                  {q.isLoading ? "Loading…" : filter === "all" ? "No gated calls yet." : "No calls of this type on this page."}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
       <div className="cst-budget-foot">
-        <span>{rows.length} calls · <b>{cachedCount}</b> served from cache</span>
-        <span className="cst-foot-hint">Logged spend <b>{usd(shown, 2)}</b></span>
+        <span>
+          {rows.length} calls on this page · <b>{cachedCount}</b> cached · logged <b>{usd(shown, 2)}</b>
+        </span>
+        <div className="cst-pager">
+          <button
+            type="button"
+            className="cst-pager-btn"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0 || q.isFetching}
+          >
+            <span className="material-symbols-rounded">chevron_left</span>Newer
+          </button>
+          <span className="cst-pager-pos">Page {page + 1}</span>
+          <button
+            type="button"
+            className="cst-pager-btn"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasMore || q.isFetching}
+          >
+            Older<span className="material-symbols-rounded">chevron_right</span>
+          </button>
+        </div>
       </div>
     </section>
   );

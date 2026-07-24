@@ -38,15 +38,15 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # visibility rather than hiding inside the backlinks dial's numbers. Defaults to
     # API per the client's explicit 2026-07-23 decision ("no approval gate — a
     # queued campaign submits immediately"); the dial + per-client budget caps +
-    # the daily spend-stop still bound the spend, and an operator can turn it back
-    # to byhand/off at any time.
+    # the global manual spend halt still bound the spend, and an operator can turn it
+    # back to byhand/off at any time.
     DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="Auto-submits queued directories (CAPTCHA + proxy spend)", default_mode="api"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
     DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),
     # Part 6B — the Client-Context / AI-memory module's two AI spends. Both flow
     # through the SAME gate as every other paid call (P6B-4's Gated* wrappers), so
     # ops can throttle context AI to off/byhand/api on the money-dial and no
-    # context spend can bypass the budget caps / daily spend-stop.
+    # context spend can bypass the budget caps / the global spend halt.
     DialFeatureMeta(key="context", label="Client Context", icon="psychology", provider="Anthropic", note="Living-summary prose (Claude)", default_mode="api"),
     DialFeatureMeta(key="context_embed", label="Context Embeddings", icon="memory", provider="Voyage", note="Context vectors (Voyage)", default_mode="api"),
     # Part 7 (P7A-3) — the Content module's SERP keyword & intent RESEARCH spend
@@ -161,16 +161,20 @@ class CostEntryResponse(BaseModel):
 
 
 class SpendStopResponse(BaseModel):
-    """The org daily spend-stop (frontend dailyStopDefault + live state)."""
+    """The org-wide manual API-spend HALT state + today's live paid spend.
 
-    daily_stop: float = Field(serialization_alias="dailyStop")
+    ``halted`` is the single agency-global kill-switch (owner/admin). ``today_spent``
+    is day-to-date paid spend, kept purely informational (there is no per-day dollar
+    THRESHOLD any more - the manual halt replaced it)."""
+
     halted: bool
     today_spent: float = Field(serialization_alias="todaySpent")
 
 
 class SpendStopUpdate(BaseModel):
-    daily_stop: float | None = Field(default=None, ge=0)
-    halted: bool | None = None
+    """Toggle the global spend halt on/off (owner/admin only)."""
+
+    halted: bool
 
 
 def merge_dial(stored_modes: dict[str, str]) -> list[DialFeatureResponse]:

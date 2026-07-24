@@ -100,6 +100,14 @@ celery_app = Celery(
         # Both event-driven (enqueued per property from the router), so no beat
         # entry / overlap-lock is needed - each property is synced on request.
         "app.modules.site_analytics.tasks",
+        # Reports/cron: the AUTONOMOUS reporting jobs (refresh_client_audits weekly,
+        # generate_monthly_reports monthly, sweep_offpage_monitors weekly). All are
+        # BEAT-driven (see the beat_schedule below) and idempotent: the audit refresh
+        # dedupes on a recent audit, the monthly report dedupes per client x month, and
+        # the off-page sweep just fans out the already-idempotent monitor task. Each
+        # records its run in the scheduled_job_runs ledger so the Reports tab can show
+        # last-run / last-status, and none re-raises into beat.
+        "workers.tasks.reports",
     ],
 )
 
@@ -192,5 +200,33 @@ celery_app.conf.beat_schedule = {
     "rollup-rank-history": {
         "task": "rollup_rank_history",
         "schedule": crontab(hour=4, minute=10, day_of_week=0),
+    },
+    # Reports/cron (autonomous SEO reporting). All degrade cleanly with no external keys
+    # and never re-raise into beat; each records a row in scheduled_job_runs so the
+    # Reports tab shows last-run / last-status alongside the live cadence.
+    #
+    # refresh-client-audits (WEEKLY): re-run the audit engine per active client and store
+    # the report (it then appears in the Reports library via /audits). Dedupes a client
+    # audited within report_audit_refresh_min_age_days, so a re-delivered tick is a no-op.
+    "refresh-client-audits": {
+        "task": "refresh_client_audits",
+        "schedule": float(settings.report_audit_refresh_seconds),
+    },
+    # generate-monthly-reports (MONTHLY): one stored, downloadable JSON SEO summary per
+    # active client (audit-score trend + ranks + content shipped + backlinks/citations
+    # delta), on a day-of-month crontab. Idempotent per client x month.
+    "generate-monthly-reports": {
+        "task": "generate_monthly_reports",
+        "schedule": crontab(
+            day_of_month=settings.report_monthly_day,
+            hour=settings.report_monthly_hour,
+            minute=0,
+        ),
+    },
+    # sweep-offpage-monitors (WEEKLY): fan out the existing backlink/citation monitor per
+    # active client with a domain. The monitor is itself cost-gated + key-degrading.
+    "sweep-offpage-monitors": {
+        "task": "sweep_offpage_monitors",
+        "schedule": float(settings.report_offpage_sweep_seconds),
     },
 }

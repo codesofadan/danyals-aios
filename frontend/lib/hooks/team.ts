@@ -231,24 +231,7 @@ export function useReviewTask() {
   });
 }
 
-/**
- * Toggle a role's capability in the RBAC matrix.
- *
- * MISMATCH (recorded): the backend serves the role→permission matrix as READ-ONLY
- * reference data (GET /rbac/roles) — there is NO endpoint to persist a change (Owner
- * is all-on and locked; the matrix is versioned platform code, not per-tenant state).
- * The editable access surface is per-USER feature grants (PUT /admin/users/{id}/grants),
- * a different screen (user × 17 features, not role × 8 permissions). So this updates
- * the local query cache ONLY — session-scoped, NOT persisted across a reload.
- */
-export function useTogglePerm() {
-  const qc = useQueryClient();
-  return (role: TeamRole, key: PermKey) => {
-    qc.setQueryData<Record<TeamRole, PermKey[]>>(RBAC_ROLES_KEY, (prev) => {
-      if (!prev) return prev;
-      const cur = prev[role] ?? [];
-      const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
-      return { ...prev, [role]: next };
-    });
-  };
-}
+// NOTE: the RBAC role×permission matrix (GET /rbac/roles) is READ-ONLY reference data
+// — there is no endpoint to persist a role→permission change, so AccessControl renders
+// it as a static grid. The former `useTogglePerm` (a local-cache-only, non-persisted
+// toggle) was removed rather than ship a control that silently discards edits.

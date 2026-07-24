@@ -387,17 +387,18 @@ export type Task = {
   priority: TaskPriority;
   status: TaskStatus;
   due: string;
+  proofUrl: string; // proof-of-completion link (published URL / delivered report); "" when unset
 };
 
 export const tasks_seed: Task[] = [
-  { id: "J-2041", title: "Full technical crawl + CWV pass", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "high", status: "in_progress", due: "Jul 12" },
-  { id: "J-2039", title: "Service-page content sprint (6 pages)", client: "Lumen Realty", type: "Content Sprint", assignee: "u-hina", priority: "high", status: "in_progress", due: "Jul 14" },
-  { id: "J-2037", title: "Map-pack + NAP consistency fixes", client: "Verde Cafe", type: "Local SEO", assignee: "u-zoya", priority: "med", status: "todo", due: "Jul 15" },
-  { id: "J-2035", title: "Backlink profile + toxic-link sweep", client: "Meridian Wealth", type: "Backlink Audit", assignee: "u-usman", priority: "med", status: "review", due: "Jul 11" },
-  { id: "J-2032", title: "Actionable audit — per-page fixes", client: "Atlas Legal", type: "Actionable Audit", assignee: "u-bilal", priority: "urgent", status: "todo", due: "Jul 10" },
-  { id: "J-2030", title: "WordPress publish — 4 blog posts", client: "BrightHVAC", type: "Publishing", assignee: "u-ayesha", priority: "low", status: "review", due: "Jul 13" },
-  { id: "J-2028", title: "Local SEO audit + GBP categories", client: "Coastline Fit", type: "Local SEO", assignee: "u-zoya", priority: "low", status: "done", due: "Jul 08" },
-  { id: "J-2025", title: "Technical audit — second site", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "med", status: "done", due: "Jul 07" },
+  { id: "J-2041", title: "Full technical crawl + CWV pass", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "high", status: "in_progress", due: "Jul 12", proofUrl: "" },
+  { id: "J-2039", title: "Service-page content sprint (6 pages)", client: "Lumen Realty", type: "Content Sprint", assignee: "u-hina", priority: "high", status: "in_progress", due: "Jul 14", proofUrl: "" },
+  { id: "J-2037", title: "Map-pack + NAP consistency fixes", client: "Verde Cafe", type: "Local SEO", assignee: "u-zoya", priority: "med", status: "todo", due: "Jul 15", proofUrl: "" },
+  { id: "J-2035", title: "Backlink profile + toxic-link sweep", client: "Meridian Wealth", type: "Backlink Audit", assignee: "u-usman", priority: "med", status: "review", due: "Jul 11", proofUrl: "" },
+  { id: "J-2032", title: "Actionable audit — per-page fixes", client: "Atlas Legal", type: "Actionable Audit", assignee: "u-bilal", priority: "urgent", status: "todo", due: "Jul 10", proofUrl: "" },
+  { id: "J-2030", title: "WordPress publish — 4 blog posts", client: "BrightHVAC", type: "Publishing", assignee: "u-ayesha", priority: "low", status: "review", due: "Jul 13", proofUrl: "" },
+  { id: "J-2028", title: "Local SEO audit + GBP categories", client: "Coastline Fit", type: "Local SEO", assignee: "u-zoya", priority: "low", status: "done", due: "Jul 08", proofUrl: "https://coastlinefit.example/blog/local-seo-report" },
+  { id: "J-2025", title: "Technical audit — second site", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "med", status: "done", due: "Jul 07", proofUrl: "https://northpeakdental.example/reports/tech-audit-2.pdf" },
 ];
 
 // --- Activity log -----------------------------------------------------------

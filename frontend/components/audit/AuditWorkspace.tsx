@@ -10,6 +10,7 @@ import {
 } from "@/lib/audit";
 import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
+import { useSpendHalted } from "@/lib/hooks/cost";
 import { downloadFile, getReportHtml } from "@/lib/api";
 import ReportViewer from "@/components/report/ReportViewer";
 import AuditStats from "./AuditStats";
@@ -38,6 +39,7 @@ export default function AuditWorkspace() {
   const statsQ = useAuditStats();
   const clientsQ = useClients();
   const createAudit = useCreateAudit();
+  const { halted } = useSpendHalted(); // global API-spend kill-switch
 
   const rows = auditsQ.data ?? [];
   const clients = clientsQ.data ?? [];
@@ -60,7 +62,9 @@ export default function AuditWorkspace() {
   // document the PDF is rendered from, so the on-screen report matches the download.
   const loadReport = useCallback(() => getReportHtml(`/audits/${viewId}/report.html`), [viewId]);
 
-  const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending;
+  // A run spends metered budget (Paid types especially), so it is blocked while the
+  // global API-spend halt is engaged.
+  const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending && !halted;
 
   const toggleType = (k: AuditTypeKey) =>
     setTypes((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
@@ -285,12 +289,20 @@ export default function AuditWorkspace() {
 
           <button className="primary-btn wide" onClick={runAudit} disabled={!canRun}>
             <span className="material-symbols-rounded">rocket_launch</span>
-            {createAudit.isPending
-              ? "Starting…"
-              : types.length === 0
-                ? "Run full audit"
-                : `Run ${types.length}-type audit`}
+            {halted
+              ? "API spend is halted"
+              : createAudit.isPending
+                ? "Starting…"
+                : types.length === 0
+                  ? "Run full audit"
+                  : `Run ${types.length}-type audit`}
           </button>
+          {halted && (
+            <div className="au-run-note" role="status" style={{ color: "var(--warn, #A96913)" }}>
+              <span className="material-symbols-rounded">block</span>
+              API spend is halted. Resume it in Cost Controls to run audits.
+            </div>
+          )}
           {createErr && (
             <div className="au-run-note" role="alert" style={{ color: "var(--warn, #A96913)" }}>
               <span className="material-symbols-rounded">error</span>

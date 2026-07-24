@@ -90,7 +90,7 @@ export default function AddKeyForm({ onAdd }: { onAdd: (k: NewKey) => void }) {
         </div>
         <div className="fld-hint">
           <span className="material-symbols-rounded" style={{ fontSize: 14, verticalAlign: "-2px" }}>lock</span>{" "}
-          Encrypted at rest in Supabase Vault — never stored in plaintext or logs.
+          AES-256 encrypted at rest — never stored in plaintext or logs.
         </div>
       </div>
 

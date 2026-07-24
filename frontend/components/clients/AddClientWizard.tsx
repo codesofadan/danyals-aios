@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  clientReports, reportBundles, REPORT_GROUP_COLOR, TIER_PRICE,
+  clientReports, reportBundles, REPORT_GROUP_COLOR,
   type ClientReport, type SubTier,
 } from "@/lib/data";
 import type { NewClientInput } from "@/lib/hooks/clients";
@@ -40,11 +40,12 @@ function genPassword(): string {
   return `${pick(ADJ)}-${pick(NOUN)}${digits}${sym}${tail}`;
 }
 
-// Best-effort admin login from the contact email, else from the client name.
-function genLogin(email: string, client: string): string {
-  if (/\S+@\S+\.\S+/.test(email)) return `admin@${email.split("@")[1]}`;
-  const slug = client.trim().toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 18);
-  return `admin@${slug || "client"}.com`;
+// Portal login as `<first-name>@aios.com`, from the contact's name (falls back to
+// the company name). Never the client's own email/domain - it's an AIOS portal login.
+function genLogin(contactName: string, client: string): string {
+  const source = contactName.trim() || client.trim();
+  const first = source.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+  return `${first || "client"}@aios.com`;
 }
 
 type Step = 1 | 2 | 3;
@@ -131,7 +132,7 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
 
   function goCredentials() {
     if (!nameValid || !contactValid || !emailValid) return;
-    setAdminLogin(genLogin(contactEmail, cn));
+    setAdminLogin(genLogin(contactName, cn));
     setAdminPass(genPassword());
     setStep(3);
   }

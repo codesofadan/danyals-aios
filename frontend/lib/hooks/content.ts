@@ -176,3 +176,21 @@ export type ContentQa = { id: string; qa: QaScorecard | null };
 export function useContentQa(code: string | null) {
   return useContentColumn<ContentQa>(code, "qa");
 }
+
+// (f) WORDPRESS push: the permalink + wp-admin edit link captured when an approved
+// job was pushed to the client's AIOS Publisher plugin (the host-independent push).
+// All fields are null until the job is pushed; fetched lazily like the other rich
+// columns. Kept OUT of the 15-key ContentJob contract, so it rides its own endpoint.
+export type ContentWp = {
+  id: string;
+  wp: {
+    url: string | null;
+    edit_url: string | null;
+    post_id: string | null;
+    status: string | null;
+    target: string | null;
+  } | null;
+};
+export function useContentWp(code: string | null) {
+  return useContentColumn<ContentWp>(code, "wp");
+}

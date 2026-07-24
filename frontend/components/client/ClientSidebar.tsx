@@ -16,6 +16,7 @@ export default function ClientSidebar() {
 
   const items: Item[] = [
     { icon: "insights", label: "Client Dashboard", href: "/client" },
+    { icon: "fact_check", label: "Audits", href: "/client/audits" },
     { icon: "flag", label: "Milestones", href: "/client/milestones" },
     { icon: "summarize", label: "Reports", href: "/client/reports" },
     { icon: "forum", label: "Requests", href: "/client/requests", badge: openRequests },

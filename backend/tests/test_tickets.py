@@ -283,3 +283,62 @@ async def test_status_rejects_unknown_value(
         f"/api/v1/tickets/{seeded['code']}/status", json={"status": "closed"}
     )
     assert resp.status_code == 422  # not one of open/pending/resolved
+
+
+# --- all-way comms: a status change emails the client (ADMIN/LEAD -> CLIENT) -------
+
+async def test_status_change_emails_the_client(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_email_client(
+        client_id: str, subject: str, html: str, text: str = "", **_k: Any
+    ) -> None:
+        calls.append((client_id, subject))
+
+    monkeypatch.setattr("app.routers.tickets.email_client", _fake_email_client)
+    seeded = repo.seed(status="open", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.patch(
+        f"/api/v1/tickets/{seeded['code']}/status", json={"status": "resolved"}
+    )
+    assert resp.status_code == 200
+    assert calls and calls[0][0] == "cl-atlas"  # the request's client is emailed
+    assert seeded["subject"] in calls[0][1]  # the subject carries the request title
+
+
+async def test_status_unchanged_does_not_email(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_email_client(
+        client_id: str, subject: str, html: str, text: str = "", **_k: Any
+    ) -> None:
+        calls.append((client_id, subject))
+
+    monkeypatch.setattr("app.routers.tickets.email_client", _fake_email_client)
+    seeded = repo.seed(status="resolved", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.patch(
+        f"/api/v1/tickets/{seeded['code']}/status", json={"status": "resolved"}
+    )
+    assert resp.status_code == 200
+    assert calls == []  # no real transition -> no client email
+
+
+async def test_status_change_survives_email_layer_unconfigured(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None]
+) -> None:
+    # No monkeypatch: the real email_client runs with no DB / no Resend key and must
+    # degrade to a no-op - the triage still returns 200.
+    seeded = repo.seed(status="open", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.patch(
+        f"/api/v1/tickets/{seeded['code']}/status", json={"status": "pending"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "pending"

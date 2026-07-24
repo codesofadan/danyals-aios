@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { dailyStopDefault, type DialMode, type Provider } from "@/lib/cost";
+import { useMemo } from "react";
+import { type DialMode, type Provider } from "@/lib/cost";
 import {
   useBudgets, useCostLog, useDial, useSpendStop,
   useSetBudget, useSetDial, useSetSpendStop,
@@ -25,18 +25,14 @@ export default function CostWorkspace() {
 
   const budgets = budgetsQ.data ?? [];
   const dial = dialQ.data ?? [];
+  // The recent-window log feeds the aggregate cards (breakdown / heatmap / jobs).
+  // The cost-log TABLE paginates its own fetch (see CostLog), so it no longer grows
+  // unbounded with this window.
   const costLog = logQ.data ?? [];
 
-  // Spend-stop: `armed` (providers live) is the inverse of the server `halted` flag.
-  const armed = !(spendStopQ.data?.halted ?? false);
-  const serverThreshold = spendStopQ.data?.dailyStop ?? dailyStopDefault;
-  // Live day-to-date paid spend (the number the daily stop trips on).
+  // API-spend HALT: the single agency-global kill-switch (halted === true).
+  const halted = spendStopQ.data?.halted ?? false;
   const todaySpent = spendStopQ.data?.todaySpent ?? 0;
-  // Local draft so typing the threshold feels instant; the PUT is debounced and the
-  // draft is cleared once the write settles (the query becomes authoritative).
-  const [thresholdDraft, setThresholdDraft] = useState<number | null>(null);
-  const threshold = thresholdDraft ?? serverThreshold;
-  const thrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const totals = useMemo(() => {
     const spent = budgets.reduce((s, b) => s + b.spent, 0);
@@ -45,9 +41,9 @@ export default function CostWorkspace() {
     return { spent, cap, used };
   }, [budgets]);
 
-  // Derived from the real cost log — a job can have multiple provider rows (one
-  // per API call), so "jobs this month" is the count of DISTINCT job ids, and the
-  // provider breakdown groups+sums cost per provider (both replace hardcoded seeds).
+  // Derived from the recent cost-log window: a job can have multiple provider rows
+  // (one per API call), so "jobs this month" is the count of DISTINCT job ids, and
+  // the provider breakdown groups+sums cost per provider.
   const providerSpend = useMemo(() => {
     const byProvider = new Map<Provider, number>();
     for (const e of costLog) byProvider.set(e.provider, (byProvider.get(e.provider) ?? 0) + e.cost);
@@ -67,17 +63,9 @@ export default function CostWorkspace() {
     setDial.mutate({ key, mode });
   }
 
-  // Trip when armed, re-arm when tripped (new halted = the current armed flag).
-  function handleToggleStop() {
-    setSpendStop.mutate({ halted: armed });
-  }
-
-  function handleThreshold(v: number) {
-    setThresholdDraft(v);
-    if (thrTimer.current) clearTimeout(thrTimer.current);
-    thrTimer.current = setTimeout(() => {
-      setSpendStop.mutate({ daily_stop: v }, { onSettled: () => setThresholdDraft(null) });
-    }, 500);
+  // Flip the global halt (new halted = the inverse of the current state).
+  function handleToggleHalt() {
+    setSpendStop.mutate({ halted: !halted });
   }
 
   const readError =
@@ -89,21 +77,30 @@ export default function CostWorkspace() {
     <div className="cst">
       {readError && (
         <div className="cs" role="alert" style={{ color: "var(--warn)", marginBottom: 8 }}>
-          Some cost data couldn&apos;t load — {readError ?? "try again"}.
+          Some cost data couldn&apos;t load. {readError ?? "Try again"}.
         </div>
       )}
 
-      <CostStats spend={totals.spent} budgetUsed={totals.used} jobs={jobsThisMonth} armed={armed} todaySpent={todaySpent} />
+      {halted && (
+        <div className="cst-halt-banner" role="alert">
+          <span className="material-symbols-rounded">block</span>
+          <div>
+            <b>API spend is HALTED.</b>
+            <span> All paid features are paused. Audits, content, policy ask and every metered tool are blocked platform-wide until you resume spend below.</span>
+          </div>
+        </div>
+      )}
+
+      <CostStats spend={totals.spent} budgetUsed={totals.used} jobs={jobsThisMonth} armed={!halted} todaySpent={todaySpent} />
 
       <div className="row">
         <SpendStopCard
-          armed={armed}
-          threshold={threshold}
+          halted={halted}
           todaySpent={todaySpent}
-          onToggle={handleToggleStop}
-          onThreshold={handleThreshold}
+          onToggle={handleToggleHalt}
+          pending={setSpendStop.isPending}
         />
-        <CostDial dial={dial} onSetMode={handleSetMode} />
+        <CostDial dial={dial} onSetMode={handleSetMode} halted={halted} />
       </div>
 
       <div className="row-single">
@@ -111,7 +108,7 @@ export default function CostWorkspace() {
       </div>
 
       <div className="row">
-        <CostLog log={costLog} />
+        <CostLog />
         <ProviderBreakdown data={providerSpend} total={providerTotal} />
       </div>
 

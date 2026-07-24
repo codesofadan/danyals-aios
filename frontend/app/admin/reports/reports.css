@@ -39,6 +39,11 @@
   border-top: 1px solid var(--line); font-size: 11.5px; font-weight: 600; color: var(--muted); line-height: 1.4; }
 .rp-conn-foot .material-symbols-rounded { font-size: 16px; color: var(--violet-soft); flex: none; }
 
+/* ---- Reports library sub-headers ---- */
+.rp-lib-sub { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin: 16px 2px 2px; }
+.rp-lib-sub:first-of-type { margin-top: 10px; }
+
 /* ---- Workbooks table ---- */
 .rp-tbl-wrap { margin-top: 12px; }
 .rp-tbl { min-width: 760px; }

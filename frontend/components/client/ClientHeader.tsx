@@ -14,8 +14,9 @@ function greeting(name: string): string {
 // Shared hero across the client portal pages — identity, plan, health. A portal
 // login IS the client (the company), so the identity is company-level: the
 // avatar/initials are derived from the name, and health comes from the client's
-// own /portal/milestones project.
-export default function ClientHeader({ eyebrow, focus }: { eyebrow: string; focus?: React.ReactNode }) {
+// own /portal/milestones project. The eyebrow line is the time-of-day greeting
+// ("Good morning, {name}"), computed after mount to stay SSR-safe.
+export default function ClientHeader({ focus }: { focus?: React.ReactNode }) {
   const { client, grants } = useClient();
   const project = useClientMilestones().data;
   const health = project ? HEALTH_META[project.health] : null;
@@ -28,7 +29,7 @@ export default function ClientHeader({ eyebrow, focus }: { eyebrow: string; focu
       <span className="cl-hero-av av" style={{ background: client.c }}>{client.init}</span>
 
       <div className="cl-hero-id">
-        <div className="cl-hero-hi">{eyebrow ?? hi}</div>
+        <div className="cl-hero-hi">{hi}</div>
         <div className="cl-hero-name">{client.cn}</div>
         <div className="cl-hero-meta">
           <span className="cl-hero-plan">{client.tier} plan</span>

@@ -17,7 +17,9 @@ export type NewJob = {
 
 const FW_OPTIONS: (Framework | "Auto")[] = ["Auto", ...FRAMEWORKS.map((f) => f.key)];
 
-export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => void }) {
+export default function NewJobForm(
+  { onCreate, halted = false }: { onCreate: (job: NewJob) => void; halted?: boolean },
+) {
   const clientsQ = useClients();
   const clients = clientsQ.data ?? [];
   const [clientId, setClientId] = useState("");
@@ -30,7 +32,9 @@ export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => vo
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!topic.trim() || !effectiveClientId) return;
+    // Generating a content job spends metered research + Claude budget, so it is
+    // blocked while the global API-spend halt is engaged.
+    if (!topic.trim() || !effectiveClientId || halted) return;
     onCreate({ clientId: effectiveClientId, pageType, topic: topic.trim(), framework, target });
     setTopic("");
     setFramework("Auto");
@@ -41,7 +45,7 @@ export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => vo
       <div className="card-h">
         <div>
           <div className="ct">New content job</div>
-          <div className="cs">Pick a content type + topic — the engine handles the rest to the review gate.</div>
+          <div className="cs">Pick a content type + topic. The engine handles the rest to the review gate.</div>
         </div>
       </div>
 
@@ -111,9 +115,15 @@ export default function NewJobForm({ onCreate }: { onCreate: (job: NewJob) => vo
           </div>
         </div>
 
-        <button className="primary-btn wide" type="submit" disabled={!topic.trim() || !effectiveClientId}>
-          <span className="material-symbols-rounded">add</span>Queue content job
+        <button className="primary-btn wide" type="submit" disabled={!topic.trim() || !effectiveClientId || halted}>
+          <span className="material-symbols-rounded">{halted ? "block" : "add"}</span>
+          {halted ? "API spend is halted" : "Queue content job"}
         </button>
+        {halted && (
+          <div className="cs" role="status" style={{ color: "var(--warn)", marginTop: 8 }}>
+            API spend is halted. Resume it in Cost Controls to queue content jobs.
+          </div>
+        )}
       </form>
     </section>
   );

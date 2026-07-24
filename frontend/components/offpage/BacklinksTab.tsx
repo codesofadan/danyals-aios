@@ -57,7 +57,7 @@ export default function BacklinksTab() {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">hub</span>
-          Referring domains, anchors &amp; authority — new / lost alerts from DataForSEO.
+          Referring domains, anchors &amp; authority — new / lost link monitoring.
         </div>
         <div className="op-toolset">
           <div className="seg">

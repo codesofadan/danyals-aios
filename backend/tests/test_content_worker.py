@@ -351,13 +351,13 @@ def test_qa_loop_cost_blocked_mid_loop_advances_with_best_never_spins() -> None:
     scorer = _ScriptedScorer([_qa(60, passed=False)])  # would loop forever if uncapped
 
     class _RewriteBlockedWriter:
-        """Writes normally for generation + the em-dash guard, but the spend-stop
-        trips on a QA-loop rewrite (its prompt carries the guided-rewrite marker) ->
+        """Writes normally for generation + the em-dash guard, but the cost gate
+        blocks a QA-loop rewrite (its prompt carries the guided-rewrite marker) ->
         that pass does ZERO writer work, so the loop must stop, not spin."""
 
         def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
             if "REVIEWER INSTRUCTION" in prompt:
-                raise ContentSpendBlocked("daily spend-stop")
+                raise ContentSpendBlocked("blocked_halt")
             return LLMResult(text="Grounded, clean brunch copy for weekend diners.", input_tokens=6, output_tokens=6)
 
     providers = replace(content_providers_for_tests(), writer=_RewriteBlockedWriter())
@@ -639,3 +639,52 @@ def test_md_to_html_covers_headings_lists_links() -> None:
     assert '<a href="https://x.test">link</a>' in html
     assert "<strong>bold</strong>" in html
     assert "<ul><li>a</li><li>b</li></ul>" in html
+
+
+# --------------------------------------------------------------------------- #
+# All-way comms: the content worker's cross-actor email legs.
+# --------------------------------------------------------------------------- #
+def test_content_needs_review_notifies_the_leads(monkeypatch: pytest.MonkeyPatch) -> None:
+    # TEAM/WORKER -> LEAD: when the pipeline reaches the review gate it fans a
+    # content_review notification out to the leads who own the sign-off.
+    import workers.tasks.content as content_mod
+
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(content_mod, "notify_leads_sync", lambda *a, **k: calls.append(a))
+
+    store = FakeContentStore(_job_row())
+    out = execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(), gate=_gate(), fetcher=FakePageFetcher(),
+    )
+    assert out.status == "needs_review"
+    assert calls and calls[0][0] == "content_review"
+    assert "best brunch in portland" in calls[0][1]  # the topic is in the subject
+
+
+def test_content_published_emails_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ADMIN/LEAD -> CLIENT: publishing content emits a portal deliverable AND emails
+    # the client that new content is live.
+    import workers.tasks.content as content_mod
+
+    client_calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(content_mod, "email_client_sync", lambda *a, **k: client_calls.append(a))
+    monkeypatch.setattr(content_mod, "emit_deliverable", lambda **k: None)
+
+    content_mod._emit_content_deliverable(
+        {"client_id": _CLIENT_ID, "client_name": "Verde Cafe", "topic": "Spring Menu", "id": "j1"},
+        artifact_key="CJ-4200/content.pdf",
+    )
+    assert client_calls and client_calls[0][0] == _CLIENT_ID
+    assert "Spring Menu" in client_calls[0][1]  # subject carries the topic
+
+
+def test_content_published_no_client_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workers.tasks.content as content_mod
+
+    client_calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(content_mod, "email_client_sync", lambda *a, **k: client_calls.append(a))
+    monkeypatch.setattr(content_mod, "emit_deliverable", lambda **k: None)
+    # An unlinked job (no client_id) neither emits a deliverable nor emails anyone.
+    content_mod._emit_content_deliverable({"topic": "X"}, artifact_key=None)
+    assert client_calls == []

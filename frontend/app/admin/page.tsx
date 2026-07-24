@@ -63,7 +63,7 @@ export default function CommandCenter() {
           </div>
 
           <div className="row b">
-            <TrafficChart traffic={data.traffic.points} />
+            <TrafficChart traffic={data.traffic.points} placeholder={data.traffic.placeholder} />
             <TeamTracking team={data.team} />
           </div>
         </>

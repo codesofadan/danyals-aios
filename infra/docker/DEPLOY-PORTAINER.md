@@ -72,12 +72,34 @@ Method A.
 - **Owner login:** username `owner`, the `SEED_OWNER_PASSWORD` you set. **Change it after
   first login.**
 
-If you put a reverse proxy / TLS (Caddy, Nginx Proxy Manager, Traefik) in front:
-- Route your app domain → `web:3000`.
-- Either keep the built-in proxy (browser → web → `api:8000`, one domain), **or** expose the
-  API on its own subdomain and set `API_CORS_ORIGINS` + `TRUSTED_HOSTS` accordingly, and set
-  `GOOGLE_OAUTH_REDIRECT_URI` to `https://<api-domain>/api/v1/site-analytics/oauth/callback`
-  (also add that exact URI to the Google OAuth client).
+## TLS / public domain (the `nginx` service)
+
+The stack ships an **`nginx` container (`jonasal/nginx-certbot`)** that is the only
+service facing the public network. It terminates HTTPS for **`app.qanry.com`** and
+reverse-proxies to `web:3000` (which proxies `/api/v1/*` → `api:8000`, so one domain
+fronts the whole app). On first deploy it drops in a dummy cert so nginx boots, then
+obtains the real **Let's Encrypt** cert over port 80 (ACME http-01 + the http→https
+redirect are handled internally) and auto-renews it. Certs persist in the
+`nginx_secrets` volume across redeploys.
+
+To go live on the domain:
+1. **DNS:** an `A` record for `app.qanry.com` → the VPS public IP (`192.255.159.242`),
+   propagated (`nslookup app.qanry.com` returns it).
+2. **Env:** `CERTBOT_EMAIL` (a real inbox), `TRUSTED_HOSTS=app.qanry.com`,
+   `API_CORS_ORIGINS=https://app.qanry.com`. To change the domain, edit
+   `infra/deploy/nginx.conf` (the `server_name` + the `live/<domain>` cert paths) too.
+3. **Firewall:** open ports **80** and **443** on the VPS / cloud security group.
+4. Deploy, then browse **`https://app.qanry.com`** — valid padlock, login page.
+   `https://app.qanry.com/api/v1/health` → `{"status":"ok"}` proves the api proxy.
+
+Watch the `nginx` container **Logs** on first deploy: it prints the dummy-cert step,
+then the successful certbot issuance. If issuance fails, it's almost always (a) DNS not
+yet pointing at this box, or (b) port 80 not open — fix and it retries on the next loop.
+
+If you later expose the API on its OWN subdomain instead of the one-domain proxy, set
+`API_CORS_ORIGINS` + `TRUSTED_HOSTS` accordingly and point
+`GOOGLE_OAUTH_REDIRECT_URI` at `https://<api-domain>/api/v1/site-analytics/oauth/callback`
+(also add that exact URI to the Google OAuth client).
 
 ---
 

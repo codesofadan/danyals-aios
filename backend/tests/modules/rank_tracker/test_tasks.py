@@ -407,7 +407,7 @@ def test_the_today_dedupe_runs_before_the_gate_so_a_repeat_costs_nothing() -> No
     [
         (FakeCostStore(mode="off"), "skip"),
         (FakeCostStore(mode="byhand"), "manual"),
-        (FakeCostStore(halted=True), "blocked_daily"),
+        (FakeCostStore(halted=True), "blocked_halt"),
         (FakeCostStore(budget=(10.0, 10.0)), "blocked_cap"),
     ],
 )

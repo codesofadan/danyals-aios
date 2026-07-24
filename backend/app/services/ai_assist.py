@@ -19,7 +19,7 @@ exactly like the context module. Degrade, never crash:
 
 * no Anthropic key (``summarizer is None``) -> a keyless stub; the gate is never
   consulted and no provider call happens.
-* a cost-gate block (dial off / by-hand, client cap, org daily spend-stop) -> a
+* a cost-gate block (dial off / by-hand, client cap, global spend halt) -> a
   blocked stub; NO provider call happens and the gate is NEVER bypassed.
 
 In both cases the surface returns 200 with ``status='degraded'``.
@@ -207,7 +207,7 @@ def run_assist(
 
     ctx = GateContext(
         feature_key=_FEATURE,
-        client_id=None,  # org-level staff assist; still under the org daily spend-stop
+        client_id=None,  # org-level staff assist; still under the global spend halt
         provider=_PROVIDER,
         estimated_cost=settings.ai_assist_cost_estimate,
         job_type=_JOB_TYPE,
@@ -215,7 +215,7 @@ def run_assist(
     )
     decision = gate.evaluate(ctx)
     if not decision.allowed:
-        # dial off / by-hand, client cap, or daily spend-stop: NO provider call.
+        # dial off / by-hand, client cap, or the global spend halt: NO provider call.
         return _degraded(route, surface, f"cost_gate:{decision.outcome}", _blocked_message(route, decision.outcome))
 
     composed = _compose_prompt(route, prompt, context_ref)

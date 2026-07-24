@@ -136,7 +136,12 @@ export default function Web2Tab() {
                   </td>
                   <td>
                     {w.postUrl ? (
-                      <a className="op-url" href={`https://${w.postUrl}`} target="_blank" rel="noreferrer">
+                      <a
+                        className="op-url"
+                        href={w.postUrl.startsWith("http") ? w.postUrl : `https://${w.postUrl}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         {w.postUrl}<span className="material-symbols-rounded">open_in_new</span>
                       </a>
                     ) : (

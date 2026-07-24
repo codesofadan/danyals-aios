@@ -1,0 +1,367 @@
+/**
+ * AIOS Publisher - Article Template
+ * =================================
+ * A polished, reusable article skin for AIOS-pushed content. It is deliberately
+ * BRAND-AGNOSTIC: every colour and font is read from the ACTIVE THEME's own CSS
+ * custom properties (the `--wp--preset--*` tokens a WordPress block/FSE theme
+ * exposes) with tasteful neutral fallbacks. So on a cream/crimson theme it renders
+ * cream/crimson; on any other client's theme it auto-adopts THAT theme's tokens -
+ * nothing here is hardcoded to one site.
+ *
+ * All local design decisions funnel through the `--aios-*` variables defined on
+ * `.aios-article`, so re-branding is a one-block edit. The stylesheet is enqueued
+ * ONLY on singular posts that carry `_aios_managed=1`, so it never touches the rest
+ * of the site.
+ */
+
+.aios-article {
+	/* --- Brand tokens: active-theme variable -> common alias -> neutral fallback --- */
+	--aios-fg: var(--wp--preset--color--foreground,
+		var(--wp--preset--color--contrast,
+		var(--wp--preset--color--color-2, #2c2a29)));
+	--aios-muted: var(--wp--preset--color--color-4,
+		var(--wp--preset--color--tertiary, #5a504a));
+	--aios-accent: var(--wp--preset--color--accent,
+		var(--wp--preset--color--vivid-red,
+		var(--wp--preset--color--primary, #a10223)));
+	--aios-surface: var(--wp--preset--color--base-2,
+		var(--wp--preset--color--secondary,
+		var(--wp--preset--color--color-3, #f6f2ea)));
+	--aios-on-accent: var(--wp--preset--color--base,
+		var(--wp--preset--color--background, #ffffff));
+
+	--aios-font-body: var(--wp--preset--font-family--body,
+		var(--wp--preset--font-family--dmsans,
+		var(--wp--preset--font-family--open-sans,
+		"Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif)));
+	--aios-font-heading: var(--wp--preset--font-family--heading,
+		var(--wp--preset--font-family--titillium-web,
+		var(--wp--preset--font-family--titillium, var(--aios-font-body))));
+
+	/* Readable measure straight from the theme's content-size (fallback ~68ch). */
+	--aios-measure: var(--wp--style--global--content-size, 68ch);
+
+	/* Accent tints derived once (fallbacks first, so a color-mix-less browser still
+	   gets a sensible flat tint rather than nothing). */
+	--aios-accent-soft: rgba(161, 2, 35, 0.07);
+	--aios-accent-soft: color-mix(in srgb, var(--aios-accent) 7%, transparent);
+	--aios-accent-line: rgba(161, 2, 35, 0.18);
+	--aios-accent-line: color-mix(in srgb, var(--aios-accent) 20%, transparent);
+
+	max-width: var(--aios-measure);
+	margin-inline: auto;
+	font-family: var(--aios-font-body);
+	color: var(--aios-fg);
+	font-size: clamp(1.02rem, 0.98rem + 0.2vw, 1.13rem);
+	line-height: 1.75;
+	overflow-wrap: break-word;
+}
+
+/* Body typography ---------------------------------------------------------- */
+.aios-article p {
+	margin: 0 0 1.15em;
+}
+
+/* Lead / intro: the first paragraph of the body reads larger. */
+.aios-article__body > p:first-of-type {
+	font-size: 1.18em;
+	line-height: 1.6;
+	color: var(--aios-fg);
+}
+
+.aios-article a {
+	color: var(--aios-accent);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.aios-article a:hover {
+	text-decoration: none;
+}
+
+/* Headings ----------------------------------------------------------------- */
+.aios-article h2,
+.aios-article h3,
+.aios-article h4 {
+	font-family: var(--aios-font-heading);
+	line-height: 1.25;
+	color: var(--aios-fg);
+	scroll-margin-top: 90px; /* so a TOC jump clears a sticky header */
+}
+.aios-article h2 {
+	font-size: clamp(1.5rem, 1.3rem + 0.9vw, 2rem);
+	font-weight: 700;
+	margin: 1.9em 0 0.6em;
+	padding-bottom: 0.28em;
+	border-bottom: 2px solid var(--aios-accent-line);
+}
+.aios-article h3 {
+	font-size: clamp(1.2rem, 1.1rem + 0.5vw, 1.45rem);
+	font-weight: 700;
+	margin: 1.5em 0 0.5em;
+	color: var(--aios-accent);
+}
+.aios-article h4 {
+	font-size: 1.12rem;
+	font-weight: 700;
+	margin: 1.3em 0 0.4em;
+}
+
+/* Lists -------------------------------------------------------------------- */
+.aios-article__body ul,
+.aios-article__body ol {
+	margin: 0 0 1.2em;
+	padding-left: 1.4em;
+}
+.aios-article__body li {
+	margin: 0.4em 0;
+	padding-left: 0.2em;
+}
+.aios-article__body ul > li::marker {
+	color: var(--aios-accent);
+}
+.aios-article__body ol > li::marker {
+	color: var(--aios-accent);
+	font-weight: 700;
+}
+
+/* Blockquote --------------------------------------------------------------- */
+.aios-article blockquote {
+	margin: 1.6em 0;
+	padding: 0.6em 1.2em;
+	border-left: 4px solid var(--aios-accent);
+	background: var(--aios-accent-soft);
+	font-style: italic;
+	color: var(--aios-fg);
+	border-radius: 0 8px 8px 0;
+}
+.aios-article blockquote p:last-child {
+	margin-bottom: 0;
+}
+
+/* Figures + images --------------------------------------------------------- */
+.aios-article figure {
+	margin: 1.8em 0;
+}
+.aios-article img {
+	max-width: 100%;
+	height: auto;
+	border-radius: 10px;
+	display: block;
+}
+.aios-article figcaption {
+	margin-top: 0.5em;
+	font-size: 0.86em;
+	color: var(--aios-muted);
+	text-align: center;
+	line-height: 1.4;
+}
+
+/* Code + tables ------------------------------------------------------------ */
+.aios-article code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.9em;
+	background: var(--aios-accent-soft);
+	padding: 0.12em 0.4em;
+	border-radius: 5px;
+}
+.aios-article pre {
+	margin: 1.5em 0;
+	padding: 1em 1.2em;
+	background: var(--aios-surface);
+	border: 1px solid var(--aios-accent-line);
+	border-radius: 10px;
+	overflow-x: auto;
+	line-height: 1.5;
+}
+.aios-article pre code {
+	background: none;
+	padding: 0;
+}
+.aios-article table {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 1.6em 0;
+	font-size: 0.96em;
+	display: block;
+	overflow-x: auto;
+}
+.aios-article th,
+.aios-article td {
+	border: 1px solid var(--aios-accent-line);
+	padding: 0.6em 0.8em;
+	text-align: left;
+}
+.aios-article th {
+	background: var(--aios-accent-soft);
+	font-weight: 700;
+}
+
+/* E-E-A-T meta line (author - date - read time) ---------------------------- */
+.aios-article__meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5em;
+	margin: 0 0 1.6em;
+	font-size: 0.9em;
+	color: var(--aios-muted);
+	font-family: var(--aios-font-heading);
+}
+.aios-article__meta-sep {
+	opacity: 0.55;
+}
+
+/* Table of contents -------------------------------------------------------- */
+.aios-article__toc {
+	margin: 0 0 2em;
+	padding: 1em 1.3em;
+	background: var(--aios-surface);
+	border: 1px solid var(--aios-accent-line);
+	border-radius: 12px;
+}
+.aios-article__toc-title {
+	font-family: var(--aios-font-heading);
+	font-weight: 700;
+	font-size: 0.82em;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--aios-muted);
+	margin-bottom: 0.5em;
+}
+.aios-article__toc ol {
+	margin: 0;
+	padding-left: 1.3em;
+}
+.aios-article__toc li {
+	margin: 0.3em 0;
+}
+.aios-article__toc a {
+	text-decoration: none;
+}
+.aios-article__toc a:hover {
+	text-decoration: underline;
+}
+
+/* Key takeaways callout ---------------------------------------------------- */
+.aios-article__takeaways {
+	margin: 0 0 2em;
+	padding: 1.15em 1.4em;
+	border-left: 5px solid var(--aios-accent);
+	background: var(--aios-accent-soft);
+	border-radius: 0 12px 12px 0;
+}
+.aios-article__takeaways-title {
+	font-family: var(--aios-font-heading);
+	font-weight: 800;
+	font-size: 1.05em;
+	color: var(--aios-accent);
+	margin-bottom: 0.5em;
+	display: flex;
+	align-items: center;
+	gap: 0.4em;
+}
+.aios-article__takeaways-title::before {
+	content: "\2713"; /* check mark */
+}
+.aios-article__takeaways ul {
+	margin: 0;
+	padding-left: 1.3em;
+}
+.aios-article__takeaways li {
+	margin: 0.35em 0;
+}
+
+/* FAQ (accessible details/summary) ----------------------------------------- */
+.aios-article__faq {
+	margin: 2.4em 0 0;
+	padding-top: 1.4em;
+	border-top: 2px solid var(--aios-accent-line);
+}
+.aios-article__faq-title {
+	border: 0;
+	padding: 0;
+	margin: 0 0 0.6em;
+}
+.aios-article__faq-item {
+	border-bottom: 1px solid var(--aios-accent-line);
+}
+.aios-article__faq-item summary {
+	cursor: pointer;
+	list-style: none;
+	padding: 0.85em 2em 0.85em 0;
+	position: relative;
+	font-family: var(--aios-font-heading);
+	font-weight: 700;
+	font-size: 1.05em;
+	color: var(--aios-fg);
+}
+.aios-article__faq-item summary::-webkit-details-marker {
+	display: none;
+}
+.aios-article__faq-item summary::after {
+	content: "\002B"; /* plus */
+	position: absolute;
+	right: 0.2em;
+	top: 0.75em;
+	font-size: 1.2em;
+	color: var(--aios-accent);
+	transition: transform 0.2s ease;
+}
+.aios-article__faq-item[open] summary::after {
+	content: "\2212"; /* minus */
+}
+.aios-article__faq-answer {
+	padding: 0 0 1em;
+	color: var(--aios-fg);
+}
+.aios-article__faq-answer p:last-child {
+	margin-bottom: 0;
+}
+
+/* Closing CTA banner ------------------------------------------------------- */
+.aios-article__cta {
+	margin: 2.6em 0 0.5em;
+	padding: 1.8em 2em;
+	background: var(--aios-accent);
+	color: var(--aios-on-accent);
+	border-radius: 16px;
+	text-align: center;
+}
+.aios-article__cta-heading {
+	font-family: var(--aios-font-heading);
+	font-weight: 800;
+	font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.75rem);
+	line-height: 1.2;
+	margin-bottom: 0.4em;
+	color: var(--aios-on-accent);
+}
+.aios-article__cta-text {
+	margin: 0 auto 1.1em;
+	max-width: 46ch;
+	opacity: 0.94;
+	color: var(--aios-on-accent);
+}
+.aios-article__cta-btn {
+	display: inline-block;
+	background: var(--aios-on-accent);
+	color: var(--aios-accent);
+	font-weight: 700;
+	font-family: var(--aios-font-heading);
+	text-decoration: none;
+	padding: 0.7em 1.6em;
+	border-radius: 999px;
+	transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.aios-article__cta-btn:hover {
+	transform: translateY(-1px);
+	opacity: 0.92;
+	text-decoration: none;
+}
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+	.aios-article__faq-item summary::after,
+	.aios-article__cta-btn {
+		transition: none;
+	}
+}

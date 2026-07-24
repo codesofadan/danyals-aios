@@ -36,7 +36,7 @@ from app.services.audit_artifacts import (
     LocalArtifactStore,
     local_store_from_settings,
 )
-from app.services.cost_gate import CostGate, GateContext, GateDecision
+from app.services.cost_gate import CostGate, GateContext, GateDecision, SpendHaltedError
 from app.services.cost_store import PostgresCostStore
 
 router = APIRouter(tags=["audits"])
@@ -117,8 +117,8 @@ def get_paid_audit_gate() -> Callable[[str, str, float], GateDecision]:
     """Dependency: evaluate a prospective PAID audit against the cost gate
     (overridable in tests).
 
-    Reuses the SAME gate the worker runs (dial -> client cap -> daily spend-stop)
-    so the enqueue pre-check and the worker's run-time gate can never diverge. The
+    Reuses the SAME gate the worker runs (spend halt -> dial -> client cap) so the
+    enqueue pre-check and the worker's run-time gate can never diverge. The
     gate makes no paid call - it only decides - so a read here is cheap and safe.
     """
 
@@ -243,6 +243,9 @@ async def create_audit(
         decision = await asyncio.to_thread(
             gate, body.client_id, client.get("name", ""), settings.audit_paid_cost_estimate
         )
+        if decision.halted:
+            # Global API-spend halt: a typed 402 "spend_halted" refusal (not run).
+            raise SpendHaltedError()
         if not decision.allowed:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,

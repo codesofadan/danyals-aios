@@ -18,7 +18,9 @@ from app.db.tasks_repo import get_tasks_repo
 
 pytestmark = pytest.mark.unit
 
-_TASK_FIELDS = {"id", "title", "client", "type", "assignee", "priority", "status", "due"}
+_TASK_FIELDS = {
+    "id", "title", "client", "type", "assignee", "priority", "status", "due", "proofUrl",
+}
 
 
 class FakeTasksRepo:
@@ -337,6 +339,43 @@ async def test_review_non_review_status_409(
     assert resp.status_code == 409
 
 
+# --- all-way comms: the review decision emails the assignee (LEAD -> TEAM) --------
+
+@pytest.mark.parametrize(
+    ("action", "needle"), [("approve", "approved"), ("reject", "Changes requested")]
+)
+async def test_review_emails_the_assignee(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch, action: str, needle: str,
+) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    async def _fake_notify(user_id: str, *, kind: str, title: str, body: str = "", **_k: Any) -> None:
+        calls.append((user_id, kind, title))
+
+    monkeypatch.setattr("app.routers.tasks.notify", _fake_notify)
+    repo.seed(code="J-1", status="review", type="content_sprint", assignee_id="u-1")
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/tasks/J-1/review", json={"action": action})
+    assert resp.status_code == 200
+    # The submitter (the assignee) is told their work was reviewed.
+    assert calls and calls[0][0] == "u-1"
+    assert calls[0][1] == "work_reviewed"
+    assert needle in calls[0][2]
+
+
+async def test_review_survives_email_layer_unconfigured(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    # No monkeypatch: the real notify runs with no DB / no Resend key and degrades to
+    # a no-op (best-effort). The review decision must still return 200 and persist.
+    repo.seed(code="J-1", status="review", type="content_sprint", assignee_id="u-1")
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/tasks/J-1/review", json={"action": "approve"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "done"
+
+
 # --- patch --------------------------------------------------------------------
 
 async def test_patch_requires_assign_tasks(
@@ -370,3 +409,48 @@ async def test_patch_rejects_client_assignee(
     wire("manager", "u-lead")
     resp = await client.patch("/api/v1/tasks/J-1", json={"assignee_id": "u-portal"})
     assert resp.status_code == 400
+
+
+# --- proof link ---------------------------------------------------------------
+
+async def test_advance_carries_proof_url(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    # The assignee attaches their proof-of-completion link as they advance.
+    repo.seed(code="J-1", status="in_progress", type="technical_audit", assignee_id="u-1")
+    wire("specialist", "u-1")
+    resp = await client.post(
+        "/api/v1/tasks/J-1/advance", json={"proof_url": "https://ex.com/report.pdf"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "done"
+    assert body["proofUrl"] == "https://ex.com/report.pdf"
+    assert repo.tasks["J-1"]["proof_url"] == "https://ex.com/report.pdf"
+
+
+async def test_advance_without_body_still_works(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    # A plain advance (no body) is unchanged - proof_url stays "".
+    repo.seed(code="J-1", status="todo", type="technical_audit", assignee_id="u-1")
+    wire("specialist", "u-1")
+    resp = await client.post("/api/v1/tasks/J-1/advance")
+    assert resp.status_code == 200
+    assert resp.json()["proofUrl"] == ""
+    assert "proof_url" not in repo.tasks["J-1"]  # never touched when omitted
+
+
+async def test_lead_patch_sets_and_clears_proof_url(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(code="J-1", proof_url="https://old.example")
+    wire("manager", "u-lead")
+    # set
+    resp = await client.patch("/api/v1/tasks/J-1", json={"proof_url": "https://new.example"})
+    assert resp.status_code == 200
+    assert resp.json()["proofUrl"] == "https://new.example"
+    # clear (empty string normalizes the NOT NULL column)
+    resp = await client.patch("/api/v1/tasks/J-1", json={"proof_url": ""})
+    assert resp.status_code == 200
+    assert resp.json()["proofUrl"] == ""

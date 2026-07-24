@@ -330,8 +330,7 @@ def test_a_gate_block_degrades_with_no_call_no_spend_and_no_write() -> None:
         ({"mode": "off"}, "skip"),
         ({"mode": "byhand"}, "manual"),
         ({"budget": (1.0, 0.99)}, "blocked_cap"),
-        ({"halted": True}, "blocked_daily"),
-        ({"daily": 999.99, "stop": 1000.0}, "blocked_daily"),
+        ({"halted": True}, "blocked_halt"),
     ],
 )
 def test_every_gate_outcome_degrades_rather_than_crashing(

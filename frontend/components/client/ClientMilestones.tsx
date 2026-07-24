@@ -16,7 +16,6 @@ export default function ClientMilestones() {
   return (
     <div className="tw cl">
       <ClientHeader
-        eyebrow=""
         focus={
           <>
             <span className="cl-focus-k">Project health</span>

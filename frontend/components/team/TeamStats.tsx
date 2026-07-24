@@ -9,8 +9,6 @@ type Tile = {
   label: string;
   value: number;
   unit?: string;
-  delta: string;
-  deltaDir: "up" | "down";
   note: string;
   hero?: boolean;
 };
@@ -59,11 +57,13 @@ export default function TeamStats() {
   const avgUtil = active.length ? Math.round(active.reduce((s, m) => s + m.utilization, 0) / active.length) : 0;
   const avgOnTime = active.length ? Math.round(active.reduce((s, m) => s + m.onTime, 0) / active.length) : 0;
 
+  // Live values only — no fabricated period-over-period deltas (there is no
+  // historical series to compute a real trend from, so no trend chip is shown).
   const TILES: Tile[] = [
-    { icon: "groups", label: "Team members", value: headcount, delta: "1", deltaDir: "up", note: "on the roster", hero: true },
-    { icon: "assignment", label: "Active tasks", value: openTasks, delta: "3", deltaDir: "up", note: "across the board" },
-    { icon: "bolt", label: "Avg. utilization", value: avgUtil, unit: "%", delta: "4.1%", deltaDir: "up", note: "capacity in use" },
-    { icon: "schedule", label: "On-time delivery", value: avgOnTime, unit: "%", delta: "1.3%", deltaDir: "up", note: "rolling 30 days" },
+    { icon: "groups", label: "Team members", value: headcount, note: "on the roster", hero: true },
+    { icon: "assignment", label: "Active tasks", value: openTasks, note: "across the board" },
+    { icon: "bolt", label: "Avg. utilization", value: avgUtil, unit: "%", note: "capacity in use" },
+    { icon: "schedule", label: "On-time delivery", value: avgOnTime, unit: "%", note: "of assigned jobs" },
   ];
 
   return (
@@ -73,15 +73,7 @@ export default function TeamStats() {
           <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
           <div className="lab">{t.label}</div>
           <Value value={t.value} unit={t.unit} />
-          <div className="sub">
-            <span className={`delta ${t.deltaDir}`}>
-              <span className="material-symbols-rounded">
-                {t.deltaDir === "up" ? "trending_up" : "trending_down"}
-              </span>
-              {t.delta}
-            </span>{" "}
-            {t.note}
-          </div>
+          <div className="sub">{t.note}</div>
         </div>
       ))}
     </section>

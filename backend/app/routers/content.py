@@ -185,8 +185,27 @@ async def get_content_job(code: str, repo: ContentRepoDep, _user: ViewReports) -
 async def get_content_rich(code: str, column: str, repo: ContentRepoDep, _user: ViewReports) -> dict[str, Any]:
     """Rich retrieval (staff-only, NOT contract-locked): the server-only pipeline
     columns a reviewer needs - ``draft`` (markdown), ``keywords`` (keyword_map),
-    ``qa`` (the QA scorecard), ``schema`` (the assembled JSON-LD). 404 on an
-    unknown column or job."""
+    ``qa`` (the QA scorecard), ``schema`` (the assembled JSON-LD), and ``wp`` (the
+    WordPress push URLs captured at publish time). 404 on an unknown column or job."""
+    if column == "wp":
+        # The WordPress push result (permalink + wp-admin edit link + post id) captured
+        # when an approved job was pushed to the client's AIOS Publisher plugin. Kept
+        # OUT of the 15-key ContentJob contract, surfaced here so the review preview can
+        # link straight to the WP draft to publish it there. All null until pushed.
+        row = await asyncio.to_thread(repo.get_job_by_code, code)
+        if row is None:
+            raise _JOB_NOT_FOUND
+        return {
+            "id": str(row.get("code", code)),
+            "wp": {
+                "url": row.get("wp_url"),
+                "edit_url": row.get("wp_edit_url"),
+                "post_id": row.get("wp_post_id"),
+                "status": row.get("status"),
+                "target": row.get("target"),
+            },
+        }
+
     db_column = _RICH_COLUMNS.get(column)
     if db_column is None:
         raise _JOB_NOT_FOUND

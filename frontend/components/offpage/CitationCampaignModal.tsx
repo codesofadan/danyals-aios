@@ -19,9 +19,11 @@ import {
 
 const MARKETS: BusinessMarket[] = ["US", "UK", "CA", "AU"];
 
-export default function CitationCampaignModal({ onClose }: { onClose: () => void }) {
+export default function CitationCampaignModal({ onClose, initialClientId }: { onClose: () => void; initialClientId?: string }) {
   const clientsQ = useClients();
-  const [clientId, setClientId] = useState("");
+  // Pre-select the client the operator was just analysing (from the gap panel), so the
+  // campaign is scoped to that client's missing directories instead of re-picking.
+  const [clientId, setClientId] = useState(initialClientId ?? "");
   const profilesQ = useBusinessProfiles(clientId || undefined);
   const profiles = profilesQ.data ?? [];
   const [profileId, setProfileId] = useState("");

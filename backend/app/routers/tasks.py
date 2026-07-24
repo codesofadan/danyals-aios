@@ -24,6 +24,7 @@ from app.db.clients_repo import ClientsRepoDep
 from app.db.tasks_repo import TasksRepoDep
 from app.schemas.activity import ActivityKind
 from app.schemas.tasks import (
+    TaskAdvanceRequest,
     TaskCreate,
     TaskResponse,
     TaskReviewRequest,
@@ -155,9 +156,15 @@ async def create_task(
 
 
 @router.post("/tasks/{code}/advance", response_model=TaskResponse)
-async def advance_task(code: str, repo: TasksRepoDep, actor: ViewReports) -> TaskResponse:
+async def advance_task(
+    code: str, repo: TasksRepoDep, actor: ViewReports, body: TaskAdvanceRequest | None = None
+) -> TaskResponse:
     """Advance a task one legal step. The assignee OR a lead may act; a task in
-    ``review``/``done`` (or with no next step) is 409 (review uses /review)."""
+    ``review``/``done`` (or with no next step) is 409 (review uses /review).
+
+    An optional ``proof_url`` in the body is the assignee's proof-of-completion link,
+    persisted ALONGSIDE the status move (the DB guard allows a non-lead to change
+    {status, proof_url} together along a legal transition)."""
     task = await asyncio.to_thread(repo.get_task_by_code, code)
     if task is None:
         raise _TASK_NOT_FOUND
@@ -182,9 +189,10 @@ async def advance_task(code: str, repo: TasksRepoDep, actor: ViewReports) -> Tas
             status_code=status.HTTP_409_CONFLICT, detail="No further transition for this task"
         )
 
-    updated = await asyncio.to_thread(
-        repo.update_task_by_code, code, {"status": nxt}, current
-    )
+    patch: dict[str, Any] = {"status": nxt}
+    if body is not None and body.proof_url is not None:
+        patch["proof_url"] = body.proof_url
+    updated = await asyncio.to_thread(repo.update_task_by_code, code, patch, current)
     if updated is None:
         # A racing transition already moved the row (optimistic concurrency).
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task changed concurrently")
@@ -239,6 +247,27 @@ async def review_task(
         actor, kind="content", action=action, target=task.get("client_name", ""),
         entity_type=ent_type, entity_id=ent_id,
     )
+    # LEAD -> TEAM: tell the assignee their submitted work was approved or sent back
+    # (best-effort; honours their notification_prefs, never blocks the decision).
+    # work_reviewed is a NOTIF_EVENTS key (email default on).
+    assignee_id = task.get("assignee_id")
+    if assignee_id is not None:
+        approved = body.action == "approve"
+        title = task.get("title", "your task")
+        client = task.get("client_name", "a client")
+        await notify(
+            str(assignee_id),
+            kind="work_reviewed",
+            title=(f"Work approved: {title}" if approved else f"Changes requested: {title}"),
+            body=(
+                f'Your work on "{title}" for {client} was '
+                + (
+                    "approved and marked done."
+                    if approved
+                    else "sent back for changes. Open your queue to revise and resubmit."
+                )
+            ),
+        )
     return TaskResponse.from_row(updated)
 
 
@@ -262,6 +291,10 @@ async def patch_task(
     if "due" in provided:
         due = provided["due"]
         patch["due_date"] = due.isoformat() if due is not None else None
+    if "proof_url" in provided:
+        # A lead may set OR clear the proof link; the column is NOT NULL, so a
+        # cleared value normalizes to "".
+        patch["proof_url"] = provided["proof_url"] or ""
 
     if not patch:
         return TaskResponse.from_row(task)  # nothing to change

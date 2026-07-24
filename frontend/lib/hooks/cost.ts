@@ -6,9 +6,11 @@
 // seeds. ClientBudget / DialFeature / CostEntry are contract-locked, so the JSON
 // drops straight into the existing types.
 //
-// Spend-stop asymmetry: the RESPONSE is camelCase (dailyStop/halted/todaySpent —
-// SpendStopResponse serialization_alias) while the REQUEST body is snake_case
-// (daily_stop/halted — SpendStopUpdate has no alias).
+// Spend HALT: /cost/spend-stop is now a single agency-global kill-switch (the old
+// per-day dollar THRESHOLD was removed). The RESPONSE is camelCase
+// (halted/todaySpent, from SpendStopResponse serialization_alias); the toggle body
+// is { halted } (SpendStopUpdate). `useSpendHalted` is the shared, lightweight read
+// every dashboard surface keys its paid-action CTAs off of.
 // ============================================================
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +21,10 @@ export const BUDGETS_KEY = ["cost", "budgets"] as const;
 export const DIAL_KEY = ["cost", "dial"] as const;
 export const COST_LOG_KEY = ["cost", "log"] as const;
 export const SPEND_STOP_KEY = ["cost", "spend-stop"] as const;
+
+// The recent-window size the stat cards (provider breakdown / heatmap / jobs count)
+// aggregate over. The cost-log TABLE paginates independently (useCostLogPage).
+const COST_LOG_WINDOW = 200;
 
 // --- reads -------------------------------------------------------------------
 export function useBudgets() {
@@ -35,15 +41,29 @@ export function useDial() {
   });
 }
 
+// The recent window used by the aggregate stat cards (NOT the paginated table).
 export function useCostLog() {
   return useQuery({
-    queryKey: COST_LOG_KEY,
-    queryFn: () => api.get<CostEntry[]>("/cost/log"),
+    queryKey: [...COST_LOG_KEY, "window", COST_LOG_WINDOW] as const,
+    queryFn: () => api.get<CostEntry[]>(`/cost/log?limit=${COST_LOG_WINDOW}&offset=0`),
   });
 }
 
-// SpendStopResponse (serialized). `todaySpent` is live day-to-date paid spend.
-export type SpendStop = { dailyStop: number; halted: boolean; todaySpent: number };
+// One page of the cost log (newest-first). `hasMore` is inferred from a full page:
+// a page shorter than `limit` is the last one. Backed by the same paginated
+// /cost/log endpoint; each (offset,limit) caches separately + keeps prior data so
+// paging feels instant.
+export function useCostLogPage(offset: number, limit: number) {
+  return useQuery({
+    queryKey: [...COST_LOG_KEY, "page", offset, limit] as const,
+    queryFn: () => api.get<CostEntry[]>(`/cost/log?limit=${limit}&offset=${offset}`),
+    placeholderData: (prev) => prev,
+  });
+}
+
+// SpendStopResponse (serialized): the global API-spend HALT state + today's live
+// paid spend (informational; there is no per-day threshold any more).
+export type SpendStop = { halted: boolean; todaySpent: number };
 
 export function useSpendStop() {
   return useQuery({
@@ -52,8 +72,17 @@ export function useSpendStop() {
   });
 }
 
+// The shared halt signal. Every paid-action surface (audit run, content generate,
+// policy ask, team tool panels) reads this to disable its CTA + show the banner
+// when spend is halted agency-wide. `halted` defaults to false while loading so a
+// transient read never wrongly blocks a control.
+export function useSpendHalted(): { halted: boolean; isLoading: boolean } {
+  const q = useSpendStop();
+  return { halted: q.data?.halted ?? false, isLoading: q.isLoading };
+}
+
 // --- writes ------------------------------------------------------------------
-// PUT /cost/budgets/{client_id} — the ClientBudget.id IS the client_id.
+// PUT /cost/budgets/{client_id}: the ClientBudget.id IS the client_id.
 export function useSetBudget() {
   const qc = useQueryClient();
   return useMutation({
@@ -63,7 +92,7 @@ export function useSetBudget() {
   });
 }
 
-// PUT /cost/dial/{feature_key} — flip a feature's cost mode (api/byhand/off).
+// PUT /cost/dial/{feature_key}: flip a feature's cost mode (api/byhand/off).
 // Optimistic: flip the row in-cache immediately so the segmented control feels
 // instant, roll back on error, then reconcile with the server on settle.
 export function useSetDial() {
@@ -89,26 +118,19 @@ export function useSetDial() {
   });
 }
 
-// PUT /cost/spend-stop — snake_case body (SpendStopUpdate). Either field optional.
-export type SpendStopUpdate = { daily_stop?: number; halted?: boolean };
+// PUT /cost/spend-stop: toggle the global API-spend halt. Body is { halted }.
+export type SpendStopUpdate = { halted: boolean };
 
 export function useSetSpendStop() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: SpendStopUpdate) => api.put<SpendStop>("/cost/spend-stop", body),
-    // Optimistic: reflect the halt flip / new threshold immediately so the toggle
-    // and threshold read live. The request body is snake_case (daily_stop) while the
-    // cache is camelCase (dailyStop) — map across. Roll back on error.
+    // Optimistic: reflect the halt flip immediately so the toggle reads live; roll
+    // back on error.
     onMutate: async (body) => {
       await qc.cancelQueries({ queryKey: SPEND_STOP_KEY });
       const prev = qc.getQueryData<SpendStop>(SPEND_STOP_KEY);
-      if (prev) {
-        qc.setQueryData<SpendStop>(SPEND_STOP_KEY, {
-          ...prev,
-          ...(body.halted !== undefined ? { halted: body.halted } : {}),
-          ...(body.daily_stop !== undefined ? { dailyStop: body.daily_stop } : {}),
-        });
-      }
+      if (prev) qc.setQueryData<SpendStop>(SPEND_STOP_KEY, { ...prev, halted: body.halted });
       return { prev };
     },
     onError: (_e, _v, ctx) => {

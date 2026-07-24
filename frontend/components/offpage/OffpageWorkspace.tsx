@@ -16,7 +16,12 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "web2", label: "Web 2.0", icon: "rocket_launch" },
 ];
 
-type Kpi = { icon: string; label: string; value: number; delta: string; dir: "up" | "down"; note: string; hero?: boolean };
+// Citations & Web 2.0 are locked in production until they ship (matching the standalone
+// /admin/citations + /admin/web2 pages and the Sidebar lock). Hide those tabs in prod so
+// the lock isn't bypassed through this workspace; they stay usable in `next dev`.
+const LOCKED_IN_PROD = process.env.NODE_ENV === "production";
+
+type Kpi = { icon: string; label: string; value: number; note: string; hero?: boolean };
 
 function useCountUp(target: number) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -44,13 +49,7 @@ function KpiTile({ k }: { k: Kpi }) {
       <div className="ic"><span className="material-symbols-rounded">{k.icon}</span></div>
       <div className="lab">{k.label}</div>
       <div className="val"><span ref={ref}>0</span></div>
-      <div className="sub">
-        <span className={`delta ${k.dir}`}>
-          <span className="material-symbols-rounded">{k.dir === "up" ? "trending_up" : "trending_down"}</span>
-          {k.delta}
-        </span>{" "}
-        {k.note}
-      </div>
+      <div className="sub">{k.note}</div>
     </div>
   );
 }
@@ -59,12 +58,17 @@ export default function OffpageWorkspace() {
   const [tab, setTab] = useState<TabKey>("backlinks");
   const kpis = useOffpageKpis().data;
 
+  // Live values only — the tiles carry no fabricated period-over-period deltas
+  // (there is no historical link series to compute a real trend from yet). The notes
+  // describe what the number is, not an invented movement.
   const KPIS: Kpi[] = [
-    { icon: "public", label: "Referring domains", value: kpis?.referringDomains ?? 0, delta: "5.2%", dir: "up", note: "live profile", hero: true },
-    { icon: "add_link", label: "New links (30d)", value: kpis?.newLinks30d ?? 0, delta: "18", dir: "up", note: "DataForSEO alerts" },
-    { icon: "link_off", label: "Lost links (30d)", value: kpis?.lostLinks30d ?? 0, delta: "6", dir: "down", note: "flagged for recovery" },
-    { icon: "gpp_bad", label: "Toxic / spam flagged", value: kpis?.toxicFlagged ?? 0, delta: "2", dir: "down", note: "in disavow review" },
+    { icon: "public", label: "Referring domains", value: kpis?.referringDomains ?? 0, note: "unique linking domains", hero: true },
+    { icon: "add_link", label: "New links (30d)", value: kpis?.newLinks30d ?? 0, note: "new referring links" },
+    { icon: "link_off", label: "Lost links (30d)", value: kpis?.lostLinks30d ?? 0, note: "links dropped" },
+    { icon: "gpp_bad", label: "Toxic / spam flagged", value: kpis?.toxicFlagged ?? 0, note: "in disavow review" },
   ];
+
+  const tabs = TABS.filter((t) => !(LOCKED_IN_PROD && (t.key === "citations" || t.key === "web2")));
 
   return (
     <>
@@ -97,7 +101,7 @@ export default function OffpageWorkspace() {
           </div>
           <div className="tools">
             <div className="seg" role="tablist" aria-label="Off-page sections">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button
                   key={t.key}
                   role="tab"

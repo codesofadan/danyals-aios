@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     # artifacts are stored/served (the pdf/json flags stay false).
     audit_artifact_dir: str | None = None
     # A Paid audit's UPFRONT pre-flight estimate (feeds GateContext.estimated_cost
-    # for the dial/cap/spend-stop pre-check BEFORE the engine runs, when real usage
+    # for the dial/cap/halt pre-check BEFORE the engine runs, when real usage
     # is unknown). It is NOT the logged cost: the COMMITTED cost is computed at
     # RUNTIME from the engine's run.json (real token usage + serper queries when the
     # engine reports a `usage` block; else derived from pages_crawled + agent count).
@@ -231,8 +231,8 @@ class Settings(BaseSettings):
     # back to ``audit_artifact_dir``; if BOTH are unset no artifact is written. ---
     content_artifact_dir: str | None = None
     # Coarse R5 cost-precheck fan-out factors: the worker estimates the FULL job
-    # spend upfront (research fan-out + generation) against the client budget +
-    # daily spend-stop BEFORE it starts, and defers a job that would breach. These
+    # spend upfront (research fan-out + generation) against the client budget cap
+    # (and the global halt) BEFORE it starts, and defers a job that would breach. These
     # multiply the per-call estimates; conservative (over-estimating) is the safe
     # side (defers a borderline job rather than half-spending then blocking).
     content_precheck_research_calls: int = 10  # ~ serp + up-to-8 metrics + teardown
@@ -245,9 +245,30 @@ class Settings(BaseSettings):
     # `target_score` is the weighted total the loop aims for (>= the publish bar; a
     # passed draft that scores below it is still refined); `max_loops` hard-caps the
     # rewrite passes so it can never spin forever. Every pass is cost-gated, so the
-    # spend-stop / client cap can stop the loop early (advance with the best draft). ---
+    # global halt / client cap can stop the loop early (advance with the best draft). ---
     content_qa_target_score: int = 90   # the top-1% weighted-total the loop aims for
     content_qa_max_loops: int = 3       # hard cap on drafting-time rewrite passes
+
+    # --- AIOS Publisher plugin push (host-independent WordPress publish). The
+    # companion WordPress plugin exposes its OWN endpoint + shared-key auth, so a
+    # client site that STRIPS the Authorization header / DISABLES Application
+    # Passwords / runs an anti-bot layer (proven on some managed hosts) can still
+    # receive an approved page as a DRAFT. Per-client config is resolved at publish
+    # time: the site_url is seeded into the job's source_pack (wp_site_url) from the
+    # client's site, and the shared API KEY lives in the Key Vault (provider
+    # 'wordpress_plugin', label = the site domain). The two settings below are the
+    # SINGLE-SITE fallback (a default site_url + key) for an operator running one
+    # site; the browser UA + timeout tune the anti-bot bypass. ALL optional and NOT
+    # in _REQUIRED_IN_PROD - no target configured leaves the existing publish path
+    # (app-password REST / artifact render) unchanged. Key is a SecretStr (never
+    # logged / never in a repr). ---
+    wp_plugin_api_key: SecretStr | None = None  # default AIOS Publisher shared key (single-site fallback)
+    wp_plugin_site_url: str | None = None       # default plugin site URL (single-site fallback)
+    wp_plugin_browser_ua: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+    wp_plugin_timeout_seconds: float = 30.0
 
     # --- Off-page module provider seams (7B). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic fakes
@@ -454,6 +475,36 @@ class Settings(BaseSettings):
     # service-account credential JSON (it carries a private key) - a SecretStr so it
     # is never logged / never in a repr. ---
     google_sheets_sa_json: SecretStr | None = None  # service-account credential JSON
+
+    # --- Autonomous reporting cron (Reports tab). The platform runs its OWN recurring
+    # SEO/reporting jobs on Celery beat - no operator has to press a button - and the
+    # admin Reports tab surfaces the live schedule + the reports they produce. ALL knobs
+    # are additive + optional (never required in prod); every job DEGRADES cleanly with
+    # no external keys (a keyless audit refresh runs the Free engine at $0; a keyless
+    # off-page sweep records a degraded run) and NEVER re-raises into beat.
+    #
+    # WEEKLY audit refresh: re-runs the audit engine per ACTIVE client and stores the
+    # report (which then appears in the Reports library via the existing /audits path).
+    # `tier` is 'free' by default so the sweep spends $0 by construction; set 'paid' to
+    # run the comprehensive engine (each run then clears the audit cost gate). `min_age_days`
+    # dedupes so a client audited within the window is skipped (idempotent re-runs);
+    # `batch` caps clients per tick.
+    report_audit_refresh_seconds: int = 604_800  # weekly beat cadence
+    report_audit_refresh_tier: Literal["free", "paid"] = "free"  # engine mode for the sweep
+    report_audit_refresh_min_age_days: int = 6  # skip a client audited within N days
+    report_audit_refresh_batch: int = 100  # active clients claimed per tick
+    # MONTHLY client SEO report: one stored, downloadable JSON summary per active client
+    # (audit-score trend + ranks + content shipped + backlinks/citations delta). Runs on
+    # a day-of-month crontab; a client already reported for the period is skipped
+    # (idempotent). `batch` caps clients per tick.
+    report_monthly_day: int = 1  # day-of-month the monthly report beat fires
+    report_monthly_hour: int = 6  # UTC hour it fires (off the traffic peak)
+    report_monthly_batch: int = 200  # active clients reported per tick
+    # WEEKLY backlink/citation monitor sweep: enqueues the existing monitor_offpage task
+    # per active client with a site domain (diffs new/lost links + NAP changes). Degrades
+    # cleanly when the off-page providers are unconfigured. `batch` caps clients per tick.
+    report_offpage_sweep_seconds: int = 604_800  # weekly beat cadence
+    report_offpage_sweep_batch: int = 100  # active clients swept per tick
 
     # --- Delivery layer: email + Slack (7F-1). OPTIONAL and NOT in _REQUIRED_IN_PROD:
     # the notifications/alerts service builds + unit-tests NOW with fakes and lights up

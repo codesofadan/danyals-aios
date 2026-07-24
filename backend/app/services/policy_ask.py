@@ -26,7 +26,7 @@ answer (a clear message, ``urgency='informational'``, no rules, no sources):
 
 * no Anthropic key / no ``[ai]`` SDK (``researcher is None``) -> keyless degrade; the gate
   is NOT consulted.
-* a cost-gate block (dial off / by-hand, client cap, org daily spend-stop) -> NO provider
+* a cost-gate block (dial off / by-hand, client cap, global spend halt) -> NO provider
   call happens and the gate is NEVER bypassed.
 * the research call fails (transport error, or a model/SDK that can't web-search) -> a
   clean degrade with no spend committed (usage is unknown, so nothing is billed).
@@ -312,7 +312,7 @@ def run_policy_ask(
     )
     ctx = GateContext(
         feature_key=_FEATURE,
-        client_id=None,  # org-level staff lookup; still under the org daily spend-stop
+        client_id=None,  # org-level staff lookup; still under the global spend halt
         provider=_PROVIDER_ANTHROPIC,
         estimated_cost=float(estimate),
         job_type=_JOB_TYPE,
@@ -320,7 +320,7 @@ def run_policy_ask(
     )
     decision = gate.evaluate(ctx)
     if not decision.allowed:
-        # dial off / by-hand, client cap, or daily spend-stop: NO provider call.
+        # dial off / by-hand, client cap, or the global spend halt: NO provider call.
         return _degraded(clean_topic, f"cost_gate:{decision.outcome}", _blocked_message(decision.outcome))
 
     # The single paid call: Claude searches the web itself and returns a cited answer.

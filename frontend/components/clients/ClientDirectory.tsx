@@ -37,28 +37,8 @@ function ContactCell({ c }: { c: ClientRecord["contact"] }) {
       <span className="av" style={{ background: c.c }}>{c.init}</span>
       <div className="cd-cmeta">
         <div className="cd-cname">{c.name}</div>
-        <div className="cd-crole">{c.role}</div>
+        {c.role && <div className="cd-crole">{c.role}</div>}
       </div>
-    </div>
-  );
-}
-
-function PassCell({ pass }: { pass: string }) {
-  // Admin credentials are shown by default across the admin dashboard (the admin owns
-  // these client portal logins and shares them manually); the eye toggle still hides.
-  const [shown, setShown] = useState(true);
-  return (
-    <div className="pass-cell">
-      <code className="pass-val">{shown ? pass : "•".repeat(pass.length)}</code>
-      <button
-        className="pass-eye"
-        onClick={() => setShown((s) => !s)}
-        aria-label={shown ? "Hide admin password" : "Reveal admin password"}
-        title={shown ? "Hide" : "Reveal"}
-      >
-        <span className="material-symbols-rounded">{shown ? "visibility_off" : "visibility"}</span>
-      </button>
-      <CopyButton value={pass} label="admin password" />
     </div>
   );
 }
@@ -135,7 +115,7 @@ export default function ClientDirectory() {
 
   const subtitle =
     mode === "info" ? "Account details, primary contact & subscription"
-    : mode === "portal" ? "Portal logins & admin credentials · handle with care"
+    : mode === "portal" ? "Portal logins · the admin sign-in for each client account"
     : "What each client is allowed to see — charts, graphs & reports";
 
   return (
@@ -183,7 +163,7 @@ export default function ClientDirectory() {
       {mode === "portal" && (
         <div className="sec-note">
           <span className="material-symbols-rounded">lock</span>
-          Admin credentials are shown by default; use the eye to hide one. Copy actions are recorded in the activity log.
+          Portal logins for each client account. The one-time password is shown at creation and emailed — it is never stored in readable form.
         </div>
       )}
       {mode === "access" && (
@@ -222,7 +202,7 @@ export default function ClientDirectory() {
                     <td>
                       <div className="cd-client">
                         <div className="cd-name">{c.cn}</div>
-                        <div className="cd-meta">{c.industry} · since {c.since}</div>
+                        <div className="cd-meta">{c.industry}{c.since ? ` · since ${c.since}` : ""}</div>
                       </div>
                     </td>
                     <td><ContactCell c={c.contact} /></td>
@@ -230,7 +210,7 @@ export default function ClientDirectory() {
                       <div className="cd-sub">
                         <span className="tier-chip sm" style={{ color: TIER_COLOR[c.tier], borderColor: TIER_COLOR[c.tier] }}>{c.tier}</span>
                         <span className={`status-pill ${sm.cls}`}>{sm.label}</span>
-                        <span className="cd-renew">Renews {c.renews}</span>
+                        {c.renews && <span className="cd-renew">Renews {c.renews}</span>}
                       </div>
                     </td>
                     <td className="num">{c.sites}</td>
@@ -263,7 +243,6 @@ export default function ClientDirectory() {
               <tr>
                 <th>Client</th>
                 <th>Admin login</th>
-                <th>Admin pass</th>
                 <th className="num">Seats</th>
                 <th>2FA</th>
                 <th>Last login</th>
@@ -284,7 +263,6 @@ export default function ClientDirectory() {
                       <CopyButton value={c.portal.admin} label="admin login" />
                     </div>
                   </td>
-                  <td><PassCell pass={c.portal.pass} /></td>
                   <td className="num">{c.portal.seats}</td>
                   <td>
                     {c.portal.twoFA ? (

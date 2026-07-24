@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { TeamRole, PermKey, TaskStatus } from "@/lib/data";
 import {
   useMembers, useTeamMembers, useTasks, useActivity, useRbac,
-  useAddMember, useAssignTask, useAdvanceTask, useReviewTask, useTogglePerm,
+  useAddMember, useAssignTask, useAdvanceTask, useReviewTask,
 } from "@/lib/hooks/team";
 import { useClients } from "@/lib/hooks/clients";
 import TeamRoster, { type NewMember } from "./TeamRoster";
@@ -59,7 +59,6 @@ export default function TeamWorkspace() {
   const assignTask = useAssignTask();
   const advanceTask = useAdvanceTask();
   const reviewTask = useReviewTask();
-  const togglePerm = useTogglePerm();
 
   function handleAddMember(input: NewMember) {
     addMember.mutate({
@@ -97,10 +96,6 @@ export default function TeamWorkspace() {
     }
     const order: TaskStatus[] = ["todo", "in_progress", "review", "done"];
     if (order.indexOf(target) > order.indexOf(task.status)) advanceTask.mutate(taskId);
-  }
-
-  function handleTogglePerm(role: TeamRole, key: PermKey) {
-    togglePerm(role, key);
   }
 
   return (
@@ -156,7 +151,7 @@ export default function TeamWorkspace() {
         ))}
         {tab === "performance" && (panelGuard(membersQ) ?? <TeamPerformance members={members} />)}
         {tab === "activity" && (panelGuard(activityQ) ?? <ActivityLog log={activity} />)}
-        {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} onToggle={handleTogglePerm} />)}
+        {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} />)}
       </div>
     </section>
   );

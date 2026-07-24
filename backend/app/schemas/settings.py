@@ -161,7 +161,7 @@ class SecurityPolicyUpdate(BaseModel):
 # --------------------------------------------------------------------------- #
 # Notification preferences (per-user, per-event)
 # --------------------------------------------------------------------------- #
-# The 7 events + their static label/desc/icon and defaults (data.ts
+# The notification events + their static label/desc/icon and defaults (data.ts
 # notificationDefaults). The table stores only the per-user email/in_app toggles;
 # this constant supplies the immutable presentation + the default toggle state.
 NOTIF_EVENTS: tuple[dict[str, Any], ...] = (
@@ -186,6 +186,9 @@ NOTIF_EVENTS: tuple[dict[str, Any], ...] = (
     {"key": "task_assigned", "label": "Task assigned",
      "desc": "A task is assigned or reassigned to you",
      "icon": "assignment_ind", "email": True, "in_app": True},
+    {"key": "work_reviewed", "label": "Work reviewed",
+     "desc": "Your submitted work is approved or sent back at the review gate",
+     "icon": "rate_review", "email": True, "in_app": True},
     {"key": "member_welcome", "label": "Account created",
      "desc": "Your team account is created and ready to use",
      "icon": "person_add", "email": True, "in_app": True},
@@ -219,7 +222,7 @@ class NotifPrefResponse(BaseModel):
 
     @classmethod
     def merged(cls, overrides: dict[str, dict[str, Any]]) -> list[NotifPrefResponse]:
-        """The full 7-event list, each merged with the caller's stored toggles.
+        """The full event list, each merged with the caller's stored toggles.
 
         ``overrides`` maps ``event_key -> {email, in_app}`` (the user's rows). A
         missing event falls back to the ``NOTIF_EVENTS`` default; unknown stored

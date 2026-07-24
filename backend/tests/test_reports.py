@@ -318,6 +318,19 @@ class FakeReportsRepo:
         self.master: dict[str, Any] | None = None
         self.events: list[dict[str, Any]] = []
         self.synced: list[str] = []
+        self.job_runs: list[dict[str, Any]] = []
+        self.generated: list[dict[str, Any]] = []
+
+    def latest_job_runs(self) -> list[dict[str, Any]]:
+        return self.job_runs
+
+    def list_generated_reports(
+        self, *, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        return self.generated
+
+    def get_generated_report(self, report_id: str) -> dict[str, Any] | None:
+        return next((r for r in self.generated if str(r["id"]) == report_id), None)
 
     def list_workbooks(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         return self.workbooks
@@ -516,3 +529,59 @@ async def test_sync_events_feed_shape(
     assert set(body[0]) == _SYNCEVENT_KEYS
     assert body[0]["dataset"] == "audit"
     assert body[0]["rows"] == 176
+
+
+# --- autonomous cron: scheduled jobs + produced reports -----------------------
+
+
+async def test_scheduled_jobs_endpoint_lists_live_beat_schedule(
+    client: httpx.AsyncClient, repo: FakeReportsRepo, wire: Callable[..., None]
+) -> None:
+    repo.job_runs = [
+        {"job_name": "generate-monthly-reports", "task": "generate_monthly_reports",
+         "status": "ok", "detail": "produced 3 reports", "created_at": datetime(2026, 7, 1, tzinfo=UTC)},
+    ]
+    wire("viewer")
+    resp = await client.get("/api/v1/reports/scheduled-jobs")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_name = {j["name"]: j for j in body}
+    # the autonomous report jobs are surfaced, camelCased, with next-run derived
+    assert "generate-monthly-reports" in by_name
+    monthly = by_name["generate-monthly-reports"]
+    assert set(monthly) >= {"name", "task", "cadence", "nextRun", "lastRun", "lastStatus", "waitingOn"}
+    assert monthly["lastStatus"] == "ok"  # the ledger row propagates
+
+
+async def test_generated_reports_list_and_download(
+    client: httpx.AsyncClient, repo: FakeReportsRepo, wire: Callable[..., None]
+) -> None:
+    payload = {"kind": "monthly_seo", "headline": "Score 82 (+12)", "client": "Acme"}
+    repo.generated = [
+        {"id": "rep-1", "job_name": "generate-monthly-reports", "client_name": "Acme",
+         "title": "Monthly SEO Report", "period": "July 2026", "report": payload,
+         "created_at": datetime(2026, 7, 1, tzinfo=UTC)},
+    ]
+    wire("viewer")
+    listed = await client.get("/api/v1/reports/generated")
+    assert listed.status_code == 200
+    row = listed.json()[0]
+    assert set(row) == {"id", "client", "title", "period", "headline", "when"}
+    assert "client_id" not in row
+    assert row["headline"] == "Score 82 (+12)"
+
+    dl = await client.get("/api/v1/reports/generated/rep-1/download")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/json")
+    assert dl.json() == payload
+
+    missing = await client.get("/api/v1/reports/generated/nope/download")
+    assert missing.status_code == 404
+
+
+async def test_generated_reports_forbidden_for_clients(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    wire("client")  # a portal client lacks view_reports
+    assert (await client.get("/api/v1/reports/generated")).status_code == 403
+    assert (await client.get("/api/v1/reports/scheduled-jobs")).status_code == 403

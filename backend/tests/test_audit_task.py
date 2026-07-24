@@ -204,8 +204,8 @@ def test_paid_audit_blocked_by_cap_never_runs_engine_and_logs_no_cost() -> None:
     assert store.costs == []
 
 
-def test_paid_audit_blocked_when_dial_off_or_daily_stop() -> None:
-    for outcome, reason in (("skip", "feature dial is off"), ("blocked_daily", "daily spend-stop")):
+def test_paid_audit_blocked_when_dial_off_or_halted() -> None:
+    for outcome, reason in (("skip", "feature dial is off"), ("blocked_halt", "API spend is halted")):
         ran: list[bool] = []
         store = FakeStore(_row(tier="paid"), decision=GateDecision(outcome, reason=reason))
         out = execute_audit(store, _settings(), "aud-1", runner=_tracking_runner(ran))
@@ -228,6 +228,75 @@ def test_free_audit_is_never_gated_even_if_a_block_would_apply() -> None:
     assert store.evaluated == []  # gate never consulted on the Free-labelled row
     # Dashboard audits run the comprehensive pipeline, so the paid estimate is logged.
     assert store.costs == [pytest.approx(_PAID_COST)]
+
+
+# --------------------------------------------------------------------------- #
+# All-way comms: a completed client audit emails the CLIENT that the report is ready
+# (ADMIN/LEAD -> CLIENT), on top of the existing lead fan-out.
+# --------------------------------------------------------------------------- #
+class _FakeArtifacts:
+    """Minimal ArtifactStore reporting a stored PDF so the client-email leg fires
+    (execute_audit only emails a client when a downloadable PDF exists)."""
+
+    def store(
+        self, audit_id: str, *, pdf_src: Any = None, findings_src: Any = None,
+        html_src: Any = None,
+    ) -> tuple[str | None, str | None]:
+        return f"{audit_id}/report.pdf", f"{audit_id}/findings.json"
+
+
+def _pdf_runner(score: int) -> Any:
+    def _run(
+        cfg: AuditEngineConfig, *, url: str, tier: str,
+        comprehensive: bool = False, types: list[str] | None = None,
+    ) -> AuditRunResult:
+        return AuditRunResult(
+            ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=score,
+            scores={"overall": score}, runtime_seconds=100, exit_code=0,
+            pdf_path="/art/u-1/report.pdf", findings_path="/art/u-1/findings.json",
+        )
+    return _run
+
+
+def test_audit_done_emails_the_client_report_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workers.tasks.audit as audit_mod
+
+    client_calls: list[tuple[Any, ...]] = []
+    lead_calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(audit_mod, "email_client_sync", lambda *a, **k: client_calls.append(a))
+    monkeypatch.setattr(audit_mod, "notify_leads_sync", lambda *a, **k: lead_calls.append(a))
+
+    store = FakeStore(_row(tier="free"))
+    out = execute_audit(
+        store, _settings(), "aud-1", runner=_pdf_runner(82), artifacts=_FakeArtifacts()
+    )
+    assert out["status"] == "done"
+    # BOTH legs fired: the LEAD queue (audit_done) + the CLIENT (report ready).
+    assert lead_calls and lead_calls[0][0] == "audit_done"
+    assert client_calls and client_calls[0][0] == "cl-1"  # client_id
+
+
+def test_audit_without_a_pdf_does_not_email_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workers.tasks.audit as audit_mod
+
+    client_calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(audit_mod, "email_client_sync", lambda *a, **k: client_calls.append(a))
+    monkeypatch.setattr(audit_mod, "notify_leads_sync", lambda *a, **k: None)
+    # No artifacts store -> no pdf_key -> no client email (nothing to download yet).
+    store = FakeStore(_row(tier="free"))
+    out = execute_audit(store, _settings(), "aud-1", runner=_ok_runner(82))
+    assert out["status"] == "done"
+    assert client_calls == []
+
+
+def test_audit_done_survives_when_email_layer_unconfigured() -> None:
+    # No monkeypatch: the real email_client_sync + notify_leads_sync run with no DB /
+    # no Resend key -> both degrade to no-ops. The job must still complete 'done'.
+    store = FakeStore(_row(tier="free"))
+    out = execute_audit(
+        store, _settings(), "aud-1", runner=_pdf_runner(70), artifacts=_FakeArtifacts()
+    )
+    assert out["status"] == "done"
 
 
 def test_task_is_registered() -> None:

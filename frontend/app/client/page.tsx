@@ -6,7 +6,7 @@ import ClientDashboard from "@/components/client/ClientDashboard";
 export default function ClientDashboardPage() {
   return (
     <>
-      <TopBar eyebrow="Client · Dashboard" title="Client Dashboard" searchPlaceholder="Search your reports…" />
+      <TopBar eyebrow="Client · Dashboard" title="Client Dashboard" searchPlaceholder="Jump to…" />
       <ClientDashboard />
     </>
   );

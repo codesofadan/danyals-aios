@@ -66,11 +66,11 @@ export default function CostStats({ spend, budgetUsed, jobs, armed, todaySpent }
 
       <div className={`kpi cst-stopkpi ${armed ? "armed" : "tripped"}`}>
         <div className="ic"><span className="material-symbols-rounded">{armed ? "shield" : "gpp_bad"}</span></div>
-        <div className="lab">Spend-stop</div>
-        <div className="val cst-stopval">{armed ? "Armed" : "Tripped"}</div>
+        <div className="lab">API spend</div>
+        <div className="val cst-stopval">{armed ? "Live" : "Halted"}</div>
         <div className="sub">
           <span className={`cst-stopdot ${armed ? "ok" : "crit"}`} />
-          {armed ? "paid providers protected" : "paid providers halted"}
+          {armed ? "paid providers live" : "all paid features paused"}
         </div>
       </div>
     </section>

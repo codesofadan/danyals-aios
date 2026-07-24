@@ -2,9 +2,13 @@
 
 import { DIAL_MODES, DIAL_MODE_META, providerMeta, type DialFeature, type DialMode } from "@/lib/cost";
 
-type Props = { dial: DialFeature[]; onSetMode: (key: string, mode: DialMode) => void };
+type Props = {
+  dial: DialFeature[];
+  onSetMode: (key: string, mode: DialMode) => void;
+  halted?: boolean;
+};
 
-export default function CostDial({ dial, onSetMode }: Props) {
+export default function CostDial({ dial, onSetMode, halted = false }: Props) {
   const live = dial.filter((d) => d.mode === "api").length;
 
   return (
@@ -12,14 +16,27 @@ export default function CostDial({ dial, onSetMode }: Props) {
       <div className="card-h">
         <div>
           <div className="ct">Cost Dial</div>
-          <div className="cs">Per-feature mode — cost is a dial, not a switch.</div>
+          <div className="cs">Per-feature mode. Cost is a dial, not a switch.</div>
         </div>
         <div className="tools">
-          <span className="pill-tag"><span className="material-symbols-rounded">tune</span>{live} on API</span>
+          {halted ? (
+            <span className="pill-tag warn">
+              <span className="material-symbols-rounded">block</span>All paused
+            </span>
+          ) : (
+            <span className="pill-tag"><span className="material-symbols-rounded">tune</span>{live} on API</span>
+          )}
         </div>
       </div>
 
-      <div className="cst-dial-list">
+      {halted && (
+        <div className="cst-dial-halt" role="status">
+          <span className="material-symbols-rounded">warning</span>
+          <span>API spend is halted, so every dial is <b>effectively off</b> right now. Resume spend to restore these settings.</span>
+        </div>
+      )}
+
+      <div className={`cst-dial-list ${halted ? "halted" : ""}`}>
         {dial.map((d) => {
           const pv = providerMeta(d.provider);
           return (

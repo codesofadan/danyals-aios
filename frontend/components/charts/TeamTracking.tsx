@@ -8,7 +8,10 @@ import type { CCTeamPoint } from "@/lib/hooks/commandCenter";
 export default function TeamTracking({ team }: { team: CCTeamPoint[] }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const totalRef = useRef<HTMLElement>(null);
-  const maxJobs = Math.max(...team.map((t) => t.jobs));
+  // Guard the denominator: an empty team → Math.max() = -Infinity, and a team whose
+  // members have all delivered 0 jobs → 0, either of which makes `jobs / maxJobs`
+  // NaN and paints a `width: NaN%` bar. Floor it at 1 so every bar renders 0-width.
+  const maxJobs = Math.max(1, ...team.map((t) => t.jobs));
   const total = team.reduce((s, t) => s + t.jobs, 0);
 
   useEffect(() => {

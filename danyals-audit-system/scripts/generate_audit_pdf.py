@@ -5612,6 +5612,9 @@ def main() -> int:
     parser.add_argument("--no-root-copy", action="store_true")
     parser.add_argument("--no-downloads-copy", action="store_true",
                         help="Skip the mirror copy to $env:USERPROFILE/Downloads.")
+    parser.add_argument("--free", action="store_true",
+                        help="Render the condensed FREE-tier variant (fewer findings per "
+                             "dimension, all 7 sections retained, no Semrush enrichment).")
     # --depth is accepted for backwards compatibility but ignored.
     # The report always renders the full structure (no page cap).
     parser.add_argument("--depth", default=None, help=argparse.SUPPRESS)
@@ -5638,7 +5641,7 @@ def main() -> int:
     ctx = assemble_report_pages(
         root,
         client=args.client, industry=args.industry, location=args.location,
-        date=args.date, condensed=False, use_semrush=True,
+        date=args.date, condensed=args.free, use_semrush=not args.free,
     )
     pages_html    = ctx["pages_html"]
     index_entries = ctx["index_entries"]

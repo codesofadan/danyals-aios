@@ -356,6 +356,18 @@ async def set_grants(
             current, kind="access", action="updated feature access", target=role,
             entity_type="user", entity_id=user_id,
         )
+        # LEAD/ADMIN -> TEAM: tell the member their access changed (best-effort;
+        # honours their notification_prefs; never blocks the grant write).
+        # access_change is a NOTIF_EVENTS key (email default on).
+        await notify(
+            user_id,
+            kind="access_change",
+            title="Your access was updated",
+            body=(
+                "An administrator updated your feature access. Sign in to your team "
+                "portal to see what changed."
+            ),
+        )
 
     overrides = await asyncio.to_thread(_read_grant_overrides, current.id, user_id)
     return UserGrantsResponse(grants=_resolve_grants(role, overrides))

@@ -18,7 +18,11 @@ from app.schemas.tasks import (
 pytestmark = pytest.mark.unit
 
 # The EXACT frontend Task field set - TaskResponse must expose these and no more.
-_TASK_FIELDS = {"id", "title", "client", "type", "assignee", "priority", "status", "due"}
+# (model_dump() keys are the PYTHON field names, so proof_url appears un-aliased here;
+# over the wire it serializes as proofUrl - asserted in test_tasks_endpoints.py.)
+_TASK_FIELDS = {
+    "id", "title", "client", "type", "assignee", "priority", "status", "due", "proof_url",
+}
 
 
 def test_type_roundtrip() -> None:
@@ -72,6 +76,7 @@ def test_response_exposes_only_task_fields_with_public_code() -> None:
         "audit_id": "aud-secret",  # must NOT leak
         "created_by": "u-owner",  # must NOT leak
         "created_at": "2026-07-01T00:00:00Z",
+        "proof_url": "https://northpeak.example/published-page",  # the proof link
     }
     resp = TaskResponse.from_row(row)
     dumped = resp.model_dump()
@@ -81,6 +86,9 @@ def test_response_exposes_only_task_fields_with_public_code() -> None:
     assert dumped["client"] == "NorthPeak Dental"
     assert dumped["assignee"] == "u-bilal"
     assert dumped["due"] == "Jul 12"
+    assert dumped["proof_url"] == "https://northpeak.example/published-page"
+    # It serializes over the wire under the camelCase alias the frontend expects.
+    assert resp.model_dump(by_alias=True)["proofUrl"] == dumped["proof_url"]
     # A VALID non-default priority/status must pass through unchanged (kills the
     # `in _PRIORITIES` / `in _STATUSES` -> `not in` mutants, which else coerce a
     # valid value to the "med"/"todo" fallback).

@@ -22,6 +22,7 @@ const ADMIN_DESTS: Dest[] = [
   { icon: "map", label: "Off-page", href: "/admin/off-page", keywords: "gmb local maps" },
   { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
   { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff" },
+  { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board" },
   { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "cron jobs pdf downloads" },
   { icon: "savings", label: "Cost Controls", href: "/admin/cost", keywords: "spend budget dials pricing" },
   { icon: "key", label: "Key Vault", href: "/admin/vault", keywords: "api keys credentials secrets" },
@@ -39,7 +40,8 @@ const TEAM_DESTS: Dest[] = [
 
 const CLIENT_DESTS: Dest[] = [
   { icon: "space_dashboard", label: "Portal Home", href: "/client", keywords: "overview dashboard" },
-  { icon: "summarize", label: "Reports", href: "/client/reports", keywords: "audits pdf downloads" },
+  { icon: "fact_check", label: "Audits", href: "/client/audits", keywords: "seo scan report pdf findings" },
+  { icon: "summarize", label: "Reports", href: "/client/reports", keywords: "deliverables pdf downloads" },
   { icon: "support_agent", label: "Requests", href: "/client/requests", keywords: "tickets edits support" },
   { icon: "flag", label: "Milestones", href: "/client/milestones", keywords: "roadmap progress" },
 ];

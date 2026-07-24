@@ -3,7 +3,7 @@
 Every context-module LLM + embedding call routes through the existing cost gate,
 so:
 
-* dial ``off`` / ``byhand`` / a client cap / the daily spend-stop => the inner
+* dial ``off`` / ``byhand`` / a client cap / the global spend halt => the inner
   provider is NEVER called (the spy asserts 0 calls) and ``ContextSpendBlocked``
   is raised;
 * dial ``api`` + a fresh call => inner is called once and ``commit`` records the
@@ -148,8 +148,7 @@ def test_summarize_api_calls_inner_once_and_commits() -> None:
         (FakeStore(mode="off"), "skip"),
         (FakeStore(mode="byhand"), "manual"),
         (FakeStore(mode="api", budget=(10.0, 9.99)), "blocked_cap"),
-        (FakeStore(mode="api", halted=True), "blocked_daily"),
-        (FakeStore(mode="api", daily_spent=75.0, daily_stop=75.0), "blocked_daily"),
+        (FakeStore(mode="api", halted=True), "blocked_halt"),
     ],
 )
 def test_summarize_blocked_never_calls_inner(store: FakeStore, outcome: str) -> None:

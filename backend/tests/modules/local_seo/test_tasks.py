@@ -411,7 +411,7 @@ def test_an_allowed_check_commits_exactly_the_providers_estimate() -> None:
     [
         (FakeCostStore(mode="off"), "skip"),
         (FakeCostStore(mode="byhand"), "manual"),
-        (FakeCostStore(halted=True), "blocked_daily"),
+        (FakeCostStore(halted=True), "blocked_halt"),
     ],
 )
 def test_a_blocked_dial_degrades_with_zero_spend_and_no_write(

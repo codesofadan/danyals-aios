@@ -19,9 +19,11 @@ work keeps each client's context fresh.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 
 from app.core.auth import CurrentUser, require_perm, require_role
 from app.core.deps import RedisDep, SettingsDep
@@ -31,6 +33,7 @@ from app.schemas.reports import (
     REPORT_TYPES,
     BufferStatsResponse,
     ConnectionResponse,
+    GeneratedReportResponse,
     MasterRollupResponse,
     ReportTypeResponse,
     SyncEventResponse,
@@ -57,6 +60,9 @@ _SYNC_ALL_LIMIT = 500
 
 _WORKBOOK_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Workbook not found"
+)
+_REPORT_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
 )
 
 
@@ -165,11 +171,50 @@ async def list_report_types(_user: ViewReports) -> list[ReportTypeResponse]:
 
 
 @router.get("/reports/scheduled-jobs", response_model=list[ScheduledJob])
-async def list_scheduled_jobs(_user: ViewReports) -> list[ScheduledJob]:
-    """The LIVE Celery beat schedule: each background job, what it does, and its
-    human-readable cadence. Read from the SAME ``beat_schedule`` the beat process
-    runs, so the panel never drifts from what is actually scheduled."""
-    return await asyncio.to_thread(scheduled_jobs)
+async def list_scheduled_jobs(
+    repo: ReportsRepoDep, settings: SettingsDep, _user: ViewReports
+) -> list[ScheduledJob]:
+    """The LIVE Celery beat schedule: each background job, what it does, its cadence,
+    the NEXT fire time, and (from the run ledger) when it LAST ran + how it went.
+
+    Read from the SAME ``beat_schedule`` the beat process runs, so the panel never drifts
+    from what is actually scheduled. A job that needs an absent provider key is still
+    shown, flagged ``waitingOn`` rather than hidden."""
+    runs = await asyncio.to_thread(repo.latest_job_runs)
+    last_runs = {str(r["job_name"]): r for r in runs}
+    return await asyncio.to_thread(scheduled_jobs, last_runs=last_runs, settings=settings)
+
+
+@router.get("/reports/generated", response_model=list[GeneratedReportResponse])
+async def list_generated_reports(
+    repo: ReportsRepoDep, page: PageDep, _user: ViewReports
+) -> list[GeneratedReportResponse]:
+    """The autonomously-produced, downloadable reports (newest first) - the monthly
+    per-client SEO summaries the scheduled job generates and stores."""
+    rows = await asyncio.to_thread(
+        repo.list_generated_reports, limit=page.limit, offset=page.offset
+    )
+    return [GeneratedReportResponse.from_row(r) for r in rows]
+
+
+@router.get("/reports/generated/{report_id}/download")
+async def download_generated_report(
+    report_id: str, repo: ReportsRepoDep, _user: ViewReports
+) -> Response:
+    """Download one produced report's stored JSON summary. 404 if unknown / not a
+    report row. The internal ``client_id`` never leaks (only the stored payload)."""
+    row = await asyncio.to_thread(repo.get_generated_report, report_id)
+    if row is None:
+        raise _REPORT_NOT_FOUND
+    payload = row.get("report")
+    if not isinstance(payload, dict):
+        raise _REPORT_NOT_FOUND
+    body = json.dumps(payload, indent=2, default=str)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="report-{report_id}.json"'},
+    )
 
 
 @router.get("/reports/connection", response_model=ConnectionResponse)

@@ -187,7 +187,7 @@ async def test_happy_path_commits_one_gated_spend(
     [
         ("off", False, "skip"),
         ("byhand", False, "manual"),
-        ("api", True, "blocked_daily"),
+        ("api", True, "blocked_halt"),
     ],
 )
 async def test_gate_block_degrades_without_calling_provider(
@@ -214,13 +214,13 @@ async def test_gate_block_degrades_without_calling_provider(
     assert body["endpoint"] == "/api/v1/content/jobs"
 
 
-async def test_daily_spend_stop_threshold_block_degrades(
+async def test_global_spend_halt_block_degrades(
     client: httpx.AsyncClient, summarizer: SpySummarizer, app: FastAPI
 ) -> None:
-    # ai_assist is org-level (client_id=None), so the per-client cap does not apply and
-    # the org daily spend-stop governs. Prove the threshold path (spend + estimate >
-    # stop) blocks by SPEND, not just the halt flag exercised above.
-    store = FakeStore(mode="api", daily_spent=75.0, daily_stop=75.0)
+    # ai_assist is org-level (client_id=None), so the per-client cap does not apply.
+    # The global manual spend HALT still governs it (there is no per-day threshold any
+    # more): prove a halted org blocks the assist with the spend_halted signal.
+    store = FakeStore(mode="api", halted=True)
     app.dependency_overrides[get_current_user] = lambda: _user("owner")
     app.dependency_overrides[get_assist_summarizer] = lambda: summarizer
     app.dependency_overrides[get_assist_gate] = lambda: CostGate(store, FakeCache())
@@ -228,7 +228,7 @@ async def test_daily_spend_stop_threshold_block_degrades(
     resp = await client.post("/api/v1/ai/assist", json={"surface": "report", "prompt": "x"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "degraded"
-    assert resp.json()["reason"] == "cost_gate:blocked_daily"
+    assert resp.json()["reason"] == "cost_gate:blocked_halt"
     assert summarizer.calls == []
 
 

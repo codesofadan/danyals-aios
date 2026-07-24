@@ -2,21 +2,24 @@
 
 import { useState, type FormEvent } from "react";
 import { usePolicyAsk } from "@/lib/hooks/policy";
+import { useSpendHalted } from "@/lib/hooks/cost";
 
 // The on-demand lookup box: type a policy topic, get a live, source-cited answer.
 // The heavy lifting (Claude researches the topic itself via the Anthropic server-side
 // web_search tool) is all server-side and cost-gated; this component only submits the
 // topic and renders the structured reply (answer + urgency + key rules + sources),
-// degrading honestly.
+// degrading honestly. A live web-search + Claude call is a paid action, so it is
+// disabled while the global API-spend halt is engaged.
 export default function AskBox() {
   const ask = usePolicyAsk();
+  const { halted } = useSpendHalted();
   const [topic, setTopic] = useState("");
   const result = ask.data;
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     const t = topic.trim();
-    if (!t || ask.isPending) return;
+    if (!t || ask.isPending || halted) return;
     ask.mutate(t);
   }
 
@@ -43,14 +46,20 @@ export default function AskBox() {
           maxLength={200}
           aria-label="Policy topic to look up"
         />
-        <button className="pr-ask-btn" type="submit" disabled={ask.isPending || topic.trim().length === 0}>
+        <button className="pr-ask-btn" type="submit" disabled={ask.isPending || topic.trim().length === 0 || halted}>
           {ask.isPending ? "Searching…" : "Ask"}
         </button>
       </form>
 
+      {halted && (
+        <div className="pr-empty pr-ask-msg" role="status">
+          API spend is halted, so live policy lookups are paused. Resume spend in Cost Controls to run one.
+        </div>
+      )}
+
       {ask.isError && (
         <div className="pr-empty pr-ask-msg">
-          Couldn&apos;t run the lookup — {(ask.error as Error)?.message ?? "try again"}.
+          Couldn&apos;t run the lookup. {(ask.error as Error)?.message ?? "Try again"}.
         </div>
       )}
 

@@ -6,7 +6,7 @@ import ClientRequests from "@/components/client/ClientRequests";
 export default function ClientRequestsPage() {
   return (
     <>
-      <TopBar eyebrow="Client · Requests" title="Requests" searchPlaceholder="Search requests…" />
+      <TopBar eyebrow="Client · Requests" title="Requests" searchPlaceholder="Jump to…" />
       <ClientRequests />
     </>
   );

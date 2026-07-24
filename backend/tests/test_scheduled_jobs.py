@@ -6,9 +6,12 @@ what actually runs).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from celery.schedules import crontab
 
+from app.config import Settings
 from app.services.scheduled_jobs import (
     _humanize_crontab,
     _humanize_interval,
@@ -35,6 +38,14 @@ def test_humanize_crontab_daily_and_weekly() -> None:
     )
 
 
+def test_humanize_crontab_monthly() -> None:
+    # A fixed day-of-month reads as a monthly cadence (not "Daily").
+    assert (
+        _humanize_crontab(crontab(day_of_month=1, hour=6, minute=0))
+        == "Monthly on day 1 at 06:00 UTC"
+    )
+
+
 def test_humanize_schedule_dispatches_by_type() -> None:
     assert _humanize_schedule(crontab(hour=3, minute=15)) == "Daily at 03:15 UTC"
     assert _humanize_schedule(21600.0) == "Every 6 hours"
@@ -57,3 +68,43 @@ def test_scheduled_jobs_reflects_live_beat_schedule() -> None:
     rank = next(j for j in jobs if j.name == "dispatch-rank-checks")
     assert rank.cadence == "Daily at 03:15 UTC"
     assert rank.task == "dispatch_rank_checks"
+
+
+def test_beat_schedule_includes_the_autonomous_report_jobs() -> None:
+    jobs = scheduled_jobs()
+    names = {j.name for j in jobs}
+    # the three new autonomous SEO/reporting jobs are actually registered
+    assert {"refresh-client-audits", "generate-monthly-reports", "sweep-offpage-monitors"} <= names
+    monthly = next(j for j in jobs if j.name == "generate-monthly-reports")
+    assert monthly.task == "generate_monthly_reports"
+    assert monthly.cadence.startswith("Monthly on day")
+    # every entry now derives a next-run for an interval-scheduled job (no celery clock
+    # needed): the context dispatcher runs on a plain interval.
+    ctx = next(j for j in jobs if j.name == "dispatch-context")
+    assert ctx.next_run is not None
+
+
+def test_scheduled_jobs_surfaces_last_run_and_status() -> None:
+    ran_at = datetime(2026, 7, 20, 3, 15, tzinfo=UTC)
+    jobs = scheduled_jobs(
+        last_runs={"dispatch-rank-checks": {"status": "ok", "created_at": ran_at}}
+    )
+    rank = next(j for j in jobs if j.name == "dispatch-rank-checks")
+    assert rank.last_status == "ok"
+    assert rank.last_run == ran_at.isoformat()
+    # a job with no ledger row carries no last-run
+    ctx = next(j for j in jobs if j.name == "dispatch-context")
+    assert ctx.last_run is None and ctx.last_status is None
+
+
+def test_scheduled_jobs_flags_waiting_on_absent_provider_key() -> None:
+    # A keyless dev Settings: no audit engine + no off-page provider configured.
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    jobs = scheduled_jobs(settings=settings)
+    audit = next(j for j in jobs if j.name == "refresh-client-audits")
+    sweep = next(j for j in jobs if j.name == "sweep-offpage-monitors")
+    monthly = next(j for j in jobs if j.name == "generate-monthly-reports")
+    assert audit.waiting_on and "audit engine" in audit.waiting_on
+    assert sweep.waiting_on and "DataForSEO" in sweep.waiting_on
+    # the monthly report reads only the platform's own data — it never waits on a key
+    assert monthly.waiting_on is None

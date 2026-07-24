@@ -4,12 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import type { CCTrafficPoint } from "@/lib/hooks/commandCenter";
 
-// Monthly organic sessions — animated SVG area line (anime.js) with hover crosshair.
-export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] }) {
+// Monthly traffic — animated SVG area line (anime.js) with hover crosshair.
+// The series is HONEST about its provenance: when `placeholder` is true the values
+// are an audit-activity ESTIMATE (audits are URL-only — no live analytics), so the
+// card drops the "K sessions" framing and labels the number as audits, badged
+// "Estimated". Once real analytics are connected the backend flips `placeholder`
+// false and the sessions framing returns.
+export default function TrafficChart({ traffic, placeholder = false }: { traffic: CCTrafficPoint[]; placeholder?: boolean }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [showTable, setShowTable] = useState(false);
-  const [range, setRange] = useState<"12M" | "6M" | "30D">("12M");
+
+  const unit = placeholder ? "" : "K";
+  const noun = placeholder ? "audits" : "sessions";
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -56,7 +63,7 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
       const v = min + (max - min) * i / steps, y = Y(v);
       gaxis.appendChild(mk("line", { class: "tx-grid", x1: padL, y1: y, x2: W - padR, y2: y }));
       const t = mk("text", { x: padL - 10, y: y + 3.5, "text-anchor": "end" });
-      t.textContent = `${Math.round(v)}K`;
+      t.textContent = `${Math.round(v)}${unit}`;
       gaxis.appendChild(t);
     }
     traffic.forEach((d, i) => {
@@ -104,7 +111,7 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
       const d = traffic[i], px = X(i), py = Y(d.v);
       cross.setAttribute("x1", String(px)); cross.setAttribute("x2", String(px)); cross.setAttribute("opacity", "1");
       dot.setAttribute("cx", String(px)); dot.setAttribute("cy", String(py)); dot.setAttribute("opacity", "1");
-      tip.innerHTML = `<span class="k">${d.m}</span><br><span class="v">${d.v}K</span> <span class="k">sessions</span>`;
+      tip.innerHTML = `<span class="k">${d.m}</span><br><span class="v">${d.v}${unit}</span> <span class="k">${noun}</span>`;
       tip.style.left = `${px / W * r.width}px`;
       tip.style.top = `${py / H * r.height}px`;
       tip.classList.add("show");
@@ -121,21 +128,31 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
       svg.removeEventListener("pointermove", onMove);
       svg.removeEventListener("pointerleave", onLeave);
     };
-  }, [traffic]);
+  }, [traffic, unit, noun]);
 
   return (
     <section className="card">
       <div className="card-h">
         <div>
-          <div className="ct">Monthly Traffic Overview</div>
-          <div className="cs">Aggregate organic sessions across all client sites</div>
+          <div className="ct">
+            Monthly Traffic Overview
+            {placeholder && (
+              <span
+                className="status-pill mut"
+                style={{ marginLeft: 8, verticalAlign: "middle" }}
+                title="Audits are URL-only — this is an estimate from audit activity, not live analytics."
+              >
+                Estimated
+              </span>
+            )}
+          </div>
+          <div className="cs">
+            {placeholder
+              ? "Estimated from audit activity — connect site analytics for live organic sessions"
+              : "Aggregate organic sessions across all client sites"}
+          </div>
         </div>
         <div className="tools">
-          <div className="seg">
-            {(["12M", "6M", "30D"] as const).map((r) => (
-              <button key={r} className={range === r ? "on" : undefined} onClick={() => setRange(r)}>{r}</button>
-            ))}
-          </div>
           <button className="ghostbtn" onClick={() => setShowTable((s) => !s)}>
             <span className="material-symbols-rounded">table_rows</span>Data
           </button>
@@ -145,16 +162,18 @@ export default function TrafficChart({ traffic }: { traffic: CCTrafficPoint[] })
       <div className="svg-wrap">
         {traffic.length < 2 && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
-            Traffic history appears here once site analytics start reporting.
+            {placeholder
+              ? "Trend appears here once there is audit activity to chart."
+              : "Traffic history appears here once site analytics start reporting."}
           </div>
         )}
-        <svg ref={svgRef} viewBox="0 0 760 300" preserveAspectRatio="none" aria-label="Monthly organic sessions" />
+        <svg ref={svgRef} viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={placeholder ? "Monthly audit activity (estimate)" : "Monthly organic sessions"} />
         <div className="chart-tip" ref={tipRef} />
       </div>
 
       <div className={showTable ? "dtable show" : "dtable"}>
         <table>
-          <thead><tr><th>Month</th><th>Sessions (K)</th></tr></thead>
+          <thead><tr><th>Month</th><th>{placeholder ? "Audits" : "Sessions (K)"}</th></tr></thead>
           <tbody>
             {traffic.map((d) => (
               <tr key={d.m}><td>{d.m}</td><td>{d.v}</td></tr>

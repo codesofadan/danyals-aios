@@ -28,6 +28,7 @@ from app.config import Settings
 from app.modules.keyword_research import tasks as wk
 from app.modules.keyword_research.tasks import execute_research, research_keywords
 from app.schemas.cost import DIAL_KEYS
+from app.services import pricing
 from app.services.cost_gate import CostGate, DialMode, GateContext
 from integrations.keyword_data import FakeKeywordDataProvider, KeywordMetric
 
@@ -263,7 +264,7 @@ def test_the_cost_gate_is_consulted_before_the_provider_is_touched() -> None:
     [
         (FakeCostStore(mode="off"), "skip"),
         (FakeCostStore(mode="byhand"), "manual"),
-        (FakeCostStore(halted=True), "blocked_daily"),
+        (FakeCostStore(halted=True), "blocked_halt"),
     ],
 )
 def test_a_blocked_dial_degrades_with_zero_spend_and_raises_nothing(
@@ -287,10 +288,13 @@ def test_a_blocked_run_never_calls_the_provider() -> None:
     assert result["state"] == "blocked"  # not "error" - the fetch never happened
 
 
-def test_an_allowed_run_commits_exactly_the_configured_estimate() -> None:
+def test_an_allowed_run_commits_the_runtime_metered_cost() -> None:
+    # The gate PRE-CHECKS with the worst-case flat estimate, but COMMITS the actual
+    # runtime-metered cost - the per-call unit price x the 3 DataForSEO calls the run
+    # makes (see keyword_research/tasks.py), never one flat per-run estimate.
     cost = FakeCostStore()
     _run(cost=cost)
-    assert cost.recorded == [("keywords", _settings().keyword_research_cost_estimate)]
+    assert cost.recorded == [("keywords", pricing.dataforseo_cost(_settings(), calls=3))]
 
 
 def test_the_spend_rides_its_own_registered_money_dial() -> None:

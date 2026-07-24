@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 class FakeCostRepo:
     def __init__(self) -> None:
         self.dial: dict[str, str] = {}
-        self.settings: dict[str, Any] = {"daily_stop": 75, "halted": False}
+        self.settings: dict[str, Any] = {"halted": False}
         self._clients = {"cl-1": {"name": "NorthPeak Dental", "tier": "Scale", "contact_color": "#7B69EE"}}
         self._budgets: dict[str, int] = {"cl-1": 500}
 
@@ -44,12 +44,17 @@ class FakeCostRepo:
         self.dial[feature_key] = mode
 
     def list_cost_log(self, limit: int | None = 50, offset: int = 0) -> list[dict[str, Any]]:
+        # A newest-first synthetic log: J-0000 is newest, created_at descending. The
+        # repo/endpoint slice it by offset/limit (the SQL does the same with
+        # `order by created_at desc limit offset`), so we mirror that here.
+        base = datetime.now(UTC)
         rows = [
             {
-                "job_id": "J-2041", "client_name": "NorthPeak Dental", "job_type": "audit",
+                "job_id": f"J-{i:04d}", "client_name": "NorthPeak Dental", "job_type": "audit",
                 "provider": "DataForSEO", "cost": 0.75, "cached": False,
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": (base - timedelta(minutes=i)).isoformat(),
             }
+            for i in range(10)
         ]
         end = None if limit is None else offset + limit
         return rows[offset:end]
@@ -116,7 +121,7 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     resp = await client.get("/api/v1/cost/dial")
     assert resp.status_code == 200
     dial = {d["key"]: d for d in resp.json()}
-    assert len(dial) == 16  # +1 citations (7B-4), +1 site_analytics (7C), +1 policy (Module 05 watcher)
+    assert len(dial) == 17  # +1 citations (7B-4), +1 site_analytics (7C), +1 policy watcher, +1 gmb
     assert dial["keywords"]["mode"] == "off"  # default
     assert dial["tech_audit"]["mode"] == "api"
     # Part 8: the tool modules' spends are dial-controllable. rank_tracker is the
@@ -153,22 +158,47 @@ async def test_cost_log_shape(client: httpx.AsyncClient, wire: Callable[[str], N
     resp = await client.get("/api/v1/cost/log")
     assert resp.status_code == 200
     e = resp.json()[0]
-    assert e["id"] == "J-2041"
+    assert e["id"] == "J-0000"
     assert e["provider"] == "DataForSEO"
     assert e["cost"] == 0.75
 
 
-async def test_spend_stop_get_and_set(client: httpx.AsyncClient, wire: Callable[[str], None]) -> None:
+async def test_cost_log_paginates_newest_first(client: httpx.AsyncClient, wire: Callable[[str], None]) -> None:
+    wire("viewer")
+    # Page 1: two newest rows (J-0000, J-0001).
+    p1 = await client.get("/api/v1/cost/log?limit=2&offset=0")
+    assert p1.status_code == 200
+    ids1 = [r["id"] for r in p1.json()]
+    assert ids1 == ["J-0000", "J-0001"]  # respects limit + newest-first ordering
+    # Page 2 (offset=2): the next window, non-overlapping.
+    p2 = await client.get("/api/v1/cost/log?limit=2&offset=2")
+    assert p2.status_code == 200
+    ids2 = [r["id"] for r in p2.json()]
+    assert ids2 == ["J-0002", "J-0003"]
+    assert set(ids1).isdisjoint(ids2)
+    # A short final page (< limit) is the has-more=false signal the frontend reads.
+    last = await client.get("/api/v1/cost/log?limit=50&offset=8")
+    assert len(last.json()) == 2  # only 2 rows remain of the 10
+
+
+async def test_spend_halt_get_and_toggle(client: httpx.AsyncClient, wire: Callable[[str], None]) -> None:
     wire("viewer")
     got = await client.get("/api/v1/cost/spend-stop")
     assert got.status_code == 200
-    assert got.json()["dailyStop"] == 75
-    assert got.json()["todaySpent"] == 12.5
-    # setting requires owner/admin
+    body = got.json()
+    assert body["halted"] is False
+    assert body["todaySpent"] == 12.5
+    assert "dailyStop" not in body  # the per-day threshold is gone
+    # toggling the halt requires owner/admin
     denied = await client.put("/api/v1/cost/spend-stop", json={"halted": True})
     assert denied.status_code == 403
+    # owner engages the halt
     wire("owner")
-    ok = await client.put("/api/v1/cost/spend-stop", json={"halted": True, "daily_stop": 120})
-    assert ok.status_code == 200
-    assert ok.json()["halted"] is True
-    assert ok.json()["dailyStop"] == 120
+    on = await client.put("/api/v1/cost/spend-stop", json={"halted": True})
+    assert on.status_code == 200
+    assert on.json()["halted"] is True
+    assert "dailyStop" not in on.json()
+    # ...and toggling it OFF restores the normal state
+    off = await client.put("/api/v1/cost/spend-stop", json={"halted": False})
+    assert off.status_code == 200
+    assert off.json()["halted"] is False

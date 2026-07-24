@@ -22,6 +22,7 @@ from starlette.responses import JSONResponse
 
 from app.db.database import DatabaseNotConfiguredError
 from app.logging_setup import get_logger
+from app.services.cost_gate import SPEND_HALTED_CODE, SpendHaltedError
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -40,6 +41,9 @@ class ErrorCode:
     SERVICE_UNAVAILABLE = "service_unavailable"
     HTTP = "http_error"
     VALIDATION = "validation_error"
+    # The global API-spend halt refusal (owner/admin kill-switch is engaged). Emitted
+    # as a 402 so a caller/UI can branch on it distinctly from a plain 403/http_error.
+    SPEND_HALTED = SPEND_HALTED_CODE
 
 
 def _request_id(request: Request) -> str | None:
@@ -89,6 +93,19 @@ def install_error_handlers(app: FastAPI) -> None:
             error_type=ErrorCode.SERVICE_UNAVAILABLE,
             message="A required backend service is not configured",
             request_id=_request_id(request),
+        )
+
+    @app.exception_handler(SpendHaltedError)
+    async def _spend_halted_handler(request: Request, exc: SpendHaltedError) -> JSONResponse:
+        # The global API-spend halt is engaged: a typed 402 refusal with the stable
+        # machine code so the frontend surfaces "API spend is halted" consistently and
+        # never mistakes it for a transient failure. No provider call was made.
+        return _error_response(
+            status_code=exc.status_code,
+            error_type=ErrorCode.SPEND_HALTED,
+            message=exc.message,
+            request_id=_request_id(request),
+            extra={"reason": exc.reason},
         )
 
     @app.exception_handler(StarletteHTTPException)

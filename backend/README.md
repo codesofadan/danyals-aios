@@ -13,7 +13,7 @@ lands in later parts.
   via a Celery + Redis job queue
 - Talks to the audit engine, Claude, Serper, Google, and the Google Sheets store
 - Auth, a per-client encrypted key vault, and tier / role enforcement
-- Per-client API budget caps and a daily spend-stop
+- Per-client API budget caps and a global manual API-spend halt
 
 ## Layout
 
