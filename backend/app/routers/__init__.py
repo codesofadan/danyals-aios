@@ -39,6 +39,7 @@ from app.routers.tickets import router as tickets_router
 from app.routers.tiers import router as tiers_router
 from app.routers.upsells import router as upsells_router
 from app.routers.vault import router as vault_router
+from app.routers.wp_connections import router as wp_connections_router
 
 api_v1 = APIRouter()
 api_v1.include_router(auth_router)
@@ -70,6 +71,7 @@ api_v1.include_router(me_router)
 api_v1.include_router(portal_router)
 api_v1.include_router(context_router)
 api_v1.include_router(ai_assist_router)
+api_v1.include_router(wp_connections_router)
 # Feature modules (app/modules/) self-register here. Included BEFORE the public
 # funnel so module routes are authenticated-by-default like every other business
 # router; iterating an empty MODULE_ROUTERS is a no-op.

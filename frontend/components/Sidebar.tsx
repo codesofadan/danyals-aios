@@ -23,6 +23,7 @@ const SECTIONS: Section[] = [
       { icon: "fact_check", label: "Audit", href: "/admin/audit" },
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads" },
       { icon: "article", label: "Content", href: "/admin/content" },
+      { icon: "language", label: "WordPress", href: "/admin/wordpress" },
       { icon: "hub", label: "Off-page", href: "/admin/off-page" },
       { icon: "storefront", label: "Citations", href: "/admin/citations" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2" },

@@ -35,13 +35,21 @@ from app.config import Settings
 from app.services.content_qa import QA_DIMENSIONS, QaScore
 from app.services.content_research import ContentSpendBlocked, FakePageFetcher
 from app.services.cost_gate import DialMode, GateContext
+from app.services.wp_connections import ResolvedWpConnection
 from integrations.content_providers import content_providers_for_tests
 from integrations.llm import LLMResult
-from integrations.wordpress import FakeWordPressPublisher, PostDraft, PublishResult
+from integrations.wordpress import (
+    FakeWordPressPublisher,
+    PostDraft,
+    PublishResult,
+    XmlRpcWordPressPublisher,
+)
 from workers.tasks.content import (
+    ClientWpTarget,
     MeteredCostGate,
     PublishBlocked,
     WpTarget,
+    build_client_wp_target,
     execute_content_job,
     md_to_html,
     publish_content_job,
@@ -133,6 +141,7 @@ def _settings(**over: Any) -> Settings:
 
 
 _CLIENT_ID = "11111111-1111-1111-1111-111111111111"
+_OTHER_ID = "22222222-2222-2222-2222-222222222222"
 
 
 def _job_row(**over: Any) -> dict[str, Any]:
@@ -628,6 +637,157 @@ def test_publish_not_publishing_is_noop() -> None:
     out = publish_content_job(store, None, "CJ-4200", settings=_settings())
     assert out.state == "noop"
     assert store.updates == []
+
+
+# --------------------------------------------------------------------------- #
+# Per-client WordPress Connections registry (0058): resolve the RIGHT client's
+# connection at publish time + publish through its auth method.
+# --------------------------------------------------------------------------- #
+def _connection_resolver(targets: dict[str, ClientWpTarget]) -> Any:
+    """A resolve_client_wp that returns the target for the JOB's client_id (the exact
+    per-client resolution the worker does), or None when that client has none."""
+    return lambda row, settings: targets.get(str(row.get("client_id")))
+
+
+def test_publish_via_client_connection_plugin() -> None:
+    # A 'plugin' connection pushes to the AIOS Publisher plugin (draft) + records URLs.
+    from integrations.wordpress_publisher import FakeWordPressPluginPublisher
+
+    plugin = FakeWordPressPluginPublisher(site_url="https://verde.test")
+    target = ClientWpTarget("plugin", "https://verde.test", plugin=plugin)
+    store = FakeContentStore(_publish_row())
+    out = publish_content_job(
+        store, None, "CJ-4200", settings=_settings(),
+        resolve_client_wp=_connection_resolver({_CLIENT_ID: target}),
+    )
+    assert out.state == "published"
+    assert store.row["status"] == "done"
+    assert plugin.published  # the draft was pushed to the plugin
+    assert store.row["wp_url"] and store.row["wp_edit_url"]  # the plugin URLs recorded
+
+
+def test_publish_via_client_connection_app_password() -> None:
+    # An 'app_password' connection publishes over the REST WordPressPublisher.
+    spy = _SpyWordPress()
+    target = ClientWpTarget("app_password", "https://verde.test", publisher=spy)
+    store = FakeContentStore(_publish_row())
+    out = publish_content_job(
+        store, None, "CJ-4200", settings=_settings(),
+        resolve_client_wp=_connection_resolver({_CLIENT_ID: target}),
+    )
+    assert out.state == "published" and store.row["status"] == "done"
+    assert len(spy.published) == 1
+    site, _post = spy.published[0]
+    assert site == "https://verde.test"
+
+
+def test_publish_via_client_connection_xmlrpc() -> None:
+    # An 'xmlrpc' connection publishes over the XML-RPC WordPressPublisher (same
+    # Protocol) - proven here with a spy that satisfies publish(site_url, post).
+    spy = _SpyWordPress()
+    target = ClientWpTarget("xmlrpc", "https://hostile.test", publisher=spy)
+    store = FakeContentStore(_publish_row())
+    out = publish_content_job(
+        store, None, "CJ-4200", settings=_settings(),
+        resolve_client_wp=_connection_resolver({_CLIENT_ID: target}),
+    )
+    assert out.state == "published"
+    assert spy.published[0][0] == "https://hostile.test"
+    assert out.url  # the live URL surfaced on the stage label
+
+
+def test_publish_resolves_the_right_connection_per_client() -> None:
+    # TWO clients, each with its OWN connection/site: each job must publish to ITS site.
+    verde, other = _SpyWordPress(), _SpyWordPress()
+    targets = {
+        _CLIENT_ID: ClientWpTarget("app_password", "https://verde.test", publisher=verde),
+        _OTHER_ID: ClientWpTarget("xmlrpc", "https://other.test", publisher=other),
+    }
+    resolver = _connection_resolver(targets)
+
+    store_v = FakeContentStore(_publish_row(code="CJ-4200", client_id=_CLIENT_ID))
+    store_o = FakeContentStore(_publish_row(code="CJ-4300", client_id=_OTHER_ID))
+    publish_content_job(store_v, None, "CJ-4200", settings=_settings(), resolve_client_wp=resolver)
+    publish_content_job(store_o, None, "CJ-4300", settings=_settings(), resolve_client_wp=resolver)
+
+    # Each client's draft went to ITS OWN site, never the other's.
+    assert verde.published[0][0] == "https://verde.test"
+    assert other.published[0][0] == "https://other.test"
+    assert len(other.published) == 1 and len(verde.published) == 1
+
+
+def test_publish_degrades_cleanly_when_no_connection(tmp_path: Any) -> None:
+    # No per-client connection AND no legacy vault target -> artifact-only degrade
+    # (the clean "skip the push" the task describes), never a crash.
+    from app.services.content_artifacts import LocalContentArtifactStore
+
+    store = FakeContentStore(_publish_row())
+    out = publish_content_job(
+        store, None, "CJ-4200", settings=_settings(), artifacts=LocalContentArtifactStore(tmp_path),
+        resolve_client_wp=lambda row, settings: None,  # no connection configured
+        resolve_wp=lambda row, settings: None,          # no legacy vault credential
+    )
+    assert out.state == "degraded" and store.row["status"] == "done"
+    assert "artifact-only" in store.row["stage"].lower()
+
+
+# --------------------------------------------------------------------------- #
+# build_client_wp_target: the pure method->adapter dispatch (no DB, no network).
+# --------------------------------------------------------------------------- #
+def _resolved(method: str, *, secret: str = "s", site: str = "https://verde.test") -> ResolvedWpConnection:
+    return ResolvedWpConnection(
+        client_id=_CLIENT_ID, site_url=site, auth_method=method, username="editor", secret=secret
+    )
+
+
+def test_build_client_wp_target_dispatches_by_method() -> None:
+    s = _settings()
+    plugin = build_client_wp_target(_resolved("plugin"), s)
+    assert plugin is not None and plugin.method == "plugin" and plugin.plugin is not None
+
+    xml = build_client_wp_target(_resolved("xmlrpc"), s)
+    assert xml is not None and xml.method == "xmlrpc" and isinstance(xml.publisher, XmlRpcWordPressPublisher)
+
+    rest = build_client_wp_target(_resolved("app_password"), s)
+    assert rest is not None and rest.method == "app_password" and rest.publisher is not None
+
+
+def test_build_client_wp_target_none_without_site_or_secret() -> None:
+    assert build_client_wp_target(_resolved("plugin", site=""), _settings()) is None
+    assert build_client_wp_target(_resolved("plugin", secret=""), _settings()) is None
+
+
+# --------------------------------------------------------------------------- #
+# XmlRpcWordPressPublisher: parses wp.newPost + strips a hostile-host HTML footer.
+# --------------------------------------------------------------------------- #
+def test_xmlrpc_publish_parses_post_id_and_strips_trailing_html() -> None:
+    import xmlrpc.client
+
+    # A valid XML-RPC response returning the new post id, with junk a hostile host
+    # appended AFTER </methodResponse> (a WAF/cache footer) - which must be trimmed.
+    valid = xmlrpc.client.dumps(("9137",), methodresponse=True)
+    body = valid + "\n<!-- cache -->\n<html>blocked-notice</html>"
+
+    class _Resp:
+        status_code = 200
+        text = body
+
+    class _FakeHttp:
+        def __init__(self) -> None:
+            self.posted: list[bytes] = []
+
+        def post(self, url: str, content: bytes) -> _Resp:
+            self.posted.append(content)
+            return _Resp()
+
+    pub = XmlRpcWordPressPublisher(username="editor", app_password="pw")
+    fake = _FakeHttp()
+    pub._client = fake  # type: ignore[assignment]  # inject the fake transport
+    result = pub.publish("https://hostile.test", PostDraft(title="Hello", content="<p>Body</p>"))
+    assert result.post_id == 9137
+    assert result.url == "https://hostile.test/?p=9137"
+    # The credential rode in the XML BODY (never a header).
+    assert b"editor" in fake.posted[0] and b"wp.newPost" in fake.posted[0]
 
 
 # --------------------------------------------------------------------------- #

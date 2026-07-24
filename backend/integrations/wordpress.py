@@ -65,6 +65,14 @@ _INSTALL_HINT = (
     "to publish"
 )
 
+# A current desktop-Chrome User-Agent. Managed hosts' anti-bot layers block
+# non-browser UAs (proven on some hosts); every real request here rides this string
+# so a hostile host cannot soft-block an otherwise-valid authenticated call.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 @dataclass(frozen=True)
 class PostDraft:
@@ -133,7 +141,14 @@ class WordPressClient(HttpProviderClient):
 
     provider = "wordpress"
 
-    def __init__(self, *, username: str, app_password: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        username: str,
+        app_password: str,
+        user_agent: str = BROWSER_UA,
+        timeout: float = 30.0,
+    ) -> None:
         if not username or not app_password:
             raise ProviderNotConfiguredError(f"WordPress client unavailable: {_INSTALL_HINT}")
         # No base_url: each publish targets a per-call absolute site URL.
@@ -142,14 +157,32 @@ class WordPressClient(HttpProviderClient):
         # REST call with a soft-challenge 403 that clears on an immediate retry, so
         # 403 is transient HERE (not globally) and the publish path gets one extra
         # attempt. A genuine permission-403 (the app password lacks publish rights)
-        # still surfaces as ProviderCallError once the attempts are spent.
+        # still surfaces as ProviderCallError once the attempts are spent. A browser
+        # User-Agent rides every call so an anti-bot layer cannot soft-block it.
         super().__init__(
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": user_agent},
             timeout=timeout,
             max_attempts=4,
             transient_statuses=frozenset({403}),
         )
         self._auth = (username, app_password)
+
+    def verify(self, site_url: str) -> tuple[bool, str]:
+        """Non-raising credential probe for the connectivity test: read the current
+        user (``GET /wp-json/wp/v2/users/me?context=edit``) under HTTP Basic. Returns
+        ``(ok, detail)`` so the UI shows a clean red/green without a 500. The detail
+        never contains the credential (auth rides the Basic header, kept out of logs)."""
+        try:
+            data = self.request_json(
+                "GET",
+                f"{site_url.rstrip('/')}/wp-json/wp/v2/users/me",
+                params={"context": "edit"},
+                auth=self._auth,
+            )
+        except ProviderCallError as exc:
+            return False, f"REST verify failed: {exc}"
+        who = data.get("name") or data.get("slug") or "the account"
+        return True, f"Application Password accepted for {who}"
 
     def _post_endpoint(self, site_url: str, post_id: int) -> str:
         return f"{site_url.rstrip('/')}/wp-json/wp/v2/posts/{post_id}"
@@ -216,6 +249,127 @@ class WordPressClient(HttpProviderClient):
         if not isinstance(post_id, int) or not isinstance(link, str):
             raise ProviderCallError("WordPress response missing post id or link")
         return PublishResult(post_id=post_id, url=link)
+
+
+class XmlRpcWordPressPublisher:
+    """``WordPressPublisher`` over XML-RPC (``POST /xmlrpc.php`` ``wp.newPost``).
+
+    The path that actually works on HOSTILE managed hosts that strip the
+    ``Authorization`` header or disable Application Passwords (the REST app-password
+    path 501s / 401s there): the credential rides in the XML request BODY (never a
+    header), behind a browser User-Agent that defeats the anti-bot layer. Idempotent
+    like the REST seam - a ``PostDraft`` carrying a ``wp_post_id`` edits that post
+    (``wp.editPost``), else it creates one (``wp.newPost``).
+
+    HOSTILE-HOST QUIRK this seam survives: some such hosts append stray HTML or
+    whitespace AFTER ``</methodResponse>`` (a WAF/cache footer), which breaks a strict
+    XML parse; :meth:`_call` trims to the closing tag before unmarshalling so a valid
+    response is never misread as malformed. Credentials are PASSED IN, never read here.
+    """
+
+    provider = "wordpress_xmlrpc"
+
+    def __init__(
+        self,
+        *,
+        username: str,
+        app_password: str,
+        user_agent: str = BROWSER_UA,
+        timeout: float = 30.0,
+    ) -> None:
+        if not username or not app_password:
+            raise ProviderNotConfiguredError(f"WordPress XML-RPC client unavailable: {_INSTALL_HINT}")
+        try:
+            import httpx
+        except ImportError as exc:  # httpx is a base dep; guard mirrors the HTTP seam
+            raise ProviderNotConfiguredError(
+                "WordPress XML-RPC client unavailable: install httpx (a base dependency)"
+            ) from exc
+        self._client = httpx.Client(
+            headers={
+                "Content-Type": "text/xml; charset=utf-8",
+                "Accept": "text/xml",
+                "User-Agent": user_agent,
+            },
+            timeout=httpx.Timeout(timeout),
+            follow_redirects=True,
+        )
+        self._username = username
+        self._password = app_password
+
+    @staticmethod
+    def _endpoint(site_url: str) -> str:
+        return f"{site_url.rstrip('/')}/xmlrpc.php"
+
+    def _call(self, site_url: str, method: str, params: list[Any]) -> Any:
+        """Issue one XML-RPC call and return its first return value (or None).
+
+        The credential is marshalled into the XML body by ``xmlrpc.client.dumps``; a
+        4xx/5xx is a ``ProviderCallError`` (never echoing the body), and a fault or a
+        non-XML body (after trimming a hostile-host footer) is likewise typed."""
+        import xmlrpc.client
+
+        body = xmlrpc.client.dumps(tuple(params), methodname=method)
+        response = self._client.post(self._endpoint(site_url), content=body.encode("utf-8"))
+        if response.status_code >= 400:
+            raise ProviderCallError(
+                f"wordpress xmlrpc request failed with status {response.status_code}"
+            )
+        text = response.text
+        marker = "</methodResponse>"
+        idx = text.find(marker)
+        if idx != -1:
+            text = text[: idx + len(marker)]  # trim any HTML the host appended after the XML
+        try:
+            values, _method = xmlrpc.client.loads(text)
+        except xmlrpc.client.Fault as fault:
+            raise ProviderCallError(f"wordpress xmlrpc fault {fault.faultCode}") from fault
+        except Exception as exc:  # a non-XML / truncated body
+            raise ProviderCallError("wordpress xmlrpc returned a non-XML body") from exc
+        return values[0] if values else None
+
+    def publish(self, site_url: str, post: PostDraft) -> PublishResult:
+        struct: dict[str, Any] = {
+            "post_type": "post",
+            # honour the draft's status (the publish path pushes "publish"); anything
+            # else lands as a draft a human flips live on WordPress.
+            "post_status": "publish" if post.status == "publish" else "draft",
+            "post_title": post.title,
+            "post_content": post.content,
+        }
+        if post.slug:
+            struct["post_name"] = post.slug
+        if post.excerpt:
+            struct["post_excerpt"] = post.excerpt
+        if post.wp_post_id is not None:
+            # wp.editPost(blog_id, user, pass, post_id, content_struct) -> bool (idempotent UPDATE)
+            self._call(
+                site_url,
+                "wp.editPost",
+                [0, self._username, self._password, int(post.wp_post_id), struct],
+            )
+            new_id = int(post.wp_post_id)
+        else:
+            # wp.newPost(blog_id, user, pass, content_struct) -> the new post id (a string)
+            raw_id = self._call(
+                site_url, "wp.newPost", [0, self._username, self._password, struct]
+            )
+            try:
+                new_id = int(str(raw_id))
+            except (TypeError, ValueError) as exc:
+                raise ProviderCallError("wordpress xmlrpc returned no usable post id") from exc
+        return PublishResult(post_id=new_id, url=f"{site_url.rstrip('/')}/?p={new_id}")
+
+    def verify(self, site_url: str) -> tuple[bool, str]:
+        """Non-raising probe: ``wp.getUsersBlogs(username, password)`` lists the sites
+        the credential may post to. Returns ``(ok, detail)`` for a clean red/green."""
+        try:
+            self._call(site_url, "wp.getUsersBlogs", [self._username, self._password])
+        except ProviderCallError as exc:
+            return False, f"XML-RPC verify failed: {exc}"
+        except Exception:  # transport error / unreachable host
+            return False, "XML-RPC verify failed: the site could not be reached"
+        return True, "XML-RPC reachable and the credentials were accepted"
 
 
 class FakeWordPressPublisher:

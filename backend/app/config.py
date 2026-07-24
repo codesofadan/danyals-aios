@@ -270,6 +270,20 @@ class Settings(BaseSettings):
     )
     wp_plugin_timeout_seconds: float = 30.0
 
+    # --- Multi-client WordPress Connections registry (0058). The per-client publish
+    # connections (site_url + auth_method + sealed credential) live in
+    # public.wp_connections; the credential is sealed app-layer with the SAME
+    # AES-256-GCM master key as the Key Vault (VAULT_MASTER_KEY - already required in
+    # prod). These two knobs tune the connectivity TEST + the xmlrpc / app_password
+    # publish paths: a browser User-Agent (managed hosts' anti-bot layers block
+    # non-browser UAs - proven on some hosts) + a bounded timeout. Both optional and
+    # NOT in _REQUIRED_IN_PROD (they default sensibly). ---
+    wp_connection_browser_ua: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+    wp_connection_timeout_seconds: float = 30.0
+
     # --- Off-page module provider seams (7B). ALL optional and NOT in
     # _REQUIRED_IN_PROD: the module builds + unit-tests NOW with deterministic fakes
     # and ACTIVATES per key as they land (mirrors the content/context key-gating).

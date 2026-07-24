@@ -97,6 +97,7 @@ from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
 from app.services.notifications import email_client_sync, notify_leads_sync
+from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import ImageGenerator
 from integrations.llm import LLMResult, Summarizer
@@ -1224,6 +1225,86 @@ def _resolve_wp_plugin(row: dict[str, Any], settings: Settings) -> PluginPublish
         return None
 
 
+# --------------------------------------------------------------------------- #
+# Per-client WordPress Connections registry (0058) - the PRIMARY publish target.
+# --------------------------------------------------------------------------- #
+# The admin connects EVERY client's WordPress site in one place (public.wp_connections:
+# site_url + auth_method + a sealed credential). At publish time the RIGHT client's
+# connection is resolved by client_id and the approved draft is pushed through the
+# adapter for its auth_method: 'plugin' -> the AIOS Publisher plugin; 'xmlrpc' -> the
+# XML-RPC seam (hostile-host-proof); 'app_password' -> the REST app-password seam. No
+# connection for a client -> None (the legacy single-site fallbacks + artifact path,
+# unchanged). All resolution is best-effort and NEVER raises.
+@dataclass(frozen=True)
+class ClientWpTarget:
+    """A resolved per-client WordPress target: the site + a ready adapter for its auth
+    method. ``plugin`` carries a PluginPublisher (method ``plugin``); ``publisher``
+    carries a WordPressPublisher (methods ``xmlrpc`` / ``app_password``)."""
+
+    method: str
+    site_url: str
+    plugin: PluginPublisher | None = None
+    publisher: WordPressPublisher | None = None
+
+
+def build_client_wp_target(conn: ResolvedWpConnection, settings: Settings) -> ClientWpTarget | None:
+    """Turn a resolved + opened connection into a ready adapter, or None if unusable.
+
+    Pure of the DB (the credential is already opened by ``resolve_connection``), so it
+    is unit-tested directly with a fabricated ``ResolvedWpConnection``. A construction
+    failure (missing httpx / bad config) degrades to None -> the publish falls back."""
+    site_url = conn.site_url.strip()
+    if not site_url or not conn.secret:
+        return None
+    ua = settings.wp_connection_browser_ua
+    timeout = settings.wp_connection_timeout_seconds
+    try:
+        if conn.auth_method == "plugin":
+            from integrations.wordpress_publisher import WordPressPluginPublisher
+
+            plugin = WordPressPluginPublisher(
+                site_url=site_url, api_key=conn.secret, user_agent=ua, timeout=timeout
+            )
+            return ClientWpTarget("plugin", site_url, plugin=plugin)
+        if conn.auth_method == "xmlrpc":
+            from integrations.wordpress import XmlRpcWordPressPublisher
+
+            xml = XmlRpcWordPressPublisher(
+                username=conn.username, app_password=conn.secret, user_agent=ua, timeout=timeout
+            )
+            return ClientWpTarget("xmlrpc", site_url, publisher=xml)
+        if conn.auth_method == "app_password":
+            from integrations.wordpress import WordPressClient
+
+            rest = WordPressClient(
+                username=conn.username, app_password=conn.secret, user_agent=ua, timeout=timeout
+            )
+            return ClientWpTarget("app_password", site_url, publisher=rest)
+    except Exception:
+        logger.warning("wp_connection_client_unavailable", method=conn.auth_method)
+        return None
+    return None
+
+
+def _resolve_wp_connection(row: dict[str, Any], settings: Settings) -> ClientWpTarget | None:
+    """Resolve the job's client's WordPress connection (0058) into a publish target.
+
+    Never raises: no client_id / no connection row / no sealed credential / an
+    unopenable blob all degrade to None -> the legacy single-site fallbacks run,
+    unchanged. The credential is opened only here, server-side, never on the wire."""
+    client_id = row.get("client_id")
+    if not client_id:
+        return None
+    try:
+        conn = resolve_connection(str(client_id))
+    except Exception:
+        logger.warning("wp_connection_resolve_failed", code=str(row.get("code", "")))
+        return None
+    if conn is None:
+        return None
+    return build_client_wp_target(conn, settings)
+
+
 # --- Article-template component derivation (best-effort, from the finished draft).
 # The AIOS Publisher plugin renders these into styled, theme-native components (a key-
 # takeaways callout, an accessible FAQ + FAQPage JSON-LD, a closing CTA banner). Parsed
@@ -1398,6 +1479,7 @@ def publish_content_job(
     artifacts: ContentArtifactStore | None = None,
     resolve_wp: Any = _resolve_wp_from_vault,
     resolve_wp_plugin: Any = _resolve_wp_plugin,
+    resolve_client_wp: Any = _resolve_wp_connection,
 ) -> PublishOutcome:
     """Publish an APPROVED content job (the approve path moves it to ``publishing``
     first, then calls this).
@@ -1444,7 +1526,8 @@ def publish_content_job(
     try:
         if target == "WordPress":
             return _publish_wordpress(
-                store, code, row, draft_md, title, settings, artifacts, resolve_wp, resolve_wp_plugin
+                store, code, row, draft_md, title, settings, artifacts,
+                resolve_wp, resolve_wp_plugin, resolve_client_wp,
             )
         return _publish_artifact(store, code, row, draft_md, title, artifacts, degraded=False)
     except PublishBlocked:
@@ -1468,13 +1551,31 @@ def _publish_wordpress(
     artifacts: ContentArtifactStore | None,
     resolve_wp: Any,
     resolve_wp_plugin: Any,
+    resolve_client_wp: Any,
 ) -> PublishOutcome:
-    # --- The AIOS Publisher PLUGIN path (host-independent; bypasses header-stripping
-    # + app-passwords). When a plugin target is configured for this client, push the
-    # approved page as a DRAFT so the admin publishes it on the WordPress site itself
-    # (the operator's flow). Best-effort: a push failure is logged and FALLS THROUGH
-    # to the legacy REST / artifact path (never crashes the approve). No plugin target
-    # configured leaves the existing behavior below completely unchanged.
+    # --- PRIMARY: the per-client WordPress Connections registry (0058). One row per
+    # client selects the site + auth method + sealed credential; publish the approved
+    # draft through it - 'plugin' via the AIOS Publisher plugin, 'xmlrpc'/'app_password'
+    # via the WordPressPublisher (XML-RPC / REST app-password). A configured-but-failing
+    # connection is logged and FALLS THROUGH to the legacy single-site fallbacks below
+    # (best-effort, never crashes the approve). No connection for this client leaves
+    # the existing behavior completely unchanged.
+    connection: ClientWpTarget | None = resolve_client_wp(row, settings)
+    if connection is not None:
+        try:
+            if connection.method == "plugin" and connection.plugin is not None:
+                return _publish_via_plugin(store, code, row, connection.plugin, draft_md, title)
+            if connection.publisher is not None:
+                return _publish_via_rest(
+                    store, code, row, connection.site_url, connection.publisher, draft_md, title
+                )
+        except WordPressPluginError:
+            logger.warning("content_connection_plugin_push_failed", code=code)
+        except Exception:  # any REST / XML-RPC push failure -> fall through, never crash
+            logger.warning("content_connection_push_failed", code=code, method=connection.method)
+
+    # --- FALLBACK 1: the single-site AIOS Publisher PLUGIN (host-independent; bypasses
+    # header-stripping + app-passwords), resolved from the vault/settings default.
     plugin: PluginPublisher | None = resolve_wp_plugin(row, settings)
     if plugin is not None:
         try:
@@ -1482,12 +1583,29 @@ def _publish_wordpress(
         except WordPressPluginError:
             logger.warning("content_plugin_push_failed", code=code)
 
+    # --- FALLBACK 2: the REST app-password path resolved from the vault by domain.
     wp: WpTarget | None = resolve_wp(row, settings)
     if wp is None:
         # Credential-degraded: artifact-only + a degraded-publish marker (job still
-        # completes so the client gets a deliverable), never a crash.
+        # completes so the client gets a deliverable), never a crash. This is the
+        # clean "no connection configured for this client" skip the task describes.
         return _publish_artifact(store, code, row, draft_md, title, artifacts, degraded=True)
+    return _publish_via_rest(store, code, row, wp.site_url, wp.publisher, draft_md, title)
 
+
+def _publish_via_rest(
+    store: ContentStore,
+    code: str,
+    row: dict[str, Any],
+    site_url: str,
+    publisher: WordPressPublisher,
+    draft_md: str,
+    title: str,
+) -> PublishOutcome:
+    """Publish (idempotent UPDATE-or-CREATE) through a ``WordPressPublisher`` - the REST
+    app-password client OR the XML-RPC client, which share the Protocol - and record
+    the live URL. Shared by the per-client connection path (xmlrpc / app_password) and
+    the legacy vault path so both record the post identically."""
     existing = row.get("wp_post_id")
     wp_post_id = int(existing) if existing is not None and str(existing).isdigit() else None
     post = PostDraft(
@@ -1497,7 +1615,7 @@ def _publish_wordpress(
         slug=_slug(title),
         wp_post_id=wp_post_id,  # set -> idempotent UPDATE, else CREATE
     )
-    result: PublishResult = wp.publisher.publish(wp.site_url, post)
+    result: PublishResult = publisher.publish(site_url, post)
     # Surface the LIVE post URL on the wire-visible `stage` field so the dashboard's
     # Review surface can display it + offer an "open live post" action (the wire
     # ContentJob has no dedicated url column; the stage label carries it).
