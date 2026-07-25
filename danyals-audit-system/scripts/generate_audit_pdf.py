@@ -2636,6 +2636,21 @@ def _format_example_urls(urls: list) -> str:
     return ", ".join(seen)
 
 
+def _evidence_to_str(ev) -> str:
+    """Coerce a finding's ``evidence_json`` to a stripped string. A real run may
+    store it as a JSON string, an already-parsed dict/list, or (defensively) any
+    other scalar; this normalises all of them so downstream ``.strip()`` /
+    ``json.loads`` never raises on an unexpected type. Returns "" when empty."""
+    if ev is None or ev == "":
+        return ""
+    if isinstance(ev, str):
+        return ev.strip()
+    try:
+        return json.dumps(ev)
+    except (TypeError, ValueError):
+        return str(ev).strip()
+
+
 def compute_full_issue_list(artifact_dir: Path, pages_total: int | None = None) -> list[dict]:
     """Every unique warn/fail issue-type the engine found, deduped to one row
     per check_id, with its worst severity, affected-page count, report area,
@@ -2677,16 +2692,23 @@ def compute_full_issue_list(artifact_dir: Path, pages_total: int | None = None) 
         if rank >= e["rank"]:
             e["rank"] = rank
             e["severity"] = nsev
-            if (r.get("check_name") or "").strip():
-                e["name"] = r["check_name"].strip()
-            if (r.get("remediation") or "").strip():
-                e["fix"] = r["remediation"].strip()
-            if (r.get("evidence_json") or "").strip():
-                e["evidence_raw"] = r["evidence_json"].strip()
-        if not e["fix"] and (r.get("remediation") or "").strip():
-            e["fix"] = r["remediation"].strip()
-        if not e["evidence_raw"] and (r.get("evidence_json") or "").strip():
-            e["evidence_raw"] = r["evidence_json"].strip()
+            cn = r.get("check_name")
+            if isinstance(cn, str) and cn.strip():
+                e["name"] = cn.strip()
+            rem = r.get("remediation")
+            if isinstance(rem, str) and rem.strip():
+                e["fix"] = rem.strip()
+            ev_s = _evidence_to_str(r.get("evidence_json"))
+            if ev_s:
+                e["evidence_raw"] = ev_s
+        if not e["fix"]:
+            rem = r.get("remediation")
+            if isinstance(rem, str) and rem.strip():
+                e["fix"] = rem.strip()
+        if not e["evidence_raw"]:
+            ev_s = _evidence_to_str(r.get("evidence_json"))
+            if ev_s:
+                e["evidence_raw"] = ev_s
 
     issues = list(agg.values())
     # Site-wide threshold: 80% of crawled pages OR 30+ pages absolute. At that
@@ -3231,11 +3253,15 @@ def _build_one_issue_card_v2(e: dict) -> str:
     effort_text = (e.get("effort") or "").strip()
     owner_text  = (e.get("owner") or "").strip()
 
-    pages_str = (
-        "Site-wide" if e.get("pages_total") and e["pages"] >= e["pages_total"]
-        else f"{e['pages']} page" + ("s" if e["pages"] != 1 else "")
-    )
-    eyebrow = f"ISSUE - {pages_str.upper()}"
+    pages_n = e.get("pages")
+    pages_total = e.get("pages_total")
+    if not isinstance(pages_n, int):
+        pages_str = ""
+    elif pages_total and pages_n >= pages_total:
+        pages_str = "Site-wide"
+    else:
+        pages_str = f"{pages_n} page" + ("s" if pages_n != 1 else "")
+    eyebrow = f"ISSUE - {pages_str.upper()}" if pages_str else "ISSUE"
 
     callouts: list[str] = []
     if impact_text:
@@ -3273,6 +3299,21 @@ def _build_one_issue_card_v2(e: dict) -> str:
     {callouts_html}
     {pills_html}
   </div>"""
+
+
+def _safe_issue_card(e: dict) -> str:
+    """Render one issue card, degrading a single malformed finding to an empty
+    string rather than letting it abort the whole report. A raise here would bubble
+    up and force the platform bundle (bundle.py) to fall back to the legacy
+    full.html.j2 layout - exactly the regression this hardening prevents."""
+    try:
+        return _build_one_issue_card_v2(e)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(
+            f"[warn] issue card render failed ({e.get('check_id', '?')}): "
+            f"{type(exc).__name__}: {exc}\n"
+        )
+        return ""
 
 
 def _build_passes_card(dim_label: str, passes: list[str]) -> str:
@@ -3710,16 +3751,22 @@ def build_dimension_section_pages(
         # universal Citation Gap directory list with DRs. Fully self-contained
         # builder that degrades gracefully when source data is missing.
         if dim_key == "offpage":
-            off_issues = [e for e in all_issues if e["area_key"] == "offpage"]
+            off_issues = [e for e in all_issues if e.get("area_key") == "offpage"]
             off_passes = passes.get("offpage", [])
-            pages_out.append(build_offpage_complete_section(
-                artifact_dir, run_meta, scores, off_issues, off_passes,
-                condensed=condensed,
-            ))
+            try:
+                pages_out.append(build_offpage_complete_section(
+                    artifact_dir, run_meta, scores, off_issues, off_passes,
+                    condensed=condensed,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                sys.stderr.write(
+                    f"[warn] off-page section failed: {type(exc).__name__}: {exc}\n"
+                )
+                pages_out.append(_minimal_dimension_page("offpage"))
             continue
 
         dim_label = SECTION_LABELS.get(dim_key, dim_key)
-        dim_issues = [e for e in all_issues if e["area_key"] == dim_key]
+        dim_issues = [e for e in all_issues if e.get("area_key") == dim_key]
         crit = [e for e in dim_issues if e["severity"] == "critical"]
         majs = [e for e in dim_issues if e["severity"] == "major"]
         mins = [e for e in dim_issues if e["severity"] == "minor"]
@@ -3764,7 +3811,7 @@ def build_dimension_section_pages(
         if crit:
             flow_parts.append(
                 '<div class="reg-cards">'
-                + "".join(_build_one_issue_card_v2(e) for e in crit)
+                + "".join(_safe_issue_card(e) for e in crit)
                 + '</div>'
             )
 
@@ -3774,7 +3821,7 @@ def build_dimension_section_pages(
                 f'<div class="dim-sub-lead">{len(majs)} major '
                 f'issue{"s" if len(majs)!=1 else ""}</div>'
                 '<div class="reg-cards">'
-                + "".join(_build_one_issue_card_v2(e) for e in majs)
+                + "".join(_safe_issue_card(e) for e in majs)
                 + '</div>'
             )
 
@@ -3782,9 +3829,9 @@ def build_dimension_section_pages(
         if mins:
             rows_html = "".join(
                 '<tr>'
-                f'<td>{md_inline(e["name"])}</td>'
+                f'<td>{md_inline(e.get("name", ""))}</td>'
                 f'<td style="white-space:nowrap; text-align:right;">'
-                f'{e["pages"]} page' + ("s" if e["pages"] != 1 else "") + '</td>'
+                f'{e.get("pages", 0)} page' + ("s" if e.get("pages", 0) != 1 else "") + '</td>'
                 f'<td>{md_inline(_cap(e.get("fix") or "Standard remediation.", 160))}</td>'
                 '</tr>'
                 for e in mins
@@ -5390,9 +5437,24 @@ def _synthesize_action_md_from_quick_artifacts(root: Path) -> str | None:
 # each dimension to roughly one page; the free reader still sees EVERY critical
 # and major issue in the index and the TRUE totals in the scare-stat tiles, so
 # nothing is hidden - only the per-section detail is a teaser for the full audit.
-# Measured (A4, rendered): a realistic free crawl lands ~19 pages at this value.
-_CONDENSED_PER_DIM = 3
+# Measured (A4, Chrome print): at 2 detailed cards per dimension a realistic free
+# crawl lands ~18-20 A4 pages WITH the closing CTA intact, so the paid-vs-free page
+# cap net never has to truncate it (which would drop the trailing CTA upsell page).
+_CONDENSED_PER_DIM = 2
 _CONDENSED_QUICK_WINS = 6
+
+# PAID hard cap: the number of detailed critical/major issue CARDS rendered across
+# all seven dimensions is bounded so even a pathological catalog (every check type
+# firing on a large crawl) can never push the report past the <=100-page paid
+# ceiling. The INDEX still lists EVERY critical + major issue with its occurrence
+# count (that list is built uncapped from full_issues), so nothing is hidden from
+# the reader - only the count of full detail cards is bounded. At ~2-3 cards per A4
+# sheet this keeps the detailed inventory to ~40-50 pages, comfortably under 100
+# once the standing sections (cover, dashboard, executive, strategy, off-page,
+# quick wins, URL appendix, methodology, CTA) are added. A realistic audit
+# (30-80 critical/major types) never reaches it, so the per-dimension header counts
+# stay accurate in practice; only an extreme site trims to the worst-first cards.
+_PAID_MAX_DETAIL_CARDS = 120
 
 
 def _document_html(pages_html: list[str], client: str) -> str:
@@ -5536,6 +5598,26 @@ def assemble_report_pages(
             per_dim[key] = per_dim.get(key, 0) + 1
             capped.append(e)
         dim_issues = capped
+    else:
+        # PAID: bound the number of detailed critical/major CARDS so a huge site
+        # cannot exceed the 100-page ceiling. full_issues is already sorted
+        # worst-first, so the cap keeps the most severe cards; minor issues
+        # (rendered as dense one-row-per-item tables) are left intact. The index
+        # above still lists every critical + major issue, so the M5 contract
+        # invariant (index count == inventory critical + major) is unaffected.
+        crit_major_total = sum(
+            1 for e in full_issues if e.get("severity") in ("critical", "major")
+        )
+        if crit_major_total > _PAID_MAX_DETAIL_CARDS:
+            kept: list[dict] = []
+            card_budget = _PAID_MAX_DETAIL_CARDS
+            for e in full_issues:
+                if e.get("severity") in ("critical", "major"):
+                    if card_budget <= 0:
+                        continue
+                    card_budget -= 1
+                kept.append(e)
+            dim_issues = kept
 
     semrush_data = _fetch_semrush_overview(client) if use_semrush else None
 
@@ -5578,6 +5660,43 @@ def assemble_report_pages(
     }
 
 
+def _minimal_dimension_page(dim_key: str) -> str:
+    """A minimal but contract-valid dimension section. Carries the exact
+    '<Label> issues in your site' marker the deterministic M5 report contract
+    checks for, so a degraded section never trips the section-presence blocker."""
+    label = SECTION_LABELS.get(dim_key, dim_key)
+    return (
+        '<div class="reg-flow dim-section">'
+        '<div class="dim-header-strip">'
+        f'<div class="dim-header-eyebrow">{md_inline(label.upper())}</div>'
+        f'<div class="dim-header-title">{md_inline(label)} issues in your site</div>'
+        '</div>'
+        '<div class="passes-card"><div class="passes-empty">'
+        'This section could not be fully rendered from this run\'s data and will '
+        'be completed in the delivered report.</div></div>'
+        '</div>'
+    )
+
+
+def _minimal_report_pages(root: Path, client: str) -> list[str]:
+    """Last-resort page set when full assembly raises: a cover plus every one of
+    the seven contract dimension sections as a minimal placeholder. The emitted
+    HTML is STILL the consulting design (it passes the M5 section-presence
+    contract) and is only a handful of pages - never the legacy multi-hundred-page
+    layout the platform bundle would otherwise fall back to."""
+    pages: list[str] = []
+    try:
+        pages.append(build_cover(client, "-", "-", "", 0))
+    except Exception:  # noqa: BLE001
+        pages.append(
+            f'<div class="page"><div class="sec-title">SEO Audit Report</div>'
+            f'<div class="sec-lead">{md_inline(client)}</div></div>'
+        )
+    for dim_key in DIMENSION_ORDER:
+        pages.append(_minimal_dimension_page(dim_key))
+    return pages
+
+
 def build_report_html(
     artifact_dir,
     *,
@@ -5591,13 +5710,28 @@ def build_report_html(
     consulting report HTML (CSS inlined) for an artifact dir, WITHOUT rendering a
     PDF or writing any file. ``condensed=True`` for the free tier (fewer findings
     per dimension, all 7 sections retained); ``condensed=False`` for the full
-    paid inventory. Never performs a network call (Semrush is skipped)."""
+    paid inventory. Never performs a network call (Semrush is skipped).
+
+    This function NEVER raises and NEVER returns an empty/None result: on any
+    assembly failure it emits a minimal but valid consulting-design document. That
+    guarantee is load-bearing - if it raised, ``bundle.py`` would fall back to the
+    legacy ``full.html.j2`` single-file report (the multi-hundred-page layout this
+    whole hardening exists to keep out of the client deliverable)."""
     root = Path(artifact_dir).resolve()
-    ctx = assemble_report_pages(
-        root, client=client, industry=industry, location=location,
-        date=date, condensed=condensed, use_semrush=False,
-    )
-    return _document_html(ctx["pages_html"], client)
+    try:
+        ctx = assemble_report_pages(
+            root, client=client, industry=industry, location=location,
+            date=date, condensed=condensed, use_semrush=False,
+        )
+        pages_html = ctx["pages_html"]
+    except Exception as exc:  # noqa: BLE001
+        import traceback as _tb
+        sys.stderr.write(
+            "[warn] assemble_report_pages failed; emitting minimal consulting "
+            f"report: {type(exc).__name__}: {exc}\n{_tb.format_exc()}"
+        )
+        pages_html = _minimal_report_pages(root, client)
+    return _document_html(pages_html, client)
 
 
 def main() -> int:

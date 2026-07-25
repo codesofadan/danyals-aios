@@ -9,6 +9,8 @@ opts into the paid AI mode and ANTHROPIC_API_KEY is set.
 from __future__ import annotations
 
 import importlib.util
+import os
+import traceback
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -26,25 +28,68 @@ from audit_engine.reporters import pdf as pdf_reporter
 log = get_logger(__name__)
 
 
+def _pdf_generator_candidates() -> list[Path]:
+    """Ordered candidate locations for ``scripts/generate_audit_pdf.py``.
+
+    The engine normally runs from its SOURCE tree (the worker invokes
+    ``python -m audit_engine.cli.main`` with cwd = ``AUDIT_ENGINE_DIR``), so the
+    script sits two parents above this file. But if the package is ever imported
+    from an installed location (site-packages) that sibling does not exist, so we
+    also probe ``AUDIT_ENGINE_DIR``, the process cwd, and the known container
+    path. First existing wins; duplicates are collapsed."""
+    raw: list[Path] = [Path(__file__).resolve().parents[2] / "scripts" / "generate_audit_pdf.py"]
+    env_dir = os.environ.get("AUDIT_ENGINE_DIR")
+    if env_dir:
+        raw.append(Path(env_dir) / "scripts" / "generate_audit_pdf.py")
+    raw.append(Path.cwd() / "scripts" / "generate_audit_pdf.py")
+    raw.append(Path("/app/audit-engine/scripts/generate_audit_pdf.py"))
+
+    ordered: list[Path] = []
+    seen: set[str] = set()
+    for p in raw:
+        try:
+            rp = p.resolve()
+        except OSError:
+            rp = p
+        key = str(rp)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(rp)
+    return ordered
+
+
 @lru_cache(maxsize=1)
 def _load_pdf_generator() -> ModuleType | None:
     """Load ``scripts/generate_audit_pdf.py`` (the consulting-grade report
     designer) as a module. It is a script, not a package member, so we load it
-    by path. Returns None if it cannot be found or imported - callers then fall
-    back to the simpler ``full.html.j2`` report so the bundle never crashes."""
-    repo_root = Path(__file__).resolve().parents[2]
-    script = repo_root / "scripts" / "generate_audit_pdf.py"
-    if not script.is_file():
+    by path, probing multiple candidate locations so an installed-package layout
+    does not defeat the source-relative lookup. Returns None if it cannot be found
+    or imported - callers then fall back to the simpler ``full.html.j2`` report so
+    the bundle never crashes. A None return is logged LOUDLY (error) because for a
+    PAID run it means the client would receive the legacy layout."""
+    candidates = _pdf_generator_candidates()
+    script = next((c for c in candidates if c.is_file()), None)
+    if script is None:
+        log.error(
+            "pdf_generator_not_found",
+            searched=";".join(str(c) for c in candidates),
+        )
         return None
     try:
         spec = importlib.util.spec_from_file_location("audit_pdf_generator", script)
         if spec is None or spec.loader is None:
+            log.error("pdf_generator_spec_failed", script=str(script))
             return None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
     except Exception as exc:  # noqa: BLE001
-        log.warning("pdf_generator_load_failed", error=f"{type(exc).__name__}: {exc}")
+        log.error(
+            "pdf_generator_load_failed",
+            script=str(script),
+            error=f"{type(exc).__name__}: {exc}",
+            traceback=traceback.format_exc(),
+        )
         return None
 
 
@@ -72,8 +117,14 @@ def _render_consulting_report_html(
     the artifact dir. Returns the (possibly patched) HTML string, or None on any
     failure (missing module, raised exception) so the caller can fall back to the
     simpler template."""
+    tier = "free" if condensed else "paid"
     mod = _load_pdf_generator()
     if mod is None or not hasattr(mod, "build_report_html"):
+        log.error(
+            "consulting_report_generator_unavailable",
+            tier=tier,
+            reason="module_not_loaded" if mod is None else "missing_build_report_html",
+        )
         return None
     try:
         html = mod.build_report_html(
@@ -85,7 +136,15 @@ def _render_consulting_report_html(
             condensed=condensed,
         )
     except Exception as exc:  # noqa: BLE001
-        log.warning("consulting_report_html_failed", error=f"{type(exc).__name__}: {exc}")
+        # build_report_html is written to NEVER raise; if it somehow does, log
+        # LOUDLY with the full traceback so the PAID fallback to the legacy
+        # single-file report can never regress invisibly.
+        log.error(
+            "consulting_report_html_failed",
+            tier=tier,
+            error=f"{type(exc).__name__}: {exc}",
+            traceback=traceback.format_exc(),
+        )
         return None
 
     # Deterministic M5 report-design contract loop. Never fatal: on a residual
@@ -193,6 +252,58 @@ def _render_consolidated_html(
     return path
 
 
+def _cap_report_pdf_pages(pdf_path: Path | None, *, max_pages: int) -> None:
+    """Hard safety net: truncate ``report.pdf`` to ``max_pages`` if it somehow
+    renders longer. The source-level caps in generate_audit_pdf.py already keep it
+    well under this, so this is a last line of defense - and a graceful no-op when
+    PyMuPDF is not installed (its absence must never break the bundle)."""
+    if pdf_path is None:
+        return
+    p = Path(pdf_path)
+    if not p.is_file():
+        return
+    try:
+        import fitz  # type: ignore  # PyMuPDF; lazy import so absence is non-fatal
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        doc = fitz.open(str(p))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("report_pdf_page_cap_open_failed", error=f"{type(exc).__name__}: {exc}")
+        return
+
+    tmp = p.with_suffix(".capped.pdf")
+    truncated = False
+    try:
+        if doc.page_count > max_pages:
+            log.warning(
+                "report_pdf_page_cap_applied",
+                pages=doc.page_count,
+                cap=max_pages,
+                path=str(p),
+            )
+            # Keep the first (cap - 1) pages PLUS the last page - the closing CTA
+            # (it carries the contact email the M5 contract checks and the free-tier
+            # upsell). This keeps the deliverable exactly ``max_pages`` long without
+            # ever dropping that final page when the net has to fire.
+            if max_pages >= 2:
+                keep = [*range(max_pages - 1), doc.page_count - 1]
+            else:
+                keep = list(range(max_pages))
+            doc.select(keep)
+            doc.save(str(tmp))
+            truncated = True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("report_pdf_page_cap_failed", error=f"{type(exc).__name__}: {exc}")
+        truncated = False
+    finally:
+        doc.close()
+
+    # Swap in the truncated copy only after the handle is closed (Windows-safe).
+    if truncated and tmp.is_file():
+        os.replace(str(tmp), str(p))
+
+
 def write_full_bundle(
     *,
     artifact_dir: Path,
@@ -288,12 +399,17 @@ def write_full_bundle(
         artifact_dir.mkdir(parents=True, exist_ok=True)
         report_html_path.write_text(consulting_html, encoding="utf-8")
     else:
+        # LAST-RESORT fallback only (the consulting designer failed and was logged
+        # LOUDLY above). Render the legacy single-file report in its CONDENSED form
+        # REGARDLESS of tier, so even this fallback stays ~15-20 pages and can never
+        # ship the multi-hundred-page uncondensed layout as the client deliverable.
+        log.error("consulting_report_fallback_used", tier="free" if condensed else "paid")
         report_html_path = html_reporter.render_report_html(
             findings=findings,
             run_metadata=run_meta,
             artifact_dir=artifact_dir,
             brand=brand,
-            condensed=condensed,
+            condensed=True,
         )
     html_paths["report_html"] = report_html_path
 
@@ -350,6 +466,21 @@ def write_full_bundle(
             ai_html.replace(ai_html_path)
             html_paths["report_ai_narrative_html"] = ai_html_path
 
-    pdf_paths = pdf_reporter.write_all_pdfs(html_paths)
+    # Render the SERVED consulting report.pdf FIRST so a slow or failing render of
+    # the heavy legacy reports (report-full.html can be hundreds of pages on a large
+    # crawl) can never leave report.pdf missing - which would make the backend serve
+    # the giant report-full.pdf instead. dicts preserve insertion order and
+    # write_all_pdfs renders in that order, so hoist report_html to the front.
+    ordered_html_paths: dict[str, Path] = {}
+    if "report_html" in html_paths:
+        ordered_html_paths["report_html"] = html_paths["report_html"]
+    ordered_html_paths.update({k: v for k, v in html_paths.items() if k != "report_html"})
+    pdf_paths = pdf_reporter.write_all_pdfs(ordered_html_paths)
+
+    # Belt-and-suspenders page cap on the SERVED report.pdf: guarantee it never
+    # exceeds the tier ceiling even if a data edge case slipped past the
+    # source-level caps in generate_audit_pdf.py. No-op when PyMuPDF is absent (the
+    # source-level caps already keep it well under the ceiling).
+    _cap_report_pdf_pages(pdf_paths.get("report_pdf"), max_pages=(20 if condensed else 100))
 
     return {**md_paths, "report_consolidated_md": consolidated_md_path, **html_paths, **pdf_paths}
