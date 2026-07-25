@@ -175,7 +175,10 @@ export async function downloadFile(path: string, filename?: string): Promise<voi
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Revoke AFTER the browser has picked up the download. A synchronous revoke
+  // invalidates the blob: URL before the async download reads it, which surfaces
+  // as "Your file couldn't be accessed - ERR_FILE_NOT_FOUND" in Chrome.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // Opens the blob in a new tab (no forced download attribute) — for a "View" action

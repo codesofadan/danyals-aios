@@ -20,7 +20,6 @@ const ADMIN_DESTS: Dest[] = [
   { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "nap directories" },
   { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "backlinks properties" },
   { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", keywords: "google updates algorithm" },
-  { icon: "map", label: "Off-page", href: "/admin/off-page", keywords: "gmb local maps" },
   { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
   { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff" },
   { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board" },
