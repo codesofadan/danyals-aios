@@ -246,6 +246,12 @@ services:
   # CERTBOT_EMAIL set, and app.qanry.com's DNS A record already pointing here.
   nginx:
     image: jonasal/nginx-certbot:latest
+    # Opt-in ONLY: this built-in TLS proxy binds host ports 80/443. On a VPS that
+    # already runs an external reverse proxy (e.g. nginx-proxy-manager fronting
+    # app.qanry.com -> web:3000) those ports are taken, so leave this profile OFF
+    # (the default) to avoid a "port is already allocated" clash. Enable it with
+    # COMPOSE_PROFILES=edge only when THIS stack owns 80/443 directly.
+    profiles: ["edge"]
     environment:
       CERTBOT_EMAIL: ${CERTBOT_EMAIL}
     ports:
