@@ -16,6 +16,8 @@
 #   5. runs the RLS coverage gate (fails the install if any public table is open)
 #   6. builds the venv + editable `pip install -e .`
 #   7. provisions the seed OWNER (idempotent) so there is a login
+#   7.5 builds the audit-engine venv (crawl+reports extras) + installs a headless
+#      Chromium so the report.pdf actually renders (skipped if AUDIT_ENGINE_DIR unset)
 #   8. installs + enables + (re)starts the three systemd units
 #
 # Prereqs: run as root; clone the repo to $DEPLOY_ROOT first (git clone <repo>
@@ -230,6 +232,56 @@ if [[ -n "$(env_get SEED_OWNER_USERNAME)" && -n "$(env_get SEED_OWNER_PASSWORD)"
 else
     warn "SEED_OWNER_USERNAME/PASSWORD not set in ${ENV_FILE}; skipping owner provisioning."
     warn "provision one later:  sudo -u ${APP_USER} ${VENV_DIR}/bin/python -m app.cli.provision_owner --username <u> --password <p>"
+fi
+
+# --- 7.5 Audit engine (Module 01): its OWN venv + a headless browser -----------
+# The engine (danyals-audit-system) is a SEPARATE product with its OWN interpreter
+# (AUDIT_ENGINE_PYTHON), invoked by the worker as a subprocess - it is NOT part of
+# the backend venv above. A full audit CRAWLS with Playwright and RENDERS the
+# consulting report.pdf with a headless browser; on a server with no system Chrome
+# the engine falls back to Playwright's bundled Chromium. Without a render backend
+# the engine still writes findings.json but produces NO downloadable report.pdf
+# (which surfaces in the dashboard as a "pdf error" on download). So we build the
+# engine venv WITH its crawl+reports extras and install Chromium (+ OS libs) into a
+# shared path the sandboxed worker can read.
+ENGINE_DIR="$(env_get AUDIT_ENGINE_DIR)"
+if [[ -n "${ENGINE_DIR}" && -f "${ENGINE_DIR}/pyproject.toml" ]]; then
+    ENGINE_PY="$(env_get AUDIT_ENGINE_PYTHON)"
+    if [[ -n "${ENGINE_PY}" ]]; then
+        ENGINE_VENV="$(dirname "$(dirname "${ENGINE_PY}")")"
+    else
+        ENGINE_VENV="${ENGINE_DIR}/.venv"
+        warn "AUDIT_ENGINE_PYTHON is unset; set it to ${ENGINE_VENV}/bin/python in ${ENV_FILE}."
+    fi
+    if [[ ! -d "${ENGINE_VENV}" ]]; then
+        log "creating audit-engine virtualenv at ${ENGINE_VENV}"
+        python3 -m venv "${ENGINE_VENV}"
+    fi
+    log "installing the audit engine (editable, crawl+reports extras) into its venv"
+    "${ENGINE_VENV}/bin/pip" install --upgrade pip -q
+    # [crawl] = the Playwright crawler (also a PDF backend); [reports] = markdown +
+    # weasyprint + pygments. Both are needed for a full audit to RUN and RENDER; a
+    # bare `pip install -e .` ships neither (they are optional extras).
+    (cd "${ENGINE_DIR}" && "${ENGINE_VENV}/bin/pip" install -e '.[crawl,reports]' -q)
+
+    # Playwright's bundled Chromium, into a shared path the sandboxed worker can
+    # read: StateDirectory=/var/lib/aios is the worker's only writable+readable tree
+    # (ProtectSystem=strict + ProtectHome=true). The worker unit exports
+    # PLAYWRIGHT_BROWSERS_PATH to the same path so the engine subprocess finds it.
+    # install-deps needs root (apt); the browser download inherits the same path.
+    PLAYWRIGHT_DIR="${STATE_DIR}/ms-playwright"
+    install -d -o "${APP_USER}" -g "${APP_USER}" -m 0750 "${PLAYWRIGHT_DIR}"
+    log "installing Playwright Chromium OS libraries (apt)"
+    "${ENGINE_VENV}/bin/python" -m playwright install-deps chromium \
+        || warn "playwright install-deps failed (unsupported distro?); PDF rendering may be degraded"
+    log "downloading Playwright Chromium into ${PLAYWRIGHT_DIR}"
+    PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_DIR}" "${ENGINE_VENV}/bin/python" -m playwright install chromium \
+        || warn "playwright chromium download failed; report.pdf may not render"
+
+    chown -R "${APP_USER}:${APP_USER}" "${ENGINE_VENV}" "${PLAYWRIGHT_DIR}"
+else
+    warn "AUDIT_ENGINE_DIR not set (or no pyproject.toml there); skipping audit-engine setup."
+    warn "audits stay unavailable until AUDIT_ENGINE_DIR + AUDIT_ENGINE_PYTHON are set in ${ENV_FILE}."
 fi
 
 # --- 8. systemd units ----------------------------------------------------------

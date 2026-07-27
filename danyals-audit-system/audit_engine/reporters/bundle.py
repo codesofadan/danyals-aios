@@ -369,12 +369,28 @@ def write_full_bundle(
         "usage": usage,
     }
 
-    html_paths = html_reporter.render_all(
-        findings=findings,
-        run_metadata=run_meta,
-        artifact_dir=artifact_dir,
-        brand=brand,
-    )
+    # The legacy multi-file HTML reports (report-full / executive / remediation).
+    # None of these is the SERVED deliverable - the AIOS adapter always prefers
+    # report.pdf (built from report.html below) - so a failure here must NEVER
+    # abort the bundle and prevent report.pdf from being produced. render_all's
+    # per-finding shaper uses hard subscripts, so a single malformed finding
+    # (e.g. an older/hand-authored findings.json missing owner_agent) would
+    # otherwise raise straight past the report.pdf build. Degrade to no legacy
+    # reports instead, and keep going to the consulting report.pdf that matters.
+    try:
+        html_paths = html_reporter.render_all(
+            findings=findings,
+            run_metadata=run_meta,
+            artifact_dir=artifact_dir,
+            brand=brand,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "legacy_html_reports_failed",
+            error=f"{type(exc).__name__}: {exc}",
+            traceback=traceback.format_exc(),
+        )
+        html_paths = {}
 
     # The single self-contained deliverable: report.html (CSS inlined) is what the
     # AIOS dashboard viewer shows AND the source report.pdf is rendered from (via

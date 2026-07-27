@@ -10,6 +10,11 @@ Type=simple
 User=aios
 Group=aios
 WorkingDirectory=/opt/aios/backend
+# Where install.sh downloads Playwright's Chromium (under the writable StateDirectory
+# so the sandbox can read it). The engine subprocess inherits this, so its headless
+# PDF render finds the browser. EnvironmentFile is read AFTER this, so aios.env can
+# override it if you relocate the cache.
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/aios/ms-playwright
 # Same root-owned env file as the API (see aios-api.service for the footgun note).
 EnvironmentFile=/etc/aios/aios.env
 ExecStart=/opt/aios/backend/.venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=4

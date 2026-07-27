@@ -53,14 +53,19 @@ def _evidence_summary(evidence_json: str | None) -> str | None:
 
 
 def _shape_finding(f: dict[str, Any]) -> dict[str, Any]:
+    # Defensive .get() throughout: findings from the engine DB always carry the
+    # NOT-NULL columns, but an older or hand-authored findings.json can be missing
+    # any of them. A hard subscript here would raise and abort the whole bundle
+    # (this reporter runs before the served report.pdf is built), so every field
+    # falls back to a benign default instead of crashing the deliverable.
     return {
-        "check_id": f["check_id"],
-        "check_name": f["check_name"],
-        "category": f["category"],
+        "check_id": f.get("check_id", ""),
+        "check_name": f.get("check_name", f.get("check_id", "")),
+        "category": f.get("category", ""),
         "subcategory": f.get("subcategory"),
-        "owner_agent": f["owner_agent"],
-        "status": f["status"],
-        "severity": f["severity"],
+        "owner_agent": f.get("owner_agent", ""),
+        "status": f.get("status", "fail"),
+        "severity": f.get("severity", "minor"),
         "score": f.get("score"),
         "confidence": f.get("confidence"),
         "page_id": f.get("page_id"),
