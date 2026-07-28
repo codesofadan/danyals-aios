@@ -58,6 +58,13 @@ export type CreateContentJobInput = {
   topic: string;
   framework: Framework | "Auto";
   target: PublishTarget;
+  // First-hand grounding the QA publish gate requires (fact_grounding / E-E-A-T).
+  // Optional, but a job with none of these hard-fails the publish gate (the
+  // generator has nothing real to ground against). camelCase = the server aliases.
+  proofPoints?: string[];
+  testimonials?: string[];
+  uniqueData?: string[];
+  services?: string[];
 };
 
 export function useCreateContentJob() {

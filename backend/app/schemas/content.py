@@ -101,6 +101,17 @@ class ContentJobCreate(BaseModel):
     topic: str = Field(min_length=1)
     framework: Framework | Literal["Auto"] = "Auto"
     target: PublishTarget = "WordPress"
+    # First-hand grounding the E-E-A-T / fact-grounding QA gate requires (§2/§7).
+    # Optional, but a job with NONE of these will hard-fail the publish gate
+    # (fact_grounding / eeat_experience floor) because the generator can only emit a
+    # ``[NEEDS:]`` marker with nothing real to ground against. Each is a short list of
+    # plain-text lines (one proof point / testimonial / stat / service per line); the
+    # endpoint seeds them into the job's ``source_pack`` verbatim. Capped so a body
+    # can't balloon the pack.
+    proof_points: list[str] = Field(default_factory=list, alias="proofPoints", max_length=12)
+    testimonials: list[str] = Field(default_factory=list, max_length=12)
+    unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
+    services: list[str] = Field(default_factory=list, max_length=20)
 
 
 ReviewAction = Literal["approve", "edit", "reject"]

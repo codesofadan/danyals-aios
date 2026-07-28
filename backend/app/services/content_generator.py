@@ -373,14 +373,27 @@ def _bound_words(text: str, max_words: int) -> str:
     return " ".join(tokens[:max_words])
 
 
+# Anti-stuffing density weights the HEAD of the primary phrase, not its full length.
+# The raw measure (occurrences * full word-length / total) linearly over-penalizes
+# long-tail informational queries: an 8-word primary appearing the same natural
+# number of times as a 2-word one reads as 4x the "density" purely because the
+# phrase is longer, so the exact query in title + a few headings + the FAQ trips the
+# 0.03 stuffing ceiling on content that isn't stuffed at all. Capping the per-
+# occurrence multiplier at the head-term unit measures saturation the way anti-
+# stuffing intends: 1-2 word terms are unchanged (min(1,2)=1, min(2,2)=2), and
+# genuine over-repetition of a long phrase still breaches the ceiling (it just needs
+# real repetition, not incidental length).
+_DENSITY_HEAD_WORDS = 2
+
+
 def _density(draft_md: str, primary: str) -> float:
     """Primary-keyword density as a 0-1 fraction (§3): occurrences of the primary
-    phrase * its word length / total words."""
+    phrase * its head-term word length (capped) / total words."""
     total = _word_count(draft_md)
     if total == 0 or not primary.strip():
         return 0.0
     occurrences = len(re.findall(re.escape(primary), draft_md, re.IGNORECASE))
-    primary_words = max(1, len(_words(primary)))
+    primary_words = min(max(1, len(_words(primary))), _DENSITY_HEAD_WORDS)
     return round(occurrences * primary_words / total, 4)
 
 

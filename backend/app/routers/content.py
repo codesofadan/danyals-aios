@@ -111,7 +111,21 @@ ContentPublishEnqueuerDep = Annotated[Callable[[str], None], Depends(get_content
 # --------------------------------------------------------------------------- #
 # source_pack seeding (client facts + WordPress publish config)
 # --------------------------------------------------------------------------- #
-def _seed_source_pack(client: dict[str, Any], site: dict[str, Any] | None, *, target: str) -> dict[str, Any]:
+def _clean_lines(items: list[str] | None) -> list[str]:
+    """Trim + drop blanks from an operator-supplied grounding list."""
+    return [s.strip() for s in (items or []) if isinstance(s, str) and s.strip()]
+
+
+def _seed_source_pack(
+    client: dict[str, Any],
+    site: dict[str, Any] | None,
+    *,
+    target: str,
+    proof_points: list[str] | None = None,
+    testimonials: list[str] | None = None,
+    unique_data: list[str] | None = None,
+    services: list[str] | None = None,
+) -> dict[str, Any]:
     """Assemble the worker's ``source_pack`` grounding from the client + its site.
 
     Snapshots the client FACTS (name/industry/founded/contact) the generator grounds
@@ -119,6 +133,13 @@ def _seed_source_pack(client: dict[str, Any], site: dict[str, Any] | None, *, ta
     passwords live encrypted in the vault (never in a request body); the publish
     chunk reveals them, so this seeds only the non-secret site reference. A missing
     site simply omits the WP config, and the publish path degrades to artifact-only.
+
+    The operator-supplied first-hand grounding (``proof_points``/``testimonials``/
+    ``unique_data``/``services``) is seeded verbatim: the generator's §2 Experience
+    block + §7 information-gain angle ground against these, so a job that supplies
+    them clears the ``fact_grounding``/``eeat_experience`` publish gate instead of
+    emitting a ``[NEEDS:]`` marker. Absent, the job still generates but holds at the
+    review gate as un-publishable (by design - no first-hand signal, no publish).
     """
     facts: dict[str, str] = {}
     if client.get("industry"):
@@ -131,6 +152,18 @@ def _seed_source_pack(client: dict[str, Any], site: dict[str, Any] | None, *, ta
         facts["contact_role"] = str(client["contact_role"])
 
     pack: dict[str, Any] = {"client_name": client.get("name", ""), "facts": facts}
+    proof = _clean_lines(proof_points)
+    quotes = _clean_lines(testimonials)
+    data = _clean_lines(unique_data)
+    svcs = _clean_lines(services)
+    if proof:
+        pack["proof_points"] = proof
+    if quotes:
+        pack["testimonials"] = quotes
+    if data:
+        pack["unique_data"] = data
+    if svcs:
+        pack["services"] = svcs
     if target == "WordPress" and site is not None:
         domain = str(site.get("domain") or "").strip()
         if domain:
@@ -247,7 +280,15 @@ async def create_content_job(
         auto = False
 
     site = await _first_site(clients, body.client_id) if body.target == "WordPress" else None
-    source_pack = _seed_source_pack(client, site, target=body.target)
+    source_pack = _seed_source_pack(
+        client,
+        site,
+        target=body.target,
+        proof_points=body.proof_points,
+        testimonials=body.testimonials,
+        unique_data=body.unique_data,
+        services=body.services,
+    )
 
     row = await asyncio.to_thread(
         repo.insert_job,

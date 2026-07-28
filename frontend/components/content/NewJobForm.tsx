@@ -13,7 +13,15 @@ export type NewJob = {
   topic: string;
   framework: Framework | "Auto";
   target: PublishTarget;
+  proofPoints: string[];
+  testimonials: string[];
+  uniqueData: string[];
+  services: string[];
 };
+
+// One item per non-blank line — how the grounding textareas map to the API arrays.
+const _lines = (s: string): string[] =>
+  s.split("\n").map((l) => l.trim()).filter(Boolean);
 
 const FW_OPTIONS: (Framework | "Auto")[] = ["Auto", ...FRAMEWORKS.map((f) => f.key)];
 
@@ -27,17 +35,36 @@ export default function NewJobForm(
   const [topic, setTopic] = useState("");
   const [framework, setFramework] = useState<Framework | "Auto">("Auto");
   const [target, setTarget] = useState<PublishTarget>("WordPress");
+  const [proof, setProof] = useState("");
+  const [testimonials, setTestimonials] = useState("");
+  const [uniqueData, setUniqueData] = useState("");
+  const [services, setServices] = useState("");
 
   const effectiveClientId = clientId || clients[0]?.id || "";
+  const hasProof = _lines(proof).length + _lines(testimonials).length + _lines(uniqueData).length > 0;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     // Generating a content job spends metered research + Claude budget, so it is
     // blocked while the global API-spend halt is engaged.
     if (!topic.trim() || !effectiveClientId || halted) return;
-    onCreate({ clientId: effectiveClientId, pageType, topic: topic.trim(), framework, target });
+    onCreate({
+      clientId: effectiveClientId,
+      pageType,
+      topic: topic.trim(),
+      framework,
+      target,
+      proofPoints: _lines(proof),
+      testimonials: _lines(testimonials),
+      uniqueData: _lines(uniqueData),
+      services: _lines(services),
+    });
     setTopic("");
     setFramework("Auto");
+    setProof("");
+    setTestimonials("");
+    setUniqueData("");
+    setServices("");
   }
 
   return (
@@ -114,6 +141,45 @@ export default function NewJobForm(
             ))}
           </div>
         </div>
+
+        <div className="fld">
+          <label>Proof &amp; first-hand experience</label>
+          <textarea
+            rows={3}
+            value={proof}
+            onChange={(e) => setProof(e.target.value)}
+            placeholder={"One per line — real projects, results, credentials.\ne.g. Manufactured 12,000+ sofas since 2011 across 3 production lines\ne.g. Kiln-dried hardwood frames, 15-year structural warranty"}
+          />
+          <div className="fld-hint">
+            Required to publish. The E-E-A-T / fact-grounding QA gate blocks any page with
+            zero first-hand proof, so a job without this will hold at review as un-publishable.
+          </div>
+        </div>
+
+        <div className="fld">
+          <label>Testimonials <span className="cs">(optional, one per line)</span></label>
+          <textarea rows={2} value={testimonials} onChange={(e) => setTestimonials(e.target.value)}
+            placeholder={"'Best build quality we've sourced in 10 years' - a Lahore buyer"} />
+        </div>
+
+        <div className="fld">
+          <label>Unique data / original stats <span className="cs">(optional, one per line)</span></label>
+          <textarea rows={2} value={uniqueData} onChange={(e) => setUniqueData(e.target.value)}
+            placeholder={"Our 2025 teardown of 200 returned units found 68% of failures start at the frame joint"} />
+        </div>
+
+        <div className="fld">
+          <label>Services <span className="cs">(optional, one per line)</span></label>
+          <textarea rows={2} value={services} onChange={(e) => setServices(e.target.value)}
+            placeholder={"Custom sofa manufacturing\nUpholstery\nFrame construction"} />
+        </div>
+
+        {!hasProof && (
+          <div className="cs" role="status" style={{ color: "var(--warn)", marginBottom: 8 }}>
+            <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>info</span>{" "}
+            No proof added — the job will generate but hold at review below the publish gate.
+          </div>
+        )}
 
         <button className="primary-btn wide" type="submit" disabled={!topic.trim() || !effectiveClientId || halted}>
           <span className="material-symbols-rounded">{halted ? "block" : "add"}</span>

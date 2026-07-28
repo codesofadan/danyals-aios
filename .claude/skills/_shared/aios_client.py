@@ -198,18 +198,27 @@ def cmd_resolve_client(a: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------- #
 def cmd_create_job(a: argparse.Namespace) -> None:
     """POST /content/jobs. The server RESOLVES framework (Auto) + schema_type +
-    source_pack; do not try to set them here beyond the page_type + topic + target."""
-    row = _req(
-        "POST",
-        "/content/jobs",
-        {
-            "client_id": a.client_id,
-            "page_type": a.page_type,
-            "topic": a.topic,
-            "framework": a.framework,
-            "target": a.target,
-        },
-    )
+    source_pack; do not try to set them here beyond the page_type + topic + target.
+
+    Supply first-hand grounding with repeatable --proof / --testimonial /
+    --unique-data / --service. Without at least one proof point the QA publish gate
+    (fact_grounding / E-E-A-T) will block the job at review as un-publishable."""
+    body = {
+        "client_id": a.client_id,
+        "page_type": a.page_type,
+        "topic": a.topic,
+        "framework": a.framework,
+        "target": a.target,
+    }
+    if a.proof:
+        body["proofPoints"] = a.proof
+    if a.testimonial:
+        body["testimonials"] = a.testimonial
+    if a.unique_data:
+        body["uniqueData"] = a.unique_data
+    if a.service:
+        body["services"] = a.service
+    row = _req("POST", "/content/jobs", body)
     print(json.dumps({"code": row.get("id"), "status": row.get("status"), "job": row}))
 
 
@@ -302,6 +311,13 @@ def _build_parser() -> argparse.ArgumentParser:
     cj.add_argument("--topic", required=True)
     cj.add_argument("--framework", default="Auto")
     cj.add_argument("--target", default="WordPress", choices=["WordPress", "PDF/Markdown"])
+    # First-hand grounding (repeatable). At least one --proof is needed for the job
+    # to clear the QA publish gate; the rest strengthen E-E-A-T / information gain.
+    cj.add_argument("--proof", action="append", default=[], help="a first-hand proof point (repeatable)")
+    cj.add_argument("--testimonial", action="append", default=[], help="a client testimonial (repeatable)")
+    cj.add_argument("--unique-data", dest="unique_data", action="append", default=[],
+                    help="an original stat / dataset (repeatable)")
+    cj.add_argument("--service", action="append", default=[], help="a service offered (repeatable)")
     cj.set_defaults(fn=cmd_create_job)
 
     w = sub.add_parser("wait-job", help="poll GET /content/jobs/{code} until terminal")

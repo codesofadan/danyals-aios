@@ -66,6 +66,11 @@ Copy this checklist and check items off as you go:
    $page_type --topic "$topic" --framework Auto --target WordPress` → `POST /content/jobs`. The
    server resolves the framework (`Auto` → AIDA/PAS/BAB per page type, DOCTRINE §6) + the JSON-LD
    schema (§9) + the source pack. Capture the `CJ-####` code.
+   **Always pass first-hand grounding** — repeatable `--proof "<real project/result/credential>"`
+   (at least one), plus optional `--testimonial`, `--unique-data`, `--service`. Without a proof
+   point the QA publish gate (`fact_grounding` / `eeat_experience`, DOCTRINE §2/§7) HARD-BLOCKS the
+   job: it generates but can never pass review. Gather the proof from the client's context (step 2)
+   or ask the operator; never invent it.
 
 4. **Wait for `needs_review`.** Run `aios_client.py wait-job --code CJ-#### --timeout 900` →
    polls `GET /content/jobs/{code}` until terminal. The worker owns the pipeline transitions;

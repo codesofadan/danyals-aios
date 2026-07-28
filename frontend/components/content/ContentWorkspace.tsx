@@ -33,6 +33,10 @@ export default function ContentWorkspace() {
       topic: input.topic,
       framework: input.framework,
       target: input.target,
+      proofPoints: input.proofPoints,
+      testimonials: input.testimonials,
+      uniqueData: input.uniqueData,
+      services: input.services,
     });
   }
 
