@@ -422,6 +422,37 @@ async def test_review_approve_to_publishing_and_enqueues_publish(
     assert published == ["CJ-1"]  # the publish worker was enqueued
 
 
+async def test_review_approve_blocked_by_failing_qa_is_422(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    # A draft that did NOT pass QA cannot be approved into publishing: the gate is
+    # enforced at the review step (with the blockers), not silently at publish time.
+    repo.seed(
+        code="CJ-1",
+        status="needs_review",
+        qa_score={"passed": False, "weighted_total": 64, "blocked_by": ["fact_grounding", "eeat_experience"]},
+    )
+    wire("manager")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "approve"})
+    assert resp.status_code == 422
+    detail = resp.json()["error"]["message"] if "error" in resp.json() else resp.json().get("detail", "")
+    assert "fact_grounding" in detail and "eeat_experience" in detail
+    # The job stayed at review and the publish worker was NOT enqueued.
+    assert repo.jobs["CJ-1"]["status"] == "needs_review"
+    assert published == []
+
+
+async def test_review_reject_allowed_even_when_qa_fails(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    # Reject/edit must always work on a failing draft - only approve is QA-gated.
+    repo.seed(code="CJ-1", status="needs_review", qa_score={"passed": False, "blocked_by": ["fact_grounding"]})
+    wire("manager")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "reject"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "rejected"
+
+
 async def test_review_edit_to_drafting_no_publish(
     client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
 ) -> None:

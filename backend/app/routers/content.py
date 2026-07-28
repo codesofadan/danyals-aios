@@ -26,6 +26,7 @@ overridable dependencies so the endpoints unit-test with zero broker.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from typing import Annotated, Any
 
@@ -114,6 +115,26 @@ ContentPublishEnqueuerDep = Annotated[Callable[[str], None], Depends(get_content
 def _clean_lines(items: list[str] | None) -> list[str]:
     """Trim + drop blanks from an operator-supplied grounding list."""
     return [s.strip() for s in (items or []) if isinstance(s, str) and s.strip()]
+
+
+def _qa_verdict(qa_score: Any) -> dict[str, Any] | None:
+    """The stored QA scorecard as a dict IFF it is a real verdict, else None.
+
+    ``qa_score`` is jsonb (psycopg hands it back as a dict), but tolerate a JSON
+    string too so the review gate never crashes on an unexpected shape. A verdict
+    only counts once the scorer has recorded a ``passed`` field; a not-yet-scored
+    job (empty ``{}`` / partial) returns None so the approve gate does not block on
+    missing data (the publish worker's own hard gate remains the backstop).
+    """
+    parsed: Any = qa_score
+    if isinstance(qa_score, str) and qa_score.strip():
+        try:
+            parsed = json.loads(qa_score)
+        except ValueError:
+            return None
+    if isinstance(parsed, dict) and "passed" in parsed:
+        return parsed
+    return None
 
 
 def _seed_source_pack(
@@ -339,6 +360,31 @@ async def review_content_job(
         raise _JOB_NOT_FOUND
     if job.get("status") != "needs_review":
         raise _NOT_IN_REVIEW
+
+    # QA is a HARD publish gate and it is evaluated DURING drafting (the worker scores
+    # every draft and stores the verdict on ``qa_score``). Enforce it HERE, at the
+    # review gate, so a sub-threshold draft is refused at approve time with the exact
+    # blockers - instead of being accepted into ``publishing`` and then silently
+    # dead-ending at "Blocked" when the publish worker re-checks. Approve only ever
+    # moves a draft that already passed; edit/reject always work (that is how a
+    # failing draft is fixed or dropped).
+    if body.action == "approve":
+        verdict = _qa_verdict(job.get("qa_score"))
+        if verdict is not None and verdict.get("passed") is not True:
+            blockers = [str(b) for b in (verdict.get("blocked_by") or [])]
+            total = verdict.get("weighted_total")
+            score = f" (scored {total}/100)" if isinstance(total, (int, float)) else ""
+            reason = f"; blocked by: {', '.join(blockers)}" if blockers else ""
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"This draft did not pass the QA publish gate{score} and cannot be "
+                    f"published as-is{reason}. Approving cannot override the gate. Use "
+                    "'edit' with guidance to re-draft, or recreate the job with first-hand "
+                    "proof (proof points / testimonials / unique data) so the E-E-A-T and "
+                    "fact-grounding checks pass."
+                ),
+            )
 
     new_status = {"approve": "publishing", "edit": "drafting", "reject": "rejected"}[body.action]
     changes: dict[str, Any] = {"status": new_status}
