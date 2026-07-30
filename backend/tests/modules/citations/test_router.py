@@ -70,6 +70,15 @@ class FakeCitationsRepo:
     def get_business_profile(self, profile_id: str) -> dict[str, Any] | None:
         return self.profiles.get(profile_id)
 
+    def ensure_business_profile(
+        self, *, client_id: str, client_name: str
+    ) -> dict[str, Any] | None:
+        """Mirror the real repo: return the client's existing submission profile, else
+        None (the fake has no client-NAP source to derive from, so a client with no
+        profile yields the honest 'capture a NAP first' -> the router 404s)."""
+        existing = self.list_business_profiles(client_id=client_id)
+        return existing[0] if existing else None
+
     def client_name_for(self, client_id: str) -> str | None:
         return self.client_names.get(client_id)
 

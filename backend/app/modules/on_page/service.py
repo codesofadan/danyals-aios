@@ -82,6 +82,12 @@ H1_EXPECTED_COUNT = 1
 # pages that cannot compete, it does not reward padding.
 THIN_CONTENT_MIN_WORDS = 300
 
+# On-page keyword presence floor: a keyword that appears in under ~0.5% of the body on
+# a page that TARGETS it is too sparse to signal topical focus. Distinct from the
+# content generator's ``PRIMARY_DENSITY_TARGET_MIN`` (0.0, a "never below" sentinel for
+# its own scorer) - the on-page audit needs a real floor to fire ``keyword_density_low``.
+KEYWORD_MIN_DENSITY = 0.005
+
 # Internal links: >= 2 contextual internal links per ~1000 words. Fewer and the page
 # is a dead end for both crawlers and equity flow.
 INTERNAL_LINKS_PER_1000_WORDS = 2.0
@@ -718,14 +724,14 @@ def detect_content(
                             "ceiling": PRIMARY_DENSITY_HARD_CEILING},
                 )
             )
-        elif density < PRIMARY_DENSITY_TARGET_MIN:
+        elif density < KEYWORD_MIN_DENSITY:
             out.append(
                 _rec(
                     "keyword_density_low",
                     f"Keyword density is {density:.1%} - under the "
-                    f"{PRIMARY_DENSITY_TARGET_MIN:.1%} target",
+                    f"{KEYWORD_MIN_DENSITY:.1%} presence floor",
                     detail={"density": round(density, 4),
-                            "target_min": PRIMARY_DENSITY_TARGET_MIN},
+                            "target_min": KEYWORD_MIN_DENSITY},
                 )
             )
     if words:

@@ -27,7 +27,8 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
     plan.mutate(
       {
         clientId, platform, anchor: anchor.trim(), targetUrl: targetUrl.trim(), pageType,
-        proofPoints: proofLines,
+        // Cap to the server's max_length=12 so pasting more lines can't 422 the plan.
+        proofPoints: proofLines.slice(0, 12),
       },
       { onSuccess: () => setPlanned(true) },
     );

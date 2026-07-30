@@ -54,10 +54,11 @@ export default function NewJobForm(
       topic: topic.trim(),
       framework,
       target,
-      proofPoints: _lines(proof),
-      testimonials: _lines(testimonials),
-      uniqueData: _lines(uniqueData),
-      services: _lines(services),
+      // Cap to the server max_length so pasting extra lines can't 422 the create.
+      proofPoints: _lines(proof).slice(0, 12),
+      testimonials: _lines(testimonials).slice(0, 12),
+      uniqueData: _lines(uniqueData).slice(0, 12),
+      services: _lines(services).slice(0, 20),
     });
     setTopic("");
     setFramework("Auto");
