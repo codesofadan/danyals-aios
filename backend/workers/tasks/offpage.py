@@ -27,6 +27,7 @@ and returns. When 7F-1 lands, the same seam starts delivering with no change her
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +37,7 @@ from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
 from app.schemas.offpage import action_for
 from app.services import pricing
+from app.services.content_generator import SourcePack
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
@@ -313,14 +315,49 @@ def _writer_for(settings: Settings) -> tuple[Any | None, str]:
     return providers.writer, providers.model_writer
 
 
+def _wr_str_list(value: Any) -> list[str]:
+    """Trimmed, blank-dropped string list from a jsonb value (else empty)."""
+    if not isinstance(value, list):
+        return []
+    return [str(x).strip() for x in value if str(x).strip()]
+
+
+def _source_pack_from_web2_row(row: dict[str, Any]) -> SourcePack:
+    """Build the writer's grounding pack from the placement's ``source_pack`` jsonb
+    (seeded at plan time with the operator's first-hand proof). Empty -> just the
+    client name, so the generator emits ``[NEEDS:]`` gaps (never a hallucination)
+    that HOLD at review - exactly the pre-grounding behaviour."""
+    raw = row.get("source_pack")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    facts_raw = raw.get("facts")
+    facts = (
+        {str(k): str(v) for k, v in facts_raw.items()} if isinstance(facts_raw, dict) else {}
+    )
+    return SourcePack(
+        client_name=str(raw.get("client_name") or row.get("client_name") or "our team"),
+        facts=facts,
+        services=_wr_str_list(raw.get("services")),
+        proof_points=_wr_str_list(raw.get("proof_points")),
+        unique_data=_wr_str_list(raw.get("unique_data")),
+        testimonials=_wr_str_list(raw.get("testimonials")),
+    )
+
+
 def _client_from_row(row: dict[str, Any]) -> Web2Client:
-    """The minimal grounding client for a placement (display name + tenant id). The
-    source-of-truth pack + fresh 6B context wiring is a later chunk; with none, the
-    generator degrades ungrounded facts to ``[NEEDS:]`` gaps that HOLD at review."""
+    """The grounding client for a placement: display name + tenant id + the first-hand
+    ``source_pack`` seeded at plan time. With an empty pack the generator degrades
+    ungrounded facts to ``[NEEDS:]`` gaps that HOLD at review."""
     client_id = row.get("client_id")
     return Web2Client(
         client_id=str(client_id) if client_id else None,
         name=str(row.get("client_name") or ""),
+        source_pack=_source_pack_from_web2_row(row),
     )
 
 

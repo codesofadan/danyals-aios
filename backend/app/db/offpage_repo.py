@@ -20,6 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import privileged_connection, rls_connection
@@ -268,20 +269,23 @@ class OffpageRepo:
         topic: str,
         page_type: str,
         framework: str,
+        source_pack: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Insert a PLANNED Web 2.0 placement (status ``draft``) and return the row.
 
         Lead-only by RLS (the web2_properties insert policy). ``client_name`` is a
-        display SNAPSHOT; the write worker fills the drafted body + flips the status."""
+        display SNAPSHOT; ``source_pack`` is the writer's first-hand grounding (proof /
+        testimonials / unique data), read by the write worker so the draft is gap-free.
+        The write worker fills the drafted body + flips the status."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "insert into public.web2_properties "
                 "(client_id, client_name, platform, anchor, target_url, topic, "
-                "page_type, framework, status) "
-                "values (%s, %s, %s, %s, %s, %s, %s, %s, 'draft') returning *",
+                "page_type, framework, source_pack, status) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft') returning *",
                 (
                     client_id, client_name, platform, anchor, target_url, topic,
-                    page_type, framework,
+                    page_type, framework, Jsonb(source_pack or {}),
                 ),
             )
             return cur.fetchone()

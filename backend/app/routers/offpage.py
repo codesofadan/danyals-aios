@@ -264,6 +264,21 @@ async def plan_web2(
     name = await asyncio.to_thread(repo.client_name_for, body.client_id)
     if name is None:
         raise _CLIENT_NOT_FOUND
+    # Seed the writer's grounding pack (mirrors the content job): first-hand proof so
+    # the draft is gap-free instead of holding at [NEEDS:]. Blank lines dropped; an
+    # empty pack simply degrades to [NEEDS:] exactly as before.
+    def _lines(items: list[str]) -> list[str]:
+        return [s.strip() for s in items if isinstance(s, str) and s.strip()]
+
+    source_pack: dict[str, Any] = {"client_name": name}
+    if _lines(body.proof_points):
+        source_pack["proof_points"] = _lines(body.proof_points)
+    if _lines(body.testimonials):
+        source_pack["testimonials"] = _lines(body.testimonials)
+    if _lines(body.unique_data):
+        source_pack["unique_data"] = _lines(body.unique_data)
+    if _lines(body.services):
+        source_pack["services"] = _lines(body.services)
     row = await asyncio.to_thread(
         repo.create_web2,
         client_id=body.client_id,
@@ -274,6 +289,7 @@ async def plan_web2(
         topic=(body.topic or body.anchor),
         page_type=body.page_type,
         framework=body.framework,
+        source_pack=source_pack,
     )
     if row is None:  # RLS/insert rejected (should not happen for a lead)
         raise HTTPException(

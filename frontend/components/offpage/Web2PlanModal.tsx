@@ -13,17 +13,22 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
   const [anchor, setAnchor] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
   const [pageType, setPageType] = useState<"service" | "blog" | "local">("blog");
+  const [proof, setProof] = useState("");
 
   const plan = usePlanWeb2();
   const [planned, setPlanned] = useState(false);
 
   const canPlan = !!clientId && anchor.trim().length > 1 && targetUrl.trim().startsWith("http");
+  const proofLines = proof.split("\n").map((l) => l.trim()).filter(Boolean);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canPlan) return;
     plan.mutate(
-      { clientId, platform, anchor: anchor.trim(), targetUrl: targetUrl.trim(), pageType },
+      {
+        clientId, platform, anchor: anchor.trim(), targetUrl: targetUrl.trim(), pageType,
+        proofPoints: proofLines,
+      },
       { onSuccess: () => setPlanned(true) },
     );
   }
@@ -91,6 +96,16 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
             <div className="fld">
               <label>Target URL (the client page this backlink points to)</label>
               <input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} placeholder="https://client.example/services" />
+            </div>
+            <div className="fld">
+              <label>Proof &amp; first-hand experience (one per line)</label>
+              <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)}
+                placeholder={"Real projects, results, credentials — the writer grounds against these.\ne.g. Rebuilt 40 storm-damaged roofs in 2025\ne.g. 25-year workmanship warranty"} />
+              {proofLines.length === 0 && (
+                <div className="fld-hint" style={{ color: "var(--warn)" }}>
+                  Without proof the draft holds at review on [NEEDS:] gaps — add at least one line.
+                </div>
+              )}
             </div>
             <div className="op-muted">
               Publishing to <b>{platform}</b>{" "}

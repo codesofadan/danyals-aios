@@ -371,3 +371,47 @@ def test_web2_publish_worker_never_raises_on_store_failure(monkeypatch: pytest.M
     # web2_publisher_from_settings returns None (per-account OAuth is in the vault).
     outcome = wk.execute_web2_publish(BoomStore(), _settings(), "w2-1")  # type: ignore[arg-type]
     assert outcome.state == "error"  # never stuck, never re-raised
+
+
+# --------------------------------------------------------------------------- #
+# Web 2.0 source-pack grounding (7B-4 proof wiring)
+# --------------------------------------------------------------------------- #
+def test_source_pack_from_web2_row_builds_grounded_pack() -> None:
+    """The write worker turns the placement's seeded source_pack jsonb into a real
+    grounding pack so the draft is gap-free (proof / testimonials / unique data)."""
+    row = {
+        "client_name": "Acme Roofing",
+        "source_pack": {
+            "client_name": "Acme Roofing",
+            "proof_points": ["Rebuilt 40 storm-damaged roofs in 2025", "  "],
+            "testimonials": ["'They saved our home' - J. Doe"],
+            "unique_data": ["2025 study of 500 roofs: 30% spot-repair only"],
+            "services": ["Roof repair"],
+            "facts": {"years": 18},
+        },
+    }
+    pack = wk._source_pack_from_web2_row(row)
+    assert pack.client_name == "Acme Roofing"
+    assert pack.proof_points == ["Rebuilt 40 storm-damaged roofs in 2025"]  # blank dropped
+    assert pack.testimonials == ["'They saved our home' - J. Doe"]
+    assert pack.unique_data == ["2025 study of 500 roofs: 30% spot-repair only"]
+    assert pack.services == ["Roof repair"]
+    assert pack.facts == {"years": "18"}
+
+
+def test_source_pack_from_web2_row_empty_degrades_to_name_only() -> None:
+    """No seeded pack -> just the client name, so the generator emits [NEEDS:] gaps
+    that hold at review (the pre-grounding behaviour, never a hallucination)."""
+    pack = wk._source_pack_from_web2_row({"client_name": "Acme", "source_pack": {}})
+    assert pack.client_name == "Acme"
+    assert pack.proof_points == [] and pack.testimonials == [] and pack.unique_data == []
+
+
+def test_client_from_row_carries_source_pack() -> None:
+    """_client_from_row now populates Web2Client.source_pack (the run_write seam)."""
+    client = wk._client_from_row({
+        "client_id": "cl-1", "client_name": "Acme",
+        "source_pack": {"proof_points": ["Did a real thing"]},
+    })
+    assert client.source_pack is not None
+    assert client.source_pack.proof_points == ["Did a real thing"]

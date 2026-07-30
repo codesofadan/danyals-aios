@@ -211,6 +211,12 @@ export type Web2PlanInput = {
   topic?: string;
   pageType?: "service" | "blog" | "local";
   framework?: string;
+  // First-hand grounding the writer grounds against — without it the draft holds at
+  // review on [NEEDS:] gaps. camelCase = the server aliases.
+  proofPoints?: string[];
+  testimonials?: string[];
+  uniqueData?: string[];
+  services?: string[];
 };
 
 export function usePlanWeb2() {

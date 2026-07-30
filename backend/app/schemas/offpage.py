@@ -264,6 +264,14 @@ class Web2PlanRequest(BaseModel):
     topic: str | None = None
     page_type: Web2PageType = Field(default="blog", alias="pageType")
     framework: str = "Auto"
+    # First-hand grounding the writer grounds against (same contract as a content
+    # job). Optional, but a property planned with NONE of these drafts with
+    # ``[NEEDS:]`` gaps and holds at review, un-publishable - so supply real proof.
+    # The endpoint seeds them verbatim into the property's ``source_pack``.
+    proof_points: list[str] = Field(default_factory=list, alias="proofPoints", max_length=12)
+    testimonials: list[str] = Field(default_factory=list, max_length=12)
+    unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
+    services: list[str] = Field(default_factory=list, max_length=20)
 
 
 class Web2ReviewRequest(BaseModel):

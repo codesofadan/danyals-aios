@@ -381,13 +381,14 @@ class FakeOffpageRepo:
     def create_web2(
         self, *, client_id: str, client_name: str, platform: str, anchor: str,
         target_url: str, topic: str, page_type: str, framework: str,
+        source_pack: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         row = {
             "id": f"w2-{len(self.web2_by_id) + 1}", "client_id": client_id,
             "client_name": client_name, "platform": platform, "anchor": anchor,
             "target_url": target_url, "topic": topic, "page_type": page_type,
-            "framework": framework, "status": "draft", "post_url": "",
-            "verified": "pending", "published_at": None,
+            "framework": framework, "source_pack": source_pack or {}, "status": "draft",
+            "post_url": "", "verified": "pending", "published_at": None,
         }
         self.web2_by_id[row["id"]] = row
         self.created_web2.append(row)
@@ -640,6 +641,29 @@ async def test_web2_plan_creates_draft_and_enqueues_write(
     assert body["verified"] == "pending"
     assert repo.created_web2 and repo.created_web2[0]["status"] == "draft"
     assert writes == [repo.created_web2[0]["id"]]  # the write worker was enqueued
+
+
+async def test_web2_plan_seeds_source_pack_from_proof(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    # First-hand proof supplied at plan time is seeded into the property's source_pack
+    # so the write worker grounds the draft (no [NEEDS:] hold). Blanks are dropped.
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/plan", json=_plan_body(
+        proofPoints=["Rebuilt 40 storm-damaged roofs in 2025", "  "],
+        testimonials=["'They saved our home' - J. Doe"],
+        uniqueData=["2025 study of 500 roofs: 30% needed only spot repair"],
+        services=["Roof repair", "Roof replacement"],
+    ))
+    assert resp.status_code == 201
+    pack = repo.created_web2[0]["source_pack"]
+    assert pack["client_name"] == "Acme Roofing"
+    assert pack["proof_points"] == ["Rebuilt 40 storm-damaged roofs in 2025"]  # blank dropped
+    assert pack["testimonials"] == ["'They saved our home' - J. Doe"]
+    assert pack["unique_data"] == ["2025 study of 500 roofs: 30% needed only spot repair"]
+    assert pack["services"] == ["Roof repair", "Roof replacement"]
 
 
 async def test_web2_plan_unknown_client_is_404(
