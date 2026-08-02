@@ -1611,20 +1611,25 @@ def _publish_via_rest(
     post = PostDraft(
         title=title,
         content=md_to_html(draft_md),
-        status="publish",
+        # Push as a DRAFT: AIOS already ran the QA gate + human approval, but the final
+        # go-live stays with the client in wp-admin (safer on a live site, and matches
+        # the AIOS Publisher plugin path which also drafts). Flip to "publish" only if
+        # the agency wants fully-automated go-live.
+        status="draft",
         slug=_slug(title),
         wp_post_id=wp_post_id,  # set -> idempotent UPDATE, else CREATE
     )
     result: PublishResult = publisher.publish(site_url, post)
-    # Surface the LIVE post URL on the wire-visible `stage` field so the dashboard's
-    # Review surface can display it + offer an "open live post" action (the wire
-    # ContentJob has no dedicated url column; the stage label carries it).
-    stage = f"Published: {result.url}" if result.url else "Published"
+    # Surface the WordPress post URL on the wire-visible `stage` field so the dashboard's
+    # Review surface can display it + offer an "open in WordPress" action (the wire
+    # ContentJob has no dedicated url column; the stage label carries it). It lands as a
+    # DRAFT in wp-admin for the client to publish.
+    stage = f"Draft on WordPress: {result.url}" if result.url else "Draft on WordPress"
     store.update(code, {"status": "done", "stage": stage, "wp_post_id": str(result.post_id)})
-    _emit_content_deliverable(row, artifact_key=None)  # published to WP; no local artifact
-    logger.info("content_published_wp", code=code, wp_post_id=result.post_id)
+    _emit_content_deliverable(row, artifact_key=None)  # pushed to WP; no local artifact
+    logger.info("content_drafted_wp", code=code, wp_post_id=result.post_id)
     return PublishOutcome(
-        code, "done", "published", reason="published to WordPress", wp_post_id=result.post_id, url=result.url
+        code, "done", "published", reason="drafted to WordPress", wp_post_id=result.post_id, url=result.url
     )
 
 

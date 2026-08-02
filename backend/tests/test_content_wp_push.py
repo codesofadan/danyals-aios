@@ -166,10 +166,10 @@ def test_no_plugin_target_uses_legacy_wordpress_path() -> None:
     )
 
     assert out.state == "published"
-    assert out.reason == "published to WordPress"  # the legacy REST path, not the plugin
+    assert out.reason == "drafted to WordPress"  # the legacy REST path, not the plugin (drafts)
     assert store.row["status"] == "done"
     assert store.row.get("wp_url") is None  # the plugin push never ran
-    assert store.row["stage"].startswith("Published")
+    assert store.row["stage"].startswith("Draft on WordPress")
 
 
 # --------------------------------------------------------------------------- #
