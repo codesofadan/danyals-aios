@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { NAP_META, SUBMIT_STATUS_META, type Citation, type NapStatus } from "@/lib/offpage";
-import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap } from "@/lib/hooks/offpage";
+import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
 import w from "./Wave4.module.css";
@@ -34,6 +34,40 @@ export default function CitationsTab() {
   const clientsQ = useClients();
   const gapQ = useCitationGap(gapClient || undefined);
   const gap = gapQ.data;
+  const runAudit = useRunCitationAudit();
+  const clearCitations = useClearCitations();
+
+  // Audit-first: discover which directories already list this business vs which are
+  // missing. Populates the board + gap analysis; build then targets the missing.
+  function auditClient() {
+    if (!gapClient || runAudit.isPending) return;
+    runAudit.mutate(gapClient, {
+      onSuccess: (r) => {
+        setFlash(r?.detail ?? "Citation audit queued — discovering existing vs missing.");
+        window.setTimeout(() => setFlash(null), 4200);
+      },
+      onError: (err) => {
+        setFlash(`Audit couldn't start — ${(err as Error)?.message ?? "add the client's NAP first"}.`);
+        window.setTimeout(() => setFlash(null), 4200);
+      },
+    });
+  }
+
+  // Clear a client's citations so it can be re-audited from a clean slate.
+  function clearForClient() {
+    if (!gapClient || clearCitations.isPending) return;
+    if (!window.confirm("Remove ALL citation rows for this client? It can then be re-audited fresh.")) return;
+    clearCitations.mutate(gapClient, {
+      onSuccess: (r) => {
+        setFlash(`Cleared ${r?.removed ?? 0} citation row(s) — run an audit to rediscover.`);
+        window.setTimeout(() => setFlash(null), 4200);
+      },
+      onError: (err) => {
+        setFlash(`Clear failed — ${(err as Error)?.message ?? "try again"}.`);
+        window.setTimeout(() => setFlash(null), 4200);
+      },
+    });
+  }
 
   // Mark ONE listing handled — Submit a missing one or Update a drifted one.
   function actOnRow(c: Citation) {
@@ -113,9 +147,9 @@ export default function CitationsTab() {
         </div>
       )}
 
-      {/* Gap analysis: reconcile a client's citations against the catalog. */}
+      {/* Audit-first: pick a client, AUDIT to discover built-vs-missing, then build the gaps. */}
       <div className="fld" style={{ marginTop: 4 }}>
-        <label>Gap analysis - pick a client to see what is covered vs still missing</label>
+        <label>Citation audit - pick a client, run an audit to discover what&apos;s already built vs missing</label>
         <select value={gapClient} onChange={(e) => setGapClient(e.target.value)}>
           <option value="">Choose a client…</option>
           {(clientsQ.data ?? []).map((c) => (
@@ -123,6 +157,21 @@ export default function CitationsTab() {
           ))}
         </select>
       </div>
+      {gapClient && (
+        <div className="op-toolset" style={{ marginBottom: 8 }}>
+          <button className="primary-btn" onClick={auditClient} disabled={runAudit.isPending}>
+            <span className="material-symbols-rounded">search_check</span>
+            {runAudit.isPending ? "Auditing…" : "Run citation audit"}
+          </button>
+          <button className="ghostbtn co-reject" onClick={clearForClient} disabled={clearCitations.isPending}>
+            <span className="material-symbols-rounded">delete_sweep</span>
+            {clearCitations.isPending ? "Clearing…" : "Clear citations"}
+          </button>
+          <span className="op-muted" style={{ alignSelf: "center" }}>
+            Audit first (discover built vs missing), then build only the gaps below.
+          </span>
+        </div>
+      )}
 
       {gapClient && gapQ.isLoading && <div className="op-muted">Analysing citations…</div>}
       {gapClient && gapQ.isError && (

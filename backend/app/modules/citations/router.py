@@ -18,13 +18,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
-from app.modules.citations.repo import CitationsRepoDep, web2_credential_counts
+from app.modules.citations.repo import (
+    CitationsRepoDep,
+    ServiceCitationsStore,
+    service_citations_store,
+    web2_credential_counts,
+)
 from app.modules.citations.schemas import (
     AUTOMATABLE_TIERS,
     DEFAULT_CAMPAIGN_CAP,
@@ -78,6 +83,37 @@ def get_citation_enqueuer() -> Callable[[str], None]:
 
 
 CitationEnqueuerDep = Annotated[Callable[[str], None], Depends(get_citation_enqueuer)]
+
+
+def get_audit_enqueuer() -> Callable[[str, str, str], None]:
+    """Dependency: enqueue the citation-AUDIT sweep (overridable in tests).
+
+    Reuses the built off-page monitor worker (``monitor_offpage``): it pulls the
+    business's directory listings from the configured citation tracker, diffs vs the
+    ledger, and writes real ``nap_status`` rows (consistent / inconsistent / missing)
+    - i.e. discovers where the business is already listed vs where it is not. Lazily
+    imported so the API process never pulls in Celery just to import this router."""
+
+    def _enqueue(client_id: str, domain: str, business: str) -> None:
+        from workers.tasks.offpage import monitor_offpage_job
+
+        monitor_offpage_job.delay(client_id, domain, business)
+
+    return _enqueue
+
+
+AuditEnqueuerDep = Annotated[Callable[[str, str, str], None], Depends(get_audit_enqueuer)]
+
+
+def get_service_citations_store() -> ServiceCitationsStore:
+    """Dependency: the privileged citations store (service_role) for the delete path.
+
+    ``citations`` has FORCE RLS with no delete policy, so clearing rows must run on
+    the service_role connection - exactly like the submit worker's writes."""
+    return service_citations_store()
+
+
+ServiceCitationsStoreDep = Annotated[ServiceCitationsStore, Depends(get_service_citations_store)]
 
 
 # --- business profiles ----------------------------------------------------------
@@ -174,6 +210,69 @@ async def ensure_business_profile(
     return BusinessProfileResponse.from_row(row)
 
 
+# --- citation audit (discover) + clear ------------------------------------------
+
+
+@router.post("/clients/{client_id}/audit", status_code=status.HTTP_202_ACCEPTED)
+async def run_citation_audit(
+    client_id: str, repo: CitationsRepoDep, actor: Lead, enqueue: AuditEnqueuerDep
+) -> dict[str, Any]:
+    """AUDIT a client's citations (lead-only): discover which directories ALREADY list
+    this business (and whether the NAP is consistent) vs which are MISSING - the
+    audit-first step before any build.
+
+    Requires the client's NAP (business profile); enqueues the citation-tracker sweep
+    (``monitor_offpage``), which pulls the business's directory listings, diffs vs the
+    ledger, and writes the discovered ``nap_status`` rows the board + gap-analysis then
+    read. Build then targets only the MISSING directories the audit surfaces. 404s on an
+    unknown/invisible client; 400s when the client has no NAP to audit against. With no
+    citation tracker configured the sweep degrades honestly (no rows) rather than
+    inventing listings."""
+    name = await asyncio.to_thread(repo.client_name_for, client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    profile = await asyncio.to_thread(
+        repo.ensure_business_profile, client_id=client_id, client_name=name
+    )
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add this client's NAP (business profile) before running a citation audit.",
+        )
+    business = str(profile.get("business_name") or name)
+    # domain is only used by the sibling backlink monitor; a citation audit keys off
+    # the business name, so "" is fine here.
+    enqueue(client_id, "", business)
+    await record_activity(
+        actor, kind="content", action="ran a citation audit", target=name,
+        entity_type="client", entity_id=client_id,
+    )
+    return {
+        "status": "queued",
+        "clientId": client_id,
+        "business": business,
+        "detail": "Citation audit queued - discovering existing vs missing listings.",
+    }
+
+
+@router.delete("/clients/{client_id}/citations")
+async def clear_client_citations(
+    client_id: str, repo: CitationsRepoDep, store: ServiceCitationsStoreDep, actor: Lead
+) -> dict[str, Any]:
+    """Clear ALL citation rows for a client (lead-only) so it can be re-audited from a
+    clean slate. Validates the client is visible to the caller (RLS ``client_name_for``)
+    BEFORE the privileged delete, so a lead can only clear a tenant it can see."""
+    name = await asyncio.to_thread(repo.client_name_for, client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    removed = await asyncio.to_thread(store.clear_citations, client_id)
+    await record_activity(
+        actor, kind="content", action=f"cleared {removed} citation row(s)", target=name,
+        entity_type="client", entity_id=client_id,
+    )
+    return {"clientId": client_id, "removed": removed}
+
+
 # --- directory catalog -----------------------------------------------------------
 
 
@@ -246,13 +345,23 @@ async def create_campaign(
     # Apply the reference-plan strategy (vertical match + spam-tail floor + marketplace
     # gate + build-order sort + cap). The selection is ORDERED, so queueing walks it in
     # build order (core -> tier1 -> tier2), and every exclusion is counted, never silent.
-    selection = select_campaign_directories(
-        candidates,
-        vertical=vertical,
-        cap=cap,
-        min_authority=min_authority,
-        include_marketplaces=body.include_marketplaces,
-    )
+    if body.directory_ids:
+        # Audit-first "build only these": the operator ticked specific MISSING
+        # directories, so build exactly those (still automatable + in-market) and
+        # bypass the strategy filters/cap - an explicit choice is not second-guessed.
+        wanted = {str(d) for d in body.directory_ids}
+        picked = [r for r in candidates if str(r.get("id")) in wanted]
+        selection = select_campaign_directories(
+            picked, vertical=vertical, cap=0, min_authority=0, include_marketplaces=True
+        )
+    else:
+        selection = select_campaign_directories(
+            candidates,
+            vertical=vertical,
+            cap=cap,
+            min_authority=min_authority,
+            include_marketplaces=body.include_marketplaces,
+        )
 
     existing = await asyncio.to_thread(repo.existing_citation_directory_ids, body.client_id)
     requeueable = await asyncio.to_thread(repo.requeueable_citations, body.client_id)

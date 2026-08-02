@@ -188,6 +188,11 @@ class CitationCampaignRequest(BaseModel):
     cap: int | None = Field(default=None, ge=0)
     min_authority: int | None = Field(default=None, ge=0, le=100, alias="minAuthority")
     include_marketplaces: bool = Field(default=False, alias="includeMarketplaces")
+    # Audit-first "build only these" subset: after an audit surfaces the MISSING
+    # directories, the operator ticks the ones to build and sends their catalog ids
+    # here. When present, the campaign restricts to exactly these (still skipping any
+    # already in flight); when omitted, it falls back to the full strategy selection.
+    directory_ids: list[str] | None = Field(default=None, alias="directoryIds")
 
 
 class CitationCampaignResponse(BaseModel):

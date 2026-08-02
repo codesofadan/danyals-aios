@@ -16,7 +16,11 @@ from fastapi import FastAPI
 
 from app.core.auth import CurrentUser, get_current_user
 from app.modules.citations.repo import get_citations_repo
-from app.modules.citations.router import get_citation_enqueuer
+from app.modules.citations.router import (
+    get_audit_enqueuer,
+    get_citation_enqueuer,
+    get_service_citations_store,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -164,11 +168,40 @@ def enqueued() -> list[str]:
 
 
 @pytest.fixture
+def audits() -> list[tuple[str, str, str]]:
+    return []
+
+
+class _FakeServiceCitationsStore:
+    """Records clear_citations calls for the delete-endpoint test."""
+
+    def __init__(self) -> None:
+        self.cleared: list[str] = []
+
+    def clear_citations(self, client_id: str) -> int:
+        self.cleared.append(client_id)
+        return 3  # pretend 3 rows removed
+
+
+@pytest.fixture
+def svc_store() -> _FakeServiceCitationsStore:
+    return _FakeServiceCitationsStore()
+
+
+@pytest.fixture
 def wire(
-    app: FastAPI, repo: FakeCitationsRepo, enqueued: list[str]
+    app: FastAPI,
+    repo: FakeCitationsRepo,
+    enqueued: list[str],
+    audits: list[tuple[str, str, str]],
+    svc_store: _FakeServiceCitationsStore,
 ) -> Callable[[str], None]:
     app.dependency_overrides[get_citations_repo] = lambda: repo
     app.dependency_overrides[get_citation_enqueuer] = lambda: enqueued.append
+    app.dependency_overrides[get_audit_enqueuer] = lambda: (
+        lambda cid, dom, biz: audits.append((cid, dom, biz))
+    )
+    app.dependency_overrides[get_service_citations_store] = lambda: svc_store
 
     def _as(role: str) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
@@ -422,3 +455,72 @@ async def test_locked_business_profile_rejects_edits_until_unlocked(
         json={"clientId": "cl-secret", "businessName": "Renamed", "napLocked": False},
     )
     assert ok.status_code == 200, ok.text
+
+
+# --------------------------------------------------------------------------- #
+# Audit-first flow: audit (discover) + clear (remove) + build-only-selected
+# --------------------------------------------------------------------------- #
+async def test_audit_requires_nap(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    audits: list[tuple[str, str, str]],
+) -> None:
+    repo.client_names["cl-1"] = "Acme Dental"  # known client, but no NAP profile
+    wire("owner")
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 400
+    assert audits == []  # nothing enqueued without a NAP
+
+
+async def test_audit_enqueues_monitor_with_business(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    audits: list[tuple[str, str, str]],
+) -> None:
+    repo.client_names["cl-1"] = "Acme Dental"
+    repo.create_business_profile(client_id="cl-1", client_name="Acme Dental",
+                                 fields={"business_name": "Acme Dental Studio"})
+    wire("owner")
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["business"] == "Acme Dental Studio" and body["clientId"] == "cl-1"
+    # The monitor sweep was enqueued WITH the business name (the dead business="" gap).
+    assert audits == [("cl-1", "", "Acme Dental Studio")]
+
+
+async def test_audit_unknown_client_404(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    wire("owner")
+    resp = await client.post("/api/v1/citation-builder/clients/nope/audit")
+    assert resp.status_code == 404
+
+
+async def test_audit_is_lead_only(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    repo.client_names["cl-1"] = "Acme Dental"
+    wire("analyst")  # a non-lead staffer
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 403
+
+
+async def test_clear_citations_removes_and_validates_client(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    svc_store: "_FakeServiceCitationsStore",
+) -> None:
+    repo.client_names["cl-1"] = "Acme Dental"
+    wire("owner")
+    resp = await client.request("DELETE", "/api/v1/citation-builder/clients/cl-1/citations")
+    assert resp.status_code == 200
+    assert resp.json()["removed"] == 3
+    assert svc_store.cleared == ["cl-1"]  # ran the privileged clear for the visible client
+
+
+async def test_clear_unknown_client_404(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    svc_store: "_FakeServiceCitationsStore",
+) -> None:
+    wire("owner")
+    resp = await client.request("DELETE", "/api/v1/citation-builder/clients/nope/citations")
+    assert resp.status_code == 404
+    assert svc_store.cleared == []  # never touched the DB for an invisible client

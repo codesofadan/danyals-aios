@@ -324,6 +324,17 @@ class ServiceCitationsStore:
         with privileged_connection() as cur:
             cur.execute(stmt, [*fields.values(), citation_id])
 
+    def clear_citations(self, client_id: str) -> int:
+        """DELETE every citation row for a client and return the row count.
+
+        Runs on the privileged connection because ``citations`` has ENABLE+FORCE RLS
+        with NO delete policy (0018) - a delete must be service_role. Used by the
+        operator "clear citations" action so a client can be re-audited from a clean
+        slate (an audit re-discovers the true built-vs-missing state)."""
+        with privileged_connection() as cur:
+            cur.execute("delete from public.citations where client_id = %s", (client_id,))
+            return int(cur.rowcount or 0)
+
 
 def service_citations_store() -> ServiceCitationsStore:
     """The privileged citations store the citation_submit_job worker uses."""

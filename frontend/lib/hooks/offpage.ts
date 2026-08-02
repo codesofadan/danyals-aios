@@ -167,6 +167,40 @@ export function useEnsureBusinessProfile() {
   });
 }
 
+/** POST /citation-builder/clients/{id}/audit — the AUDIT-FIRST step: discover which
+ *  directories already list this business vs which are missing (writes nap_status
+ *  rows the board + gap-analysis read). Requires the client's NAP. */
+export function useRunCitationAudit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clientId: string) =>
+      api.post<{ status: string; business: string; clientId: string; detail: string }>(
+        `/citation-builder/clients/${clientId}/audit`,
+        {},
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+      void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
+      void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
+    },
+  });
+}
+
+/** DELETE /citation-builder/clients/{id}/citations — clear a client's citation rows so
+ *  it can be re-audited from a clean slate (lead-only). */
+export function useClearCitations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clientId: string) =>
+      api.del<{ clientId: string; removed: number }>(`/citation-builder/clients/${clientId}/citations`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+      void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
+      void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
+    },
+  });
+}
+
 // --- Wave 4: API status boards -----------------------------------------------
 export const WEB2_STATUS_KEY = ["citation-builder", "web2-status"] as const;
 export const ENGINE_STATUS_KEY = ["citation-builder", "engine-status"] as const;
