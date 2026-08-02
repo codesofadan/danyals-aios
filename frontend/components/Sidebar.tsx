@@ -51,7 +51,9 @@ const SECTIONS: Section[] = [
 // Tabs LOCKED in PRODUCTION until the module is fully built. They stay visible in
 // `next dev` (NODE_ENV !== 'production') so the team keeps building them; the prod
 // bundle hides them. To relaunch a tab, remove its href from this set.
-const LOCKED_IN_PROD = new Set<string>(["/admin/citations", "/admin/web2"]);
+// Citations + Web 2.0 are now shipped (verified live end-to-end: a real Web 2.0
+// publish + the citation submit pipeline), so both are unlocked for production.
+const LOCKED_IN_PROD = new Set<string>([]);
 const HIDE_LOCKED = process.env.NODE_ENV === "production";
 
 export default function Sidebar() {
