@@ -1,10 +1,9 @@
 import TopBar from "@/components/TopBar";
 import "../off-page/offpage.css";
 import CitationsTab from "@/components/offpage/CitationsTab";
-import { blockIfLockedInProd } from "@/lib/lockedInProd";
+import TestGate from "@/components/TestGate";
 
 export default function CitationsPage() {
-  blockIfLockedInProd();
   return (
     <>
       <TopBar
@@ -12,15 +11,17 @@ export default function CitationsPage() {
         title="Citations"
         searchPlaceholder="Search directories, citations, NAP…"
       />
-      <section className="card">
-        <div className="card-h">
-          <div>
-            <div className="ct">Citation Builder</div>
-            <div className="cs">Directory submissions + NAP consistency — Foursquare, aggregators &amp; the self-hosted bot.</div>
+      <TestGate gateKey="citations" label="Citations">
+        <section className="card">
+          <div className="card-h">
+            <div>
+              <div className="ct">Citation Builder</div>
+              <div className="cs">Directory submissions + NAP consistency — Foursquare, aggregators &amp; the self-hosted bot.</div>
+            </div>
           </div>
-        </div>
-        <CitationsTab />
-      </section>
+          <CitationsTab />
+        </section>
+      </TestGate>
     </>
   );
 }
