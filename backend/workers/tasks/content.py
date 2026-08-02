@@ -1509,15 +1509,20 @@ def publish_content_job(
         # else here is not ready to publish.
         return PublishOutcome(code, status, "noop", reason="not in the publishing state")
 
-    # --- The QA HARD GATE re-check: never publish a sub-threshold draft. ---
+    # QA is ADVISORY, not a gate (product decision): the automated QA scorecard is
+    # still computed at drafting and surfaced for the reviewer, but it NO LONGER blocks
+    # publish. The HUMAN review gate (a lead approving needs_review -> publishing) is the
+    # quality gate now - "QA approves it after reading". This keeps a job from taking a
+    # long, token-heavy rewrite loop just to clear an automated threshold; generation
+    # aims for top quality up front and a person signs off. The qa_score is logged for
+    # visibility.
     qa = _as_dict(row.get("qa_score"))
-    if qa.get("passed") is not True:
-        blocked_by = [str(b) for b in qa.get("blocked_by") or []]
-        # Leave the job at publishing with a clear marker (same-status write) and
-        # signal the caller; the draft is NOT published.
-        _safe_stage(store, code, "Blocked — QA gate below publish threshold")
-        logger.info("content_publish_blocked", code=code, blocked_by=blocked_by)
-        raise PublishBlocked(code, blocked_by)
+    logger.info(
+        "content_publish_qa_advisory",
+        code=code,
+        qa_passed=qa.get("passed"),
+        qa_total=qa.get("weighted_total"),
+    )
 
     draft_md = str(row.get("draft_md") or "")
     title = _extract_title(draft_md) or str(row.get("topic") or code)

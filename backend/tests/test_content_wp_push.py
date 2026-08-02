@@ -173,22 +173,20 @@ def test_no_plugin_target_uses_legacy_wordpress_path() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 4. The QA hard gate still blocks a sub-threshold draft BEFORE any push.
+# 4. QA is ADVISORY: a sub-threshold draft still pushes (human review is the gate).
 # --------------------------------------------------------------------------- #
-def test_qa_block_prevents_plugin_push() -> None:
-    from workers.tasks.content import PublishBlocked
-
+def test_qa_does_not_block_plugin_push() -> None:
     store = FakeContentStore(_publish_row(qa_score={"passed": False, "blocked_by": ["fact_grounding"]}))
     fake = FakeWordPressPluginPublisher(site_url="https://verde.example")
 
-    with pytest.raises(PublishBlocked):
-        publish_content_job(
-            store, None, "CJ-4200",
-            settings=_settings(), resolve_wp_plugin=_plugin(fake),
-        )
+    out = publish_content_job(
+        store, None, "CJ-4200",
+        settings=_settings(), resolve_wp_plugin=_plugin(fake),
+    )
 
-    assert fake.published == []  # never pushed
-    assert store.row["status"] == "publishing"
+    assert out.state == "published"   # QA score no longer blocks publish
+    assert len(fake.published) == 1   # pushed despite the failing QA score
+    assert store.row["status"] == "done"
 
 
 # --------------------------------------------------------------------------- #

@@ -247,7 +247,12 @@ class Settings(BaseSettings):
     # rewrite passes so it can never spin forever. Every pass is cost-gated, so the
     # global halt / client cap can stop the loop early (advance with the best draft). ---
     content_qa_target_score: int = 90   # the top-1% weighted-total the loop aims for
-    content_qa_max_loops: int = 3       # hard cap on drafting-time rewrite passes
+    # QA is advisory (not a gate) - the human review gate is the quality gate. Default
+    # to 0 drafting-time rewrite passes: generate one high-quality draft (doctrine +
+    # research + proof grounding) and let a person sign off, instead of a long,
+    # token-heavy rewrite loop chasing an automated threshold. Raise this only if you
+    # want the pipeline to auto-improve toward content_qa_target_score again.
+    content_qa_max_loops: int = 0       # drafting-time rewrite passes (0 = single draft)
 
     # --- AIOS Publisher plugin push (host-independent WordPress publish). The
     # companion WordPress plugin exposes its OWN endpoint + shared-key auth, so a

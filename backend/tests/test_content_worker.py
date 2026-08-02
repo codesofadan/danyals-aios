@@ -16,7 +16,8 @@ Worker (P7A-7) proves:
 
 Publish (P7A-8) proves:
 
-* a QA-blocked (sub-threshold) job CANNOT publish (raises PublishBlocked);
+* QA is ADVISORY, not a gate: a sub-threshold (or unscored) job still publishes -
+  the human review gate is the quality gate now;
 * a passing job publishes to WordPress; the publish is idempotent (a set
   ``wp_post_id`` -> UPDATE, id reused);
 * the PDF/Markdown path renders to the traversal-safe store and never leaks a path;
@@ -47,7 +48,6 @@ from integrations.wordpress import (
 from workers.tasks.content import (
     ClientWpTarget,
     MeteredCostGate,
-    PublishBlocked,
     WpTarget,
     build_client_wp_target,
     execute_content_job,
@@ -527,28 +527,30 @@ def _wp_resolver(publisher: Any, site_url: str = "https://verde.example") -> Any
     return lambda row, settings: WpTarget(site_url=site_url, publisher=publisher)
 
 
-def test_publish_blocked_when_qa_fails() -> None:
+def test_publish_not_blocked_by_failing_qa() -> None:
+    # QA is ADVISORY (product decision): a sub-threshold draft still publishes - the
+    # human review gate already approved it, so the automated scorecard no longer blocks.
     store = FakeContentStore(
         _publish_row(qa_score={"passed": False, "blocked_by": ["fact_grounding"], "weighted_total": 60})
     )
     spy = _SpyWordPress()
 
-    with pytest.raises(PublishBlocked) as excinfo:
-        publish_content_job(
-            store, None, "CJ-4200", settings=_settings(), resolve_wp=_wp_resolver(spy)
-        )
+    out = publish_content_job(
+        store, None, "CJ-4200", settings=_settings(), resolve_wp=_wp_resolver(spy)
+    )
 
-    assert excinfo.value.blocked_by == ["fact_grounding"]
-    assert spy.published == []  # NEVER published
-    assert store.row["status"] == "publishing"  # not advanced to done
+    assert out.state == "published"           # published despite the failing QA score
+    assert len(spy.published) == 1
+    assert store.row["status"] == "done"
 
 
-def test_publish_blocked_when_no_qa_score() -> None:
-    # An unscored job (empty qa_score) is fail-safe: never publish.
+def test_publish_not_blocked_when_no_qa_score() -> None:
+    # An unscored job (empty qa_score) also publishes - QA is advisory, not a gate.
     store = FakeContentStore(_publish_row(qa_score={}))
-    with pytest.raises(PublishBlocked):
-        publish_content_job(store, None, "CJ-4200", settings=_settings(), resolve_wp=_wp_resolver(_SpyWordPress()))
-    assert store.row["status"] == "publishing"
+    spy = _SpyWordPress()
+    out = publish_content_job(store, None, "CJ-4200", settings=_settings(), resolve_wp=_wp_resolver(spy))
+    assert out.state == "published"
+    assert store.row["status"] == "done"
 
 
 def test_publish_passes_to_wordpress() -> None:
@@ -560,7 +562,7 @@ def test_publish_passes_to_wordpress() -> None:
     assert out.state == "published"
     assert out.status == "done"
     assert store.row["status"] == "done"
-    assert store.row["stage"].startswith("Published")  # carries the live URL when present
+    assert store.row["stage"].startswith("Draft on WordPress")  # carries the post URL when present
     assert store.row["wp_post_id"]  # recorded for idempotent re-publish
     assert out.url
     # The live URL is surfaced on the wire-visible stage label for the dashboard.

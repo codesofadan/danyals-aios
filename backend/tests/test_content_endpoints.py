@@ -422,11 +422,12 @@ async def test_review_approve_to_publishing_and_enqueues_publish(
     assert published == ["CJ-1"]  # the publish worker was enqueued
 
 
-async def test_review_approve_blocked_by_failing_qa_is_422(
+async def test_review_approve_with_failing_qa_still_publishes(
     client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
 ) -> None:
-    # A draft that did NOT pass QA cannot be approved into publishing: the gate is
-    # enforced at the review step (with the blockers), not silently at publish time.
+    # QA is ADVISORY, not a gate: approving a sub-threshold draft still moves it to
+    # publishing (the human sign-off IS the quality gate). The reviewer sees the QA
+    # scorecard in the preview and decides.
     repo.seed(
         code="CJ-1",
         status="needs_review",
@@ -434,18 +435,15 @@ async def test_review_approve_blocked_by_failing_qa_is_422(
     )
     wire("manager")
     resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "approve"})
-    assert resp.status_code == 422
-    detail = resp.json()["error"]["message"] if "error" in resp.json() else resp.json().get("detail", "")
-    assert "fact_grounding" in detail and "eeat_experience" in detail
-    # The job stayed at review and the publish worker was NOT enqueued.
-    assert repo.jobs["CJ-1"]["status"] == "needs_review"
-    assert published == []
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "publishing"
+    assert published == ["CJ-1"]  # publish worker enqueued despite the failing QA score
 
 
-async def test_review_reject_allowed_even_when_qa_fails(
+async def test_review_reject_still_works_on_failing_qa(
     client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
 ) -> None:
-    # Reject/edit must always work on a failing draft - only approve is QA-gated.
+    # Reject/edit remain the ways to drop or fix a draft the reviewer isn't happy with.
     repo.seed(code="CJ-1", status="needs_review", qa_score={"passed": False, "blocked_by": ["fact_grounding"]})
     wire("manager")
     resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "reject"})

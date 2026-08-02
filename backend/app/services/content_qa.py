@@ -293,14 +293,22 @@ def _angle_is_substantive(content: GeneratedContent) -> bool:
 
 def _concrete_claim_digits(draft_md: str) -> list[str]:
     """Every concrete numeric claim in the draft, as its digit string (money,
-    percentages, and standalone 2+ digit numbers) - the fact-grounding audit set."""
+    percentages, and standalone 2+ digit numbers) - the fact-grounding audit set.
+
+    A bare 4-digit YEAR (1900-2099) is excluded: a temporal reference ("today, in
+    2026, ...") is not a fabricated quantity claim, and penalising the current year
+    as an "untraceable number" false-fails otherwise-grounded copy. Money/percent
+    values are still audited (so "$2026" or "20.26%" is not exempted)."""
     tokens: list[str] = []
     for match in _MONEY_RE.findall(draft_md):
         tokens.append(_digits(match))
     for match in _PERCENT_RE.findall(draft_md):
         tokens.append(_digits(match))
     for match in _NUMBER_RE.findall(draft_md):
-        tokens.append(_digits(match))
+        d = _digits(match)
+        if len(d) == 4 and 1900 <= int(d) <= 2099:
+            continue  # a bare year is a temporal reference, not a quantity claim
+        tokens.append(d)
     return [t for t in tokens if t]
 
 
