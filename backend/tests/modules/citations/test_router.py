@@ -65,7 +65,15 @@ class FakeCitationsRepo:
         self.updated_profiles: list[tuple[str, dict[str, Any]]] = []
         self.queued: list[dict[str, Any]] = []
         self.requeued: list[str] = []
+        self.client_naps: dict[str, dict[str, Any]] = {}
+        self.citations: dict[str, list[dict[str, Any]]] = {}
         self._next_id = 1
+
+    def client_business_profile_for(self, client_id: str) -> dict[str, Any] | None:
+        return self.client_naps.get(client_id)
+
+    def list_citations_for_client(self, client_id: str) -> list[dict[str, Any]]:
+        return list(self.citations.get(client_id, []))
 
     def list_business_profiles(self, *, client_id: str | None = None) -> list[dict[str, Any]]:
         rows = list(self.profiles.values())
@@ -524,3 +532,86 @@ async def test_clear_unknown_client_404(
     resp = await client.request("DELETE", "/api/v1/citation-builder/clients/nope/citations")
     assert resp.status_code == 404
     assert svc_store.cleared == []  # never touched the DB for an invisible client
+
+
+# --------------------------------------------------------------------------- #
+# 5. Expanded business fields (0060) round-trip.
+# --------------------------------------------------------------------------- #
+async def test_create_business_profile_round_trips_the_expanded_fields(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    repo.client_names["cl-secret"] = "Acme Dental"
+    wire("owner")
+    resp = await client.post(
+        "/api/v1/citation-builder/business-profiles",
+        json={
+            "clientId": "cl-secret", "businessName": "Acme Dental", "market": "US",
+            "description": "Family + cosmetic dentistry", "email": "hi@acme.example",
+            "logoUrl": "https://acme.example/logo.png", "facebookUrl": "https://fb.com/acme",
+            "instagramUrl": "https://ig.com/acme", "linkedinUrl": "https://linkedin.com/company/acme",
+            "yearFounded": 2009, "paymentTypes": ["cash", "visa"], "tagline": "Smiles for all",
+            "serviceArea": "Greater Bellevue",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    # the new columns were persisted (snake_case) ...
+    created = repo.created_profiles[0]
+    assert created["description"] == "Family + cosmetic dentistry"
+    assert created["year_founded"] == 2009 and created["payment_types"] == ["cash", "visa"]
+    # ... and echoed back on the camelCase wire contract.
+    body = resp.json()
+    assert body["description"] == "Family + cosmetic dentistry"
+    assert body["email"] == "hi@acme.example"
+    assert body["logoUrl"] == "https://acme.example/logo.png"
+    assert body["facebookUrl"] == "https://fb.com/acme"
+    assert body["yearFounded"] == 2009
+    assert body["paymentTypes"] == ["cash", "visa"]
+    assert body["serviceArea"] == "Greater Bellevue"
+    assert body["tagline"] == "Smiles for all"
+
+
+# --------------------------------------------------------------------------- #
+# 6. Audit plan (generic -> country -> niche, built|missing).
+# --------------------------------------------------------------------------- #
+async def test_audit_plan_returns_three_prioritized_buckets(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    repo.client_names["cl-1"] = "Atlas Legal"
+    repo.client_industries["cl-1"] = "Family Law Firm"  # -> vertical 'legal'
+    repo.directories = [
+        _directory_row(id="fs", name="Foursquare", market="GLOBAL", verticals=[]),
+        _directory_row(id="yp", name="YellowPages", market="US", verticals=[]),
+        _directory_row(id="avvo", name="Avvo", market="US", verticals=["legal"]),
+        _directory_row(id="hg", name="Healthgrades", market="US", verticals=["medical"]),
+    ]
+    # one live submission covering Foursquare -> it should report BUILT.
+    repo.citations["cl-1"] = [
+        {"id": "c1", "directory": "Foursquare", "directory_id": "fs",
+         "submit_status": "submitted", "nap_status": "missing", "proof_url": "https://p/1"},
+    ]
+    wire("viewer")  # a staff read
+    resp = await client.get("/api/v1/citation-builder/clients/cl-1/audit-plan")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resolvedVertical"] == "legal" and body["market"] == "US"
+    assert [d["directoryName"] for d in body["generic"]] == ["Foursquare"]
+    assert [d["directoryName"] for d in body["country"]] == ["YellowPages"]
+    assert [d["directoryName"] for d in body["niche"]] == ["Avvo"]  # medical excluded
+    assert body["generic"][0]["status"] == "built"      # covered by the citation
+    assert body["country"][0]["status"] == "missing"    # no covering citation yet
+
+
+async def test_audit_plan_requires_staff_read(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    wire("client")  # a portal client holds no staff permission
+    resp = await client.get("/api/v1/citation-builder/clients/cl-1/audit-plan")
+    assert resp.status_code == 403
+
+
+async def test_audit_plan_unknown_client_404(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    wire("viewer")
+    resp = await client.get("/api/v1/citation-builder/clients/nope/audit-plan")
+    assert resp.status_code == 404

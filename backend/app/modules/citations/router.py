@@ -34,6 +34,8 @@ from app.modules.citations.schemas import (
     AUTOMATABLE_TIERS,
     DEFAULT_CAMPAIGN_CAP,
     DEFAULT_MIN_AUTHORITY,
+    AuditPlanItem,
+    AuditPlanResponse,
     BusinessProfileRequest,
     BusinessProfileResponse,
     CitationCampaignRequest,
@@ -48,6 +50,7 @@ from app.modules.citations.schemas import (
 )
 from app.modules.citations.service import (
     automatable_directories,
+    build_audit_plan,
     compute_citation_gap,
     estimate_campaign_cost,
     select_campaign_directories,
@@ -468,6 +471,56 @@ async def gap_analysis(
         live_urls=[CitationLiveUrl(**u) for u in gap.live_urls],
         by_submit_status=gap.by_submit_status,
         by_nap_status=gap.by_nap_status,
+    )
+
+
+# --- audit plan (generic -> country -> niche) -------------------------------------
+
+
+@router.get("/clients/{client_id}/audit-plan", response_model=AuditPlanResponse)
+async def audit_plan(
+    client_id: str, repo: CitationsRepoDep, _user: ViewReports
+) -> AuditPlanResponse:
+    """The geo/niche/generic citation audit for a client, PRIORITIZED Generic -> Country
+    -> Niche, each directory tagged built|missing (staff read).
+
+    Reuses the SAME selection + gap logic a campaign uses (``build_audit_plan`` over
+    ``select_campaign_directories`` + ``compute_citation_gap``) - no re-ranking. Read-only:
+    resolves the client's market from an existing submission profile, else its own NAP,
+    else US; derives built-vs-missing from the existing citation records (all ``missing``
+    when none exist yet). Degrade-safe - never inserts a profile or queues work. 404s on an
+    unknown/invisible client."""
+    client = await asyncio.to_thread(repo.client_meta_for, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+
+    # Resolve the market WITHOUT writing (mirrors gap_analysis): a submission profile's
+    # market if one exists, else the client's own NAP market, else US.
+    profiles = await asyncio.to_thread(repo.list_business_profiles, client_id=client_id)
+    if profiles:
+        market = str(profiles[0].get("market") or "US")
+    else:
+        client_nap = await asyncio.to_thread(repo.client_business_profile_for, client_id)
+        market = str(client_nap.get("market") or "US") if client_nap else "US"
+
+    vertical = normalize_vertical(str(client.get("industry") or ""))
+    directories = await asyncio.to_thread(repo.list_directories, markets=[market, "GLOBAL"], tiers=None)
+    existing = await asyncio.to_thread(repo.list_citations_for_client, client_id)
+    plan = build_audit_plan(directories=directories, existing_citations=existing, vertical=vertical)
+
+    def _items(rows: list[dict[str, Any]]) -> list[AuditPlanItem]:
+        return [AuditPlanItem.from_directory(r, status=r["_status"]) for r in rows]
+
+    # Any-typed so the runtime-validated market (always one of the five) binds to the
+    # response's BusinessMarket Literal field without a static-typing narrowing dance.
+    resolved_market: Any = market if market in {"US", "UK", "CA", "AU", "GLOBAL"} else "US"
+    return AuditPlanResponse(
+        client=str(client.get("name") or ""),
+        resolved_vertical=vertical,
+        market=resolved_market,
+        generic=_items(plan.generic),
+        country=_items(plan.country),
+        niche=_items(plan.niche),
     )
 
 

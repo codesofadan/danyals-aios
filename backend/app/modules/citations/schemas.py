@@ -62,11 +62,23 @@ class BusinessProfileResponse(BaseModel):
     is_primary: bool = Field(serialization_alias="isPrimary")
     # Once locked, the canonical NAP cannot be edited until explicitly unlocked (0048).
     nap_locked: bool = Field(default=False, serialization_alias="napLocked")
+    # Richer identity beyond NAP (0060) - what a real directory form also asks for.
+    description: str = ""
+    email: str = ""
+    logo_url: str = Field(default="", serialization_alias="logoUrl")
+    facebook_url: str = Field(default="", serialization_alias="facebookUrl")
+    instagram_url: str = Field(default="", serialization_alias="instagramUrl")
+    linkedin_url: str = Field(default="", serialization_alias="linkedinUrl")
+    year_founded: int | None = Field(default=None, serialization_alias="yearFounded")
+    payment_types: list[str] = Field(default_factory=list, serialization_alias="paymentTypes")
+    tagline: str = ""
+    service_area: str = Field(default="", serialization_alias="serviceArea")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> BusinessProfileResponse:
         market = row.get("market")
         hours = row.get("hours")
+        year = row.get("year_founded")
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
@@ -84,6 +96,16 @@ class BusinessProfileResponse(BaseModel):
             hours=dict(hours) if isinstance(hours, dict) else {},
             is_primary=bool(row.get("is_primary", False)),
             nap_locked=bool(row.get("nap_locked", False)),
+            description=row.get("description") or "",
+            email=row.get("email") or "",
+            logo_url=row.get("logo_url") or "",
+            facebook_url=row.get("facebook_url") or "",
+            instagram_url=row.get("instagram_url") or "",
+            linkedin_url=row.get("linkedin_url") or "",
+            year_founded=int(year) if year is not None else None,
+            payment_types=list(row.get("payment_types") or []),
+            tagline=row.get("tagline") or "",
+            service_area=row.get("service_area") or "",
         )
 
 
@@ -109,6 +131,18 @@ class BusinessProfileRequest(BaseModel):
     # Lock/unlock the canonical NAP. A locked profile rejects edits until a request
     # explicitly sets this back to false (see the router's update guard).
     nap_locked: bool = Field(default=False, alias="napLocked")
+    # Richer identity beyond NAP (0060). The python field name IS the DB column name,
+    # so model_dump(by_alias=False) feeds the repo's dynamic INSERT/UPDATE directly.
+    description: str = ""
+    email: str = ""
+    logo_url: str = Field(default="", alias="logoUrl")
+    facebook_url: str = Field(default="", alias="facebookUrl")
+    instagram_url: str = Field(default="", alias="instagramUrl")
+    linkedin_url: str = Field(default="", alias="linkedinUrl")
+    year_founded: int | None = Field(default=None, alias="yearFounded")
+    payment_types: list[str] = Field(default_factory=list, alias="paymentTypes")
+    tagline: str = ""
+    service_area: str = Field(default="", alias="serviceArea")
 
 
 class DirectoryResponse(BaseModel):
@@ -244,6 +278,50 @@ class GapAnalysisResponse(BaseModel):
     live_urls: list[CitationLiveUrl] = Field(serialization_alias="liveUrls")
     by_submit_status: dict[str, int] = Field(serialization_alias="bySubmitStatus")
     by_nap_status: dict[str, int] = Field(serialization_alias="byNapStatus")
+
+
+# --- audit plan (generic -> country -> niche) ------------------------------------
+
+
+class AuditPlanItem(BaseModel):
+    """One directory in the audit plan: which directory, its market/tier/url, and
+    whether the client already has it BUILT (a covering citation exists) or it is a
+    MISSING build target. ``status`` mirrors the gap-analysis covering rule."""
+
+    directory_name: str = Field(serialization_alias="directoryName")
+    market: BusinessMarket
+    tier: DirectoryTier
+    url: str
+    status: Literal["built", "missing"]
+
+    @classmethod
+    def from_directory(cls, row: dict[str, Any], *, status: Literal["built", "missing"]) -> AuditPlanItem:
+        market, tier = row.get("market"), row.get("tier")
+        return cls(
+            directory_name=str(row.get("name") or ""),
+            market=market if market in _MARKETS else "US",
+            tier=tier if tier in _TIERS else "bot_fillable",
+            url=str(row.get("url") or ""),
+            status=status,
+        )
+
+
+class AuditPlanResponse(BaseModel):
+    """The geo/niche/generic citation audit, PRIORITIZED Generic -> Country -> Niche.
+
+    * ``generic`` - the GLOBAL core/aggregators/APIs every market builds first.
+    * ``country`` - the client's own-market (US/UK/CA/AU) general directories.
+    * ``niche``   - vertical-specific directories that serve the client's industry.
+
+    Each bucket is in build order and each item carries a built|missing status derived
+    from the existing citation records (all ``missing`` when none exist yet)."""
+
+    client: str
+    resolved_vertical: str | None = Field(default=None, serialization_alias="resolvedVertical")
+    market: BusinessMarket
+    generic: list[AuditPlanItem]
+    country: list[AuditPlanItem]
+    niche: list[AuditPlanItem]
 
 
 # --- API status boards (Wave 4) --------------------------------------------------

@@ -10,6 +10,7 @@ import pytest
 
 from app.config import Settings
 from app.modules.citations.service import (
+    build_audit_plan,
     compute_citation_gap,
     derive_business_profile_fields,
 )
@@ -99,6 +100,45 @@ def test_gap_manual_only_directories_are_never_missing() -> None:
     directories = [_dir("d1", "Data Axle", tier="manual_only", submit_method="")]
     gap = compute_citation_gap(directories=directories, existing_citations=[])
     assert gap.missing == []  # manual_only has no worker path -> never a build target
+
+
+# --------------------------------------------------------------------------- #
+# build_audit_plan: Generic -> Country -> Niche buckets, each built|missing
+# --------------------------------------------------------------------------- #
+def test_audit_plan_groups_generic_country_and_niche() -> None:
+    directories = [
+        _dir("g1", "Foursquare", market="GLOBAL", verticals=[]),   # generic
+        _dir("c1", "YellowPages", market="US", verticals=[]),      # country
+        _dir("n1", "Avvo", market="US", verticals=["legal"]),      # niche (legal client)
+        _dir("n2", "Healthgrades", market="US", verticals=["medical"]),  # off-vertical
+    ]
+    plan = build_audit_plan(directories=directories, existing_citations=[], vertical="legal")
+    assert {d["name"] for d in plan.generic} == {"Foursquare"}
+    assert {d["name"] for d in plan.country} == {"YellowPages"}
+    assert {d["name"] for d in plan.niche} == {"Avvo"}  # medical row excluded off-vertical
+    # with no citations, every surfaced directory is a missing build target.
+    all_items = plan.generic + plan.country + plan.niche
+    assert all(d["_status"] == "missing" for d in all_items)
+
+
+def test_audit_plan_marks_built_vs_missing_from_existing_citations() -> None:
+    directories = [
+        _dir("g1", "Foursquare", market="GLOBAL", verticals=[]),
+        _dir("c1", "YellowPages", market="US", verticals=[]),
+    ]
+    existing = [
+        # a live submission covering Foursquare (by directory_id) -> BUILT
+        {"id": "c1", "directory": "Foursquare", "directory_id": "g1",
+         "submit_status": "submitted", "nap_status": "missing", "proof_url": "https://p/1"},
+    ]
+    plan = build_audit_plan(directories=directories, existing_citations=existing, vertical=None)
+    statuses = {d["name"]: d["_status"] for d in plan.generic + plan.country}
+    assert statuses == {"Foursquare": "built", "YellowPages": "missing"}
+
+
+def test_audit_plan_is_empty_when_no_directories() -> None:
+    plan = build_audit_plan(directories=[], existing_citations=[], vertical="legal")
+    assert plan.generic == [] and plan.country == [] and plan.niche == []
 
 
 # --------------------------------------------------------------------------- #

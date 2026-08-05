@@ -103,14 +103,29 @@ def _job_value(job: CitationJob, key: str) -> str:
         "phone": job.phone,
         "website_url": job.website_url,
         "categories": ", ".join(job.categories),
+        # Richer identity beyond NAP (0060) - a FormSpec field can reference any of these.
+        "description": job.description,
+        "email": job.email,
+        "logo_url": job.logo_url,
+        "facebook_url": job.facebook_url,
+        "instagram_url": job.instagram_url,
+        "linkedin_url": job.linkedin_url,
+        "tagline": job.tagline,
+        "service_area": job.service_area,
+        "year_founded": str(job.year_founded) if job.year_founded is not None else "",
+        "payment_types": ", ".join(job.payment_types),
+        "hours": "; ".join(f"{day}: {span}" for day, span in job.hours.items()),
     }
     return fields.get(key, "")
 
 
 # --------------------------------------------------------------------------- #
-# A representative bot_fillable slice (US long-tail; the shape extends unchanged to
-# the rest of the catalog - see the module docstring). All plain web forms, no
-# CAPTCHA, per db/migrations/0046_directories_seed.sql.
+# A bot_fillable slice spanning every market (US/UK/CA/AU + the GLOBAL layer); the
+# shape extends unchanged to the rest of the catalog - see the module docstring. All
+# plain web forms, no CAPTCHA, per db/migrations/0046_directories_seed.sql. The dict
+# key + `directory_name` are the EXACT seed `name` strings so a queued row lines up.
+# EVERY selector below is a best-effort starting spec, NOT hand-verified against the
+# live DOM (the reference doc's "reconfirm before automating" caution, per site).
 # --------------------------------------------------------------------------- #
 FORM_SPECS: dict[str, FormSpec] = {
     "Brownbook": FormSpec(
@@ -263,6 +278,339 @@ FORM_SPECS: dict[str, FormSpec] = {
         ),
         submit_selector="button[type='submit']",
         success_indicator="text=gracias",
+    ),
+    # --- GLOBAL --------------------------------------------------------------- #
+    "Superpages / YP Network (Thryv)": FormSpec(
+        directory_name="Superpages / YP Network (Thryv)",
+        url="https://www.superpages.com/add-business",
+        fields=(
+            FormField("input[name='businessName']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='zip']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    # --- US: more general long-tail ------------------------------------------- #
+    "Tupalo": FormSpec(
+        directory_name="Tupalo",
+        url="https://www.tupalo.com/en/add-business",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='street']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='zipcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "YellowBot": FormSpec(
+        directory_name="YellowBot",
+        url="https://www.yellowbot.com/add",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='zip']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=added",
+    ),
+    "Judy's Book": FormSpec(
+        directory_name="Judy's Book",
+        url="https://www.judysbook.com/add-business",
+        fields=(
+            FormField("input[name='business_name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Infobel": FormSpec(
+        directory_name="Infobel",
+        url="https://www.infobel.com/en/add-business",
+        fields=(
+            FormField("input[name='companyName']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='zip']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='email']", "email"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=submitted",
+    ),
+    "EnrollBusiness": FormSpec(
+        directory_name="EnrollBusiness",
+        url="https://www.enrollbusiness.com/AddBusiness",
+        fields=(
+            FormField("input[name='company']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+            FormField("textarea[name='description']", "description"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "MyHuckleberry": FormSpec(
+        directory_name="MyHuckleberry",
+        url="https://www.myhuckleberry.com/AddListing.aspx",
+        fields=(
+            FormField("input[name='BusinessName']", "business_name"),
+            FormField("input[name='Address']", "address_line1"),
+            FormField("input[name='City']", "city"),
+            FormField("input[name='Phone']", "phone"),
+        ),
+        submit_selector="input[type='submit']",
+        success_indicator="text=added",
+    ),
+    # --- US: niche/vertical (bot_fillable per the seed) ----------------------- #
+    "Justia (Lawyers)": FormSpec(
+        directory_name="Justia (Lawyers)",
+        url="https://lawyers.justia.com/signup",
+        fields=(
+            FormField("input[name='firm_name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='email']", "email"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Houzz": FormSpec(
+        directory_name="Houzz",
+        url="https://www.houzz.com/pro/signup",
+        fields=(
+            FormField("input[name='businessName']", "business_name"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+            FormField("textarea[name='description']", "description"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=welcome",
+    ),
+    "MenuPix": FormSpec(
+        directory_name="MenuPix",
+        url="https://www.menupix.com/add-restaurant",
+        fields=(
+            FormField("input[name='restaurant_name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Wellness.com": FormSpec(
+        directory_name="Wellness.com",
+        url="https://www.wellness.com/add-listing",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=added",
+    ),
+    # --- UK ------------------------------------------------------------------- #
+    "Thomson Local": FormSpec(
+        directory_name="Thomson Local",
+        url="https://www.thomsonlocal.com/add-your-business",
+        fields=(
+            FormField("input[name='businessName']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='town']", "city"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "FreeIndex": FormSpec(
+        directory_name="FreeIndex",
+        url="https://www.freeindex.co.uk/add.htm",
+        fields=(
+            FormField("input[name='company']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='town']", "city"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='telephone']", "phone"),
+        ),
+        submit_selector="input[type='submit']",
+        success_indicator="text=added",
+    ),
+    "Scoot": FormSpec(
+        directory_name="Scoot",
+        url="https://www.scoot.co.uk/add-business",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='town']", "city"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Cylex UK": FormSpec(
+        directory_name="Cylex UK",
+        url="https://www.cylex-uk.co.uk/add-company",
+        fields=(
+            FormField("input[name='companyName']", "business_name"),
+            FormField("input[name='street']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+            FormField("input[name='website']", "website_url"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=success",
+    ),
+    "192.com": FormSpec(
+        directory_name="192.com",
+        url="https://www.192.com/businesses/add/",
+        fields=(
+            FormField("input[name='businessName']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='town']", "city"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    # --- Canada --------------------------------------------------------------- #
+    "411.ca": FormSpec(
+        directory_name="411.ca",
+        url="https://411.ca/business/add",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='province']", "region"),
+            FormField("input[name='postal']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Ourbis": FormSpec(
+        directory_name="Ourbis",
+        url="https://www.ourbis.ca/en/add-business",
+        fields=(
+            FormField("input[name='companyName']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='province']", "region"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=added",
+    ),
+    "ProfileCanada": FormSpec(
+        directory_name="ProfileCanada",
+        url="https://www.profilecanada.com/addcompany.cfm",
+        fields=(
+            FormField("input[name='company']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='province']", "region"),
+            FormField("input[name='postal']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="input[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Weblocal.ca": FormSpec(
+        directory_name="Weblocal.ca",
+        url="https://www.weblocal.ca/add-business.html",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='city']", "city"),
+            FormField("input[name='province']", "region"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    # --- Australia ------------------------------------------------------------ #
+    "True Local": FormSpec(
+        directory_name="True Local",
+        url="https://www.truelocal.com.au/add-business",
+        fields=(
+            FormField("input[name='businessName']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='suburb']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "StartLocal": FormSpec(
+        directory_name="StartLocal",
+        url="https://www.startlocal.com.au/addbusiness/",
+        fields=(
+            FormField("input[name='business_name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='suburb']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=submitted",
+    ),
+    "Aussie Web": FormSpec(
+        directory_name="Aussie Web",
+        url="https://www.aussieweb.com.au/addlisting.aspx",
+        fields=(
+            FormField("input[name='BusinessName']", "business_name"),
+            FormField("input[name='Address']", "address_line1"),
+            FormField("input[name='Suburb']", "city"),
+            FormField("input[name='State']", "region"),
+            FormField("input[name='Phone']", "phone"),
+        ),
+        submit_selector="input[type='submit']",
+        success_indicator="text=thank you",
+    ),
+    "Local.com.au": FormSpec(
+        directory_name="Local.com.au",
+        url="https://www.local.com.au/add-business/",
+        fields=(
+            FormField("input[name='name']", "business_name"),
+            FormField("input[name='address']", "address_line1"),
+            FormField("input[name='suburb']", "city"),
+            FormField("input[name='state']", "region"),
+            FormField("input[name='postcode']", "postal_code"),
+            FormField("input[name='phone']", "phone"),
+        ),
+        submit_selector="button[type='submit']",
+        success_indicator="text=thank you",
     ),
 }
 

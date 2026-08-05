@@ -181,6 +181,48 @@ def test_job_from_row_falls_back_to_the_legacy_directory_text_column() -> None:
     job = job_from_row(row)
     assert job.directory_name == "Yelp"
     assert job.categories == ()
+    # the expanded fields (0060) default cleanly when the joined profile has none.
+    assert job.description == "" and job.email == ""
+    assert job.year_founded is None and job.payment_types == () and job.hours == {}
+
+
+def test_job_from_row_carries_the_expanded_business_fields() -> None:
+    # The joined business_profile now exposes the richer identity (0060); job_from_row
+    # must thread every new column onto the CitationJob the engine fills a form from.
+    row = {
+        "directory_name": "Brownbook", "submit_method": "bot:playwright",
+        "bp_business_name": "Acme Dental", "bp_categories": ["dentist"],
+        "bp_description": "Family + cosmetic dentistry", "bp_email": "hi@acme.example",
+        "bp_logo_url": "https://acme.example/logo.png",
+        "bp_facebook_url": "https://fb.com/acme", "bp_instagram_url": "https://ig.com/acme",
+        "bp_linkedin_url": "https://linkedin.com/company/acme", "bp_year_founded": 2009,
+        "bp_payment_types": ["cash", "visa"], "bp_tagline": "Smiles for all",
+        "bp_service_area": "Greater Bellevue", "bp_hours": {"mon": "9-5"},
+    }
+    job = job_from_row(row)
+    assert job.description == "Family + cosmetic dentistry"
+    assert job.email == "hi@acme.example"
+    assert job.logo_url == "https://acme.example/logo.png"
+    assert job.facebook_url == "https://fb.com/acme"
+    assert job.instagram_url == "https://ig.com/acme"
+    assert job.linkedin_url == "https://linkedin.com/company/acme"
+    assert job.year_founded == 2009
+    assert job.payment_types == ("cash", "visa")
+    assert job.tagline == "Smiles for all"
+    assert job.service_area == "Greater Bellevue"
+    assert job.hours == {"mon": "9-5"}
+
+
+def test_citation_job_expanded_fields_default_when_omitted() -> None:
+    # A minimal CitationJob (no expanded fields supplied) is still valid - every 0060
+    # field defaults empty, so no existing construction site breaks.
+    job = CitationJob(
+        directory_name="X", directory_url="", market="US", submit_method="",
+        business_name="X Co", address_line1="", address_line2="", city="", region="",
+        postal_code="", phone="", website_url="",
+    )
+    assert job.description == "" and job.payment_types == () and job.hours == {}
+    assert job.year_founded is None
 
 
 # --------------------------------------------------------------------------- #
