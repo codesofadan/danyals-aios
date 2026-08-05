@@ -56,6 +56,11 @@ _TASK_DESCRIPTIONS: dict[str, str] = {
     "reconcile_context_vectors": (
         "Safety sweep that heals any drift between the context store and its vector index."
     ),
+    "generate_policy_daily": (
+        "Generates the day's Policy Radar brief - Claude researches the current top Google "
+        "Search policy / algorithm developments via web search and files them as change "
+        "events, KB entries, and recommendations."
+    ),
     "watch_policy_sources": (
         "Re-fetches the curated Google policy sources, diffs each by content hash, and files "
         "a change event (and KB analysis) on any update."
@@ -111,6 +116,11 @@ def _waiting_on(task: str, settings: Settings) -> str | None:
         dataforseo = _present(settings.dataforseo_login) and _present(settings.dataforseo_password)
         if not (dataforseo or _present(settings.brightlocal_api_key)):
             return "DataForSEO / BrightLocal key"
+        return None
+    if task == "generate_policy_daily":
+        # The daily brief is Anthropic-only (web search); keyless it writes nothing.
+        if not _present(settings.anthropic_api_key):
+            return "Anthropic key (ANTHROPIC_API_KEY)"
         return None
     return None
 

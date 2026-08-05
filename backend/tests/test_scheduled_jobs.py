@@ -59,7 +59,10 @@ def test_scheduled_jobs_reflects_live_beat_schedule() -> None:
     tasks = {j.task for j in jobs}
     # a beat-scheduled job that exists in workers/celery_app.py
     assert "dispatch-rank-checks" in names
-    assert "watch_policy_sources" in tasks
+    # Policy Radar now runs the Anthropic daily GENERATOR on the beat (the Google-scrape
+    # watcher was moved off the schedule), so the generator task is the one present.
+    assert "generate_policy_daily" in tasks
+    assert "watch_policy_sources" not in tasks
     # every job carries a cadence + a plain-language description
     for j in jobs:
         assert j.cadence
@@ -104,7 +107,10 @@ def test_scheduled_jobs_flags_waiting_on_absent_provider_key() -> None:
     audit = next(j for j in jobs if j.name == "refresh-client-audits")
     sweep = next(j for j in jobs if j.name == "sweep-offpage-monitors")
     monthly = next(j for j in jobs if j.name == "generate-monthly-reports")
+    brief = next(j for j in jobs if j.name == "generate-policy-daily")
     assert audit.waiting_on and "audit engine" in audit.waiting_on
     assert sweep.waiting_on and "DataForSEO" in sweep.waiting_on
+    # the daily Policy Radar brief is Anthropic-only, so keyless it waits on the key
+    assert brief.waiting_on and "Anthropic" in brief.waiting_on
     # the monthly report reads only the platform's own data — it never waits on a key
     assert monthly.waiting_on is None

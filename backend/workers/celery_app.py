@@ -49,10 +49,10 @@ celery_app = Celery(
         "workers.tasks.content",
         "workers.tasks.context",
         "workers.tasks.context_reconcile",
-        # Part 7 Module 05: the LIVE Policy-Radar change-detection watcher
-        # (watch_policy_sources). BEAT-driven (see the schedule below); it CLAIMS due
-        # sources FOR UPDATE SKIP LOCKED so overlapping ticks never double-poll a
-        # source, and it never re-raises (the acks_late double-spend guard).
+        # Part 7 Module 05: the Policy-Radar tasks. DEFAULT = generate_policy_daily (the
+        # BEAT-driven Anthropic daily brief; idempotent per UTC day, never re-raises).
+        # The legacy Google-scrape watcher (watch_policy_sources) lives here too but is no
+        # longer on the beat schedule (kept for reference / re-enablement).
         "workers.tasks.policy",
         # 7B-3: the Web 2.0 publish drivers (web2_write / web2_publish) + the backlink/
         # citation monitoring sweep (monitor_offpage). All are event-driven plain tasks
@@ -157,15 +157,20 @@ celery_app.conf.beat_schedule = {
         "task": "reconcile_context_vectors",
         "schedule": float(settings.context_reconcile_seconds),
     },
-    # Part 7 Module 05 - the LIVE Policy Radar watcher. It sweeps the curated Google
-    # policy sources every policy_watch_seconds (6h by default): a source's content is
-    # re-fetched, hashed, and diffed against the stored anchor; a diff appends a
-    # change_event and (cost-gated) enriches the KB. Deliberately slow - a policy page
-    # does not move hourly and each change fans out a paid Haiku call. It CLAIMS due
-    # sources FOR UPDATE SKIP LOCKED, so an overlapping tick simply grabs nothing.
-    "watch-policy-sources": {
-        "task": "watch_policy_sources",
-        "schedule": float(settings.policy_watch_seconds),
+    # Part 7 Module 05 - the DAILY Policy Radar GENERATOR (Anthropic). Once a day Claude
+    # researches the current top Google-Search policy/algorithm developments via the
+    # server-side web_search tool and writes policy_daily_count items into change_events +
+    # kb_entries + recommendations - the SAME tables the dashboard reads. This REPLACED the
+    # Google-scrape watcher (watch_policy_sources), which the user moved off of; the
+    # watcher task is retained in workers/tasks/policy.py but is no longer scheduled. The
+    # task is idempotent per UTC day (count_generated_today) so a re-delivered tick never
+    # double-spends, and it degrades to nothing (never crashes) when keyless / dial-blocked.
+    "generate-policy-daily": {
+        "task": "generate_policy_daily",
+        "schedule": crontab(
+            hour=settings.policy_generate_hour,
+            minute=settings.policy_generate_minute,
+        ),
     },
     "mark-past-due-invoices": {
         "task": "mark_past_due",

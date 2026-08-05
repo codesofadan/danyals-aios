@@ -54,9 +54,10 @@ _FEATURE = "policy"
 _PROVIDER_ANTHROPIC = "Anthropic"
 _JOB_TYPE = "policy_ask"
 
-# Bound the reply and the distilled fields.
-_ANSWER_MAX_TOKENS = 1024
-_MAX_RULES = 8
+# Bound the reply and the distilled fields. The token ceiling is generous so an
+# on-demand answer can be genuinely IN-DEPTH (paired with the Sonnet research model).
+_ANSWER_MAX_TOKENS = 2048
+_MAX_RULES = 10
 _MAX_SOURCES = 6
 
 # Stable, machine-branchable degrade reasons surfaced on the response.

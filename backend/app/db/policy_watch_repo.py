@@ -176,6 +176,59 @@ class PolicyWatchRepo:
                 (kb_job, change_event_id),
             )
 
+    # --- the daily Anthropic GENERATOR (replaces the scrape watcher) ---------- #
+    def insert_change_event(self, source_name: str, summary: str, severity: str) -> str:
+        """Append an AI-GENERATED change_event and return its id.
+
+        Unlike the watcher's ``record_change`` (which advances a watched source's anchor),
+        a generated item is not tied to any watched row - ``source_id`` is NULL and
+        ``source_name`` is the cited publication snapshot. The severity text resolves into
+        the enum column without a hand cast (psycopg sends str as an unknown-typed param)."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "insert into public.change_events (source_id, source_name, summary, severity) "
+                "values (null, %s, %s, %s::public.policy_severity) returning id",
+                (source_name, summary, severity),
+            )
+            row = cur.fetchone()
+        return str(cast("dict[str, Any]", row)["id"])
+
+    def count_generated_today(self) -> int:
+        """How many generator recommendations have been written so far TODAY (UTC).
+
+        The daily beat + the manual trigger use this as the once-per-day idempotency guard:
+        a generator rec's ``kb_ref`` is the synthetic ``kb-gen-*`` snapshot, so this counts
+        only generated rows (never baseline / watcher recs) whose ``created_at`` falls on
+        the current UTC calendar day."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "select count(*) as n from public.recommendations "
+                "where kb_ref like %s "
+                "and (created_at at time zone 'UTC')::date = (now() at time zone 'UTC')::date",
+                ("kb-gen-%",),
+            )
+            row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    def clear_policy_feed(self) -> dict[str, int]:
+        """Privileged RESET of the Policy-Radar feed - clears the retired Google-scrape
+        data before the Anthropic generator populates it.
+
+        In ONE privileged transaction: delete every change_event + kb_entry, and every
+        NON-baseline recommendation (``kb_ref`` not ``kb-base-*``) so the evergreen baseline
+        set survives and the Command Center is never left empty (a removed materialized
+        baseline also re-surfaces as a constant). Returns the per-table row counts."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "delete from public.recommendations where kb_ref not like %s", ("kb-base-%",)
+            )
+            recs = cur.rowcount
+            cur.execute("delete from public.kb_entries")
+            kb = cur.rowcount
+            cur.execute("delete from public.change_events")
+            changes = cur.rowcount
+        return {"recommendations": recs, "kb_entries": kb, "change_events": changes}
+
 
 def service_policy_watch_repo() -> PolicyWatchRepo:
     """The privileged repo the watcher worker uses (service_role, BYPASSRLS)."""

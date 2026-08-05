@@ -22,6 +22,7 @@ changes / KB.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -36,6 +37,8 @@ from app.schemas.policy import (
     OverlayResponse,
     PolicyAskRequest,
     PolicyAskResponse,
+    PolicyGenerateResponse,
+    PolicyResetResponse,
     RecommendationAction,
     RecommendationResponse,
     SourceResponse,
@@ -72,6 +75,41 @@ def get_ask_gate() -> CostGate:
 
 AskResearcherDep = Annotated[Researcher | None, Depends(get_ask_researcher)]
 AskGateDep = Annotated[CostGate, Depends(get_ask_gate)]
+
+
+# --- daily-generator seams (injected so tests swap in fakes) ----------------- #
+def get_policy_generator() -> Callable[[bool], None]:
+    """Dependency: enqueue the daily-brief generator task (``force=True`` for a manual run
+    past the once-per-day guard). Imports the Celery task LAZILY so the API process never
+    pulls the worker module in just to enqueue. Overridable in tests."""
+
+    def _enqueue(force: bool) -> None:
+        from workers.tasks.policy import generate_policy_daily
+
+        generate_policy_daily.delay(force=force)
+
+    return _enqueue
+
+
+def get_policy_reset() -> Callable[[], dict[str, int]]:
+    """Dependency: the privileged Policy-Radar feed reset (clears the retired scrape data),
+    returning the per-table row counts. Overridable in tests."""
+
+    def _reset() -> dict[str, int]:
+        from app.db.policy_watch_repo import service_policy_watch_repo
+
+        return service_policy_watch_repo().clear_policy_feed()
+
+    return _reset
+
+
+PolicyGeneratorDep = Annotated[Callable[[bool], None], Depends(get_policy_generator)]
+PolicyResetDep = Annotated[Callable[[], dict[str, int]], Depends(get_policy_reset)]
+
+# Manual generation spends on a paid provider, so it is a lead action (owner/admin/manager);
+# the destructive feed reset is owner-only.
+ManageGenerate = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))]
+OwnerOnly = Annotated[CurrentUser, Depends(require_role("owner"))]
 
 # The activity verb for each recommendation transition.
 _ACTION_VERB: dict[str, str] = {
@@ -134,6 +172,37 @@ async def policy_ask(
         )
 
     return await asyncio.to_thread(_run)
+
+
+@router.post("/policy/generate", response_model=PolicyGenerateResponse)
+async def generate_policy_brief(
+    actor: ManageGenerate, enqueue: PolicyGeneratorDep
+) -> PolicyGenerateResponse:
+    """Trigger the Anthropic daily-brief generator NOW (leads only). Enqueues the SAME task
+    the daily beat runs, forcing a fresh run past the once-per-day guard, so an operator can
+    refresh the day's policies on demand. Returns immediately - the items land async in the
+    KB / change-events / recommendations the panels already read."""
+    await asyncio.to_thread(enqueue, True)
+    await record_activity(
+        actor, kind="content", action="generated the daily policy brief", target="Policy Radar"
+    )
+    return PolicyGenerateResponse(queued=True)
+
+
+@router.post("/policy/reset", response_model=PolicyResetResponse)
+async def reset_policy_feed(actor: OwnerOnly, reset: PolicyResetDep) -> PolicyResetResponse:
+    """Clear the retired Google-scrape Policy-Radar data (owner only): every change event,
+    KB entry, and NON-baseline recommendation. The evergreen baseline recs survive. Run once
+    when switching the feed onto the Anthropic generator, or to start the brief clean."""
+    counts = await asyncio.to_thread(reset)
+    await record_activity(
+        actor, kind="content", action="reset the Policy Radar feed", target="Policy Radar"
+    )
+    return PolicyResetResponse(
+        change_events=counts.get("change_events", 0),
+        kb_entries=counts.get("kb_entries", 0),
+        recommendations=counts.get("recommendations", 0),
+    )
 
 
 @router.get("/policy/kb", response_model=list[KBEntryResponse])

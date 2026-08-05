@@ -81,6 +81,25 @@ export function usePolicyAsk() {
   });
 }
 
+// ---- daily brief: manual trigger (POST /policy/generate) -----------------------
+// Force a fresh Anthropic daily brief now (leads only: owner/admin/manager). The backend
+// enqueues the SAME task the daily beat runs, so the 6 policies land async in the KB /
+// change-events / recommendations. The task takes a few seconds, so on success we refetch
+// those three queries after a short delay to surface the new items.
+export function useGeneratePolicyBrief() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ queued: boolean }>("/policy/generate"),
+    onSuccess: () => {
+      setTimeout(() => {
+        void qc.invalidateQueries({ queryKey: POLICY_CHANGES_KEY });
+        void qc.invalidateQueries({ queryKey: POLICY_KB_KEY });
+        void qc.invalidateQueries({ queryKey: POLICY_RECS_KEY });
+      }, 12000);
+    },
+  });
+}
+
 export type RecAction = "acknowledge" | "apply" | "dismiss";
 
 /**

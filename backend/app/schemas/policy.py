@@ -100,6 +100,24 @@ class PolicyAskResponse(BaseModel):
     reason: str = ""
 
 
+# --- daily generator admin (POST /policy/generate, /policy/reset) ------------- #
+# Small operational acks with no ``lib/policy.ts`` mirror, so - like PolicyAskResponse
+# and OverlayResponse - they sit deliberately OUTSIDE ``test_contract_lock``.
+class PolicyGenerateResponse(BaseModel):
+    """Ack for a manual daily-brief trigger: the run was enqueued (it lands async in the
+    KB / changes / recommendations the panels already read)."""
+
+    queued: bool
+
+
+class PolicyResetResponse(BaseModel):
+    """The per-table row counts a Policy-Radar feed RESET cleared."""
+
+    change_events: int = Field(serialization_alias="changeEvents")
+    kb_entries: int = Field(serialization_alias="kbEntries")
+    recommendations: int
+
+
 # --- responses --------------------------------------------------------------- #
 
 

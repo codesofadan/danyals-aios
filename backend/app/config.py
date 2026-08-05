@@ -183,10 +183,23 @@ class Settings(BaseSettings):
     # under the SAME `policy` money-dial: the committed spend is the Anthropic token cost
     # PLUS the web-search cost (searches x price_web_search_per_search). Reuses the shared
     # `anthropic_api_key`; keyless / a dial-block / an SDK-or-model that can't web-search
-    # all DEGRADE (200, status='degraded'), never crash. web_search_20250305 works on the
-    # Haiku default, so no heavier model is needed. ---
-    policy_research_model: str = "claude-haiku-4-5"  # web-search-capable Claude for /policy/ask
+    # all DEGRADE (200, status='degraded'), never crash. web_search_20250305 runs on both
+    # Haiku and Sonnet; we default to Sonnet so an on-demand answer is genuinely IN-DEPTH. ---
+    policy_research_model: str = "claude-sonnet-5"  # web-search-capable Claude for /policy/ask (deep)
     policy_research_max_searches: int = 5  # web_search tool max_uses per lookup (<=5)
+
+    # --- Daily Policy-Radar GENERATOR (replaces the Google-scrape watcher as the DEFAULT
+    # feed). Once a day the beat fires `generate_policy_daily`: Claude researches the
+    # CURRENT top Google Search policy / algorithm developments via the SERVER-SIDE
+    # web_search tool and writes `policy_daily_count` items into the SAME change_events +
+    # kb_entries + recommendations the dashboard already reads. Metered under the SAME
+    # `policy` money-dial; keyless / a dial-block / a research failure DEGRADE (nothing
+    # written), never crash. The manual POST /policy/generate forces a run past the
+    # once-per-day guard so an operator can refresh on demand. ---
+    policy_daily_count: int = 6                     # policy items generated per day
+    policy_generate_model: str = "claude-sonnet-5"  # web-search-capable, deeper than Haiku
+    policy_generate_hour: int = 6                    # daily beat fire hour (UTC)
+    policy_generate_minute: int = 0                  # daily beat fire minute (UTC)
 
     # --- Web in-product AI-assist surface (P9-5). The dashboard/portal calls OUR
     # backend, which calls Claude through the EXISTING summarizer seam

@@ -22,6 +22,7 @@ from fastapi import FastAPI
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.policy_repo import get_policy_repo
+from app.routers.policy import get_policy_generator, get_policy_reset
 from app.schemas.policy import (
     Category,
     ChangeEventResponse,
@@ -407,3 +408,60 @@ async def test_transition_forbidden_for_non_lead(
         wire(role)
         resp = await client.post("/api/v1/policy/recommendations/rec-base-eeat/apply")
         assert resp.status_code == 403, role
+
+
+# daily generator: manual trigger + feed reset
+
+
+class _RecordingGen:
+    """Records each generator trigger (the force flag)."""
+
+    def __init__(self) -> None:
+        self.calls: list[bool] = []
+
+    def __call__(self, force: bool) -> None:
+        self.calls.append(force)
+
+
+async def test_generate_enqueues_forced_run_for_leads(
+    client: httpx.AsyncClient, app: FastAPI, wire: Callable[..., None]
+) -> None:
+    gen = _RecordingGen()
+    app.dependency_overrides[get_policy_generator] = lambda: gen
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/policy/generate")
+    assert resp.status_code == 200
+    assert resp.json()["queued"] is True
+    assert gen.calls == [True]  # a manual trigger forces past the once-per-day guard
+
+
+async def test_generate_forbidden_for_non_lead(
+    client: httpx.AsyncClient, app: FastAPI, wire: Callable[..., None]
+) -> None:
+    app.dependency_overrides[get_policy_generator] = lambda: _RecordingGen()
+    for role in ("viewer", "specialist", "analyst", "client"):
+        wire(role)
+        assert (await client.post("/api/v1/policy/generate")).status_code == 403, role
+
+
+async def test_reset_clears_feed_for_owner(
+    client: httpx.AsyncClient, app: FastAPI, wire: Callable[..., None]
+) -> None:
+    counts = {"change_events": 50, "kb_entries": 50, "recommendations": 12}
+    app.dependency_overrides[get_policy_reset] = lambda: (lambda: counts)
+    wire("owner", "u-owner")
+    resp = await client.post("/api/v1/policy/reset")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["changeEvents"] == 50
+    assert body["kbEntries"] == 50
+    assert body["recommendations"] == 12
+
+
+async def test_reset_forbidden_for_non_owner(
+    client: httpx.AsyncClient, app: FastAPI, wire: Callable[..., None]
+) -> None:
+    app.dependency_overrides[get_policy_reset] = lambda: (lambda: {})
+    for role in ("admin", "manager", "viewer", "client"):
+        wire(role)
+        assert (await client.post("/api/v1/policy/reset")).status_code == 403, role

@@ -506,7 +506,7 @@ async def test_audit_is_lead_only(
 
 async def test_clear_citations_removes_and_validates_client(
     client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
-    svc_store: "_FakeServiceCitationsStore",
+    svc_store: _FakeServiceCitationsStore,
 ) -> None:
     repo.client_names["cl-1"] = "Acme Dental"
     wire("owner")
@@ -518,7 +518,7 @@ async def test_clear_citations_removes_and_validates_client(
 
 async def test_clear_unknown_client_404(
     client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
-    svc_store: "_FakeServiceCitationsStore",
+    svc_store: _FakeServiceCitationsStore,
 ) -> None:
     wire("owner")
     resp = await client.request("DELETE", "/api/v1/citation-builder/clients/nope/citations")

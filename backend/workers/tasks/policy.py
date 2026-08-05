@@ -1,6 +1,16 @@
-"""Celery BEAT task: the LIVE Policy-Radar change-detection WATCHER.
+"""Celery tasks for Policy Radar: the DAILY Anthropic GENERATOR (the default feed) and
+the legacy change-detection WATCHER (retained, now dormant).
 
-Once every ``policy_watch_seconds`` (6h) the beat fires ``watch_policy_sources``. It
+DEFAULT (``generate_policy_daily``, beat ``generate-policy-daily``): once a day Claude
+researches the current top Google-Search developments via the server-side web_search tool
+and writes ``policy_daily_count`` items into change_events + kb_entries + recommendations
+(``store_generated_items`` + ``app/services/policy_generate.py``). This REPLACED the
+Google-scrape watcher on the beat; the manual ``POST /policy/generate`` forces a refresh.
+
+LEGACY (``watch_policy_sources``): the source-diff watcher below is kept for reference /
+re-enablement but is NO LONGER on the beat schedule (the user moved Policy Radar off
+Google-feed scraping onto Anthropic generation). When it ran, once every
+``policy_watch_seconds`` (6h) the beat fired ``watch_policy_sources``. It
 CLAIMS the least-recently-checked sources (``FOR UPDATE SKIP LOCKED``, so overlapping
 ticks never double-poll a source), and for each:
 
@@ -33,6 +43,8 @@ from app.db.policy_watch_repo import service_policy_watch_repo
 from app.logging_setup import get_logger
 from app.services.cost_gate import CostGate
 from app.services.cost_store import PostgresCostStore
+from app.services.policy_ask import build_ask_researcher
+from app.services.policy_generate import GeneratedItem, run_policy_generation
 from app.services.policy_watch import (
     PolicyFetcher,
     SsrfGuardedPolicyFetcher,
@@ -84,6 +96,9 @@ class PolicyWatchStore(Protocol):
     def insert_kb_entry(self, row: dict[str, Any]) -> dict[str, Any]: ...
     def insert_recommendation(self, row: dict[str, Any]) -> dict[str, Any]: ...
     def set_triggered_job(self, change_event_id: str, kb_job: str) -> None: ...
+    # the daily Anthropic generator's extra surface:
+    def insert_change_event(self, source_name: str, summary: str, severity: str) -> str: ...
+    def count_generated_today(self) -> int: ...
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +212,67 @@ def analyze_and_store(
         "policy_analysis_done", source=source_name, kb_ref=kb_ref, severity=analysis.severity
     )
     return AnalysisOutcome("analyzed", kb_ref=kb_ref)
+
+
+# --------------------------------------------------------------------------- #
+# Generated items -> DB (the daily Anthropic brief: change_event + kb + rec each)
+# --------------------------------------------------------------------------- #
+# The display source name for a generated change_event when the model did not cite one.
+_GEN_SOURCE_LABEL = "AIOS Policy Brief"
+
+
+def store_generated_items(store: PolicyWatchStore, items: list[GeneratedItem]) -> int:
+    """Persist each generated policy item as a change_event + a versioned/deduped kb_entry
+    + a 'new' recommendation, returning the number written.
+
+    Mirrors ``analyze_and_store`` but for the GENERATOR: there is no diffed source, so the
+    change_event has a NULL source_id (``insert_change_event``) and the citation snapshots
+    come from the model. The KB ref is ``kb-gen-<sha8>`` - distinct from ``kb-live-*``
+    (watcher) and ``kb-base-*`` (baseline) - so the once-per-day guard
+    (``count_generated_today``) and the reset (``clear_policy_feed``) can target generated
+    rows precisely. Pure over the injected store, so it unit-tests with a fake store."""
+    written = 0
+    for item in items:
+        analysis = item.analysis
+        source_name = item.source_name or _GEN_SOURCE_LABEL
+        change_event_id = store.insert_change_event(
+            source_name=source_name,
+            summary=analysis.summary,
+            severity=analysis.severity,
+        )
+        kb_hash = finding_hash(item.source_url or "aios-generated", analysis.title, analysis.summary)
+        kb_ref = f"kb-gen-{kb_hash[:8]}"
+        kb_row = store.insert_kb_entry(
+            {
+                "source_id": None,
+                "title": analysis.title,
+                "summary": analysis.summary,
+                "severity": analysis.severity,
+                "category": analysis.category,
+                "region": analysis.region,
+                "region_label": analysis.region_label,
+                "source_name": source_name,
+                "source_url": item.source_url,
+                "hash": kb_hash,
+            }
+        )
+        store.insert_recommendation(
+            {
+                "kb_entry_id": kb_row.get("id"),
+                "kb_ref": kb_ref,
+                "title": analysis.rec_title,
+                "why": analysis.rec_why,
+                "action": analysis.rec_action,
+                "scope": "global",
+                "target_module": analysis.target_module,
+                "region": analysis.region,
+                "region_label": analysis.region_label,
+                "status": "new",
+            }
+        )
+        store.set_triggered_job(change_event_id, kb_ref)
+        written += 1
+    return written
 
 
 # --------------------------------------------------------------------------- #
@@ -328,3 +404,35 @@ def watch_policy_sources() -> dict[str, Any]:
     except Exception:  # never re-raise: acks_late would redeliver the beat task
         logger.exception("watch_policy_sources_task_failed")
         return {"claimed": 0, "state": "failed"}
+
+
+@celery_app.task(name="generate_policy_daily")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
+def generate_policy_daily(force: bool = False) -> dict[str, Any]:
+    """BEAT entry point (+ manual trigger): generate the day's policy brief via Anthropic.
+
+    Wires the (key-gated) web-search researcher, the cost gate, and the privileged store,
+    then runs the pure core (``run_policy_generation``) and persists its items
+    (``store_generated_items``). ONCE PER DAY: unless ``force`` is set (the manual
+    ``POST /policy/generate`` refresh), a run is SKIPPED when generator items already exist
+    for the current UTC day (``count_generated_today``), so a re-delivered beat tick never
+    double-spends. Total degradation: a keyless deploy, a dial/budget block, or a research
+    failure simply writes NOTHING (state='degraded'); the task NEVER re-raises (acks_late
+    would otherwise redeliver + re-spend)."""
+    try:
+        settings = get_settings()
+        store = service_policy_watch_repo()
+        if not force and store.count_generated_today() > 0:
+            return {"state": "skipped", "reason": "already_generated_today", "written": 0}
+        result = run_policy_generation(
+            researcher=build_ask_researcher(settings),
+            gate=_gate(),
+            settings=settings,
+        )
+        if result.status != "ok":
+            return {"state": result.status, "reason": result.reason, "written": 0}
+        written = store_generated_items(store, result.items)
+        logger.info("generate_policy_daily_done", written=written, forced=force)
+        return {"state": "ok", "written": written}
+    except Exception:  # never re-raise: acks_late would redeliver the beat task
+        logger.exception("generate_policy_daily_task_failed")
+        return {"state": "failed", "written": 0}
