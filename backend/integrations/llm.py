@@ -151,10 +151,19 @@ class Researcher(Protocol):
     the cited source URLs, and token/search usage for cost accounting.
 
     ``max_searches`` bounds the web_search tool's ``max_uses`` for one lookup.
+    ``system`` optionally OVERRIDES the built-in policy-lookup system prompt so a
+    different caller (e.g. the content page-set recommender) can pass its own JSON
+    contract; ``None`` keeps the default web-search research contract.
     """
 
     def research(
-        self, prompt: str, *, model: str, max_tokens: int, max_searches: int
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        max_searches: int,
+        system: str | None = None,
     ) -> ResearchResult: ...
 
 
@@ -198,7 +207,13 @@ class AnthropicResearcher:
         self.model = model
 
     def research(
-        self, prompt: str, *, model: str, max_tokens: int, max_searches: int
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        max_searches: int,
+        system: str | None = None,
     ) -> ResearchResult:
         message = self._client.messages.create(
             model=model,
@@ -206,7 +221,7 @@ class AnthropicResearcher:
             system=[
                 {
                     "type": "text",
-                    "text": _RESEARCH_SYSTEM_PROMPT,
+                    "text": system or _RESEARCH_SYSTEM_PROMPT,
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
@@ -283,7 +298,13 @@ class FakeResearcher:
         self._searches = searches
 
     def research(
-        self, prompt: str, *, model: str, max_tokens: int, max_searches: int
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        max_searches: int,
+        system: str | None = None,
     ) -> ResearchResult:
         return ResearchResult(
             text=self._payload,
