@@ -64,9 +64,13 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 from app.config import Settings
 from app.core.security import is_public_url
 from app.logging_setup import get_logger
+from app.schemas.content import ContentRecommendation, Difficulty
 from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext, GateOutcome
+from app.services.cost_store import PostgresCostStore
 from integrations.content_research import KeywordMetrics, SerpResearcher, SerpResult
+from integrations.errors import ProviderNotConfiguredError
+from integrations.llm import AnthropicResearcher, Researcher
 
 logger = get_logger("services.content_research")
 
@@ -1049,4 +1053,325 @@ def _degraded_brief(
         low_confidence=True,
         degraded=True,
         notes=notes,
+    )
+
+
+# =========================================================================== #
+# Research-first bulk content: the page-set RECOMMENDER (POST /content/research).
+#
+# A SEPARATE flow from the SERP brief above (which grounds ONE already-chosen page).
+# Here an operator picks a site + a content type and Claude researches the site AND
+# its competitors LIVE via the Anthropic SERVER-SIDE web_search tool, returning a set
+# of recommended pages to build (the "checkboxes"). The core (:func:`run_content_research`)
+# is PURE - the researcher + the cost gate are INJECTED - so it unit-tests with a
+# ``FakeResearcher`` + a fake gate: NO network, NO DB, NO real provider. Modelled
+# EXACTLY on ``policy_ask.run_policy_ask``: evaluate -> call -> commit, degrade-not-crash.
+#
+# It reuses the EXISTING ``content_research`` money-dial (``_FEATURE`` above - no new
+# dial). The ACTUAL spend committed after the call is the Anthropic TOKEN cost
+# (``pricing.anthropic_cost``) PLUS the WEB-SEARCH cost (``pricing.web_search_cost`` x
+# the searches Claude ran, from usage; ``max_searches`` when the SDK doesn't surface it).
+#
+# Degrade, never crash: a missing Anthropic key (``researcher is None``) degrades
+# BEFORE the gate; a gate block returns degraded with NO provider call; a research
+# exception degrades with NO spend committed.
+# =========================================================================== #
+_PROVIDER_ANTHROPIC = "Anthropic"
+_RECOMMEND_JOB_TYPE = "content_research"  # groups the cost-log rows for this flow
+
+# Stable, machine-branchable degrade reasons surfaced on the response.
+DEGRADE_NO_ANTHROPIC = "anthropic_unconfigured"
+DEGRADE_RESEARCH_FAILED = "research_failed"
+
+_RECOMMEND_CONTENT_TYPES: frozenset[str] = frozenset(
+    {"service", "location", "service_location", "service_area", "blog", "faq"}
+)
+_MAX_SECONDARY_KEYWORDS = 8
+_LEADING_DIGITS_RE = re.compile(r"\d+")
+
+
+# --------------------------------------------------------------------------- #
+# Provider wiring (key-gated builders; None == degrade) + a null cache
+# --------------------------------------------------------------------------- #
+def build_recommend_researcher(settings: Settings) -> Researcher | None:
+    """The key-gated web-search researcher for the recommender, or ``None`` (degraded)
+    when unconfigured. Reuses the SAME optional ``anthropic_api_key`` every AI seam
+    gates on; a missing key OR an absent ``[ai]`` SDK returns ``None`` (degrade, never
+    crash). NEVER logs the secret, only the reason."""
+    key = settings.anthropic_api_key
+    if not key:
+        logger.info("content_research_degraded", reason=DEGRADE_NO_ANTHROPIC)
+        return None
+    try:
+        return AnthropicResearcher(
+            api_key=key.get_secret_value(),
+            model=settings.content_research_model,
+        )
+    except ProviderNotConfiguredError:
+        logger.info("content_research_degraded", reason="anthropic_sdk_absent")
+        return None
+
+
+class _NullRecommendCache:
+    """A no-op ``CostCache``: each research run is a unique live lookup, never a cache
+    hit; the dial + budgets still gate it. Satisfies the ``CostGate`` constructor only
+    (``cache_key`` is always ``None`` on this flow, so the gate never touches it)."""
+
+    def get(self, key: str) -> Any | None:
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        return None
+
+
+def build_recommend_gate() -> CostGate:
+    """The real cost gate over the Postgres cost store (no cache - see ``_NullRecommendCache``)."""
+    return CostGate(PostgresCostStore(), _NullRecommendCache())
+
+
+# --------------------------------------------------------------------------- #
+# Pure helpers: the research prompt + the JSON parse
+# --------------------------------------------------------------------------- #
+def build_recommend_system(content_type: str) -> str:
+    """The system prompt carrying the strict-JSON page-set CONTRACT + the research
+    instruction (passed via the ``Researcher`` ``system=`` override). For
+    ``service_location`` it additionally instructs city x service combinations."""
+    base = (
+        "You are a senior SEO content strategist advising an agency. Use the web_search "
+        "tool to research the given website AND its top competitors, then propose the "
+        "highest-value pages the site should build for the requested CONTENT TYPE. Ground "
+        "every recommendation in what you actually found (the site's services / locations, "
+        "competitor coverage, and real search demand); do not invent pages the site has no "
+        "basis for, and prefer pages a competitor ranks for that this site is missing. "
+        "Respond with STRICT JSON ONLY - no prose, no markdown, no code fences - an object "
+        'with EXACTLY one key "items", whose value is an array where each element has '
+        "EXACTLY these keys: title (the page's H1 / title), page_type (the content type), "
+        "primary_keyword (the head term the page targets), secondary_keywords (an array of "
+        "3-8 supporting terms), est_volume (an integer estimate of the primary keyword's "
+        'monthly search volume), difficulty (one of "easy", "medium", "hard"), rationale '
+        "(one sentence on why the page is worth building), city (the target city, or \"\" "
+        'if not applicable), service (the target service, or "" if not applicable).'
+    )
+    if content_type == "service_location":
+        base += (
+            " For this service+location type, return sensible city x service COMBINATIONS "
+            "(one page per city-and-service pair) and ALWAYS populate both city and service "
+            "on every item."
+        )
+    return base
+
+
+def build_recommend_prompt(site: str, content_type: str, count: int) -> str:
+    """The concrete user turn: the site + content type + how many pages to return."""
+    cleaned = " ".join(site.split())
+    return (
+        f"Website: {cleaned}\nContent type: {content_type}\n"
+        f"Research this site and its competitors, then recommend up to {count} pages of the "
+        f"'{content_type}' type to build. Return the strict JSON described in the system "
+        "instructions."
+    )
+
+
+def _extract_json_object(raw: str) -> dict[str, Any] | None:
+    """Best-effort parse of a JSON object from a model reply, tolerating surrounding
+    prose / code fences by slicing the outermost ``{...}``. ``None`` on failure."""
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _clamp_difficulty(value: object) -> Difficulty:
+    """Lower-case + validate against ``easy|medium|hard``; anything else -> medium."""
+    text = str(value or "").strip().lower()
+    if text == "easy":
+        return "easy"
+    if text == "hard":
+        return "hard"
+    return "medium"
+
+
+def _coerce_int(value: object) -> int:
+    """Tolerantly coerce a model value (int / float / "12,000" / "5k+") to a
+    non-negative int; unparseable -> 0. Never raises."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, float):
+        return max(int(value), 0)
+    match = _LEADING_DIGITS_RE.match(str(value or "").strip().replace(",", ""))
+    return int(match.group(0)) if match else 0
+
+
+def _bounded_str_list(value: object, *, limit: int) -> list[str]:
+    """Coerce a model value into a bounded list of non-empty, deduped stripped strings."""
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def parse_recommendations(
+    raw: str, *, content_type: str, count: int
+) -> list[ContentRecommendation]:
+    """Parse the researcher's reply into recommended pages, DEGRADING defensively.
+
+    Non-JSON / a missing ``items`` list / a bad item never crashes: a bad object is
+    skipped, difficulty is clamped to ``easy|medium|hard``, ``est_volume`` is coerced,
+    and each item's ``page_type`` falls back to the requested ``content_type``. Capped
+    at ``count`` (first-N-good order)."""
+    data = _extract_json_object(raw)
+    if data is None:
+        return []
+    raw_items = data.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    out: list[ContentRecommendation] = []
+    for entry in raw_items:
+        if not isinstance(entry, dict):
+            continue
+        title = str(entry.get("title") or "").strip()
+        if not title:
+            continue
+        declared = str(entry.get("page_type") or "").strip()
+        page_type = declared if declared in _RECOMMEND_CONTENT_TYPES else content_type
+        try:
+            item = ContentRecommendation.model_validate(
+                {
+                    "title": title,
+                    "page_type": page_type,
+                    "primary_keyword": str(entry.get("primary_keyword") or "").strip(),
+                    "secondary_keywords": _bounded_str_list(
+                        entry.get("secondary_keywords"), limit=_MAX_SECONDARY_KEYWORDS
+                    ),
+                    "est_volume": _coerce_int(entry.get("est_volume")),
+                    "difficulty": _clamp_difficulty(entry.get("difficulty")),
+                    "rationale": str(entry.get("rationale") or "").strip(),
+                    "city": str(entry.get("city") or "").strip(),
+                    "service": str(entry.get("service") or "").strip(),
+                }
+            )
+        except Exception:  # a single malformed item never sinks the whole set
+            logger.info("content_recommendation_skipped")
+            continue
+        out.append(item)
+        if len(out) >= count:
+            break
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# The result + the pure, injectable core
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ContentResearchResult:
+    """The verdict of one :func:`run_content_research` run (a small, comparable value)."""
+
+    site: str
+    content_type: str
+    status: str  # ok | degraded
+    items: list[ContentRecommendation]
+    reason: str = ""
+
+
+def _recommend_degraded(site: str, content_type: str, reason: str) -> ContentResearchResult:
+    return ContentResearchResult(
+        site=site, content_type=content_type, status="degraded", items=[], reason=reason
+    )
+
+
+def run_content_research(
+    *,
+    researcher: Researcher | None,
+    gate: CostGate,
+    settings: Settings,
+    site: str,
+    content_type: str,
+    count: int | None = None,
+) -> ContentResearchResult:
+    """Research ONE site + content type and RECOMMEND a page set. Pure; degrades.
+
+    The gate contract is reused verbatim (evaluate -> call -> commit): on any
+    non-allowed outcome NO provider call happens and the gate is not bypassed. The
+    single paid call (the Anthropic web-search research) is metered under the
+    ``content_research`` dial; the committed cost is the TOKEN cost + the WEB-SEARCH cost.
+    """
+    clean_site = site.strip()
+    ctype = content_type if content_type in _RECOMMEND_CONTENT_TYPES else "service"
+    n = settings.content_research_count if count is None else int(count)
+    n = max(1, n)
+
+    # Anthropic (with web search) is the WHOLE answer engine; without it there is no
+    # research to run, so a missing key is a keyless degrade. The gate is NOT touched.
+    if researcher is None:
+        return _recommend_degraded(clean_site, ctype, DEGRADE_NO_ANTHROPIC)
+
+    max_searches = max(1, int(settings.content_research_max_searches))
+    model = settings.content_research_model
+
+    # One pre-check estimate: the flat research estimate plus the worst-case web-search
+    # spend (every allowed search used). The COMMITTED value below is the real spend.
+    estimate = settings.content_research_cost_estimate + pricing.web_search_cost(
+        settings, searches=max_searches
+    )
+    ctx = GateContext(
+        feature_key=_FEATURE,
+        client_id=None,  # org-level staff research; still under the global spend halt
+        provider=_PROVIDER_ANTHROPIC,
+        estimated_cost=float(estimate),
+        job_type=_RECOMMEND_JOB_TYPE,
+        cache_key=None,
+    )
+    decision = gate.evaluate(ctx)
+    if not decision.allowed:
+        # dial off / by-hand, client cap, or the global spend halt: NO provider call.
+        return _recommend_degraded(clean_site, ctype, f"cost_gate:{decision.outcome}")
+
+    # The single paid call: Claude searches the web itself and returns the JSON page set.
+    try:
+        research = researcher.research(
+            build_recommend_prompt(clean_site, ctype, n),
+            model=model,
+            max_tokens=settings.content_research_max_tokens,
+            max_searches=max_searches,
+            system=build_recommend_system(ctype),
+        )
+    except Exception:  # transport / SDK / model-not-web-search-capable: degrade, don't crash
+        logger.info("content_research_failed")
+        return _recommend_degraded(clean_site, ctype, DEGRADE_RESEARCH_FAILED)
+
+    # Commit the ACTUAL spend: the Anthropic TOKEN cost + the WEB-SEARCH cost. The number
+    # of searches is read from usage when the SDK surfaces it, else estimated at max_uses.
+    token_cost = pricing.anthropic_cost(
+        settings, model=model, input_tokens=research.input_tokens, output_tokens=research.output_tokens
+    )
+    searches = research.searches if research.searches is not None else max_searches
+    search_cost = pricing.web_search_cost(settings, searches=searches)
+    gate.commit(ctx, token_cost + search_cost)
+
+    items = parse_recommendations(research.text, content_type=ctype, count=n)
+    return ContentResearchResult(
+        site=clean_site, content_type=ctype, status="ok", items=items, reason=""
     )

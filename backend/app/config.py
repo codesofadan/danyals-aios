@@ -237,6 +237,19 @@ class Settings(BaseSettings):
     # Per-URL bounded fetch timeout + how many ranking pages to tear down.
     content_teardown_timeout_seconds: float = 8.0
     content_teardown_max_pages: int = 10
+    # --- Research-first bulk content: the page-set RECOMMENDER (POST /content/research).
+    # A DISTINCT flow from the P7A-3 SERP brief above: an operator picks a site + a
+    # content type and Claude researches the site + its competitors LIVE via the
+    # Anthropic SERVER-SIDE web_search tool (integrations/llm.py Researcher, reusing the
+    # optional system= override to pass a strict-JSON page-set contract), returning a set
+    # of recommended pages to build (the "checkboxes"). Metered under the EXISTING
+    # `content_research` money-dial (committed spend = Anthropic token cost + web-search
+    # cost); keyless / a dial-block / a research failure all DEGRADE (200, status=
+    # 'degraded'), never crash - exactly like POST /policy/ask. All additive + optional. ---
+    content_research_model: str = "claude-sonnet-5"  # web-search Claude for the page-set recommender
+    content_research_count: int = 12  # recommended pages returned per research call (default cap)
+    content_research_max_searches: int = 6  # web_search tool max_uses per recommend lookup
+    content_research_max_tokens: int = 4096  # bound the JSON page-set reply (a list of items)
     # --- Content WORKER + PUBLISH tuning (P7A-7/8). The pipeline worker composes
     # the merged content services; the publish path renders PDF/Markdown to a
     # controlled artifact root (traversal-guarded, like the audit store) when the

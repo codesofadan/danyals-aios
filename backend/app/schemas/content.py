@@ -253,3 +253,112 @@ class ContentJobResponse(BaseModel):
 def to_response(row: dict[str, Any]) -> ContentJobResponse:
     """Map a ``content_jobs`` row to the frontend ``ContentJob`` shape."""
     return ContentJobResponse.from_row(row)
+
+
+# --------------------------------------------------------------------------- #
+# Research-first bulk content (POST /content/research + /content/research/generate).
+#
+# OPERATIONAL models: there is NO ``frontend/lib/*.ts`` mirror for the page-set
+# recommender, so these deliberately sit OUTSIDE ``test_contract_lock`` (exactly
+# like ``PolicyAskResponse`` / ``OverlayResponse``). ``ContentRecommendation`` is
+# symmetric - it is both a RESPONSE item (from /content/research) and a REQUEST
+# item (the selected checkboxes posted back to /content/research/generate) - so it
+# accepts camelCase OR snake_case on the wire (``populate_by_name``) and always
+# emits camelCase (``serialization_alias``), letting an item round-trip unchanged.
+# --------------------------------------------------------------------------- #
+# The six content types the recommender researches. ``service_location`` returns
+# city x service landing pages (each item carries ``city`` + ``service``).
+ContentType = Literal["service", "location", "service_location", "service_area", "blog", "faq"]
+Difficulty = Literal["easy", "medium", "hard"]
+
+_CONTENT_TYPES: frozenset[str] = frozenset(
+    {"service", "location", "service_location", "service_area", "blog", "faq"}
+)
+_DIFFICULTIES: frozenset[str] = frozenset({"easy", "medium", "hard"})
+
+# A research content type -> the ``ContentJob`` page type the generator understands
+# (the generator only knows service/blog/local/gbp_post). All location-flavoured
+# types map to ``local`` (LocalBusiness schema); an FAQ page drafts as an Article.
+_RESEARCH_PAGE_TYPE: dict[str, PageType] = {
+    "service": "service",
+    "location": "local",
+    "service_location": "local",
+    "service_area": "local",
+    "blog": "blog",
+    "faq": "blog",
+}
+
+
+def job_page_type_for(content_type: str) -> PageType:
+    """The ``ContentJob`` page type a research content type fans out into
+    (service->service, blog->blog, every location flavour->local, faq->blog).
+    Falls back to ``service`` for an unknown type."""
+    return _RESEARCH_PAGE_TYPE.get(content_type, "service")
+
+
+class ContentRecommendation(BaseModel):
+    """One recommended page (a "checkbox") the recommender proposes and the operator
+    selects to generate. ``city``/``service`` are meaningful only for the
+    ``service_location`` type (the city x service landing pages); empty otherwise."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str = Field(min_length=1)
+    page_type: str = Field(default="service", alias="pageType", serialization_alias="pageType")
+    primary_keyword: str = Field(
+        default="", alias="primaryKeyword", serialization_alias="primaryKeyword"
+    )
+    secondary_keywords: list[str] = Field(
+        default_factory=list, alias="secondaryKeywords", serialization_alias="secondaryKeywords"
+    )
+    est_volume: int = Field(default=0, alias="estVolume", serialization_alias="estVolume")
+    difficulty: Difficulty = "medium"
+    rationale: str = ""
+    city: str = ""
+    service: str = ""
+
+
+class ContentResearchRequest(BaseModel):
+    """POST /content/research body: research a site + content type for a page set."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    site: str = Field(min_length=1, max_length=2048)
+    content_type: ContentType = Field(alias="contentType")
+    # Optional cap; ``None`` -> the ``content_research_count`` setting default.
+    count: int | None = Field(default=None, ge=1, le=50)
+
+
+class ContentResearchResponse(BaseModel):
+    """The recommended page set (or a clean degraded shell). ``reason`` is populated
+    only when ``status='degraded'`` (keyless / dial-blocked / research failed)."""
+
+    status: Literal["ok", "degraded"]
+    items: list[ContentRecommendation]
+    reason: str = ""
+
+
+class ContentBulkGenerateRequest(BaseModel):
+    """POST /content/research/generate body: fan the SELECTED recommendations into
+    content jobs. ``clientId`` + ``framework``/``target`` + the first-hand grounding
+    are shared across every item (each mirrors ``ContentJobCreate``); each item
+    supplies its own ``title`` (-> the job topic) and ``pageType``. The per-site
+    WordPress publish target is resolved server-side from the client's site + vault
+    (exactly like ``POST /content/jobs``), so no wpConnection field is needed here."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[ContentRecommendation] = Field(min_length=1, max_length=100)
+    client_id: str = Field(min_length=1, alias="clientId")
+    framework: Framework | Literal["Auto"] = "Auto"
+    target: PublishTarget = "WordPress"
+    proof_points: list[str] = Field(default_factory=list, alias="proofPoints", max_length=12)
+    testimonials: list[str] = Field(default_factory=list, max_length=12)
+    unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
+    services: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ContentBulkGenerateResponse(BaseModel):
+    """The fan-out result: the public ``CJ-####`` codes of the queued jobs."""
+
+    jobs: list[str]

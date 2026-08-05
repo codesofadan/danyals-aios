@@ -33,20 +33,34 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
-from app.db.clients_repo import ClientsRepoDep
-from app.db.content_repo import ContentRepoDep
+from app.core.security import PrivateAddressError, validate_public_host
+from app.db.clients_repo import ClientsRepo, ClientsRepoDep
+from app.db.content_repo import ContentRepo, ContentRepoDep
 from app.schemas.content import (
+    ContentBulkGenerateRequest,
+    ContentBulkGenerateResponse,
     ContentJobCreate,
     ContentJobResponse,
     ContentJobUpdate,
+    ContentResearchRequest,
+    ContentResearchResponse,
     ContentReviewRequest,
     ContentStatsResponse,
     auto_framework,
     compute_content_stats,
+    job_page_type_for,
     schema_for,
 )
 from app.services.activity import record_activity
+from app.services.content_research import (
+    build_recommend_gate,
+    build_recommend_researcher,
+    run_content_research,
+)
+from app.services.cost_gate import CostGate
+from integrations.llm import Researcher
 
 router = APIRouter(tags=["content"])
 
@@ -178,6 +192,86 @@ async def _first_site(clients: ClientsRepoDep, client_id: str) -> dict[str, Any]
     return sites[0] if sites else None
 
 
+async def _seed_and_insert_job(
+    repo: ContentRepo,
+    clients: ClientsRepo,
+    enqueue: Callable[[str], None],
+    *,
+    client: dict[str, Any],
+    client_id: str,
+    page_type: str,
+    topic: str,
+    framework: str,
+    target: str,
+    proof_points: list[str] | None = None,
+    testimonials: list[str] | None = None,
+    unique_data: list[str] | None = None,
+    services: list[str] | None = None,
+) -> dict[str, Any]:
+    """Seed a job's ``source_pack``, insert the queued row (RLS path), enqueue the
+    pipeline worker, and return the row. The shared create path behind BOTH
+    ``POST /content/jobs`` and the research fan-out, so the two can never diverge:
+    it resolves the ``Auto`` framework + the JSON-LD ``schema_type`` server-side and
+    snapshots the client name/color. The CALLER records the activity entry (one per
+    request, not one per job) - that is the only part not shared here.
+    """
+    if framework == "Auto":
+        framework_resolved: str = auto_framework(page_type)
+        auto = True
+    else:
+        framework_resolved = framework
+        auto = False
+
+    site = await _first_site(clients, client_id) if target == "WordPress" else None
+    source_pack = _seed_source_pack(
+        client,
+        site,
+        target=target,
+        proof_points=proof_points,
+        testimonials=testimonials,
+        unique_data=unique_data,
+        services=services,
+    )
+    row = await asyncio.to_thread(
+        repo.insert_job,
+        {
+            "client_id": client_id,
+            "client_name": client.get("name", ""),
+            "color": client.get("contact_color", "#7B69EE"),
+            "page_type": page_type,
+            "topic": topic,
+            "framework": framework_resolved,
+            "auto": auto,
+            "target": target,
+            "status": "queued",
+            "schema_type": schema_for(page_type),
+            "stage": "Queued",
+            "source_pack": Jsonb(source_pack),
+        },
+    )
+    enqueue(str(row["code"]))
+    return row
+
+
+# --------------------------------------------------------------------------- #
+# Research-first bulk content: the page-set recommender + the bulk fan-out.
+# The researcher/gate are overridable dependencies so the endpoints unit-test on
+# fakes with zero network / zero DB (mirrors policy.py's get_ask_researcher/gate).
+# --------------------------------------------------------------------------- #
+def get_research_researcher(settings: SettingsDep) -> Researcher | None:
+    """Dependency: the key-gated web-search researcher (or ``None`` degraded). Overridable in tests."""
+    return build_recommend_researcher(settings)
+
+
+def get_research_gate() -> CostGate:
+    """Dependency: the real cost gate over the Postgres store. Overridable in tests."""
+    return build_recommend_gate()
+
+
+ResearchResearcherDep = Annotated[Researcher | None, Depends(get_research_researcher)]
+ResearchGateDep = Annotated[CostGate, Depends(get_research_gate)]
+
+
 # --------------------------------------------------------------------------- #
 # Reads
 # --------------------------------------------------------------------------- #
@@ -271,48 +365,125 @@ async def create_content_job(
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
-    # Resolve the framework: the "Auto" sentinel picks per page type + flags auto.
-    if body.framework == "Auto":
-        framework = auto_framework(body.page_type)
-        auto = True
-    else:
-        framework = body.framework
-        auto = False
-
-    site = await _first_site(clients, body.client_id) if body.target == "WordPress" else None
-    source_pack = _seed_source_pack(
-        client,
-        site,
+    row = await _seed_and_insert_job(
+        repo,
+        clients,
+        enqueue,
+        client=client,
+        client_id=body.client_id,
+        page_type=body.page_type,
+        topic=body.topic,
+        framework=body.framework,
         target=body.target,
         proof_points=body.proof_points,
         testimonials=body.testimonials,
         unique_data=body.unique_data,
         services=body.services,
     )
-
-    row = await asyncio.to_thread(
-        repo.insert_job,
-        {
-            "client_id": body.client_id,
-            "client_name": client.get("name", ""),
-            "color": client.get("contact_color", "#7B69EE"),
-            "page_type": body.page_type,
-            "topic": body.topic,
-            "framework": framework,
-            "auto": auto,
-            "target": body.target,
-            "status": "queued",
-            "schema_type": schema_for(body.page_type),
-            "stage": "Queued",
-            "source_pack": Jsonb(source_pack),
-        },
-    )
-    enqueue(str(row["code"]))
     await record_activity(
         actor, kind="content", action="queued a content job", target=client.get("name", ""),
         entity_type="client", entity_id=body.client_id,
     )
     return ContentJobResponse.from_row(row)
+
+
+# --------------------------------------------------------------------------- #
+# Research-first bulk content: recommend a page set, then bulk-generate the picks
+# --------------------------------------------------------------------------- #
+@router.post("/content/research", response_model=ContentResearchResponse)
+async def research_content(
+    body: ContentResearchRequest,
+    settings: SettingsDep,
+    researcher: ResearchResearcherDep,
+    gate: ResearchGateDep,
+    _actor: PublishContent,
+) -> ContentResearchResponse:
+    """Recommend a set of pages to build for a site + content type (the "checkboxes").
+
+    Claude researches the site + its competitors LIVE via the Anthropic SERVER-SIDE
+    web_search tool and returns a strict-JSON page set. The single paid call is metered
+    under the EXISTING ``content_research`` money-dial (committed spend = token cost +
+    web-search cost); a missing key, a dial/budget block, or a research failure DEGRADES
+    (200, ``status='degraded'``) rather than crashing, and the gate is never bypassed.
+    The site URL is SSRF-guarded off the event loop; the blocking Anthropic call + the
+    sync gate store run off the loop via ``to_thread``."""
+    # SSRF guard: getaddrinfo blocks, so validate off the event loop (invariant #2).
+    try:
+        await asyncio.to_thread(validate_public_host, body.site)
+    except PrivateAddressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Site is not a public address: {exc}",
+        ) from exc
+
+    def _run() -> ContentResearchResponse:
+        result = run_content_research(
+            researcher=researcher,
+            gate=gate,
+            settings=settings,
+            site=body.site,
+            content_type=body.content_type,
+            count=body.count,
+        )
+        return ContentResearchResponse(
+            status=result.status,  # type: ignore[arg-type]
+            items=result.items,
+            reason=result.reason,
+        )
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post(
+    "/content/research/generate",
+    response_model=ContentBulkGenerateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_from_research(
+    body: ContentBulkGenerateRequest,
+    repo: ContentRepoDep,
+    clients: ClientsRepoDep,
+    enqueue: ContentEnqueuerDep,
+    actor: PublishContent,
+) -> ContentBulkGenerateResponse:
+    """Bulk-generate the SELECTED recommendations: fan each picked page into a content
+    job via the SAME create path as ``POST /content/jobs`` (``_seed_and_insert_job`` -
+    snapshot client, resolve framework + schema, seed ``source_pack``, enqueue the
+    pipeline worker). Each item's ``title`` becomes the job topic and its ``pageType``
+    maps to the generator's page type; the client / framework / target / first-hand
+    grounding are shared across every job. Records ONE activity entry for the fan-out."""
+    client = await asyncio.to_thread(clients.get_client, body.client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    codes: list[str] = []
+    for item in body.items:
+        row = await _seed_and_insert_job(
+            repo,
+            clients,
+            enqueue,
+            client=client,
+            client_id=body.client_id,
+            page_type=job_page_type_for(item.page_type),
+            topic=item.title,
+            framework=body.framework,
+            target=body.target,
+            proof_points=body.proof_points,
+            testimonials=body.testimonials,
+            unique_data=body.unique_data,
+            services=body.services,
+        )
+        codes.append(str(row["code"]))
+
+    await record_activity(
+        actor,
+        kind="content",
+        action=f"bulk-generated {len(codes)} content pages",
+        target=client.get("name", ""),
+        entity_type="client",
+        entity_id=body.client_id,
+    )
+    return ContentBulkGenerateResponse(jobs=codes)
 
 
 # --------------------------------------------------------------------------- #

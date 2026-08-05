@@ -151,9 +151,10 @@ class Researcher(Protocol):
     the cited source URLs, and token/search usage for cost accounting.
 
     ``max_searches`` bounds the web_search tool's ``max_uses`` for one lookup.
-    ``system`` optionally OVERRIDES the frozen research system prompt (the daily
-    Policy-Radar GENERATOR passes its own N-item JSON contract); ``None`` keeps the
-    default on-demand-lookup prompt.
+    ``system`` optionally OVERRIDES the built-in web-search system prompt so a different
+    caller can pass its own JSON contract (the Policy-Radar daily generator's N-item
+    contract, or the content page-set recommender); ``None`` keeps the default
+    on-demand-lookup prompt.
     """
 
     def research(
