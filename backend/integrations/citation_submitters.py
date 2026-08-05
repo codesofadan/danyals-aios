@@ -55,6 +55,21 @@ class CitationJob:
     website_url: str
     categories: tuple[str, ...] = field(default_factory=tuple)
     external_ref: str | None = None
+    # Richer identity beyond NAP (0060) - what a fuller directory form also asks for.
+    # All default-empty so every existing construction site stays valid.
+    description: str = ""
+    email: str = ""
+    logo_url: str = ""
+    facebook_url: str = ""
+    instagram_url: str = ""
+    linkedin_url: str = ""
+    year_founded: int | None = None
+    payment_types: tuple[str, ...] = field(default_factory=tuple)
+    tagline: str = ""
+    service_area: str = ""
+    # Opening hours ({"mon": "9:00-17:00", ...}); stored on business_profiles (0045)
+    # and now carried through so a directory form with an hours field can use it.
+    hours: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

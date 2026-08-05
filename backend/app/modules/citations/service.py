@@ -324,10 +324,78 @@ def compute_citation_gap(
     return gap
 
 
+# --------------------------------------------------------------------------- #
+# Audit plan: the geo/niche/generic view, PRIORITIZED Generic -> Country -> Niche,
+# each directory tagged built|missing. PURE - reuses select_campaign_directories +
+# compute_citation_gap (no new ranking); the router feeds it catalog + citation rows.
+# --------------------------------------------------------------------------- #
+@dataclass
+class AuditPlan:
+    """Three prioritized buckets of directories with a built|missing verdict each:
+    ``generic`` (GLOBAL core, built first everywhere), ``country`` (the client's own
+    market's general directories), ``niche`` (vertical-specific ones). Each bucket is
+    in the same build order ``select_campaign_directories`` produces."""
+
+    generic: list[dict[str, Any]] = field(default_factory=list)
+    country: list[dict[str, Any]] = field(default_factory=list)
+    niche: list[dict[str, Any]] = field(default_factory=list)
+
+
+def build_audit_plan(
+    *,
+    directories: list[dict[str, Any]],
+    existing_citations: list[dict[str, Any]],
+    vertical: str | None = None,
+    min_authority: int | None = DEFAULT_MIN_AUTHORITY,
+    include_marketplaces: bool = False,
+) -> AuditPlan:
+    """Group the client's relevant catalog into Generic -> Country -> Niche and tag each
+    directory built|missing.
+
+    Reuses the EXISTING selection + gap logic rather than re-ranking: the ordered
+    universe is ``select_campaign_directories`` (no cap - the whole plan is shown), and a
+    directory is MISSING iff it is in ``compute_citation_gap``'s missing set (which
+    subtracts everything a covering citation already earned) - so everything else in the
+    universe is BUILT. Bucketing: a directory that names verticals is NICHE; else a GLOBAL
+    one is GENERIC; else (the client's own market) it is COUNTRY. Degrade-safe: no citation
+    records simply means every directory reports ``missing``."""
+    candidates = automatable_directories(directories)
+    selection = select_campaign_directories(
+        candidates,
+        vertical=vertical,
+        cap=None,  # show the whole plan, not a capped campaign batch
+        min_authority=min_authority,
+        include_marketplaces=include_marketplaces,
+    )
+    gap = compute_citation_gap(
+        directories=directories,
+        existing_citations=existing_citations,
+        vertical=vertical,
+        cap=None,
+        min_authority=min_authority,
+        include_marketplaces=include_marketplaces,
+    )
+    missing_ids = {str(d.get("id")) for d in gap.missing}
+
+    plan = AuditPlan()
+    for row in selection.selected:
+        row = {**row, "_status": "missing" if str(row.get("id")) in missing_ids else "built"}
+        if row.get("verticals"):
+            plan.niche.append(row)
+        elif str(row.get("market")) == "GLOBAL":
+            plan.generic.append(row)
+        else:
+            plan.country.append(row)
+    return plan
+
+
 def job_from_row(row: dict[str, Any]) -> CitationJob:
     """Build the engine-facing ``CitationJob`` from a joined citation+directory+
     business_profile row (see ``repo.load_citation_with_directory``)."""
     categories = row.get("bp_categories")
+    payment_types = row.get("bp_payment_types")
+    hours = row.get("bp_hours")
+    year = row.get("bp_year_founded")
     return CitationJob(
         directory_name=str(row.get("directory_name") or row.get("directory") or ""),
         directory_url=str(row.get("directory_url") or ""),
@@ -343,4 +411,15 @@ def job_from_row(row: dict[str, Any]) -> CitationJob:
         website_url=str(row.get("bp_website_url") or ""),
         categories=tuple(categories) if isinstance(categories, list) else (),
         external_ref=str(row["external_ref"]) if row.get("external_ref") else None,
+        description=str(row.get("bp_description") or ""),
+        email=str(row.get("bp_email") or ""),
+        logo_url=str(row.get("bp_logo_url") or ""),
+        facebook_url=str(row.get("bp_facebook_url") or ""),
+        instagram_url=str(row.get("bp_instagram_url") or ""),
+        linkedin_url=str(row.get("bp_linkedin_url") or ""),
+        year_founded=int(year) if year is not None else None,
+        payment_types=tuple(payment_types) if isinstance(payment_types, list) else (),
+        tagline=str(row.get("bp_tagline") or ""),
+        service_area=str(row.get("bp_service_area") or ""),
+        hours=dict(hours) if isinstance(hours, dict) else {},
     )
