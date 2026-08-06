@@ -262,6 +262,16 @@ def test_parse_generation_is_defensive() -> None:
     assert len(got) == 1 and got[0].analysis.title == "Policy item 1"
 
 
+def test_parse_generation_salvages_a_truncated_reply() -> None:
+    # The real prod failure: the model hit the token ceiling mid-array, so the outer object
+    # + array never close and the strict parse drops everything. Salvage recovers the items
+    # that WERE fully written (0 and 1); the incomplete 3rd item is skipped.
+    full = json.dumps({"items": [_item(0), _item(1), _item(2)]})
+    truncated = full[: full.index("Policy item 2") + 4]  # chop mid-3rd item (its {} never closes)
+    got = parse_generation(truncated, count=6)
+    assert [g.analysis.title for g in got] == ["Policy item 0", "Policy item 1"]
+
+
 # --------------------------------------------------------------------------- #
 # Degrade paths
 # --------------------------------------------------------------------------- #

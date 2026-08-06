@@ -54,8 +54,11 @@ _FEATURE = "policy"
 _PROVIDER_ANTHROPIC = "Anthropic"
 _JOB_TYPE = "policy_generate"
 
-# Bound the reply (N rich items + JSON overhead) and the total item count.
-_GEN_MAX_TOKENS = 3600
+# Bound the reply (N rich items + JSON overhead) and the total item count. The ceiling is
+# generous: six items each carrying ~12 prose fields easily exceeds a few thousand tokens,
+# and a reply truncated at the ceiling is INVALID JSON that the strict parse drops whole -
+# so we give plenty of headroom AND salvage complete items from a partial array (below).
+_GEN_MAX_TOKENS = 8000
 _MAX_ITEMS = 12
 
 # Stable, machine-branchable degrade reasons.
@@ -141,6 +144,56 @@ def _extract_json(raw: str) -> dict[str, Any] | None:
     return None
 
 
+def _salvage_items(raw: str) -> list[dict[str, Any]]:
+    """Recover the COMPLETE item objects from a reply whose outer JSON is broken - almost
+    always because the model hit the token ceiling mid-array, leaving `{"items":[{..},{..},{`
+    (the outer object + array never close, so ``_extract_json`` gives up on the whole thing).
+
+    Scans INSIDE the ``items`` array (from its ``[``), string-aware, tracking brace depth, and
+    ``json.loads`` each balanced ``{...}`` at array level; a truncated final object (opened,
+    never closed) is simply skipped. Returns the items it could fully recover - so a reply cut
+    off after item 4 still yields 4 items instead of zero."""
+    key = raw.find('"items"')
+    arr = raw.find("[", key) if key >= 0 else raw.find("[")
+    if arr < 0:
+        return []
+    out: list[dict[str, Any]] = []
+    depth = 0
+    start = -1
+    in_str = False
+    esc = False
+    for i in range(arr, len(raw)):
+        ch = raw[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    try:
+                        obj = json.loads(raw[start : i + 1])
+                    except json.JSONDecodeError:
+                        obj = None
+                    if isinstance(obj, dict):
+                        out.append(obj)
+                    start = -1
+        elif ch == "]" and depth == 0:
+            break  # end of the items array
+    return out
+
+
 def _clean_str(value: object, *, limit: int) -> str:
     """Whitespace-normalized, length-bounded string (empty on a falsy value)."""
     return " ".join(str(value or "").split())[:limit]
@@ -157,10 +210,12 @@ def parse_generation(raw: str, *, count: int) -> list[GeneratedItem]:
     there is no web retrieval, so an item that omitted its own ``source_url`` falls back to
     an empty string. The result is capped at ``min(count, _MAX_ITEMS)``."""
     data = _extract_json(raw)
-    if not data:
-        return []
-    items = data.get("items")
-    if not isinstance(items, list):
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        # Outer JSON missing/empty (usually a token-ceiling truncation) - recover whatever
+        # complete item objects the reply DID contain instead of dropping the whole brief.
+        items = _salvage_items(raw)
+    if not items:
         return []
     cap = min(max(1, int(count)), _MAX_ITEMS)
     out: list[GeneratedItem] = []
@@ -235,5 +290,7 @@ def run_policy_generation(
     gate.commit(ctx, token_cost)
 
     items = parse_generation(result.text, count=n)
+    if not items:  # a 200 that still parsed to nothing: log the shape for diagnosis
+        logger.warning("policy_generate_empty", length=len(result.text), head=result.text[:400])
     logger.info("policy_generate_done", requested=n, produced=len(items))
     return GenerationResult(status="ok", items=items)
