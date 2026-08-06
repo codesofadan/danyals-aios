@@ -72,7 +72,7 @@ export default function Web2StatusBoard() {
 
       {/* Citation submission engines */}
       <div className={w.rollup} style={{ marginTop: 20 }}>
-        <span><b>Citation engines</b> - direct APIs, the Apify fallback, the solver &amp; bot</span>
+        <span><b>Citation engines</b> - direct APIs, the solver &amp; bot</span>
         {engines && (
           <span><b>{engines.connectedCount}</b> connected · {engines.totalCount} engines</span>
         )}

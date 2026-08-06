@@ -1,5 +1,5 @@
 """7B-4 unit gate: the citation-SUBMISSION engines (direct API, CAPTCHA solver,
-Apify fallback, and the Playwright bot's degrade path) - no network, no keys, no
+and the Playwright bot's degrade path) - no network, no keys, no
 browser. Mirrors ``test_content_providers.py``'s ``httpx.MockTransport`` pattern.
 """
 
@@ -19,7 +19,6 @@ from integrations.captcha_solver import (
     FakeCaptchaSolver,
     captcha_solver_from_settings,
 )
-from integrations.citation_apify import ApifyCitationSubmitter, apify_submitter_from_settings
 from integrations.citation_apis import BingPlacesSubmitter, FoursquareSubmitter
 from integrations.citation_bot import (
     FORM_SPECS,
@@ -172,69 +171,7 @@ def test_captcha_solver_from_settings_degrades_without_a_key() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 4. Apify fallback engine.
-# --------------------------------------------------------------------------- #
-def test_apify_refuses_without_token_or_actor() -> None:
-    with pytest.raises(ProviderNotConfiguredError):
-        ApifyCitationSubmitter(api_token="", actor_id="a1")
-    with pytest.raises(ProviderNotConfiguredError):
-        ApifyCitationSubmitter(api_token="t", actor_id="")
-
-
-def test_apify_runs_and_polls_to_success() -> None:
-    """The REAL Citation Builder actor contract: results land in the run's default
-    DATASET (actor runs carry no `output` field), the run input is the actor's
-    flattened NAP schema, and demoMode MUST be explicitly disabled (it defaults to
-    true on the actor - a sample run that builds nothing)."""
-    client = ApifyCitationSubmitter(api_token="t", actor_id="a1")
-    calls = {"n": 0}
-    seen: dict[str, object] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/runs"):
-            import json as _json
-
-            seen.update(_json.loads(request.content))
-            return httpx.Response(200, json={"data": {"id": "run-1"}})
-        if "/datasets/" in request.url.path:
-            # The REAL actor output: submissions is a DICT {summary, results}.
-            return httpx.Response(
-                200,
-                json=[{
-                    "submissions": {
-                        "summary": {"total": 1, "submitted": 1},
-                        "results": [{"directory": "Brownbook", "status": "submitted",
-                                     "listingUrl": "https://proof.example/1"}],
-                    },
-                    "audit": {"results": [{"directory": "Brownbook", "status": "missing"}]},
-                }],
-            )
-        calls["n"] += 1
-        if calls["n"] < 2:
-            return httpx.Response(200, json={"data": {"status": "RUNNING"}})
-        return httpx.Response(
-            200, json={"data": {"status": "SUCCEEDED", "defaultDatasetId": "ds-1"}}
-        )
-
-    _with_mock(client, handler)
-    ApifyCitationSubmitter._POLL_INTERVAL_SECONDS = 0.01
-    result = client.submit(_job())
-    assert result.status == "submitted" and result.proof_url == "https://proof.example/1"
-    # The run input follows the actor's schema and never runs in demo mode.
-    assert seen["demoMode"] is False
-    assert seen["mode"] == "submit"
-    assert seen["businessName"] == "Acme Dental"
-
-
-def test_apify_submitter_from_settings_degrades_without_credentials() -> None:
-    from app.config import Settings
-
-    settings = Settings(_env_file=None, app_env="dev")
-    assert apify_submitter_from_settings(settings) is None
-
-
-# --------------------------------------------------------------------------- #
-# 5. The Playwright bot: FormSpec plumbing + the degrade path (Playwright is not
+# 4. The Playwright bot: FormSpec plumbing + the degrade path (Playwright is not
 # installed in this test environment - exactly the production-without-the-optional-
 # extra case).
 # --------------------------------------------------------------------------- #

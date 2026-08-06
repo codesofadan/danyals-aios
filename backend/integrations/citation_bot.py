@@ -1,8 +1,8 @@
 """Playwright citation-submission bot (7B-4): the self-hosted engine for
 ``bot_fillable`` and ``captcha_assisted`` directories - the reference plan's own cost
 model puts this route at ~$0.004-0.008/citation (CAPTCHA solve + proxy bandwidth +
-compute), well under the 10c ceiling and ~2.5x cheaper than an off-the-shelf Apify
-actor, ~20-50x cheaper than a managed citation service.
+compute), well under the 10c ceiling and ~20-50x cheaper than a managed citation
+service.
 
 A :class:`FormSpec` is a small, DATA-driven description of one directory's signup
 form (URL + CSS selectors mapped to NAP fields + the submit button + a success

@@ -110,8 +110,6 @@ def integration_statuses(
             _present(settings.foursquare_api_key), "FOURSQUARE_API_KEY"),
         cfg("bing_places", "Bing Places", "Off-page",
             _present(settings.bing_places_api_key), "BING_PLACES_API_KEY"),
-        cfg("apify", "Apify", "Off-page",
-            _present(settings.apify_api_token), "APIFY_API_TOKEN"),
         cfg("captcha", "CAPTCHA Solver", "Off-page",
             _present(settings.captcha_solver_api_key), "CAPTCHA_SOLVER_API_KEY"),
         cfg("brightlocal", "BrightLocal", "Off-page",

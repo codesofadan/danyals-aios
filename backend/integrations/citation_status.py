@@ -3,8 +3,8 @@ engines are actually configured vs missing, and WHY.
 
 The citation-builder dispatches a queued directory to one of several engines by its
 ``tier``/``submit_method`` (see ``integrations.citation_submitters``): a direct API
-(Bing Places / Foursquare), the self-hosted Playwright bot, an Apify actor fallback,
-and a CAPTCHA solver that gates the ``captcha_assisted`` tier. When a submit "shows
+(Bing Places / Foursquare), the self-hosted Playwright bot, and a CAPTCHA solver
+that gates the ``captcha_assisted`` tier. When a submit "shows
 failed/blocked" the first question is always "is that engine even set up?" - this
 board answers it up front instead of after a paid, dead-end run.
 
@@ -56,7 +56,6 @@ def citation_engine_status(settings: Settings) -> list[EngineStatus]:
     """The per-engine CONNECTED/MISSING board for the citation-builder, honestly."""
     bing = _has_secret(settings.bing_places_api_key)
     foursquare = _has_secret(settings.foursquare_api_key)
-    apify = _has_secret(settings.apify_api_token) and bool(settings.apify_citation_actor_id)
     captcha = (
         _has_secret(settings.captcha_solver_api_key)
         and settings.captcha_solver_provider not in ("", "none")
@@ -71,8 +70,8 @@ def citation_engine_status(settings: Settings) -> list[EngineStatus]:
             reason=(
                 "API key configured - direct-API submits are enabled."
                 if bing
-                else "No BING_PLACES_API_KEY set - direct Bing submits fall through to "
-                "the Apify fallback (if configured)."
+                else "No BING_PLACES_API_KEY set - Bing Places direct submits HOLD as "
+                "'blocked' until the key is set; they are not force-failed."
             ),
             required_config=("BING_PLACES_API_KEY",),
             external_note=_EXTERNAL,
@@ -84,28 +83,11 @@ def citation_engine_status(settings: Settings) -> list[EngineStatus]:
             reason=(
                 "API key configured - direct-API submits are enabled."
                 if foursquare
-                else "No FOURSQUARE_API_KEY set - Foursquare submits fall through to the "
-                "Apify fallback (if configured)."
+                else "No FOURSQUARE_API_KEY set - Foursquare direct submits HOLD as "
+                "'blocked' until the key is set; they are not force-failed."
             ),
             required_config=("FOURSQUARE_API_KEY",),
             external_note=_EXTERNAL,
-        ),
-        EngineStatus(
-            key="apify",
-            label="Apify Citation Builder (fallback engine)",
-            connected=apify,
-            reason=(
-                "Token + actor id configured - the fallback engine can build a directory "
-                "the self-hosted bot cannot reach."
-                if apify
-                else "Missing APIFY_API_TOKEN and/or APIFY_CITATION_ACTOR_ID - a directory "
-                "with no other engine HOLDS as 'blocked', it is not force-failed."
-            ),
-            required_config=("APIFY_API_TOKEN", "APIFY_CITATION_ACTOR_ID"),
-            external_note=(
-                "The Apify actor only covers a fixed 48-directory network; a catalog "
-                "name outside it is reported honestly, never billed for nothing. " + _EXTERNAL
-            ),
         ),
         EngineStatus(
             key="captcha_solver",
@@ -129,7 +111,7 @@ def citation_engine_status(settings: Settings) -> list[EngineStatus]:
             connected=False,
             reason=(
                 "Requires the Playwright browser extra installed on the worker host; "
-                "until then bot_fillable directories route to the Apify fallback."
+                "until then bot_fillable directories HOLD as 'blocked'."
             ),
             required_config=("playwright browser extra (worker host)",),
             external_note=_EXTERNAL,

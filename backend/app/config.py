@@ -494,10 +494,8 @@ class Settings(BaseSettings):
     web2_house_credentials_json: SecretStr | None = None
 
     # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: direct
-    # APIs (Bing Places / Foursquare), aggregator pushes, a self-hosted Playwright
-    # bot for bot_fillable/captcha_assisted directories, and an Apify actor as an
-    # OCCASIONAL fallback (not the primary engine — the reference cost model shows
-    # self-hosted beats Apify ~2.5x and a managed service 20-50x per unit). ALL
+    # APIs (Bing Places / Foursquare), aggregator pushes, and a self-hosted Playwright
+    # bot for bot_fillable/captcha_assisted directories. ALL
     # optional and NOT in _REQUIRED_IN_PROD: every provider degrades to a fake/hold
     # exactly like every other off-page seam. Per-directory login credentials (a
     # directory account username/password the bot fills in) are NOT here — they
@@ -508,8 +506,6 @@ class Settings(BaseSettings):
     captcha_solver_provider: str = "capsolver"  # capsolver | capmonster | none
     captcha_solver_api_key: SecretStr | None = None
     citation_proxy_url: SecretStr | None = None  # http(s)://user:pass@host:port
-    apify_api_token: SecretStr | None = None  # Apify Citation Builder actor (fallback engine)
-    apify_citation_actor_id: str = ""  # the actor id/slug to run when Apify is the chosen engine
     # Per-call/per-submit cost estimates for the `citations` money-dial. Figures are
     # the reference plan's own directional numbers (self-hosted route): a solve is
     # ~$0.0006 (CapMonster reCAPTCHA v2), a submit's proxy bandwidth is ~$0.002-0.005,
@@ -518,7 +514,6 @@ class Settings(BaseSettings):
     citation_api_cost_estimate: float = 0.01  # one direct-API submit (Bing/Foursquare)
     citation_bot_cost_estimate: float = 0.005  # one Playwright bot_fillable submit (no CAPTCHA)
     citation_captcha_cost_estimate: float = 0.006  # one Playwright captcha_assisted submit
-    citation_apify_cost_estimate: float = 0.25  # one Apify Citation Builder actor run (fallback)
     # Controlled root a bot_fillable/captcha_assisted submission's proof screenshot is
     # written under. Unset -> no screenshot is captured (an honest empty proof_url,
     # never a crash) - mirrors audit_artifact_dir's key-gating.

@@ -157,7 +157,6 @@ def submitter_for(
     *,
     api_submitters: dict[str, CitationSubmitter],
     bot: CitationSubmitter | None,
-    apify: CitationSubmitter | None,
 ) -> tuple[CitationSubmitter | None, str]:
     """Pick the engine one queued row's ``submit_method`` routes to.
 
@@ -173,20 +172,11 @@ def submitter_for(
         sub = api_submitters.get(key)
         if sub is not None:
             return sub, ""
-        # FALL BACK to Apify rather than blocking - the client's explicit call
-        # (2026-07-23): a queued directory must be BUILT by whatever engine can
-        # reach it, not parked behind an unconfigured native integration.
-        if apify is not None:
-            return apify, ""
         return None, f"no API submitter configured for {key!r}"
     if submit_method.startswith("aggregator:") or submit_method.startswith("bot:"):
         if bot is not None:
             return bot, ""
-        if apify is not None:
-            return apify, ""
         return None, "Playwright bot not installed/configured"
-    if submit_method == "apify":
-        return apify, ("" if apify is not None else "Apify fallback not configured")
     return None, f"no automatable engine for submit_method={submit_method!r}"
 
 
