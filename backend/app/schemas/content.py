@@ -85,6 +85,67 @@ def schema_for(page_type: str) -> str:
     return _SCHEMA_FOR.get(page_type, "Article")
 
 
+# --------------------------------------------------------------------------- #
+# Site-design EXTRACTOR profile models (POST /content/site-design).
+#
+# OPERATIONAL models (there is NO ``frontend/lib/*.ts`` mirror), so - like
+# ``ContentResearchResponse`` / ``PolicyAskResponse`` - they deliberately sit OUTSIDE
+# ``test_contract_lock`` (they are simply never registered in its ``_CONTRACT`` list).
+# Snake_case, no serialization aliases: the profile round-trips unchanged from the
+# response, into a content job's ``source_pack["design_profile"]``, and back out when
+# the publish path reads ``layout.section_order`` - one representation, no re-mapping.
+# The nested models mirror ``app.services.site_design.SiteDesignProfile.as_dict()``.
+# Defined here (before ContentJobCreate) so the create body can carry a profile.
+# --------------------------------------------------------------------------- #
+class SiteDesignPalette(BaseModel):
+    """The site's core colours (CSS hex strings)."""
+
+    primary: str = "#111827"
+    secondary: str = "#4b5563"
+    background: str = "#ffffff"
+    text: str = "#111827"
+    accent: str = "#2563eb"
+
+
+class SiteDesignTypography(BaseModel):
+    """The site's type system (CSS font-family stacks + a base size)."""
+
+    heading_font: str = "system-ui, sans-serif"
+    body_font: str = "system-ui, sans-serif"
+    base_size: str = "16px"
+
+
+class SiteDesignLayout(BaseModel):
+    """The page skeleton: the ORDERED section names a matching page should follow,
+    plus the container width and hero / CTA presentation styles."""
+
+    container_width: str = "1200px"
+    section_order: list[str] = Field(
+        default_factory=lambda: ["hero", "intro", "services", "proof", "faq", "cta"]
+    )
+    hero_style: str = "centered"
+    cta_style: str = "banner"
+
+
+class SiteDesignComponents(BaseModel):
+    """Reusable component styling cues the new page should echo."""
+
+    button_style: str = "solid rounded"
+    card_style: str = "soft shadow"
+    spacing_scale: str = "comfortable"
+
+
+class SiteDesignProfile(BaseModel):
+    """The extracted design system a new page is built to MATCH. Every field defaults,
+    so a partial payload still validates into a usable profile."""
+
+    palette: SiteDesignPalette = Field(default_factory=SiteDesignPalette)
+    typography: SiteDesignTypography = Field(default_factory=SiteDesignTypography)
+    layout: SiteDesignLayout = Field(default_factory=SiteDesignLayout)
+    components: SiteDesignComponents = Field(default_factory=SiteDesignComponents)
+    notes: str = ""
+
+
 class ContentJobCreate(BaseModel):
     """POST /content body: queue a new content job.
 
@@ -112,6 +173,12 @@ class ContentJobCreate(BaseModel):
     testimonials: list[str] = Field(default_factory=list, max_length=12)
     unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
     services: list[str] = Field(default_factory=list, max_length=20)
+    # The target site's extracted design profile (from POST /content/site-design). When
+    # supplied it is seeded verbatim into the job's ``source_pack["design_profile"]`` so
+    # the publish path builds the page structure to MATCH the client's existing site
+    # (ordered ``<section class="aios-<name>">`` blocks from ``layout.section_order``).
+    # Absent -> the publish path behaves exactly as before (no structural wrap).
+    design_profile: SiteDesignProfile | None = Field(default=None, alias="designProfile")
 
 
 ReviewAction = Literal["approve", "edit", "reject"]
@@ -356,9 +423,35 @@ class ContentBulkGenerateRequest(BaseModel):
     testimonials: list[str] = Field(default_factory=list, max_length=12)
     unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
     services: list[str] = Field(default_factory=list, max_length=20)
+    # Shared across every fanned-out job (like the grounding lists above): the target
+    # site's design profile is seeded into each job's ``source_pack["design_profile"]``.
+    design_profile: SiteDesignProfile | None = Field(default=None, alias="designProfile")
 
 
 class ContentBulkGenerateResponse(BaseModel):
     """The fan-out result: the public ``CJ-####`` codes of the queued jobs."""
 
     jobs: list[str]
+
+
+class SiteDesignRequest(BaseModel):
+    """POST /content/site-design body: analyze a site's existing design.
+
+    ``site`` is the target site URL (SSRF-guarded server-side); ``maxPages`` optionally
+    caps how many same-domain pages (homepage + internal) are fetched, defaulting to
+    the ``content_design_max_pages`` setting when omitted."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    site: str = Field(min_length=1, max_length=2048)
+    max_pages: int | None = Field(default=None, alias="maxPages", ge=1, le=10)
+
+
+class SiteDesignResponse(BaseModel):
+    """The extracted design profile (or a clean degraded shell). ``reason`` is populated
+    only when ``status='degraded'`` (keyless / dial-blocked / analysis failed); a
+    degraded result carries ``profile=None``."""
+
+    status: Literal["ok", "degraded"]
+    profile: SiteDesignProfile | None = None
+    reason: str = ""

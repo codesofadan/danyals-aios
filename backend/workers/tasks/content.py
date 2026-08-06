@@ -1036,6 +1036,69 @@ def md_to_html(draft_md: str) -> str:
     return "\n".join(parts)
 
 
+# --------------------------------------------------------------------------- #
+# Design-profile structural shaping (match the target site's section order).
+# --------------------------------------------------------------------------- #
+# When a content job carries a site-design profile (from POST /content/site-design,
+# seeded into source_pack["design_profile"] by the router), the publish body is wrapped
+# in ordered <section class="aios-<name>"> blocks following the profile's
+# layout.section_order - a best-effort STRUCTURAL match to the client's existing site so
+# a theme can style each named section. Deep Elementor/Gutenberg BLOCK generation (a live
+# page builder's block tree) is a LATER chunk and is deliberately NOT built here. When no
+# profile is present the body is EXACTLY md_to_html(draft_md) - no regression.
+def _design_section_order(row: dict[str, Any]) -> list[str]:
+    """The ordered section names from the job's design profile, or ``[]`` when absent."""
+    profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
+    order = _as_dict(profile.get("layout")).get("section_order")
+    if not isinstance(order, list):
+        return []
+    return [str(name).strip() for name in order if str(name).strip()]
+
+
+def _wrap_sections(body_html: str, section_order: list[str]) -> str:
+    """Group the rendered top-level blocks by ``<h2>`` boundary and wrap each group in
+    the next-named ``<section class="aios-<name>">`` block (a best-effort structural map).
+
+    Content before the first ``<h2>`` (the ``<h1>`` + intro) is the first group; any
+    groups beyond ``section_order``'s length fold into the LAST named section; empty
+    sections are skipped. Returns the plain body unchanged if there is nothing to wrap.
+    """
+    blocks = [b for b in body_html.split("\n") if b.strip()]
+    if not blocks or not section_order:
+        return body_html
+
+    groups: list[list[str]] = []
+    current: list[str] = []
+    for block in blocks:
+        if block.startswith("<h2") and current:
+            groups.append(current)
+            current = [block]
+        else:
+            current.append(block)
+    if current:
+        groups.append(current)
+
+    n = len(section_order)
+    buckets: list[list[str]] = [[] for _ in section_order]
+    for idx, group in enumerate(groups):
+        buckets[idx if idx < n else n - 1].extend(group)
+
+    out: list[str] = []
+    for name, bucket in zip(section_order, buckets, strict=True):
+        if not bucket:
+            continue
+        out.append(f'<section class="aios-{_slug(name)}">\n' + "\n".join(bucket) + "\n</section>")
+    return "\n".join(out) if out else body_html
+
+
+def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
+    """Render the draft to HTML and - when the job carries a design profile - wrap it in
+    the profile's ordered sections to MATCH the target site. No profile -> plain render."""
+    html = md_to_html(draft_md)
+    section_order = _design_section_order(row)
+    return _wrap_sections(html, section_order) if section_order else html
+
+
 def _write_artifacts(
     artifacts: ContentArtifactStore | None, code: str, draft_md: str, title: str
 ) -> tuple[str | None, str | None]:
@@ -1409,7 +1472,7 @@ def _plugin_payload(row: dict[str, Any], draft_md: str, title: str) -> dict[str,
     keyword_map = _as_dict(row.get("keyword_map"))
     payload: dict[str, Any] = {
         "title": title,
-        "content": md_to_html(draft_md),
+        "content": _shape_body_html(row, draft_md),
         "status": "draft",  # push as a DRAFT - a human publishes it on WordPress
         "post_type": "post",
         "slug": _slug(title),
@@ -1615,7 +1678,7 @@ def _publish_via_rest(
     wp_post_id = int(existing) if existing is not None and str(existing).isdigit() else None
     post = PostDraft(
         title=title,
-        content=md_to_html(draft_md),
+        content=_shape_body_html(row, draft_md),
         # Push as a DRAFT: AIOS already ran the QA gate + human approval, but the final
         # go-live stays with the client in wp-admin (safer on a live site, and matches
         # the AIOS Publisher plugin path which also drafts). Flip to "publish" only if

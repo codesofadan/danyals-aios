@@ -26,14 +26,16 @@ overridable dependencies so the endpoints unit-test with zero broker.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg.types.json import Jsonb
 
+from app.config import Settings
 from app.core.auth import CurrentUser, require_perm, require_role
-from app.core.deps import SettingsDep
+from app.core.deps import HttpClientDep, SettingsDep
 from app.core.pagination import PageDep
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.clients_repo import ClientsRepo, ClientsRepoDep
@@ -48,6 +50,9 @@ from app.schemas.content import (
     ContentResearchResponse,
     ContentReviewRequest,
     ContentStatsResponse,
+    SiteDesignProfile,
+    SiteDesignRequest,
+    SiteDesignResponse,
     auto_framework,
     compute_content_stats,
     job_page_type_for,
@@ -60,6 +65,13 @@ from app.services.content_research import (
     run_content_research,
 )
 from app.services.cost_gate import CostGate
+from app.services.site_design import (
+    DesignResult,
+    SystemSummarizer,
+    build_design_gate,
+    build_design_summarizer,
+    extract_site_design,
+)
 from integrations.llm import Researcher
 
 router = APIRouter(tags=["content"])
@@ -130,6 +142,12 @@ def _clean_lines(items: list[str] | None) -> list[str]:
     return [s.strip() for s in (items or []) if isinstance(s, str) and s.strip()]
 
 
+def _design_dict(profile: SiteDesignProfile | None) -> dict[str, Any] | None:
+    """A plain (snake_case) dict of a design profile for ``source_pack`` seeding, or
+    ``None`` when the create body carried no profile."""
+    return profile.model_dump() if profile is not None else None
+
+
 def _seed_source_pack(
     client: dict[str, Any],
     site: dict[str, Any] | None,
@@ -139,6 +157,7 @@ def _seed_source_pack(
     testimonials: list[str] | None = None,
     unique_data: list[str] | None = None,
     services: list[str] | None = None,
+    design_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the worker's ``source_pack`` grounding from the client + its site.
 
@@ -178,6 +197,11 @@ def _seed_source_pack(
         pack["unique_data"] = data
     if svcs:
         pack["services"] = svcs
+    if design_profile:
+        # The target site's extracted design profile - the worker's publish path reads
+        # ``design_profile["layout"]["section_order"]`` back off here to wrap the page
+        # in ordered <section class="aios-<name>"> blocks matching the client's site.
+        pack["design_profile"] = design_profile
     if target == "WordPress" and site is not None:
         domain = str(site.get("domain") or "").strip()
         if domain:
@@ -207,6 +231,7 @@ async def _seed_and_insert_job(
     testimonials: list[str] | None = None,
     unique_data: list[str] | None = None,
     services: list[str] | None = None,
+    design_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Seed a job's ``source_pack``, insert the queued row (RLS path), enqueue the
     pipeline worker, and return the row. The shared create path behind BOTH
@@ -231,6 +256,7 @@ async def _seed_and_insert_job(
         testimonials=testimonials,
         unique_data=unique_data,
         services=services,
+        design_profile=design_profile,
     )
     row = await asyncio.to_thread(
         repo.insert_job,
@@ -379,6 +405,7 @@ async def create_content_job(
         testimonials=body.testimonials,
         unique_data=body.unique_data,
         services=body.services,
+        design_profile=_design_dict(body.design_profile),
     )
     await record_activity(
         actor, kind="content", action="queued a content job", target=client.get("name", ""),
@@ -456,6 +483,7 @@ async def generate_from_research(
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
+    design_profile = _design_dict(body.design_profile)  # shared across every fanned-out job
     codes: list[str] = []
     for item in body.items:
         row = await _seed_and_insert_job(
@@ -472,6 +500,7 @@ async def generate_from_research(
             testimonials=body.testimonials,
             unique_data=body.unique_data,
             services=body.services,
+            design_profile=design_profile,
         )
         codes.append(str(row["code"]))
 
@@ -484,6 +513,169 @@ async def generate_from_research(
         entity_id=body.client_id,
     )
     return ContentBulkGenerateResponse(jobs=codes)
+
+
+# --------------------------------------------------------------------------- #
+# Site-design EXTRACTOR (POST /content/site-design): gather the target site's
+# existing design so a new page can be built to MATCH it before publishing. The
+# summarizer / gate / fetcher are overridable dependencies so the endpoint unit-tests
+# on fakes with ZERO network + ZERO real provider (mirrors the research endpoints).
+# --------------------------------------------------------------------------- #
+# A fetcher takes (site_url, max_pages) and returns the fetched page HTML strings.
+DesignFetcher = Callable[[str, int], Awaitable[list[str]]]
+
+# Only these link schemes / prefixes are worth crawling for a same-domain page.
+_SKIP_HREF_PREFIXES = ("#", "mailto:", "tel:", "javascript:", "data:")
+_ASSET_SUFFIXES = (
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".css", ".js",
+    ".pdf", ".zip", ".mp4", ".woff", ".woff2", ".ttf", ".xml", ".json",
+)
+
+
+def get_design_summarizer(settings: SettingsDep) -> SystemSummarizer | None:
+    """Dependency: the key-gated design summarizer (or ``None`` degraded). Overridable in tests."""
+    return build_design_summarizer(settings)
+
+
+def get_design_gate() -> CostGate:
+    """Dependency: the real cost gate over the Postgres store. Overridable in tests."""
+    return build_design_gate()
+
+
+def _same_domain_links(html: str, base_url: str, *, limit: int) -> list[str]:
+    """Extract up to ``limit`` same-domain internal page URLs from the homepage HTML.
+
+    Pure + stdlib only (regex, like the research teardown): absolutises each ``href``
+    against ``base_url``, keeps only http(s) links on the SAME host, drops fragments /
+    assets / the homepage itself, and dedupes. The caller SSRF-guards each before fetch.
+    """
+    import re
+    from urllib.parse import urljoin, urlparse
+
+    base_host = (urlparse(base_url).hostname or "").lower()
+    base_norm = base_url.split("#", 1)[0].rstrip("/")
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in re.findall(r'href\s*=\s*["\']([^"\']+)["\']', html, re.IGNORECASE):
+        href = raw.strip()
+        if not href or href.lower().startswith(_SKIP_HREF_PREFIXES):
+            continue
+        absolute = urljoin(base_url, href).split("#", 1)[0]
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https"):
+            continue
+        if (parsed.hostname or "").lower() != base_host:
+            continue
+        if parsed.path.lower().endswith(_ASSET_SUFFIXES):
+            continue
+        if absolute.rstrip("/") == base_norm or absolute in seen:
+            continue
+        seen.add(absolute)
+        out.append(absolute)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def _fetch_page_html(http: httpx.AsyncClient, url: str, settings: Settings) -> str | None:
+    """Fetch one already-SSRF-validated public URL, trimmed + non-raising.
+
+    Redirects are DISABLED (the SSRF caller contract: a 30x cannot bounce to an
+    internal address) and a non-200 is dropped. The body is trimmed to the design
+    HTML cap so a huge page cannot balloon memory."""
+    try:
+        resp = await http.get(
+            url,
+            follow_redirects=False,
+            timeout=settings.content_teardown_timeout_seconds,
+            headers={"User-Agent": "AIOSDesignBot/1.0"},
+        )
+    except Exception:  # any transport error degrades to a skip (never fails the analysis)
+        return None
+    if resp.status_code != 200:
+        return None
+    return resp.text[: settings.content_design_max_html_chars]
+
+
+async def fetch_site_pages(
+    http: httpx.AsyncClient, site: str, *, max_pages: int, settings: Settings
+) -> list[str]:
+    """The default design fetcher: fetch the homepage via the shared async client, then
+    up to ``max_pages - 1`` same-domain internal pages (each SSRF-guarded OFF the loop
+    before fetch). Returns the collected HTML; a failed homepage yields an empty list."""
+    homepage = await _fetch_page_html(http, site, settings)
+    if homepage is None:
+        return []
+    pages = [homepage]
+    for link in _same_domain_links(homepage, site, limit=max(0, max_pages - 1)):
+        try:
+            await asyncio.to_thread(validate_public_host, link)
+        except PrivateAddressError:
+            continue  # a link that resolves internal is refused (never fetched)
+        html = await _fetch_page_html(http, link, settings)
+        if html is not None:
+            pages.append(html)
+        if len(pages) >= max_pages:
+            break
+    return pages
+
+
+def get_design_fetcher(http: HttpClientDep, settings: SettingsDep) -> DesignFetcher:
+    """Dependency: the default network fetcher bound to the shared async HTTP client.
+    Overridden in tests with a fake returning fixed HTML (no network)."""
+
+    async def _fetch(site: str, max_pages: int) -> list[str]:
+        return await fetch_site_pages(http, site, max_pages=max_pages, settings=settings)
+
+    return _fetch
+
+
+DesignSummarizerDep = Annotated[SystemSummarizer | None, Depends(get_design_summarizer)]
+DesignGateDep = Annotated[CostGate, Depends(get_design_gate)]
+DesignFetcherDep = Annotated[DesignFetcher, Depends(get_design_fetcher)]
+
+
+@router.post("/content/site-design", response_model=SiteDesignResponse)
+async def analyze_site_design(
+    body: SiteDesignRequest,
+    settings: SettingsDep,
+    summarizer: DesignSummarizerDep,
+    gate: DesignGateDep,
+    fetcher: DesignFetcherDep,
+    actor: PublishContent,
+) -> SiteDesignResponse:
+    """Extract the target site's existing design profile so a new page can MATCH it.
+
+    Fetches the homepage + up to ``maxPages`` same-domain internal pages, then has Claude
+    analyze the rendered HTML under a strict-JSON design contract. The single paid call is
+    metered under the EXISTING ``content`` money-dial (committed spend = Anthropic token
+    cost only); a missing key, a dial/budget block, or an analysis failure DEGRADES (200,
+    ``status='degraded'``, ``profile=null``) rather than crashing, and the gate is never
+    bypassed. The site URL is SSRF-guarded OFF the event loop; the blocking Anthropic call
+    + the sync gate store run off the loop via ``to_thread``."""
+    # SSRF guard: getaddrinfo blocks, so validate off the event loop (invariant #2).
+    try:
+        await asyncio.to_thread(validate_public_host, body.site)
+    except PrivateAddressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Site is not a public address: {exc}",
+        ) from exc
+
+    max_pages = body.max_pages if body.max_pages is not None else settings.content_design_max_pages
+    pages = await fetcher(body.site, max_pages)
+
+    def _run() -> DesignResult:
+        return extract_site_design(
+            summarizer=summarizer, gate=gate, settings=settings, pages=pages
+        )
+
+    result = await asyncio.to_thread(_run)
+    profile = SiteDesignProfile.model_validate(result.profile.as_dict()) if result.profile else None
+    await record_activity(
+        actor, kind="content", action="analyzed target site design", target=body.site,
+    )
+    return SiteDesignResponse(status=result.status, profile=profile, reason=result.reason)
 
 
 # --------------------------------------------------------------------------- #
