@@ -2,10 +2,11 @@
 the legacy change-detection WATCHER (retained, now dormant).
 
 DEFAULT (``generate_policy_daily``, beat ``generate-policy-daily``): once a day Claude
-researches the current top Google-Search developments via the server-side web_search tool
-and writes ``policy_daily_count`` items into change_events + kb_entries + recommendations
-(``store_generated_items`` + ``app/services/policy_generate.py``). This REPLACED the
-Google-scrape watcher on the beat; the manual ``POST /policy/generate`` forces a refresh.
+returns the current top Google-Search developments from its OWN expert knowledge (PURE
+Cloud-API generation, no web search) and writes ``policy_daily_count`` items into
+change_events + kb_entries + recommendations (``store_generated_items`` +
+``app/services/policy_generate.py``). This REPLACED the Google-scrape watcher on the beat;
+the manual ``POST /policy/generate`` forces a refresh.
 
 LEGACY (``watch_policy_sources``): the source-diff watcher below is kept for reference /
 re-enablement but is NO LONGER on the beat schedule (the user moved Policy Radar off
@@ -43,7 +44,7 @@ from app.db.policy_watch_repo import service_policy_watch_repo
 from app.logging_setup import get_logger
 from app.services.cost_gate import CostGate
 from app.services.cost_store import PostgresCostStore
-from app.services.policy_ask import build_ask_researcher
+from app.services.policy_ask import build_ask_summarizer
 from app.services.policy_generate import GeneratedItem, run_policy_generation
 from app.services.policy_watch import (
     PolicyFetcher,
@@ -410,8 +411,8 @@ def watch_policy_sources() -> dict[str, Any]:
 def generate_policy_daily(force: bool = False) -> dict[str, Any]:
     """BEAT entry point (+ manual trigger): generate the day's policy brief via Anthropic.
 
-    Wires the (key-gated) web-search researcher, the cost gate, and the privileged store,
-    then runs the pure core (``run_policy_generation``) and persists its items
+    Wires the (key-gated) pure-generation summarizer, the cost gate, and the privileged
+    store, then runs the pure core (``run_policy_generation``) and persists its items
     (``store_generated_items``). ONCE PER DAY: unless ``force`` is set (the manual
     ``POST /policy/generate`` refresh), a run is SKIPPED when generator items already exist
     for the current UTC day (``count_generated_today``), so a re-delivered beat tick never
@@ -424,7 +425,7 @@ def generate_policy_daily(force: bool = False) -> dict[str, Any]:
         if not force and store.count_generated_today() > 0:
             return {"state": "skipped", "reason": "already_generated_today", "written": 0}
         result = run_policy_generation(
-            researcher=build_ask_researcher(settings),
+            summarizer=build_ask_summarizer(settings),
             gate=_gate(),
             settings=settings,
         )

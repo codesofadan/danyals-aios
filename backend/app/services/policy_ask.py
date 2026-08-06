@@ -2,34 +2,33 @@
 
 The always-on watcher (``policy_watch.py`` + ``workers/tasks/policy.py``) diffs a
 curated set of Google sources on a beat. This is its on-DEMAND twin: an operator types
-a topic and we answer it right now by letting Claude do the WEB SEARCH ITSELF.
+a topic and we answer it right now with PURE Claude generation - the Anthropic Messages
+API answering from its OWN current expert knowledge:
 
-    Anthropic messages.create with the SERVER-SIDE web_search tool -> Claude searches
-    the web, reads the pages, and synthesizes a cited, structured answer.
+    Anthropic messages.create (NO tools, NO web) -> Claude synthesizes a cited,
+    structured answer from what it already knows about Google Search policy.
 
-This replaces the old scrape-one-page pipeline (Serper -> pick top result -> SSRF-fetch
-its text -> Haiku summarize), which returned useless "the document does not contain that
-info" answers whenever the picked page was JS-rendered (e.g. developers.google.com serves
-only nav/header HTML to a plain fetch). Serper + the SSRF fetcher are DROPPED from this
-feature; they still power the always-on watcher (``policy_watch.py``), untouched.
+This is a deliberate move OFF web-search grounding: the web-search-grounded results were
+returning WRONG guidance while Claude's direct answers were correct, so the whole Policy
+path now runs entirely on the Cloud API with pure generation. (The dormant web-search
+``Researcher`` seam in ``integrations/llm.py`` is left in place but is no longer used by
+this flow.)
 
-The core (:func:`run_policy_ask`) is PURE - the researcher and the cost gate are injected
-- so it unit-tests with a ``FakeResearcher`` + a fake gate: NO network, NO DB, NO real
-provider. It reuses the EXISTING ``policy`` money-dial (no new dial): the ACTUAL spend is
-committed after the call as the Anthropic TOKEN cost (``pricing.anthropic_cost`` from the
-returned usage) PLUS the WEB-SEARCH cost (``pricing.web_search_cost`` x the number of
-searches Claude ran, read from ``usage.server_tool_use.web_search_requests``; if the SDK
-doesn't surface it, ``max_uses`` is used as a defensive high estimate).
+The core (:func:`run_policy_ask`) is PURE - the summarizer and the cost gate are injected
+- so it unit-tests with a fake ``SystemSummarizer`` + a fake gate: NO network, NO DB, NO
+real provider. It reuses the EXISTING ``policy`` money-dial (no new dial): the ACTUAL spend
+committed after the call is the Anthropic TOKEN cost ONLY (``pricing.anthropic_cost`` from
+the returned usage) - there is NO web-search cost term any more.
 
 Degrade, never crash. Every seam that cannot run returns a clean, structured "degraded"
 answer (a clear message, ``urgency='informational'``, no rules, no sources):
 
-* no Anthropic key / no ``[ai]`` SDK (``researcher is None``) -> keyless degrade; the gate
+* no Anthropic key / no ``[ai]`` SDK (``summarizer is None``) -> keyless degrade; the gate
   is NOT consulted.
 * a cost-gate block (dial off / by-hand, client cap, global spend halt) -> NO provider
   call happens and the gate is NEVER bypassed.
-* the research call fails (transport error, or a model/SDK that can't web-search) -> a
-  clean degrade with no spend committed (usage is unknown, so nothing is billed).
+* the summarize call fails (transport error, SDK issue) -> a clean degrade with no spend
+  committed (usage is unknown, so nothing is billed).
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from integrations.errors import ProviderNotConfiguredError
-from integrations.llm import AnthropicResearcher, Researcher
+from integrations.llm import AnthropicSummarizer, SystemSummarizer
 
 logger = get_logger("app.services.policy_ask")
 
@@ -66,25 +65,44 @@ DEGRADE_RESEARCH_FAILED = "research_failed"
 
 _URGENCIES = frozenset({"urgent", "informational"})
 
+# Frozen, factual system prompt for the on-demand lookup. Claude answers the operator's
+# Google-Search policy/algorithm question from its OWN current expert knowledge - NO tools,
+# NO web - as STRICT JSON so the parse below is deterministic.
+_ASK_SYSTEM_PROMPT = (
+    "You are a senior SEO and Google Search policy expert advising an agency operator. "
+    "Answer the operator's question about Google Search ranking, algorithm, spam, "
+    "structured-data, or helpful-content policy from your OWN current, expert knowledge. "
+    "Do NOT use any tools and do NOT browse the web - rely only on what you already know. "
+    "Respond with STRICT JSON ONLY - no prose, no markdown, no code fences - with EXACTLY "
+    "these keys: answer (a concise 2-4 sentence plain-language answer to the operator's "
+    'question), urgency (one of "urgent" or "informational" - "urgent" ONLY if the '
+    "operator should act soon, e.g. an active rollout, a newly required change, or a "
+    "manual-action risk), key_rules (an array of short strings, each a concrete rule or "
+    "requirement), sources (an array of authoritative URLs you can cite from your own "
+    "knowledge, e.g. Google Search Central documentation - may be empty if you are not "
+    "certain of an exact URL). Never invent a URL you are not confident is real."
+)
+
 
 # --------------------------------------------------------------------------- #
 # Provider wiring (key-gated builders; None == degrade)
 # --------------------------------------------------------------------------- #
-def build_ask_researcher(settings: Settings) -> Researcher | None:
-    """The key-gated web-search researcher, or ``None`` (degraded) when unconfigured.
+def build_ask_summarizer(settings: Settings) -> SystemSummarizer | None:
+    """The key-gated pure-generation summarizer, or ``None`` (degraded) when unconfigured.
 
     Reuses the SAME optional ``anthropic_api_key`` every other AI seam gates on; a missing
     key OR an absent ``[ai]`` SDK returns ``None`` (degrade, never crash). It NEVER logs
-    the secret, only the reason.
+    the secret, only the reason. The Sonnet ``policy_research_model`` rides in as the
+    ``model_heavy`` tier so an on-demand answer is genuinely in-depth.
     """
     key = settings.anthropic_api_key
     if not key:
         logger.info("policy_ask_degraded", reason=DEGRADE_NO_ANTHROPIC)
         return None
     try:
-        return AnthropicResearcher(
+        return AnthropicSummarizer(
             api_key=key.get_secret_value(),
-            model=settings.policy_research_model,
+            model_heavy=settings.policy_research_model,
         )
     except ProviderNotConfiguredError:
         logger.info("policy_ask_degraded", reason="anthropic_sdk_absent")
@@ -109,17 +127,13 @@ def build_ask_gate() -> CostGate:
 
 
 # --------------------------------------------------------------------------- #
-# Pure helpers: the research prompt + the JSON parse
+# Pure helpers: the user prompt + the JSON parse
 # --------------------------------------------------------------------------- #
-def build_research_prompt(topic: str) -> str:
+def build_ask_user_prompt(topic: str) -> str:
     """The user turn for one on-demand topic (the system prompt carries the JSON contract
-    + the research instruction; this is the concrete question)."""
+    + the from-knowledge instruction; this is the concrete question)."""
     cleaned = " ".join(topic.split())
-    return (
-        "Research this Google Search policy / algorithm topic and answer the operator's "
-        f'question: "{cleaned}". Search the web for current, authoritative guidance before '
-        "answering."
-    )
+    return f'Answer this Google Search policy / algorithm question for the operator: "{cleaned}".'
 
 
 def _extract_json(raw: str) -> dict[str, Any] | None:
@@ -198,13 +212,14 @@ def _no_answer_message() -> str:
 
 
 def parse_research(raw: str, *, web_sources: list[str], topic: str) -> PolicyAsk:
-    """Parse the researcher's reply into a ``PolicyAsk``, DEGRADING defensively.
+    """Parse the model's reply into a ``PolicyAsk``, DEGRADING defensively.
 
     The reply SHOULD be strict JSON (``answer`` / ``urgency`` / ``key_rules`` /
     ``sources``); on any parse miss the answer is NOT lost - the cleaned raw text becomes
-    the answer with a heuristic urgency. ``web_sources`` are the URLs Claude actually
-    retrieved via web_search (the authoritative citations); they lead the source list,
-    then any JSON-declared URLs, deduped and bounded."""
+    the answer with a heuristic urgency. There is no web retrieval any more, so
+    ``web_sources`` is passed empty by ``run_policy_ask``; only the JSON-declared
+    ``sources`` (URLs Claude can cite from its own knowledge) flow through, deduped and
+    bounded. The parameter is kept so any future retrieval seam can lead the source list."""
     data = _extract_json(raw)
     if data is not None:
         answer = str(data.get("answer") or "").strip()
@@ -263,7 +278,7 @@ def _degraded(topic: str, reason: str, message: str) -> AskResult:
 def _keyless_message(provider: str) -> str:
     return (
         f"Policy lookup is degraded: no {provider} key is configured. The live topic "
-        "research runs once the key is activated; the detected change-events and the "
+        "lookup runs once the key is activated; the detected change-events and the "
         "knowledge base below still answer from what the watcher has already found."
     )
 
@@ -277,7 +292,7 @@ def _blocked_message(outcome: str) -> str:
 
 def _research_failed_message() -> str:
     return (
-        "The live web research could not complete just now. Try again shortly, or read "
+        "The live policy lookup could not complete just now. Try again shortly, or read "
         "the change-events and knowledge base below."
     )
 
@@ -285,32 +300,29 @@ def _research_failed_message() -> str:
 def run_policy_ask(
     topic: str,
     *,
-    researcher: Researcher | None,
+    summarizer: SystemSummarizer | None,
     gate: CostGate,
     settings: Settings,
 ) -> AskResult:
-    """Research ONE on-demand policy topic via server-side web search. Pure; degrades.
+    """Answer ONE on-demand policy topic via PURE Claude generation. Pure; degrades.
 
     The gate contract is reused verbatim (evaluate -> call -> commit): on any non-allowed
     outcome NO provider call happens and the gate is not bypassed. The single paid call
-    (the Anthropic web-search research) is metered under the ``policy`` dial, and the
-    ACTUAL cost committed after the call is the TOKEN cost + the WEB-SEARCH cost.
+    (the Anthropic Messages generation) is metered under the ``policy`` dial, and the
+    ACTUAL cost committed after the call is the TOKEN cost ONLY (no web-search term).
     """
     clean_topic = " ".join(topic.split())
 
-    # Anthropic (with web search) is the WHOLE answer engine now; without it we cannot
-    # answer at all, so a missing key is the only keyless degrade. The gate is NOT touched.
-    if researcher is None:
+    # Anthropic is the WHOLE answer engine now; without it we cannot answer at all, so a
+    # missing key is the only keyless degrade. The gate is NOT touched.
+    if summarizer is None:
         return _degraded(clean_topic, DEGRADE_NO_ANTHROPIC, _keyless_message("Anthropic"))
 
-    max_searches = max(1, int(settings.policy_research_max_searches))
     model = settings.policy_research_model
 
-    # One pre-check estimate: the token-analysis estimate plus the worst-case web-search
-    # spend (every allowed search used). The COMMITTED value below is the real spend.
-    estimate = settings.policy_analysis_cost_estimate + pricing.web_search_cost(
-        settings, searches=max_searches
-    )
+    # One pre-check estimate: the flat token-analysis estimate (usage is not yet known).
+    # The COMMITTED value below is the real token spend.
+    estimate = settings.policy_analysis_cost_estimate
     ctx = GateContext(
         feature_key=_FEATURE,
         client_id=None,  # org-level staff lookup; still under the global spend halt
@@ -324,28 +336,25 @@ def run_policy_ask(
         # dial off / by-hand, client cap, or the global spend halt: NO provider call.
         return _degraded(clean_topic, f"cost_gate:{decision.outcome}", _blocked_message(decision.outcome))
 
-    # The single paid call: Claude searches the web itself and returns a cited answer.
+    # The single paid call: Claude answers from its own expert knowledge (no tools/web).
     try:
-        research = researcher.research(
-            build_research_prompt(clean_topic),
+        result = summarizer.summarize(
+            build_ask_user_prompt(clean_topic),
             model=model,
             max_tokens=_ANSWER_MAX_TOKENS,
-            max_searches=max_searches,
+            system=_ASK_SYSTEM_PROMPT,
         )
-    except Exception:  # transport / SDK / model-not-web-search-capable: degrade, don't crash
-        logger.info("policy_ask_research_failed")
+    except Exception:  # transport / SDK failure: degrade, don't crash
+        logger.info("policy_ask_generation_failed")
         return _degraded(clean_topic, DEGRADE_RESEARCH_FAILED, _research_failed_message())
 
-    # Commit the ACTUAL spend: the Anthropic TOKEN cost + the WEB-SEARCH cost. The number
-    # of searches is read from usage when the SDK surfaces it, else estimated at max_uses.
+    # Commit the ACTUAL spend: the Anthropic TOKEN cost only (no web-search cost).
     token_cost = pricing.anthropic_cost(
-        settings, model=model, input_tokens=research.input_tokens, output_tokens=research.output_tokens
+        settings, model=model, input_tokens=result.input_tokens, output_tokens=result.output_tokens
     )
-    searches = research.searches if research.searches is not None else max_searches
-    search_cost = pricing.web_search_cost(settings, searches=searches)
-    gate.commit(ctx, token_cost + search_cost)
+    gate.commit(ctx, token_cost)
 
-    ask = parse_research(research.text, web_sources=research.sources, topic=clean_topic)
+    ask = parse_research(result.text, web_sources=[], topic=clean_topic)
     return AskResult(
         topic=clean_topic,
         status="ok",
