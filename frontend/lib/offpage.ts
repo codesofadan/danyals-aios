@@ -159,6 +159,17 @@ export type BusinessProfile = {
   categories: string[];
   hours: Record<string, string>;
   isPrimary: boolean;
+  // Richer identity beyond NAP (0060) — what a real directory form also asks for.
+  description: string;
+  email: string;
+  logoUrl: string;
+  facebookUrl: string;
+  instagramUrl: string;
+  linkedinUrl: string;
+  yearFounded: number | null;
+  paymentTypes: string[];
+  tagline: string;
+  serviceArea: string;
 };
 
 export type BusinessProfileInput = {
@@ -176,6 +187,17 @@ export type BusinessProfileInput = {
   categories?: string[];
   hours?: Record<string, string>;
   isPrimary?: boolean;
+  // Richer identity beyond NAP (0060). All optional (camelCase = the server aliases).
+  description?: string;
+  email?: string;
+  logoUrl?: string;
+  facebookUrl?: string;
+  instagramUrl?: string;
+  linkedinUrl?: string;
+  yearFounded?: number | null;
+  paymentTypes?: string[];
+  tagline?: string;
+  serviceArea?: string;
 };
 
 // --- 7B-4: the directory catalog (reference data) ---------------------------
@@ -257,6 +279,36 @@ export type CitationGap = {
   bySubmitStatus: Record<string, number>;
   byNapStatus: Record<string, number>;
 };
+
+// --- audit plan (generic → country → niche) ----------------------------------
+// GET /citation-builder/clients/{id}/audit-plan — the geo/niche/generic citation
+// audit, PRIORITIZED Generic → Country → Niche. Each directory is tagged built|missing
+// (the same covering rule gap-analysis uses). Read-only, degrade-safe server-side.
+export type AuditPlanStatus = "built" | "missing";
+
+export type AuditPlanItem = {
+  directoryName: string;
+  market: BusinessMarket;
+  tier: DirectoryTier;
+  url: string;
+  status: AuditPlanStatus;
+};
+
+export type AuditPlan = {
+  client: string;
+  resolvedVertical: string | null;
+  market: BusinessMarket;
+  generic: AuditPlanItem[];
+  country: AuditPlanItem[];
+  niche: AuditPlanItem[];
+};
+
+// The three prioritized buckets, in build order, for rendering.
+export const AUDIT_PLAN_BUCKETS: { key: "generic" | "country" | "niche"; label: string; hint: string }[] = [
+  { key: "generic", label: "Generic", hint: "Global core, aggregators & APIs every market builds first." },
+  { key: "country", label: "Country", hint: "The client's own-market general directories." },
+  { key: "niche", label: "Niche", hint: "Vertical-specific directories for the client's industry." },
+];
 
 // --- Wave 4: client business profile (NAP captured at creation) --------------
 export type ClientBusinessProfile = {

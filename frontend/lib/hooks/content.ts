@@ -9,7 +9,15 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ContentJob, Framework, PageType, PublishTarget } from "@/lib/content";
+import type {
+  ContentJob,
+  Framework,
+  PageType,
+  PublishTarget,
+  ResearchContentType,
+  ResearchItem,
+  SiteDesignProfile,
+} from "@/lib/content";
 
 export const CONTENT_JOBS_KEY = ["content", "jobs"] as const;
 export const CONTENT_STATS_KEY = ["content", "jobs", "stats"] as const;
@@ -97,6 +105,76 @@ export function useReviewContentJob() {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
     },
+  });
+}
+
+// --- Research-first bulk content (POST /content/research + …/generate) ---------
+// The recommender researches a site + content type LIVE (Anthropic server-side
+// web_search) and returns a page set to pick from — a single paid call metered under
+// the content_research dial. A keyless / dial-blocked / failed run DEGRADES (200,
+// status='degraded'), never an error. retry:0 (the client default) so a transient
+// failure never double-spends the gated call.
+export type ContentResearchInput = {
+  site: string;
+  contentType: ResearchContentType;
+  count?: number;
+};
+export type ContentResearchResult = {
+  status: "ok" | "degraded";
+  items: ResearchItem[];
+  reason: string;
+};
+
+export function useContentResearch() {
+  return useMutation({
+    mutationFn: (input: ContentResearchInput) =>
+      api.post<ContentResearchResult>("/content/research", input),
+  });
+}
+
+// POST /content/research/generate — fan the SELECTED recommendations into content jobs
+// (the SAME create path as POST /content/jobs). Shared client / framework / target /
+// grounding / design profile across every item; each item carries its own title +
+// pageType. Returns the queued CJ-#### codes; on success the board + stats refetch.
+export type BulkGenerateInput = {
+  items: ResearchItem[];
+  clientId: string;
+  framework?: Framework | "Auto";
+  target?: PublishTarget;
+  proofPoints?: string[];
+  testimonials?: string[];
+  uniqueData?: string[];
+  services?: string[];
+  designProfile?: SiteDesignProfile;
+};
+
+export function useGenerateFromResearch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: BulkGenerateInput) =>
+      api.post<{ jobs: string[] }>("/content/research/generate", input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
+      void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
+    },
+  });
+}
+
+// POST /content/site-design — extract the target site's existing design so a new page
+// can be built to MATCH it. A single paid call metered under the content dial; a
+// keyless / dial-blocked / failed analysis DEGRADES (200, status='degraded',
+// profile=null). retry:0 so a transient failure never double-spends.
+export type SiteDesignInput = { site: string; maxPages?: number };
+export type SiteDesignResult = {
+  status: "ok" | "degraded";
+  profile: SiteDesignProfile | null;
+  reason: string;
+};
+
+export function useSiteDesign() {
+  return useMutation({
+    mutationFn: (input: SiteDesignInput) =>
+      api.post<SiteDesignResult>("/content/site-design", input),
   });
 }
 

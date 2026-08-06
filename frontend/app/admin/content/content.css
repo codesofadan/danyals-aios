@@ -115,6 +115,66 @@
 .co-fw-best { display: flex; align-items: flex-start; gap: 7px; margin-top: 10px; font-size: 12px; color: var(--body); line-height: 1.45; }
 .co-fw-best .material-symbols-rounded { font-size: 16px; color: var(--c2); flex: none; margin-top: 1px; }
 
+/* ---- research-first bulk panel + site-design matcher ---- */
+.co-research-card { margin-top: 16px; }
+.co-research { margin-top: 12px; }
+
+.co-rec-h { display: flex; align-items: center; gap: 12px; margin: 14px 0 8px; }
+.co-rec-h .op-muted { font-size: 12px; color: var(--muted); }
+
+.co-rec-list { display: flex; flex-direction: column; gap: 8px; }
+.co-rec-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 11px 13px; background: var(--well); border: 1px solid var(--line);
+  border-left: 3px solid transparent; border-radius: 12px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.co-rec-row:hover { border-color: var(--line-2); }
+.co-rec-row.on { border-left-color: var(--c4); background: color-mix(in srgb, var(--c4) 6%, transparent); }
+.co-rec-check { font-size: 20px; color: var(--muted); flex: none; }
+.co-rec-row.on .co-rec-check { color: var(--c4); }
+.co-rec-main { flex: 1; min-width: 0; }
+.co-rec-title { display: block; font-size: 13px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+.co-rec-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 3px; }
+.co-rec-kw { font-size: 11px; font-weight: 600; color: var(--violet-soft); }
+.co-rec-meta .co-sep { font-size: 11px; color: var(--muted); }
+.co-rec-vol { font-size: 12.5px; font-weight: 800; color: var(--fg-strong); font-variant-numeric: tabular-nums; flex: none; white-space: nowrap; }
+.co-rec-vol i { font-style: normal; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2); }
+
+.co-gen { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+
+.co-codes-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.co-codes { display: flex; flex-wrap: wrap; gap: 7px; }
+.co-code {
+  font-size: 11.5px; font-weight: 800; letter-spacing: .02em; font-variant-numeric: tabular-nums;
+  color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 32%, transparent); border-radius: 999px; padding: 3px 11px;
+}
+
+/* ---- extracted site-design profile ---- */
+.co-design {
+  margin: 12px 0; padding: 13px 15px; background: var(--well);
+  border: 1px solid var(--line); border-radius: 14px;
+}
+.co-design-h { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.co-design-t { font-size: 13px; font-weight: 800; color: var(--fg-strong); }
+.co-design-pages { width: 92px; margin: 0; }
+.co-design-pages input { padding: 6px 8px; }
+.co-swatches { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.co-swatch { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.co-swatch-chip { width: 46px; height: 34px; border-radius: 8px; border: 1px solid var(--line-2); }
+.co-swatch-name { font-size: 10.5px; font-weight: 700; text-transform: capitalize; color: var(--muted); }
+.co-swatch-hex { font-size: 10px; font-weight: 600; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.co-design-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 14px; font-size: 12px; color: var(--muted); }
+.co-design-meta b { color: var(--ink); font-weight: 700; }
+.co-order-lbl { font-size: 11.5px; margin-top: 12px; }
+.co-order { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; counter-reset: sec; }
+.co-order-item { counter-increment: sec; font-size: 11.5px; font-weight: 600; color: var(--ink); background: var(--raise);
+  border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; text-transform: capitalize; }
+.co-order-item::before { content: counter(sec) ". "; color: var(--violet-soft); font-weight: 800; }
+.co-attach { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; font-weight: 600; color: var(--body); cursor: pointer; }
+.co-attach input { width: 15px; height: 15px; accent-color: var(--c4); }
+
 @media (max-width: 1180px) and (min-width: 641px) {
   /* 5 columns squeezed to 2 is unreadable — scroll horizontally instead,
      each column keeping a workable width, snapping column-by-column. */
