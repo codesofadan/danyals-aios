@@ -41,12 +41,12 @@ export default function FiverrUpsells({ fiverrUrl }: { fiverrUrl?: string }) {
       <div className="fa-upsell-h">
         <span className="fa-fiverr-badge"><span className="material-symbols-rounded">verified</span></span>
         <div>
-          <h2 className="fa-upsell-t">Recommended next steps</h2>
-          <p className="fa-upsell-s">Done for you by our team on Fiverr — fix what your audit surfaced.</p>
+          <h2 className="fa-upsell-t">Want more hands-on help?</h2>
+          <p className="fa-upsell-s">Optional — if you&apos;d like a hand fixing what this audit surfaced, explore our SEO services on Fiverr.</p>
         </div>
         {fiverrUrl && (
           <a className="fa-upsell-all" href={fiverrUrl} target="_blank" rel="noopener noreferrer">
-            View all gigs
+            Explore all services
             <span className="material-symbols-rounded">arrow_outward</span>
           </a>
         )}
@@ -65,18 +65,17 @@ export default function FiverrUpsells({ fiverrUrl }: { fiverrUrl?: string }) {
               <span className="fa-gig-ic" style={{ background: `${u.color}22`, color: u.color }}>
                 <span className="material-symbols-rounded">{u.icon}</span>
               </span>
-              <span className="fa-gig-rating">
-                <span className="material-symbols-rounded">star</span>
-                {u.rating.toFixed(1)}
-                <span className="fa-gig-reviews">({u.reviews})</span>
-              </span>
             </div>
             <div className="fa-gig-title">{u.title}</div>
             <p className="fa-gig-desc">{u.description}</p>
             <div className="fa-gig-foot">
-              <span className="fa-gig-price">
-                from <strong>${u.price}</strong>
-              </span>
+              {u.price > 0 ? (
+                <span className="fa-gig-price">
+                  from <strong>${u.price}</strong>
+                </span>
+              ) : (
+                <span className="fa-gig-price fa-gig-price-muted">On Fiverr</span>
+              )}
               <span className="fa-fiverr-cta">
                 View on Fiverr
                 <span className="material-symbols-rounded">arrow_outward</span>

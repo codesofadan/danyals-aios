@@ -9,6 +9,7 @@ import {
 } from "@/lib/hooks/publicAudit";
 import ReportViewer from "@/components/report/ReportViewer";
 import FreeAuditReport from "./FreeAuditReport";
+import FiverrUpsells from "./FiverrUpsells";
 
 type View = "landing" | "form" | "working";
 
@@ -302,6 +303,7 @@ export default function FreeAuditFlow() {
             label="Your SEO audit report"
             pdfHref={report.has_pdf ? publicReportPdfUrl(token) : undefined}
           />
+          <FiverrUpsells fiverrUrl={fiverrUrl} />
           <div className="fa-report-foot">
             Built by AIOS · <a href={fiverrUrl} target="_blank" rel="noopener noreferrer">See all our services on Fiverr →</a>
           </div>

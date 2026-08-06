@@ -400,6 +400,7 @@
 .fa-gig-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; }
 .fa-gig-price { font-size: 12.5px; color: var(--muted); }
 .fa-gig-price strong { font-size: 16px; font-weight: 800; color: var(--fg-strong); }
+.fa-gig-price-muted { font-style: italic; opacity: .75; }
 .fa-fiverr-cta {
   display: inline-flex; align-items: center; gap: 5px; padding: 8px 13px; border-radius: 10px;
   font-size: 12.5px; font-weight: 800; color: #fff; background: var(--fa-fiverr); transition: .16s;
