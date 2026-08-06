@@ -1,17 +1,21 @@
 """Unit gate for the daily Policy-Radar GENERATOR (Anthropic, replaces the scrape watcher).
 
-Proven with the researcher + gate ALL faked - NO network, NO DB, NO real provider:
+The generator now runs entirely on the Cloud API with PURE Claude generation (the Anthropic
+Messages API, NO web search) - Claude returns the current top developments from its OWN
+expert knowledge. Proven with the summarizer + gate ALL faked - NO network, NO DB, NO real
+provider:
 
 * the pure core (:func:`run_policy_generation`):
   - happy path -> N structured, enum-clamped items; the SINGLE paid call is metered under
-    the ``policy`` dial and committed as the ACTUAL token cost + web-search cost; the
-    generator's own N-item system prompt is passed through;
-  - keyless (no researcher) DEGRADES to no items WITHOUT touching the gate;
-  - a cost-gate block DEGRADES with NO researcher call + NO spend (never bypassed);
-  - a research failure DEGRADES cleanly with no spend committed;
+    the ``policy`` dial and committed as the ACTUAL TOKEN cost ONLY (no web-search term);
+    the generator's own N-item system prompt is passed through;
+  - keyless (no summarizer) DEGRADES to no items WITHOUT touching the gate;
+  - a cost-gate block DEGRADES with NO summarizer call + NO spend (never bypassed);
+  - a generation failure DEGRADES cleanly with no spend committed;
   - the requested count caps the produced items.
 * the parse (:func:`parse_generation`) is DEFENSIVE: non-JSON / missing-items / bad-item /
-  hallucinated-enum inputs never crash and clamp to the 0019 vocabulary.
+  hallucinated-enum inputs never crash and clamp to the 0019 vocabulary; an item that omits
+  its own source_url falls back to an empty string (no web retrieval).
 * the persistence core (``store_generated_items``) writes a change_event + kb_entry +
   recommendation per item, with a ``kb-gen-*`` ref.
 """
@@ -27,13 +31,14 @@ from app.config import Settings
 from app.services import pricing
 from app.services.cost_gate import CostGate, DialMode, GateContext
 from app.services.policy_generate import (
+    _GENERATE_SYSTEM_PROMPT,
     DEGRADE_GENERATION_FAILED,
     DEGRADE_NO_ANTHROPIC,
     build_generate_prompt,
     parse_generation,
     run_policy_generation,
 )
-from integrations.llm import ResearchResult
+from integrations.llm import LLMResult
 from workers.tasks.policy import store_generated_items
 
 pytestmark = pytest.mark.unit
@@ -42,51 +47,39 @@ pytestmark = pytest.mark.unit
 # --------------------------------------------------------------------------- #
 # Fakes
 # --------------------------------------------------------------------------- #
-class SpyResearcher:
-    """A ``Researcher`` returning a fixed reply; records the prompt + system it was given."""
+class SpySummarizer:
+    """A ``SystemSummarizer`` returning fixed text; records the prompt + system it was given."""
 
     def __init__(
         self,
         *,
         text: str,
-        sources: list[str] | None = None,
-        searches: int | None = 2,
         input_tokens: int = 300,
         output_tokens: int = 800,
     ) -> None:
         self._text = text
-        self._sources = sources or []
-        self._searches = searches
         self._in = input_tokens
         self._out = output_tokens
         self.calls: list[str] = []
         self.systems: list[str | None] = []
 
-    def research(
-        self, prompt: str, *, model: str, max_tokens: int, max_searches: int,
-        system: str | None = None,
-    ) -> ResearchResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
         self.calls.append(prompt)
         self.systems.append(system)
-        return ResearchResult(
-            text=self._text,
-            sources=list(self._sources),
-            input_tokens=self._in,
-            output_tokens=self._out,
-            searches=self._searches,
-        )
+        return LLMResult(text=self._text, input_tokens=self._in, output_tokens=self._out)
 
 
-class RaisingResearcher:
+class RaisingSummarizer:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def research(
-        self, prompt: str, *, model: str, max_tokens: int, max_searches: int,
-        system: str | None = None,
-    ) -> ResearchResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
         self.calls.append(prompt)
-        raise RuntimeError("web search unavailable")
+        raise RuntimeError("generation unavailable")
 
 
 class SpyCostStore:
@@ -193,21 +186,21 @@ def _items_json(n: int = 6, **over: Any) -> str:
 # --------------------------------------------------------------------------- #
 # build_generate_prompt
 # --------------------------------------------------------------------------- #
-def test_prompt_requests_exact_count_and_a_search() -> None:
+def test_prompt_requests_exact_count_from_knowledge() -> None:
     prompt = build_generate_prompt(6)
     assert "6" in prompt
-    assert "search" in prompt.lower()
+    assert "knowledge" in prompt.lower()
 
 
 # --------------------------------------------------------------------------- #
-# Happy path: N items + a single metered spend (token + web-search)
+# Happy path: N items + a single metered spend (TOKEN cost only)
 # --------------------------------------------------------------------------- #
-def test_happy_path_returns_items_and_meters_token_plus_search() -> None:
-    researcher = SpyResearcher(text=_items_json(6), searches=3, input_tokens=300, output_tokens=800)
+def test_happy_path_returns_items_and_meters_token_only() -> None:
+    summarizer = SpySummarizer(text=_items_json(6), input_tokens=300, output_tokens=800)
     gate, store = _gate("api")
     settings = _settings()
 
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=settings, count=6)
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=settings, count=6)
 
     assert result.status == "ok"
     assert len(result.items) == 6
@@ -215,57 +208,57 @@ def test_happy_path_returns_items_and_meters_token_plus_search() -> None:
     assert first.analysis.title == "Policy item 0"
     assert first.analysis.severity == "major"
     assert first.source_url == "https://developers.google.com/search/item-0"
-    # exactly one paid research call, carrying the GENERATOR system prompt (its N-item JSON)
-    assert len(researcher.calls) == 1
-    assert researcher.systems[0] and '"items"' in researcher.systems[0]
-    # ONE committed cost row under the policy dial = token cost + search cost.
+    # exactly one paid call, carrying the GENERATOR system prompt (its N-item JSON contract)
+    assert len(summarizer.calls) == 1
+    assert summarizer.systems == [_GENERATE_SYSTEM_PROMPT]
+    # ONE committed cost row under the policy dial = TOKEN cost only (no web-search term).
     assert len(store.commits) == 1
     feature, provider, cost = store.commits[0]
     assert (feature, provider) == ("policy", "Anthropic")
     expected = pricing.anthropic_cost(
         settings, model=settings.policy_generate_model, input_tokens=300, output_tokens=800
-    ) + pricing.web_search_cost(settings, searches=3)
+    )
     assert cost == expected and cost > 0
 
 
 def test_count_defaults_to_settings_policy_daily_count() -> None:
-    researcher = SpyResearcher(text=_items_json(8))
+    summarizer = SpySummarizer(text=_items_json(8))
     gate, _ = _gate("api")
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=_settings())
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=_settings())
     assert len(result.items) == 6  # capped at policy_daily_count (default 6), not the 8 returned
 
 
 def test_requested_count_caps_items() -> None:
-    researcher = SpyResearcher(text=_items_json(6))
+    summarizer = SpySummarizer(text=_items_json(6))
     gate, _ = _gate("api")
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=_settings(), count=3)
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=_settings(), count=3)
     assert len(result.items) == 3
 
 
-def test_bad_enums_are_clamped_and_source_url_falls_back_to_web_sources() -> None:
+def test_bad_enums_are_clamped_and_source_url_falls_back_to_empty() -> None:
     payload = json.dumps(
         {"items": [_item(0, severity="bogus", category="nope", target_module="zzz", source_url="")]}
     )
-    researcher = SpyResearcher(text=payload, sources=["https://blog.google/products/search/"])
+    summarizer = SpySummarizer(text=payload)
     gate, _ = _gate("api")
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=_settings(), count=1)
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=_settings(), count=1)
     item = result.items[0]
     assert item.analysis.severity == "info"  # clamped
     assert item.analysis.category == "algorithm"  # clamped
     assert item.analysis.target_module == "audit"  # clamped
-    assert item.source_url == "https://blog.google/products/search/"  # web-source fallback
+    assert item.source_url == ""  # no web fallback under pure generation
 
 
 # --------------------------------------------------------------------------- #
 # parse_generation defensive
 # --------------------------------------------------------------------------- #
 def test_parse_generation_is_defensive() -> None:
-    assert parse_generation("not json at all", count=6, web_sources=[]) == []
-    assert parse_generation('{"items": "not a list"}', count=6, web_sources=[]) == []
-    assert parse_generation('{"nope": 1}', count=6, web_sources=[]) == []
+    assert parse_generation("not json at all", count=6) == []
+    assert parse_generation('{"items": "not a list"}', count=6) == []
+    assert parse_generation('{"nope": 1}', count=6) == []
     # a non-dict item is skipped; a valid sibling survives.
     mixed = json.dumps({"items": ["oops", _item(1)]})
-    got = parse_generation(mixed, count=6, web_sources=[])
+    got = parse_generation(mixed, count=6)
     assert len(got) == 1 and got[0].analysis.title == "Policy item 1"
 
 
@@ -274,7 +267,7 @@ def test_parse_generation_is_defensive() -> None:
 # --------------------------------------------------------------------------- #
 def test_keyless_degrades_without_touching_the_gate() -> None:
     gate, store = _gate("api")
-    result = run_policy_generation(researcher=None, gate=gate, settings=_settings())
+    result = run_policy_generation(summarizer=None, gate=gate, settings=_settings())
     assert result.status == "degraded"
     assert result.reason == DEGRADE_NO_ANTHROPIC
     assert result.items == [] and store.commits == []
@@ -284,24 +277,24 @@ def test_keyless_degrades_without_touching_the_gate() -> None:
     ("mode", "halted", "expected"),
     [("off", False, "skip"), ("byhand", False, "manual"), ("api", True, "blocked_halt")],
 )
-def test_gate_block_degrades_without_calling_the_researcher(
+def test_gate_block_degrades_without_calling_the_summarizer(
     mode: str, halted: bool, expected: str
 ) -> None:
-    researcher = SpyResearcher(text=_items_json(6))
+    summarizer = SpySummarizer(text=_items_json(6))
     gate, store = _gate(mode, halted=halted)  # type: ignore[arg-type]
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=_settings())
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=_settings())
     assert result.status == "degraded"
     assert result.reason == f"cost_gate:{expected}"
-    assert researcher.calls == [] and store.commits == []  # no bypass
+    assert summarizer.calls == [] and store.commits == []  # no bypass
 
 
-def test_research_failure_degrades_with_no_spend() -> None:
-    researcher = RaisingResearcher()
+def test_generation_failure_degrades_with_no_spend() -> None:
+    summarizer = RaisingSummarizer()
     gate, store = _gate("api")
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=_settings())
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=_settings())
     assert result.status == "degraded"
     assert result.reason == DEGRADE_GENERATION_FAILED
-    assert researcher.calls  # the gate allowed the attempt
+    assert summarizer.calls  # the gate allowed the attempt
     assert store.commits == []  # nothing billed - usage unknown
 
 
@@ -309,9 +302,9 @@ def test_research_failure_degrades_with_no_spend() -> None:
 # store_generated_items: change_event + kb_entry + recommendation per item
 # --------------------------------------------------------------------------- #
 def test_store_generated_items_writes_the_three_rows_per_item() -> None:
-    researcher = SpyResearcher(text=_items_json(2))
+    summarizer = SpySummarizer(text=_items_json(2))
     gate, _ = _gate("api")
-    result = run_policy_generation(researcher=researcher, gate=gate, settings=_settings(), count=2)
+    result = run_policy_generation(summarizer=summarizer, gate=gate, settings=_settings(), count=2)
 
     store = FakeGenStore()
     written = store_generated_items(store, result.items)

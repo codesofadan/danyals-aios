@@ -27,6 +27,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
 from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
@@ -48,11 +49,11 @@ from app.services.activity import record_activity
 from app.services.cost_gate import CostGate
 from app.services.policy_ask import (
     build_ask_gate,
-    build_ask_researcher,
+    build_ask_summarizer,
     run_policy_ask,
 )
 from app.services.policy_radar import apply_recommendation
-from integrations.llm import Researcher
+from integrations.llm import SystemSummarizer
 
 router = APIRouter(tags=["policy"])
 
@@ -63,9 +64,9 @@ ManageRecs = Annotated[CurrentUser, Depends(require_role("owner", "admin", "mana
 
 
 # --- on-demand lookup seams (injected so tests swap in fakes) ---------------- #
-def get_ask_researcher(settings: SettingsDep) -> Researcher | None:
-    """Dependency: the key-gated web-search researcher (or ``None`` degraded). Overridable in tests."""
-    return build_ask_researcher(settings)
+def get_ask_summarizer() -> SystemSummarizer | None:
+    """Dependency: the key-gated pure-generation summarizer (or ``None`` degraded). Overridable in tests."""
+    return build_ask_summarizer(get_settings())
 
 
 def get_ask_gate() -> CostGate:
@@ -73,7 +74,7 @@ def get_ask_gate() -> CostGate:
     return build_ask_gate()
 
 
-AskResearcherDep = Annotated[Researcher | None, Depends(get_ask_researcher)]
+AskSummarizerDep = Annotated[SystemSummarizer | None, Depends(get_ask_summarizer)]
 AskGateDep = Annotated[CostGate, Depends(get_ask_gate)]
 
 
@@ -141,23 +142,24 @@ async def policy_ask(
     body: PolicyAskRequest,
     _user: ViewReports,
     settings: SettingsDep,
-    researcher: AskResearcherDep,
+    summarizer: AskSummarizerDep,
     gate: AskGateDep,
 ) -> PolicyAskResponse:
-    """On-demand policy lookup (staff-gated). Claude researches the topic LIVE via the
-    Anthropic SERVER-SIDE web_search tool and returns a structured, cited answer (a concise
-    answer, an urgency label, the key rules, and the source URLs it actually retrieved).
+    """On-demand policy lookup (staff-gated). Claude answers the topic with PURE Cloud-API
+    generation (the Anthropic Messages API, NO web search) from its OWN current expert
+    knowledge, returning a structured answer (a concise answer, an urgency label, the key
+    rules, and any authoritative source URLs it can cite from knowledge).
 
     The single paid call is metered under the EXISTING ``policy`` money-dial (the committed
-    spend is the Anthropic token cost PLUS the web-search cost); a missing key, a dial/budget
-    block, or a research failure DEGRADES (200, ``status='degraded'``) rather than crashing,
+    spend is the Anthropic token cost ONLY - no web-search cost); a missing key, a dial/budget
+    block, or a generation failure DEGRADES (200, ``status='degraded'``) rather than crashing,
     and the gate is never bypassed. The blocking Anthropic call + the sync gate store run off
     the event loop via ``to_thread``."""
 
     def _run() -> PolicyAskResponse:
         result = run_policy_ask(
             body.topic,
-            researcher=researcher,
+            summarizer=summarizer,
             gate=gate,
             settings=settings,
         )
