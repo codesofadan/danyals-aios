@@ -437,3 +437,21 @@ def generate_policy_daily(force: bool = False) -> dict[str, Any]:
     except Exception:  # never re-raise: acks_late would redeliver the beat task
         logger.exception("generate_policy_daily_task_failed")
         return {"state": "failed", "written": 0}
+
+
+@celery_app.task(name="reset_policy_feed")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
+def reset_policy_feed() -> dict[str, Any]:
+    """One-off ops task: clear the RETIRED Google-scrape Policy-Radar feed.
+
+    Deletes every change_event + kb_entry + NON-baseline recommendation via the privileged
+    repo (``clear_policy_feed``; the evergreen baseline recs survive) so the dashboard drops
+    the old generic scrape items and shows only the Cloud-API-generated brief. Runnable in
+    the worker's own context (``celery call reset_policy_feed``) so it inherits the live
+    config. Returns the per-table row counts; NEVER re-raises (acks_late would redeliver)."""
+    try:
+        counts = service_policy_watch_repo().clear_policy_feed()
+        logger.info("reset_policy_feed_done", **counts)
+        return {"state": "ok", **counts}
+    except Exception:
+        logger.exception("reset_policy_feed_task_failed")
+        return {"state": "failed"}
