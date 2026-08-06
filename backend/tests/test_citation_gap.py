@@ -173,7 +173,6 @@ def test_engine_status_all_missing_on_keyless_settings() -> None:
     settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
     engines = {e.key: e for e in citation_engine_status(settings)}
     assert engines["bing_places"].connected is False
-    assert engines["apify"].connected is False
     assert engines["playwright_bot"].connected is False  # optional extra, never a key
     # every engine names its required config + carries an honest reason
     for e in engines.values():
@@ -184,9 +183,8 @@ def test_engine_status_all_missing_on_keyless_settings() -> None:
 def test_engine_status_reflects_configured_keys() -> None:
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None, app_env="dev",
-        bing_places_api_key="k", apify_api_token="t", apify_citation_actor_id="actor-1",
+        bing_places_api_key="k",
     )
     engines = {e.key: e for e in citation_engine_status(settings)}
     assert engines["bing_places"].connected is True
-    assert engines["apify"].connected is True
     assert engines["foursquare"].connected is False  # still unset

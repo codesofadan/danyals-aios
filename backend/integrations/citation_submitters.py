@@ -12,10 +12,6 @@ so the worker dispatches on ``tier`` without caring which concrete engine runs:
   module - an aggregator push and a direct API write share this Protocol).
 * ``bot_fillable`` / ``captcha_assisted`` - a Playwright form-fill
   (``integrations.citation_bot``), the latter routed through a CAPTCHA solver first.
-* Apify (``integrations.citation_apify``) is an OCCASIONAL FALLBACK engine satisfying
-  the SAME Protocol - not the default (the reference plan's own cost model has
-  self-hosted beating Apify ~2.5x per unit); a directory only routes there when the
-  self-hosted engine is explicitly configured to defer to it.
 * ``manual_only`` directories have NO engine and are never dispatched to a worker -
   they exist in the catalog purely for completeness/reporting.
 

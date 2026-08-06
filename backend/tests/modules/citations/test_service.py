@@ -108,7 +108,7 @@ class _StubSubmitter:
 
 def test_fed_by_routes_to_no_engine_with_an_honest_reason() -> None:
     sub, reason = submitter_for(
-        "aggregator:fed_by_data_axle", api_submitters={}, bot=_StubSubmitter(), apify=_StubSubmitter()
+        "aggregator:fed_by_data_axle", api_submitters={}, bot=_StubSubmitter()
     )
     assert sub is None
     assert "no action needed" in reason
@@ -116,40 +116,42 @@ def test_fed_by_routes_to_no_engine_with_an_honest_reason() -> None:
 
 def test_api_prefix_routes_to_the_matching_key() -> None:
     bing = _StubSubmitter()
-    sub, reason = submitter_for("api:bing_places", api_submitters={"bing_places": bing}, bot=None, apify=None)
+    sub, reason = submitter_for("api:bing_places", api_submitters={"bing_places": bing}, bot=None)
     assert sub is bing and reason == ""
 
 
 def test_api_prefix_with_no_matching_key_is_a_clean_none() -> None:
-    sub, reason = submitter_for("api:foursquare_places", api_submitters={}, bot=None, apify=None)
+    sub, reason = submitter_for("api:foursquare_places", api_submitters={}, bot=None)
     assert sub is None and "foursquare_places" in reason
 
 
 def test_bot_prefix_routes_to_the_bot() -> None:
     bot = _StubSubmitter()
-    sub, reason = submitter_for("bot:playwright", api_submitters={}, bot=bot, apify=None)
+    sub, reason = submitter_for("bot:playwright", api_submitters={}, bot=bot)
     assert sub is bot and reason == ""
 
 
 def test_aggregator_non_fed_prefix_also_routes_to_the_bot() -> None:
     bot = _StubSubmitter()
-    sub, _reason = submitter_for("aggregator:data_axle", api_submitters={}, bot=bot, apify=None)
+    sub, _reason = submitter_for("aggregator:data_axle", api_submitters={}, bot=bot)
     assert sub is bot
 
 
 def test_bot_prefix_with_no_bot_configured_is_a_clean_none() -> None:
-    sub, reason = submitter_for("bot:playwright", api_submitters={}, bot=None, apify=None)
+    sub, reason = submitter_for("bot:playwright", api_submitters={}, bot=None)
     assert sub is None and "Playwright" in reason
 
 
-def test_apify_routes_to_the_fallback() -> None:
-    apify = _StubSubmitter()
-    sub, reason = submitter_for("apify", api_submitters={}, bot=None, apify=apify)
-    assert sub is apify and reason == ""
+def test_removed_engine_method_degrades_honestly() -> None:
+    # The old fallback engine is gone: a directory whose method is literally that
+    # engine's name now has no engine and falls to the honest "no automatable
+    # engine" reason rather than being silently re-routed.
+    sub, reason = submitter_for("apify", api_submitters={}, bot=_StubSubmitter())
+    assert sub is None and "no automatable engine" in reason
 
 
 def test_unrecognised_method_never_raises() -> None:
-    sub, reason = submitter_for("mystery:xyz", api_submitters={}, bot=None, apify=None)
+    sub, reason = submitter_for("mystery:xyz", api_submitters={}, bot=None)
     assert sub is None and "mystery:xyz" in reason
 
 

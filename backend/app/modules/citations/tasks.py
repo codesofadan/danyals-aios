@@ -1,6 +1,6 @@
 """Citation-submission worker (7B-4): the never-stuck / never-re-raise / idempotent
 driver that claims a QUEUED citation row, dispatches it to the right engine (a
-direct API, the self-hosted Playwright bot, or the Apify fallback), and tracks the
+direct API or the self-hosted Playwright bot), and tracks the
 outcome. Mirrors ``workers/tasks/offpage.py``'s Web 2.0 tasks exactly - with
 ``task_acks_late`` a raised exception would redeliver the job and re-run a PAID
 stage (double spend), so this always acks and returns a small result dict.
@@ -24,7 +24,6 @@ from app.modules.citations.service import job_from_row, submitter_for
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from integrations.captcha_solver import captcha_solver_from_settings
-from integrations.citation_apify import apify_submitter_from_settings
 from integrations.citation_apis import BingPlacesSubmitter, FoursquareSubmitter
 from integrations.citation_bot import citation_bot_from_settings
 from integrations.citation_submitters import CitationSubmitter
@@ -78,7 +77,9 @@ def _cost_estimate_for(tier: str, settings: Settings) -> float:
         return settings.citation_bot_cost_estimate
     if tier == "captcha_assisted":
         return settings.citation_captcha_cost_estimate
-    return settings.citation_apify_cost_estimate
+    # Any other/unknown tier falls to the self-hosted Playwright bot's estimate -
+    # the default engine for a directory not on the api/aggregator/captcha tiers.
+    return settings.citation_bot_cost_estimate
 
 
 def execute_citation_submit(
@@ -140,9 +141,8 @@ def execute_citation_submit(
         job = job_from_row(row)
         submit_method = str(row.get("submit_method") or "")
         bot = citation_bot_from_settings(settings, captcha_solver=captcha_solver_from_settings(settings))
-        apify = apify_submitter_from_settings(settings)
         submitter, reason = submitter_for(
-            submit_method, api_submitters=_api_submitters(settings), bot=bot, apify=apify,
+            submit_method, api_submitters=_api_submitters(settings), bot=bot,
         )
         if submitter is None:
             store.update_citation(citation_id, {"submit_status": "blocked", "error": reason[:_ERROR_MAX]})
@@ -160,27 +160,9 @@ def execute_citation_submit(
         # The self-hosted bot only drives directories it has a FormSpec for, and a
         # native API can turn out not to expose the write endpoint at all (e.g.
         # Foursquare's public API has no anonymous place-create - POST /v3/places
-        # 404s). Either way, FALL THROUGH to the Apify network (the client's call:
-        # a queued directory gets built by whatever engine can reach it) - the
-        # actor then reports the honest outcome (submitted, or blocked with the
-        # platform's manual link) instead of a dead-end failure.
-        if (
-            result.status == "failed"
-            and ("no FormSpec" in result.error or "status 404" in result.error or "status 405" in result.error)
-            and apify is not None
-            and submitter is not apify
-        ):
-            logger.info("citation_submit_apify_fallthrough", citation_id=citation_id)
-            try:
-                result = apify.submit(job)
-            except Exception as exc:
-                _gate().commit(ctx, ctx.estimated_cost)
-                logger.exception("citation_submit_provider_error", citation_id=citation_id)
-                store.update_citation(
-                    citation_id, {"submit_status": "failed", "error": f"{exc!r}"[:_ERROR_MAX]}
-                )
-                return {"state": "failed", "reason": f"{exc!r}"[:_ERROR_MAX]}
-
+        # 404s). With no fallback engine, that engine's own honest failed/blocked
+        # result stands as-is - a queued directory it cannot reach is reported
+        # truthfully rather than silently re-routed.
         _gate().commit(ctx, ctx.estimated_cost)
         fields: dict[str, Any] = {
             "submit_status": result.status,

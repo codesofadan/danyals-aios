@@ -229,7 +229,7 @@ export function useWeb2Status() {
   });
 }
 
-/** The citation-ENGINE status board (Bing/Foursquare/Apify/CAPTCHA/bot/proxy). */
+/** The citation-ENGINE status board (Bing/Foursquare/CAPTCHA/bot/proxy). */
 export function useCitationEngineStatus() {
   return useQuery({
     queryKey: ENGINE_STATUS_KEY,

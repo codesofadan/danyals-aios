@@ -558,7 +558,7 @@ async def web2_status(_user: ViewReports) -> Web2StatusResponse:
 @router.get("/engine-status", response_model=EngineStatusBoardResponse)
 async def engine_status(_user: ViewReports) -> EngineStatusBoardResponse:
     """The citation-ENGINE status board: each submission engine (Bing/Foursquare direct
-    API, the Apify fallback, the CAPTCHA solver, the self-hosted bot, the proxy)
+    API, the CAPTCHA solver, the self-hosted bot, the proxy)
     CONNECTED vs MISSING, with the reason and the external-API caveat. Derived from
     settings presence only - never a live probe, never a spend."""
     board = citation_engine_board(get_settings())

@@ -136,22 +136,6 @@ every site's current DOM — see the module's own docstring).
 
 ---
 
-## 5. Apify fallback (optional — only if self-hosting genuinely can't reach a directory)
-
-Per the user's own call on this build (self-hosted primary, Apify as an occasional
-fallback — the reference plan's cost model has self-hosted beating Apify ~2.5×):
-
-| Setting | How to get it |
-|---|---|
-| `APIFY_API_TOKEN` | Apify account → Settings → Integrations → API tokens. |
-| `APIFY_CITATION_ACTOR_ID` | The Citation Builder actor's id/slug from the Apify Store (or your own custom actor). |
-
-Only set these once a specific directory has proven genuinely unreachable by the
-self-hosted bot — routing a directory's `submit_method` to `"apify"` in the
-`directories` catalog is a manual, deliberate per-row decision, not a default.
-
----
-
 ## A note on promises
 
 Every entry above degrades cleanly without the key: the pipeline holds the
