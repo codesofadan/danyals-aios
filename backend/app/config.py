@@ -250,6 +250,18 @@ class Settings(BaseSettings):
     content_research_count: int = 12  # recommended pages returned per research call (default cap)
     content_research_max_searches: int = 6  # web_search tool max_uses per recommend lookup
     content_research_max_tokens: int = 4096  # bound the JSON page-set reply (a list of items)
+    # --- Site-design EXTRACTOR (POST /content/site-design). Before a page is published
+    # to a client's WordPress site the system gathers that site's EXISTING design/layout
+    # (palette, typography, section order, component styles) so the new page can be built
+    # to MATCH it. Claude analyzes the fetched rendered-page HTML under a strict-JSON
+    # design contract (integrations/llm.py summarizer seam), metered under the EXISTING
+    # `content` money-dial (committed spend = Anthropic token cost only); a missing key /
+    # a dial-block / an analysis failure DEGRADES (200, status='degraded'), never crashes.
+    # All additive + optional. ---
+    content_design_model: str = "claude-sonnet-5"  # Claude tier that reads the page HTML
+    content_design_max_pages: int = 3  # homepage + up to N-1 same-domain internal pages
+    content_design_max_tokens: int = 2048  # bound the JSON design-profile reply
+    content_design_max_html_chars: int = 6000  # per-page HTML trimmed to this many chars
     # --- Content WORKER + PUBLISH tuning (P7A-7/8). The pipeline worker composes
     # the merged content services; the publish path renders PDF/Markdown to a
     # controlled artifact root (traversal-guarded, like the audit store) when the
