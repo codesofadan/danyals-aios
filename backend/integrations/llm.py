@@ -66,6 +66,23 @@ class Summarizer(Protocol):
     def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult: ...
 
 
+@runtime_checkable
+class SystemSummarizer(Protocol):
+    """A ``Summarizer`` that also accepts an optional ``system`` prompt override, for
+    callers that need Claude's PURE generation under their OWN contract instead of the
+    built-in compaction prompt (the Policy-Radar Cloud-API generator + on-demand ask, and
+    the content site-design analyzer). ``system=None`` behaves exactly like ``Summarizer``.
+
+    ``AnthropicSummarizer`` and ``FakeSummarizer`` both satisfy this AND the base
+    ``Summarizer`` (their ``system`` param is optional), so widening never rippled into the
+    many existing ``Summarizer`` implementers (context / content / offpage).
+    """
+
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult: ...
+
+
 class AnthropicSummarizer:
     """Real ``Summarizer`` backed by Claude; lazy-imports the ``anthropic`` SDK.
 
@@ -93,12 +110,14 @@ class AnthropicSummarizer:
         self.model_summary = model_summary
         self.model_heavy = model_heavy
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
         message = self._client.messages.create(
             model=model,
             max_tokens=max_tokens,
             system=[
-                {"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+                {"type": "text", "text": system or _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
             ],
             messages=[{"role": "user", "content": prompt}],
         )
@@ -312,7 +331,9 @@ class FakeSummarizer:
     def __init__(self, *, max_chars: int = 480) -> None:
         self._max_chars = max_chars
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
         normalized = " ".join(prompt.split())
         digest = normalized[: self._max_chars]
         return LLMResult(
