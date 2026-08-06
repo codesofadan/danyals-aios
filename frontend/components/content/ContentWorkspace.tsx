@@ -8,6 +8,7 @@ import PipelineBoard from "./PipelineBoard";
 import ReviewGate, { type ReviewAction } from "./ReviewGate";
 import ReviewPreview from "./ReviewPreview";
 import NewJobForm, { type NewJob } from "./NewJobForm";
+import ResearchPanel from "./ResearchPanel";
 
 export default function ContentWorkspace() {
   const jobsQ = useContentJobs(); // live: GET /content/jobs, polls while the worker moves a job
@@ -67,6 +68,8 @@ export default function ContentWorkspace() {
       )}
 
       <ContentKpis jobs={jobs} />
+
+      <ResearchPanel halted={halted} />
 
       <PipelineBoard jobs={jobs} />
 

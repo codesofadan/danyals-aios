@@ -43,6 +43,17 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
   const [phone, setPhone] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [market, setMarket] = useState<BusinessMarket>("US");
+  // Richer identity beyond NAP (0060) — what a real directory form also asks for.
+  const [tagline, setTagline] = useState("");
+  const [description, setDescription] = useState("");
+  const [email, setEmail] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [facebookUrl, setFacebookUrl] = useState("");
+  const [instagramUrl, setInstagramUrl] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [yearFounded, setYearFounded] = useState("");
+  const [paymentTypes, setPaymentTypes] = useState("");
+  const [serviceArea, setServiceArea] = useState("");
 
   const createProfile = useCreateBusinessProfile();
   const createCampaign = useCreateCitationCampaign();
@@ -77,11 +88,19 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
   function saveProfile(e: React.FormEvent) {
     e.preventDefault();
     if (!canSaveProfile || !clientId) return;
+    const year = parseInt(yearFounded, 10);
     createProfile.mutate(
       {
         clientId, businessName: businessName.trim(), addressLine1: addressLine1.trim(),
         city: city.trim(), region: region.trim(), postalCode: postalCode.trim(),
         phone: phone.trim(), websiteUrl: websiteUrl.trim(), market,
+        // Richer identity beyond NAP (0060) — sent only when filled.
+        tagline: tagline.trim(), description: description.trim(), email: email.trim(),
+        logoUrl: logoUrl.trim(), facebookUrl: facebookUrl.trim(),
+        instagramUrl: instagramUrl.trim(), linkedinUrl: linkedinUrl.trim(),
+        serviceArea: serviceArea.trim(),
+        yearFounded: Number.isFinite(year) && year > 0 ? year : null,
+        paymentTypes: paymentTypes.split(",").map((p) => p.trim()).filter(Boolean),
       },
       {
         onSuccess: (row) => {
@@ -236,6 +255,56 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                   <div className="fld">
                     <label>Website</label>
                     <input value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://acme.example" />
+                  </div>
+                </div>
+
+                {/* Richer identity beyond NAP (0060) — what a real directory form also asks for. */}
+                <div className="fld">
+                  <label>Tagline <span className="cs">(optional)</span></label>
+                  <input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Gentle dentistry, done right" />
+                </div>
+                <div className="fld">
+                  <label>Description <span className="cs">(optional)</span></label>
+                  <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)}
+                    placeholder="A short business description directories publish alongside the listing." />
+                </div>
+                <div className="fld-row">
+                  <div className="fld">
+                    <label>Email <span className="cs">(optional)</span></label>
+                    <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="hello@acme.example" />
+                  </div>
+                  <div className="fld">
+                    <label>Year founded <span className="cs">(optional)</span></label>
+                    <input value={yearFounded} onChange={(e) => setYearFounded(e.target.value.replace(/[^0-9]/g, ""))}
+                      inputMode="numeric" placeholder="2011" />
+                  </div>
+                </div>
+                <div className="fld-row">
+                  <div className="fld">
+                    <label>Logo URL <span className="cs">(optional)</span></label>
+                    <input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://acme.example/logo.png" />
+                  </div>
+                  <div className="fld">
+                    <label>Service area <span className="cs">(optional)</span></label>
+                    <input value={serviceArea} onChange={(e) => setServiceArea(e.target.value)} placeholder="Greater Seattle" />
+                  </div>
+                </div>
+                <div className="fld">
+                  <label>Payment types <span className="cs">(optional, comma-separated)</span></label>
+                  <input value={paymentTypes} onChange={(e) => setPaymentTypes(e.target.value)} placeholder="Visa, Mastercard, Cash" />
+                </div>
+                <div className="fld-row">
+                  <div className="fld">
+                    <label>Facebook <span className="cs">(optional)</span></label>
+                    <input value={facebookUrl} onChange={(e) => setFacebookUrl(e.target.value)} placeholder="https://facebook.com/acme" />
+                  </div>
+                  <div className="fld">
+                    <label>Instagram <span className="cs">(optional)</span></label>
+                    <input value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} placeholder="https://instagram.com/acme" />
+                  </div>
+                  <div className="fld">
+                    <label>LinkedIn <span className="cs">(optional)</span></label>
+                    <input value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/company/acme" />
                   </div>
                 </div>
                 <div className="modal-f">

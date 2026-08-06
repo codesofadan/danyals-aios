@@ -5,6 +5,7 @@ import { NAP_META, SUBMIT_STATUS_META, type Citation, type NapStatus } from "@/l
 import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
+import AuditPlanPanel from "./AuditPlanPanel";
 import w from "./Wave4.module.css";
 
 const NAP_SOURCE_LABEL: Record<string, string> = {
@@ -245,6 +246,9 @@ export default function CitationsTab() {
           </div>
         </div>
       )}
+
+      {/* The prioritized audit plan (generic → country → niche) for the chosen client. */}
+      <AuditPlanPanel clientId={gapClient || undefined} />
 
       <div className="tbl-wrap">
         <table className="tbl op-tbl">

@@ -95,6 +95,83 @@ const CLR: Record<string, string> = {
 };
 export const clientAccent = (c: string) => CLR[c] ?? SERIES.c1;
 
+// ============================================================
+// Research-first bulk content + site-design matcher (Module 02
+// extension). These are OPERATIONAL shapes (no backend contract-
+// lock mirror); they mirror the FastAPI response models 1:1 so the
+// JSON drops straight in. See backend app/schemas/content.py.
+// ============================================================
+
+// The six content types the recommender researches. service_location returns
+// city × service landing pages (each item carries city + service).
+export type ResearchContentType =
+  | "service" | "location" | "service_location" | "service_area" | "blog" | "faq";
+export type ResearchDifficulty = "easy" | "medium" | "hard";
+
+export const RESEARCH_CONTENT_TYPES: { key: ResearchContentType; label: string }[] = [
+  { key: "service", label: "Service" },
+  { key: "location", label: "Location" },
+  { key: "service_location", label: "Service × Location" },
+  { key: "service_area", label: "Service area" },
+  { key: "blog", label: "Blog" },
+  { key: "faq", label: "FAQ" },
+];
+
+export const DIFFICULTY_META: Record<ResearchDifficulty, { label: string; cls: string }> = {
+  easy: { label: "Easy", cls: "ok" },
+  medium: { label: "Medium", cls: "warn" },
+  hard: { label: "Hard", cls: "op-crit" },
+};
+
+// One recommended page (a "checkbox"). Symmetric: it comes back from /content/research
+// and is posted back unchanged (camelCase) to /content/research/generate as a selection.
+// city/service are meaningful only for the service_location type.
+export type ResearchItem = {
+  title: string;
+  pageType: string;
+  primaryKeyword: string;
+  secondaryKeywords: string[];
+  estVolume: number;
+  difficulty: ResearchDifficulty;
+  rationale: string;
+  city: string;
+  service: string;
+};
+
+// --- Site-design profile (POST /content/site-design) --------------------------
+// Snake_case, no aliases: the profile round-trips unchanged from the response into a
+// content job's design_profile (source_pack) and back out at publish time.
+export type SiteDesignPalette = {
+  primary: string;
+  secondary: string;
+  background: string;
+  text: string;
+  accent: string;
+};
+export type SiteDesignTypography = {
+  heading_font: string;
+  body_font: string;
+  base_size: string;
+};
+export type SiteDesignLayout = {
+  container_width: string;
+  section_order: string[];
+  hero_style: string;
+  cta_style: string;
+};
+export type SiteDesignComponents = {
+  button_style: string;
+  card_style: string;
+  spacing_scale: string;
+};
+export type SiteDesignProfile = {
+  palette: SiteDesignPalette;
+  typography: SiteDesignTypography;
+  layout: SiteDesignLayout;
+  components: SiteDesignComponents;
+  notes: string;
+};
+
 export const contentJobs: ContentJob[] = [
   { id: "CJ-4192", client: "Verde Cafe", color: CLR["Verde Cafe"], pageType: "local", topic: "Best brunch in Portland's Pearl District", framework: "BAB", auto: true, target: "PDF/Markdown", status: "queued", cost: 14, words: 0, schema: "LocalBusiness", images: 0, stage: "Queued", ago: "6m ago" },
   { id: "CJ-4188", client: "NorthPeak Dental", color: CLR["NorthPeak Dental"], pageType: "blog", topic: "Do you really need a night guard?", framework: "PAS", auto: true, target: "WordPress", status: "queued", cost: 16, words: 0, schema: "Article", images: 0, stage: "Queued", ago: "22m ago" },

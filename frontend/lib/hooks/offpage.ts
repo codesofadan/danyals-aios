@@ -11,6 +11,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
+  AuditPlan,
   Backlink,
   BusinessMarket,
   BusinessProfile,
@@ -198,6 +199,20 @@ export function useClearCitations() {
       void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
       void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
     },
+  });
+}
+
+// --- audit plan (generic → country → niche) ----------------------------------
+export const AUDIT_PLAN_KEY = ["citation-builder", "audit-plan"] as const;
+
+/** The prioritized geo/niche/generic citation audit for a client (GET
+ * /citation-builder/clients/{id}/audit-plan). Read-only; each directory tagged
+ * built|missing. Fetched only once a client is chosen. */
+export function useAuditPlan(clientId?: string) {
+  return useQuery({
+    queryKey: [...AUDIT_PLAN_KEY, clientId ?? ""],
+    queryFn: () => api.get<AuditPlan>(`/citation-builder/clients/${clientId}/audit-plan`),
+    enabled: !!clientId,
   });
 }
 
