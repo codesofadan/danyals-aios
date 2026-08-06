@@ -1,6 +1,6 @@
 ---
 name: content
-description: The Content module hub for Danyal AIOS. Creates any content job (service, blog, or local page), reads the content board + KPIs, pulls a job's draft/keywords/QA/schema, and runs the human review gate. Use when an operator says "write content", "make a page", "write an article/blog", "create a service or local page", "check the content board", "what's awaiting review", or "review/approve/reject a draft" for a client. Routes to the deep skill for the page type. Creating a job spends metered AI budget; approving is a LEAD action.
+description: The Content module hub for Danyal AIOS. Creates any content job (service, blog, or local page), recommends a research-first page SET for a site and bulk-generates the picks, extracts a target site's DESIGN profile so a published page matches it, reads the content board + KPIs, pulls a job's draft/keywords/QA/schema, and runs the human review gate. Use when an operator says "write content", "make a page", "write an article/blog", "create a service or local page", "research pages / recommend a page set", "bulk-generate pages", "match the site's design", "check the content board", "what's awaiting review", or "review/approve/reject a draft" for a client. Routes to the deep skill for the page type. Research, bulk generation, and site-design each spend metered AI budget (content dials); approving is a LEAD action.
 argument-hint: "[client] [page-type] [topic]"
 arguments: [client, page_type, topic]
 model: opus
@@ -40,6 +40,58 @@ board / content jobs / awaiting review", "review this draft" for a client.
 - `page_type == service` (or a general request) → run the hub SOP below.
 
 The deep skills carry the tighter, rubric-embedded SOP; the hub does not duplicate their rubric.
+
+## Research-first bulk flow (recommend a page set, then generate the picks)
+When the operator wants a WHOLE SET of pages for a site (not one topic) - "research pages",
+"recommend a page set", "bulk-generate service/location pages" - use this flow. It spends
+per recommended-and-selected page; run it deliberately, never fan out the full set on your own.
+
+Copy this checklist and check items off as you go:
+
+```
+- [ ] Step R1: (optional) Extract the target site design (POST /content/site-design)
+- [ ] Step R2: Recommend a page set (POST /content/research)
+- [ ] Step R3: STOP - the operator selects which items to build
+- [ ] Step R4: Resolve the client id + gather >=1 real proof point (shared grounding)
+- [ ] Step R5: Bulk-generate the picks (POST /content/research/generate)
+- [ ] Step R6: For each CJ-#### -> wait/fetch/review through the normal gate
+```
+
+R1. **Extract the site design (optional but recommended).** Run `aios_client.py post
+   /content/site-design --json '{"site":"https://example.com","maxPages":5}'`. Read
+   `status`, `profile` (`palette`, `typography`, `layout.section_order`, `components`,
+   `notes`), `reason`. If `status=='degraded'` the `profile` is null (ANTHROPIC dormant /
+   dial-blocked / analysis failed) - report it and proceed WITHOUT a design match. Keep a
+   good `profile` to attach as `designProfile` in R5 so the published page matches the site.
+
+R2. **Recommend a page set.** Run `aios_client.py post /content/research --json
+   '{"site":"https://example.com","contentType":"service","count":10}'`. `contentType` is
+   one of `service` | `location` | `service_location` | `service_area` | `blog` | `faq`.
+   Read `status`, `items` (each: `title`, `pageType`, `primaryKeyword`, `secondaryKeywords`,
+   `estVolume`, `difficulty`, `rationale`, `city`, `service`), `reason`. If
+   `status=='degraded'` the research ran on the deterministic fallback (keyless / dial-blocked
+   / failed) - label it and do NOT present the set as live SERP-grounded.
+
+R3. **STOP - the operator selects.** Present the items (title / pageType / primaryKeyword /
+   estVolume / difficulty / rationale). The operator picks which to build; each pick spends.
+   Never auto-select the whole set.
+
+R4. **Resolve the client + shared grounding.** Run `aios_client.py resolve-client --client
+   "$client"` for the real `client_id`. Gather at least one REAL first-hand `proofPoints`
+   value shared across every job - without it every fanned-out job hard-fails the QA publish
+   gate (`fact_grounding` / `eeat_experience`, DOCTRINE §2/§7). Never invent it.
+
+R5. **Bulk-generate the picks.** Run `aios_client.py post /content/research/generate --json
+   '{"clientId":"<id>","items":[<the selected items verbatim>],"proofPoints":["<real proof>"],
+   "designProfile":<the R1 profile, or omit>}'`. Each item's `title` becomes the job topic and
+   its `pageType` maps to the generator's page type; `framework` defaults `Auto`, `target`
+   `WordPress`, and the grounding + design profile are shared across every job. Returns
+   `{jobs:["CJ-####", ...]}` - one code per fanned-out job.
+
+R6. **Drive each job through the one gate.** For each `CJ-####` run `wait-job` then
+   `fetch-job` and apply the SAME Decision points + QA gate as a single job, STOP for the
+   human on each. The bulk call only CREATES the jobs; each still passes the one human review
+   gate before publish. Emit the **Research/bulk output** then the per-job **Output format**.
 
 ## Steps
 Copy this checklist and check items off as you go:
@@ -84,8 +136,19 @@ Copy this checklist and check items off as you go:
    STOP for the human. Do NOT approve here.
 
 ## Decision points
-- If the caller lacks `publish_content` → `POST /content/jobs` 403s → report "requires
-  publish_content", STOP.
+- If the caller lacks `publish_content` → `POST /content/jobs`, `POST /content/research`,
+  `POST /content/research/generate`, and `POST /content/site-design` all 403 → report
+  "requires publish_content", STOP.
+- If `contentType` is not one of the six (service / location / service_location /
+  service_area / blog / faq) → reject as an invalid content type; do not guess.
+- If `POST /content/site-design` returns `status=='degraded'` (`profile` null) → proceed
+  WITHOUT a design match and report the degrade; never present a null profile as a match.
+- If `POST /content/research` returns `status=='degraded'` → the set is the deterministic
+  fallback; label it, do NOT present as live SERP research.
+- If the operator says "generate all" without picking → confirm the count first (each page
+  spends under the content dial); do not silently fan out the whole set.
+- If no real `proofPoints` is available for the bulk fan-out → STOP; every job will hard-fail
+  the QA gate (`fact_grounding`). Route the `[NEEDS:]` to a human; never invent a proof.
 - If `qa.passed` is **false** (weighted total < 85, or any dim < 70, or `blocked_by` non-empty)
   → **STOP.** Surface the failing dimensions + `blocked_by`. Recommend `review --action edit`.
   NEVER approve.
@@ -104,12 +167,37 @@ Copy this checklist and check items off as you go:
 ## Common Pitfalls
 - Approving because "the number is close" → the DB gate re-checks and raises `PublishBlocked`;
   route to `edit`.
+- Bulk-generating the entire recommended set without the operator selecting → each page
+  spends; present the set and confirm the picks first.
+- Omitting `proofPoints` on the bulk `research/generate` call → every fanned-out job
+  hard-fails the publish gate; pass ≥1 real proof shared across the fan-out.
+- Presenting a degraded research set as live SERP research, or a null design profile as a
+  match → forbidden; report the degrade honestly.
+- Approving a bulk-created job without its OWN gate check → each `CJ-####` passes the QA
+  §11 gate individually; the bulk call only created them.
 - Re-implementing a page-type's rubric in the hub instead of routing to its deep skill → the deep
   skill owns the rubric; route to it for `local`/`blog`/titles-meta.
 - Filling a `[NEEDS:]` from memory → forbidden; it routes the gap to a human.
 - Passing an explicit framework "to be safe" → let `Auto` resolve it per DOCTRINE §6 unless the
   operator explicitly asked for a specific framework.
 - Presenting degraded/fake output as live metrics → forbidden; grounding rule.
+
+## Research/bulk output
+Emit verbatim after the research-first flow (then the per-job Output format for each job):
+
+```
+CONTENT RESEARCH — <site> · <contentType>
+Status: <ok | degraded>   (degraded → deterministic fallback, NOT live SERP)
+Recommended pages (<n>):
+  1. <title>  [<pageType>]  kw:<primaryKeyword>  vol~<estVolume>  diff:<difficulty>
+     Why: <rationale>
+  2. ...
+Site design: <matched (profile extracted) | none | degraded (profile null)>
+Selected to build: <k>/<n>  (operator-picked; each spends)
+Shared grounding: <"≥1 real proofPoint confirmed" | "[NEEDS: proof] → human, STOP">
+Bulk jobs queued: <CJ-####, CJ-####, ...>  (each still passes the human review gate)
+Next: for each job → wait-job → fetch-job → QA gate → LEAD review
+```
 
 ## Output format
 Emit verbatim:
