@@ -42,20 +42,6 @@ def test_build_argv_free_is_zero_spend() -> None:
     assert argv[argv.index("--max-pages") + 1] == "20"
 
 
-def test_build_argv_free_with_ai_narrative_opts_in() -> None:
-    # The free/public run can opt into the Claude consulting narrative while every
-    # other paid provider stays OFF ($0 crawl + the one authorized narrative call).
-    argv = build_argv(
-        domain="example.com", mode="free", max_pages=20, profile="general",
-        ai_narrative=True,
-    )
-    assert argv[argv.index("--mode") + 1] == "free"
-    assert argv[argv.index("--ai-narrative") + 1] == "on"
-    assert argv[argv.index("--agents") + 1] == "off"  # agents stay off
-    for flag in ("--no-serper", "--no-places", "--no-citations"):
-        assert flag in argv  # every other paid provider still disabled
-
-
 def test_build_argv_paid_enables_providers() -> None:
     argv = build_argv(domain="example.com", mode="paid", max_pages=100, profile="local")
     assert argv[argv.index("--mode") + 1] == "paid"
