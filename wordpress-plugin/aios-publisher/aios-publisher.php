@@ -3,7 +3,7 @@
  * Plugin Name:       AIOS Publisher
  * Plugin URI:        https://xegents.ai/aios-publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Requires at least: 5.6
  * Requires PHP:      7.2
  * Author:            Xegents AI
@@ -31,7 +31,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AIOS_PUBLISHER_VERSION', '1.1.0' );
+define( 'AIOS_PUBLISHER_VERSION', '1.2.0' );
 define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 
 // wp_options keys. The API key lives in its own option so a "regenerate" is a
@@ -279,6 +279,13 @@ function aios_publisher_rest_publish( $request ) {
 			array( 'status' => 500 )
 		);
 	}
+
+	// --- Elementor-editable output: write the builder post-meta when AIOS supplied an
+	// Elementor widget TREE, so the page opens FULLY EDITABLE (drag-and-drop) in
+	// Elementor rather than as flat HTML. GUARDED: only when a valid `elementor_data`
+	// JSON array is present; otherwise the post is a normal post (the flat `content`
+	// HTML above is always written, so a site without Elementor still renders it). ---
+	aios_publisher_store_elementor_data( $post_id, $request );
 
 	// --- SEO meta for BOTH Yoast and Rank Math (works with whichever is active) ---
 	$meta_title = sanitize_text_field( (string) $request->get_param( 'meta_title' ) );
@@ -790,6 +797,49 @@ function aios_publisher_store_article_components( $post_id, $request ) {
 			update_post_meta( $post_id, AIOS_PUBLISHER_META_CTA, $clean );
 		}
 	}
+}
+
+/**
+ * Write the Elementor builder post-meta when the push carried an Elementor widget TREE.
+ *
+ * Makes the published page FULLY EDITABLE (drag-and-drop) in Elementor rather than flat
+ * HTML: WordPress needs `_elementor_edit_mode = "builder"` plus `_elementor_data` (the
+ * JSON widget tree) on the post. GUARDED — only runs when `elementor_data` is present and
+ * decodes to a non-empty JSON ARRAY (Elementor's top-level shape is a list of sections);
+ * otherwise the post is left as a normal post (the flat `content` HTML is always written,
+ * so a site without Elementor still renders it). `wp_slash` keeps the JSON intact through
+ * the DB write (Elementor reads it back with `wp_unslash`), mirroring Elementor's own save.
+ *
+ * @param int             $post_id The created post id.
+ * @param WP_REST_Request $request The REST request.
+ * @return void
+ */
+function aios_publisher_store_elementor_data( $post_id, $request ) {
+	$data = (string) $request->get_param( 'elementor_data' );
+	if ( '' === trim( $data ) || ! aios_publisher_is_valid_json( $data ) ) {
+		return;
+	}
+	$decoded = json_decode( $data, true );
+	// Elementor's _elementor_data is a JSON ARRAY of top-level sections; a non-array (or
+	// empty) payload is not a valid tree, so skip it and leave a normal post.
+	if ( ! is_array( $decoded ) || empty( $decoded ) ) {
+		return;
+	}
+
+	// Constrain the edit mode to the safe set; default to Elementor's "builder".
+	$edit_mode = sanitize_key( (string) $request->get_param( 'elementor_edit_mode' ) );
+	if ( 'builder' !== $edit_mode ) {
+		$edit_mode = 'builder';
+	}
+
+	update_post_meta( $post_id, '_elementor_edit_mode', $edit_mode );
+	// wp_slash so the JSON survives the DB write exactly as Elementor stores it.
+	update_post_meta( $post_id, '_elementor_data', wp_slash( $data ) );
+	$version = defined( 'ELEMENTOR_VERSION' ) ? ELEMENTOR_VERSION : '3.0.0';
+	update_post_meta( $post_id, '_elementor_version', $version );
+	// Elementor renders its own layout, so tell the theme to use a full-width/blank
+	// template where supported (best-effort; harmless on themes that ignore it).
+	update_post_meta( $post_id, '_wp_page_template', 'elementor_header_footer' );
 }
 
 /**

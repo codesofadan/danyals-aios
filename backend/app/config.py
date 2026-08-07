@@ -325,6 +325,15 @@ class Settings(BaseSettings):
     )
     wp_plugin_timeout_seconds: float = 30.0
 
+    # --- Elementor-editable page output. When True, the AIOS Publisher plugin publish
+    # payload ALSO carries `elementor_data` (a JSON widget TREE built from the reviewed
+    # draft) + `elementor_edit_mode="builder"`, so the plugin writes the Elementor
+    # post-meta and the published page opens FULLY EDITABLE (drag-and-drop) in Elementor
+    # instead of as flat HTML. The flat `content` HTML is ALWAYS sent too (the fallback
+    # for a site without Elementor). Set False to publish flat HTML only - the payload is
+    # then byte-identical to the pre-Elementor behaviour. Additive + optional. ---
+    content_elementor_enabled: bool = True
+
     # --- Multi-client WordPress Connections registry (0058). The per-client publish
     # connections (site_url + auth_method + sealed credential) live in
     # public.wp_connections; the credential is sealed app-layer with the SAME
