@@ -380,6 +380,33 @@ function DesignProfileView({
 
       {profile && (
         <>
+          {/* Live preview — how a matching page would look, rendered from the extracted
+              colours/fonts/layout. Sandboxed (no scripts, no same-origin) so the model-
+              generated HTML can never touch the app. */}
+          {profile.wireframeHtml && (
+            <div className="co-wireframe">
+              <div className="co-order-lbl op-muted" style={{ marginBottom: 6 }}>
+                <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>preview</span>{" "}
+                Preview — how a matching page would look
+              </div>
+              <iframe
+                title="Matching page preview"
+                srcDoc={profile.wireframeHtml}
+                sandbox=""
+                loading="lazy"
+                style={{
+                  width: "100%",
+                  height: 320,
+                  border: "1px solid var(--line, #e5e7eb)",
+                  borderRadius: 10,
+                  background: "#fff",
+                  display: "block",
+                  marginBottom: 12,
+                }}
+              />
+            </div>
+          )}
+
           <div className="co-swatches">
             {(Object.entries(profile.palette) as [string, string][]).map(([name, hex]) => (
               <div key={name} className="co-swatch">

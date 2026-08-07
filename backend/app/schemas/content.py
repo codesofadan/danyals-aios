@@ -137,13 +137,21 @@ class SiteDesignComponents(BaseModel):
 
 class SiteDesignProfile(BaseModel):
     """The extracted design system a new page is built to MATCH. Every field defaults,
-    so a partial payload still validates into a usable profile."""
+    so a partial payload still validates into a usable profile.
+
+    ``wireframe_html`` is a self-contained, styled HTML snippet (inline ``<style>`` + one
+    ``<section>``) that renders a representative hero/homepage section in the EXTRACTED
+    colours + fonts + layout, so the operator can SEE how a matching page would look. It
+    is emitted on the wire as ``wireframeHtml`` (FastAPI serializes ``by_alias``); it does
+    NOT round-trip back into ``source_pack`` (it is a preview artifact, not publish
+    grounding), so ``model_dump()`` still keeps the snake_case field for internal use."""
 
     palette: SiteDesignPalette = Field(default_factory=SiteDesignPalette)
     typography: SiteDesignTypography = Field(default_factory=SiteDesignTypography)
     layout: SiteDesignLayout = Field(default_factory=SiteDesignLayout)
     components: SiteDesignComponents = Field(default_factory=SiteDesignComponents)
     notes: str = ""
+    wireframe_html: str = Field(default="", serialization_alias="wireframeHtml")
 
 
 class ContentJobCreate(BaseModel):
