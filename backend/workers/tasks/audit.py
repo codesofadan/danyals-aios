@@ -97,6 +97,7 @@ class _Runner(Protocol):
         tier: str,
         comprehensive: bool = False,
         types: list[str] | None = None,
+        ai_narrative: bool = False,
     ) -> AuditRunResult: ...
 
 
@@ -448,8 +449,17 @@ def execute_public_audit(
     store.update(public_audit_id, {"status": "running"})
 
     try:
-        # Public = Free tier: zero paid-provider spend by construction.
-        result = runner(_config_from_settings(settings), url=row["url"], tier="free")
+        # Public = Free tier: zero paid-provider spend by construction. The ONE
+        # authorized paid call is the Claude consulting NARRATIVE, opted in via
+        # AUDIT_FREE_AI_NARRATIVE so the free/public report reads like a paid
+        # consulting deliverable (the engine serves the narrative as the public
+        # report; it degrades to a $0 skip when no ANTHROPIC key/SDK is present).
+        result = runner(
+            _config_from_settings(settings),
+            url=row["url"],
+            tier="free",
+            ai_narrative=settings.audit_free_ai_narrative,
+        )
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("public_audit_job_crashed", public_audit_id=public_audit_id)
         store.update(

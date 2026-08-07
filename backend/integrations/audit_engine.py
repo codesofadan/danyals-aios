@@ -138,6 +138,7 @@ def build_argv(
     profile: str,
     comprehensive: bool = False,
     types: list[str] | None = None,
+    ai_narrative: bool = False,
 ) -> list[str]:
     """Build the ``python -m audit_engine.cli.main full ...`` argument vector.
 
@@ -159,8 +160,13 @@ def build_argv(
         - ``strategy`` -> ``--ai-narrative on`` (the strategy recommendation prose).
 
     ``comprehensive=False`` (the PUBLIC free-audit funnel) keeps the light, zero-spend
-    on-page-only run: ``mode`` is the stored value (``free`` | ``paid``), agents +
-    narrative off, and on ``free`` every paid provider is explicitly disabled.
+    on-page-only run: ``mode`` is the stored value (``free`` | ``paid``), agents off,
+    and on ``free`` every paid provider is explicitly disabled. ``ai_narrative``
+    (default off) is the ONE authorized exception: when the backend opts the free
+    audit into the Claude consulting narrative (``AUDIT_FREE_AI_NARRATIVE``), we pass
+    ``--ai-narrative on`` so the engine runs the Opus narrative and serves it as the
+    public report. The engine's narrative reporter still degrades to a skip ($0) when
+    no ANTHROPIC key/SDK is present, so the free run never breaks.
     ``--no-moz`` always (Moz needs a separate paid key, out of scope).
     """
     base = [
@@ -203,7 +209,10 @@ def build_argv(
         )
         argv += ["--ai-narrative", "on"] if "strategy" in selected else ["--ai-narrative", "off"]
         return argv
-    argv = [*base, "--mode", mode, "--agents", "off", "--ai-narrative", "off"]
+    argv = [
+        *base, "--mode", mode, "--agents", "off",
+        "--ai-narrative", "on" if ai_narrative else "off",
+    ]
     if mode == "paid":
         argv += ["--serper", "--places", "--citations"]
     else:
@@ -258,6 +267,7 @@ def run_audit(
     tier: str,
     comprehensive: bool = False,
     types: list[str] | None = None,
+    ai_narrative: bool = False,
 ) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
@@ -265,8 +275,11 @@ def run_audit(
     ``--mode`` for the light path. ``comprehensive=True`` runs the consulting
     pipeline for the authenticated dashboard audit; ``types`` (the audit-type
     picker) then SCOPES it - empty = the full run, a subset gates the paid work
-    (see ``build_argv``). The URL is SSRF-validated here (defense in depth - the
-    endpoint already validated at enqueue) before any subprocess is spawned.
+    (see ``build_argv``). ``ai_narrative`` only affects the light (public/free)
+    path: when True it opts the free run into the Claude consulting narrative
+    (which the engine then serves as the public report). The URL is SSRF-validated
+    here (defense in depth - the endpoint already validated at enqueue) before any
+    subprocess is spawned.
     """
     # 1) SSRF guard. Sync context (a Celery worker, no event loop) so a direct
     # call is fine - no to_thread needed off the loop.
@@ -283,7 +296,7 @@ def run_audit(
     mode = "paid" if (tier == "paid" or comprehensive) else "free"
     argv = build_argv(
         domain=url, mode=mode, max_pages=cfg.max_pages, profile=cfg.profile,
-        comprehensive=comprehensive, types=types,
+        comprehensive=comprehensive, types=types, ai_narrative=ai_narrative,
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}

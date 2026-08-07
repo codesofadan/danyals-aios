@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     audit_agent_tokens_in: int = 6000  # rough per-agent input tokens (derived only)
     audit_agent_tokens_out: int = 1200  # rough per-agent output tokens (derived only)
 
+    # Run the Claude consulting NARRATIVE on the FREE/PUBLIC audit and serve it as
+    # the public report, so a free audit reads like a paid consulting deliverable.
+    # The engine's narrative reporter degrades gracefully (skips, $0) when no
+    # ANTHROPIC_API_KEY / SDK is present, so this is a safe default; the authenticated
+    # (comprehensive) path is unaffected - it already narrates via the type picker.
+    audit_free_ai_narrative: bool = True
+
     # Fiverr upsell link shown on the PUBLIC free-audit report (P6C). Not a secret
     # (it is rendered to anonymous visitors); trivial to change per campaign.
     fiverr_upsell_url: str = "https://www.fiverr.com/iamdaani"
