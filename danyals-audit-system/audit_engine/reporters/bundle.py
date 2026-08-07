@@ -453,7 +453,16 @@ def write_full_bundle(
 
     html_paths["report_consolidated_html"] = consolidated_html_path
 
-    # ----- AI narrative (opt-in, paid) -----
+    # ----- AI narrative (opt-in) -----
+    # When enabled and ANTHROPIC_API_KEY + the SDK are present, Claude writes the
+    # consulting-grade narrative (exec summary, top findings evidence -> why -> fix,
+    # 30-60-90 plan). For a FREE/condensed run this narrative BECOMES the served
+    # report.html (so report.pdf renders from it) - the free/public audit then reads
+    # like a paid consulting deliverable. The designed condensed report stays the
+    # graceful fallback when the narrative is absent (no key/SDK/API error). Paid
+    # runs are untouched: the full designed report.html remains the served
+    # deliverable and the narrative is only a side artifact.
+    ai_narrative_html_path: Path | None = None
     if ai_narrative:
         ctx = narrative_reporter.build_context(
             domain=domain,
@@ -481,6 +490,30 @@ def write_full_bundle(
             ai_html_path = artifact_dir / "report-ai-narrative.html"
             ai_html.replace(ai_html_path)
             html_paths["report_ai_narrative_html"] = ai_html_path
+            ai_narrative_html_path = ai_html_path
+
+    # Promote the Claude narrative to the SERVED report for a FREE/condensed run.
+    # The backend's public endpoint serves report.html (viewer) + report.pdf, so we
+    # overwrite report.html with the (self-contained, CSS-inlined) narrative and let
+    # write_all_pdfs below re-render report.pdf from it. Only when the narrative was
+    # actually produced - otherwise the designed condensed report already written to
+    # report.html is served unchanged (graceful fallback). Never fatal.
+    if condensed and ai_narrative_html_path is not None:
+        served_html = Path(html_paths.get("report_html") or report_html_path)
+        try:
+            narrative_doc = ai_narrative_html_path.read_text(encoding="utf-8")
+            css = (TEMPLATES_DIR / "report" / "print.css").read_text(encoding="utf-8")
+            # The viewer serves report.html as a static file, so it MUST carry its
+            # own CSS - inline print.css (never leave a sibling <link>).
+            narrative_doc = html_reporter._inline_stylesheet(narrative_doc, css)
+            served_html.write_text(narrative_doc, encoding="utf-8")
+            html_paths["report_html"] = served_html
+            log.info("free_report_served_ai_narrative", path=str(served_html))
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "free_report_ai_narrative_promote_failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     # Render the SERVED consulting report.pdf FIRST so a slow or failing render of
     # the heavy legacy reports (report-full.html can be hundreds of pages on a large

@@ -56,9 +56,14 @@ def _row(**over: Any) -> dict[str, Any]:
     return row
 
 
-def _ok_runner(score: int) -> Any:
-    def _run(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+def _ok_runner(score: int, *, expect_ai_narrative: bool = True) -> Any:
+    def _run(
+        cfg: AuditEngineConfig, *, url: str, tier: str, ai_narrative: bool = False
+    ) -> AuditRunResult:
         assert tier == "free"  # public is ALWAYS free
+        # The free/public run opts into the Claude consulting narrative by default
+        # (AUDIT_FREE_AI_NARRATIVE); the engine serves it as the public report.
+        assert ai_narrative is expect_ai_narrative
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=score,
             scores={"overall": score, "technical": 90}, runtime_seconds=372, exit_code=0,
@@ -83,8 +88,20 @@ def test_success_marks_running_then_done_and_logs_zero_cost() -> None:
     assert store.costs == [0.0]  # public = Free -> always $0
 
 
+def test_ai_narrative_toggle_off_is_forwarded_as_false() -> None:
+    # AUDIT_FREE_AI_NARRATIVE=false -> the runner is called with ai_narrative=False.
+    settings = Settings(_env_file=None, app_env="dev", audit_free_ai_narrative=False)
+    store = FakeStore(_row())
+    out = execute_public_audit(
+        store, settings, "pa-1", runner=_ok_runner(70, expect_ai_narrative=False)
+    )
+    assert out["status"] == "done"
+
+
 def test_engine_failure_marks_failed_never_running() -> None:
-    def _fail(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _fail(
+        cfg: AuditEngineConfig, *, url: str, tier: str, ai_narrative: bool = False
+    ) -> AuditRunResult:
         return AuditRunResult(ok=False, run_uuid="u-9", error="engine timed out after 1500s")
 
     store = FakeStore(_row())
@@ -99,7 +116,9 @@ def test_engine_failure_marks_failed_never_running() -> None:
 
 def test_deferred_engine_unconfigured_marks_failed_no_cost() -> None:
     # Mirrors the DEFERRED live path: adapter returns ok=False, run_uuid None.
-    def _unconfigured(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _unconfigured(
+        cfg: AuditEngineConfig, *, url: str, tier: str, ai_narrative: bool = False
+    ) -> AuditRunResult:
         return AuditRunResult(ok=False, error="audit engine is not configured")
 
     store = FakeStore(_row())
@@ -110,7 +129,9 @@ def test_deferred_engine_unconfigured_marks_failed_no_cost() -> None:
 
 
 def test_worker_exception_marks_failed_and_does_not_reraise() -> None:
-    def _boom(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+    def _boom(
+        cfg: AuditEngineConfig, *, url: str, tier: str, ai_narrative: bool = False
+    ) -> AuditRunResult:
         raise RuntimeError("unexpected")
 
     store = FakeStore(_row())
