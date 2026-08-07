@@ -12,8 +12,13 @@ Fiverr upsell link. Security posture (read before touching this file):
   (``clients``/``users``/``audits``) is ever reachable from here.
 * The ``report_token`` IS the capability: 24 random bytes (hex) minted by the DB.
   Knowing it grants read of exactly that one curated report - nothing else.
-* One free audit per email (409 on a repeat), Free tier only (no paid audit
-  types), SSRF-guarded target URL, and per-IP rate limited (abuse control).
+* One free audit per email (409 on a repeat), SSRF-guarded target URL, and
+  per-IP rate limited (abuse control). The free audit is now COMPREHENSIVE: it
+  runs all six SEO dimensions (on-page, off-page, technical, local, GEO/AI-search,
+  strategy) with real provider data. COST NOTE: this means each free run now
+  spends on the wired providers (Serper + Google Places, degrade-safe) - it is no
+  longer $0. Intended as a comprehensive lead-generation audit; the owner should
+  know the funnel is now a metered cost (a missing key skips that spend).
 * The tokenized report is CURATED: it returns the score/status/flags + the upsell
   link, and NEVER the internal id, the email, the stored error, or artifact paths.
 """
@@ -35,7 +40,7 @@ from app.core.ratelimit import rate_limit_ip
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
-from app.schemas.audits import PAID_AUDIT_TYPES, AuditTypeKey
+from app.schemas.audits import AuditTypeKey
 from app.services.audit_artifacts import (
     REPORT_HTML_VIEW_HEADERS,
     LocalArtifactStore,
@@ -53,7 +58,17 @@ _COST_FEATURE = "tech_audit"
 _COST_PROVIDER = "audit_engine"
 _COST_JOB_TYPE = "public_audit"
 
-_DEFAULT_TYPES: tuple[AuditTypeKey, ...] = ("onpage", "technical")
+# The free audit is COMPREHENSIVE: it defaults to all six SEO dimensions. The
+# engine runs every dimension deterministically and enables the wired providers
+# for the paid dimensions (degrade-safe) - see integrations.audit_engine.build_argv.
+_DEFAULT_TYPES: tuple[AuditTypeKey, ...] = (
+    "onpage",
+    "offpage",
+    "technical",
+    "local",
+    "geo",
+    "strategy",
+)
 
 _DUPLICATE_EMAIL = HTTPException(
     status_code=status.HTTP_409_CONFLICT,
@@ -72,14 +87,16 @@ _ARTIFACT_NOT_FOUND = HTTPException(
 # --------------------------------------------------------------------------- #
 class PublicAuditCreate(BaseModel):
     """Landing-page payload. ``email`` is validated (``EmailStr``); ``types`` is
-    optional and defaults to the non-paid set - any paid type is rejected."""
+    optional and defaults to ALL six dimensions (the comprehensive free audit).
+
+    ``types`` is accepted for API compatibility but does not scope the public run:
+    the free funnel always runs the full comprehensive engine pass (all six
+    dimensions with real data) - the engine's light/public path is not
+    per-dimension scopeable (see integrations.audit_engine.build_argv)."""
 
     email: EmailStr
     url: str = Field(min_length=1, max_length=2048)
     types: list[AuditTypeKey] = Field(default_factory=lambda: list(_DEFAULT_TYPES))
-
-    def paid_types(self) -> list[str]:
-        return [t for t in self.types if t in PAID_AUDIT_TYPES]
 
 
 class PublicAuditCreated(BaseModel):
@@ -232,15 +249,13 @@ async def create_public_audit(
     enqueue: PublicEnqueuerDep,
     log_cost: PublicCostLoggerDep,
 ) -> PublicAuditCreated:
-    """Create ONE free audit for an email (lead capture). Free-only, SSRF-guarded."""
-    # Free tier only: reject any paid audit type up front (zero paid-provider spend).
-    paid = body.paid_types()
-    if paid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"The free audit does not support paid audit types: {', '.join(paid)}",
-        )
+    """Create ONE free audit for an email (lead capture). Comprehensive, SSRF-guarded.
 
+    The free funnel now runs ALL six SEO dimensions with real provider data, so
+    paid audit types are NO LONGER rejected here. The one-free-audit-per-email,
+    SSRF, and per-IP rate-limit guards are retained. COST NOTE: each run now spends
+    on the wired providers (Serper + Google Places, degrade-safe) - no longer $0.
+    """
     # SSRF guard: getaddrinfo blocks, so validate off the event loop.
     try:
         await asyncio.to_thread(validate_public_host, body.url)

@@ -376,9 +376,14 @@ def run_audit_job(audit_id: str) -> dict[str, Any]:
 
 # --------------------------------------------------------------------------- #
 # Public free-audit funnel (P6C): the SAME lifecycle over public.public_audits.
-# There is NO tenant linkage - a public run is ALWAYS the Free tier ($0), so it
-# has no client_id/tier/cost columns and never makes paid-provider spend. The
-# store + engine adapter are reused; only the table + the always-free cost differ.
+# There is NO tenant linkage - a public run has no client_id/tier/cost columns.
+# COST NOTE: the public/free audit is now the COMPREHENSIVE lead-gen run (all six
+# dimensions with real data), so the engine DOES spend on the wired providers
+# (Serper + Google Places, degrade-safe) per run - it is no longer strictly $0 of
+# provider spend. There is no tenant to attribute that spend to, so the public
+# cost ledger still records the funnel entry at $0 (the money-dial accounts for
+# the run's existence); the real provider spend is intentional and untracked
+# per-run here. The store + engine adapter are reused; only the table differs.
 # --------------------------------------------------------------------------- #
 class PublicAuditStore:
     """Concrete store for ``public.public_audits`` over ``privileged_connection``.
@@ -432,10 +437,13 @@ def execute_public_audit(
 
     Mirrors ``execute_audit`` (queued -> running -> done|failed; never stuck,
     never re-raises, idempotent on redelivery) but over ``public_audits`` and
-    ALWAYS at the Free tier ($0). Injected store + runner keep it unit-testable
-    with fakes. The live engine run is DEFERRED exactly like the tenant worker:
-    with no engine env the adapter returns ``ok=False`` (run_uuid None) and the
-    row is marked ``failed`` without any spend.
+    ALWAYS at the Free tier. The run is COMPREHENSIVE (tier="free" now maps to the
+    engine's degrade-safe ``--mode auto`` with the wired providers ON - see
+    ``build_argv``), so every dimension gets real data. The public ledger entry is
+    still recorded at $0 (no tenant to attribute provider spend to); see the COST
+    NOTE above. Injected store + runner keep it unit-testable with fakes. The live
+    engine run is DEFERRED exactly like the tenant worker: with no engine env the
+    adapter returns ``ok=False`` (run_uuid None) and the row is marked ``failed``.
     """
     row = store.load(public_audit_id)
     if row is None:
@@ -448,7 +456,11 @@ def execute_public_audit(
     store.update(public_audit_id, {"status": "running"})
 
     try:
-        # Public = Free tier: zero paid-provider spend by construction.
+        # Public = Free tier, but the light path (comprehensive=False, tier="free")
+        # now runs the engine's degrade-safe ``--mode auto`` with the wired
+        # providers ON, so all six dimensions get real data (see build_argv). A
+        # missing provider key skips that integration silently; the run never
+        # crashes. COST NOTE: this now incurs real Serper/Places spend per run.
         result = runner(_config_from_settings(settings), url=row["url"], tier="free")
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("public_audit_job_crashed", public_audit_id=public_audit_id)
