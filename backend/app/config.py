@@ -423,6 +423,21 @@ class Settings(BaseSettings):
     google_oauth_return_path: str = "/admin/settings"
     site_analytics_cost_estimate: float = 0.0  # GSC/GA4 reads are free-tier; logged for spend visibility
 
+    # --- Indexing module. Submit a published/on-demand page URL to search engines. All
+    # additive + optional (never required in prod); both engines are FREE (no cost dial).
+    # Each engine is independently key-gated and degrades to a recorded 'skipped' row.
+    # * IndexNow (Bing/Yandex/...): keyless to the caller, but a random per-DOMAIN key +
+    #   a hosted `<key>.txt` file at the domain root are required (a MANUAL one-time setup
+    #   per client domain). indexnow_key_salt seeds the STABLE per-domain key derivation
+    #   (sha256(salt:host)); blank falls back to a fixed dev salt (set it in prod so the
+    #   key is not derivable from open source). Toggle indexnow_enabled to activate.
+    # * Google Indexing API: reuses the GOOGLE_SHEETS_SA_JSON service account (needs the
+    #   SA as a Search Console OWNER + the Indexing API enabled in the GCP project - a
+    #   manual setup). Toggle google_indexing_enabled to activate.
+    indexnow_enabled: bool = False  # activate the IndexNow submission engine
+    indexnow_key_salt: SecretStr | None = None  # seeds the stable per-domain IndexNow key
+    google_indexing_enabled: bool = False  # activate the Google Indexing API engine
+
     # --- On-page optimizer module (Part 8 Phase 2D). Additive + optional (never
     # required in prod). The analysis worker's only PAID call is one Serper SERP pull
     # (the content score's entity-coverage dimension); it is logged through the cost

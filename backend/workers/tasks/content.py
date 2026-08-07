@@ -1627,6 +1627,31 @@ def publish_content_job(
         return PublishOutcome(code, "failed", "failed", reason=f"publish error: {exc!r}"[:_ERROR_MAX])
 
 
+def _fire_indexing_best_effort(store: ContentStore, outcome: PublishOutcome) -> None:
+    """Enqueue a search-engine indexing submission for a JUST-PUBLISHED page.
+
+    Called from the PUBLISH TASK entry point (never the pure core, which unit tests
+    drive directly without a broker). BEST-EFFORT + NEVER BLOCKS OR FAILS THE PUBLISH:
+    only fires when the publish landed live with a real URL (a degraded artifact-only
+    publish has no live URL, so nothing to index), and any enqueue error is swallowed.
+    The client is resolved from the just-published row so the indexing ledger links to
+    it; the indexing module owns its own key-gating + degrade behaviour.
+    """
+    if outcome.state != "published" or not outcome.url:
+        return
+    try:
+        from app.modules.indexing.tasks import submit_urls_for_indexing
+
+        row = store.load(outcome.code) or {}
+        client_id = row.get("client_id")
+        submit_urls_for_indexing.delay(
+            [outcome.url], None, str(client_id) if client_id else None
+        )
+        logger.info("content_indexing_enqueued", code=outcome.code, url=outcome.url)
+    except Exception:
+        logger.warning("content_indexing_enqueue_failed", code=outcome.code)
+
+
 def _publish_wordpress(
     store: ContentStore,
     code: str,
@@ -1830,4 +1855,7 @@ def publish_content_job_task(code: str) -> dict[str, Any]:
         outcome = publish_content_job(store, providers, code, settings=settings, artifacts=artifacts)
     except PublishBlocked as blocked:
         return {"code": code, "status": "publishing", "state": "blocked", "blocked_by": blocked.blocked_by}
+    # Fire-on-publish: best-effort submit the live URL to the search engines. Runs in the
+    # worker (a broker is available here); never blocks or fails the completed publish.
+    _fire_indexing_best_effort(store, outcome)
     return outcome.as_dict()
