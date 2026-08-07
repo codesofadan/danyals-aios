@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from app.config import Settings
 from app.logging_setup import get_logger
-from integrations.embeddings import Embedder, FakeEmbedder, VoyageEmbedder
+from integrations.embeddings import Embedder, FakeEmbedder, OpenAIEmbedder, VoyageEmbedder
 from integrations.errors import ProviderNotConfiguredError
 from integrations.llm import AnthropicSummarizer, FakeSummarizer, Summarizer
 from integrations.vectorstore import InMemoryVectorStore, PineconeVectorStore, VectorStore
@@ -44,14 +44,22 @@ class ContextProviders:
 
 
 def _build_embedder(settings: Settings, api_key: str) -> Embedder:
-    """Select the real embeddings impl for the configured provider (Voyage today)."""
+    """Select the real embeddings impl for the configured provider (Voyage or OpenAI)."""
     provider = settings.embeddings_provider.lower()
     if provider == "voyage":
         return VoyageEmbedder(
             api_key=api_key, model=settings.embeddings_model, dim=settings.embeddings_dim
         )
+    if provider == "openai":
+        # Reuse EMBEDDINGS_MODEL, but if the operator left it at a Voyage default
+        # (e.g. "voyage-3") while switching the provider to openai, fall back to
+        # OpenAI's default model instead of sending Voyage's name to OpenAI.
+        model = settings.embeddings_model
+        if model.lower().startswith("voyage"):
+            model = "text-embedding-3-small"
+        return OpenAIEmbedder(api_key=api_key, model=model, dim=settings.embeddings_dim)
     raise ProviderNotConfiguredError(
-        f"unknown embeddings provider '{provider}': set EMBEDDINGS_PROVIDER=voyage"
+        f"unknown embeddings provider '{provider}': set EMBEDDINGS_PROVIDER=voyage or openai"
     )
 
 
