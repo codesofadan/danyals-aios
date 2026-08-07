@@ -72,6 +72,7 @@ from app.services.site_design import (
     build_design_summarizer,
     extract_site_design,
 )
+from integrations.firecrawl import Firecrawl, firecrawl_from_settings
 from integrations.llm import Researcher
 
 router = APIRouter(tags=["content"])
@@ -542,6 +543,13 @@ def get_design_gate() -> CostGate:
     return build_design_gate()
 
 
+def get_design_firecrawl(settings: SettingsDep) -> Firecrawl | None:
+    """Dependency: the key-gated Firecrawl render+screenshot client (or ``None`` when
+    ``FIRECRAWL_API_KEY`` is unset -> the endpoint falls back to the plain fetcher).
+    Overridden in tests with a ``FakeFirecrawl`` (no network)."""
+    return firecrawl_from_settings(settings)
+
+
 def _same_domain_links(html: str, base_url: str, *, limit: int) -> list[str]:
     """Extract up to ``limit`` same-domain internal page URLs from the homepage HTML.
 
@@ -633,23 +641,53 @@ def get_design_fetcher(http: HttpClientDep, settings: SettingsDep) -> DesignFetc
 DesignSummarizerDep = Annotated[SystemSummarizer | None, Depends(get_design_summarizer)]
 DesignGateDep = Annotated[CostGate, Depends(get_design_gate)]
 DesignFetcherDep = Annotated[DesignFetcher, Depends(get_design_fetcher)]
+DesignFirecrawlDep = Annotated[Firecrawl | None, Depends(get_design_firecrawl)]
+
+
+async def _gather_design_evidence(
+    firecrawl: Firecrawl | None,
+    fetcher: DesignFetcher,
+    http: httpx.AsyncClient,
+    settings: Settings,
+    *,
+    site: str,
+    max_pages: int,
+) -> tuple[str, str | None]:
+    """Render the target site into ``(content, screenshot_b64)`` for the analysis.
+
+    PREFERRED: Firecrawl renders the page (JS + CSS) and returns clean markdown + a
+    full-page screenshot for Claude vision. FALLBACK (Firecrawl unconfigured, or a
+    runtime render failure): the plain-httpx fetcher's joined page HTML with NO
+    screenshot - the old behaviour, still better than crashing. The URL is already
+    SSRF-guarded by the caller."""
+    if firecrawl is not None:
+        page = await firecrawl.scrape(http, site, want_screenshot=settings.site_design_screenshot)
+        if page is not None:
+            return page.markdown, page.screenshot_b64
+    pages = await fetcher(site, max_pages)
+    return "\n\n".join(pages), None
 
 
 @router.post("/content/site-design", response_model=SiteDesignResponse)
 async def analyze_site_design(
     body: SiteDesignRequest,
+    http: HttpClientDep,
     settings: SettingsDep,
     summarizer: DesignSummarizerDep,
     gate: DesignGateDep,
+    firecrawl: DesignFirecrawlDep,
     fetcher: DesignFetcherDep,
     actor: PublishContent,
 ) -> SiteDesignResponse:
-    """Extract the target site's existing design profile so a new page can MATCH it.
+    """Extract the target site's REAL design profile so a new page can MATCH it.
 
-    Fetches the homepage + up to ``maxPages`` same-domain internal pages, then has Claude
-    analyze the rendered HTML under a strict-JSON design contract. The single paid call is
-    metered under the EXISTING ``content`` money-dial (committed spend = Anthropic token
-    cost only); a missing key, a dial/budget block, or an analysis failure DEGRADES (200,
+    RENDERS the site via Firecrawl (runs its JS + CSS) to get clean markdown + a full-page
+    SCREENSHOT, then has Claude analyze the screenshot with VISION under a strict-JSON
+    design contract that also returns a self-contained ``wireframe_html`` preview. When
+    Firecrawl is unconfigured (no key) or a render fails, it FALLS BACK to the plain-httpx
+    fetcher (homepage + same-domain pages, no screenshot). The single paid call is metered
+    under the EXISTING ``content`` money-dial (committed spend = Anthropic token cost
+    only); a missing key, a dial/budget block, or an analysis failure DEGRADES (200,
     ``status='degraded'``, ``profile=null``) rather than crashing, and the gate is never
     bypassed. The site URL is SSRF-guarded OFF the event loop; the blocking Anthropic call
     + the sync gate store run off the loop via ``to_thread``."""
@@ -663,11 +701,17 @@ async def analyze_site_design(
         ) from exc
 
     max_pages = body.max_pages if body.max_pages is not None else settings.content_design_max_pages
-    pages = await fetcher(body.site, max_pages)
+    content, screenshot_b64 = await _gather_design_evidence(
+        firecrawl, fetcher, http, settings, site=body.site, max_pages=max_pages
+    )
 
     def _run() -> DesignResult:
         return extract_site_design(
-            summarizer=summarizer, gate=gate, settings=settings, pages=pages
+            summarizer=summarizer,
+            gate=gate,
+            settings=settings,
+            content=content,
+            screenshot_b64=screenshot_b64,
         )
 
     result = await asyncio.to_thread(_run)

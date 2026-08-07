@@ -170,6 +170,10 @@ export type SiteDesignProfile = {
   layout: SiteDesignLayout;
   components: SiteDesignComponents;
   notes: string;
+  // A self-contained, styled HTML snippet (inline <style> + one <section>) that renders a
+  // representative hero/homepage section in the extracted colours + fonts + layout, so the
+  // operator can SEE how a matching page would look. Rendered in a sandboxed iframe.
+  wireframeHtml: string;
 };
 
 export const contentJobs: ContentJob[] = [

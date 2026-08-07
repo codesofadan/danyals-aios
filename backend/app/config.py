@@ -258,10 +258,22 @@ class Settings(BaseSettings):
     # `content` money-dial (committed spend = Anthropic token cost only); a missing key /
     # a dial-block / an analysis failure DEGRADES (200, status='degraded'), never crashes.
     # All additive + optional. ---
-    content_design_model: str = "claude-sonnet-5"  # Claude tier that reads the page HTML
-    content_design_max_pages: int = 3  # homepage + up to N-1 same-domain internal pages
-    content_design_max_tokens: int = 2048  # bound the JSON design-profile reply
-    content_design_max_html_chars: int = 6000  # per-page HTML trimmed to this many chars
+    content_design_model: str = "claude-sonnet-5"  # Claude tier (VISION) that reads the screenshot + page content
+    content_design_max_pages: int = 3  # fallback fetcher: homepage + up to N-1 same-domain internal pages
+    # A VISION call carrying a screenshot + a rendered-page wireframe reply is bigger than
+    # the old text-only extract, so this is bumped to fit the self-contained wireframe HTML.
+    content_design_max_tokens: int = 4096  # bound the JSON design-profile + wireframe reply
+    content_design_max_html_chars: int = 6000  # per-page content trimmed to this many chars
+    # --- Firecrawl (site-design RENDER + SCREENSHOT). The plain httpx fetcher returns a
+    # modern site's empty JS shell (no styles), so Claude saw no real evidence and every
+    # profile collapsed to the dataclass defaults. Firecrawl renders the page (JS + CSS)
+    # and returns clean markdown + a full-page SCREENSHOT, which Claude then analyzes with
+    # VISION - so the profile actually varies per site. KEY-GATED + optional (NOT in
+    # _REQUIRED_IN_PROD): a keyless deploy DEGRADES to the plain-httpx fallback fetcher
+    # (no screenshot), never crashes. The key is a SecretStr (never logged / in a repr). ---
+    firecrawl_api_key: SecretStr | None = None  # Firecrawl render+screenshot API key
+    firecrawl_base_url: str = "https://api.firecrawl.dev"  # Firecrawl REST base
+    site_design_screenshot: bool = True  # request a screenshot for the Claude-vision analysis
     # --- Content WORKER + PUBLISH tuning (P7A-7/8). The pipeline worker composes
     # the merged content services; the publish path renders PDF/Markdown to a
     # controlled artifact root (traversal-guarded, like the audit store) when the

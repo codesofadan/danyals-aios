@@ -4,10 +4,18 @@ be built to MATCH it BEFORE it is published to the client's WordPress.
 The user's requirement, in three moves: (1) GATHER the target site's existing
 design/layout/UI, (2) build the new page's structure to MATCH it, (3) fill in the
 content. This module is the FOUNDATION of move (1) + the seam for move (2): it turns
-one or more fetched rendered pages into a bounded, strict :class:`SiteDesignProfile`
-(palette / typography / layout+section-order / component styles) that the content
-job carries in its ``source_pack["design_profile"]`` and the publish path uses to
-wrap the generated body in ordered ``<section class="aios-<name>">`` blocks.
+the RENDERED site - a Firecrawl SCREENSHOT (what the site actually looks like) plus
+its rendered text - into a bounded, strict :class:`SiteDesignProfile` (palette /
+typography / layout+section-order / component styles + a self-contained
+``wireframe_html`` preview) that the content job carries in its
+``source_pack["design_profile"]`` and the publish path uses to wrap the generated
+body in ordered ``<section class="aios-<name>">`` blocks.
+
+WHY VISION: a plain httpx GET returns a modern site's empty JS shell (no CSS), so the
+old text-only analysis had no real evidence and EVERY profile collapsed to the dataclass
+defaults (the same templated design for every site). The router now RENDERS the site via
+Firecrawl and hands Claude the screenshot; :func:`extract_site_design` analyzes it with
+VISION, so the extracted design genuinely varies per site.
 
 Deep Elementor/Gutenberg block GENERATION (translating this profile into a live
 page builder's block tree) is a LATER chunk and is deliberately NOT built here - this
@@ -61,9 +69,10 @@ _JOB_TYPE = "site_design"
 DEGRADE_NO_ANTHROPIC = "anthropic_unconfigured"
 DEGRADE_ANALYSIS_FAILED = "analysis_failed"
 
-# Bound the per-page HTML the parser considers salient; hard-cap the total so a
-# hostile / huge site cannot balloon the prompt regardless of page count.
+# Bound the rendered content the parser considers salient; hard-cap the total so a
+# hostile / huge site cannot balloon the prompt.
 _MAX_SECTIONS = 12  # how many section names the profile's section_order may carry
+_MAX_WIREFRAME_CHARS = 20_000  # bound the self-contained wireframe HTML the reply may carry
 
 
 # --------------------------------------------------------------------------- #
@@ -81,10 +90,20 @@ _INSTALL_HINT = "install the AI extra (pip install -e '.[ai]') and set ANTHROPIC
 @runtime_checkable
 class SystemSummarizer(Protocol):
     """Compact ``prompt`` into text under a per-call ``system`` prompt, returning the
-    text + token usage. ``model`` selects the tier; ``max_tokens`` bounds the reply."""
+    text + token usage. ``model`` selects the tier; ``max_tokens`` bounds the reply.
+
+    ``image_b64`` optionally attaches a base64 PNG (a rendered-page SCREENSHOT) so Claude
+    analyzes what the site actually LOOKS LIKE with VISION, not just its text. ``None``
+    keeps the plain text-only behaviour."""
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | None = None,
+        image_b64: str | None = None,
     ) -> LLMResult: ...
 
 
@@ -92,10 +111,10 @@ class AnthropicSystemSummarizer:
     """Real :class:`SystemSummarizer` backed by Claude; lazy-imports the ``anthropic``
     SDK (optional ``[ai]`` extra, exactly like ``integrations.llm.AnthropicSummarizer``).
 
-    Distinct from that summarizer only in that it passes a PER-CALL ``system`` prompt
-    (the design contract) instead of a frozen preamble. Absent SDK / key ->
-    ``ProviderNotConfiguredError`` naming the fix (the builder turns that into a clean
-    keyless degrade). NEVER logs the secret."""
+    Distinct from that summarizer in that it passes a PER-CALL ``system`` prompt (the
+    design contract) instead of a frozen preamble AND accepts an optional screenshot for
+    VISION analysis. Absent SDK / key -> ``ProviderNotConfiguredError`` naming the fix
+    (the builder turns that into a clean keyless degrade). NEVER logs the secret."""
 
     def __init__(self, *, api_key: str, model: str = "claude-sonnet-5") -> None:
         if not api_key:
@@ -110,12 +129,32 @@ class AnthropicSystemSummarizer:
         self.model = model
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | None = None,
+        image_b64: str | None = None,
     ) -> LLMResult:
+        # With a screenshot the user turn is a content LIST: the image block FIRST (so
+        # Claude looks at the render), then the text block. Without one it stays a plain
+        # string (identical to the old text-only behaviour).
+        user_content: Any
+        if image_b64:
+            user_content = [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+                },
+                {"type": "text", "text": prompt},
+            ]
+        else:
+            user_content = prompt
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": user_content}],
         }
         if system:
             kwargs["system"] = [
@@ -219,13 +258,19 @@ class Components:
 @dataclass(frozen=True)
 class SiteDesignProfile:
     """The extracted design system a new page is built to MATCH. Every field has a
-    sane default, so a partial (or missing) parse still yields a usable profile."""
+    sane default, so a partial (or missing) parse still yields a usable profile.
+
+    ``wireframe_html`` is a SELF-CONTAINED, styled HTML snippet (inline ``<style>`` +
+    one ``<section>``) that renders a representative hero/homepage section using the
+    EXTRACTED colours + fonts + layout, so a human can SEE what a matching page would
+    look like. Empty when the reply carried none (still a usable profile)."""
 
     palette: Palette = field(default_factory=Palette)
     typography: Typography = field(default_factory=Typography)
     layout: Layout = field(default_factory=Layout)
     components: Components = field(default_factory=Components)
     notes: str = ""
+    wireframe_html: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """A plain JSON-safe dict whose keys match the ``schemas.content``
@@ -256,6 +301,7 @@ class SiteDesignProfile:
                 "spacing_scale": self.components.spacing_scale,
             },
             "notes": self.notes,
+            "wireframe_html": self.wireframe_html,
         }
 
 
@@ -273,38 +319,46 @@ class DesignResult:
 # --------------------------------------------------------------------------- #
 _DESIGN_SYSTEM_PROMPT = (
     "You are a senior web + brand designer analyzing a company's EXISTING website so a "
-    "new page can be built to MATCH its look and structure. You are given the rendered "
-    "HTML (and any inline CSS) of one or more pages from ONE site. From ONLY what you "
-    "observe, extract the site's visual design system. Respond with STRICT JSON ONLY - "
-    "no prose, no markdown, no code fences - an object with EXACTLY these keys: "
-    'palette (an object with primary, secondary, background, text, accent - each a CSS '
-    'hex colour like "#0a0a0a"), typography (an object with heading_font and body_font - '
-    'CSS font-family stacks - and base_size like "16px"), layout (an object with '
-    'container_width like "1200px", section_order - an ORDERED array of the section names '
-    "a matching page should follow, drawn from hero/intro/about/services/features/proof/"
+    "new page can be built to MATCH its look and structure. You are given a full-page "
+    "SCREENSHOT of the site (what it ACTUALLY looks like when rendered) together with the "
+    "page's text content. LOOK AT THE SCREENSHOT FIRST - read the real colours, the real "
+    "fonts, the real section rhythm off the pixels - and use the text only to confirm "
+    "wording and section order. From ONLY what you observe, extract the site's REAL "
+    "visual design system. Respond with STRICT JSON ONLY - no prose, no markdown, no code "
+    "fences - an object with EXACTLY these keys: "
+    'palette (an object with primary, secondary, background, text, accent - each the '
+    'ACTUAL CSS hex colour you SEE, like "#0a0a0a"), typography (an object with '
+    "heading_font and body_font - the actual CSS font-family stacks you can identify from "
+    'the letterforms/content - and base_size like "16px"), layout (an object with '
+    'container_width like "1200px", section_order - an ORDERED array of the sections '
+    "ACTUALLY visible top-to-bottom, drawn from hero/intro/about/services/features/proof/"
     "testimonials/gallery/faq/cta/contact - hero_style, and cta_style), components (an "
-    "object with button_style, card_style, spacing_scale), and notes (a short string of "
-    "any other useful observations). Infer sensible values where the HTML is thin; never "
-    "invent a brand the site does not actually show."
+    "object with button_style, card_style, spacing_scale), notes (a short string of any "
+    "other useful observations), and wireframe_html (a SELF-CONTAINED, styled HTML snippet "
+    "- an inline <style> block plus ONE <section> - that renders a representative "
+    "hero/homepage section using the colours, fonts and layout you extracted, so a human "
+    "can SEE how a matching page would look; keep it to one screen, inline every style, "
+    "reference no external assets, and make it valid standalone HTML). Report the REAL "
+    "design you observe - accurate hexes, real fonts, the true section order - so the "
+    "profile VARIES per site; never fall back to a generic template, and never invent a "
+    "brand the site does not actually show."
 )
 
 
 # --------------------------------------------------------------------------- #
 # Pure helpers: the analysis prompt + the tolerant JSON parse.
 # --------------------------------------------------------------------------- #
-def build_design_prompt(pages: list[str], *, max_html_chars: int, max_pages: int) -> str:
-    """The user turn: the fetched page HTML, each trimmed to a bounded length and the
-    total capped at ``max_pages`` pages, labelled per page. The system prompt carries
-    the JSON contract; this is the concrete evidence."""
-    per_page = max(1, max_html_chars)
-    parts: list[str] = []
-    for idx, html in enumerate(pages[: max(1, max_pages)], start=1):
-        snippet = (html or "")[:per_page]
-        parts.append(f"--- PAGE {idx} ---\n{snippet}")
-    body = "\n\n".join(parts) if parts else "(no page HTML was fetched)"
+def build_design_prompt(content: str, *, max_chars: int) -> str:
+    """The user turn: the RENDERED page content (Firecrawl markdown, or the joined
+    fallback HTML), trimmed to a bounded length. The screenshot rides alongside as a
+    vision image block; the system prompt carries the JSON contract - this is the text
+    evidence that confirms wording + section order."""
+    snippet = (content or "")[: max(1, max_chars)]
+    body = snippet if snippet.strip() else "(no page content was rendered - rely on the screenshot)"
     return (
-        "Analyze the following rendered page HTML/CSS from ONE website and return the "
-        "strict-JSON design profile described in the system instructions.\n\n" + body
+        "Analyze this website (screenshot attached above, if present) and return the "
+        "strict-JSON design profile described in the system instructions. The page's "
+        "rendered text content follows:\n\n" + body
     )
 
 
@@ -357,6 +411,25 @@ def _section_list(value: object, *, limit: int) -> list[str]:
     return out
 
 
+def _wireframe(value: object, *, limit: int) -> str:
+    """Coerce the model's ``wireframe_html`` into a bounded HTML string.
+
+    Tolerant: a non-string -> ``""``; a value fenced in ```` ```html ... ``` ```` (the
+    model wrapped the snippet in a code fence despite the strict-JSON instruction) is
+    unwrapped; the result is hard-capped so a runaway snippet cannot balloon the row."""
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if text.startswith("```"):
+        # Drop the opening fence line (``` or ```html) and any trailing fence.
+        newline = text.find("\n")
+        text = text[newline + 1 :] if newline != -1 else ""
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+    return text[:limit]
+
+
 def build_profile(data: dict[str, Any]) -> SiteDesignProfile:
     """Build a :class:`SiteDesignProfile` from a parsed JSON object, filling every
     missing / malformed field with the dataclass default (so a thin reply is usable)."""
@@ -397,6 +470,7 @@ def build_profile(data: dict[str, Any]) -> SiteDesignProfile:
         layout=layout,
         components=components,
         notes=_txt(data.get("notes"), defaults.notes),
+        wireframe_html=_wireframe(data.get("wireframe_html"), limit=_MAX_WIREFRAME_CHARS),
     )
 
 
@@ -412,15 +486,20 @@ def extract_site_design(
     summarizer: SystemSummarizer | None,
     gate: CostGate,
     settings: Settings,
-    pages: list[str],
+    content: str,
+    screenshot_b64: str | None,
 ) -> DesignResult:
-    """Analyze the fetched page HTML and extract the site's :class:`SiteDesignProfile`.
+    """Analyze the RENDERED site (a screenshot + its text) and extract the site's
+    :class:`SiteDesignProfile`.
 
-    Pure of network/DB (the summarizer + gate are injected). The gate contract is
-    reused verbatim (evaluate -> call -> commit): on any non-allowed outcome NO provider
-    call happens and the gate is not bypassed. The single paid call is metered under the
-    ``content`` dial, and the ACTUAL cost committed after the call is the Anthropic TOKEN
-    cost only (:func:`pricing.anthropic_cost`). Degrades, never crashes.
+    Pure of network/DB (the summarizer + gate are injected; the fetch/render already
+    happened in the router). ``content`` is the rendered markdown (or joined fallback
+    HTML); ``screenshot_b64`` is the base64 PNG Claude analyzes with VISION (``None`` ->
+    text-only). The gate contract is reused verbatim (evaluate -> call -> commit): on any
+    non-allowed outcome NO provider call happens and the gate is not bypassed. The single
+    paid call is metered under the ``content`` dial, and the ACTUAL cost committed after
+    the call is the Anthropic TOKEN cost only (:func:`pricing.anthropic_cost`). Degrades,
+    never crashes.
     """
     # Claude is the WHOLE analysis engine; without a key there is nothing to run, so a
     # missing summarizer is a keyless degrade BEFORE the gate is ever consulted.
@@ -428,9 +507,8 @@ def extract_site_design(
         return _degraded(DEGRADE_NO_ANTHROPIC)
 
     prompt = build_design_prompt(
-        pages,
-        max_html_chars=settings.content_design_max_html_chars,
-        max_pages=settings.content_design_max_pages,
+        content,
+        max_chars=settings.content_design_max_html_chars * max(1, settings.content_design_max_pages),
     )
     ctx = GateContext(
         feature_key=_FEATURE,
@@ -452,6 +530,7 @@ def extract_site_design(
             model=model,
             max_tokens=settings.content_design_max_tokens,
             system=_DESIGN_SYSTEM_PROMPT,
+            image_b64=screenshot_b64,
         )
     except Exception:  # transport / SDK failure: degrade, don't crash (usage unknown -> nothing billed)
         logger.info("site_design_analysis_failed")

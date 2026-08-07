@@ -1,17 +1,21 @@
-"""Site-design EXTRACTOR: the pure analysis core, its degrade paths, the endpoint
-(summarizer + gate + fetcher all faked -> NO network / NO real provider), and the
-source_pack seeding + the publish section-wrapping.
+"""Site-design EXTRACTOR: the pure VISION analysis core, its degrade paths, the endpoint
+(summarizer + gate + firecrawl + fetcher all faked -> NO network / NO real provider), and
+the source_pack seeding + the publish section-wrapping.
 
 Proves:
 
-* the pure ``extract_site_design`` parses a fixed-JSON reply into a ``SiteDesignProfile``,
-  commits exactly ONE token-only cost under the ``content`` dial, and passes the design
-  system prompt through to the summarizer;
+* the pure ``extract_site_design`` parses a fixed-JSON reply (incl. ``wireframe_html``)
+  into a ``SiteDesignProfile``, commits exactly ONE token-only cost under the ``content``
+  dial, passes the design system prompt AND the screenshot through to the summarizer;
+* TWO different fake replies yield TWO DIFFERENT profiles - proving the extract reflects
+  the model's actual analysis, not hardcoded dataclass defaults (the bug);
 * every degrade path (keyless summarizer / a gate block / an unparseable reply) returns a
   clean ``status='degraded'`` shell with ``profile=None`` and never crashes - and a gate
   block / keyless degrade makes NO provider call;
 * a partial JSON reply still yields a usable profile (missing fields default);
-* the endpoint returns 200 + the profile on fakes (no network), and degrades cleanly;
+* the endpoint returns 200 + the profile + the wireframe on fakes (Firecrawl render +
+  vision, no network), FALLS BACK to the plain fetcher when Firecrawl is unconfigured,
+  and degrades cleanly;
 * a content job's ``source_pack`` stores a supplied ``design_profile``, and the publish
   body is wrapped in ordered ``<section class="aios-<name>">`` blocks when a profile is
   present and is byte-for-byte unchanged when absent.
@@ -32,6 +36,7 @@ from app.core.auth import CurrentUser, get_current_user
 from app.routers.content import (
     _seed_source_pack,
     get_design_fetcher,
+    get_design_firecrawl,
     get_design_gate,
     get_design_summarizer,
 )
@@ -42,6 +47,7 @@ from app.services.site_design import (
     DEGRADE_NO_ANTHROPIC,
     extract_site_design,
 )
+from integrations.firecrawl import FakeFirecrawl, FirecrawlPage
 from integrations.llm import LLMResult
 from workers.tasks.content import _shape_body_html, md_to_html
 
@@ -68,26 +74,60 @@ _VALID_JSON = json.dumps(
         },
         "components": {"button_style": "pill", "card_style": "bordered", "spacing_scale": "airy"},
         "notes": "Bold headings, lots of whitespace.",
+        "wireframe_html": (
+            "<style>.hero{background:#0a0a0a;color:#fff;font-family:Poppins}</style>"
+            "<section class='hero'><h1>Welcome</h1></section>"
+        ),
+    }
+)
+
+# A DIFFERENT site's reply - to prove the extract varies per site (not templated defaults).
+_OTHER_JSON = json.dumps(
+    {
+        "palette": {
+            "primary": "#14532d", "secondary": "#166534", "background": "#f0fdf4",
+            "text": "#052e16", "accent": "#22c55e",
+        },
+        "typography": {
+            "heading_font": "Merriweather, serif", "body_font": "Georgia, serif",
+            "base_size": "17px",
+        },
+        "layout": {
+            "container_width": "960px",
+            "section_order": ["hero", "about", "gallery", "contact"],
+            "hero_style": "full-bleed", "cta_style": "inline",
+        },
+        "components": {"button_style": "ghost", "card_style": "flat", "spacing_scale": "tight"},
+        "notes": "Earthy, editorial.",
+        "wireframe_html": "<style>.hero{background:#14532d}</style><section class='hero'>Green</section>",
     }
 )
 
 
 class FakeSystemSummarizer:
     """Deterministic ``SystemSummarizer``: returns a fixed payload, records the ``system``
-    prompt it was handed + the token counts it reported. No network."""
+    prompt + the ``image_b64`` it was handed + the token counts it reported. No network."""
 
     def __init__(self, *, payload: str = _VALID_JSON) -> None:
         self._payload = payload
         self.system: str | None = None
+        self.image_b64: str | None = None
         self.calls = 0
         self.last_input_tokens = 0
         self.last_output_tokens = 0
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | None = None,
+        image_b64: str | None = None,
     ) -> LLMResult:
         self.calls += 1
         self.system = system
+        self.image_b64 = image_b64
         self.last_input_tokens = max(1, len(prompt) // 4)
         self.last_output_tokens = max(1, len(self._payload) // 4)
         return LLMResult(
@@ -139,14 +179,15 @@ def _gate(store: _FakeCostStore | None = None) -> CostGate:
 
 
 # --------------------------------------------------------------------------- #
-# 1. The pure core: parse + token-only commit + system pass-through
+# 1. The pure core: parse + wireframe + token-only commit + system/image pass-through
 # --------------------------------------------------------------------------- #
-def test_extract_ok_parses_profile_commits_token_cost_and_passes_system() -> None:
+def test_extract_ok_parses_profile_wireframe_commits_cost_passes_system_and_image() -> None:
     settings = _settings()
     summ = FakeSystemSummarizer()
     store = _FakeCostStore()
     result = extract_site_design(
-        summarizer=summ, gate=_gate(store), settings=settings, pages=["<html><body>hi</body></html>"]
+        summarizer=summ, gate=_gate(store), settings=settings,
+        content="# Rendered home\n\nReal markdown from Firecrawl.", screenshot_b64="c2hvdA==",
     )
 
     assert result.status == "ok"
@@ -157,10 +198,14 @@ def test_extract_ok_parses_profile_commits_token_cost_and_passes_system() -> Non
     assert result.profile.layout.section_order == ["hero", "services", "faq", "cta"]
     assert result.profile.layout.hero_style == "split"
     assert result.profile.components.button_style == "pill"
+    # The NEW wireframe is parsed onto the profile.
+    assert "<section class='hero'>" in result.profile.wireframe_html
+    assert result.profile.wireframe_html.startswith("<style>")
 
-    # The design system prompt was passed through to the summarizer.
+    # The design system prompt AND the screenshot were passed through to the summarizer.
     assert summ.calls == 1
     assert summ.system == site_design._DESIGN_SYSTEM_PROMPT
+    assert summ.image_b64 == "c2hvdA=="
 
     # Exactly ONE commit, TOKEN-only, under the content dial, not cached.
     assert len(store.records) == 1
@@ -175,12 +220,45 @@ def test_extract_ok_parses_profile_commits_token_cost_and_passes_system() -> Non
     assert cost > 0  # token cost, not a flat/free constant
 
 
+def test_two_different_replies_yield_two_different_profiles() -> None:
+    # THE BUG WAS: every site collapsed to the SAME templated defaults. Prove the extract
+    # reflects the model's real analysis by feeding two different site replies.
+    settings = _settings()
+    a = extract_site_design(
+        summarizer=FakeSystemSummarizer(payload=_VALID_JSON), gate=_gate(), settings=settings,
+        content="site A", screenshot_b64="AAAA",
+    )
+    b = extract_site_design(
+        summarizer=FakeSystemSummarizer(payload=_OTHER_JSON), gate=_gate(), settings=settings,
+        content="site B", screenshot_b64="BBBB",
+    )
+    assert a.profile is not None and b.profile is not None
+    assert a.profile.palette.primary != b.profile.palette.primary
+    assert a.profile.typography.heading_font != b.profile.typography.heading_font
+    assert a.profile.layout.section_order != b.profile.layout.section_order
+    assert a.profile.wireframe_html != b.profile.wireframe_html
+    # And neither is the dataclass default palette (the templated-bug fingerprint).
+    assert a.profile.palette.primary != site_design.Palette().primary
+    assert b.profile.palette.primary != site_design.Palette().primary
+
+
+def test_text_only_when_no_screenshot_passes_image_none() -> None:
+    # The fallback path renders no screenshot; the analysis still runs text-only.
+    summ = FakeSystemSummarizer()
+    result = extract_site_design(
+        summarizer=summ, gate=_gate(), settings=_settings(),
+        content="joined fallback HTML", screenshot_b64=None,
+    )
+    assert result.status == "ok"
+    assert summ.image_b64 is None
+
+
 def test_partial_json_still_yields_usable_profile_with_defaults() -> None:
     # A thin reply (only a primary colour) must NOT degrade - missing fields default.
     settings = _settings()
     summ = FakeSystemSummarizer(payload='{"palette": {"primary": "#abcdef"}}')
     result = extract_site_design(
-        summarizer=summ, gate=_gate(), settings=settings, pages=["<html></html>"]
+        summarizer=summ, gate=_gate(), settings=settings, content="<html></html>", screenshot_b64=None,
     )
     assert result.status == "ok"
     assert result.profile is not None
@@ -188,6 +266,18 @@ def test_partial_json_still_yields_usable_profile_with_defaults() -> None:
     # Defaulted fields are present + usable.
     assert result.profile.palette.background == "#ffffff"
     assert result.profile.layout.section_order == ["hero", "intro", "services", "proof", "faq", "cta"]
+    assert result.profile.wireframe_html == ""  # none supplied -> empty, still usable
+
+
+def test_wireframe_code_fence_is_stripped() -> None:
+    # The model sometimes wraps the snippet in a ```html fence despite strict JSON; strip it.
+    payload = json.dumps({"wireframe_html": "```html\n<section>Hi</section>\n```"})
+    result = extract_site_design(
+        summarizer=FakeSystemSummarizer(payload=payload), gate=_gate(), settings=_settings(),
+        content="x", screenshot_b64=None,
+    )
+    assert result.profile is not None
+    assert result.profile.wireframe_html == "<section>Hi</section>"
 
 
 # --------------------------------------------------------------------------- #
@@ -196,7 +286,8 @@ def test_partial_json_still_yields_usable_profile_with_defaults() -> None:
 def test_degrade_keyless_summarizer_none_before_gate() -> None:
     store = _FakeCostStore()
     result = extract_site_design(
-        summarizer=None, gate=_gate(store), settings=_settings(), pages=["<html></html>"]
+        summarizer=None, gate=_gate(store), settings=_settings(), content="<html></html>",
+        screenshot_b64=None,
     )
     assert result.status == "degraded"
     assert result.profile is None
@@ -208,7 +299,8 @@ def test_degrade_gate_block_makes_no_call() -> None:
     store = _FakeCostStore(dials={"content": "off"})  # dial off -> skip
     summ = FakeSystemSummarizer()
     result = extract_site_design(
-        summarizer=summ, gate=_gate(store), settings=_settings(), pages=["<html></html>"]
+        summarizer=summ, gate=_gate(store), settings=_settings(), content="<html></html>",
+        screenshot_b64="c2hvdA==",
     )
     assert result.status == "degraded"
     assert result.profile is None
@@ -221,7 +313,8 @@ def test_degrade_spend_halt_makes_no_call() -> None:
     store = _FakeCostStore(halted=True)
     summ = FakeSystemSummarizer()
     result = extract_site_design(
-        summarizer=summ, gate=_gate(store), settings=_settings(), pages=["<html></html>"]
+        summarizer=summ, gate=_gate(store), settings=_settings(), content="<html></html>",
+        screenshot_b64=None,
     )
     assert result.status == "degraded"
     assert result.reason == "cost_gate:blocked_halt"
@@ -234,7 +327,8 @@ def test_degrade_bad_json_reply() -> None:
     store = _FakeCostStore()
     summ = FakeSystemSummarizer(payload="Sorry, I could not analyze that page.")
     result = extract_site_design(
-        summarizer=summ, gate=_gate(store), settings=_settings(), pages=["<html></html>"]
+        summarizer=summ, gate=_gate(store), settings=_settings(), content="<html></html>",
+        screenshot_b64=None,
     )
     assert result.status == "degraded"
     assert result.profile is None
@@ -244,7 +338,7 @@ def test_degrade_bad_json_reply() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 3. The endpoint (summarizer + gate + fetcher all faked -> no network)
+# 3. The endpoint (summarizer + gate + firecrawl + fetcher all faked -> no network)
 # --------------------------------------------------------------------------- #
 def _user(role: str) -> CurrentUser:
     return CurrentUser(
@@ -253,23 +347,35 @@ def _user(role: str) -> CurrentUser:
     )
 
 
-def _wire(app: FastAPI, summarizer: Any, *, role: str = "manager") -> _FakeCostStore:
+def _wire(
+    app: FastAPI, summarizer: Any, *, role: str = "manager",
+    firecrawl: Any = None, fetched: list[str] | None = None,
+) -> _FakeCostStore:
+    """Override the whole site-design dep graph with fakes (no network).
+
+    ``firecrawl`` defaults to a real ``FakeFirecrawl`` (render + screenshot); pass
+    ``None`` to exercise the plain-fetcher FALLBACK path. ``fetched`` is what the fake
+    fallback fetcher returns."""
     store = _FakeCostStore()
+    fetched_pages = fetched if fetched is not None else ["<html><body><h1>Home</h1></body></html>"]
 
     async def _fake_fetch(site: str, max_pages: int) -> list[str]:
-        return ["<html><body><h1>Home</h1></body></html>"]  # fixed HTML, no network
+        return fetched_pages  # fixed HTML, no network
 
     app.dependency_overrides[get_current_user] = lambda: _user(role)
     app.dependency_overrides[get_design_summarizer] = lambda: summarizer
     app.dependency_overrides[get_design_gate] = lambda: _gate(store)
+    app.dependency_overrides[get_design_firecrawl] = lambda: firecrawl
     app.dependency_overrides[get_design_fetcher] = lambda: _fake_fetch
     return store
 
 
-async def test_endpoint_returns_profile_on_fakes(
+async def test_endpoint_returns_profile_and_wireframe_via_firecrawl(
     client: httpx.AsyncClient, app: FastAPI
 ) -> None:
-    _wire(app, FakeSystemSummarizer())
+    summ = FakeSystemSummarizer()
+    fc = FakeFirecrawl(page=FirecrawlPage(markdown="# Real home", screenshot_b64="c2hvdA=="))
+    _wire(app, summ, firecrawl=fc)
     # A public IP literal so the SSRF guard needs NO DNS lookup (fully offline).
     resp = await client.post(
         "/api/v1/content/site-design", json={"site": "https://1.2.3.4", "maxPages": 2}
@@ -281,12 +387,30 @@ async def test_endpoint_returns_profile_on_fakes(
     assert body["profile"]["palette"]["primary"] == "#0a0a0a"
     assert body["profile"]["layout"]["section_order"] == ["hero", "services", "faq", "cta"]
     assert body["profile"]["typography"]["heading_font"] == "Poppins, sans-serif"
+    # The NEW wireframe is on the wire as camelCase (serialization alias).
+    assert "<section" in body["profile"]["wireframeHtml"]
+    # Firecrawl was used (screenshot requested + fed to Claude vision), NOT the fetcher.
+    assert fc.calls == 1
+    assert fc.last_want_screenshot is True
+    assert summ.image_b64 == "c2hvdA=="
+
+
+async def test_endpoint_falls_back_to_fetcher_when_firecrawl_unconfigured(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    summ = FakeSystemSummarizer()
+    _wire(app, summ, firecrawl=None, fetched=["<html><body>fallback</body></html>"])
+    resp = await client.post("/api/v1/content/site-design", json={"site": "https://1.2.3.4"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    # No Firecrawl -> the plain fetcher ran and NO screenshot reached the vision call.
+    assert summ.image_b64 is None
 
 
 async def test_endpoint_degrades_cleanly_without_key(
     client: httpx.AsyncClient, app: FastAPI
 ) -> None:
-    _wire(app, None)  # keyless summarizer
+    _wire(app, None, firecrawl=FakeFirecrawl())  # keyless summarizer
     resp = await client.post("/api/v1/content/site-design", json={"site": "https://1.2.3.4"})
     assert resp.status_code == 200
     body = resp.json()
