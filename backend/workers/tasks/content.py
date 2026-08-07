@@ -96,6 +96,7 @@ from app.services.content_schema import (
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
+from app.services.elementor import elementor_json
 from app.services.notifications import email_client_sync, notify_leads_sync
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
@@ -1462,11 +1463,20 @@ def _derive_cta(row: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _plugin_payload(row: dict[str, Any], draft_md: str, title: str) -> dict[str, Any]:
+def _plugin_payload(
+    row: dict[str, Any], draft_md: str, title: str, *, settings: Settings | None = None
+) -> dict[str, Any]:
     """Build the AIOS Publisher push body from the finished job (title, rendered HTML,
     SEO meta, slug, focus keyword, JSON-LD, and the article-template components). Pushed
     as a DRAFT so the admin publishes it on the WordPress site itself (the operator's
-    flow). The api_key is injected by the adapter, never assembled here."""
+    flow). The api_key is injected by the adapter, never assembled here.
+
+    When ``settings.content_elementor_enabled`` is on (the default), the payload ALSO
+    carries an Elementor widget TREE (``elementor_data``) + ``elementor_edit_mode`` so
+    the plugin writes the Elementor post-meta and the page opens fully editable
+    (drag-and-drop) in Elementor. The flat ``content`` HTML is ALWAYS sent too (the
+    fallback for a site without Elementor). With the flag OFF the payload is
+    byte-identical to the pre-Elementor behaviour (no extra keys)."""
     outline = _as_dict(row.get("outline"))
     meta = _as_dict(outline.get("meta"))
     keyword_map = _as_dict(row.get("keyword_map"))
@@ -1491,6 +1501,13 @@ def _plugin_payload(row: dict[str, Any], draft_md: str, title: str) -> dict[str,
     if faq:
         payload["faq"] = faq
     payload["cta"] = _derive_cta(row)
+    # Elementor-editable output: attach the widget tree so the plugin writes the builder
+    # post-meta (guarded by the setting; absent when disabled -> byte-identical payload).
+    settings = settings or get_settings()
+    if settings.content_elementor_enabled:
+        design_profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile")) or None
+        payload["elementor_data"] = elementor_json(draft_md, design_profile)
+        payload["elementor_edit_mode"] = "builder"
     return payload
 
 
@@ -1501,6 +1518,7 @@ def _publish_via_plugin(
     publisher: PluginPublisher,
     draft_md: str,
     title: str,
+    settings: Settings | None = None,
 ) -> PublishOutcome:
     """Push the approved draft to the client's AIOS Publisher plugin + record the URLs.
 
@@ -1508,7 +1526,7 @@ def _publish_via_plugin(
     falls back to the legacy path - best-effort, never crashing the approve). On
     success the job goes ``publishing -> done`` with the WordPress permalink + edit
     link stored, and the reviewer is pointed at the WP draft to publish it there."""
-    result = publisher.publish(_plugin_payload(row, draft_md, title))
+    result = publisher.publish(_plugin_payload(row, draft_md, title, settings=settings))
     where = result.edit_url or result.url
     stage = "Pushed to WordPress (draft) — publish it on the site"
     if where:
@@ -1632,7 +1650,9 @@ def _publish_wordpress(
     if connection is not None:
         try:
             if connection.method == "plugin" and connection.plugin is not None:
-                return _publish_via_plugin(store, code, row, connection.plugin, draft_md, title)
+                return _publish_via_plugin(
+                    store, code, row, connection.plugin, draft_md, title, settings
+                )
             if connection.publisher is not None:
                 return _publish_via_rest(
                     store, code, row, connection.site_url, connection.publisher, draft_md, title
@@ -1647,7 +1667,7 @@ def _publish_wordpress(
     plugin: PluginPublisher | None = resolve_wp_plugin(row, settings)
     if plugin is not None:
         try:
-            return _publish_via_plugin(store, code, row, plugin, draft_md, title)
+            return _publish_via_plugin(store, code, row, plugin, draft_md, title, settings)
         except WordPressPluginError:
             logger.warning("content_plugin_push_failed", code=code)
 
