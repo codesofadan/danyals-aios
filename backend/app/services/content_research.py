@@ -1364,12 +1364,19 @@ def run_content_research(
 
     # Commit the ACTUAL spend: the Anthropic TOKEN cost + the WEB-SEARCH cost. The number
     # of searches is read from usage when the SDK surfaces it, else estimated at max_uses.
-    token_cost = pricing.anthropic_cost(
-        settings, model=model, input_tokens=research.input_tokens, output_tokens=research.output_tokens
-    )
-    searches = research.searches if research.searches is not None else max_searches
-    search_cost = pricing.web_search_cost(settings, searches=searches)
-    gate.commit(ctx, token_cost + search_cost)
+    # A cost-LOGGING failure (a DB hiccup in the gate/store) must NEVER discard a research
+    # the operator already paid for: swallow it and still return the recommended pages.
+    try:
+        token_cost = pricing.anthropic_cost(
+            settings,
+            model=model,
+            input_tokens=research.input_tokens,
+            output_tokens=research.output_tokens,
+        )
+        searches = research.searches if research.searches is not None else max_searches
+        gate.commit(ctx, token_cost + pricing.web_search_cost(settings, searches=searches))
+    except Exception:  # spend accounting is a side-effect; the page set is the product
+        logger.warning("content_research_commit_failed")
 
     items = parse_recommendations(research.text, content_type=ctype, count=n)
     return ContentResearchResult(

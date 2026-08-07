@@ -40,6 +40,7 @@ from app.core.pagination import PageDep
 from app.core.security import PrivateAddressError, validate_public_host
 from app.db.clients_repo import ClientsRepo, ClientsRepoDep
 from app.db.content_repo import ContentRepo, ContentRepoDep
+from app.logging_setup import get_logger
 from app.schemas.content import (
     ContentBulkGenerateRequest,
     ContentBulkGenerateResponse,
@@ -418,6 +419,9 @@ async def create_content_job(
 # --------------------------------------------------------------------------- #
 # Research-first bulk content: recommend a page set, then bulk-generate the picks
 # --------------------------------------------------------------------------- #
+logger = get_logger("app.routers.content")
+
+
 @router.post("/content/research", response_model=ContentResearchResponse)
 async def research_content(
     body: ContentResearchRequest,
@@ -443,16 +447,28 @@ async def research_content(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Site is not a public address: {exc}",
         ) from exc
+    except Exception as exc:  # a non-resolving / malformed host is a BAD REQUEST, not a 500
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not reach that site URL - check it is a valid, public web address.",
+        ) from exc
 
     def _run() -> ContentResearchResponse:
-        result = run_content_research(
-            researcher=researcher,
-            gate=gate,
-            settings=settings,
-            site=body.site,
-            content_type=body.content_type,
-            count=body.count,
-        )
+        # Research must NEVER 500: any unexpected failure (a provider/gate/DB hiccup)
+        # degrades to an honest empty result so the dashboard shows a clean message
+        # instead of "internal server error".
+        try:
+            result = run_content_research(
+                researcher=researcher,
+                gate=gate,
+                settings=settings,
+                site=body.site,
+                content_type=body.content_type,
+                count=body.count,
+            )
+        except Exception:
+            logger.exception("content_research_endpoint_error")
+            return ContentResearchResponse(status="degraded", items=[], reason="research_error")
         return ContentResearchResponse(
             status=result.status,  # type: ignore[arg-type]
             items=result.items,
