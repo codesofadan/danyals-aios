@@ -133,9 +133,11 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_model_summary: str = "claude-haiku-4-5"  # cheap default fold
     anthropic_model_heavy: str = "claude-sonnet-5"  # heavier model for large folds
-    # Embedder (Voyage AI - Anthropic has no embeddings API). embeddings_dim MUST
-    # match the Pinecone index dimension AND the FakeEmbedder so real<->fake are
-    # drop-in swappable (voyage-3 -> 1024).
+    # Embedder (Anthropic has no embeddings API, so it is a SEPARATE provider).
+    # embeddings_provider selects the impl: "voyage" (default, voyage-3 -> 1024) or
+    # "openai" (text-embedding-3-small -> 1536; for a client with an OpenAI key but
+    # no Voyage key). embeddings_dim MUST match the Pinecone index dimension AND the
+    # FakeEmbedder so real<->fake stay drop-in swappable (OpenAI pins output to it).
     embeddings_provider: str = "voyage"
     embeddings_api_key: SecretStr | None = None
     embeddings_model: str = "voyage-3"
