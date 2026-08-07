@@ -1,7 +1,7 @@
 """P6C gate: the PUBLIC free-audit endpoints - unauthenticated, tenant-isolated.
 
 Covers: 201 returns the token (not the internal id); one-audit-per-email 409;
-Free-tier-only rejection of paid types; SSRF rejection; the curated tokenized
+paid types accepted (the free audit is comprehensive); SSRF rejection; the curated tokenized
 report (no tenant data / internal id / email / error leaked); unknown token 404;
 and that the routes carry NO auth dependency (a request with no Authorization
 header succeeds)."""
@@ -149,16 +149,17 @@ async def test_one_audit_per_email_returns_409(
     assert len(enqueued) == 1  # the duplicate never enqueued a second job
 
 
-async def test_free_only_rejects_paid_types(
+async def test_paid_types_now_accepted_comprehensive_audit(
     client: httpx.AsyncClient, enqueued: list[str]
 ) -> None:
+    # The free funnel is now comprehensive: paid audit types are NO LONGER
+    # rejected. A request naming paid dimensions is accepted and enqueued.
     resp = await client.post(
         "/api/v1/public/audits",
         json={"email": "paid@example.com", "url": _PUBLIC_URL, "types": ["technical", "local"]},
     )
-    assert resp.status_code == 400
-    assert "paid audit types" in resp.json()["error"]["message"]
-    assert enqueued == []
+    assert resp.status_code == 201
+    assert len(enqueued) == 1  # the job was enqueued despite the paid type
 
 
 async def test_ssrf_private_url_rejected(

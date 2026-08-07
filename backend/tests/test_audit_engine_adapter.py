@@ -30,13 +30,23 @@ def test_domain_to_slug() -> None:
     assert domain_to_slug("example.com") == "example.com"
 
 
-def test_build_argv_free_is_zero_spend() -> None:
+def test_build_argv_public_is_comprehensive_with_real_data() -> None:
+    # The PUBLIC free-audit path (comprehensive=False, tier=free -> mode="free")
+    # is now the comprehensive lead-gen run: degrade-safe --mode auto with the
+    # wired providers ON, profile local (unlocks Places/citations), agents off.
     argv = build_argv(domain="example.com", mode="free", max_pages=20, profile="general")
     assert argv[:4] == ["-m", "audit_engine.cli.main", "full", "example.com"]
-    assert "--mode" in argv and argv[argv.index("--mode") + 1] == "free"
-    # explicit, deterministic, and paid providers OFF
-    for flag in ("--no-moz", "--no-serper", "--no-places", "--no-citations"):
+    # degrade-safe auto mode (never "free", which would disable every provider)
+    assert argv[argv.index("--mode") + 1] == "auto"
+    # profile forced local so Places + citations + local analyzers unlock
+    assert argv[argv.index("--profile") + 1] == "local"
+    # the now-wired providers are ON (real off-page/local/technical data)
+    for flag in ("--psi", "--serper", "--places", "--citations", "--no-moz"):
         assert flag in argv
+    # never disable the wired providers for the public path
+    for flag in ("--no-serper", "--no-places", "--no-citations"):
+        assert flag not in argv
+    # agents + narrative OFF to bound cost (deterministic checks fill the sections)
     assert argv[argv.index("--agents") + 1] == "off"
     assert argv[argv.index("--ai-narrative") + 1] == "off"
     assert argv[argv.index("--max-pages") + 1] == "20"

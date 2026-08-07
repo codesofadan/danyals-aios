@@ -158,10 +158,15 @@ def build_argv(
           GEO; the engine has no per-team flag, so agents are all-or-nothing).
         - ``strategy`` -> ``--ai-narrative on`` (the strategy recommendation prose).
 
-    ``comprehensive=False`` (the PUBLIC free-audit funnel) keeps the light, zero-spend
-    on-page-only run: ``mode`` is the stored value (``free`` | ``paid``), agents +
-    narrative off, and on ``free`` every paid provider is explicitly disabled.
-    ``--no-moz`` always (Moz needs a separate paid key, out of scope).
+    ``comprehensive=False`` (the PUBLIC free-audit funnel) is now the COMPREHENSIVE
+    lead-gen audit: every dimension runs (on-page + technical + the GEO/AI-search
+    checks are deterministic and always run) and the now-wired paid providers are
+    turned ON so off-page, Local SEO, GEO, and Strategy carry REAL data. It runs
+    ``--mode auto`` (degrade-safe: a missing key skips that integration silently),
+    ``--profile local`` (unlocks Places + citations + the local analyzers - the
+    engine gates them behind profile=local), ``--serper --places --citations
+    --psi`` on, and agents + narrative OFF to bound cost. ``--no-moz`` always
+    (Moz needs a separate paid key, out of scope). See the COST NOTE below.
     """
     base = [
         "-m", "audit_engine.cli.main", "full", domain,
@@ -203,12 +208,32 @@ def build_argv(
         )
         argv += ["--ai-narrative", "on"] if "strategy" in selected else ["--ai-narrative", "off"]
         return argv
-    argv = [*base, "--mode", mode, "--agents", "off", "--ai-narrative", "off"]
-    if mode == "paid":
-        argv += ["--serper", "--places", "--citations"]
-    else:
-        argv += ["--no-serper", "--no-places", "--no-citations"]
-    return argv
+    # PUBLIC free-audit funnel (comprehensive=False): the comprehensive lead-gen
+    # audit. On-page + technical + the GEO/AI-search checks always run
+    # deterministically; the now-wired paid providers are turned ON so off-page,
+    # Local SEO, GEO, and Strategy carry REAL data. ``--mode auto`` is
+    # degrade-safe: any provider whose key is absent returns a stub and is
+    # skipped SILENTLY - the section still renders, the run never crashes.
+    # ``--profile local`` unlocks Places + citations + the local analyzers (the
+    # engine gates those behind profile=local), so the Local SEO section and the
+    # off-page citation snapshot get real data. Agents + AI narrative stay OFF to
+    # bound cost/time; the deterministic checks + wired APIs already fill all six
+    # report sections (the engine's always-on A5 GEO analyst still fires when an
+    # Anthropic key is present).
+    #
+    # COST NOTE: this path is NO LONGER $0. Each public/free audit now spends on
+    # Serper (SERP + citation discovery) and Google Places (when the business
+    # resolves) per run. This is intentional - a comprehensive lead-generation
+    # audit - but the owner should know the free funnel is now a metered cost.
+    # A missing provider key simply skips that spend and degrades the section.
+    engine_mode = "paid" if mode == "paid" else "auto"
+    return [
+        "-m", "audit_engine.cli.main", "full", domain,
+        "--profile", "local", "--max-pages", str(max_pages), "--no-moz",
+        "--mode", engine_mode,
+        "--psi", "--serper", "--places", "--citations",
+        "--agents", "off", "--ai-narrative", "off",
+    ]
 
 
 def parse_run_uuid(stdout: str) -> str | None:
