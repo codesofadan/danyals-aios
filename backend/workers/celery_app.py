@@ -100,6 +100,10 @@ celery_app = Celery(
         # Both event-driven (enqueued per property from the router), so no beat
         # entry / overlap-lock is needed - each property is synced on request.
         "app.modules.site_analytics.tasks",
+        # Indexing: submit_urls_for_indexing. Event-driven (enqueued best-effort after a
+        # successful content publish, and by the on-demand endpoint), so no beat entry /
+        # overlap-lock is needed. FREE engines -> no cost dial.
+        "app.modules.indexing.tasks",
         # Reports/cron: the AUTONOMOUS reporting jobs (refresh_client_audits weekly,
         # generate_monthly_reports monthly, sweep_offpage_monitors weekly). All are
         # BEAT-driven (see the beat_schedule below) and idempotent: the audit refresh
