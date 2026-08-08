@@ -23,6 +23,15 @@ const nextConfig = {
   // Emit a self-contained server bundle (.next/standalone) for a small Docker
   // runtime image — ignored by `next dev`, only affects `next build`.
   output: "standalone",
+  experimental: {
+    // The /api/v1 rewrite proxy (next/dist/compiled/http-proxy) defaults to a
+    // 30s proxyTimeout. Some backend calls are legitimately slow — content
+    // research runs a live Anthropic web_search that takes ~40–60s — so a 30s
+    // cut surfaced to the user as a bogus "internal server error" while the
+    // backend was still working and would have returned a valid result. Raise
+    // the upstream proxy timeout so those long synchronous calls complete.
+    proxyTimeout: 180_000,
+  },
   async redirects() {
     return [
       { source: "/free-audit", destination: "/", permanent: true },
