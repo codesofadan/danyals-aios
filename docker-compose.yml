@@ -72,6 +72,14 @@ x-app-env: &app-env
   SERPER_API_KEY: ${SERPER_API_KEY:-}
   RESEND_API_KEY: ${RESEND_API_KEY:-}
   RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-AIOS <noreply@mail.qanry.com>}
+  # Email transport selector: "resend" (HTTP), "smtp" (Gmail/any SMTP), or "none".
+  # SMTP is used for the two-way admin<->team / admin<->client notifications.
+  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-resend}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
   GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
   GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
   GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
