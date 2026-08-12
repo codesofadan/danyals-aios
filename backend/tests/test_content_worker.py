@@ -36,8 +36,10 @@ from app.config import Settings
 from app.services.content_qa import QA_DIMENSIONS, QaScore
 from app.services.content_research import ContentSpendBlocked, FakePageFetcher
 from app.services.cost_gate import DialMode, GateContext
+from app.services.elementor import build_elementor_data
 from app.services.wp_connections import ResolvedWpConnection
 from integrations.content_providers import content_providers_for_tests
+from integrations.images import GeneratedImage
 from integrations.llm import LLMResult
 from integrations.wordpress import (
     FakeWordPressPublisher,
@@ -801,6 +803,117 @@ def test_md_to_html_covers_headings_lists_links() -> None:
     assert '<a href="https://x.test">link</a>' in html
     assert "<strong>bold</strong>" in html
     assert "<ul><li>a</li><li>b</li></ul>" in html
+
+
+def test_md_to_html_renders_an_image_line_as_img_tag() -> None:
+    # A standalone ![alt](url) line becomes a real <img> (not a broken link), so an
+    # injected image reaches the flat WordPress body too.
+    html = md_to_html("# T\n\n![a hero photo](https://cdn.test/hero.png)\n")
+    assert '<img src="https://cdn.test/hero.png" alt="a hero photo">' in html
+    assert "!" not in html  # the '!' prefix did not survive as literal text
+
+
+# --------------------------------------------------------------------------- #
+# BUILD 1: generated image URLs are INJECTED into the draft (preview + Elementor + WP).
+# --------------------------------------------------------------------------- #
+class _RealImageGen:
+    """A NON-fake ImageGenerator returning real hosted URLs (so the worker injects
+    them). Records every image it made so a test can assert each one landed."""
+
+    def __init__(self) -> None:
+        self.made: list[GeneratedImage] = []
+
+    def generate(self, prompt: str, alt: str) -> GeneratedImage:
+        image = GeneratedImage(url=f"https://cdn.test/img-{len(self.made)}.png", alt=alt)
+        self.made.append(image)
+        return image
+
+
+def test_generated_images_are_injected_into_the_stored_draft_and_elementor() -> None:
+    store = FakeContentStore(_job_row())
+    gen = _RealImageGen()
+    providers = replace(content_providers_for_tests(), images=gen)
+
+    out = execute_content_job(
+        store, providers, "CJ-4200", settings=_settings(), gate=_gate(), fetcher=FakePageFetcher()
+    )
+
+    assert out.status == "needs_review"
+    draft = store.row["draft_md"]
+    assert gen.made, "at least the hero image was generated"
+    # (a) Every generated image is now ![alt](url) markdown in the STORED draft (what
+    #     GET /content/jobs/{code}/draft serves) - not discarded.
+    for image in gen.made:
+        assert f"![{image.alt}]({image.url})" in draft
+    # The hero image lands right after the H1 (top of the page).
+    lines = [ln for ln in draft.splitlines() if ln.strip()]
+    h1_at = next(i for i, ln in enumerate(lines) if ln.startswith("# "))
+    assert lines[h1_at + 1].startswith("![")
+    # (b) The same URLs become image widgets in the Elementor tree.
+    tree = build_elementor_data(draft)
+    img_urls = [
+        w["settings"]["image"]["url"]
+        for section in tree for column in section["elements"] for w in column["elements"]
+        if w["widgetType"] == "image"
+    ]
+    assert all(image.url in img_urls for image in gen.made)
+    # (c) And the flat WordPress body carries them as real <img> tags.
+    body = md_to_html(draft)
+    assert all(f'src="{image.url}"' in body for image in gen.made)
+    # The billed image count is still tracked (existing behaviour preserved).
+    assert store.row["images"] == len(gen.made)
+
+
+def test_fake_or_empty_image_injects_nothing() -> None:
+    # The keyless FakeImageGenerator (the default test bundle) is BILLED as before but
+    # its placeholder URL is NOT injected -> the draft has no image markdown at all.
+    store = FakeContentStore(_job_row())
+    out = execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(), gate=_gate(), fetcher=FakePageFetcher(),
+    )
+    assert out.status == "needs_review"
+    assert "![" not in store.row["draft_md"]  # no broken/placeholder image markdown
+    assert store.row["images"] > 0            # yet images were still counted (billed)
+
+
+# --------------------------------------------------------------------------- #
+# BUILD 2: the FULL design profile shapes the flat WordPress <style> block.
+# --------------------------------------------------------------------------- #
+def test_shape_body_html_emits_a_style_block_from_the_full_profile() -> None:
+    from workers.tasks.content import _shape_body_html
+
+    profile = {
+        "palette": {
+            "primary": "#0a0a0a", "secondary": "#333333", "background": "#fffbea",
+            "text": "#111111", "accent": "#ff5500",
+        },
+        "typography": {
+            "heading_font": "Poppins, sans-serif", "body_font": "Inter, sans-serif",
+            "base_size": "18px",
+        },
+        "layout": {
+            "container_width": "1080px", "section_order": ["hero", "services", "cta"],
+            "hero_style": "centered",
+        },
+        "components": {
+            "button_style": "solid pill", "card_style": "soft shadow", "spacing_scale": "spacious",
+        },
+    }
+    row = {"source_pack": {"design_profile": profile}}
+    draft = "# Best Brunch\n\nIntro.\n\n## Our Services\n\nBody.\n\n## Get in Touch\n\nVisit.\n"
+    out = _shape_body_html(row, draft)
+
+    assert "<style>" in out and 'class="aios-page"' in out
+    assert "max-width:1080px" in out                 # layout.container_width
+    assert "font-family:Inter, sans-serif" in out    # typography.body_font
+    assert "font-size:18px" in out                   # typography.base_size
+    assert "Poppins, sans-serif" in out              # typography.heading_font
+    assert "padding:72px 0" in out                   # components.spacing_scale (spacious)
+    assert "border-radius:999px" in out              # components.button_style (pill)
+    # The ordered sections are still wrapped and the content is preserved.
+    assert '<section class="aios-hero">' in out
+    assert "<h1>Best Brunch</h1>" in out
 
 
 # --------------------------------------------------------------------------- #

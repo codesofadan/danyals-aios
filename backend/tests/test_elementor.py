@@ -147,6 +147,50 @@ def test_design_profile_injects_section_names_and_palette() -> None:
     assert json.loads(raw) == tree
 
 
+def test_design_profile_applies_typography_components_and_container() -> None:
+    # The FULL profile (beyond palette + order): typography, components, container width,
+    # and hero styling must land on the widget / section settings.
+    profile = {
+        "palette": {
+            "primary": "#0a0a0a", "secondary": "#333333", "background": "#ffffff",
+            "text": "#111111", "accent": "#ff5500",
+        },
+        "typography": {
+            "heading_font": "Poppins, sans-serif", "body_font": "Inter, sans-serif",
+            "base_size": "18px",
+        },
+        "layout": {
+            "container_width": "1080px", "section_order": ["hero", "services", "cta"],
+            "hero_style": "centered",
+        },
+        "components": {
+            "button_style": "solid pill", "card_style": "soft shadow", "spacing_scale": "spacious",
+        },
+    }
+    tree = build_elementor_data(_DRAFT, design_profile=profile)
+    widgets = _walk_widgets(tree)
+
+    # Typography: heading font on heading widgets; body font + base size on text widgets.
+    heads = [w["settings"] for w in widgets if w["widgetType"] == "heading"]
+    assert any(s.get("title_typography_typography") == "custom" for s in heads)
+    assert any(s.get("title_typography_font_family") == "Poppins, sans-serif" for s in heads)
+    texts = [w["settings"] for w in widgets if w["widgetType"] == "text-editor"]
+    assert any(s.get("typography_font_family") == "Inter, sans-serif" for s in texts)
+    assert any(s.get("typography_font_size") == {"unit": "px", "size": 18} for s in texts)
+
+    # Components: the CTA button gets a pill radius (999px) from button_style.
+    btn = next(w["settings"] for w in widgets if w["widgetType"] == "button")
+    assert btn["border_radius"]["top"] == 999
+
+    # Layout: the container width lands on every section; the hero (first) centres + pads.
+    assert any(s["settings"].get("content_width") == {"unit": "px", "size": 1080} for s in tree)
+    assert tree[0]["settings"].get("content_position") == "center"
+    # spacing_scale (spacious -> 72px) drives a NON-hero section's vertical padding.
+    assert any(s["settings"].get("padding", {}).get("top") == "72" for s in tree[1:])
+    # elementor_json round-trips the tree (the nested typography / padding dicts included).
+    assert json.loads(elementor_json(_DRAFT, profile)) == tree
+
+
 def test_empty_and_plain_input_degrade_to_a_single_text_section() -> None:
     for draft in ("", "   \n\n   "):
         tree = build_elementor_data(draft)
