@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from html import escape as html_escape
 from typing import Any, Protocol
@@ -100,7 +100,7 @@ from app.services.elementor import elementor_json
 from app.services.notifications import email_client_sync, notify_leads_sync
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
-from integrations.images import ImageGenerator
+from integrations.images import FakeImageGenerator, GeneratedImage, ImageGenerator
 from integrations.llm import LLMResult, Summarizer
 from integrations.wordpress import (
     PostDraft,
@@ -620,13 +620,21 @@ def _generate_images(
     *,
     client_id: str | None,
     code: str,
-) -> int:
+) -> tuple[int, list[tuple[str, GeneratedImage]]]:
     """Generate the planned hero/section images, gated on the content dial. A dial
     block stops image generation (not fatal); a provider error skips that image.
     Each generated image is committed at its RUNTIME cost = 1 x the per-image unit
-    price (pricing.py); the pre-check estimate is the same per-image price."""
+    price (pricing.py); the pre-check estimate is the same per-image price.
+
+    Returns ``(count, resolved)`` where ``count`` is the number of images billed (the
+    pre-existing integer behaviour, unchanged) and ``resolved`` is the ``(slot, image)``
+    list to inject into the draft. Only REAL hosted images make ``resolved``: a keyless
+    ``FakeImageGenerator`` result or an empty/missing url is billed-as-before but yields
+    NO injection (so the draft never gets a broken ``![]()``)."""
     per_image = settings.price_image_per_image
+    is_fake = isinstance(images, FakeImageGenerator)
     count = 0
+    resolved: list[tuple[str, GeneratedImage]] = []
     for item in content.images_plan:
         ctx = GateContext(
             feature_key=_CONTENT_FEATURE,
@@ -641,13 +649,71 @@ def _generate_images(
         if not decision.allowed:
             break
         try:
-            images.generate(item.prompt, item.alt)
+            image = images.generate(item.prompt, item.alt)
             # ACTUAL cost = one image generated x the per-image unit price.
             gate.commit(ctx, pricing.image_cost(settings, images=1))
             count += 1
+            # Inject only a REAL hosted image; a fake/degraded result or an empty url
+            # injects nothing (count is unaffected - the existing behaviour is preserved).
+            if not is_fake and image.url:
+                resolved.append((item.slot, image))
         except Exception:  # one bad image never fails the job
             logger.warning("content_image_failed", code=code)
-    return count
+    return count, resolved
+
+
+def _image_md(image: GeneratedImage) -> str:
+    """The Markdown image tag every downstream consumer already understands (the draft
+    endpoint, ``md_to_html``, and ``build_elementor_data``)."""
+    return f"![{image.alt}]({image.url})"
+
+
+def _inject_images(draft_md: str, resolved: list[tuple[str, GeneratedImage]]) -> str:
+    """Inject each resolved image as its OWN ``![alt](url)`` block into the draft so it
+    reaches the stored draft, the Elementor tree, AND the WordPress body.
+
+    Placement is deterministic: the ``hero`` slot lands right after the ``# `` H1 (or at
+    the very top when there is none); a ``section:<role>`` slot lands right under the
+    ``## `` H2 whose text equals the image's ``alt`` (the generator sets a section
+    image's alt to its heading text, so this is an exact match), else under the LAST H2,
+    else at the top. Only real images are passed in, so no broken markdown is written."""
+    if not resolved:
+        return draft_md
+    lines = draft_md.splitlines()
+    h1_idx: int | None = None
+    last_h2_idx: int | None = None
+    h2_at: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if h1_idx is None and s.startswith("# ") and not s.startswith("## "):
+            h1_idx = i
+        elif s.startswith("## ") and not s.startswith("### "):
+            h2_at.setdefault(s[3:].strip(), i)
+            last_h2_idx = i
+
+    after: dict[int, list[str]] = {}  # line index -> image markdown to insert AFTER it (-1 = top)
+
+    def _queue(idx: int, md: str) -> None:
+        after.setdefault(idx, []).append(md)
+
+    for slot, image in resolved:
+        md = _image_md(image)
+        if slot == "hero":
+            _queue(h1_idx if h1_idx is not None else -1, md)
+        else:
+            idx = h2_at.get(image.alt.strip())
+            if idx is None:
+                idx = last_h2_idx if last_h2_idx is not None else -1
+            _queue(idx, md)
+
+    out: list[str] = []
+    for md in after.get(-1, []):
+        out.extend((md, ""))
+    for i, line in enumerate(lines):
+        out.append(line)
+        for md in after.get(i, []):
+            out.extend(("", md))
+    return "\n".join(out)
 
 
 # --------------------------------------------------------------------------- #
@@ -921,11 +987,16 @@ def _run_pipeline(
         passed=qa.passed, weighted_total=qa.weighted_total,
     )
 
-    # --- images (bounded, gated) -> assemble
+    # --- images (bounded, gated) -> inject into the draft -> assemble
     stream("images")
-    image_count = _generate_images(
+    image_count, resolved_images = _generate_images(
         providers.images, content, gate, settings, client_id=client_id, code=code
     )
+    if resolved_images:
+        # Weave the generated image URLs into the draft as ![alt](url) blocks so they flow
+        # to the stored draft, the Elementor tree, AND the WordPress payload (a fake/empty
+        # result was filtered out above -> nothing to inject, no broken markdown).
+        content = replace(content, draft_md=_inject_images(content.draft_md, resolved_images))
     stream("assemble")
 
     # --- layout: a simple deterministic heuristic picks ONE presentation template
@@ -996,9 +1067,13 @@ def _extract_title(draft_md: str) -> str:
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _MD_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+_MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 def _md_inline(text: str) -> str:
+    # Images FIRST (``![alt](url)``) so the link regex never mistakes one for a plain
+    # link; then links and bold. A standalone image line becomes ``<p><img ..></p>``.
+    text = _MD_IMG_RE.sub(r'<img src="\2" alt="\1">', text)
     text = _MD_LINK_RE.sub(r'<a href="\2">\1</a>', text)
     return _MD_BOLD_RE.sub(r"<strong>\1</strong>", text)
 
@@ -1092,12 +1167,130 @@ def _wrap_sections(body_html: str, section_order: list[str]) -> str:
     return "\n".join(out) if out else body_html
 
 
+# --------------------------------------------------------------------------- #
+# Design-profile VISUAL styling: a <style> block from the COPIED site's tokens so the
+# published WordPress page visually matches it (colours + fonts + layout + components),
+# not just its section order. Every token is optional -> a missing sub-field simply
+# omits its rule (degrade to the prior behaviour); no profile -> no <style> at all.
+# --------------------------------------------------------------------------- #
+def _radius_px(style: str) -> int:
+    """Map a component style phrase (button/card) to a border-radius in px."""
+    s = (style or "").lower()
+    if "pill" in s:
+        return 999
+    if "sharp" in s or "square" in s:
+        return 0
+    if "round" in s:
+        return 8
+    return 6
+
+
+def _spacing_px(scale: str) -> int:
+    """Map a spacing-scale phrase to a section vertical padding in px."""
+    s = (scale or "").lower()
+    if "compact" in s or "tight" in s or "dense" in s:
+        return 24
+    if "spacious" in s or "airy" in s or "generous" in s or "roomy" in s:
+        return 72
+    return 48  # comfortable / default
+
+
+def _design_style_block(profile: dict[str, Any]) -> str:
+    """Build a self-contained ``<style>`` block from the design profile's palette /
+    typography / layout / component tokens, scoped to ``.aios-page`` so it only styles
+    the generated body. Returns ``""`` when the profile carries nothing usable."""
+    palette = _as_dict(profile.get("palette"))
+    typo = _as_dict(profile.get("typography"))
+    layout = _as_dict(profile.get("layout"))
+    comps = _as_dict(profile.get("components"))
+    page = ".aios-page"
+    rules: list[str] = []
+
+    container = str(layout.get("container_width") or "").strip()
+    body_font = str(typo.get("body_font") or "").strip()
+    heading_font = str(typo.get("heading_font") or "").strip()
+    base_size = str(typo.get("base_size") or "").strip()
+    text_color = str(palette.get("text") or "").strip()
+    accent = str(palette.get("accent") or "").strip()
+    primary = str(palette.get("primary") or "").strip()
+
+    page_decls = ["margin:0 auto"]
+    if container:
+        page_decls.append(f"max-width:{container}")
+    if body_font:
+        page_decls.append(f"font-family:{body_font}")
+    if base_size:
+        page_decls.append(f"font-size:{base_size}")
+    if text_color:
+        page_decls.append(f"color:{text_color}")
+    rules.append(f"{page}{{{';'.join(page_decls)}}}")
+
+    head_decls: list[str] = []
+    if heading_font:
+        head_decls.append(f"font-family:{heading_font}")
+    if primary:
+        head_decls.append(f"color:{primary}")
+    if head_decls:
+        rules.append(f"{page} h1,{page} h2,{page} h3{{{';'.join(head_decls)}}}")
+
+    spacing = str(comps.get("spacing_scale") or "").strip()
+    if spacing:
+        rules.append(f"{page} section{{padding:{_spacing_px(spacing)}px 0}}")
+
+    if accent:
+        rules.append(f"{page} a{{color:{accent}}}")
+    button_style = str(comps.get("button_style") or "").strip()
+    if accent and button_style:
+        bg = str(palette.get("background") or "#ffffff").strip() or "#ffffff"
+        btn = ["display:inline-block", "padding:12px 22px",
+               f"border-radius:{_radius_px(button_style)}px", "text-decoration:none"]
+        low = button_style.lower()
+        if "outline" in low or "ghost" in low:
+            btn += ["background:transparent", f"color:{accent}", f"border:2px solid {accent}"]
+        else:
+            btn += [f"background:{accent}", f"color:{bg}"]
+        rules.append(f"{page} .aios-cta a{{{';'.join(btn)}}}")
+
+    card_style = str(comps.get("card_style") or "").strip()
+    if card_style:
+        card = ["padding:20px", f"border-radius:{_radius_px(card_style)}px"]
+        low = card_style.lower()
+        if "shadow" in low:
+            card.append("box-shadow:0 2px 12px rgba(0,0,0,.08)")
+        elif "border" in low or "outline" in low:
+            line = str(palette.get("secondary") or "#e5e7eb").strip() or "#e5e7eb"
+            card.append(f"border:1px solid {line}")
+        rules.append(f"{page} blockquote,{page} .aios-card{{{';'.join(card)}}}")
+
+    hero_style = str(layout.get("hero_style") or "").strip()
+    if hero_style:
+        hero = ["padding:64px 0"]
+        if "center" in hero_style.lower():
+            hero.append("text-align:center")
+        bg = str(palette.get("background") or "").strip()
+        if bg:
+            hero.append(f"background:{bg}")
+        rules.append(f"{page} > section:first-child{{{';'.join(hero)}}}")
+
+    return "<style>" + "".join(rules) + "</style>" if rules else ""
+
+
 def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
     """Render the draft to HTML and - when the job carries a design profile - wrap it in
-    the profile's ordered sections to MATCH the target site. No profile -> plain render."""
+    the profile's ordered sections AND a ``<style>`` block derived from the profile's
+    tokens, so the published page MATCHES the copied site (colours + fonts + layout +
+    components), not just its section order. No profile -> plain render (no regression)."""
     html = md_to_html(draft_md)
+    profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
+    if not profile:
+        return html
     section_order = _design_section_order(row)
-    return _wrap_sections(html, section_order) if section_order else html
+    if section_order:
+        html = _wrap_sections(html, section_order)
+    style = _design_style_block(profile)
+    if not style:
+        return html
+    return f'{style}\n<div class="aios-page">\n{html}\n</div>'
 
 
 def _write_artifacts(
