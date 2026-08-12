@@ -99,6 +99,25 @@ _FIELD_PAUSE_MS = (250, 900)  # pause between fields / before submit
 _SETTLE_MS = (1_800, 3_600)  # post-submit settle (replaces the old fixed 2s)
 
 
+def _parse_proxy(url: str) -> dict[str, str]:
+    """Playwright wants proxy auth SPLIT from the server URL, not inline.
+    ``chromium.launch(proxy={"server": "http://user:pass@host:port"})`` silently
+    IGNORES the embedded credentials → the upstream proxy refuses the tunnel and
+    every ``goto`` hangs to timeout (this looked like a "dead proxy" but the proxy
+    was fine). Parse into ``server`` + ``username`` + ``password`` so auth is sent."""
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
+    scheme = u.scheme or "http"
+    server = f"{scheme}://{u.hostname}:{u.port}" if u.port else f"{scheme}://{u.hostname}"
+    out: dict[str, str] = {"server": server}
+    if u.username:
+        out["username"] = u.username
+    if u.password:
+        out["password"] = u.password
+    return out
+
+
 @dataclass(frozen=True)
 class FormField:
     """One form field to fill: a CSS selector + which NAP attribute feeds it (or a
@@ -713,7 +732,7 @@ class PlaywrightCitationSubmitter:
             "args": list(_STEALTH_LAUNCH_ARGS),
         }
         if self._proxy_url:
-            launch_kwargs["proxy"] = {"server": self._proxy_url}
+            launch_kwargs["proxy"] = _parse_proxy(self._proxy_url)  # split auth (see _parse_proxy)
         try:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(**launch_kwargs)

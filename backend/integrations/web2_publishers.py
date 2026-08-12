@@ -514,15 +514,28 @@ class MataroaClient(HttpProviderClient):
         if platform != self.platform:
             raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
         slug = post.slug or _slugify(post.title)
-        body: dict[str, object] = {"title": post.title, "body": post.body_html, "slug": slug}
+        # published_at MUST be set or Mataroa keeps the post as a private DRAFT (the
+        # public URL then redirects to the marketing homepage). Stamp today so the
+        # placement goes live immediately.
+        from datetime import date
+
+        body: dict[str, object] = {
+            "title": post.title,
+            "body": post.body_html,
+            "slug": slug,
+            "published_at": date.today().isoformat(),
+        }
         if post.external_id:
             data = self.request_json("PATCH", f"/api/posts/{post.external_id}/", json_body=body)
         else:
             data = self.request_json("POST", "/api/posts/", json_body=body)
         returned_slug = str(data.get("slug") or slug)
-        return Web2PublishResult(
-            post_url=f"https://mataroa.blog/blog/{returned_slug}/", verified=True, external_id=returned_slug
-        )
+        # Mataroa serves each post on the ACCOUNT's own subdomain and returns the
+        # canonical public URL in ``url`` - the old hardcoded ``mataroa.blog/blog/<slug>``
+        # is NOT the live post (it redirects to the marketing homepage). Prefer the
+        # returned URL; fall back to the account-agnostic form only if it is absent.
+        post_url = str(data.get("url") or f"https://mataroa.blog/blog/{returned_slug}/")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=returned_slug)
 
 
 # --------------------------------------------------------------------------- #
