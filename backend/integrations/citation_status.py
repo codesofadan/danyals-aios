@@ -16,9 +16,39 @@ never claims a live submit will succeed, only that the credential exists.
 
 from __future__ import annotations
 
+import importlib.util
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.config import Settings
+
+
+def playwright_bot_available() -> bool:
+    """True when the Playwright package is importable AND a Chromium browser build is
+    present on the host. Both are baked into the worker image (``backend/Dockerfile``
+    installs the ``.[automation]`` extra + ``playwright install chromium``); this probe
+    stays honest if that ever fails, degrading the bot to a 'blocked' status rather than
+    crashing a submit at runtime. Pure + side-effect-free (never launches a browser)."""
+    if importlib.util.find_spec("playwright") is None:
+        return False
+    candidates: list[Path] = []
+    root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+    if root:
+        candidates.append(Path(root))
+    home = Path.home()
+    candidates += [
+        home / ".cache" / "ms-playwright",  # Linux default
+        home / "AppData" / "Local" / "ms-playwright",  # Windows default
+        home / "Library" / "Caches" / "ms-playwright",  # macOS default
+    ]
+    for base in candidates:
+        try:
+            if base.is_dir() and any(base.glob("chromium-*")):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 @dataclass(frozen=True)
@@ -105,15 +135,17 @@ def citation_engine_status(settings: Settings) -> list[EngineStatus]:
         EngineStatus(
             key="playwright_bot",
             label="Self-hosted Playwright bot (bot_fillable)",
-            # The browser automation extra is an optional dependency, not a key - it is
-            # absent in most deploys until explicitly installed, so this is honestly
-            # reported as an install/ops step rather than a missing credential.
-            connected=False,
+            # The browser automation extra is an install/ops capability, not a key -
+            # probed live on the worker host (import + a Chromium build present).
+            connected=playwright_bot_available(),
             reason=(
-                "Requires the Playwright browser extra installed on the worker host; "
-                "until then bot_fillable directories HOLD as 'blocked'."
+                "Playwright + Chromium present on the worker - bot_fillable directories "
+                "can be auto-filled and submitted."
+                if playwright_bot_available()
+                else "Playwright browser not found on the worker host - bot_fillable "
+                "directories HOLD as 'blocked' until it is installed."
             ),
-            required_config=("playwright browser extra (worker host)",),
+            required_config=("playwright browser (worker host)",),
             external_note=_EXTERNAL,
         ),
         EngineStatus(

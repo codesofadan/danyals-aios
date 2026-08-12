@@ -32,6 +32,7 @@ mirroring how every other optional SDK in this codebase is gated.
 from __future__ import annotations
 
 import hashlib
+import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,50 @@ _INSTALL_HINT = (
 
 _TIMEOUT_MS = 15_000
 _NAV_TIMEOUT_MS = 30_000
+
+# --- Anti-detection (Phase 3) ------------------------------------------------
+# Plain headless Chromium is trivially fingerprinted (navigator.webdriver=true, the
+# HeadlessChrome UA, a fixed viewport, no plugins). At submission scale that flags the
+# house IP/accounts and directories reject the listing. These measures make a run look
+# like an ordinary human browser: a realistic RANDOMIZED fingerprint per run, the
+# automation signals masked before any page script runs, and human-cadence typing +
+# pauses. All best-effort - a failed stealth step logs and continues, never breaks a
+# submit. (Not a silver bullet: sophisticated anti-bot walls may still block; the proxy
+# + rate-limiting + per-run variety together keep block rates workable at volume.)
+_STEALTH_LAUNCH_ARGS = (
+    "--disable-blink-features=AutomationControlled",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+)
+_USER_AGENTS = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+)
+_VIEWPORTS = ((1366, 768), (1440, 900), (1536, 864), (1920, 1080), (1280, 800))
+# (locale, timezone) pairs kept plausible together (a UK locale in a London tz, etc.).
+_LOCALES = (
+    ("en-US", "America/New_York"),
+    ("en-GB", "Europe/London"),
+    ("en-US", "America/Chicago"),
+    ("en-AU", "Australia/Sydney"),
+)
+# Injected BEFORE any page script runs: erase the headless/automation tells.
+_STEALTH_INIT_JS = (
+    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+    "Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});"
+    "Object.defineProperty(navigator,'languages',{get:()=>['en-US','en']});"
+    "window.chrome=window.chrome||{runtime:{}};"
+)
+_TYPE_DELAY_MS = (40, 140)  # per-character human typing cadence
+_FIELD_PAUSE_MS = (250, 900)  # pause between fields / before submit
+_SETTLE_MS = (1_800, 3_600)  # post-submit settle (replaces the old fixed 2s)
 
 
 @dataclass(frozen=True)
@@ -635,6 +680,7 @@ class PlaywrightCitationSubmitter:
         proxy_url: str | None = None,
         screenshot_dir: str | None = None,
         headless: bool = True,
+        rng_seed: int | None = None,
     ) -> None:
         try:
             import playwright.sync_api  # noqa: F401
@@ -645,6 +691,10 @@ class PlaywrightCitationSubmitter:
         self._proxy_url = proxy_url
         self._screenshot_dir = Path(screenshot_dir) if screenshot_dir else None
         self._headless = headless
+        # Per-submitter RNG drives the anti-detection variety (fingerprint + delays).
+        # ``rng_seed`` is for deterministic tests only; production leaves it None so
+        # every run picks a fresh, unpredictable fingerprint.
+        self._rng = random.Random(rng_seed)
 
     def submit(self, job: CitationJob) -> CitationSubmitResult:
         spec = self._specs.get(job.directory_name)
@@ -657,35 +707,69 @@ class PlaywrightCitationSubmitter:
 
         from playwright.sync_api import sync_playwright
 
-        launch_kwargs: dict[str, object] = {"headless": self._headless}
+        # Stealth launch args strip the "controlled by automated test software" tells.
+        launch_kwargs: dict[str, object] = {
+            "headless": self._headless,
+            "args": list(_STEALTH_LAUNCH_ARGS),
+        }
         if self._proxy_url:
             launch_kwargs["proxy"] = {"server": self._proxy_url}
         try:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(**launch_kwargs)
+                # A fresh randomized fingerprint per run: UA + viewport + locale/timezone.
+                ua = self._rng.choice(_USER_AGENTS)
+                vw, vh = self._rng.choice(_VIEWPORTS)
+                locale, tz = self._rng.choice(_LOCALES)
+                context = browser.new_context(
+                    user_agent=ua,
+                    viewport={"width": vw, "height": vh},
+                    locale=locale,
+                    timezone_id=tz,
+                )
                 try:
-                    return self._run(browser, spec, job)
+                    context.add_init_script(_STEALTH_INIT_JS)  # mask webdriver before page JS
+                except Exception:  # a stealth step must never break an otherwise-valid submit
+                    logger.debug("stealth_init_script_failed", directory=job.directory_name)
+                try:
+                    return self._run(context, spec, job)
                 finally:
+                    context.close()
                     browser.close()
         except Exception as exc:  # a form/selector drift must fail cleanly, never crash the worker
             logger.warning("citation_bot_submit_failed", directory=job.directory_name, error=str(exc))
             return CitationSubmitResult(status="failed", error=str(exc)[:500])
 
-    def _run(self, browser: Any, spec: FormSpec, job: CitationJob) -> CitationSubmitResult:
-        page = browser.new_page()
+    def _run(self, context: Any, spec: FormSpec, job: CitationJob) -> CitationSubmitResult:
+        page = context.new_page()
         page.goto(spec.url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
         for f in spec.fields:
             value = _job_value(job, f.value_key)
             if value:
-                page.fill(f.selector, value, timeout=_TIMEOUT_MS)
+                self._human_fill(page, f.selector, value)  # human-cadence typing, not fill()
+                page.wait_for_timeout(self._rng.randint(*_FIELD_PAUSE_MS))
         if spec.captcha is not None:
             self._clear_captcha(page, spec.captcha)
+        page.wait_for_timeout(self._rng.randint(*_FIELD_PAUSE_MS))  # settle before submit
         page.click(spec.submit_selector, timeout=_TIMEOUT_MS)
-        page.wait_for_timeout(2_000)
+        page.wait_for_timeout(self._rng.randint(*_SETTLE_MS))
         proof_url = self._screenshot(page, job)
         if self._check_success(page, spec.success_indicator):
             return CitationSubmitResult(status="submitted", proof_url=proof_url)
         return CitationSubmitResult(status="failed", proof_url=proof_url, error="success indicator not found")
+
+    def _human_fill(self, page: Any, selector: str, value: str) -> None:
+        """Enter text like a person: focus the field, then type character-by-character
+        with a randomized per-keystroke delay - instead of Playwright's instant
+        ``fill()``, which sets ``.value`` in one shot and is a classic bot tell. Falls
+        back to ``fill()`` if the human path throws (e.g. a click intercept), so anti-
+        detection can never turn a valid submit into a failure."""
+        delay = self._rng.randint(*_TYPE_DELAY_MS)
+        try:
+            page.click(selector, timeout=_TIMEOUT_MS)
+            page.type(selector, value, delay=delay, timeout=_TIMEOUT_MS)
+        except Exception:
+            page.fill(selector, value, timeout=_TIMEOUT_MS)
 
     def _clear_captcha(self, page: Any, widget: CaptchaWidget) -> None:
         site_key = page.get_attribute(widget.site_key_selector, widget.site_key_attr, timeout=_TIMEOUT_MS)
