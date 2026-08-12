@@ -613,6 +613,22 @@ class Settings(BaseSettings):
     # Base URL of the admin dashboard, used to build a deep link into an email alert
     # (e.g. the client directory where a new portal request surfaces). Not a secret.
     admin_base_url: str = "http://localhost:3000"
+    # --- Email provider selector (all-way comms). The delivery layer's single email
+    # factory (``email_sender_from_settings``) dispatches on EMAIL_PROVIDER: "resend"
+    # (the HTTP seam above), "smtp" (stdlib ``smtplib`` -> Gmail or any host), or "none"
+    # (email legs OFF; in-app still lands). Default "resend" keeps the current behaviour
+    # (a keyless resend deploy already degraded to in-app only). SMTP is OPTIONAL and NOT
+    # in _REQUIRED_IN_PROD: a blank SMTP_HOST/SMTP_FROM degrades the sender to None (the
+    # email leg is skipped), never a crash - mirroring every other provider seam. ---
+    email_provider: Literal["resend", "smtp", "none"] = "resend"
+    smtp_host: str = ""  # SMTP server host, e.g. smtp.gmail.com (blank -> degrade to None)
+    smtp_port: int = 587  # 587 -> STARTTLS, 465 -> implicit SSL (Gmail's two ports)
+    smtp_user: str = ""  # SMTP username (Gmail: the full sending address). Not a secret.
+    # SMTP password / Gmail APP-PASSWORD. SecretStr: never logged / never in a repr; it is
+    # handed only to ``smtplib.login`` at send time. Blank -> the send is unauthenticated
+    # (an open relay); Gmail requires it.
+    smtp_password: SecretStr | None = None
+    smtp_from: str = ""  # the From: header; falls back to SMTP_USER when blank
     # --- Backups module (7G-1). Nightly/manual Postgres snapshots via pg_dump, a
     # guarded restore via pg_restore, and an OPTIONAL Backblaze B2 offsite copy. ALL
     # optional and NOT in _REQUIRED_IN_PROD: the module builds + unit-tests NOW
