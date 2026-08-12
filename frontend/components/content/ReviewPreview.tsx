@@ -118,11 +118,16 @@ const QA_FLOOR = 70;
 const prettyDim = (d: string) => d.replace(/_/g, " ");
 
 export default function ReviewPreview({
-  job, onAction, onClose,
+  job, onAction, onClose, hideActions = false,
 }: {
   job: ContentJob;
   onAction: (id: string, action: ReviewAction, note?: string) => void;
-  onClose: () => void;
+  // Optional so the preview can be embedded (e.g. inside the content wizard) with no
+  // standalone close affordance.
+  onClose?: () => void;
+  // When embedded in a flow that owns the approve step, hide the inline
+  // approve / request-edit / reject bar so there is a single approve action.
+  hideActions?: boolean;
 }) {
   const draftQ = useContentDraft(job.id);
   const schemaQ = useContentSchema(job.id);
@@ -178,11 +183,13 @@ export default function ReviewPreview({
             {job.schema || "no schema"} · {job.images} image{job.images === 1 ? "" : "s"}
           </div>
         </div>
-        <div className="tools">
-          <button className="ghostbtn" onClick={onClose} aria-label="Close preview">
-            <span className="material-symbols-rounded">close</span>Close
-          </button>
-        </div>
+        {onClose && (
+          <div className="tools">
+            <button className="ghostbtn" onClick={onClose} aria-label="Close preview">
+              <span className="material-symbols-rounded">close</span>Close
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Pushed-to-WordPress (draft) banner: takes precedence when the approved page
@@ -386,8 +393,9 @@ export default function ReviewPreview({
         <QaTab loading={qaQ.isLoading} error={qaQ.error as Error | null} qa={qa} />
       )}
 
-      {/* Review actions (only meaningful while the job awaits review). */}
-      {inReview && (
+      {/* Review actions (only meaningful while the job awaits review). Hidden when
+          embedded in a flow that owns its own approve step. */}
+      {inReview && !hideActions && (
         <div className="co-gate-actions" style={{ marginTop: 14 }}>
           <button className="primary-btn co-approve" onClick={() => onAction(job.id, "approve")}>
             <span className="material-symbols-rounded">check</span>Approve &amp; publish
@@ -402,7 +410,7 @@ export default function ReviewPreview({
       )}
 
       {/* The guided-edit instruction panel. */}
-      {inReview && editOpen && (
+      {inReview && !hideActions && editOpen && (
         <div style={{ marginTop: 12, padding: 14, borderRadius: 12,
           border: "1px solid var(--line, #e8d2d7)", background: "var(--blush, #F8ECEE)" }}>
           <label htmlFor="co-edit-note" className="cs" style={{ display: "block", marginBottom: 6 }}>

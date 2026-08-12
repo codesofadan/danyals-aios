@@ -175,6 +175,57 @@
 .co-attach { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; font-weight: 600; color: var(--body); cursor: pointer; }
 .co-attach input { width: 15px; height: 15px; accent-color: var(--c4); }
 
+/* ---- ONE guided content wizard ---- */
+.co-wiz-card { margin-top: 16px; }
+.co-wiz-steps { margin-top: 14px; }
+.co-wiz-body { margin-top: 6px; display: flex; flex-direction: column; gap: 14px; }
+.co-wiz-body .fld { margin: 0; }
+
+.co-wiz-empty { display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 34px 20px; text-align: center; color: var(--muted); font-size: 13px;
+  background: var(--well); border: 1px dashed var(--line); border-radius: 14px; }
+.co-wiz-empty .material-symbols-rounded { font-size: 30px; color: var(--violet-soft); }
+
+.co-wiz-note { display: flex; align-items: flex-start; gap: 11px; padding: 12px 14px;
+  background: var(--well); border: 1px solid var(--line); border-radius: 12px;
+  font-size: 12.5px; color: var(--body); line-height: 1.5; }
+.co-wiz-note .material-symbols-rounded { font-size: 20px; color: var(--violet-soft); flex: none; margin-top: 1px; }
+.co-wiz-note b { color: var(--fg-strong); font-weight: 800; }
+
+/* research / design progress — an indeterminate sweep, never a stuck spinner */
+.co-prog { padding: 14px 15px; background: var(--well); border: 1px solid var(--line); border-radius: 12px; }
+.co-prog-bar { height: 6px; border-radius: 999px; background: var(--hover); overflow: hidden; }
+.co-prog-bar span { display: block; height: 100%; width: 40%; border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--violet), transparent);
+  animation: co-prog-sweep 1.25s ease-in-out infinite; }
+@keyframes co-prog-sweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+.co-prog-txt { margin-top: 9px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .co-prog-bar span { animation: none; width: 100%; opacity: .6; } }
+
+/* step-4 per-job preview switcher */
+.co-wiz-jobtabs { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.co-wiz-jobtabs .chip { text-transform: none; }
+
+/* step-5 approve list */
+.co-approve-list { display: flex; flex-direction: column; gap: 10px; }
+.co-approve-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 13px 15px; background: var(--well); border: 1px solid var(--line);
+  border-radius: 14px; }
+.co-approve-main { flex: 1; min-width: 220px; }
+.co-approve-topic { font-size: 13.5px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.01em; line-height: 1.3; }
+.co-approve-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px; font-size: 11.5px; color: var(--muted); }
+
+/* footer nav — Back on the left, primary actions on the right */
+.co-wiz-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px;
+  padding-top: 16px; border-top: 1px solid var(--line); }
+.co-wiz-foot > .primary-btn:last-child { margin-left: auto; }
+.co-wiz-foot > .ghostbtn + .primary-btn { margin-left: auto; }
+
+@media (max-width: 640px) {
+  .co-approve-row { flex-direction: column; align-items: stretch; }
+  .co-approve-row .primary-btn { width: 100%; justify-content: center; }
+}
+
 @media (max-width: 1180px) and (min-width: 641px) {
   /* 5 columns squeezed to 2 is unreadable — scroll horizontally instead,
      each column keeping a workable width, snapping column-by-column. */
