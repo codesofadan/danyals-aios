@@ -23,13 +23,13 @@ by emailing every lead. The email leg is additionally KEY-GATED: with no
 from __future__ import annotations
 
 import asyncio
-from html import escape as html_escape
 from typing import Any
 
 from app.config import get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.schemas.settings import NOTIF_EVENTS
+from app.services.email_templates import render_notification
 from integrations.resend import EmailSender, email_sender_from_settings
 from integrations.slack import SlackNotifier, slack_notifier_from_settings
 
@@ -109,8 +109,8 @@ def _persist_notification(
 
 
 def _email_html(title: str, body: str) -> str:
-    """A minimal, injection-safe HTML body (values escaped; server-generated anyway)."""
-    return f"<h2>{html_escape(title)}</h2><p>{html_escape(body)}</p>"
+    """A minimal, branded, injection-safe HTML body (via the shared templates module)."""
+    return render_notification(title, body).html
 
 
 async def email_admin(
