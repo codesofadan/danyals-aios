@@ -161,6 +161,16 @@ export default function ClientAudits() {
                           <span className="material-symbols-rounded">data_object</span>JSON
                         </button>
                       )}
+                      {a.json && (
+                        <button
+                          className="ghostbtn"
+                          type="button"
+                          onClick={() => download(a.id, "sheets/remediation.xlsx", `audit-${a.id}-remediation.xlsx`)}
+                          disabled={busyId === a.id}
+                        >
+                          <span className="material-symbols-rounded">table_view</span>Sheets
+                        </button>
+                      )}
                       {!a.pdf && !a.json && a.status === "done" && (
                         <span className="cl-rp-size">No files</span>
                       )}

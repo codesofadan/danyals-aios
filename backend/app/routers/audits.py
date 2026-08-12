@@ -36,6 +36,7 @@ from app.services.audit_artifacts import (
     LocalArtifactStore,
     local_store_from_settings,
 )
+from app.services.audit_sheets import SHEET_FILES, sheet_media_type
 from app.services.cost_gate import CostGate, GateContext, GateDecision, SpendHaltedError
 from app.services.cost_store import PostgresCostStore
 
@@ -196,6 +197,31 @@ async def view_audit_report_html(
     if path is None:
         raise _ARTIFACT_NOT_FOUND
     return FileResponse(path, media_type="text/html", headers=REPORT_HTML_VIEW_HEADERS)
+
+
+@router.get("/audits/{audit_id}/sheets/{name}")
+async def download_audit_sheet(
+    audit_id: str, name: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
+) -> FileResponse:
+    """Download a role-based remediation sheet (xlsx workbook or a csv export).
+
+    Guarded exactly like the report.pdf/findings.json downloads (``view_reports``
+    - all six staff roles, no client). ``name`` is restricted to the known sheet
+    allow-list before resolving, and the path is resolved traversal-safe by
+    convention from the audit id (no DB column). 404 if the sheet is not present
+    (e.g. an audit that completed before this feature, or one with no findings).
+    """
+    if name not in SHEET_FILES or store is None:
+        raise _ARTIFACT_NOT_FOUND
+    row = await asyncio.to_thread(repo.get_audit, audit_id)
+    if row is None:
+        raise _AUDIT_NOT_FOUND
+    path = store.resolve_sheet(audit_id, name)
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(
+        path, media_type=sheet_media_type(name), filename=f"audit-{audit_id}-{name}"
+    )
 
 
 @router.post(

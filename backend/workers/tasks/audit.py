@@ -28,7 +28,8 @@ from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.services import pricing
-from app.services.audit_artifacts import ArtifactStore, local_store_from_settings
+from app.services.audit_artifacts import ArtifactStore, LocalArtifactStore, local_store_from_settings
+from app.services.audit_sheets import SheetMeta, store_audit_sheets
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
@@ -193,6 +194,37 @@ def _store_artifacts(
         return None, None
 
 
+def _store_sheets(
+    artifacts: ArtifactStore | None,
+    audit_id: str,
+    result: AuditRunResult,
+    row: dict[str, Any],
+    *,
+    tier_label: str,
+) -> None:
+    """Build the role-based remediation sheets from findings.json; never fatal.
+
+    Deterministic pure transform (no AI/paid calls), generated eagerly here
+    alongside the PDF/findings copy so downloads just serve a file. Only the
+    on-disk ``LocalArtifactStore`` supports it; a missing/malformed findings file
+    skips (``store_audit_sheets`` returns ``[]``). A sheet-build error must NEVER
+    fail a completed audit - it is swallowed and logged.
+    """
+    if not isinstance(artifacts, LocalArtifactStore):
+        return
+    try:
+        meta = SheetMeta(
+            audit_id=audit_id,
+            client_name=str(row.get("client_name") or ""),
+            url=str(row.get("url") or ""),
+            tier=tier_label,
+            generated_at=_utcnow().isoformat(),
+        )
+        store_audit_sheets(artifacts, audit_id, result.findings_path, meta)
+    except Exception:
+        logger.warning("audit_sheet_build_failed", audit_id=audit_id)
+
+
 def execute_audit(
     store: AuditStore,
     settings: Settings,
@@ -307,6 +339,8 @@ def execute_audit(
             "finished_at": finished,
         },
     )
+    # Role-based remediation sheets (xlsx + csvs) from the SAME findings.json.
+    _store_sheets(artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free")
     # Publish a client deliverable for a completed audit that produced a PDF
     # (best-effort; never fails the job). Public/unlinked audits have no client.
     if pdf_key and row.get("client_id"):
@@ -499,6 +533,8 @@ def execute_public_audit(
             "json_path": json_key,
         },
     )
+    # Role-based remediation sheets from the SAME findings.json (public = Free).
+    _store_sheets(artifacts, str(public_audit_id), result, row, tier_label="Free")
     return {"public_audit_id": public_audit_id, "status": "done", "score": result.score}
 
 

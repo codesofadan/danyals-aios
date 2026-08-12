@@ -20,6 +20,10 @@ from app.config import Settings
 
 _PDF_NAME = "report.pdf"
 _JSON_NAME = "findings.json"
+# Role-based remediation sheets (xlsx + csvs) live in this subdir of the run's
+# artifact dir. They are derived from findings.json by ``audit_sheets`` and
+# resolved by convention from the audit id (no DB column) - see ``resolve_sheet``.
+_SHEETS_SUBDIR = "sheets"
 # The self-contained HTML report the dashboard viewer renders. It is a sibling of
 # report.pdf under ``<root>/<audit_id>/`` and is resolved by convention from the
 # audit id (no DB column) - see ``resolve_report_html``.
@@ -111,6 +115,25 @@ class LocalArtifactStore:
         PDF backend still emits the HTML). Traversal-safe via ``resolve``.
         """
         return self.resolve(f"{audit_id}/{REPORT_HTML_NAME}")
+
+    def sheets_dir(self, audit_id: str) -> Path:
+        """The (created) directory holding a run's remediation sheets.
+
+        ``<root>/<audit_id>/sheets/`` - the sheet builder writes the xlsx + csvs
+        here; downloads resolve them by convention via :meth:`resolve_sheet`.
+        """
+        dest = self._root / audit_id / _SHEETS_SUBDIR
+        dest.mkdir(parents=True, exist_ok=True)
+        return dest
+
+    def resolve_sheet(self, audit_id: str, name: str) -> Path | None:
+        """Resolve a named remediation sheet for a run, or ``None``.
+
+        Resolved from the audit id + file name alone (no DB column), the same way
+        report.html is. Traversal-safe via :meth:`resolve` - the caller must also
+        restrict ``name`` to the known sheet allow-list before serving it.
+        """
+        return self.resolve(f"{audit_id}/{_SHEETS_SUBDIR}/{name}")
 
 
 def local_store_from_settings(settings: Settings) -> LocalArtifactStore | None:

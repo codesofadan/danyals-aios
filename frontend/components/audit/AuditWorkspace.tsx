@@ -215,6 +215,19 @@ export default function AuditWorkspace() {
                           >
                             <span className="material-symbols-rounded">data_object</span>
                           </button>
+                          <button
+                            className="au-art"
+                            title="Download remediation sheets (Excel)"
+                            disabled={!r.json}
+                            onClick={() =>
+                              downloadFile(
+                                `/audits/${r.id}/sheets/remediation.xlsx`,
+                                `${r.client}-remediation-${r.id}.xlsx`,
+                              )
+                            }
+                          >
+                            <span className="material-symbols-rounded">table_view</span>
+                          </button>
                         </div>
                       </td>
                       <td className="num au-runtime">{r.runtime}</td>
