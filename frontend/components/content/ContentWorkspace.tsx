@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useContentJobs, useReviewContentJob } from "@/lib/hooks/content";
 import { useSpendHalted } from "@/lib/hooks/cost";
 import ContentKpis from "./ContentKpis";
@@ -33,6 +33,16 @@ export default function ContentWorkspace() {
   const needsReview = jobs.filter((j) => j.status === "needs_review");
   const reviewErr = reviewJob.error instanceof Error ? reviewJob.error.message : null;
 
+  // Close the preview modal on Escape (the scrim handles click-outside).
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
+
   return (
     <>
       {jobsQ.isError && (
@@ -52,11 +62,23 @@ export default function ContentWorkspace() {
           design / new-job entry cards. */}
       <ContentWizard jobs={jobs} halted={halted} onReview={handleReview} />
 
-      {/* Tracking surfaces for jobs already in flight. */}
-      <PipelineBoard jobs={jobs} />
+      {/* Tracking surfaces for jobs already in flight. Cards are clickable → modal preview. */}
+      <PipelineBoard jobs={jobs} onSelect={setSelectedId} />
 
+      {/* The framed draft preview, as a modal: click a pipeline card (or a review row)
+          to open; scrim click or Esc closes. */}
       {selected && (
-        <ReviewPreview job={selected} onAction={handleReview} onClose={() => setSelectedId(null)} />
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview ${selected.id}`}
+          onClick={() => setSelectedId(null)}
+        >
+          <div className="co-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <ReviewPreview job={selected} onAction={handleReview} onClose={() => setSelectedId(null)} />
+          </div>
+        </div>
       )}
 
       <ReviewGate jobs={needsReview} onAction={handleReview} onPreview={setSelectedId} />

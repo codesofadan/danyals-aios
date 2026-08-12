@@ -47,6 +47,16 @@
 }
 .co-card:hover { transform: translateY(-2px); border-color: var(--line-2);
   box-shadow: 0 14px 30px -18px rgba(0, 0, 0, .7); }
+/* Clickable pipeline cards open the preview modal. */
+.co-card-clickable { cursor: pointer; }
+.co-card-clickable:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* Draft preview shown as a centred modal over the .modal-overlay scrim. */
+.co-preview-modal {
+  width: 100%; max-width: 1000px; max-height: 88vh; overflow-y: auto;
+  border-radius: 16px; box-shadow: 0 26px 70px -20px rgba(0, 0, 0, .55);
+}
+.co-preview-modal .co-preview-card { margin-top: 0 !important; }
 .co-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .co-jid { font-size: 10.5px; font-weight: 800; color: var(--violet-soft); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 .co-page { display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; font-weight: 800;

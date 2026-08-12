@@ -9,9 +9,27 @@ const PAGE_ICON: Record<ContentJob["pageType"], string> = {
   gbp_post: "storefront",
 };
 
-function JobCard({ job }: { job: ContentJob }) {
+function JobCard({ job, onSelect }: { job: ContentJob; onSelect?: (id: string) => void }) {
+  const clickable = !!onSelect;
   return (
-    <article className="co-card" style={{ ["--acc" as string]: job.color }}>
+    <article
+      className={`co-card${clickable ? " co-card-clickable" : ""}`}
+      style={{ ["--acc" as string]: job.color }}
+      onClick={clickable ? () => onSelect!(job.id) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect!(job.id);
+              }
+            }
+          : undefined
+      }
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `Preview ${job.id}: ${job.topic}` : undefined}
+    >
       <div className="co-card-top">
         <span className="co-jid">{job.id}</span>
         <span className={`co-page ${job.pageType}`}>
@@ -37,7 +55,13 @@ function JobCard({ job }: { job: ContentJob }) {
   );
 }
 
-export default function PipelineBoard({ jobs }: { jobs: ContentJob[] }) {
+export default function PipelineBoard({
+  jobs,
+  onSelect,
+}: {
+  jobs: ContentJob[];
+  onSelect?: (id: string) => void;
+}) {
   const byCol = (k: ColumnKey) => jobs.filter((j) => j.status === k);
 
   return (
@@ -67,7 +91,7 @@ export default function PipelineBoard({ jobs }: { jobs: ContentJob[] }) {
               <div className="co-col-body">
                 {items.length === 0
                   ? <div className="co-empty">No jobs</div>
-                  : items.map((j) => <JobCard key={j.id} job={j} />)}
+                  : items.map((j) => <JobCard key={j.id} job={j} onSelect={onSelect} />)}
               </div>
             </div>
           );
