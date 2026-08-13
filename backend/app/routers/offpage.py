@@ -36,7 +36,11 @@ from app.schemas.offpage import (
     FlagToxicRequest,
     NapStatus,
     OffpageKpisResponse,
+    Web2AuthorityTier,
+    Web2AuthType,
+    Web2CatalogResponse,
     Web2PlanRequest,
+    Web2PlatformCatalogResponse,
     Web2PropertyResponse,
     Web2ReviewRequest,
     action_for,
@@ -244,6 +248,40 @@ async def list_web2(
         repo.list_web2, client_id=client_id, limit=page.limit, offset=page.offset
     )
     return [Web2PropertyResponse.from_row(r) for r in rows]
+
+
+@router.get("/offpage/web2/catalog", response_model=Web2CatalogResponse)
+async def web2_catalog(
+    repo: OffpageRepoDep,
+    _user: ViewReports,
+    auth_type: Annotated[Web2AuthType | None, Query(alias="authType")] = None,
+    authority_tier: Annotated[Web2AuthorityTier | None, Query(alias="authorityTier")] = None,
+    automation_ready: Annotated[bool | None, Query(alias="automationReady")] = None,
+) -> Web2CatalogResponse:
+    """The Web 2.0 platform CATALOG (``public.web2_platforms``, 0062/0063): the curated
+    target list of real web2 backlink properties the off-page automation works through -
+    the web2 analogue of the citation-directory catalog. Reference data, so it is
+    staff-readable (``view_reports``); a portal client is 403'd out of the namespace.
+
+    Returns the rows plus a rollup header (total, how many ``automationReady`` - the 17
+    with a real publisher today - and a per-``authType`` breakdown). ``authType`` /
+    ``authorityTier`` / ``automationReady`` narrow the board."""
+    rows = await asyncio.to_thread(
+        repo.list_web2_platforms,
+        auth_type=auth_type,
+        authority_tier=authority_tier,
+        automation_ready=automation_ready,
+    )
+    platforms = [Web2PlatformCatalogResponse.from_row(r) for r in rows]
+    by_auth_type: dict[str, int] = {}
+    for p in platforms:
+        by_auth_type[p.auth_type] = by_auth_type.get(p.auth_type, 0) + 1
+    return Web2CatalogResponse(
+        total=len(platforms),
+        automation_ready=sum(1 for p in platforms if p.automation_ready),
+        by_auth_type=by_auth_type,
+        platforms=platforms,
+    )
 
 
 @router.post(

@@ -247,6 +247,41 @@ class OffpageRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
+    # --- web 2.0 platform CATALOG (reference data, not client-scoped) ----------
+    def list_web2_platforms(
+        self,
+        *,
+        auth_type: str | None = None,
+        authority_tier: str | None = None,
+        automation_ready: bool | None = None,
+        market: str | None = None,
+    ) -> _Rows:
+        """Browse the Web 2.0 platform catalog (0062/0063). Reference data shared by
+        every tenant - RLS gates it to staff (``is_staff()``); a portal client sees
+        nothing (and is 403'd out of the router before reaching here). Ordered
+        automation-ready-first so the actionable rows lead, then by name."""
+        query = "select * from public.web2_platforms"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if auth_type is not None:
+            clauses.append("auth_type = %s")
+            params.append(auth_type)
+        if authority_tier is not None:
+            clauses.append("authority_tier = %s")
+            params.append(authority_tier)
+        if automation_ready is not None:
+            clauses.append("automation_ready = %s")
+            params.append(automation_ready)
+        if market is not None:
+            clauses.append("market = %s")
+            params.append(market)
+        if clauses:
+            query += " where " + " and ".join(clauses)
+        query += " order by automation_ready desc, name"
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
     def client_name_for(self, client_id: str) -> str | None:
         """The display name of a client the caller can see (RLS-scoped), or ``None`` if
         it does not exist / is not visible - used to SNAPSHOT client_name on a new
