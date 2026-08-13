@@ -157,11 +157,34 @@ class FakeCitationProvider:
 
 
 def citation_provider_from_settings(settings: Settings) -> CitationProvider | None:
-    """The real BrightLocal provider when its key is present, else ``None``
-    (degraded - live citation monitoring is off until the key lands). Mirrors
-    ``content_providers_from_settings``: no secret is ever logged, only the reason."""
+    """The live citation-discovery provider for this deploy, by precedence:
+
+    1. ``BrightLocalCitations`` when ``BRIGHTLOCAL_API_KEY`` is set (the purpose-built
+       citation tracker, unchanged).
+    2. ELSE ``SearchCitationProvider`` when BOTH ``SERPER_API_KEY`` AND
+       ``ANTHROPIC_API_KEY`` are present - the BrightLocal REPLACEMENT that discovers a
+       business's existing listings from the keys the platform already holds (Serper +
+       Places + Foursquare + Claude, Firecrawl optional). This is what makes the citation
+       AUDIT find real listings when the client cannot get a BrightLocal key.
+    3. ELSE ``None`` (degraded - live discovery is off until a key lands, as before).
+
+    The search provider builds from settings lazily (breaking the import cycle:
+    ``citation_discovery`` imports ``CitationRecord``/``classify_citation`` from here).
+    Mirrors ``content_providers_from_settings``: no secret is ever logged, only the
+    reason."""
     key = settings.brightlocal_api_key
-    if not key:
-        logger.info("citation_provider_degraded", reason="missing_brightlocal_key")
-        return None
-    return BrightLocalCitations(api_key=key.get_secret_value())
+    if key:
+        return BrightLocalCitations(api_key=key.get_secret_value())
+
+    if settings.serper_api_key and settings.anthropic_api_key:
+        from integrations.citation_discovery import build_search_citation_provider
+
+        provider = build_search_citation_provider(settings)
+        if provider is not None:
+            logger.info("citation_provider_search_discovery", reason="brightlocal_absent")
+            return provider
+
+    logger.info(
+        "citation_provider_degraded", reason="missing_brightlocal_and_search_keys"
+    )
+    return None

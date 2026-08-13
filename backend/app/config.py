@@ -541,6 +541,20 @@ class Settings(BaseSettings):
     # login. Costs are logged through the `citations` money-dial (R5 pre-check). ---
     bing_places_api_key: SecretStr | None = None  # Bing Places for Business API
     foursquare_api_key: SecretStr | None = None  # Foursquare Places API
+    # --- Citation AUDIT discovery (the READ side; the BrightLocal replacement).
+    # `SearchCitationProvider` (integrations/citation_discovery.py) discovers a
+    # business's EXISTING directory listings from the keys the platform already holds
+    # (Serper + Places + Foursquare + Anthropic, Firecrawl optional) when BrightLocal
+    # is unavailable. The Places ANCHOR (the canonical NAP + the Google Business
+    # Profile listing) prefers a real Google Places key when present, else falls back
+    # to Serper's `/places` endpoint (the house Places default, reusing SERPER_API_KEY
+    # - no new vendor). Both keys are OPTIONAL and NOT in _REQUIRED_IN_PROD: without a
+    # Google key the anchor rides Serper; without Serper the whole discovery provider
+    # degrades (see citation_provider_from_settings). `google_maps_api_key` is a legacy
+    # alias read as a fallback so an existing GOOGLE_MAPS_API_KEY env still activates
+    # the anchor. Keys are SecretStr (never logged / never in a repr). ---
+    google_places_api_key: SecretStr | None = None  # Google Places API (New) anchor lookup
+    google_maps_api_key: SecretStr | None = None  # legacy alias, fallback for the Places anchor
     captcha_solver_provider: str = "capsolver"  # capsolver | capmonster | none
     captcha_solver_api_key: SecretStr | None = None
     citation_proxy_url: SecretStr | None = None  # http(s)://user:pass@host:port
