@@ -19,6 +19,10 @@ x-app-env: &app-env
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   API_CORS_ORIGINS: ${API_CORS_ORIGINS:-*}
   TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*}
+  # Public API origin used to build ABSOLUTE URLs for server-hosted files loaded from
+  # a third-party context (content images embedded in a published WordPress page).
+  # Same var the frontend build reads (NEXT_PUBLIC_FILE_BASE_URL); blank -> relative URL.
+  PUBLIC_FILE_BASE_URL: ${PUBLIC_FILE_BASE_URL:-}
   # Two trust-level DSNs — host/db/user are fixed to the compose network; only the
   # passwords vary and MUST equal the role passwords the migrate step sets.
   DATABASE_URL: postgresql://authenticated:${AUTH_DB_PASSWORD}@db:5432/aios
@@ -57,6 +61,9 @@ x-app-env: &app-env
   # Artifact roots live on the shared aios_state volume (writable by the aios user).
   AUDIT_ARTIFACT_DIR: /var/lib/aios/artifacts/audits
   CONTENT_ARTIFACT_DIR: /var/lib/aios/artifacts/content
+  # Generated content images (gpt-image-1 returns base64 -> decoded + hosted here,
+  # served read-only at /api/v1/public/content-images/{name} for WordPress embeds).
+  CONTENT_IMAGE_DIR: /var/lib/aios/artifacts/content-images
   BACKUP_ARTIFACT_DIR: /var/lib/aios/backups
   # Data-import upload store — without this the multipart upload route 503s.
   IMPORT_ARTIFACT_DIR: /var/lib/aios/artifacts/imports

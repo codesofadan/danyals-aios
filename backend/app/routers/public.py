@@ -46,6 +46,10 @@ from app.services.audit_artifacts import (
     LocalArtifactStore,
     local_store_from_settings,
 )
+from app.services.content_images import (
+    LocalContentImageStore,
+    content_image_store_from_settings,
+)
 from app.services.cost_gate import GateContext
 from app.services.cost_store import PostgresCostStore
 
@@ -234,6 +238,20 @@ def get_public_artifact_store(settings: SettingsDep) -> LocalArtifactStore | Non
 PublicArtifactStoreDep = Annotated["LocalArtifactStore | None", Depends(get_public_artifact_store)]
 
 
+def get_content_image_store(settings: SettingsDep) -> LocalContentImageStore | None:
+    """Dependency: the content-image hosting store, or ``None`` when unconfigured."""
+    return content_image_store_from_settings(settings)
+
+
+ContentImageStoreDep = Annotated[
+    "LocalContentImageStore | None", Depends(get_content_image_store)
+]
+
+# Content images are served immutable (the filename is a content hash), so a long,
+# public cache is safe and keeps a WordPress-embedded image fast on repeat views.
+_IMAGE_CACHE_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
 # --------------------------------------------------------------------------- #
 # Endpoints (UNAUTHENTICATED - note: NO CurrentUser dependency anywhere here)
 # --------------------------------------------------------------------------- #
@@ -359,3 +377,23 @@ async def view_public_report_html(
     if path is None:
         raise _ARTIFACT_NOT_FOUND
     return FileResponse(path, media_type="text/html", headers=REPORT_HTML_VIEW_HEADERS)
+
+
+@router.get("/content-images/{name}")
+async def serve_content_image(
+    name: str, store: ContentImageStoreDep
+) -> FileResponse:
+    """Serve a generated CONTENT IMAGE by its content-hash filename (read-only).
+
+    UNAUTHENTICATED by design: these PNGs are embedded as ``<img>`` in published
+    WordPress pages / draft previews and are fetched by a browser with no bearer
+    token. The filename is a sha256 content hash and the store resolves it
+    traversal-safe (``..``/absolute refused), so a crafted name can never read an
+    arbitrary file. A missing store or file is a clean 404, never a crash.
+    """
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    path = await asyncio.to_thread(store.resolve, name)
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="image/png", headers=_IMAGE_CACHE_HEADERS)

@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     log_level: LogLevel = "INFO"
     api_cors_origins: str = "http://localhost:3000"
     trusted_hosts: str = "*"
+    # Public origin the API is reachable at (e.g. https://app.qanry.com), used to
+    # build ABSOLUTE URLs for server-hosted files that must load with NO auth header
+    # from a THIRD-PARTY context - notably generated CONTENT IMAGES embedded in a
+    # published WordPress page (the browser rendering that page carries no bearer
+    # token). Blank -> a relative "/api/v1/..." URL (works same-origin in the
+    # dashboard preview; SET this in prod so a WordPress-embedded image resolves).
+    # Not a secret. Mirrors the frontend's NEXT_PUBLIC_FILE_BASE_URL.
+    public_file_base_url: str = ""
 
     # --- Local Postgres (the data plane). Two DSNs, one per trust level. ---
     # Authenticated-role DSN -> the per-request RLS pool (RLS binds this connection).
@@ -282,6 +290,17 @@ class Settings(BaseSettings):
     # target is PDF/Markdown OR WordPress is credential-degraded. Unset -> falls
     # back to ``audit_artifact_dir``; if BOTH are unset no artifact is written. ---
     content_artifact_dir: str | None = None
+    # Controlled root generated CONTENT IMAGES (hero/section PNGs) are HOSTED under so
+    # the served URL can be embedded in the draft + the WordPress body. gpt-image-1
+    # returns base64 (``b64_json``), NEVER a hosted url, so the decoded bytes are
+    # written here (filename = sha256(bytes) -> dedup + cache-friendly) and served
+    # read-only via the public ``GET /api/v1/public/content-images/{name}`` route.
+    # Unset -> falls back to ``<content_artifact_dir>/content-images`` (else
+    # ``<audit_artifact_dir>/content-images``); only when NO artifact root is
+    # configured is image hosting unavailable, and a base64 image then DEGRADES to
+    # skipped (logged ``content_image_failed``), never a crash. See
+    # app/services/content_images.py.
+    content_image_dir: str | None = None
     # Coarse R5 cost-precheck fan-out factors: the worker estimates the FULL job
     # spend upfront (research fan-out + generation) against the client budget cap
     # (and the global halt) BEFORE it starts, and defers a job that would breach. These

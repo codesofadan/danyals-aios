@@ -877,6 +877,31 @@ def test_fake_or_empty_image_injects_nothing() -> None:
     assert store.row["images"] > 0            # yet images were still counted (billed)
 
 
+class _RaisingImageGen:
+    """A NON-fake ImageGenerator that always fails (mirrors the real gpt-image-1 bug
+    class: a hosting/decode error). The pipeline must catch it, inject nothing, and
+    still reach the review gate - never crash."""
+
+    def generate(self, prompt: str, alt: str) -> GeneratedImage:
+        raise RuntimeError("image hosting failed")
+
+
+def test_image_generation_failure_injects_nothing_and_does_not_crash() -> None:
+    # A hosting/gen failure per image is swallowed (logged content_image_failed): the
+    # job still advances to needs_review, with NO image markdown in the stored draft.
+    store = FakeContentStore(_job_row())
+    providers = replace(content_providers_for_tests(), images=_RaisingImageGen())
+
+    out = execute_content_job(
+        store, providers, "CJ-4200", settings=_settings(), gate=_gate(), fetcher=FakePageFetcher()
+    )
+
+    assert out.status == "needs_review"        # the job completed, not failed
+    assert out.state == "advanced"
+    assert "![" not in store.row["draft_md"]   # nothing injected (no broken markdown)
+    assert store.row["images"] == 0            # nothing was billed (generate raised)
+
+
 # --------------------------------------------------------------------------- #
 # BUILD 2: the FULL design profile shapes the flat WordPress <style> block.
 # --------------------------------------------------------------------------- #
