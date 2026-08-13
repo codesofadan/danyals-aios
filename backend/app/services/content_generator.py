@@ -37,6 +37,7 @@ anti-"scaled-content-abuse" lever. The generator resolves and EXPOSES it
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -792,50 +793,180 @@ def _links_block(
     builder.parts.append("\n".join(f"- [{link.anchor}]({link.url})" for link in builder.links))
 
 
-# Every generated image must read as a REAL photograph of a REAL scene - never an
-# infographic, illustration, diagram, chart, 3D render, or anything with text/logos.
-# This directive is appended to every image prompt so gpt-image-1 renders camera-shot
-# realism; the strong negatives suppress its default lean toward stylised/graphic art.
-_PHOTO_STYLE = (
-    "Photorealistic, high-resolution editorial photograph of a real-world scene, shot on a "
-    "full-frame DSLR with a 35mm lens, natural lighting, realistic depth of field, authentic "
-    "candid real people and true-to-life environments. It MUST look like a real photo taken "
-    "with a camera. Absolutely NOT an infographic, NOT an illustration, NOT a diagram, NOT a "
-    "chart, NOT a 3D render, NOT clip art, NOT a cartoon. NO text, NO words, NO letters, NO "
-    "numbers, NO logos, NO watermarks, NO UI mockups."
+# --------------------------------------------------------------------------- #
+# Image planning (§9). PROVEN: gpt-image-1 IGNORES negative prompts ("NOT an
+# infographic", "NO text") AND, fed an ABSTRACT topic as the subject, renders that
+# topic AS TITLE TEXT -> a flat-vector infographic with words in it, every time. The
+# ONLY reliable path to a real photograph is to feed it a CONCRETE, LITERAL real-world
+# scene. So the writer (Claude) authors ONE camera-ready scene per image in a single
+# batched call, and the final gpt-image-1 prompt is that scene + a fixed camera/realism
+# suffix. The article topic is NEVER placed in the prompt.
+# --------------------------------------------------------------------------- #
+# The fixed camera/realism suffix appended to every image prompt. It carries NO topic
+# text, and pushes two things gpt-image-1 gets wrong by default: (1) NO human face from
+# any angle - visible AI faces are the #1 "this is AI" tell, so people must be framed
+# from behind / over-the-shoulder / hands-only / cropped; (2) HYPER-REALISTIC photographic
+# texture (real pores, grain, wear) to kill the tell-tale airbrushed "soft-skin"/CGI look.
+# The infographic/text negatives are kept too - they are cheap insurance on top of the
+# concrete-scene lever (which is what actually forces a real photo).
+_CAMERA_SUFFIX = (
+    "Candid documentary photograph, shot on a full-frame DSLR (Canon 5D / Sony A7) with a "
+    "35mm or 50mm f/1.8 prime, natural available light, RAW unedited photo, true-to-life. "
+    "Frame any people from behind, over the shoulder, hands-only, torso-only, or cropped "
+    "below the chin so NO face is shown - no face, no visible faces, no portraits, no eye "
+    "contact. Visible real texture everywhere: natural skin pores, micro-detail and "
+    "imperfections on hands, real fabric weave, wood grain, surface scratches and dust; "
+    "subtle sensor noise / fine film grain, realistic dynamic range and shadows. "
+    "Unretouched, no beauty smoothing, no glossy CGI look, no plastic skin, no "
+    "over-smoothing, not airbrushed, not a 3D render. It must look like a candid real "
+    "photo a professional took, indistinguishable from a real DSLR photograph. Not an "
+    "infographic, not an illustration, no text, no words, no logos. A real photo of a "
+    "real scene."
 )
+
+# The STRICT scene-authoring rules. The face + texture + negative rules live HERE too -
+# in the instruction to Claude, which honours them - so the SCENE itself is composed
+# face-free and texture-rich before the suffix reinforces it at the image model.
+_PHOTO_BRIEF_RULES = (
+    "You are a photo director briefing a photographer for a web article. For EACH "
+    "section listed below, invent ONE concrete, literal real-world scene a photographer "
+    "could actually walk up and shoot - a real place, with real objects and, only where "
+    "it genuinely helps, real people, doing something specific and relevant to the topic "
+    "and its industry. Prefer people-free scenes (workspaces, tools, materials, "
+    "environments, close-ups of hands or objects). If a person appears, they MUST be "
+    "framed so NO face is visible: from behind, over the shoulder, hands-only, "
+    "torso-only, a silhouette, or cropped below the chin. Do NOT describe any visible or "
+    "partially-visible human face, eyes, or portrait. "
+    "STRICT rules for EVERY scene: describe ONLY a physical, photographable moment - who "
+    "or what is present, where, what is happening, and the light - with rich real-world "
+    "texture (grain, wear, materials). Include NO text, words, letters or numbers "
+    "anywhere in the scene; NO charts, graphs, diagrams or infographics; NO logos, brand "
+    "marks, user interfaces, or screens showing readable content; NO abstract symbols, "
+    "concept art, or collages; ONE single scene, never multiple panels. Keep each scene "
+    "to one vivid sentence."
+)
+
+# Concrete generic professional / lifestyle scenes - the degrade-safe fallback used when
+# the writer is unavailable, cost-blocked, or returns junk. Deliberately literal, topic-
+# free, AND face-free (people-free or framed hands-only / from behind / cropped), so even
+# a fallback image is a real photographable scene with no AI face tell (never the abstract
+# subject, never text/charts).
+_FALLBACK_SCENES: tuple[str, ...] = (
+    "Close-up of a pair of hands typing on a worn laptop keyboard at a wooden desk, a "
+    "ceramic coffee cup beside it, soft natural window light.",
+    "An over-the-shoulder view of someone reviewing printed pages at a desk in a sunlit "
+    "workspace, their face out of frame.",
+    "A tidy modern office desk shot from directly above with a notebook, pen and a small "
+    "plant, warm daylight raking across the wood grain.",
+    "Gloved hands gripping a cordless drill against a raw timber frame on a real job "
+    "site, fine sawdust in the air under clear daylight.",
+    "A person shot from behind walking through a bright office corridor holding a folder, "
+    "late-afternoon sun casting long shadows.",
+    "Close-up of two hands shaking over a desk, cropped below the shoulders, shallow "
+    "depth of field and soft window light.",
+    "A barista's hands tamping ground coffee into a stainless portafilter, steam rising, "
+    "warm cafe light catching the metal.",
+    "A weathered leather tool belt and hand tools resting on a scratched workbench, "
+    "natural light revealing every scuff and grain.",
+)
+
+_PHOTO_BRIEF_MIN_TOKENS = 200
+_PHOTO_BRIEF_TOKENS_PER_SCENE = 90
+_JSON_FENCE_RE = re.compile(r"```(?:json)?|```")
+
+
+def _photo_brief_prompt(*, primary: str, intent: str, headings: Sequence[str]) -> str:
+    """The batched instruction: one literal scene per section, strict JSON out."""
+    numbered = "\n".join(f"{i + 1}. {heading}" for i, heading in enumerate(headings))
+    return (
+        f"{_PHOTO_BRIEF_RULES}\n\n"
+        f"Topic of the page: '{primary}' ({intent} intent).\n"
+        f"Sections that each need one photo, in order:\n{numbered}\n\n"
+        f"Return STRICT JSON ONLY: a JSON array of EXACTLY {len(headings)} strings - one "
+        f"literal scene per section, in the same order. No object keys, no prose, no "
+        f"markdown, no code fences."
+    )
+
+
+def _parse_photo_briefs(text: str, count: int) -> list[str]:
+    """Parse the writer's strict-JSON array of scene strings into up to ``count`` clean
+    scenes. Returns ``[]`` for anything that is not a usable JSON array of strings (the
+    caller then pads from the concrete fallback templates - never the topic)."""
+    if not text or not text.strip():
+        return []
+    cleaned = _JSON_FENCE_RE.sub("", text).strip()
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start == -1 or end <= start:
+        return []
+    try:
+        parsed = json.loads(cleaned[start : end + 1])
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    scenes = [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
+    return scenes[:count]
+
+
+def _photo_briefs(
+    writer: Summarizer,
+    model: str,
+    *,
+    primary: str,
+    intent: str,
+    headings: Sequence[str],
+) -> list[str]:
+    """Author ONE concrete, camera-ready real-world scene per slot in a SINGLE batched
+    writer call (the only external touch here; the worker's gated writer meters it on the
+    ``content`` dial). ALWAYS returns EXACTLY ``len(headings)`` scenes: the writer's
+    parsed scenes first, the remainder padded from :data:`_FALLBACK_SCENES`. Degrade-safe
+    - a cost-gate block, a provider error, or junk output falls back to the concrete
+    templates (never the abstract topic) and NEVER raises."""
+    n = len(headings)
+    if n == 0:
+        return []
+    scenes: list[str] = []
+    try:
+        result = writer.summarize(
+            _photo_brief_prompt(primary=primary, intent=intent, headings=headings),
+            model=model,
+            max_tokens=max(_PHOTO_BRIEF_MIN_TOKENS, n * _PHOTO_BRIEF_TOKENS_PER_SCENE),
+        )
+        scenes = _parse_photo_briefs(result.text, n)
+    except Exception:  # spend block / provider error / junk -> concrete fallback, never crash
+        scenes = []
+    for i in range(len(scenes), n):
+        scenes.append(_FALLBACK_SCENES[i % len(_FALLBACK_SCENES)])
+    return scenes
 
 
 def _plan_images(
-    builder: _Builder, *, primary: str, client: str, moves: tuple[_Move, ...], tuning: GeneratorTuning
+    builder: _Builder,
+    writer: Summarizer,
+    model: str,
+    *,
+    primary: str,
+    client: str,
+    intent: str,
+    moves: tuple[_Move, ...],
+    tuning: GeneratorTuning,
 ) -> None:
-    """Plan a hero + one image per major section, each with authoritative alt text
-    (§9), capped at ``max_images``. Every prompt requests a REAL photograph of a
-    real-world scene related to the topic - never an infographic/illustration."""
-    builder.images.append(
-        ImagePlanItem(
-            slot="hero",
-            prompt=(
-                f"A realistic professional photograph of a real-world scene related to "
-                f"{primary}. {_PHOTO_STYLE}"
-            ),
-            alt=f"{primary} - {client}",
-        )
-    )
+    """Plan a hero + one image per major section (§9), capped at ``max_images``. Each
+    image's PROMPT is a CONCRETE real-world SCENE authored by the writer (never the
+    abstract topic) + the fixed camera/realism suffix; the ALT text stays the
+    human-readable heading (accessibility + on-page SEO)."""
+    slots: list[tuple[str, str]] = [("hero", f"{primary} - {client}")]
     for move in moves:
-        if len(builder.images) >= tuning.max_images:
+        if len(slots) >= tuning.max_images:
             break
         heading = move.heading.format(primary=primary, client=client)
-        builder.images.append(
-            ImagePlanItem(
-                slot=f"section:{move.role}",
-                prompt=(
-                    f"A realistic candid photograph capturing a real-world scene that reflects "
-                    f"'{heading}' in the context of {primary}. {_PHOTO_STYLE}"
-                ),
-                alt=heading,
-            )
-        )
+        slots.append((f"section:{move.role}", heading))
+
+    scenes = _photo_briefs(
+        writer, model, primary=primary, intent=intent, headings=[alt for _slot, alt in slots]
+    )
+    for (slot, alt), scene in zip(slots, scenes, strict=True):
+        builder.images.append(ImagePlanItem(slot=slot, prompt=f"{scene} {_CAMERA_SUFFIX}", alt=alt))
 
 
 def _title(primary: str, angle: DifferentiationAngle, client: str) -> str:
@@ -1028,7 +1159,10 @@ def generate(
         )
     )
 
-    _plan_images(builder, primary=primary, client=client, moves=moves, tuning=tuning)
+    _plan_images(
+        builder, writer, model,
+        primary=primary, client=client, intent=intent, moves=moves, tuning=tuning,
+    )
 
     draft_md = builder.render()
     word_count = _word_count(draft_md)

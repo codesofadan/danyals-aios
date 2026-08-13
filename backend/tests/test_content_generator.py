@@ -18,10 +18,13 @@ NO network. Proves the Content Doctrine's enforceable rules:
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
 from app.services.content_generator import (
+    _CAMERA_SUFFIX,
+    _FALLBACK_SCENES,
     ANSWER_MAX_WORDS,
     DIFFERENTIATION_KINDS,
     LOCAL_UNIQUE_MIN,
@@ -396,3 +399,154 @@ def test_generation_is_deterministic() -> None:
     assert first.draft_md == second.draft_md
     assert first.title == second.title
     assert first.meta_description == second.meta_description
+
+
+# --------------------------------------------------------------------------- #
+# 9. Image prompts are CONCRETE PHOTOGRAPHIC SCENES (never the abstract topic).
+#    gpt-image-1 renders an abstract topic as title text -> an infographic. So the writer
+#    authors one literal camera-ready scene per image and the final prompt is that scene +
+#    the fixed camera/realism suffix. The topic never enters the prompt; the suffix forces
+#    NO human face (the #1 AI tell) + hyper-realistic photographic texture (kills the
+#    airbrushed look). Only the ALT text stays the human heading.
+# --------------------------------------------------------------------------- #
+# Concrete, literal, TOPIC-FREE, FACE-FREE scenes a fake writer returns as the batched brief.
+_CONCRETE_SCENES = [
+    "Close-up of a carpenter's hands sanding an oak plank in a sawdust-lit workshop",
+    "A barista's hands steaming milk behind a cafe counter in morning light",
+    "Gloved hands, shot from behind, planting seedlings in a sunny backyard bed",
+    "An over-the-shoulder view of a wrench turning a bolt beside a lifted car",
+    "A baker's hands sliding a tray of loaves into a glowing stone oven",
+    "A cyclist seen from behind pausing on a stone bridge over a river at dusk",
+]
+
+
+class _SceneWriter:
+    """A ``Summarizer`` fake: returns a strict-JSON scene array for the ONE batched photo
+    brief (detected by the 'photo director' marker) and plain prose for every body
+    section. Counts the brief calls so a test can prove the call is batched (exactly 1)."""
+
+    def __init__(self, scenes: list[str]) -> None:
+        self._scenes = scenes
+        self.brief_calls = 0
+
+    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        if "photo director" in prompt:  # the photo-brief instruction
+            self.brief_calls += 1
+            return LLMResult(text=json.dumps(self._scenes), input_tokens=10, output_tokens=10)
+        return LLMResult(text="Plain grounded prose for this section.", input_tokens=6, output_tokens=6)
+
+
+def test_image_prompts_are_concrete_scenes_plus_suffix_not_the_topic() -> None:
+    writer = _SceneWriter(_CONCRETE_SCENES)
+    result = generate(
+        _brief(keyword="roof repair"), _source_pack(), _context(),
+        page_type="service", framework="Auto", writer=writer,
+    )
+    # ONE batched writer call authored ALL image scenes (cheaper than one-per-image).
+    assert writer.brief_calls == 1
+    assert result.images_plan
+    for i, img in enumerate(result.images_plan):
+        # The prompt is EXACTLY the concrete scene + the fixed camera/realism suffix.
+        assert img.prompt == f"{_CONCRETE_SCENES[i]} {_CAMERA_SUFFIX}"
+        assert img.prompt.endswith(_CAMERA_SUFFIX)
+        # The ABSTRACT topic never enters the prompt.
+        assert "roof repair" not in img.prompt.lower()
+        prompt_low = img.prompt.lower()
+        # No-face framing is enforced (visible AI faces are the #1 tell).
+        assert "no face" in prompt_low
+        # Hyper-realistic, unretouched texture is demanded (kills the airbrushed AI look).
+        assert "unretouched" in prompt_low
+        assert "pores" in prompt_low and "grain" in prompt_low
+
+
+def test_image_prompts_fall_back_to_concrete_templates_when_writer_raises() -> None:
+    class _RaisingBriefWriter:
+        """Body prose succeeds; the photo-brief call fails (a provider error)."""
+
+        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+            if "photo director" in prompt:
+                raise RuntimeError("image-brief provider down")
+            return LLMResult(text="Plain prose.", input_tokens=4, output_tokens=4)
+
+    result = generate(
+        _brief(keyword="roof repair"), _source_pack(), None,
+        page_type="service", framework="Auto", writer=_RaisingBriefWriter(),
+    )
+    assert result.images_plan  # the job still produced an image plan (no crash)
+    for img in result.images_plan:
+        assert img.prompt.endswith(_CAMERA_SUFFIX)
+        scene = img.prompt[: -len(_CAMERA_SUFFIX)].strip()
+        assert scene in _FALLBACK_SCENES  # a concrete generic template, not the topic
+        assert "roof repair" not in img.prompt.lower()
+        assert "no face" in img.prompt.lower()  # the no-face suffix still applies
+
+
+@pytest.mark.parametrize(
+    "brief_text",
+    ["", "   ", "not json at all", "[]", '["", "   "]', '{"scene": "x"}', "[1, 2, 3]"],
+)
+def test_image_prompts_fall_back_on_empty_or_junk_writer_output(brief_text: str) -> None:
+    class _JunkBriefWriter:
+        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+            if "photo director" in prompt:
+                return LLMResult(text=brief_text, input_tokens=1, output_tokens=1)
+            return LLMResult(text="Plain prose.", input_tokens=4, output_tokens=4)
+
+    result = generate(
+        _brief(keyword="roof repair"), _source_pack(), None,
+        page_type="service", framework="Auto", writer=_JunkBriefWriter(),
+    )
+    assert result.images_plan
+    for img in result.images_plan:
+        scene = img.prompt[: -len(_CAMERA_SUFFIX)].strip()
+        assert scene in _FALLBACK_SCENES  # degraded to a concrete generic scene
+        assert "roof repair" not in img.prompt.lower()
+
+
+def test_image_alt_text_stays_the_section_heading() -> None:
+    writer = _SceneWriter(_CONCRETE_SCENES)
+    result = generate(
+        _brief(keyword="roof repair"), _source_pack(), _context(),
+        page_type="service", framework="Auto", writer=writer,
+    )
+    imgs = result.images_plan
+    # Hero comes first; its alt is the primary + client (unchanged behaviour).
+    assert imgs[0].slot == "hero"
+    assert imgs[0].alt == "roof repair - Acme Roofing"
+    # Section images keep the human-readable AIDA heading as alt (accessibility + SEO),
+    # even though the PROMPT is a topic-free concrete scene.
+    expected_alt = {
+        "section:attention": "Why roof repair matters",
+        "section:interest": "How roof repair works",
+        "section:desire": "The benefits of choosing Acme Roofing",
+        "section:action": "Get started with roof repair",
+    }
+    section_imgs = [img for img in imgs if img.slot.startswith("section:")]
+    assert section_imgs  # AIDA has four moves -> four section images
+    for img in section_imgs:
+        assert img.alt == expected_alt[img.slot]
+        assert img.alt != img.prompt  # the alt is the heading, not the scene prompt
+
+
+def test_camera_suffix_enforces_no_faces_and_realistic_texture() -> None:
+    suffix = _CAMERA_SUFFIX.lower()
+    # No-face framing (visible AI faces are the #1 "this is AI" tell).
+    for phrase in ("no face", "no visible faces", "no portraits", "no eye contact"):
+        assert phrase in suffix
+    # Hyper-realistic, unretouched photographic texture (kills the airbrushed / CGI look).
+    for phrase in (
+        "unretouched", "pores", "grain", "not airbrushed", "not a 3d render", "no plastic skin",
+    ):
+        assert phrase in suffix
+    # The infographic / text negatives are kept as cheap insurance on top of the scene lever.
+    for phrase in ("not an infographic", "no text", "no logos"):
+        assert phrase in suffix
+    # The suffix is topic-free by construction (no article subject leaks in).
+    assert "roof repair" not in suffix
+
+
+def test_fallback_scenes_are_generic_topic_free_and_sufficient() -> None:
+    assert len(_FALLBACK_SCENES) >= MAX_IMAGES  # enough distinct templates to fill every slot
+    for scene in _FALLBACK_SCENES:
+        assert scene.strip()
+        assert "roof repair" not in scene.lower()  # a generic scene, never the abstract topic
