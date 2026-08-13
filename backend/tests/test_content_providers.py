@@ -354,7 +354,27 @@ def test_factory_selects_real_enrichment_with_keys(monkeypatch: pytest.MonkeyPat
         "model_heavy": "claude-sonnet-5",
     }
     assert built["serp"] == {"api_key": "sk"}
-    assert built["images"] == {"api_key": "ik", "model": "m1"}
+    # image_host is the decoded-b64 hosting seam; None here (no artifact root configured
+    # in these bare settings) -> a b64 image would degrade to skipped, never crash.
+    assert built["images"] == {"api_key": "ik", "model": "m1", "image_host": None}
+
+
+def test_factory_wires_a_real_image_host_when_an_artifact_root_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With a hosting root configured, the real generator is handed a live image host so
+    # a gpt-image-1 b64_json image can be decoded + served (the whole point of the fix).
+    from app.services.content_images import LocalContentImageStore
+
+    built: dict[str, object] = {}
+    monkeypatch.setattr(cp, "AnthropicSummarizer", lambda **_k: "WRITER")
+    monkeypatch.setattr(cp, "OpenAIImageGenerator", lambda **kw: built.update(kw) or "IMAGES")
+
+    bundle = content_providers_from_settings(
+        _settings(anthropic_api_key="ak", image_gen_api_key="ik", content_image_dir="/var/imgs")
+    )
+    assert isinstance(bundle, ContentProviders)
+    assert isinstance(built["image_host"], LocalContentImageStore)
 
 
 def test_content_providers_for_tests_returns_fakes() -> None:

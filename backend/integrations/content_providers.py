@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from app.config import Settings
 from app.logging_setup import get_logger
+from app.services.content_images import content_image_store_from_settings
 from integrations.content_research import FakeSerpResearcher, SerperResearcher, SerpResearcher
 from integrations.images import FakeImageGenerator, ImageGenerator, OpenAIImageGenerator
 from integrations.llm import AnthropicSummarizer, FakeSummarizer, Summarizer
@@ -83,9 +84,14 @@ def content_providers_from_settings(settings: Settings) -> ContentProviders | No
     )
 
     image_key = settings.image_gen_api_key
+    # gpt-image-1 returns base64 (b64_json), not a hosted url, so the real generator
+    # is handed an image HOST that decodes + serves the bytes as a real https URL
+    # (None when no artifact root is configured -> a b64 image degrades to skipped).
     images: ImageGenerator = (
         OpenAIImageGenerator(
-            api_key=image_key.get_secret_value(), model=settings.image_gen_model
+            api_key=image_key.get_secret_value(),
+            model=settings.image_gen_model,
+            image_host=content_image_store_from_settings(settings),
         )
         if image_key
         else FakeImageGenerator()
