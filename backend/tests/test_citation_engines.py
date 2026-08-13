@@ -191,6 +191,20 @@ def test_form_specs_catalog_is_non_empty_and_every_directory_name_is_unique() ->
         assert spec.fields  # every spec fills at least one field
 
 
+def test_form_specs_catalog_has_at_least_fifty_automation_ready_directories() -> None:
+    # The catalog was expanded 36 -> 50 bot_fillable directories (all real rows from
+    # db/migrations/0046_directories_seed.sql). This is the structural sanity sweep:
+    # every spec must be fully formed (a real https URL + >=1 field + a submit button
+    # + a success indicator) so a queued row can actually be driven, never a half-spec.
+    assert len(FORM_SPECS) >= 50
+    for name, spec in FORM_SPECS.items():
+        assert spec.url.startswith("https://"), name  # non-empty, real add-business URL
+        assert len(spec.fields) >= 1, name  # fills at least one NAP field
+        assert all(f.selector and f.value_key for f in spec.fields), name
+        assert spec.submit_selector, name  # a button to submit
+        assert spec.success_indicator, name  # a way to know it worked
+
+
 def test_playwright_bot_degrades_cleanly_without_the_optional_dependency() -> None:
     # Playwright is not installed in this test env - this IS the production-without-
     # the-automation-extra case, not a test artifact to work around.
