@@ -79,6 +79,17 @@ _WEB2_PIPELINE_STATUSES: frozenset[str] = frozenset(
     {"draft", "needs_review", "publishing", "published", "failed", "rejected"}
 )
 
+# --- Web 2.0 platform CATALOG (public.web2_platforms, 0062/0063) ---------------
+# The web2 analogue of the citation-directory catalog: reference data, not tenant
+# data. `auth_type` is verbatim from the public.web2_auth_type enum (0062); the
+# catalog `name` is FREE TEXT (decoupled from the web2_platform PUBLISHING enum), so
+# it is NOT the Web2Platform union above - a catalog row can name a platform we have
+# no publisher for yet.
+Web2AuthType = Literal["api", "oauth", "automation", "anonymous"]
+Web2AuthorityTier = Literal["high", "medium", "low"]
+_WEB2_AUTH_TYPES: frozenset[str] = frozenset({"api", "oauth", "automation", "anonymous"})
+_WEB2_AUTHORITY_TIERS: frozenset[str] = frozenset({"high", "medium", "low"})
+
 
 def action_for(nap_status: str) -> CitationAction:
     """The action a NAP state calls for: ``missing`` -> ``Submit`` (create the
@@ -208,6 +219,55 @@ class OffpageKpisResponse(BaseModel):
     new_links_30d: int = Field(serialization_alias="newLinks30d")
     lost_links_30d: int = Field(serialization_alias="lostLinks30d")
     toxic_flagged: int = Field(serialization_alias="toxicFlagged")
+
+
+class Web2PlatformCatalogResponse(BaseModel):
+    """One row of the Web 2.0 platform CATALOG (``public.web2_platforms``, 0062/0063) -
+    reference data, not tenant data (there is no ``client_id`` to leak).
+
+    ``automationReady`` marks the 17 platforms the pipeline can publish to TODAY (a real
+    ``Web2Publisher`` class + the ``web2_platform`` enum value both exist); the other 33
+    are catalogued build targets. ``authType`` is verbatim from the ``web2_auth_type``
+    enum; ``authorityTier`` is a directional high/medium/low (not a DA number)."""
+
+    id: str
+    name: str
+    homepage_url: str = Field(serialization_alias="homepageUrl")
+    signup_url: str = Field(serialization_alias="signupUrl")
+    publish_method: str = Field(serialization_alias="publishMethod")
+    auth_type: Web2AuthType = Field(serialization_alias="authType")
+    authority_tier: Web2AuthorityTier = Field(serialization_alias="authorityTier")
+    market: str
+    automation_ready: bool = Field(serialization_alias="automationReady")
+    notes: str
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Web2PlatformCatalogResponse:
+        auth = row.get("auth_type")
+        tier = row.get("authority_tier")
+        return cls(
+            id=str(row["id"]),
+            name=row.get("name", ""),
+            homepage_url=row.get("homepage_url", ""),
+            signup_url=row.get("signup_url", ""),
+            publish_method=row.get("publish_url_or_method", ""),
+            auth_type=auth if auth in _WEB2_AUTH_TYPES else "automation",
+            authority_tier=tier if tier in _WEB2_AUTHORITY_TIERS else "medium",
+            market=row.get("market", "global") or "global",
+            automation_ready=bool(row.get("automation_ready", False)),
+            notes=row.get("notes", ""),
+        )
+
+
+class Web2CatalogResponse(BaseModel):
+    """The Web 2.0 platform catalog plus a one-line rollup header: how many platforms
+    total, how many are ``automationReady`` (the pipeline can publish to now), and the
+    per-``authType`` breakdown - the web2 analogue of the citation engine board."""
+
+    total: int
+    automation_ready: int = Field(serialization_alias="automationReady")
+    by_auth_type: dict[str, int] = Field(serialization_alias="byAuthType")
+    platforms: list[Web2PlatformCatalogResponse]
 
 
 # --- Request models -----------------------------------------------------------
