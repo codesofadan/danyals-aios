@@ -4,7 +4,7 @@ import "./login.css";
 
 export const metadata: Metadata = {
   title: "AIOS · Sign in",
-  description: "Sign in to your AIOS workspace — admin, team or client.",
+  description: "Sign in to your AIOS workspace.",
 };
 
 // The front door. Every admin, team-portal and client dashboard route is

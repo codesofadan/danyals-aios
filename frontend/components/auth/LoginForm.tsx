@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth, ROLE_META, type Role } from "@/lib/auth";
+import { useAuth, ROLE_META } from "@/lib/auth";
 import { useLoader } from "@/components/loader/LoaderProvider";
-
-const PORTALS: Role[] = ["admin", "team", "client"];
 
 export default function LoginForm() {
   const { session, ready, login } = useAuth();
   const router = useRouter();
   const loader = useLoader();
-  const [portal, setPortal] = useState<Role>("admin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -42,10 +39,12 @@ export default function LoginForm() {
     const res = await login(username.trim(), password);
     if (res.ok) {
       loader.navigate("Opening your workspace");
-      // An admin lands on whichever portal tab they picked (super-admin preview);
-      // team/client always land on their own portal (the server role wins).
-      const dest = res.role === "admin" ? portal : res.role;
-      router.replace(ROLE_META[dest].home);
+      // ONE sign-in for everyone: the destination is the SERVER-decided portal
+      // (derived from the account's real DB role), never a client-picked tab.
+      // Admins land on /admin and can switch to preview another portal from
+      // inside the dashboard — the login page exposes no portal choice, so a
+      // client/attacker can't even signal an intent to reach admin.
+      router.replace(ROLE_META[res.role].home);
     } else {
       setError(res.error);
       setBusy(false);
@@ -65,23 +64,9 @@ export default function LoginForm() {
 
         <h1 className="login-h">Sign in to AIOS</h1>
 
-        {/* Portal selector — pick which workspace you're signing into. The server
-            still authorises by your account's real role; this sets where you land. */}
-        <div className="seg login-portal-seg" role="tablist" aria-label="Portal">
-          {PORTALS.map((p) => (
-            <button
-              key={p}
-              type="button"
-              role="tab"
-              aria-selected={portal === p}
-              className={portal === p ? "on" : undefined}
-              onClick={() => setPortal(p)}
-            >
-              {ROLE_META[p].label}
-            </button>
-          ))}
-        </div>
-        <p className="login-sub">{ROLE_META[portal].hint}</p>
+        {/* One sign-in for every workspace. No portal tabs: your account's role
+            decides where you land, decided by the server from your credentials. */}
+        <p className="login-sub">Sign in with your credentials — your account opens the right workspace.</p>
 
         <form className="login-form" onSubmit={submit}>
           {expired && !error && (
