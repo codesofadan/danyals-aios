@@ -792,14 +792,34 @@ def _links_block(
     builder.parts.append("\n".join(f"- [{link.anchor}]({link.url})" for link in builder.links))
 
 
+# Every generated image must read as a REAL photograph of a REAL scene - never an
+# infographic, illustration, diagram, chart, 3D render, or anything with text/logos.
+# This directive is appended to every image prompt so gpt-image-1 renders camera-shot
+# realism; the strong negatives suppress its default lean toward stylised/graphic art.
+_PHOTO_STYLE = (
+    "Photorealistic, high-resolution editorial photograph of a real-world scene, shot on a "
+    "full-frame DSLR with a 35mm lens, natural lighting, realistic depth of field, authentic "
+    "candid real people and true-to-life environments. It MUST look like a real photo taken "
+    "with a camera. Absolutely NOT an infographic, NOT an illustration, NOT a diagram, NOT a "
+    "chart, NOT a 3D render, NOT clip art, NOT a cartoon. NO text, NO words, NO letters, NO "
+    "numbers, NO logos, NO watermarks, NO UI mockups."
+)
+
+
 def _plan_images(
     builder: _Builder, *, primary: str, client: str, moves: tuple[_Move, ...], tuning: GeneratorTuning
 ) -> None:
     """Plan a hero + one image per major section, each with authoritative alt text
-    (§9), capped at ``max_images``."""
+    (§9), capped at ``max_images``. Every prompt requests a REAL photograph of a
+    real-world scene related to the topic - never an infographic/illustration."""
     builder.images.append(
         ImagePlanItem(
-            slot="hero", prompt=f"Hero image for {primary} - {client}", alt=f"{primary} - {client}"
+            slot="hero",
+            prompt=(
+                f"A realistic professional photograph of a real-world scene related to "
+                f"{primary}. {_PHOTO_STYLE}"
+            ),
+            alt=f"{primary} - {client}",
         )
     )
     for move in moves:
@@ -807,7 +827,14 @@ def _plan_images(
             break
         heading = move.heading.format(primary=primary, client=client)
         builder.images.append(
-            ImagePlanItem(slot=f"section:{move.role}", prompt=f"Illustration for '{heading}'", alt=heading)
+            ImagePlanItem(
+                slot=f"section:{move.role}",
+                prompt=(
+                    f"A realistic candid photograph capturing a real-world scene that reflects "
+                    f"'{heading}' in the context of {primary}. {_PHOTO_STYLE}"
+                ),
+                alt=heading,
+            )
         )
 
 
