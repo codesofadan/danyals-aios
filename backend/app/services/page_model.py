@@ -105,6 +105,41 @@ class PageModel:
         }
 
 
+def _derive_cta_for(row: dict[str, Any]) -> dict[str, Any]:
+    """A closing call-to-action from the job (best practice; always present). The button
+    points at the client's own site when known."""
+    sp = _as_dict(row.get("source_pack"))
+    site = str(sp.get("wp_site_url") or sp.get("site_url") or "").strip() or "#"
+    client = str(sp.get("client_name") or row.get("client_name") or "our team").strip() or "our team"
+    topic = str(row.get("topic") or "your goals").strip() or "your goals"
+    return {
+        "heading": "Ready to take the next step?",
+        "text": f"Talk to {client} about {topic} and get expert guidance tailored to you.",
+        "button_label": "Get in touch",
+        "button_url": site,
+    }
+
+
+def page_model_for_job(row: dict[str, Any]) -> PageModel:
+    """Build the editable :class:`PageModel` for a content-job row: slot its draft into
+    the resolved blueprint (analyzed site / chosen template / page-type default) with the
+    job's design profile, testimonials, and a derived CTA. This is what the dashboard live
+    editor loads (and what publish renders when no hand-edited model is saved)."""
+    sp = _as_dict(row.get("source_pack"))
+    profile = _as_dict(sp.get("design_profile")) or None
+    template = str(sp.get("template") or "").strip() or None
+    testimonials = [str(t) for t in (sp.get("testimonials") or []) if str(t).strip()]
+    return build_page_model(
+        str(row.get("draft_md") or ""),
+        design_profile=profile,
+        template=template,
+        page_type=str(row.get("page_type") or "blog"),
+        cta=_derive_cta_for(row),
+        testimonials=testimonials,
+        title=str(row.get("topic") or ""),
+    )
+
+
 def page_model_from_dict(raw: dict[str, Any]) -> PageModel:
     """Rebuild a :class:`PageModel` from the editor's saved JSON (tolerant of missing
     fields so a partial save still loads)."""

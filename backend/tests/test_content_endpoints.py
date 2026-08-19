@@ -253,6 +253,76 @@ async def test_rich_retrieval_returns_server_columns(
     assert (await client.get("/api/v1/content/jobs/CJ-7/schema")).json()["schema"] == {"@graph": [1]}
 
 
+async def test_page_model_get_builds_from_the_job(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    # The live editor loads the editable page model: built from the draft + template.
+    repo.seed(
+        code="CJ-PM1", page_type="service",
+        draft_md="# Fast plumbing\n\nWe fix pipes.\n\n## Why us\n- **Fast** - 60 min\n\n## Book\nCall.",
+        source_pack={"client_name": "Acme", "template": "service"},
+    )
+    wire("specialist")
+    r = await client.get("/api/v1/content/jobs/CJ-PM1/page-model")
+    assert r.status_code == 200
+    body = r.json()
+    kinds = [s["kind"] for s in body["sections"] if s["visible"]]
+    assert "hero" in kinds and "cta" in kinds
+    hero = next(s for s in body["sections"] if s["kind"] == "hero")
+    assert hero["heading"] == "Fast plumbing"
+
+
+async def test_page_model_get_returns_saved_edits(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    saved = {"title": "T", "design": {}, "sections": [
+        {"id": "s0", "kind": "hero", "layout": "split", "heading": "EDITED",
+         "visible": True, "data": {"subhead": "x", "buttons": []}, "images": []}]}
+    repo.seed(code="CJ-PM2", source_pack={"page_model": saved})
+    wire("specialist")
+    body = (await client.get("/api/v1/content/jobs/CJ-PM2/page-model")).json()
+    assert body["sections"][0]["heading"] == "EDITED"  # the saved model, not a rebuild
+
+
+async def test_page_model_put_saves_onto_the_job(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-PM3", source_pack={"client_name": "Acme"})
+    wire("admin")
+    model = {"title": "T", "design": {}, "sections": [
+        {"id": "s0", "kind": "hero", "layout": "centered", "heading": "New headline",
+         "visible": True, "data": {"subhead": "s", "buttons": []}, "images": []}]}
+    r = await client.put("/api/v1/content/jobs/CJ-PM3/page-model", json=model)
+    assert r.status_code == 200 and r.json()["saved"] is True
+    # It landed in source_pack.page_model on the row (jsonb columns are Jsonb-wrapped).
+    stored = repo.jobs["CJ-PM3"]["source_pack"]
+    sp = stored.obj if hasattr(stored, "obj") else stored
+    assert sp["page_model"]["sections"][0]["heading"] == "New headline"
+
+
+async def test_page_model_preview_renders_publish_html(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    wire("specialist")
+    model = {"title": "T", "design": {}, "sections": [
+        {"id": "s0", "kind": "hero", "layout": "centered", "heading": "Preview me",
+         "visible": True, "data": {"subhead": "sub", "buttons": []}, "images": []},
+        {"id": "s1", "kind": "cta", "layout": "banner", "heading": "Go",
+         "visible": True, "data": {"text": "t", "button": {"label": "Book", "url": "#"}}, "images": []}]}
+    r = await client.post("/api/v1/content/page-model/preview", json=model)
+    assert r.status_code == 200
+    html = r.json()["html"]
+    assert "Preview me" in html and "aios-hero" in html and "aios-cta" in html
+
+
+async def test_page_model_client_forbidden(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-PM4")
+    wire("client")
+    assert (await client.get("/api/v1/content/jobs/CJ-PM4/page-model")).status_code == 403
+
+
 async def test_rich_retrieval_outline_links_entities_for_preview(
     client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
 ) -> None:

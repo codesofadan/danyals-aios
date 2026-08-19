@@ -66,6 +66,11 @@ from app.services.content_research import (
     run_content_research,
 )
 from app.services.cost_gate import CostGate
+from app.services.page_model import (
+    model_to_html,
+    page_model_for_job,
+    page_model_from_dict,
+)
 from app.services.site_design import (
     DesignResult,
     SystemSummarizer,
@@ -142,6 +147,10 @@ ContentPublishEnqueuerDep = Annotated[Callable[[str], None], Depends(get_content
 def _clean_lines(items: list[str] | None) -> list[str]:
     """Trim + drop blanks from an operator-supplied grounding list."""
     return [s.strip() for s in (items or []) if isinstance(s, str) and s.strip()]
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _design_dict(profile: SiteDesignProfile | None) -> dict[str, Any] | None:
@@ -345,6 +354,57 @@ async def get_content_job(code: str, repo: ContentRepoDep, _user: ViewReports) -
     return ContentJobResponse.from_row(row)
 
 
+# --------------------------------------------------------------------------- #
+# Live page editor (WYSIWYG in the dashboard). Registered BEFORE the /{column}
+# catch-all so ``/page-model`` is not swallowed by it. The editable PAGE MODEL a job
+# renders to is loaded, edited (text / images / section order + visibility), saved,
+# and previewed as the EXACT styled HTML that publishes (page_model.model_to_html).
+# On publish the SAME saved model renders BOTH the HTML body and the Elementor tree.
+# --------------------------------------------------------------------------- #
+def _saved_or_built_model(row: dict[str, Any]) -> dict[str, Any]:
+    """The hand-edited page model saved on the job, else one freshly built from the
+    job's draft + resolved blueprint (analyzed site / template / page-type default)."""
+    saved = _as_dict(_as_dict(row.get("source_pack")).get("page_model"))
+    if saved.get("sections"):
+        return saved
+    return page_model_for_job(row).to_dict()
+
+
+@router.get("/content/jobs/{code}/page-model")
+async def get_page_model(code: str, repo: ContentRepoDep, _user: ViewReports) -> dict[str, Any]:
+    """The editable page model for a job (the dashboard live editor loads this): the
+    saved hand-edited model if present, else one built from the draft + blueprint."""
+    row = await asyncio.to_thread(repo.get_job_by_code, code)
+    if row is None:
+        raise _JOB_NOT_FOUND
+    return _saved_or_built_model(row)
+
+
+@router.put("/content/jobs/{code}/page-model")
+async def save_page_model(
+    code: str, body: dict[str, Any], repo: ContentRepoDep, actor: PublishContent
+) -> dict[str, Any]:
+    """Save the live editor's edited page model onto the job (seeded into
+    ``source_pack.page_model``). Normalised through the model shapes so a malformed body
+    is rejected cleanly. Publish then renders this exact model to HTML + Elementor."""
+    row = await asyncio.to_thread(repo.get_job_by_code, code)
+    if row is None:
+        raise _JOB_NOT_FOUND
+    normalised = page_model_from_dict(body).to_dict()  # validate + normalise
+    source_pack = _as_dict(row.get("source_pack"))
+    source_pack["page_model"] = normalised
+    updated = await asyncio.to_thread(
+        repo.update_job_by_code, code, {"source_pack": Jsonb(source_pack)}
+    )
+    if updated is None:
+        raise _JOB_NOT_FOUND
+    await record_activity(
+        actor, kind="content", action="edited a page in the live editor",
+        target=str(row.get("client_name") or ""), entity_type="content", entity_id=code,
+    )
+    return {"id": code, "saved": True}
+
+
 @router.get("/content/jobs/{code}/{column}")
 async def get_content_rich(code: str, column: str, repo: ContentRepoDep, _user: ViewReports) -> dict[str, Any]:
     """Rich retrieval (staff-only, NOT contract-locked): the server-only pipeline
@@ -377,6 +437,15 @@ async def get_content_rich(code: str, column: str, repo: ContentRepoDep, _user: 
     if row is None:
         raise _JOB_NOT_FOUND
     return {"id": str(row.get("code", code)), column: row.get(db_column)}
+
+
+@router.post("/content/page-model/preview")
+async def preview_page_model(body: dict[str, Any], _user: ViewReports) -> dict[str, Any]:
+    """Render a page model (the editor's CURRENT, possibly-unsaved state) to the exact
+    styled HTML fragment the dashboard preview iframe shows AND the publish path emits -
+    so the preview is byte-faithful to what ships. Pure render; no job lookup, no spend."""
+    html = model_to_html(page_model_from_dict(body), fragment=True)
+    return {"html": html}
 
 
 # --------------------------------------------------------------------------- #

@@ -97,9 +97,10 @@ from app.services.content_schema import (
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
-from app.services.elementor import elementor_json
+from app.services.elementor import elementor_json, elementor_json_from_model
 from app.services.notifications import email_client_sync, notify_leads_sync
 from app.services.page_blueprints import SectionSpec, resolve_blueprint
+from app.services.page_model import model_to_html, page_model_from_dict
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import FakeImageGenerator, GeneratedImage, ImageGenerator
@@ -1370,6 +1371,14 @@ def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
     blocks + a ``<style>`` block so the published page MATCHES the analyzed site (colours
     + fonts + layout + components) or the chosen TEMPLATE's classic structure - not just
     a flat section-order. No profile AND no template -> plain render (no regression)."""
+    # A page HAND-EDITED in the dashboard live editor wins: render the exact saved model
+    # to the same styled HTML the editor previewed (preview == published).
+    saved_model = _as_dict(_as_dict(row.get("source_pack")).get("page_model"))
+    if saved_model.get("sections"):
+        try:
+            return model_to_html(page_model_from_dict(saved_model), fragment=True)
+        except Exception:
+            logger.warning("content_saved_model_render_failed", code=str(row.get("code", "")))
     html = md_to_html(draft_md)
     profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
     specs = _resolve_row_blueprint(row)
@@ -1794,19 +1803,25 @@ def _plugin_payload(
     if settings.content_elementor_enabled:
         raw_pack = _as_dict(row.get("source_pack"))
         design_profile = _as_dict(raw_pack.get("design_profile")) or None
-        # Resolve the effective page blueprint (analyzed site > chosen template > page-type
-        # default) and SLOT the draft's content into its sections, rendered as classic,
-        # editable Elementor components - the hero copy + image + CTA land in the hero, the
-        # FAQ pairs in an accordion, testimonials in cards, etc.
-        specs = _resolve_row_blueprint(row)
-        blueprint = [s.as_dict() for s in specs] or None
-        payload["elementor_data"] = elementor_json(
-            draft_md,
-            design_profile,
-            blueprint=blueprint,
-            cta=payload.get("cta") or _derive_cta(row),
-            testimonials=_str_list(raw_pack.get("testimonials")),
-        )
+        saved_model = _as_dict(raw_pack.get("page_model"))
+        if saved_model.get("sections"):
+            # A page hand-edited in the dashboard live editor: publish THAT exact model as
+            # the Elementor tree (so WordPress matches the editor preview + stays editable).
+            payload["elementor_data"] = elementor_json_from_model(saved_model)
+        else:
+            # Resolve the effective page blueprint (analyzed site > chosen template > page-
+            # type default) and SLOT the draft's content into its sections, rendered as
+            # classic, editable Elementor components (hero copy + image + CTA, FAQ accordion,
+            # testimonial cards, ...).
+            specs = _resolve_row_blueprint(row)
+            blueprint = [s.as_dict() for s in specs] or None
+            payload["elementor_data"] = elementor_json(
+                draft_md,
+                design_profile,
+                blueprint=blueprint,
+                cta=payload.get("cta") or _derive_cta(row),
+                testimonials=_str_list(raw_pack.get("testimonials")),
+            )
         payload["elementor_edit_mode"] = "builder"
     return payload
 

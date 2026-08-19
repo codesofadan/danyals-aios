@@ -201,6 +201,25 @@ export type SiteDesignProfile = {
   wireframeHtml: string;
 };
 
+// --- Live page editor model (the editable page a job renders to) --------------
+// One section of the page (hero / card grid / steps / accordion FAQ / testimonials /
+// CTA / prose). `data` is kind-specific (subhead+buttons, cards[], steps[], faq[],
+// quotes[], text+button, html). Mirrors app/services/page_model.py.
+export type PageSection = {
+  id: string;
+  kind: string;
+  layout: string;
+  heading: string;
+  visible: boolean;
+  data: Record<string, unknown>;
+  images: { url: string; alt: string }[];
+};
+export type PageModelDoc = {
+  title: string;
+  design: Record<string, unknown>;
+  sections: PageSection[];
+};
+
 export const contentJobs: ContentJob[] = [
   { id: "CJ-4192", client: "Verde Cafe", color: CLR["Verde Cafe"], pageType: "local", topic: "Best brunch in Portland's Pearl District", framework: "BAB", auto: true, target: "PDF/Markdown", status: "queued", cost: 14, words: 0, schema: "LocalBusiness", images: 0, stage: "Queued", ago: "6m ago" },
   { id: "CJ-4188", client: "NorthPeak Dental", color: CLR["NorthPeak Dental"], pageType: "blog", topic: "Do you really need a night guard?", framework: "PAS", auto: true, target: "WordPress", status: "queued", cost: 16, words: 0, schema: "Article", images: 0, stage: "Queued", ago: "22m ago" },
