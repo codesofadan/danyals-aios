@@ -34,6 +34,8 @@ from __future__ import annotations
 import hashlib
 import random
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -918,6 +920,19 @@ class PlaywrightCitationSubmitter:
                 status="blocked", error="captcha_assisted directory but no CAPTCHA solver configured"
             )
 
+        try:
+            with self._browser_session(job.directory_name) as context:
+                return self._run(context, spec, job)
+        except Exception as exc:  # a form/selector drift must fail cleanly, never crash the worker
+            logger.warning("citation_bot_submit_failed", directory=job.directory_name, error=str(exc))
+            return CitationSubmitResult(status="failed", error=str(exc)[:500])
+
+    @contextmanager
+    def _browser_session(self, directory: str) -> Iterator[Any]:
+        """A stealth Chromium browser CONTEXT (fresh randomized fingerprint, webdriver
+        mask, optional proxy), opened and reliably torn down. Factored out of ``submit``
+        so BOTH the no-signup bot and the signup flow (``citation_signup``) drive an
+        identically-hardened session -- the anti-detection lives in one place."""
         from playwright.sync_api import sync_playwright
 
         # Stealth launch args strip the "controlled by automated test software" tells.
@@ -927,35 +942,36 @@ class PlaywrightCitationSubmitter:
         }
         if self._proxy_url:
             launch_kwargs["proxy"] = _parse_proxy(self._proxy_url)  # split auth (see _parse_proxy)
-        try:
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(**launch_kwargs)
-                # A fresh randomized fingerprint per run: UA + viewport + locale/timezone.
-                ua = self._rng.choice(_USER_AGENTS)
-                vw, vh = self._rng.choice(_VIEWPORTS)
-                locale, tz = self._rng.choice(_LOCALES)
-                context = browser.new_context(
-                    user_agent=ua,
-                    viewport={"width": vw, "height": vh},
-                    locale=locale,
-                    timezone_id=tz,
-                )
-                try:
-                    context.add_init_script(_STEALTH_INIT_JS)  # mask webdriver before page JS
-                except Exception:  # a stealth step must never break an otherwise-valid submit
-                    logger.debug("stealth_init_script_failed", directory=job.directory_name)
-                try:
-                    return self._run(context, spec, job)
-                finally:
-                    context.close()
-                    browser.close()
-        except Exception as exc:  # a form/selector drift must fail cleanly, never crash the worker
-            logger.warning("citation_bot_submit_failed", directory=job.directory_name, error=str(exc))
-            return CitationSubmitResult(status="failed", error=str(exc)[:500])
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(**launch_kwargs)
+            # A fresh randomized fingerprint per run: UA + viewport + locale/timezone.
+            ua = self._rng.choice(_USER_AGENTS)
+            vw, vh = self._rng.choice(_VIEWPORTS)
+            locale, tz = self._rng.choice(_LOCALES)
+            context = browser.new_context(
+                user_agent=ua,
+                viewport={"width": vw, "height": vh},
+                locale=locale,
+                timezone_id=tz,
+            )
+            try:
+                context.add_init_script(_STEALTH_INIT_JS)  # mask webdriver before page JS
+            except Exception:  # a stealth step must never break an otherwise-valid submit
+                logger.debug("stealth_init_script_failed", directory=directory)
+            try:
+                yield context
+            finally:
+                context.close()
+                browser.close()
 
     def _run(self, context: Any, spec: FormSpec, job: CitationJob) -> CitationSubmitResult:
         page = context.new_page()
         page.goto(spec.url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+        return self._fill_form(page, spec, job)
+
+    def _fill_form(self, page: Any, spec: FormSpec, job: CitationJob) -> CitationSubmitResult:
+        """Fill + submit ONE add-business FormSpec on an already-navigated page, then
+        verify success. Reused by the signup flow's post-verify "add business" step."""
         for f in spec.fields:
             value = _job_value(job, f.value_key)
             if value:

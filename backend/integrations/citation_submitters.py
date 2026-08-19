@@ -51,6 +51,10 @@ class CitationJob:
     website_url: str
     categories: tuple[str, ...] = field(default_factory=tuple)
     external_ref: str | None = None
+    # Signup flow (7B-5): the client id feeds a DISTINCT catch-all email alias per
+    # (directory, client) so each account-creation uses its own address. Default-empty
+    # so every existing NAP-only construction stays valid; a `bot:signup` job needs it.
+    client_id: str = ""
     # Richer identity beyond NAP (0060) - what a fuller directory form also asks for.
     # All default-empty so every existing construction site stays valid.
     description: str = ""

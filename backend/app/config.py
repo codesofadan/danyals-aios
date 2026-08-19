@@ -589,6 +589,19 @@ class Settings(BaseSettings):
     # written under. Unset -> no screenshot is captured (an honest empty proof_url,
     # never a crash) - mirrors audit_artifact_dir's key-gating.
     citation_artifact_dir: str | None = None
+    # --- Citation ACCOUNT-CREATION (signup + email verify, 7B-5). A single
+    # CATCH-ALL mailbox (every address at `citation_mail_domain` lands in one INBOX)
+    # lets the signup bot confirm each freshly-created directory account via its OWN
+    # unique alias (see integrations/imap_mailbox.alias_for) - what avoids the "one
+    # email -> many accounts" ban. ALL optional and NOT in _REQUIRED_IN_PROD: with no
+    # mailbox/domain, `imap_mailbox_from_settings` returns None and a `bot:signup`
+    # directory HOLDS as 'blocked' (never crashes). IMAP polling is FREE (no dial).
+    # The password is a SecretStr - never logged / never in a repr. ---
+    citation_imap_host: str = ""  # IMAP-SSL host for the catch-all mailbox
+    citation_imap_port: int = 993
+    citation_imap_user: str = ""
+    citation_imap_password: SecretStr | None = None
+    citation_mail_domain: str = ""  # catch-all domain, e.g. mail.qanry.com
 
     # --- Reports module: the Google Sheets operational store (7D). OPTIONAL and NOT
     # in _REQUIRED_IN_PROD: the SheetStore buffers writes in Redis and unit-tests NOW

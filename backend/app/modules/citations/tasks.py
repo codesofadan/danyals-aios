@@ -26,8 +26,10 @@ from app.services.cost_store import PostgresCostStore
 from integrations.captcha_solver import captcha_solver_from_settings
 from integrations.citation_apis import BingPlacesSubmitter, FoursquareSubmitter
 from integrations.citation_bot import citation_bot_from_settings
+from integrations.citation_signup import citation_signup_bot_from_settings
 from integrations.citation_submitters import CitationSubmitter
 from integrations.errors import ProviderNotConfiguredError
+from integrations.imap_mailbox import imap_mailbox_from_settings
 
 logger = get_logger("app.modules.citations.tasks")
 
@@ -140,9 +142,18 @@ def execute_citation_submit(
         store.update_citation(citation_id, {"submit_status": "submitting"})
         job = job_from_row(row)
         submit_method = str(row.get("submit_method") or "")
-        bot = citation_bot_from_settings(settings, captcha_solver=captcha_solver_from_settings(settings))
+        solver = captcha_solver_from_settings(settings)
+        bot = citation_bot_from_settings(settings, captcha_solver=solver)
+        # Account-creation engine: only wired when a catch-all IMAP mailbox + mail
+        # domain are configured (else None -> a bot:signup directory HOLDS as blocked).
+        # IMAP polling is free; the paid submit is still gated by the `citations` dial.
+        mailbox = imap_mailbox_from_settings(settings)
+        signup_bot = citation_signup_bot_from_settings(settings, captcha_solver=solver, mailbox=mailbox)
         submitter, reason = submitter_for(
-            submit_method, api_submitters=_api_submitters(settings), bot=bot,
+            submit_method,
+            api_submitters=_api_submitters(settings),
+            bot=bot,
+            signup_bot=signup_bot,
         )
         if submitter is None:
             store.update_citation(citation_id, {"submit_status": "blocked", "error": reason[:_ERROR_MAX]})
