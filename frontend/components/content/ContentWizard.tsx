@@ -148,7 +148,9 @@ export default function ContentWizard({
   }
 
   function generatePages() {
-    if (picks.length === 0 || !effectiveClientId || halted || generate.isPending) return;
+    // Proof / first-hand experience is REQUIRED to generate (not just to publish): a page
+    // with zero grounding can never clear the E-E-A-T QA gate, so block at input, not review.
+    if (picks.length === 0 || !effectiveClientId || _lines(proof).length === 0 || halted || generate.isPending) return;
     generate.mutate(
       {
         items: picks,
@@ -175,7 +177,8 @@ export default function ContentWizard({
     research.reset(); siteDesign.reset(); generate.reset();
   }
 
-  const hasProof = _lines(proof).length + _lines(testimonials).length + _lines(uniqueData).length > 0;
+  // Proof is a HARD requirement to generate — the details must be supplied by the user.
+  const hasRequiredDetails = _lines(proof).length > 0;
   const researchDegraded = research.data?.status === "degraded";
   const designDegraded = siteDesign.data?.status === "degraded";
   const clientName = clients.find((c) => c.id === effectiveClientId)?.cn ?? "";
@@ -184,7 +187,7 @@ export default function ContentWizard({
   const canNext =
     step === 1 ? selectedCount > 0 :
     step === 2 ? true :                                // design is optional / skippable
-    step === 3 ? !!effectiveClientId && !halted :
+    step === 3 ? !!effectiveClientId && hasRequiredDetails && !halted :
     step === 4 ? generatedJobs.length > 0 :
     false;
 
@@ -515,11 +518,17 @@ export default function ContentWizard({
             </div>
 
             <div className="fld">
-              <label>Proof &amp; first-hand experience <span className="cs">(one per line)</span></label>
-              <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)} placeholder={PH.proof} />
+              <label>
+                Proof &amp; first-hand experience{" "}
+                <span style={{ color: "var(--warn)", fontWeight: 700 }}>*</span>{" "}
+                <span className="cs">(required · one per line)</span>
+              </label>
+              <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)}
+                placeholder={PH.proof} aria-required="true"
+                style={!hasRequiredDetails ? { borderColor: "var(--warn)" } : undefined} />
               <div className="fld-hint">
-                Required to publish — the E-E-A-T / fact-grounding QA gate holds any page with zero
-                first-hand proof, so it stays un-publishable at review.
+                Required to generate — supply at least one real, first-hand proof point. The E-E-A-T /
+                fact-grounding QA gate holds any page with zero proof, so pages are not built without it.
               </div>
             </div>
 
@@ -539,10 +548,11 @@ export default function ContentWizard({
               </div>
             </div>
 
-            {!hasProof && (
-              <div className="cs" role="status" style={{ color: "var(--warn)", marginBottom: 4 }}>
-                <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>info</span>{" "}
-                No proof added — the pages will generate but hold at the review gate below as un-publishable.
+            {!hasRequiredDetails && (
+              <div className="cs" role="alert" style={{ color: "var(--warn)", marginBottom: 4 }}>
+                <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>error</span>{" "}
+                Add at least one <b>Proof &amp; first-hand experience</b> point above — it&apos;s required to
+                generate. The page won&apos;t build without it.
               </div>
             )}
             {design && attachDesign && (
@@ -705,9 +715,14 @@ export default function ContentWizard({
           </button>
         )}
         {step === 3 && (
-          <button type="button" className="primary-btn" disabled={!canNext || generate.isPending} onClick={generatePages}>
+          <button type="button" className="primary-btn" disabled={!canNext || generate.isPending} onClick={generatePages}
+            title={!hasRequiredDetails ? "Add a proof / first-hand experience point to generate" : undefined}>
             <span className="material-symbols-rounded">{halted ? "block" : "bolt"}</span>
-            {halted ? "API spend halted" : generate.isPending ? "Generating…" : `Generate ${selectedCount} page${selectedCount === 1 ? "" : "s"}`}
+            {halted ? "API spend halted"
+              : generate.isPending ? "Generating…"
+              : !effectiveClientId ? "Pick a client"
+              : !hasRequiredDetails ? "Add proof to generate"
+              : `Generate ${selectedCount} page${selectedCount === 1 ? "" : "s"}`}
           </button>
         )}
         {step === 4 && (
