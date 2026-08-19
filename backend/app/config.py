@@ -555,6 +555,19 @@ class Settings(BaseSettings):
     # tokens (never logged / never in a repr). Optional, never required in prod.
     web2_house_credentials_json: SecretStr | None = None
 
+    # --- Shared catch-all IMAP mailbox (web2 + citation house-account signup, 7B-5).
+    # The off-page automation auto-CREATES house accounts on web2 platforms with a
+    # unique per-signup alias on `mailbox_catchall_domain`, then reads the platform's
+    # confirmation email over IMAP to activate the account (integrations/imap_mailbox.py).
+    # All optional + never required in prod: until host/user/password land the mailbox
+    # factory returns None and every signup DEGRADES to "hold for manual account
+    # creation". The password is a SecretStr (never logged / never in a repr). ---
+    mailbox_imap_host: str | None = None       # e.g. imap.hostinger.com
+    mailbox_imap_port: int = 993               # IMAPS
+    mailbox_imap_user: str | None = None       # the catch-all mailbox login (full address)
+    mailbox_imap_password: SecretStr | None = None
+    mailbox_catchall_domain: str | None = None  # domain the per-signup aliases live on
+
     # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: direct
     # APIs (Bing Places / Foursquare), aggregator pushes, and a self-hosted Playwright
     # bot for bot_fillable/captcha_assisted directories. ALL

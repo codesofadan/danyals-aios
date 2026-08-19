@@ -1008,9 +1008,37 @@ class PlaywrightCitationSubmitter:
         solution = self._captcha_solver.solve(
             CaptchaChallenge(kind=widget.kind, site_key=site_key, page_url=page.url)
         )
+        # Write the token into the response field AND fire the widget's registered
+        # callback. Token-injection alone is silently ignored by React/MUI forms that
+        # validate via ``grecaptcha.getResponse()`` (they read the widget's internal
+        # state, not the textarea) - so the submit fails even with a valid token. Walking
+        # ``___grecaptcha_cfg.clients`` and invoking the ``callback`` flips that state.
         page.evaluate(
-            "([name, token]) => { const el = document.getElementsByName(name)[0]; "
-            "if (el) el.value = token; }",
+            """([name, token]) => {
+                document.getElementsByName(name).forEach
+                    ? document.getElementsByName(name).forEach(el => { el.value = token; })
+                    : (() => { const el = document.getElementsByName(name)[0]; if (el) el.value = token; })();
+                try {
+                    const cfg = window.___grecaptcha_cfg;
+                    if (cfg && cfg.clients) {
+                        for (const cid in cfg.clients) {
+                            const client = cfg.clients[cid];
+                            for (const k in client) {
+                                const o = client[k];
+                                if (o && typeof o === 'object') {
+                                    if (typeof o.callback === 'function') { o.callback(token); }
+                                    for (const kk in o) {
+                                        const inner = o[kk];
+                                        if (inner && typeof inner === 'object' && typeof inner.callback === 'function') {
+                                            inner.callback(token);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { /* best-effort: many sites read the field directly */ }
+            }""",
             [widget.response_field_name, solution.token],
         )
 

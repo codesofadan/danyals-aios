@@ -58,11 +58,23 @@ class CaptchaSolver(Protocol):
     def solve(self, challenge: CaptchaChallenge) -> CaptchaSolution: ...
 
 
+# CapSolver and CapMonster share the createTask/getTaskResult *shape* but NOT the
+# task-type NAMES. CapSolver: "ReCaptchaV2TaskProxyless"/"AntiTurnstileTaskProxyLess";
+# CapMonster: "RecaptchaV2TaskProxyless" (lower 'c')/"TurnstileTaskProxyless". Sending
+# CapSolver names to CapMonster is rejected with ERROR_TASK_ABSENT (every captcha-gated
+# directory then silently fails), so the map is chosen per provider at construction.
 _TASK_TYPE: dict[str, str] = {
     "recaptcha_v2": "ReCaptchaV2TaskProxyless",
     "recaptcha_v3": "ReCaptchaV3TaskProxyless",
     "hcaptcha": "HCaptchaTaskProxyless",
     "turnstile": "AntiTurnstileTaskProxyLess",
+}
+
+_CAPMONSTER_TASK_TYPE: dict[str, str] = {
+    "recaptcha_v2": "RecaptchaV2TaskProxyless",
+    "recaptcha_v3": "RecaptchaV3TaskProxyless",
+    "hcaptcha": "HCaptchaTaskProxyless",
+    "turnstile": "TurnstileTaskProxyless",
 }
 
 
@@ -75,17 +87,26 @@ class CapSolverClient(HttpProviderClient):
     _POLL_INTERVAL_SECONDS = 2.0
     _POLL_TIMEOUT_SECONDS = 90.0
 
-    def __init__(self, *, api_key: str, base_url: str = _CAPSOLVER_BASE, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = _CAPSOLVER_BASE,
+        timeout: float = 30.0,
+        task_types: dict[str, str] | None = None,
+    ) -> None:
         if not api_key:
             raise ProviderNotConfiguredError(f"CAPTCHA solver unavailable: {_INSTALL_HINT}")
         super().__init__(base_url=base_url, headers={"Content-Type": "application/json"}, timeout=timeout)
         self._api_key = api_key
+        # Provider-specific task-type names (CapSolver by default; CapMonster differs).
+        self._task_types = task_types or _TASK_TYPE
 
     def solve(self, challenge: CaptchaChallenge) -> CaptchaSolution:
         if challenge.kind == "image":
             task_body: dict[str, object] = {"type": "ImageToTextTask", "body": challenge.image_base64}
         else:
-            task_type = _TASK_TYPE.get(challenge.kind)
+            task_type = self._task_types.get(challenge.kind)
             if task_type is None:
                 raise ProviderCallError(f"unsupported CAPTCHA kind: {challenge.kind}")
             task_body = {
@@ -134,5 +155,7 @@ def captcha_solver_from_settings(settings: Settings) -> CaptchaSolver | None:
     if not key:
         logger.info("captcha_solver_degraded", reason="missing_api_key")
         return None
-    base_url = _CAPMONSTER_BASE if settings.captcha_solver_provider == "capmonster" else _CAPSOLVER_BASE
-    return CapSolverClient(api_key=key.get_secret_value(), base_url=base_url)
+    is_capmonster = settings.captcha_solver_provider == "capmonster"
+    base_url = _CAPMONSTER_BASE if is_capmonster else _CAPSOLVER_BASE
+    task_types = _CAPMONSTER_TASK_TYPE if is_capmonster else _TASK_TYPE
+    return CapSolverClient(api_key=key.get_secret_value(), base_url=base_url, task_types=task_types)
