@@ -10,6 +10,23 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 
 # Submit Citations (Real Directory Submission)
 
+## In plain words (for a non-technical operator)
+**What this does:** it gets your client listed on business directories (like an online phone book — Yelp, Yellow Pages, Brownbook, and dozens more). Each listing is a "citation": your client's exact **Name, Address, Phone, and Website**. More consistent citations = better local search rankings.
+
+**What you type:** `/citation-submit <client> <market>` — e.g. `/citation-submit "Joe's Pizza" US`. Markets are `US`, `UK`, `CA`, `AU`, or `GLOBAL`.
+
+**What you'll be asked for:** the client's **real** Name / Address / Phone / Website (exactly as it appears on their Google listing). If you don't know it, stop and ask the client — never guess, because a wrong address sent to 50 directories is 50 mistakes.
+
+**What happens:** the system creates the listings automatically. Two outcomes per directory:
+- **Auto-listed** — the whole thing is done for you; you get a live link.
+- **Needs one click** — some directories (with tricky "are you a robot?" checks or category pickers) get filled in and logged in for you, and then hand you a ready-to-go browser page where you just click **Publish**. This is normal and expected — it's the safe way to finish the ones that fight automation.
+
+**How long:** a batch of directories runs in the background; you check progress, you don't wait staring at it.
+
+**When NOT to use it:** if you only want to *check* existing listings (not create new ones), use `/citation-builder` instead.
+
+---
+
 **Purpose.** Get `$client` an actual, new NAP listing across the citation-directory catalog — via a direct API (Bing Places / Foursquare), an aggregator push (Data Axle), or the self-hosted Playwright bot (bot_fillable / captcha_assisted directories) — not just reconcile a monitoring board. This is the skill that DOES the work `/citation-builder` assumes already happened out-of-band.
 
 **Who runs it.** Every write (`business-profiles`, `campaigns`) is LEAD-only (owner/admin/manager). A non-lead call 403s - report "requires a LEAD", STOP. Reading the catalog/profiles needs `view_reports`.

@@ -16,6 +16,31 @@ logic.**
 
 ---
 
+## New here? Start in plain English (no technical knowledge needed)
+
+You don't need to be technical. A "skill" is just a **command you type that does a whole job for you**. You type a slash command, answer a couple of plain questions, and the system does the work and shows you the result.
+
+**How to run one:** type `/` then the command name and the client, in quotes if it has spaces.
+
+| You want to… | Type this | What you get |
+|---|---|---|
+| See how a client is doing | `/client-snapshot "Joe's Pizza"` | A one-page summary of the client |
+| Write a web page for a service + city | `/local-service-page "Joe's Pizza" "Dallas" "emergency plumbing"` | A ready-to-review page (you approve before it goes live) |
+| Write a blog article | `/blog-post "Joe's Pizza" "how to unclog a drain"` | A ready-to-review article |
+| Get the client listed on directories | `/citation-submit "Joe's Pizza" US` | New listings across directories (some finish with one click) |
+| Check the client's directory listings | `/citation-builder "Joe's Pizza"` | What's listed, what's missing, what's wrong |
+| Run a website audit | `/audit "joespizza.com"` | A scored SEO health report |
+| Make the monthly client report | `/monthly-report "Joe's Pizza"` | A shareable report |
+
+**Three rules that keep you safe:**
+1. **Nothing goes live on its own.** Content is written for you to **review and approve** first. Directory listings that can't be fully automated hand you a ready page to click **Publish** yourself.
+2. **The system never makes up facts.** If it needs the client's real phone, address, or a proof point, it will **ask you** — always give the real answer, never a guess.
+3. **If a command says it needs a "LEAD"**, that means an owner/admin/manager has to approve it. Ask one of them; that's by design.
+
+**If something looks stuck or errors:** read the message — it's written in plain language (e.g. "needs the client's real address", "waiting for approval"). The Troubleshooting table near the bottom covers the common ones.
+
+---
+
 > **Wave 7 — these are now PROJECT skills, not a plugin.** They were converted from the
 > `aios-seo` plugin (which lived at `aios-skills/`) into plain **project skills** under
 > `.claude/skills/`. Claude Code auto-discovers `.claude/skills/*/SKILL.md` from the repo
