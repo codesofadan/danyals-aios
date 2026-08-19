@@ -1,0 +1,38 @@
+{
+  "_note": "Saved xegents.com design profile — feed as designProfile to POST /content/jobs (or the bulk generate) so a page mirrors the xegents.com look. Palette/fonts inferred from the live site (dark-tech, cyan accent); blueprint is the real homepage section sequence.",
+  "palette": {
+    "primary": "#0a0e1a",
+    "secondary": "#8a99b5",
+    "background": "#0a0e1a",
+    "text": "#c7d2e0",
+    "accent": "#22d3ee"
+  },
+  "typography": {
+    "heading_font": "Sora, system-ui, sans-serif",
+    "body_font": "Inter, system-ui, sans-serif",
+    "base_size": "17px"
+  },
+  "layout": {
+    "container_width": "1160px",
+    "section_order": ["hero", "trust_bar", "benefits", "services", "process", "proof", "testimonials", "faq", "cta"],
+    "blueprint": [
+      { "kind": "hero",         "heading": "We find the work your team shouldn't be doing, & assign it to AI", "layout": "centered" },
+      { "kind": "trust_bar",    "heading": "Trusted by teams at",       "layout": "carousel" },
+      { "kind": "benefits",     "heading": "Why teams choose Xegents",  "layout": "grid" },
+      { "kind": "services",     "heading": "What we automate",          "layout": "grid" },
+      { "kind": "process",      "heading": "How it works",              "layout": "numbered-steps" },
+      { "kind": "proof",        "heading": "Proven across markets",     "layout": "stacked" },
+      { "kind": "testimonials", "heading": "What clients say",          "layout": "carousel" },
+      { "kind": "faq",          "heading": "Frequently asked questions","layout": "accordion" },
+      { "kind": "cta",          "heading": "Book a free discovery call","layout": "banner" }
+    ],
+    "hero_style": "centered",
+    "cta_style": "banner"
+  },
+  "components": {
+    "button_style": "solid rounded",
+    "card_style": "soft border on dark",
+    "spacing_scale": "spacious"
+  },
+  "notes": "Dark-tech AI/SaaS aesthetic: near-black navy base (#0a0e1a), electric cyan accent (#22d3ee), light heading ink, airy spacing, centered hero with an AI visual + animated marquee, subtle-bordered cards on dark, gradient CTA band. Modern geometric sans (Sora headings / Inter body)."
+}

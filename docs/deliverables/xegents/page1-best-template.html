@@ -1,0 +1,117 @@
+<!doctype html><html lang="en" data-theme="light"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Xegents — AI Agents &amp; Automation (Template)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}body{margin:0;color:var(--text);background:var(--bg);line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+.wrap{max-width:1160px;margin:0 auto;padding:0 28px}
+.wrap.narrow{max-width:820px}
+a{color:var(--accent);text-decoration:none}
+.btn{display:inline-block;padding:14px 26px;border-radius:var(--radius);font-weight:600;
+  font-size:15px;transition:.15s;border:2px solid transparent;cursor:pointer}
+.btn-primary{background:var(--accent);color:var(--on-accent)}
+.btn-primary:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--text);border-color:var(--line)}
+.btn-invert{background:var(--bg);color:var(--accent)}
+.btn-sm{padding:10px 18px;font-size:14px;background:var(--accent);color:var(--on-accent);border-radius:var(--radius)}
+.eyebrow{display:inline-block;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:18px}
+/* NAV */
+.nav{position:sticky;top:0;z-index:20;background:var(--nav-bg);backdrop-filter:saturate(1.4) blur(8px);
+  border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:70px}
+.brand{font-weight:800;font-size:22px;color:var(--head);letter-spacing:-.01em}
+.links{display:flex;gap:26px;margin-left:auto}.links a{color:var(--muted);font-weight:500;font-size:15px}
+.links a:hover{color:var(--head)}
+/* HERO */
+.hero{padding:78px 0 64px;background:var(--hero-bg);border-bottom:1px solid var(--line);overflow:hidden}
+.hero .wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+.hero.centered .wrap{grid-template-columns:1fr;text-align:center;max-width:900px}
+.hero.centered .hero-visual{margin-top:8px}
+.hero h1{font-size:56px;line-height:1.04;letter-spacing:-.025em;margin:.1em 0 .35em;color:var(--head);font-weight:800}
+.hero .lede{font-size:20px;color:var(--muted);max-width:42ch;margin:0 auto}
+.hero.split .lede{margin:0}
+.hero-cta{display:flex;gap:14px;margin:30px 0 0;flex-wrap:wrap}
+.hero.centered .hero-cta{justify-content:center}
+.hero-visual img{border-radius:20px;box-shadow:var(--shadow);width:100%;aspect-ratio:4/3;object-fit:cover}
+.marquee{margin-top:34px;overflow:hidden;border-top:1px solid var(--line);padding-top:16px;
+  color:var(--muted);font-weight:600;font-size:14px;letter-spacing:.04em;white-space:nowrap}
+/* TRUST */
+.trust{padding:30px 0;background:var(--bg)}
+.trust-l{text-align:center;color:var(--muted);font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px}
+.logos{display:flex;justify-content:center;gap:44px;flex-wrap:wrap;opacity:.7}
+.logo{font-weight:800;font-size:20px;color:var(--muted);letter-spacing:.02em}
+/* BANDS */
+.band{padding:76px 0}.band.alt{background:var(--alt)}
+.sec-h{font-size:38px;line-height:1.1;letter-spacing:-.02em;text-align:center;margin:0 0 44px;color:var(--head);font-weight:800}
+.sec-h.left{text-align:left;margin-bottom:20px}
+/* GRID CARDS */
+.grid{display:grid;gap:22px}.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}.grid-4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:30px 26px;transition:.15s}
+.card:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--accent)}
+.card-ic{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:24px;
+  background:var(--accent-soft);margin-bottom:18px}
+.card h3{margin:0 0 8px;font-size:20px;color:var(--head)}.card p{margin:0;color:var(--muted);font-size:15px}
+/* STEPS */
+.steps{list-style:none;counter-reset:s;padding:0;max-width:820px;margin:0 auto;display:grid;gap:18px}
+.steps li{display:flex;gap:20px;align-items:flex-start;background:var(--card);border:1px solid var(--line);
+  border-radius:16px;padding:22px 24px}
+.step-n{flex:0 0 auto;width:40px;height:40px;border-radius:50%;background:var(--accent);color:var(--on-accent);
+  font-weight:800;display:grid;place-items:center}
+.steps p{margin:6px 0 0;color:var(--text)}
+/* PROOF + STATS */
+.proof{background:var(--proof-bg);color:var(--proof-fg)}
+.proof .sec-h,.proof .proof-lede{color:var(--proof-fg)}
+.proof-lede{text-align:center;max-width:60ch;margin:0 auto 40px;font-size:19px;opacity:.9}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.stats.big{max-width:960px;margin:0 auto}
+.stat{text-align:center;padding:22px}
+.stat-n{font-size:46px;font-weight:800;color:var(--accent);letter-spacing:-.02em}
+.proof .stat-n{color:var(--accent-2)}
+.stat-l{color:var(--muted);font-size:14px;margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
+.proof .stat-l{color:rgba(255,255,255,.7)}
+/* QUOTES */
+.quote{margin:0;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px}
+.quote blockquote{margin:0;font-size:17px;color:var(--text);line-height:1.55}
+/* PROSE SPLIT */
+.prose-split{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
+.prose-text p{color:var(--muted);font-size:17px}
+.prose-visual img{border-radius:18px;box-shadow:var(--shadow);aspect-ratio:4/3;object-fit:cover}
+/* FAQ */
+.faq details{border:1px solid var(--line);border-radius:14px;margin-bottom:12px;background:var(--card);overflow:hidden}
+.faq summary{list-style:none;cursor:pointer;padding:20px 22px;font-weight:700;color:var(--head);font-size:17px;
+  display:flex;justify-content:space-between;align-items:center}
+.faq summary::-webkit-details-marker{display:none}
+.faq .chev{color:var(--accent);font-size:22px;transition:.2s}
+.faq details[open] .chev{transform:rotate(45deg)}
+.faq .ans{padding:0 22px 20px;color:var(--muted)}.faq .ans p{margin:0}
+/* CTA */
+.cta{background:var(--cta-bg);color:var(--cta-fg);text-align:center;padding:84px 0}
+.cta h2{font-size:40px;letter-spacing:-.02em;margin:0 0 14px;color:var(--cta-fg)}
+.cta p{font-size:19px;opacity:.9;max-width:52ch;margin:0 auto 30px}
+/* FOOTER */
+.foot{background:var(--foot-bg);color:var(--foot-fg);padding:56px 0 34px}
+.foot .brand{color:var(--foot-fg)}
+.foot-top p{color:var(--foot-muted);margin:8px 0 0;max-width:40ch}
+.foot-bot{margin-top:30px;padding-top:22px;border-top:1px solid rgba(255,255,255,.12);
+  color:var(--foot-muted);font-size:14px}
+@media(max-width:860px){.hero .wrap,.prose-split{grid-template-columns:1fr}.grid-3,.grid-4{grid-template-columns:1fr 1fr}
+  .stats{grid-template-columns:1fr 1fr}.hero h1{font-size:40px}}
+
+:root{--bg:#ffffff;--alt:#f6f8fb;--card:#ffffff;--text:#334155;--head:#0f172a;--muted:#64748b;--line:#e6ebf2;--accent:#2563eb;--accent-2:#60a5fa;--accent-soft:#eaf1ff;--on-accent:#ffffff;--nav-bg:rgba(255,255,255,.85);--hero-bg:linear-gradient(180deg,#f7faff,#ffffff);--proof-bg:#0f172a;--proof-fg:#ffffff;--cta-bg:#2563eb;--cta-fg:#ffffff;--foot-bg:#0f172a;--foot-fg:#ffffff;--foot-muted:#94a3b8;--radius:12px;--shadow:0 24px 60px -22px rgba(15,23,42,.28)}
+body{font-family:Inter,system-ui,sans-serif}
+h1,h2,h3,.brand{font-family:Sora,system-ui,sans-serif}
+</style></head><body><header class="nav "><div class="wrap"><a class="brand" href="#">Xegents</a><nav class="links"><a href="#work">Case Studies</a><a href="#">Services</a><a href="#">About</a></nav><a class="btn btn-sm" href="#book">Book a call</a></div></header><main><section class="hero split"><div class="wrap"><div class="hero-text"><span class="eyebrow">AI agents &amp; automation</span><h1>Automate the busywork. Scale the business.</h1><p class="lede">Xegents designs and deploys AI agents and end-to-end automations that take the repetitive work off your team&#x27;s plate, so your people do the work only humans should. We operate globally, wiring intelligent automation into the tools businesses already run.</p><div class="hero-cta"><a class="btn btn-primary" href="#book">Book a Free Discovery Call</a><a class="btn btn-ghost" href="#work">See Case Studies</a></div><div class="marquee"><span>AI Audit &nbsp;•&nbsp; Automations &nbsp;•&nbsp; Agents &nbsp;•&nbsp; Integrations &nbsp;•&nbsp; Global delivery &nbsp;•&nbsp; AI Audit &nbsp;•&nbsp; Automations &nbsp;•&nbsp; Agents</span></div></div><div class="hero-visual"><img src="https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1400&q=80" alt="AI automation" loading="eager"></div></div></section>
+<section class="trust"><div class="wrap"><p class="trust-l">Trusted by teams at</p><div class="logos"><span class="logo">NOVA</span><span class="logo">Meridian</span><span class="logo">Helix</span><span class="logo">Northwind</span><span class="logo">Vertex</span><span class="logo">Cobalt</span></div></div></section>
+<section class="band"><div class="wrap"><h2 class="sec-h">Why teams choose Xegents</h2><div class="grid grid-3"><article class="card"><div class="card-ic">⚡</div><h3>Ship in weeks, not quarters</h3><p>production automations go live in two to four weeks, not a year-long transformation project.</p></article><article class="card"><div class="card-ic">🤖</div><h3>Agents that actually act</h3><p>not chatbots. Agents that read, decide, and complete real tasks across your stack.</p></article><article class="card"><div class="card-ic">🔗</div><h3>Built on your tools</h3><p>we integrate with the CRMs, inboxes, and databases you already use.</p></article></div></div></section>
+<section class="band"><div class="wrap"><h2 class="sec-h">What we automate</h2><div class="grid grid-4"><article class="card"><div class="card-ic">🔍</div><h3>AI audits</h3><p>we map every workflow and find the work your team shouldn&#x27;t be doing.</p></article><article class="card"><div class="card-ic">⚙️</div><h3>Business automations</h3><p>invoicing, onboarding, reporting, and follow-ups that run themselves.</p></article><article class="card"><div class="card-ic">🤖</div><h3>AI agents</h3><p>autonomous agents that handle research, outreach, support, and operations.</p></article><article class="card"><div class="card-ic">🧩</div><h3>Integrations</h3><p>we connect your stack so data and actions flow without humans copy-pasting.</p></article></div></div></section>
+<section class="band alt"><div class="wrap"><h2 class="sec-h">How it works</h2><ol class="steps"><li><span class="step-n">1</span><p>We audit your operation and score every workflow for automation potential.</p></li><li><span class="step-n">2</span><p>We design the agents and automations that move the needle first.</p></li><li><span class="step-n">3</span><p>We build, test, and deploy straight into your real tools.</p></li><li><span class="step-n">4</span><p>We monitor, tune, and expand, so your automation footprint compounds every month.</p></li></ol></div></section>
+<section class="band"><div class="wrap"><h2 class="sec-h">What clients say</h2><div class="grid grid-3"><figure class="quote"><blockquote>“Xegents took three full days of manual reporting off my team every single week.” — Operations lead, logistics</blockquote></figure><figure class="quote"><blockquote>“The agents handle our first-response support end to end. Our people only see the hard cases now.” — Founder, SaaS</blockquote></figure><figure class="quote"><blockquote>“We went from a two-week onboarding backlog to same-day, fully automated.” — COO, fintech</blockquote></figure></div></div></section>
+<section class="band"><div class="wrap prose-split"><div class="prose-text"><h2 class="sec-h left">Proven across markets</h2><p>Xegents runs automations for businesses on four continents, across industries from healthcare to logistics. Our systems have quietly handled millions of tasks that used to sit in a human&#x27;s queue, freeing teams to focus on the work that actually needs a person.</p></div><div class="prose-visual"><img src="https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=1200&q=80" alt=""></div></div></section>
+<section class="band"><div class="wrap"><div class="stats big"><div class="stat"><div class="stat-n">4</div><div class="stat-l">continents served</div></div><div class="stat"><div class="stat-n">2–4 wks</div><div class="stat-l">to production</div></div><div class="stat"><div class="stat-n">10M+</div><div class="stat-l">tasks automated</div></div><div class="stat"><div class="stat-n">24/7</div><div class="stat-l">agents running</div></div></div></div></section>
+<section class="cta" id="book"><div class="wrap"><h2>Ready to find the work your team shouldn&#x27;t be doing?</h2><p>Book a free discovery call and we&#x27;ll map your first automation in thirty minutes.</p><a class="btn btn-invert" href="#book">Book a Free Discovery Call</a></div></section></main><footer class="foot"><div class="wrap"><div class="foot-top"><span class="brand">Xegents</span><p>AI agents &amp; automations for businesses, worldwide.</p></div><div class="foot-bot">© 2026 Xegents — We find the work your team shouldn't be doing, and assign it to AI.</div></div></footer></body></html>
