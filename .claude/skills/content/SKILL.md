@@ -123,6 +123,15 @@ Copy this checklist and check items off as you go:
    point the QA publish gate (`fact_grounding` / `eeat_experience`, DOCTRINE §2/§7) HARD-BLOCKS the
    job: it generates but can never pass review. Gather the proof from the client's context (step 2)
    or ask the operator; never invent it.
+   **Layout template (optional `--template`).** The published page is built to a page-layout
+   TEMPLATE — the audited section sequence for its type (hero → benefits → proof → FAQ → CTA, …),
+   rendered as classic, Elementor-editable components with the content slotted into the right
+   section. Default `Auto` derives the template from the page type (or, if the client's site was
+   analyzed via site-design, mirrors THAT site's layout). Pass an explicit
+   `--template {service|location|service_area|blog|faq|local|homepage}` to force one — it wins over
+   the analyzed site. The 7 templates + their exact section orders live in the shared reference
+   `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/PAGE-TEMPLATES.md` (generated from the
+   same `page_blueprints` module the dashboard generator uses, so skill + dashboard never diverge).
 
 4. **Wait for `needs_review`.** Run `aios_client.py wait-job --code CJ-#### --timeout 900` →
    polls `GET /content/jobs/{code}` until terminal. The worker owns the pipeline transitions;

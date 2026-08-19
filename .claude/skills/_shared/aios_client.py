@@ -237,6 +237,12 @@ def cmd_create_job(a: argparse.Namespace) -> None:
         "framework": a.framework,
         "target": a.target,
     }
+    # The page-layout TEMPLATE (one of the 7 named templates). "Auto" (default) lets the
+    # server derive it from the page type; an explicit template wins over any analyzed
+    # design and slots the content into THAT template's sections. See
+    # ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/PAGE-TEMPLATES.md.
+    if getattr(a, "template", "Auto") and a.template != "Auto":
+        body["template"] = a.template
     if a.proof:
         body["proofPoints"] = a.proof
     if a.testimonial:
@@ -337,6 +343,11 @@ def _build_parser() -> argparse.ArgumentParser:
     cj.add_argument("--page-type", dest="page_type", required=True, choices=["service", "blog", "local"])
     cj.add_argument("--topic", required=True)
     cj.add_argument("--framework", default="Auto")
+    cj.add_argument(
+        "--template", default="Auto",
+        choices=["Auto", "service", "location", "service_area", "blog", "faq", "local", "homepage"],
+        help="page-layout template (see reference/PAGE-TEMPLATES.md); Auto -> derive from page type",
+    )
     cj.add_argument("--target", default="WordPress", choices=["WordPress", "PDF/Markdown"])
     # First-hand grounding (repeatable). At least one --proof is needed for the job
     # to clear the QA publish gate; the rest strengthen E-E-A-T / information gain.

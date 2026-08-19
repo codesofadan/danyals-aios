@@ -234,14 +234,34 @@ class Typography:
 
 
 @dataclass(frozen=True)
+class BlueprintSection:
+    """ONE observed section of the analyzed page: its ``kind`` (a section-type name
+    from the controlled vocabulary), the ``heading`` text actually shown, and the
+    ``layout`` variant it presents in (split / grid / accordion / banner / …). The
+    ordered list of these IS the page blueprint - the exact top-to-bottom sequence a
+    matching page is built to follow."""
+
+    kind: str = "section"
+    heading: str = ""
+    layout: str = "stacked"
+
+    def as_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "heading": self.heading, "layout": self.layout}
+
+
+@dataclass(frozen=True)
 class Layout:
-    """The page skeleton: the ORDERED section names a matching page should follow,
-    plus the container width and the hero / CTA presentation styles."""
+    """The page skeleton: the full ordered ``blueprint`` (every section's kind +
+    heading + layout, in exact top-to-bottom sequence) - the deep structural capture
+    a matching page is generated to follow - plus the flat ``section_order`` (the
+    kind list, kept for the back-compat publish path), the container width, and the
+    hero / CTA presentation styles."""
 
     container_width: str = "1200px"
     section_order: list[str] = field(
         default_factory=lambda: ["hero", "intro", "services", "proof", "faq", "cta"]
     )
+    blueprint: list[BlueprintSection] = field(default_factory=list)
     hero_style: str = "centered"
     cta_style: str = "banner"
 
@@ -292,6 +312,7 @@ class SiteDesignProfile:
             "layout": {
                 "container_width": self.layout.container_width,
                 "section_order": list(self.layout.section_order),
+                "blueprint": [s.as_dict() for s in self.layout.blueprint],
                 "hero_style": self.layout.hero_style,
                 "cta_style": self.layout.cta_style,
             },
@@ -330,9 +351,15 @@ _DESIGN_SYSTEM_PROMPT = (
     'ACTUAL CSS hex colour you SEE, like "#0a0a0a"), typography (an object with '
     "heading_font and body_font - the actual CSS font-family stacks you can identify from "
     'the letterforms/content - and base_size like "16px"), layout (an object with '
-    'container_width like "1200px", section_order - an ORDERED array of the sections '
-    "ACTUALLY visible top-to-bottom, drawn from hero/intro/about/services/features/proof/"
-    "testimonials/gallery/faq/cta/contact - hero_style, and cta_style), components (an "
+    'container_width like "1200px", section_order - an ORDERED array of the section '
+    "KIND names ACTUALLY visible top-to-bottom, drawn from hero/trust_bar/intro/services/"
+    "features/benefits/process/proof/stats/testimonials/reviews/gallery/pricing/about/team/"
+    "service_areas/map/faq/cta/contact - blueprint - an ORDERED array (one object PER section, "
+    "in exact top-to-bottom sequence) where each object is {kind (the same vocabulary as "
+    'section_order), heading (the ACTUAL heading text shown in that section, or ""), layout '
+    "(how that section is laid out: split/centered/stacked/grid/numbered-steps/accordion/banner/"
+    "carousel/cards/map-embed/tiles/list)} - so the FULL page structure is captured section by "
+    "section, not just the kind order - hero_style, and cta_style), components (an "
     "object with button_style, card_style, spacing_scale), notes (a short string of any "
     "other useful observations), and wireframe_html (a SELF-CONTAINED, styled HTML snippet "
     "- an inline <style> block plus ONE <section> - that renders a representative "
@@ -411,6 +438,35 @@ def _section_list(value: object, *, limit: int) -> list[str]:
     return out
 
 
+def _blueprint_list(value: object, *, limit: int) -> list[BlueprintSection]:
+    """Coerce the model's ``blueprint`` array into a bounded, ordered list of
+    :class:`BlueprintSection`. Tolerant: a non-list -> ``[]``; a bare string item ->
+    a kind-only section; a dict item -> ``{kind, heading, layout}`` with sane
+    fallbacks; a section with no usable kind is skipped. Bounded by ``limit``."""
+    if not isinstance(value, list):
+        return []
+    out: list[BlueprintSection] = []
+    for item in value:
+        if isinstance(item, str):
+            kind = item.strip()
+            if kind:
+                out.append(BlueprintSection(kind=kind))
+        elif isinstance(item, dict):
+            kind = str(item.get("kind") or item.get("name") or "").strip()
+            if not kind:
+                continue
+            out.append(
+                BlueprintSection(
+                    kind=kind,
+                    heading=str(item.get("heading") or "").strip(),
+                    layout=str(item.get("layout") or "stacked").strip() or "stacked",
+                )
+            )
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _wireframe(value: object, *, limit: int) -> str:
     """Coerce the model's ``wireframe_html`` into a bounded HTML string.
 
@@ -449,12 +505,18 @@ def build_profile(data: dict[str, Any]) -> SiteDesignProfile:
         base_size=_txt(t.get("base_size"), defaults.typography.base_size),
     )
     ly = _as_dict(data.get("layout"))
-    section_order = _section_list(ly.get("section_order"), limit=_MAX_SECTIONS) or list(
-        defaults.layout.section_order
+    blueprint = _blueprint_list(ly.get("blueprint"), limit=_MAX_SECTIONS)
+    # section_order: the explicit array if given, else DERIVED from the blueprint kinds
+    # (so the two views stay consistent), else the dataclass default.
+    section_order = (
+        _section_list(ly.get("section_order"), limit=_MAX_SECTIONS)
+        or [s.kind for s in blueprint]
+        or list(defaults.layout.section_order)
     )
     layout = Layout(
         container_width=_txt(ly.get("container_width"), defaults.layout.container_width),
         section_order=section_order,
+        blueprint=blueprint,
         hero_style=_txt(ly.get("hero_style"), defaults.layout.hero_style),
         cta_style=_txt(ly.get("cta_style"), defaults.layout.cta_style),
     )

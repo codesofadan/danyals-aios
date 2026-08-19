@@ -37,6 +37,16 @@ _IN_PIPELINE: frozenset[str] = frozenset(
 # Unions verbatim from content.ts (note the spaces / apostrophes in the
 # frameworks). These are the SAME values front + back - no display remapping.
 PageType = Literal["service", "blog", "local", "gbp_post"]
+# The 7 named page-layout TEMPLATES (the audited section sequences). Mirrors the
+# canonical keys in ``app.services.page_blueprints.TEMPLATES`` (a unit test asserts
+# they stay identical). The sentinel ``"Auto"`` -> the server derives the template
+# from the page type (service->service, local->local, blog->blog).
+PageTemplate = Literal[
+    "service", "location", "service_area", "blog", "faq", "local", "homepage"
+]
+_PAGE_TEMPLATES: frozenset[str] = frozenset(
+    {"service", "location", "service_area", "blog", "faq", "local", "homepage"}
+)
 PublishTarget = Literal["WordPress", "PDF/Markdown"]
 Framework = Literal["AIDA", "PAS", "BAB", "FAB", "4 Ps", "PASTOR", "4 U's"]
 JobStatus = Literal[
@@ -115,14 +125,28 @@ class SiteDesignTypography(BaseModel):
     base_size: str = "16px"
 
 
+class SiteDesignSection(BaseModel):
+    """ONE section of the analyzed page blueprint: its ``kind`` (section-type name),
+    the ``heading`` shown, and the ``layout`` variant. The ordered list of these IS
+    the deep page blueprint - the exact section-by-section sequence a matching page
+    follows. Snake_case, no aliases: it round-trips into ``source_pack`` unchanged."""
+
+    kind: str = "section"
+    heading: str = ""
+    layout: str = "stacked"
+
+
 class SiteDesignLayout(BaseModel):
-    """The page skeleton: the ORDERED section names a matching page should follow,
-    plus the container width and hero / CTA presentation styles."""
+    """The page skeleton: the full ordered ``blueprint`` (every section's kind +
+    heading + layout, in exact sequence - the deep structural capture the publish path
+    builds to) plus the flat ``section_order`` (kinds only, kept for back-compat), the
+    container width, and the hero / CTA presentation styles."""
 
     container_width: str = "1200px"
     section_order: list[str] = Field(
         default_factory=lambda: ["hero", "intro", "services", "proof", "faq", "cta"]
     )
+    blueprint: list[SiteDesignSection] = Field(default_factory=list)
     hero_style: str = "centered"
     cta_style: str = "banner"
 
@@ -169,6 +193,12 @@ class ContentJobCreate(BaseModel):
     page_type: PageType = Field(alias="pageType")
     topic: str = Field(min_length=1)
     framework: Framework | Literal["Auto"] = "Auto"
+    # The page-layout TEMPLATE the generated page is built to (one of the 7 named
+    # templates). ``"Auto"`` (the default) -> the server derives it from the page type.
+    # When a design_profile is ALSO supplied, the ANALYZED site's blueprint wins over
+    # the template (the page mirrors the client's own site); the template is the
+    # fallback structure when no site was analyzed.
+    template: PageTemplate | Literal["Auto"] = "Auto"
     target: PublishTarget = "WordPress"
     # First-hand grounding the E-E-A-T / fact-grounding QA gate requires (§2/§7).
     # Optional, but a job with NONE of these will hard-fail the publish gate
@@ -426,6 +456,10 @@ class ContentBulkGenerateRequest(BaseModel):
     items: list[ContentRecommendation] = Field(min_length=1, max_length=100)
     client_id: str = Field(min_length=1, alias="clientId")
     framework: Framework | Literal["Auto"] = "Auto"
+    # The page-layout template shared across every fanned-out job (like framework);
+    # ``"Auto"`` derives it per-item from each item's page type. The analyzed
+    # design_profile (when supplied) still wins over the template per job.
+    template: PageTemplate | Literal["Auto"] = "Auto"
     target: PublishTarget = "WordPress"
     proof_points: list[str] = Field(default_factory=list, alias="proofPoints", max_length=12)
     testimonials: list[str] = Field(default_factory=list, max_length=12)

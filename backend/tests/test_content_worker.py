@@ -864,6 +864,36 @@ def test_generated_images_are_injected_into_the_stored_draft_and_elementor() -> 
     assert store.row["images"] == len(gen.made)
 
 
+def test_inject_images_distributes_one_per_section_not_bunched() -> None:
+    # Regression: images must be spread one-per-section (hero after the H1, each section
+    # image under its successive H2) - NEVER all bunched at the top of the page.
+    from workers.tasks.content import _inject_images
+
+    draft = (
+        "# The Guide\n\nIntro paragraph.\n\n"
+        "## First section\n\nFirst body.\n\n"
+        "## Second section\n\nSecond body.\n\n"
+        "## Third section\n\nThird body.\n"
+    )
+    resolved = [
+        ("hero", GeneratedImage(url="https://cdn.test/hero.png", alt="hero")),
+        ("section:a", GeneratedImage(url="https://cdn.test/a.png", alt="alt a")),
+        ("section:b", GeneratedImage(url="https://cdn.test/b.png", alt="alt b")),
+        ("section:c", GeneratedImage(url="https://cdn.test/c.png", alt="alt c")),
+    ]
+    out = _inject_images(draft, resolved)
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    # The hero image is right after the H1; each section image is right under its H2.
+    def _img_after(heading: str) -> str:
+        i = next(k for k, ln in enumerate(lines) if ln.strip() == heading)
+        return lines[i + 1]
+
+    assert _img_after("# The Guide").startswith("![") and "hero.png" in _img_after("# The Guide")
+    assert "a.png" in _img_after("## First section")
+    assert "b.png" in _img_after("## Second section")
+    assert "c.png" in _img_after("## Third section")
+
+
 def test_fake_or_empty_image_injects_nothing() -> None:
     # The keyless FakeImageGenerator (the default test bundle) is BILLED as before but
     # its placeholder URL is NOT injected -> the draft has no image markdown at all.
@@ -936,8 +966,9 @@ def test_shape_body_html_emits_a_style_block_from_the_full_profile() -> None:
     assert "Poppins, sans-serif" in out              # typography.heading_font
     assert "padding:72px 0" in out                   # components.spacing_scale (spacious)
     assert "border-radius:999px" in out              # components.button_style (pill)
-    # The ordered sections are still wrapped and the content is preserved.
-    assert '<section class="aios-hero">' in out
+    # The ordered sections are still wrapped (now with the per-kind layout variant) and
+    # the content is preserved.
+    assert '<section class="aios-hero' in out
     assert "<h1>Best Brunch</h1>" in out
 
 

@@ -449,6 +449,49 @@ def test_seed_source_pack_omits_design_profile_when_absent() -> None:
     assert "design_profile" not in pack
 
 
+def test_extracts_the_full_ordered_blueprint() -> None:
+    # A reply carrying the deep BLUEPRINT (one object per section) is parsed into the
+    # profile's ordered layout.blueprint AND round-trips through as_dict; section_order is
+    # DERIVED from the blueprint kinds when the reply omits an explicit section_order.
+    payload = json.dumps(
+        {
+            "palette": {"primary": "#0a0a0a", "background": "#fff", "text": "#111", "accent": "#f60"},
+            "layout": {
+                "blueprint": [
+                    {"kind": "hero", "heading": "We build homes", "layout": "split"},
+                    {"kind": "services", "heading": "What we do", "layout": "grid"},
+                    "faq",
+                    {"kind": "cta", "heading": "Get a quote", "layout": "banner"},
+                ]
+            },
+        }
+    )
+    summarizer = FakeSystemSummarizer(payload=payload)
+    result = extract_site_design(
+        summarizer=summarizer, gate=_gate(_FakeCostStore()), settings=_settings(),
+        content="rendered text", screenshot_b64=None,
+    )
+    assert result.status == "ok" and result.profile is not None
+    bp = result.profile.layout.blueprint
+    assert [s.kind for s in bp] == ["hero", "services", "faq", "cta"]
+    assert bp[0].heading == "We build homes" and bp[1].layout == "grid"
+    # section_order derived from the blueprint kinds (no explicit array supplied).
+    assert result.profile.layout.section_order == ["hero", "services", "faq", "cta"]
+    # as_dict carries the blueprint so it round-trips into source_pack.
+    d = result.profile.as_dict()
+    assert d["layout"]["blueprint"][1] == {"kind": "services", "heading": "What we do", "layout": "grid"}
+
+
+def test_seed_source_pack_carries_an_explicit_template() -> None:
+    pack = _seed_source_pack({"name": "Verde Cafe"}, None, target="PDF/Markdown", template="service")
+    assert pack["template"] == "service"
+
+
+def test_seed_source_pack_omits_template_when_absent() -> None:
+    pack = _seed_source_pack({"name": "Verde Cafe"}, None, target="PDF/Markdown")
+    assert "template" not in pack  # Auto -> unset (worker derives from page type / analyzed site)
+
+
 _DRAFT = (
     "# Best Brunch\n\nWe serve the best brunch in town.\n\n"
     "## Our Services\n\nWeekend brunch and espresso.\n\n"
@@ -459,16 +502,30 @@ _DRAFT = (
 def test_publish_body_wraps_sections_when_profile_present() -> None:
     row = {"source_pack": {"design_profile": {"layout": {"section_order": ["hero", "services", "cta"]}}}}
     out = _shape_body_html(row, _DRAFT)
-    assert '<section class="aios-hero">' in out
-    assert '<section class="aios-services">' in out
-    assert '<section class="aios-cta">' in out
+    # The analyzed section order drives the wrap; each section now also carries the
+    # per-kind layout variant (aios-<kind> aios-layout-<variant>).
+    assert '<section class="aios-hero' in out
+    assert '<section class="aios-services' in out
+    assert '<section class="aios-cta' in out
     # The content itself is preserved inside the wrapped structure.
     assert "<h1>Best Brunch</h1>" in out
     assert "<h2>Our Services</h2>" in out
 
 
-def test_publish_body_unchanged_without_profile() -> None:
-    row = {"source_pack": {"client_name": "Verde Cafe"}}  # no design_profile
+def test_publish_body_unchanged_without_shaping() -> None:
+    # A page type with NO full-page template (gbp_post) and no analyzed profile has
+    # nothing to shape by -> the body is the plain render (no regression).
+    row = {"page_type": "gbp_post", "source_pack": {"client_name": "Verde Cafe"}}
     out = _shape_body_html(row, _DRAFT)
-    assert out == md_to_html(_DRAFT)  # byte-for-byte today's behavior (no regression)
+    assert out == md_to_html(_DRAFT)  # byte-for-byte the plain render
     assert "<section" not in out
+
+
+def test_publish_body_gets_default_template_from_page_type() -> None:
+    # No profile, no chosen template, but a real page type -> the page-type DEFAULT
+    # template shapes the page (classic style + ordered sections), so every page looks
+    # structured out of the box.
+    row = {"page_type": "service", "source_pack": {"client_name": "Verde Cafe"}}
+    out = _shape_body_html(row, _DRAFT)
+    assert "<style>" in out and 'class="aios-page"' in out
+    assert "<section" in out

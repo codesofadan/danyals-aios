@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import type {
   ContentJob,
   Framework,
+  PageTemplate,
   PageType,
   PublishTarget,
   ResearchContentType,
@@ -65,6 +66,10 @@ export type CreateContentJobInput = {
   pageType: PageType;
   topic: string;
   framework: Framework | "Auto";
+  // The page-layout template the page is built to (one of the 7). "Auto" derives it
+  // from the page type; an explicit template slots the content into ITS sections and
+  // wins over any analyzed design profile.
+  template?: PageTemplate | "Auto";
   target: PublishTarget;
   // First-hand grounding the QA publish gate requires (fact_grounding / E-E-A-T).
   // Optional, but a job with none of these hard-fails the publish gate (the
@@ -140,6 +145,9 @@ export type BulkGenerateInput = {
   items: ResearchItem[];
   clientId: string;
   framework?: Framework | "Auto";
+  // The page-layout template shared across every fanned-out job ("Auto" derives it
+  // per-item from each item's page type; an analyzed design profile still wins).
+  template?: PageTemplate | "Auto";
   target?: PublishTarget;
   proofPoints?: string[];
   testimonials?: string[];

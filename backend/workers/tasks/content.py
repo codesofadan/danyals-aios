@@ -98,6 +98,7 @@ from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
 from app.services.elementor import elementor_json
 from app.services.notifications import email_client_sync, notify_leads_sync
+from app.services.page_blueprints import SectionSpec, resolve_blueprint
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import FakeImageGenerator, GeneratedImage, ImageGenerator
@@ -672,39 +673,44 @@ def _inject_images(draft_md: str, resolved: list[tuple[str, GeneratedImage]]) ->
     """Inject each resolved image as its OWN ``![alt](url)`` block into the draft so it
     reaches the stored draft, the Elementor tree, AND the WordPress body.
 
-    Placement is deterministic: the ``hero`` slot lands right after the ``# `` H1 (or at
-    the very top when there is none); a ``section:<role>`` slot lands right under the
-    ``## `` H2 whose text equals the image's ``alt`` (the generator sets a section
-    image's alt to its heading text, so this is an exact match), else under the LAST H2,
-    else at the top. Only real images are passed in, so no broken markdown is written."""
+    Placement is deterministic and CONTEXTUAL - one image per section, in document order,
+    each sitting at the TOP of the section its content belongs to (never all bunched at
+    the top of the page):
+
+    * the ``hero`` image lands right after the ``# `` H1 (or at the very top when there
+      is none);
+    * the ``section:<role>`` images are distributed one after each successive ``## `` H2,
+      IN ORDER (image 1 -> first H2, image 2 -> second H2, ...), so each image frames the
+      section it introduces. This does NOT depend on the image's alt matching the heading
+      text, so a rephrased heading never collapses the images into one spot. Any image
+      beyond the H2 count folds under the last H2 (or the H1 when the draft has no H2s).
+
+    Only real images are passed in, so no broken markdown is written."""
     if not resolved:
         return draft_md
     lines = draft_md.splitlines()
     h1_idx: int | None = None
-    last_h2_idx: int | None = None
-    h2_at: dict[str, int] = {}
+    h2_idxs: list[int] = []
     for i, line in enumerate(lines):
         s = line.strip()
         if h1_idx is None and s.startswith("# ") and not s.startswith("## "):
             h1_idx = i
         elif s.startswith("## ") and not s.startswith("### "):
-            h2_at.setdefault(s[3:].strip(), i)
-            last_h2_idx = i
+            h2_idxs.append(i)
 
     after: dict[int, list[str]] = {}  # line index -> image markdown to insert AFTER it (-1 = top)
 
     def _queue(idx: int, md: str) -> None:
         after.setdefault(idx, []).append(md)
 
-    for slot, image in resolved:
-        md = _image_md(image)
-        if slot == "hero":
-            _queue(h1_idx if h1_idx is not None else -1, md)
-        else:
-            idx = h2_at.get(image.alt.strip())
-            if idx is None:
-                idx = last_h2_idx if last_h2_idx is not None else -1
-            _queue(idx, md)
+    top = h1_idx if h1_idx is not None else -1
+    hero_images = [img for slot, img in resolved if slot == "hero"]
+    section_images = [img for slot, img in resolved if slot != "hero"]
+    for image in hero_images:
+        _queue(top, _image_md(image))
+    for k, image in enumerate(section_images):
+        idx = (h2_idxs[k] if k < len(h2_idxs) else h2_idxs[-1]) if h2_idxs else top
+        _queue(idx, _image_md(image))
 
     out: list[str] = []
     for md in after.get(-1, []):
@@ -1131,16 +1137,44 @@ def _design_section_order(row: dict[str, Any]) -> list[str]:
     return [str(name).strip() for name in order if str(name).strip()]
 
 
-def _wrap_sections(body_html: str, section_order: list[str]) -> str:
-    """Group the rendered top-level blocks by ``<h2>`` boundary and wrap each group in
-    the next-named ``<section class="aios-<name>">`` block (a best-effort structural map).
+def _resolve_row_blueprint(row: dict[str, Any]) -> list[SectionSpec]:
+    """The effective ordered page blueprint for a job: the ANALYZED site's blueprint if
+    present, else the chosen TEMPLATE, else the page-type default (see
+    ``page_blueprints.resolve_blueprint``). ``[]`` -> no structure to shape by (the
+    publish path keeps its plain behaviour)."""
+    raw = _as_dict(row.get("source_pack"))
+    profile = _as_dict(raw.get("design_profile")) or None
+    template = str(raw.get("template") or "").strip() or None
+    page_type = str(row.get("page_type") or "blog")
+    return resolve_blueprint(design_profile=profile, template=template, page_type=page_type)
 
-    Content before the first ``<h2>`` (the ``<h1>`` + intro) is the first group; any
-    groups beyond ``section_order``'s length fold into the LAST named section; empty
-    sections are skipped. Returns the plain body unchanged if there is nothing to wrap.
+
+def _content_section_specs(specs: list[SectionSpec]) -> list[tuple[str, str]]:
+    """The (kind, layout) pairs of the CONTENT-bearing sections - the ones the flat-HTML
+    wrapper distributes the rendered ``<h2>`` groups across (chrome sections are theme /
+    plugin supplied, never wrapped around generated copy)."""
+    return [(s.kind, s.layout) for s in specs if s.content]
+
+
+def _wrap_sections(body_html: str, section_order: list[str]) -> str:
+    """Back-compat wrapper: wrap by bare section NAMES (``aios-<name>``). Retained for
+    the design-profile-only path + existing tests; the richer path uses
+    :func:`_wrap_sections_specs` to also carry the per-kind ``aios-layout-<variant>``."""
+    return _wrap_sections_specs(body_html, [(name, "") for name in section_order])
+
+
+def _wrap_sections_specs(body_html: str, specs: list[tuple[str, str]]) -> str:
+    """Group the rendered top-level blocks by ``<h2>`` boundary and wrap each group in
+    the next content section's ``<section class="aios-<kind> aios-layout-<variant>">``
+    block, so the published page follows the blueprint's exact section sequence + carries
+    the per-kind component-styling hooks the ``<style>`` block targets.
+
+    Content before the first ``<h2>`` (the ``<h1>`` + intro) is the first group; groups
+    beyond the section count fold into the LAST section; empty sections are skipped.
+    Returns the plain body unchanged when there is nothing to wrap.
     """
     blocks = [b for b in body_html.split("\n") if b.strip()]
-    if not blocks or not section_order:
+    if not blocks or not specs:
         return body_html
 
     groups: list[list[str]] = []
@@ -1154,16 +1188,19 @@ def _wrap_sections(body_html: str, section_order: list[str]) -> str:
     if current:
         groups.append(current)
 
-    n = len(section_order)
-    buckets: list[list[str]] = [[] for _ in section_order]
+    n = len(specs)
+    buckets: list[list[str]] = [[] for _ in specs]
     for idx, group in enumerate(groups):
         buckets[idx if idx < n else n - 1].extend(group)
 
     out: list[str] = []
-    for name, bucket in zip(section_order, buckets, strict=True):
+    for (kind, variant), bucket in zip(specs, buckets, strict=True):
         if not bucket:
             continue
-        out.append(f'<section class="aios-{_slug(name)}">\n' + "\n".join(bucket) + "\n</section>")
+        cls = f"aios-{_slug(kind)}"
+        if variant:
+            cls += f" aios-layout-{_slug(variant)}"
+        out.append(f'<section class="{cls}">\n' + "\n".join(bucket) + "\n</section>")
     return "\n".join(out) if out else body_html
 
 
@@ -1275,21 +1312,73 @@ def _design_style_block(profile: dict[str, Any]) -> str:
     return "<style>" + "".join(rules) + "</style>" if rules else ""
 
 
+# Structural, palette-agnostic component CSS (scoped to ``.aios-page``): renders the
+# per-kind ``aios-layout-<variant>`` hooks as classic components (grids, banners, cards)
+# so the flat-HTML body + PDF look good even without an analyzed profile. The palette /
+# font rules are layered on top by ``_design_style_block`` (or ``_classic_style_block``).
+_LAYOUT_CSS = (
+    ".aios-page section{margin:40px auto;padding:8px 0}"
+    ".aios-page img{max-width:100%;height:auto;border-radius:10px}"
+    ".aios-page .aios-layout-grid ul{display:grid;"
+    "grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;list-style:none;"
+    "padding:0;margin:22px 0}"
+    ".aios-page .aios-layout-grid li{padding:18px 20px;border-radius:12px;"
+    "background:rgba(15,23,42,.035)}"
+    ".aios-page .aios-layout-numbered-steps ol,.aios-page .aios-layout-numbered-steps ul"
+    "{padding-left:1.1em;margin:18px 0}"
+    ".aios-page .aios-layout-numbered-steps li{margin:10px 0}"
+    ".aios-page .aios-layout-accordion h3{margin:14px 0 4px;cursor:default}"
+    ".aios-page .aios-cta,.aios-page .aios-layout-banner{text-align:center;"
+    "padding:52px 24px;border-radius:16px;margin:48px auto}"
+    ".aios-page .aios-hero,.aios-page section:first-child{padding-top:16px}"
+)
+
+
+def _classic_style_block() -> str:
+    """A premium, palette-agnostic default ``<style>`` for a TEMPLATE-only page (no
+    analyzed profile): clean type scale + spacing so a generated page still looks
+    professional out of the box."""
+    return (
+        "<style>.aios-page{max-width:1160px;margin:0 auto;color:#1e293b;"
+        "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.65;"
+        "font-size:17px}"
+        ".aios-page h1,.aios-page h2,.aios-page h3{color:#0f172a;line-height:1.18;"
+        "font-weight:700}"
+        ".aios-page h1{font-size:2.6rem;margin:.2em 0 .4em}"
+        ".aios-page h2{font-size:1.9rem;margin:1.4em 0 .5em}"
+        ".aios-page h3{font-size:1.3rem;margin:1.1em 0 .3em}"
+        ".aios-page a{color:#2563eb}</style>"
+    )
+
+
+def _with_layout_css(style: str) -> str:
+    """Fold the structural ``_LAYOUT_CSS`` into an existing ``<style>…</style>`` block
+    (or wrap it when there is none)."""
+    if style.endswith("</style>"):
+        return style[: -len("</style>")] + _LAYOUT_CSS + "</style>"
+    return f"<style>{_LAYOUT_CSS}</style>{style}"
+
+
 def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
-    """Render the draft to HTML and - when the job carries a design profile - wrap it in
-    the profile's ordered sections AND a ``<style>`` block derived from the profile's
-    tokens, so the published page MATCHES the copied site (colours + fonts + layout +
-    components), not just its section order. No profile -> plain render (no regression)."""
+    """Render the draft to HTML and shape it to the job's page BLUEPRINT: wrap the body
+    in the blueprint's ordered ``<section class="aios-<kind> aios-layout-<variant>">``
+    blocks + a ``<style>`` block so the published page MATCHES the analyzed site (colours
+    + fonts + layout + components) or the chosen TEMPLATE's classic structure - not just
+    a flat section-order. No profile AND no template -> plain render (no regression)."""
     html = md_to_html(draft_md)
     profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
-    if not profile:
-        return html
-    section_order = _design_section_order(row)
-    if section_order:
-        html = _wrap_sections(html, section_order)
-    style = _design_style_block(profile)
-    if not style:
-        return html
+    specs = _resolve_row_blueprint(row)
+    content_specs = _content_section_specs(specs)
+    if content_specs:
+        html = _wrap_sections_specs(html, content_specs)
+    elif profile:
+        order = _design_section_order(row)
+        if order:
+            html = _wrap_sections(html, order)
+    if not profile and not specs:
+        return html  # nothing to shape by -> plain render (no regression)
+    style = (_design_style_block(profile) if profile else "") or _classic_style_block()
+    style = _with_layout_css(style)
     return f'{style}\n<div class="aios-page">\n{html}\n</div>'
 
 
@@ -1698,8 +1787,21 @@ def _plugin_payload(
     # post-meta (guarded by the setting; absent when disabled -> byte-identical payload).
     settings = settings or get_settings()
     if settings.content_elementor_enabled:
-        design_profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile")) or None
-        payload["elementor_data"] = elementor_json(draft_md, design_profile)
+        raw_pack = _as_dict(row.get("source_pack"))
+        design_profile = _as_dict(raw_pack.get("design_profile")) or None
+        # Resolve the effective page blueprint (analyzed site > chosen template > page-type
+        # default) and SLOT the draft's content into its sections, rendered as classic,
+        # editable Elementor components - the hero copy + image + CTA land in the hero, the
+        # FAQ pairs in an accordion, testimonials in cards, etc.
+        specs = _resolve_row_blueprint(row)
+        blueprint = [s.as_dict() for s in specs] or None
+        payload["elementor_data"] = elementor_json(
+            draft_md,
+            design_profile,
+            blueprint=blueprint,
+            cta=payload.get("cta") or _derive_cta(row),
+            testimonials=_str_list(raw_pack.get("testimonials")),
+        )
         payload["elementor_edit_mode"] = "builder"
     return payload
 

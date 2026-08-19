@@ -17,9 +17,9 @@
 
 import { useMemo, useState } from "react";
 import {
-  RESEARCH_CONTENT_TYPES, DIFFICULTY_META, FRAMEWORKS, TARGETS,
+  RESEARCH_CONTENT_TYPES, DIFFICULTY_META, FRAMEWORKS, TARGETS, PAGE_TEMPLATES,
   type ContentJob, type ResearchContentType, type ResearchItem,
-  type SiteDesignProfile, type Framework, type PublishTarget,
+  type SiteDesignProfile, type Framework, type PublishTarget, type PageTemplate,
 } from "@/lib/content";
 import {
   useContentResearch, useGenerateFromResearch, useSiteDesign,
@@ -32,6 +32,8 @@ import type { ReviewAction } from "./ReviewGate";
 const _lines = (s: string): string[] => s.split("\n").map((l) => l.trim()).filter(Boolean);
 
 const FW_OPTIONS: (Framework | "Auto")[] = ["Auto", ...FRAMEWORKS.map((f) => f.key)];
+const TPL_OPTIONS: (PageTemplate | "Auto")[] = ["Auto", ...PAGE_TEMPLATES.map((t) => t.key)];
+const TPL_LABEL: Record<string, string> = { Auto: "Auto", ...Object.fromEntries(PAGE_TEMPLATES.map((t) => [t.key, t.label])) };
 
 // ── ONE unified, industry-neutral placeholder voice for the four grounding fields ──
 // (short instruction lives in each field's label; a single neutral example here).
@@ -77,6 +79,7 @@ export default function ContentWizard({
   // Step 3 — details (shared across every picked page)
   const [clientId, setClientId] = useState("");
   const [framework, setFramework] = useState<Framework | "Auto">("Auto");
+  const [template, setTemplate] = useState<PageTemplate | "Auto">("Auto");
   const [target, setTarget] = useState<PublishTarget>("WordPress");
   const [proof, setProof] = useState("");
   const [testimonials, setTestimonials] = useState("");
@@ -148,6 +151,7 @@ export default function ContentWizard({
         items: picks,
         clientId: effectiveClientId,
         framework,
+        template,
         target,
         proofPoints: _lines(proof).slice(0, 12),
         testimonials: _lines(testimonials).slice(0, 12),
@@ -162,7 +166,7 @@ export default function ContentWizard({
   function resetWizard() {
     setStep(1); setSite(""); setContentType("service"); setCount("");
     setSelected(new Set()); setMaxPages(""); setDesign(null); setAttachDesign(true);
-    setFramework("Auto"); setTarget("WordPress");
+    setFramework("Auto"); setTemplate("Auto"); setTarget("WordPress");
     setProof(""); setTestimonials(""); setUniqueData(""); setServices("");
     setCodes(null); setPreviewId(null);
     research.reset(); siteDesign.reset(); generate.reset();
@@ -477,6 +481,26 @@ export default function ContentWizard({
                 {framework === "Auto"
                   ? "Auto selects a framework from each page type + search intent."
                   : FRAMEWORKS.find((x) => x.key === framework)?.expansion}
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Layout template</label>
+              <div className="co-chips wrap">
+                {TPL_OPTIONS.map((t) => (
+                  <button type="button" key={t}
+                    className={template === t ? "chip on" : "chip"}
+                    onClick={() => setTemplate(t)}>
+                    {TPL_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+              <div className="fld-hint">
+                {template === "Auto"
+                  ? (attachDesign && design
+                      ? "Auto — the page mirrors the analyzed site's layout. Pick a template to override it."
+                      : "Auto picks a template from each page type. Pick one to force a specific layout.")
+                  : `${PAGE_TEMPLATES.find((x) => x.key === template)?.bestFor} — content is slotted into this template's sections${attachDesign && design ? " (overrides the analyzed site)" : ""}.`}
               </div>
             </div>
 

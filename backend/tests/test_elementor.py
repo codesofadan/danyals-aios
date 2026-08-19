@@ -233,8 +233,11 @@ def test_plugin_payload_carries_elementor_when_enabled() -> None:
     assert payload["elementor_edit_mode"] == "builder"
     tree = json.loads(payload["elementor_data"])
     assert isinstance(tree, list) and tree
-    # The design profile in source_pack drove the named sections.
-    assert any(s["settings"].get("_css_classes") == "aios-hero" for s in tree)
+    # The design profile in source_pack drove the named sections; the rich composer now
+    # carries the per-kind layout variant too (aios-hero aios-layout-<variant>).
+    assert any(
+        str(s["settings"].get("_css_classes", "")).startswith("aios-hero") for s in tree
+    )
     # The flat HTML body is STILL present (the non-Elementor fallback).
     assert payload["content"] and "<h1>" in payload["content"]
 

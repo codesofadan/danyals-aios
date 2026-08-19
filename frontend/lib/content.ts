@@ -11,6 +11,22 @@ export type PageType = "service" | "blog" | "local" | "gbp_post";
 export type PublishTarget = "WordPress" | "PDF/Markdown";
 export type Framework = "AIDA" | "PAS" | "BAB" | "FAB" | "4 Ps" | "PASTOR" | "4 U's";
 
+// The 7 named page-layout templates (the audited section sequences). Mirrors the
+// backend PageTemplate literal + app/services/page_blueprints.py TEMPLATES. When a
+// template is picked the generated page is built to it and the content is slotted into
+// its sections; "Auto" derives it from the page type (or the analyzed site wins).
+export type PageTemplate =
+  | "service" | "location" | "service_area" | "blog" | "faq" | "local" | "homepage";
+export const PAGE_TEMPLATES: { key: PageTemplate; label: string; bestFor: string }[] = [
+  { key: "service",      label: "Service page",           bestFor: "A single service — benefits, process, proof, pricing, FAQ." },
+  { key: "location",     label: "Location page",          bestFor: "One physical location — NAP, local services, reviews, map." },
+  { key: "service_area", label: "Service-area page",      bestFor: "A service across an area — covered areas, local proof." },
+  { key: "blog",         label: "Blog / article",         bestFor: "Informational post — ToC, body sections, FAQ, conclusion." },
+  { key: "faq",          label: "FAQ page",               bestFor: "A Q&A hub — accordion, simplest questions first." },
+  { key: "local",        label: "Local business landing", bestFor: "Local-intent homepage — services, reviews, areas, map." },
+  { key: "homepage",     label: "Homepage",               bestFor: "Company homepage — benefits, proof, testimonials, stats." },
+];
+
 // Job state machine: queued → drafting → needs_review → publishing → done
 // (plus failed/retry and rejected off the review gate).
 export type JobStatus =
@@ -153,9 +169,18 @@ export type SiteDesignTypography = {
   body_font: string;
   base_size: string;
 };
+// One section of the analyzed page blueprint (its kind + heading + layout variant).
+export type SiteDesignSection = {
+  kind: string;
+  heading: string;
+  layout: string;
+};
 export type SiteDesignLayout = {
   container_width: string;
   section_order: string[];
+  // The full ordered blueprint (every section's kind + heading + layout, in exact
+  // sequence) — the deep structural capture the publish path builds the page to.
+  blueprint: SiteDesignSection[];
   hero_style: string;
   cta_style: string;
 };

@@ -160,6 +160,7 @@ def _seed_source_pack(
     unique_data: list[str] | None = None,
     services: list[str] | None = None,
     design_profile: dict[str, Any] | None = None,
+    template: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the worker's ``source_pack`` grounding from the client + its site.
 
@@ -199,6 +200,12 @@ def _seed_source_pack(
         pack["unique_data"] = data
     if svcs:
         pack["services"] = svcs
+    if template:
+        # The operator EXPLICITLY chose a page-layout template - the worker's publish
+        # path (``page_blueprints.resolve_blueprint``) builds the page to it and slots the
+        # content into its sections; it wins over any analyzed design_profile. Absent ->
+        # the worker falls back to the analyzed site, then the page-type default.
+        pack["template"] = template
     if design_profile:
         # The target site's extracted design profile - the worker's publish path reads
         # ``design_profile["layout"]["section_order"]`` back off here to wrap the page
@@ -234,6 +241,7 @@ async def _seed_and_insert_job(
     unique_data: list[str] | None = None,
     services: list[str] | None = None,
     design_profile: dict[str, Any] | None = None,
+    template: str | None = None,
 ) -> dict[str, Any]:
     """Seed a job's ``source_pack``, insert the queued row (RLS path), enqueue the
     pipeline worker, and return the row. The shared create path behind BOTH
@@ -259,6 +267,7 @@ async def _seed_and_insert_job(
         unique_data=unique_data,
         services=services,
         design_profile=design_profile,
+        template=template,
     )
     row = await asyncio.to_thread(
         repo.insert_job,
@@ -408,6 +417,7 @@ async def create_content_job(
         unique_data=body.unique_data,
         services=body.services,
         design_profile=_design_dict(body.design_profile),
+        template=None if body.template == "Auto" else body.template,
     )
     await record_activity(
         actor, kind="content", action="queued a content job", target=client.get("name", ""),
@@ -501,6 +511,7 @@ async def generate_from_research(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
     design_profile = _design_dict(body.design_profile)  # shared across every fanned-out job
+    template = None if body.template == "Auto" else body.template  # shared page-layout template
     codes: list[str] = []
     for item in body.items:
         row = await _seed_and_insert_job(
@@ -518,6 +529,7 @@ async def generate_from_research(
             unique_data=body.unique_data,
             services=body.services,
             design_profile=design_profile,
+            template=template,
         )
         codes.append(str(row["code"]))
 
