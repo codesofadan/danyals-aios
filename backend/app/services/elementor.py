@@ -1136,6 +1136,104 @@ def build_elementor_data(
     return sections
 
 
+# --------------------------------------------------------------------------- #
+# Render an EDITED page model (app.services.page_model.PageModel.to_dict()) to the
+# Elementor tree, so the SAME model the dashboard editor edits is published BOTH as
+# the styled HTML (page_model.model_to_html) AND as a drag-and-drop-editable Elementor
+# page. Reuses the tested per-kind section renderers, so the output stays consistent
+# with the draft-driven composer.
+# --------------------------------------------------------------------------- #
+def model_to_elementor(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build the Elementor ``_elementor_data`` tree from a saved page-model dict. Only
+    VISIBLE sections render; each is rendered by its kind. Always a non-empty tree."""
+    design = model.get("design") if isinstance(model.get("design"), dict) else {}
+    palette = _palette_of(design) or dict(_CLASSIC_PALETTE)
+    tokens = _design_tokens(design) or dict(_CLASSIC_TOKENS)
+    ids = _IdGen()
+    out: list[dict[str, Any]] = []
+    for sec in model.get("sections") or []:
+        if not isinstance(sec, dict) or not sec.get("visible", True):
+            continue
+        section = _model_section_to_elementor(sec, ids, palette, tokens)
+        if section is not None:
+            out.append(section)
+    if not out:
+        out.append(
+            _section([_column([_text_widget("", ids, palette, tokens)], ids, size=100, seed="empty")],
+                     ids, kind="body", variant="stacked", palette=palette, tokens=tokens)
+        )
+    return out
+
+
+def _model_images(sec: dict[str, Any], ids: _IdGen) -> list[dict[str, Any]]:
+    return [
+        _widget("image", {"image": {"url": str(im.get("url") or ""), "alt": str(im.get("alt") or "")},
+                          "align": "center"}, ids, str(im.get("url") or ""))
+        for im in (sec.get("images") or []) if isinstance(im, dict) and str(im.get("url") or "").strip()
+    ]
+
+
+def _model_section_to_elementor(
+    sec: dict[str, Any], ids: _IdGen, palette: dict[str, str], tokens: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    kind = str(sec.get("kind") or "prose")
+    variant = str(sec.get("layout") or "stacked")
+    heading = str(sec.get("heading") or "")
+    data = _as_dict(sec.get("data"))
+    images = _model_images(sec, ids)
+    if kind == "hero":
+        lead: list[dict[str, Any]] = [{"type": "heading", "level": 1, "text": heading}]
+        if data.get("subhead"):
+            lead.append({"type": "paragraph", "text": str(data["subhead"])})
+        imgs = sec.get("images") or []
+        if imgs and isinstance(imgs[0], dict) and imgs[0].get("url"):
+            lead.append({"type": "image", "url": str(imgs[0]["url"]), "alt": str(imgs[0].get("alt") or "")})
+        buttons = data.get("buttons") or []
+        cta = None
+        if buttons and isinstance(buttons[0], dict):
+            cta = {"button_label": str(buttons[0].get("label") or ""),
+                   "button_url": str(buttons[0].get("url") or "#")}
+        section, _ = _render_hero(lead, ids, palette, tokens, kind=kind, variant=variant, cta=cta)
+        return section
+    if kind in _GRID_KINDS:
+        cards = [(str(c.get("title") or ""), str(c.get("desc") or ""))
+                 for c in (data.get("cards") or []) if isinstance(c, dict)]
+        return _render_grid(heading, cards, ids, palette, tokens, kind=kind, variant=variant, images=images)
+    if kind == "process":
+        cards = [("", str(s)) for s in (data.get("steps") or []) if str(s).strip()]
+        return _render_steps(heading, cards, ids, palette, tokens, kind=kind, variant=variant, images=images)
+    if kind == "faq":
+        pairs = [(str(f.get("q") or ""), str(f.get("a") or ""))
+                 for f in (data.get("faq") or []) if isinstance(f, dict)]
+        return _render_faq(heading, pairs, ids, palette, tokens, kind=kind, variant=variant)
+    if kind == "testimonials":
+        quotes = [str(q) for q in (data.get("quotes") or []) if str(q).strip()]
+        return _render_testimonials(heading, quotes, ids, palette, tokens, kind=kind, variant=variant)
+    if kind == "cta":
+        btn = data.get("button") or {}
+        cta = {"heading": heading, "text": str(data.get("text") or ""),
+               "button_label": str(btn.get("label") or "Get in touch"), "button_url": str(btn.get("url") or "#")}
+        return _render_cta(cta, ids, palette, tokens, kind=kind, variant=variant)
+    # prose / proof / other: heading + the stored HTML as a text-editor widget + any image.
+    widgets: list[dict[str, Any]] = []
+    if heading:
+        widgets.append(_heading_widget(heading, 2, ids, palette, tokens))
+    widgets.extend(images)
+    html = str(data.get("html") or "")
+    if html:
+        widgets.append(_text_widget(html, ids, palette, tokens))
+    if not widgets:
+        return None
+    return _section([_column(widgets, ids, size=100, seed=f"prose:{kind}")], ids,
+                    kind=kind, variant=variant, palette=palette, tokens=tokens)
+
+
+def elementor_json_from_model(model: dict[str, Any]) -> str:
+    """Compact JSON of :func:`model_to_elementor` - the ``_elementor_data`` for a saved,
+    edited page model."""
+    return json.dumps(model_to_elementor(model), separators=(",", ":"), ensure_ascii=False)
+
+
 def elementor_json(
     draft_md: str,
     design_profile: dict[str, Any] | None = None,
