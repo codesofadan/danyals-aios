@@ -230,6 +230,11 @@ class Settings(BaseSettings):
     serper_api_key: SecretStr | None = None  # Serper.dev SERP research
     image_gen_api_key: SecretStr | None = None  # OpenAI-compatible image generation
     image_gen_model: str = "gpt-image-1"  # image model (provider-configurable)
+    # Photographic images in generated pages are ON (operator decision): the hero + section
+    # PHOTOS are generated through the OpenAI image API (gpt-image-1, image_gen_api_key).
+    # Card/feature GLYPHS are inline SVG icons (never PNGs). Flip off to drop the photos and
+    # run icon-only.
+    content_images_enabled: bool = True
     # Per-call cost estimates for the money-dial (a later chunk wires these in).
     content_research_cost_estimate: float = 0.01
     content_generate_cost_estimate: float = 0.15

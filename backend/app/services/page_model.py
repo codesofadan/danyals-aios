@@ -233,12 +233,14 @@ def build_page_model(
             taken.add(i)
             break
     quotes = [q for q in (testimonials or []) if str(q).strip()]
-    if not quotes:
-        for i, c in enumerate(chunks):
-            if c.kind == "testimonials":
+    for i, c in enumerate(chunks):
+        if c.kind == "testimonials":
+            # Consume the testimonials chunk even when a list was supplied, so it never
+            # ALSO folds into a later section as duplicate leftover copy.
+            if not quotes:
                 quotes = [str(x) for b in c.blocks if b["type"] == "list" for x in b.get("items", [])]
-                taken.add(i)
-                break
+            taken.add(i)
+            break
     for i, c in enumerate(chunks):
         if c.kind == "cta":
             taken.add(i)
@@ -427,6 +429,90 @@ def _esc(s: str) -> str:
     return _html.escape(str(s), quote=True)
 
 
+# --------------------------------------------------------------------------- #
+# Branded inline-SVG icon system (NO photos): clean stroke icons that inherit the
+# palette accent, so every page reads on-brand + custom, never AI-stock-photo.
+# --------------------------------------------------------------------------- #
+_ICON_PATHS: dict[str, str] = {
+    "bolt": '<polygon points="13 2 4 14 11 14 9 22 20 10 13 10"/>',
+    "search": '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    "cpu": ('<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/>'
+            '<path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>'),
+    "link": ('<path d="M9 15l6-6"/><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/>'
+             '<path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/>'),
+    "gear": ('<circle cx="12" cy="12" r="3.2"/>'
+             '<path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>'),
+    "shield": '<path d="M12 2l8 4v5c0 5-4 9-8 11-4-2-8-6-8-11V6z"/>',
+    "chart": '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
+    "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
+    "rocket": ('<path d="M5 15c-2 1-3 5-3 5s4-1 5-3"/>'
+               '<path d="M9 15l-3-3c1-6 5-9 12-10-1 7-4 11-10 12z"/><circle cx="14.5" cy="9.5" r="1.6"/>'),
+    "check": '<path d="M20 6L9 17l-5-5"/>',
+    "users": '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 15c2 0 5 2 5 5"/>',
+    "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "puzzle": ('<path d="M10 4h4v3a2 2 0 1 0 4 0h2v4h-3a2 2 0 1 0 0 4h3v4h-4v-3a2 2 0 1 0-4 0v3H6v-4h3'
+               'a2 2 0 1 0 0-4H6V7h4z"/>'),
+    "sparkles": ('<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/>'
+                 '<path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18z"/>'),
+    "layers": '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+}
+_ICON_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("audit", "research", "find", "analy", "assess", "discover"), "search"),
+    (("automat", "workflow", "process", "engine", "run"), "gear"),
+    (("agent", " ai", "bot", "autonom", "intellig", "smart"), "cpu"),
+    (("integrat", "connect", "link", "stack", "api", "sync", "tool"), "link"),
+    (("fast", "speed", "quick", "instant", "rapid", "week", "hour"), "bolt"),
+    (("secure", "safe", "privacy", "data", "protect", "trust", "complian"), "shield"),
+    (("grow", "scale", "result", "roi", "revenue", "perform", "metric", "proven"), "chart"),
+    (("global", "world", "market", "continent", "region", "everywhere"), "globe"),
+    (("ship", "launch", "deploy", "live", "product", "go-live"), "rocket"),
+    (("support", "team", "people", "customer", "client", "human", "staff"), "users"),
+    (("always", "24", "monitor", "uptime", "time"), "clock"),
+    (("solution", "piece", "fit", "custom", "modular", "built"), "puzzle"),
+)
+_ICON_CYCLE: tuple[str, ...] = (
+    "bolt", "cpu", "link", "chart", "gear", "shield", "globe", "rocket", "users", "puzzle", "layers", "sparkles",
+)
+
+
+def _pick_icon(text: str, index: int) -> str:
+    low = f" {text.lower()} "
+    for kws, name in _ICON_KEYWORDS:
+        if any(k in low for k in kws):
+            return name
+    return _ICON_CYCLE[index % len(_ICON_CYCLE)]
+
+
+def _icon_svg(name: str, cls: str = "ic") -> str:
+    path = _ICON_PATHS.get(name, _ICON_PATHS["check"])
+    return (
+        f'<svg class="{cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        f'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        f"{path}</svg>"
+    )
+
+
+def _hero_visual(heading: str) -> str:
+    """A branded, photo-free hero visual: an accent-tinted panel with a large glyph and a
+    small cluster of feature icons - reads custom + on-brand, no stock photo."""
+    big = _icon_svg(_pick_icon(heading, 0), "ic-xl")
+    chips = "".join(
+        f'<span class="hchip">{_icon_svg(n, "ic-sm")}</span>'
+        for n in (_ICON_CYCLE[1], _ICON_CYCLE[3], _ICON_CYCLE[5], _ICON_CYCLE[8])
+    )
+    return f'<div class="hero-visual"><div class="brandpanel"><div class="glyph">{big}</div><div class="hchips">{chips}</div></div></div>'
+
+
+def _feature_row() -> str:
+    """A row of branded icon chips for a centered hero (replaces a hero photo)."""
+    labels = (("bolt", "Fast"), ("cpu", "Autonomous"), ("link", "Integrated"), ("shield", "Secure"))
+    chips = "".join(
+        f'<div class="frow-item">{_icon_svg(n, "ic-md")}<span>{_esc(lbl)}</span></div>'
+        for n, lbl in labels
+    )
+    return f'<div class="feature-row">{chips}</div>'
+
+
 def model_to_html(model: PageModel, *, fragment: bool = False) -> str:
     """Render the page model to premium, self-contained HTML. ``fragment=True`` returns
     just the ``<style>`` + ``<main>`` body (for embedding in the dashboard preview iframe
@@ -474,7 +560,7 @@ def _btn(label: str, url: str, cls: str) -> str:
     return f'<a class="{cls}" href="{_esc(url or "#")}">{_esc(label)}</a>'
 
 
-def _img(im: Image, cls: str) -> str:
+def _photo(im: Image, cls: str) -> str:
     if not im.url:
         return ""
     return f'<div class="{cls}"><img src="{_esc(im.url)}" alt="{_esc(im.alt)}" loading="lazy"></div>'
@@ -484,6 +570,7 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
     d = s.data or {}
     cls = f"aios-sec aios-{re.sub(r'[^a-z0-9]+', '-', s.kind.lower())}"
     attrs = f'data-aios-id="{_esc(s.id)}" data-aios-kind="{_esc(s.kind)}"'
+    has_photo = bool(s.images and s.images[0].url)
     if s.kind == "hero":
         split = "split" in (s.layout or "")
         buttons = "".join(
@@ -495,17 +582,24 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
             f'<p class="lede" data-aios-field="subhead">{_inline_html(str(d.get("subhead", "")))}</p>'
             f'<div class="hero-cta">{buttons}</div></div>'
         )
-        visual = _img(s.images[0], "hero-visual") if s.images else ""
-        layout = "split" if (split and visual) else "centered"
-        return f'<section class="{cls} hero {layout}" {attrs}><div class="wrap">{text}{visual}</div></section>'
+        if split:
+            # Split hero: a LARGE photo (gpt-image) beside the copy; icon panel if no photo.
+            visual = _photo(s.images[0], "hero-visual") if has_photo else _hero_visual(s.heading)
+            return f'<section class="{cls} hero split" {attrs}><div class="wrap">{text}{visual}</div></section>'
+        # Centered hero: copy centered, a big full-width photo below (or a branded icon row).
+        below = _photo(s.images[0], "hero-visual wide") if has_photo else _feature_row()
+        return f'<section class="{cls} hero centered" {attrs}><div class="wrap">{text}{below}</div></section>'
     if s.kind in GRID_KINDS:
+        cards_data = d.get("cards") or []
         cards = "".join(
-            f'<article class="card"><h3 data-aios-field="cards.{i}.title">{_inline_html(c.get("title") or (c.get("desc") or "")[:40])}</h3>'
+            f'<article class="card"><div class="card-ic">'
+            f"{_icon_svg(_pick_icon(str(c.get('title', '')) + ' ' + str(c.get('desc', '')), i))}</div>"
+            f'<h3 data-aios-field="cards.{i}.title">{_inline_html(c.get("title") or (c.get("desc") or "")[:40])}</h3>'
             f'<p data-aios-field="cards.{i}.desc">{_inline_html(c.get("desc") or "")}</p></article>'
-            for i, c in enumerate(d.get("cards") or [])
+            for i, c in enumerate(cards_data)
         )
-        img = _img(s.images[0], "band-visual") if s.images else ""
-        n = min(len(d.get("cards") or []), 4) or 3
+        img = _photo(s.images[0], "band-visual") if has_photo else ""
+        n = min(len(cards_data), 4) or 3
         return (f'<section class="{cls} band" {attrs}><div class="wrap">'
                 f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>{img}'
                 f'<div class="grid grid-{n}">{cards}</div></div></section>')
@@ -543,7 +637,7 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
                 f'{_btn(str(btn.get("label", "Get in touch")), str(btn.get("url", "#")), "btn btn-invert")}'
                 f"</div></section>")
     # prose / proof / other
-    img = _img(s.images[0], "prose-visual") if s.images else ""
+    img = _photo(s.images[0], "prose-visual") if has_photo else ""
     heading = f'<h2 class="sec-h left" data-aios-field="heading">{_inline_html(s.heading)}</h2>' if s.heading else ""
     inner = f'<div class="prose-text">{heading}<div data-aios-field="html">{d.get("html", "")}</div></div>{img}'
     wrap_cls = "wrap prose-split" if img else "wrap narrow"
@@ -562,18 +656,22 @@ _CSS_TEMPLATE = (
     ".aios-doc .btn-ghost{{background:transparent;color:{text};border-color:{line}}}"
     ".aios-doc .btn-invert{{background:{bg};color:{accent}}}"
     ".aios-doc .hero{{padding:76px 0 60px;border-bottom:1px solid {line}}}"
-    ".aios-doc .hero .wrap{{display:grid;grid-template-columns:1.05fr .95fr;gap:52px;align-items:center}}"
-    ".aios-doc .hero.centered .wrap{{grid-template-columns:1fr;text-align:center;max-width:900px}}"
-    ".aios-doc .hero h1{{font-size:54px;margin:.1em 0 .35em}}"
-    ".aios-doc .hero .lede{{font-size:20px;color:{muted};margin:0}}.aios-doc .hero.centered .lede{{margin:0 auto;max-width:44ch}}"
+    ".aios-doc .hero .wrap{{display:grid;grid-template-columns:1fr 1.04fr;gap:56px;align-items:center}}"
+    ".aios-doc .hero.centered .wrap{{grid-template-columns:1fr;text-align:center;max-width:1000px}}"
+    ".aios-doc .hero h1{{font-size:56px;margin:.1em 0 .35em}}"
+    ".aios-doc .hero .lede{{font-size:20px;color:{muted};margin:0}}.aios-doc .hero.centered .lede{{margin:0 auto;max-width:46ch}}"
     ".aios-doc .hero-cta{{display:flex;gap:14px;margin-top:28px;flex-wrap:wrap}}.aios-doc .hero.centered .hero-cta{{justify-content:center}}"
-    ".aios-doc .hero-visual img{{border-radius:20px;box-shadow:{shadow};width:100%;aspect-ratio:4/3;object-fit:cover}}"
+    ".aios-doc .hero-visual img{{border-radius:22px;box-shadow:{shadow};width:100%;min-height:440px;aspect-ratio:4/3;object-fit:cover}}"
+    ".aios-doc .hero-visual.wide{{grid-column:1/-1;margin-top:38px}}.aios-doc .hero-visual.wide img{{aspect-ratio:21/9;min-height:0;max-height:520px}}"
     ".aios-doc .band{{padding:74px 0}}.aios-doc .band.alt{{background:{alt}}}"
     ".aios-doc .band-visual img,.aios-doc .prose-visual img{{border-radius:18px;box-shadow:{shadow};aspect-ratio:16/9;object-fit:cover;margin:0 auto 30px}}"
     ".aios-doc .sec-h{{font-size:38px;text-align:center;margin:0 0 42px}}.aios-doc .sec-h.left{{text-align:left;margin-bottom:18px}}"
     ".aios-doc .grid{{display:grid;gap:22px}}.aios-doc .grid-2{{grid-template-columns:repeat(2,1fr)}}"
     ".aios-doc .grid-3{{grid-template-columns:repeat(3,1fr)}}.aios-doc .grid-4{{grid-template-columns:repeat(4,1fr)}}"
-    ".aios-doc .card{{background:{card};border:1px solid {line};border-radius:18px;padding:28px 26px}}"
+    ".aios-doc .card{{background:{card};border:1px solid {line};border-radius:18px;padding:30px 26px;transition:transform .15s,box-shadow .15s,border-color .15s}}"
+    ".aios-doc .card:hover{{transform:translateY(-3px);box-shadow:{shadow};border-color:{accent}}}"
+    ".aios-doc .card-ic{{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;background:{accent_soft};color:{accent};margin-bottom:18px}}"
+    ".aios-doc .ic{{width:26px;height:26px}}"
     ".aios-doc .card h3{{margin:0 0 8px;font-size:20px}}.aios-doc .card p{{margin:0;color:{muted};font-size:15px}}"
     ".aios-doc .steps{{list-style:none;padding:0;max-width:820px;margin:0 auto;display:grid;gap:16px}}"
     ".aios-doc .steps li{{display:flex;gap:20px;align-items:flex-start;background:{card};border:1px solid {line};border-radius:16px;padding:20px 24px}}"
@@ -589,6 +687,18 @@ _CSS_TEMPLATE = (
     ".aios-doc .faq details[open] .chev{{transform:rotate(45deg)}}.aios-doc .faq .ans{{padding:0 22px 20px;color:{muted}}}.aios-doc .faq .ans p{{margin:0}}"
     ".aios-doc .cta{{background:{accent};color:{cta_fg};text-align:center;padding:80px 0}}"
     ".aios-doc .cta h2{{font-size:40px;margin:0 0 14px;color:{cta_fg}}}.aios-doc .cta p{{font-size:19px;opacity:.92;max-width:52ch;margin:0 auto 28px}}"
+    ".aios-doc .brandpanel{{background:linear-gradient(160deg,{accent_soft},transparent);border:1px solid {line};"
+    "border-radius:24px;padding:48px;min-height:400px;display:flex;flex-direction:column;justify-content:center;"
+    "align-items:center;gap:30px}}"
+    ".aios-doc .glyph{{color:{accent}}}.aios-doc .ic-xl{{width:124px;height:124px}}"
+    ".aios-doc .hchips{{display:flex;gap:14px}}.aios-doc .hchip{{width:54px;height:54px;border-radius:14px;"
+    "background:{card};border:1px solid {line};display:grid;place-items:center;color:{accent}}}"
+    ".aios-doc .ic-sm{{width:24px;height:24px}}"
+    ".aios-doc .feature-row{{display:flex;gap:14px;justify-content:center;margin-top:38px;flex-wrap:wrap}}"
+    ".aios-doc .frow-item{{display:flex;align-items:center;gap:10px;padding:12px 18px;border:1px solid {line};"
+    "border-radius:999px;background:{card};color:{head};font-weight:600;font-size:15px}}"
+    ".aios-doc .ic-md{{width:20px;height:20px;color:{accent}}}"
     "@media(max-width:860px){{.aios-doc .hero .wrap,.aios-doc .prose-split{{grid-template-columns:1fr}}"
-    ".aios-doc .grid-3,.aios-doc .grid-4{{grid-template-columns:1fr 1fr}}.aios-doc .hero h1{{font-size:38px}}}}"
+    ".aios-doc .grid-3,.aios-doc .grid-4{{grid-template-columns:1fr 1fr}}.aios-doc .hero h1{{font-size:38px}}"
+    ".aios-doc .hero-visual img{{min-height:300px}}}}"
 )

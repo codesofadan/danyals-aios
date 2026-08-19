@@ -954,7 +954,11 @@ def _plan_images(
     """Plan a hero + one image per major section (§9), capped at ``max_images``. Each
     image's PROMPT is a CONCRETE real-world SCENE authored by the writer (never the
     abstract topic) + the fixed camera/realism suffix; the ALT text stays the
-    human-readable heading (accessibility + on-page SEO)."""
+    human-readable heading (accessibility + on-page SEO). ``max_images <= 0`` disables
+    image generation entirely: no slots are planned and NO photo-brief writer call is
+    made (no spend), so the page carries no images."""
+    if tuning.max_images <= 0:
+        return
     slots: list[tuple[str, str]] = [("hero", f"{primary} - {client}")]
     for move in moves:
         if len(slots) >= tuning.max_images:

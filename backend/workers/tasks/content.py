@@ -65,6 +65,7 @@ from app.services.content_artifacts import (
     content_store_from_settings,
 )
 from app.services.content_generator import (
+    MAX_IMAGES,
     NAP,
     GeneratedContent,
     GenerationContext,
@@ -462,8 +463,12 @@ def _estimate_full_cost(providers: ContentProviders, settings: Settings) -> floa
     return round(research + generation, 4)
 
 
-def _tuning() -> GeneratorTuning:
-    return GeneratorTuning()  # doctrine defaults; a later chunk may map from Settings
+def _tuning(settings: Settings) -> GeneratorTuning:
+    # Doctrine defaults, except images: when content_images_enabled is off (the default),
+    # max_images=0 disables image planning + generation entirely (no photos in the page,
+    # no image spend). Flip content_images_enabled on to restore the hero + section images.
+    max_images = MAX_IMAGES if settings.content_images_enabled else 0
+    return GeneratorTuning(max_images=max_images)
 
 
 # --- rich-column serializers (plain JSON-safe dicts for the jsonb columns) ---
@@ -902,7 +907,7 @@ def _run_pipeline(
         target=str(row.get("target") or "WordPress"),
         writer=writer,
         model=providers.model_writer,
-        tuning=_tuning(),
+        tuning=_tuning(settings),
     )
     stream("titles_meta")
 
