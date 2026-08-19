@@ -157,6 +157,7 @@ def submitter_for(
     *,
     api_submitters: dict[str, CitationSubmitter],
     bot: CitationSubmitter | None,
+    signup_bot: CitationSubmitter | None = None,
 ) -> tuple[CitationSubmitter | None, str]:
     """Pick the engine one queued row's ``submit_method`` routes to.
 
@@ -164,6 +165,11 @@ def submitter_for(
     ``submitter`` is ``None`` (why nothing could be dispatched: an unconfigured
     engine, or a directory that needs no separate action at all). Never raises -
     an unrecognised ``submit_method`` is a clean "no engine", not a crash.
+
+    ``bot:signup`` routes to the account-creation+email-verify engine (``signup_bot``,
+    ``integrations.citation_signup``); the plain ``bot:``/``aggregator:`` public-form
+    path (``bot``) is unchanged. ``bot:signup`` is matched BEFORE the generic ``bot:``
+    prefix so a signup directory never falls through to the no-signup engine.
     """
     if submit_method.startswith("aggregator:fed_by_"):
         return None, "no action needed - covered by seeding the core aggregator(s)"
@@ -173,6 +179,10 @@ def submitter_for(
         if sub is not None:
             return sub, ""
         return None, f"no API submitter configured for {key!r}"
+    if submit_method.startswith("bot:signup"):
+        if signup_bot is not None:
+            return signup_bot, ""
+        return None, "signup bot not configured (no IMAP mailbox / mail domain / Playwright)"
     if submit_method.startswith("aggregator:") or submit_method.startswith("bot:"):
         if bot is not None:
             return bot, ""
@@ -401,6 +411,7 @@ def job_from_row(row: dict[str, Any]) -> CitationJob:
         website_url=str(row.get("bp_website_url") or ""),
         categories=tuple(categories) if isinstance(categories, list) else (),
         external_ref=str(row["external_ref"]) if row.get("external_ref") else None,
+        client_id=str(row["client_id"]) if row.get("client_id") else "",
         description=str(row.get("bp_description") or ""),
         email=str(row.get("bp_email") or ""),
         logo_url=str(row.get("bp_logo_url") or ""),

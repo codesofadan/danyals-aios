@@ -107,6 +107,14 @@ x-app-env: &app-env
   # Proof screenshots for bot/captcha citation submissions (dashboard proofUrl);
   # unset -> submissions succeed with an honest empty proof, never a crash.
   CITATION_ARTIFACT_DIR: /var/lib/aios/artifacts/citations
+  # Citation account-creation: one CATCH-ALL IMAP mailbox reads signup-confirmation
+  # emails (each signup uses its own unique alias @ CITATION_MAIL_DOMAIN). All absent
+  # -> a `bot:signup` directory HOLDS as 'blocked'; never a crash. IMAP polling is free.
+  CITATION_IMAP_HOST: ${CITATION_IMAP_HOST:-}
+  CITATION_IMAP_PORT: ${CITATION_IMAP_PORT:-993}
+  CITATION_IMAP_USER: ${CITATION_IMAP_USER:-}
+  CITATION_IMAP_PASSWORD: ${CITATION_IMAP_PASSWORD:-}
+  CITATION_MAIL_DOMAIN: ${CITATION_MAIL_DOMAIN:-}
   # House Web 2.0 publishing credentials (JSON: platform -> credential fields).
   # NOT read at runtime — runtime reads the VAULT. This feeds the one-shot
   # `python -m app.cli.seed_web2_vault --yes` seeder (run it inside the api
