@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIOS - Local Control Dashboard</title>
+<style>
+  :root{
+    --maroon:#6E1423; --maroon-2:#8C1D2E; --maroon-deep:#3F0E18; --rose:#B85C6B;
+    --rose-soft:#D89AA3; --blush:#F8ECEE; --blush-2:#F1DADE; --line:#E8D2D7;
+    --ink:#241015; --muted:#7c5b62; --white:#fff; --ok:#1c7a4a; --warn:#b8860b; --err:#a11;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--blush);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45}
+  header{background:var(--maroon-deep);color:#fff;padding:14px 22px;display:flex;align-items:center;gap:16px}
+  header h1{font-size:20px;margin:0;font-weight:800;letter-spacing:-.3px}
+  header .sub{color:var(--rose-soft);font-size:12px}
+  .dot{width:10px;height:10px;border-radius:50%;background:#888;display:inline-block;margin-right:6px;vertical-align:middle}
+  .dot.up{background:#3ad07a;box-shadow:0 0 0 3px rgba(58,208,122,.25)}
+  .dot.down{background:#e0524d;box-shadow:0 0 0 3px rgba(224,82,77,.2)}
+  .status{margin-left:auto;font-size:12px;color:#f3d9de;text-align:right}
+  .flow{display:flex;gap:8px;align-items:center;background:#fff;border-bottom:1px solid var(--line);
+    padding:8px 22px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .flow b{color:var(--maroon)}
+  .flow .arrow{color:var(--rose)}
+  .wrap{display:flex;min-height:calc(100vh - 106px)}
+  nav{width:210px;background:#fff;border-right:1px solid var(--line);padding:10px 0}
+  nav button{display:block;width:100%;text-align:left;padding:9px 20px;border:0;background:none;
+    color:var(--ink);cursor:pointer;font-size:13.5px;border-left:3px solid transparent}
+  nav button:hover{background:var(--blush)}
+  nav button.active{background:var(--blush-2);border-left-color:var(--maroon);color:var(--maroon);font-weight:700}
+  main{flex:1;padding:22px 26px;min-width:0}
+  h2.sec{font-size:26px;font-weight:800;color:var(--maroon);margin:0 0 4px;letter-spacing:-.5px}
+  .lead{color:var(--muted);margin:0 0 16px;font-size:13px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .btn{background:var(--maroon);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;
+    font-size:13px;font-weight:600}
+  .btn:hover{background:var(--maroon-2)}
+  .btn.ghost{background:#fff;color:var(--maroon);border:1px solid var(--line)}
+  .btn.ghost:hover{background:var(--blush)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .tile .n{font-size:30px;font-weight:800;color:var(--maroon-deep);letter-spacing:-1px}
+  .tile .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden;margin-bottom:16px}
+  .panel .ph{padding:10px 14px;background:var(--blush);border-bottom:1px solid var(--line);font-weight:700;
+    color:var(--maroon);font-size:13px;display:flex;justify-content:space-between;align-items:center}
+  .tbl-wrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th,td{text-align:left;padding:7px 12px;border-bottom:1px solid var(--line);white-space:nowrap;
+    max-width:340px;overflow:hidden;text-overflow:ellipsis}
+  th{background:#fff;color:var(--muted);font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:.3px;position:sticky;top:0}
+  tr:hover td{background:var(--blush)}
+  .kv{padding:12px 14px}.kv div{padding:3px 0;border-bottom:1px dashed var(--line)}
+  .kv b{display:inline-block;min-width:180px;color:var(--muted);font-weight:600}
+  pre.json{margin:0;padding:12px 14px;background:#2a0f16;color:#f3d9de;font-size:11.5px;overflow-x:auto;border-radius:0 0 12px 12px}
+  .badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:700}
+  .badge.ok{background:#e3f5ea;color:var(--ok)} .badge.err{background:#fce8e8;color:var(--err)}
+  .badge.wait{background:#fbf1d8;color:var(--warn)}
+  .log{background:#2a0f16;color:#e9c9cf;border-radius:12px;padding:10px 14px;font-family:"Cascadia Code",Consolas,monospace;
+    font-size:11.5px;max-height:190px;overflow-y:auto;margin-top:8px}
+  .log .t{color:var(--rose-soft)} .log .ok2{color:#6fe3a0}.log .er2{color:#ff9a94}
+  form.inline{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:16px;
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;align-items:end}
+  form.inline label{font-size:12px;color:var(--muted);display:block;margin-bottom:3px;font-weight:600}
+  form.inline input,form.inline select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px}
+  .note{font-size:12px;color:var(--muted);grid-column:1/-1}
+  .confirmbar{background:#fbf1d8;border:1px solid #e7cf8e;border-radius:10px;padding:10px 14px;margin-bottom:14px;
+    font-size:13px;display:flex;gap:10px;align-items:center}
+  .empty{padding:20px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>AIOS Control</h1>
+    <div class="sub">local dashboard - every action runs through Claude Code + the skills</div>
+  </div>
+  <div class="status" id="status">
+    <div><span class="dot" id="bdot"></span>bridge <span id="btxt">checking...</span></div>
+    <div><span class="dot" id="wdot"></span>worker <span id="wtxt">unknown</span></div>
+  </div>
+</header>
+
+<div class="flow">
+  <b>browser</b><span class="arrow">&rarr;</span>
+  <b>bridge</b> <span style="color:#b9a">(127.0.0.1, no token)</span><span class="arrow">&rarr;</span>
+  <b>Claude Code worker</b><span class="arrow">&rarr;</span>
+  <b>aios_client.py skills</b><span class="arrow">&rarr;</span>
+  <b>AIOS API</b>
+  <span style="margin-left:auto;color:#b9a">the browser never touches the API or the token</span>
+</div>
+
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h2 class="sec" id="secTitle">Command Center</h2>
+    <p class="lead" id="secLead"></p>
+    <div id="controls"></div>
+    <div id="confirm"></div>
+    <div id="result"><div class="empty">Pick an action above.</div></div>
+    <div class="panel" style="margin-top:18px">
+      <div class="ph">Activity log <span style="font-weight:400;color:var(--muted)">browser &rarr; bridge &rarr; worker &rarr; skills</span></div>
+      <div class="log" id="log"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const BRIDGE = location.origin;            // the UI talks ONLY to the bridge
+const $ = (id)=>document.getElementById(id);
+function log(msg, cls){ const l=$("log"); const t=new Date().toLocaleTimeString();
+  l.insertAdjacentHTML("afterbegin", `<div><span class="t">${t}</span> <span class="${cls||''}">${msg}</span></div>`); }
+
+// ---- module definitions: each button is an INTENT the worker maps to a skill ----
+const MODULES = [
+  {id:"command", title:"Command Center", lead:"The agency-wide rollup the Command Center skill reads.",
+    actions:[{label:"Load Command Center", intent:"command.center"}]},
+  {id:"content", title:"Content", lead:"Content board + KPIs (the /content hub). Creating a job spends AI budget - not wired as a one-click here.",
+    actions:[{label:"Content KPIs", intent:"content.stats"},
+             {label:"Content board", intent:"content.board"},
+             {label:"Awaiting review", intent:"content.board", args:{status:"needs_review"}}]},
+  {id:"audit", title:"Audits", lead:"Audit board + KPIs (the /audit hub). Run a Free audit end-to-end below (zero paid spend).",
+    actions:[{label:"Audit board", intent:"audit.board"},{label:"Audit KPIs", intent:"audit.stats"}],
+    form:"audit"},
+  {id:"offpage", title:"Off-page", lead:"Referring-domain / backlink / citation KPIs (the /offpage hub).",
+    actions:[{label:"Off-page KPIs", intent:"offpage.kpis"}]},
+  {id:"policy", title:"Policy Radar", lead:"Detected change-events and the open recommendation queue.",
+    actions:[{label:"Change events", intent:"policy.changes"},{label:"Recommendations", intent:"policy.recs"}]},
+  {id:"team", title:"Team", lead:"The caller's record and the task queue.",
+    actions:[{label:"My record (/me)", intent:"team.me"},{label:"Task queue", intent:"team.tasks"}]},
+  {id:"milestones", title:"Milestones", lead:"The per-engagement delivery timeline.",
+    actions:[{label:"Load milestones", intent:"milestones.list"}]},
+  {id:"clients", title:"Clients", lead:"The client roster (names + tiers, portal password never revealed).",
+    actions:[{label:"List clients", intent:"clients.list"}]},
+  {id:"onboarding", title:"Onboarding", lead:"Client onboarding runs + KPIs.",
+    actions:[{label:"Onboarding KPIs", intent:"onboarding.stats"},{label:"Onboarding runs", intent:"onboarding.runs"}]},
+  {id:"reports", title:"Reports", lead:"The Google-Sheets connection state (degrades honestly when the key is dormant).",
+    actions:[{label:"Connection state", intent:"reports.connection"}]},
+  {id:"tools", title:"Tool modules", lead:"Part-8 tool-module KPIs (keyword / rank / competitor / on-page / local / billing / imports).",
+    actions:[{label:"Keyword research", intent:"keyword.stats"},{label:"Rank tracker", intent:"rank.stats"},
+             {label:"Competitor intel", intent:"competitor.stats"},{label:"On-page", intent:"onpage.stats"},
+             {label:"Local SEO", intent:"localseo.stats"},{label:"Billing", intent:"billing.stats"},
+             {label:"Data import", intent:"dataimport.stats"}]},
+];
+
+let active = MODULES[0];
+function renderNav(){
+  $("nav").innerHTML = MODULES.map(m=>`<button data-m="${m.id}" class="${m.id===active.id?'active':''}">${m.title}</button>`).join("");
+  $("nav").querySelectorAll("button").forEach(b=>b.onclick=()=>{ active=MODULES.find(m=>m.id===b.dataset.m); renderModule(); });
+}
+function renderModule(){
+  renderNav();
+  $("secTitle").textContent = active.title;
+  $("secLead").textContent = active.lead;
+  $("controls").innerHTML = `<div class="actions">${active.actions.map((a,i)=>
+     `<button class="btn" data-i="${i}">${a.label}</button>`).join("")}</div>` + (active.form==="audit"?auditForm():"");
+  $("controls").querySelectorAll(".btn[data-i]").forEach(b=>b.onclick=()=>{
+    const a=active.actions[+b.dataset.i]; submit(a.intent, a.args||{}); });
+  if(active.form==="audit") wireAuditForm();
+  $("confirm").innerHTML=""; $("result").innerHTML=`<div class="empty">Pick an action above.</div>`;
+}
+function auditForm(){
+  return `<form class="inline" id="auditForm">
+    <div><label>client_id</label><input id="af_client" placeholder="paste a client id (use List clients)"/></div>
+    <div><label>url</label><input id="af_url" value="https://example.com"/></div>
+    <div><label>tier</label><select id="af_tier"><option>Free</option><option>Paid</option></select></div>
+    <div><label>types (comma)</label><input id="af_types" value="technical" placeholder="onpage,technical..."/></div>
+    <div><button type="submit" class="btn">Run audit</button></div>
+    <div class="note">Free + [onpage,technical] = zero paid spend. Paid types (offpage,local,geo,strategy) require the Paid tier. This is a WRITE action: it needs one confirm click.</div>
+  </form>`;
+}
+function wireAuditForm(){
+  $("auditForm").onsubmit=(e)=>{ e.preventDefault();
+    const types=$("af_types").value.split(",").map(s=>s.trim()).filter(Boolean);
+    submit("audit.run",{client_id:$("af_client").value.trim(), url:$("af_url").value.trim(), tier:$("af_tier").value, types});
+  };
+}
+
+// ---- submit an intent to the bridge, poll for the worker's result ----
+async function submit(intent, args){
+  log(`submit <b style="color:#f3d9de">${intent}</b> ${args&&Object.keys(args).length?JSON.stringify(args):''}`);
+  $("confirm").innerHTML="";
+  let r;
+  try{ r = await fetch(`${BRIDGE}/api/submit`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({intent,args})}).then(x=>x.json()); }
+  catch(e){ log(`bridge unreachable: ${e}`, "er2"); return; }
+  if(r.status==="needs_confirm"){
+    log(`${intent} needs confirm (write/spend)`, "");
+    $("confirm").innerHTML=`<div class="confirmbar">This is a write/spend action. <b>${intent}</b> will run through the skills.
+      <button class="btn" id="cbtn">Confirm &amp; run</button>
+      <button class="btn ghost" id="xbtn">Cancel</button></div>`;
+    $("cbtn").onclick=()=>{ args={...args,confirm:true}; submit(intent,args); };
+    $("xbtn").onclick=()=>{ $("confirm").innerHTML=""; };
+    return;
+  }
+  $("result").innerHTML=`<div class="empty">running <b>${intent}</b> through Claude Code + skills...</div>`;
+  poll(r.id, intent);
+}
+async function poll(id, intent){
+  try{
+    const r = await fetch(`${BRIDGE}/api/result?id=${id}`).then(x=>x.json());
+    if(r.status==="pending"){ return poll(id,intent); }
+    if(r.status==="done"||r.status==="error"){
+      const ok = r.result && r.result.ok;
+      log(`${intent} &rarr; ${ok?'<span class="ok2">OK</span>':'<span class="er2">ERR</span>'} `+
+          (r.result&&r.result.meta&&r.result.meta.argv?`<span class="t">(${r.result.meta.argv.join(' ')})</span>`:''), "");
+      render(intent, r.result);
+    }
+  }catch(e){ log(`poll failed: ${e}`,"er2"); }
+}
+
+// ---- render whatever the skill returned ----
+function render(intent, result){
+  const el=$("result");
+  if(!result){ el.innerHTML=`<div class="empty">no result</div>`; return; }
+  if(!result.ok){
+    const d=result.data||{};
+    el.innerHTML=`<div class="panel"><div class="ph">Error <span class="badge err">${d.status||result.meta.exit}</span></div>
+      <div class="kv"><div><b>reason</b>${esc(d.error||'unknown')}</div>
+      ${d.detail?`<div><b>detail</b>${esc(d.detail)}</div>`:''}
+      ${d.path?`<div><b>path</b>${esc(d.path)}</div>`:''}</div></div>`;
+    return;
+  }
+  const data=result.data;
+  let html = statTiles(data);
+  if(Array.isArray(data)) html += renderTable(data);
+  else if(data && typeof data==="object") html += renderObject(data);
+  html += `<div class="panel"><div class="ph">Raw JSON <span class="badge ok">via ${esc((result.meta&&result.meta.argv||[]).join(' '))}</span></div>
+    <pre class="json">${esc(JSON.stringify(data,null,2)).slice(0,6000)}</pre></div>`;
+  el.innerHTML = html;
+}
+function statTiles(data){
+  // known flat stat shapes render as tiles
+  if(data && typeof data==="object" && !Array.isArray(data)){
+    const vals=Object.values(data);
+    const flat = vals.length && vals.every(v=>["number","string","boolean"].includes(typeof v)) && vals.length<=8;
+    if(flat){ return `<div class="tiles">`+Object.entries(data).map(([k,v])=>
+      `<div class="tile"><div class="n">${typeof v==="number"?fmt(v):esc(String(v))}</div><div class="l">${esc(k)}</div></div>`).join("")+`</div>`; }
+  }
+  return "";
+}
+function renderTable(arr){
+  if(!arr.length) return `<div class="panel"><div class="empty">empty list</div></div>`;
+  const cols=[...new Set(arr.flatMap(r=>r&&typeof r==="object"?Object.keys(r):[]))].slice(0,9);
+  if(!cols.length) return `<div class="panel"><pre class="json">${esc(JSON.stringify(arr,null,2))}</pre></div>`;
+  const head=cols.map(c=>`<th>${esc(c)}</th>`).join("");
+  const rows=arr.slice(0,60).map(r=>`<tr>${cols.map(c=>`<td>${esc(cell(r[c]))}</td>`).join("")}</tr>`).join("");
+  return `<div class="panel"><div class="ph">${arr.length} row(s)</div><div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function renderObject(o){
+  const entries=Object.entries(o).filter(([k,v])=>!["number","string","boolean"].includes(typeof v)||String(v).length>40);
+  if(!entries.length) return "";
+  return `<div class="panel"><div class="ph">detail</div><div class="kv">`+
+    Object.entries(o).map(([k,v])=>`<div><b>${esc(k)}</b>${esc(cell(v))}</div>`).join("")+`</div></div>`;
+}
+function cell(v){ if(v===null||v===undefined) return "-"; if(typeof v==="object") return JSON.stringify(v).slice(0,160); return String(v); }
+function fmt(n){ return (Math.abs(n)>=1000)?n.toLocaleString():String(n); }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// ---- health polling ----
+async function health(){
+  try{
+    const h=await fetch(`${BRIDGE}/api/health`).then(x=>x.json());
+    $("bdot").className="dot up"; $("btxt").textContent="up";
+    // worker liveness is inferred: if jobs drain, worker is alive. Show pending count.
+    $("wtxt").textContent = h.pending>0?`busy (${h.pending} queued)`:"idle/ready";
+    $("wdot").className="dot up";
+  }catch(e){ $("bdot").className="dot down"; $("btxt").textContent="down (start bridge.py)";
+    $("wdot").className="dot"; $("wtxt").textContent="unknown"; }
+}
+setInterval(health, 3000); health();
+renderModule();
+log("dashboard ready - browser talks only to the bridge on "+BRIDGE);
+</script>
+</body>
+</html>

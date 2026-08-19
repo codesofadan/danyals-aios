@@ -18,8 +18,8 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 - `$client` - the client name or id. `POST /audits` snapshots `client_name` server-side and 404s an unknown/invisible `client_id`; never invent one.
 - `$url` - the public target URL. The endpoint runs an SSRF guard; a private/internal address is rejected 400.
 - `$tier` - `Free` (default) or `Paid`. Free makes zero paid-provider spend.
-- `$types` - subset of `technical, actionable, local, geo, backlink` (default `technical, actionable`). `local`, `geo`, `backlink` are PAID types: on the `Free` tier they are rejected 400.
-- `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer).
+- `$types` - subset of `onpage, technical, offpage, local, geo, strategy` (the `AuditTypeKey` set; the default is EMPTY = a full audit of every available dimension). `onpage` and `technical` are the FREE deterministic dimensions; `offpage`, `local`, `geo`, `strategy` are PAID types: on the `Free` tier they are rejected 400. Passing an empty `types` on `Free` is allowed (only the free dimensions run).
+- `AIOS_BASE_URL` (default `http://localhost:8000/api/v1`) and `AIOS_SKILL_TOKEN` (EdDSA bearer; the legacy names `AIOS_API_BASE`/`AIOS_TOKEN` are also accepted).
 - Paid audit-provider keys (crawl/SERP/local data) must be live for a true Paid run. When dormant the engine degrades to its deterministic subset - REPORT the degrade, do not present a degraded run as a live Paid audit.
 
 **Trigger.** Any "audit / SEO health check / run a scan on <url>", a request for the audit board or KPIs, or "pull the report / findings" for a completed audit.
@@ -36,7 +36,7 @@ Copy this checklist and check items off as you go:
 ```
 
 1. **Read the board and KPIs.** Run `aios_client.py get /audits` and `... get /audits/stats` -> the audit rows and `{thisMonth, avgScore, runningNow, turnaroundMin}`. Use this to answer board/stats questions without creating a run.
-2. **Reconcile tier and types.** If `$types` contains `local`/`geo`/`backlink` while `$tier` is `Free`, apply the tier decision point BEFORE creating.
+2. **Reconcile tier and types.** If `$types` contains a PAID type (`offpage`/`local`/`geo`/`strategy`) while `$tier` is `Free`, apply the tier decision point BEFORE creating.
 3. **Create the run.** Run `aios_client.py post /audits --json '{"client_id":"<id>","url":"$url","tier":"$tier","types":[...]}'` -> `POST /api/v1/audits`. Capture the returned `id` and initial `status` (`queued`).
 4. **Poll to a terminal state.** Run `aios_client.py get /audits/{id}` until `status` is `done` or `failed`. The worker owns `queued -> running -> done|failed`; never force a transition.
 5. **Pull and interpret the artifacts.** When `done`, fetch `aios_client.py get /audits/{id}/findings.json` (and `GET /audits/{id}/report.pdf` if `pdf` is true). Read the composite `score`, then rank findings by severity then lowest per-check score (M2 method). Render the **Output format**. Do NOT invent any metric the artifact did not return.

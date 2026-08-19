@@ -145,8 +145,35 @@ def _parse_json_body(raw: str) -> dict | None:
         return None  # unreachable (_fail exits); satisfies the type checker
 
 
+def _demangle_msys_path(path: str) -> str:
+    """Recover a Git-Bash / MSYS-mangled leading-slash argument.
+
+    On Windows, Git Bash (the shell Claude Code drives) rewrites a lone leading-slash
+    argument - e.g. ``/audits`` - into an absolute OS path rooted at the MSYS mount,
+    ``C:/Program Files/Git/audits``. The skills document the generic escape hatch as
+    ``aios_client.py post /audits`` (a leading slash), so without this the call would
+    hit ``/api/v1/C:/Program Files/Git/audits`` and fail. We detect an absolute Windows
+    path and strip the longest existing-directory prefix (the mount root, which always
+    exists on disk); the remainder is the intended API path. This hardcodes no install
+    location, so it works for Git-for-Windows, msys64, etc. A non-Windows-absolute arg
+    is returned untouched, so a plain ``audits`` / ``/audits`` on Linux is unaffected.
+    """
+    p = path.replace("\\", "/")
+    if not (len(p) >= 2 and p[0].isalpha() and p[1] == ":"):
+        return path  # not an absolute Windows path -> nothing was mangled
+    segs = p.split("/")
+    for i in range(len(segs), 1, -1):
+        prefix = "/".join(segs[:i])
+        if prefix and os.path.isdir(prefix):
+            tail = "/".join(segs[i:])
+            return f"/{tail}" if tail else "/"
+    return path
+
+
 def _norm(path: str) -> str:
-    """Accept a path with or without the leading slash."""
+    """Accept a path with or without the leading slash (recovering a Git-Bash/MSYS
+    mangled leading-slash path first, so the documented ``post /path`` form works)."""
+    path = _demangle_msys_path(path)
     return path if path.startswith("/") else f"/{path}"
 
 
