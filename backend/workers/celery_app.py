@@ -152,7 +152,22 @@ celery_app.conf.update(
 # transition in the module - it notices a date, it does not move money). A single
 # idempotent UPDATE keyed on `status = 'open'`, so a re-run or an overlapping tick is
 # a no-op and it needs no overlap lock.
-celery_app.conf.beat_schedule = {
+# --------------------------------------------------------------------------- #
+# ALL CRON / BEAT JOBS ARE DISABLED (by request, 2026-08-19). Nothing runs on a
+# schedule for now - every periodic job (including the daily Policy Radar generator)
+# is OFF, and Policy Radar is now ON-DEMAND ONLY: a policy brief is fetched + stored
+# only when a user asks (POST /policy/ask + the lead "generate brief" path write into
+# the SAME change_events / kb_entries / recommendations tables the Policy page reads).
+#
+# The full schedule is preserved verbatim below in ``_BEAT_SCHEDULE_DISABLED`` so it
+# can be switched back on later by restoring ``celery_app.conf.beat_schedule =
+# _BEAT_SCHEDULE_DISABLED`` (all tasks are already registered via ``include=[...]``
+# above and remain callable on demand / via .delay()). An empty schedule means the
+# ``aios-beat`` process simply has nothing to fire; the workers keep serving
+# event-driven + on-demand tasks unchanged.
+celery_app.conf.beat_schedule = {}
+
+_BEAT_SCHEDULE_DISABLED = {
     "dispatch-context": {
         "task": "dispatch_context",
         "schedule": float(settings.context_debounce_seconds),
