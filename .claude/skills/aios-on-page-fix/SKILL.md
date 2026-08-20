@@ -1,5 +1,5 @@
 ---
-name: on-page-fix
+name: aios-on-page-fix
 description: Analyzes a client page for on-page SEO issues and applies an approved title/meta fix to the client's LIVE WordPress site behind a drift guard. Use when an operator wants an on-page analysis, a title or meta description fixed, a page's on-page score, a list of on-page recommendations, or wants to apply, revert, or dismiss a suggested fix. MUTATES a live client site: apply is lead-only, needs a literal confirm, refuses to overwrite a page edited since analysis, and never auto-applies a manual fix.
 argument-hint: "[client] [page-url] [action]"
 arguments: [client, page_url, action]

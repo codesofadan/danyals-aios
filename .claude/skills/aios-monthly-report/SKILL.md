@@ -1,5 +1,5 @@
 ---
-name: monthly-report
+name: aios-monthly-report
 description: Assembles the monthly client report - an AI-written branded narrative composed strictly from real backend numbers (audit deltas, content shipped, milestone progress, off-page, spend) and then syncs the client's workbook to Google Sheets. Use when the operator says "monthly report", "client update deck", "end-of-month report", or "write this month's client summary". Every figure is grounded in a backend read; the narrative invents nothing. Syncing is a lead-only external write to Google Sheets, so this skill is manual-invocation only.
 argument-hint: "[client] [month]"
 arguments: [client, month]
@@ -56,14 +56,14 @@ Copy this checklist and check items off as you go:
 - If `connected=false` -> the sync DEGRADES (0 rows, buffer held). Deliver the narrative but label the sync "degraded, Sheets key pending"; do not claim it reached Google Sheets.
 - If `$client` has no milestone project or no workbook -> report the gap ("no project/workbook on file for this client") and route to a human; do not fabricate stage progress or a sheet.
 - If a KPI is zero for the period -> report zero honestly ("0 content jobs published this month"); a flat month is a real result, not a reason to inflate.
-- If the traffic placeholder would carry the narrative -> do not lead with it; anchor on audits/content/milestones which are real rows.
+- If the traffic placeholder would carry the narrative -> do not lead with it; anchor on audits/content/aios-milestones which are real rows.
 
 ## Common Pitfalls
 - Inventing a traffic lift, ranking gain, or DA number -> forbidden. The platform has no live analytics; the `traffic` series is an audit-derived placeholder. State only real audit/content/milestone/spend rows.
 - Reporting the sync as delivered when `connected=false` -> a degraded flush pushes 0 rows; say so.
 - Deriving progress from vibes -> use the stage-weight formula over the real `status` values, nothing else.
 - Em/en dashes or marketing adverbs in the client narrative -> the renderer strips them; write clean declarative prose.
-- Padding a flat month with speculative wins -> report the real counts; route any "what next" to milestones/upsells, not fabrication.
+- Padding a flat month with speculative wins -> report the real counts; route any "what next" to milestones/aios-upsells, not fabrication.
 
 ## Output format
 Emit verbatim:

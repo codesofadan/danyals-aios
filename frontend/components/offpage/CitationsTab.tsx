@@ -38,12 +38,18 @@ export default function CitationsTab() {
   const runAudit = useRunCitationAudit();
   const clearCitations = useClearCitations();
 
+  // Step 1 (the client picker) collapses to a one-line summary once an audit has been
+  // run, so Step 2 (build) becomes the focus. Picking a different client — or hitting
+  // "Change client / re-audit" — re-opens the full picker.
+  const [auditCollapsed, setAuditCollapsed] = useState(false);
+
   // Audit-first: discover which directories already list this business vs which are
   // missing. Populates the board + gap analysis; build then targets the missing.
   function auditClient() {
     if (!gapClient || runAudit.isPending) return;
     runAudit.mutate(gapClient, {
       onSuccess: (r) => {
+        setAuditCollapsed(true); // fold Step 1 away — the build flow is the next step
         setFlash(r?.detail ?? "Citation audit queued — discovering existing vs missing.");
         window.setTimeout(() => setFlash(null), 4200);
       },
@@ -139,33 +145,48 @@ export default function CitationsTab() {
         </div>
       )}
 
-      {/* ───────── STEP 1 — Audit a client ───────── */}
-      <div className={w.step}>
-        <div className={w.stepH}><span className={w.stepN}>1</span> Audit a client — what&apos;s already built vs missing</div>
-        <div className="fld" style={{ marginTop: 4 }}>
-          <select value={gapClient} onChange={(e) => setGapClient(e.target.value)}>
-            <option value="">Choose a client…</option>
-            {(clientsQ.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>{c.cn}</option>
-            ))}
-          </select>
+      {/* ───────── STEP 1 — Audit a client (collapses once an audit has run) ───────── */}
+      {auditCollapsed ? (
+        <div className={w.step} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span className="material-symbols-rounded" style={{ color: "var(--maroon-2, #8c1d2e)" }}>fact_check</span>
+          <span className={w.stepH} style={{ margin: 0 }}>
+            Audited&nbsp;<b>{gap?.client ?? "client"}</b>
+          </span>
+          <span className="op-muted" style={{ fontSize: 13 }}>
+            {gap?.existingCount ?? 0} existing · {gap?.missingCount ?? 0} missing from catalog
+          </span>
+          <button className="ghostbtn" style={{ marginLeft: "auto" }} onClick={() => setAuditCollapsed(false)}>
+            <span className="material-symbols-rounded">tune</span> Change client / re-audit
+          </button>
         </div>
-        {gapClient && (
-          <div className="op-toolset" style={{ marginBottom: 2 }}>
-            <button className="primary-btn" onClick={auditClient} disabled={runAudit.isPending}>
-              <span className="material-symbols-rounded">search_check</span>
-              {runAudit.isPending ? "Auditing…" : "Run citation audit"}
-            </button>
-            <button className="ghostbtn co-reject" onClick={clearForClient} disabled={clearCitations.isPending}>
-              <span className="material-symbols-rounded">delete_sweep</span>
-              {clearCitations.isPending ? "Clearing…" : "Clear citations"}
-            </button>
+      ) : (
+        <div className={w.step}>
+          <div className={w.stepH}><span className={w.stepN}>1</span> Audit a client — what&apos;s already built vs missing</div>
+          <div className="fld" style={{ marginTop: 4 }}>
+            <select value={gapClient} onChange={(e) => { setGapClient(e.target.value); setAuditCollapsed(false); }}>
+              <option value="">Choose a client…</option>
+              {(clientsQ.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>{c.cn}</option>
+              ))}
+            </select>
           </div>
-        )}
-        {!gapClient && (
-          <div className="op-muted" style={{ fontSize: 13 }}>Pick a client to see its citation coverage and build the gaps.</div>
-        )}
-      </div>
+          {gapClient && (
+            <div className="op-toolset" style={{ marginBottom: 2 }}>
+              <button className="primary-btn" onClick={auditClient} disabled={runAudit.isPending}>
+                <span className="material-symbols-rounded">search_check</span>
+                {runAudit.isPending ? "Auditing…" : "Run citation audit"}
+              </button>
+              <button className="ghostbtn co-reject" onClick={clearForClient} disabled={clearCitations.isPending}>
+                <span className="material-symbols-rounded">delete_sweep</span>
+                {clearCitations.isPending ? "Clearing…" : "Clear citations"}
+              </button>
+            </div>
+          )}
+          {!gapClient && (
+            <div className="op-muted" style={{ fontSize: 13 }}>Pick a client to see its citation coverage and build the gaps.</div>
+          )}
+        </div>
+      )}
 
       {/* ───────── Ready to finish — the handoff queue ───────── */}
       {readyToFinish.length > 0 && (
@@ -220,7 +241,8 @@ export default function CitationsTab() {
         <div className="op-muted">Couldn&apos;t run gap analysis - {(gapQ.error as Error)?.message ?? "try again"}.</div>
       )}
       {gap && (
-        <div>
+        <div className={w.step}>
+          <div className={w.stepH}><span className={w.stepN}>2</span> Build the missing listings</div>
           <div className={w.rollup}>
             <span>
               NAP source: <b>{NAP_SOURCE_LABEL[gap.napSource] ?? gap.napSource}</b>
@@ -280,10 +302,17 @@ export default function CitationsTab() {
           )}
 
           <div className="op-toolset" style={{ marginTop: 12 }}>
-            <button className="primary-btn" onClick={() => setShowCampaign(true)}>
-              <span className="material-symbols-rounded">rocket_launch</span>
-              Build the {gap.missingCount} missing
-            </button>
+            {gap.missingCount > 0 ? (
+              <button className="primary-btn" onClick={() => setShowCampaign(true)}>
+                <span className="material-symbols-rounded">rocket_launch</span>
+                Build the {gap.missingCount} missing
+              </button>
+            ) : (
+              <span className="status-pill ok" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span className="material-symbols-rounded">check_circle</span>
+                All catalog directories covered — nothing to build
+              </span>
+            )}
           </div>
         </div>
       )}

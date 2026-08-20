@@ -1,6 +1,6 @@
 ---
-name: team-status
-description: Reads the team's live workload - the caller's own record and real performance metrics, the task queue (mine or a named member's), and the Command Center team feed - so an operator sees who is working on what. Use when the operator says "team status", "my tasks", "who is working on what", "my queue", "workload", or "how is the team doing". Read-only; assigning work is a separate action in /assign-task.
+name: aios-team-status
+description: Reads the team's live workload - the caller's own record and real performance metrics, the task queue (mine or a named member's), and the Command Center team feed - so an operator sees who is working on what. Use when the operator says "team status", "my tasks", "who is working on what", "my queue", "workload", or "how is the team doing". Read-only; assigning work is a separate action in /aios-assign-task.
 argument-hint: "[member]"
 model: sonnet
 allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_client.py:*), Read
@@ -43,16 +43,16 @@ Copy this checklist and check items off as you go:
 
 ## Decision points
 - If `$ARGUMENTS[0]` names a member with no tasks -> report "no active tasks for that member"; an empty queue is a real state, not a reason to invent one.
-- If a task sits in `review` -> flag it: it is at the content review gate and needs a lead's sign-off (route to `/assign-task`'s review path or a lead).
+- If a task sits in `review` -> flag it: it is at the content review gate and needs a lead's sign-off (route to `/aios-assign-task`'s review path or a lead).
 - If a task's `due` is empty -> report "no due date"; the API exposes none rather than a guessed date.
-- If the operator wants to assign/reassign/route work -> route to `/assign-task`; this skill is read-only.
+- If the operator wants to assign/reassign/route work -> route to `/aios-assign-task`; this skill is read-only.
 - If metrics read 0 across the board for a new member -> report the zeros honestly (a fresh member has no history yet).
 
 ## Common Pitfalls
 - Inventing `onTime`/`utilization`/`quality` -> use only the `GET /me` values; they are computed server-side from real ledgers.
 - Guessing another member's full metrics -> `GET /me` returns only the caller's; for others, report their task queue (`?assignee=`) and their `team` job count, not fabricated percentages.
 - Reading a `review` task as done -> it is awaiting sign-off; it is not delivered until a lead approves.
-- Assigning or advancing a task from here -> read-only; route mutations to `/assign-task`.
+- Assigning or advancing a task from here -> read-only; route mutations to `/aios-assign-task`.
 
 ## Output format
 Emit verbatim:
@@ -67,7 +67,7 @@ At the review gate: <list J-#### in review, or "none">  -> needs a lead sign-off
 Team load (from command-center):
   <member> - <jobs> jobs
   ...
-Next: <assign/route work -> /assign-task>
+Next: <assign/route work -> /aios-assign-task>
 ```
 
 Rubric enforced (reference, not inlined): the task lifecycle (Part 5 - `todo -> in_progress -> [review] -> done`, review gate is lead-only). Shared wiring: `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

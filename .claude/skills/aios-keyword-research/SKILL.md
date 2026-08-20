@@ -1,5 +1,5 @@
 ---
-name: keyword-research
+name: aios-keyword-research
 description: Researches keywords for a client from a seed term, saves them to the keyword bank with volume, difficulty, intent, and clusters, and reports cannibalization conflicts. Use when an operator wants keyword research, a keyword list or bank, keyword ideas from a seed, search volume or difficulty for terms, keyword clusters or a pillar map, an intent breakdown, or wants to know which pages compete for the same term. Research SPENDS metered provider budget; a cost-gate block is silent, so the result must always be verified by re-reading the bank.
 argument-hint: "[client] [seed]"
 arguments: [client, seed]

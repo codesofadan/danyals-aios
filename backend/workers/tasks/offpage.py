@@ -444,9 +444,23 @@ from workers.celery_app import celery_app  # noqa: E402 - after the pure core, p
 
 @celery_app.task(name="web2_write")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
 def web2_write_job(web2_id: str) -> dict[str, Any]:
-    """Entry point: draft one planned Web 2.0 property to the review gate."""
+    """Entry point: draft one planned Web 2.0 property, then AUTO-PUBLISH it.
+
+    The human review gate is intentionally removed: a cleanly drafted property
+    (``state='needs_review'``, ``reason='drafted'``, not degraded) is transitioned
+    straight to ``publishing`` and the publish job is enqueued — no lead approval.
+    ``run_publish`` still HOLDS a draft that has unresolved ``[NEEDS:]`` gaps, so a
+    gappy/degraded draft is never force-published.
+    """
     settings = get_settings()
-    outcome = execute_web2_write(service_offpage_store(), settings, web2_id)
+    store = service_offpage_store()
+    outcome = execute_web2_write(store, settings, web2_id)
+    if outcome.state == "needs_review" and not outcome.degraded and outcome.reason == "drafted":
+        try:
+            store.update_web2(web2_id, {"status": "publishing"})
+            web2_publish_job.delay(web2_id)
+        except Exception:  # never let auto-publish enqueue failure re-raise (acks_late)
+            logger.exception("web2_autopublish_enqueue_failed", web2_id=web2_id)
     return outcome.as_dict()
 
 

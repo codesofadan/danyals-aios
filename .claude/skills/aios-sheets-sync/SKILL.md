@@ -1,6 +1,6 @@
 ---
-name: sheets-sync
-description: Mechanically pushes every client report workbook to its Google Sheet in one pass (POST /reports/sync-all), then confirms the pushes via the sync-event feed and reports the connection state. Use when the operator says "sync all sheets", "push all reports to Google Sheets", "flush the sheets buffer", or "sync everything". This is a lead-only external write to Google Sheets and is manual-invocation only. To sync a single client use /report.
+name: aios-sheets-sync
+description: Mechanically pushes every client report workbook to its Google Sheet in one pass (POST /reports/sync-all), then confirms the pushes via the sync-event feed and reports the connection state. Use when the operator says "sync all sheets", "push all reports to Google Sheets", "flush the sheets buffer", or "sync everything". This is a lead-only external write to Google Sheets and is manual-invocation only. To sync a single client use /aios-report.
 model: sonnet
 disable-model-invocation: true
 allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_client.py:*), Read
@@ -48,7 +48,7 @@ Copy this checklist and check items off as you go:
 - If the caller is not a lead -> **STOP** before Step 3. Report "sync-all requires a lead (owner/admin/manager)"; deliver the read-only connection state.
 - If `connected=false` (no Sheets key) -> the whole pass DEGRADES: every workbook flips to `synced` but 0 rows push and buffers are retained. Report "degraded: Sheets not connected, N buffers held, 0 rows pushed"; do NOT present it as a live bulk sync.
 - If `buffer.queued` was 0 and `connected=true` -> nothing new to push; report a clean no-op rather than implying data moved.
-- If the operator wants ONE client -> route to `/report` (POST /reports/sync with a `workbookId`) instead of the bulk pass.
+- If the operator wants ONE client -> route to `/aios-report` (POST /reports/sync with a `workbookId`) instead of the bulk pass.
 
 ## Common Pitfalls
 - Reporting a total row count from the optimistic workbook `status` -> use the `sync-events` `rows`, which count only real pushes; degraded flushes are 0.
@@ -68,7 +68,7 @@ Workbooks pushed: <count>
   ...
 Total rows landed: <sum from sync-events, 0 if degraded>
 State: <LIVE bulk push | DEGRADED (buffers held, 0 rows, Sheets key pending)>
-Single-client sync instead: /report
+Single-client sync instead: /aios-report
 ```
 
 Rubric enforced (reference, not inlined): the `GET /reports/types` tab/column map. Shared wiring + the Sheets degrade contract: `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

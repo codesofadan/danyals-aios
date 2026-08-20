@@ -1,5 +1,5 @@
 ---
-name: backlink-audit
+name: aios-backlink-audit
 description: Reviews the referring-domain backlink profile and anchor toxicity, then flags at/above-threshold spam links as toxic (queues them for a disavow review) grounded in the real backlink rows. Use when an operator asks for a "backlink audit", "toxic / spammy links", "disavow", "anchor text profile / over-optimization", "PBN / link farm footprint", or "referring domain review". Flagging toxic backlinks is a LEAD-only write that mutates shared state (it queues a disavow review, it does not submit to Google); cost-gated is not applicable but the write is guarded.
 argument-hint: "[client] [spam-threshold]"
 arguments: [client, spam_threshold]

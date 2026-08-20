@@ -1,5 +1,5 @@
 ---
-name: upsells
+name: aios-upsells
 description: Surfaces the agency-global Fiverr upsell catalogue (the add-on gigs the client portal can render) and manages it - list, create, edit, toggle active, and reorder. Use when the operator says "upsells", "offers", "add-on services", "Fiverr gigs", "add an upsell", "reorder the offers", or "which upsells convert". Creating/editing/toggling/reordering mutates the shared agency-global catalogue (owner/admin only) and is manual-invocation only.
 argument-hint: "[action]"
 model: sonnet

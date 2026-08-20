@@ -1,5 +1,5 @@
 ---
-name: billing
+name: aios-billing
 description: Reports the agency's MRR, invoice ledger, and collected revenue, and drives an invoice through its manual lifecycle - draft, finalize, mark paid, void, refund. Use when an operator asks about MRR or recurring revenue, wants an invoice created, finalized, marked paid, voided, or refunded, asks what is outstanding or past due, wants a revenue or collections report, or asks what a client has been billed. Owner/admin only. There is no payment gateway: every status move is a manual operator action, and an issued invoice's amounts are frozen.
 argument-hint: "[client] [action]"
 arguments: [client, action]

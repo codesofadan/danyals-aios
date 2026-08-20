@@ -1,5 +1,5 @@
 ---
-name: local-service-page
+name: aios-local-service-page
 description: Generates a ranking-grade LOCAL service page (a city + service landing page) grounded in the client's fresh context, runs the 14-dimension QA gate, and returns the draft, JSON-LD, and QA scorecard for a human to approve. Use when an operator needs a "service in city" page, a "near me" or service-area landing page, or a local page for a client with a physical location or defined service area. Spends metered AI research + generation budget and creates a content job.
 argument-hint: "[client] [city] [service]"
 arguments: [client, city, service]

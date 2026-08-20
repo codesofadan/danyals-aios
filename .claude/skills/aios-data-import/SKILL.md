@@ -1,5 +1,5 @@
 ---
-name: data-import
+name: aios-data-import
 description: Maps an uploaded CSV/TSV/XLSX file's columns onto a client's real data fields and commits the rows, reporting rejected rows honestly. Use when an operator wants to import or upload keywords, rankings, backlinks, citations, or Search Console data, asks which columns a file type accepts, wants to fix or save a column mapping, or asks why rows were rejected from an import. Keyless (no provider spend). Committing WRITES rows to the client's data; a partial import means rows were rejected, never rounded up to success.
 argument-hint: "[client] [source-type]"
 arguments: [client, source_type]

@@ -1,6 +1,6 @@
 ---
-name: offpage
-description: Reads the off-page boards and KPIs (referring-domain / backlink profile, citation / NAP listings, Web 2.0 property ledger) and routes any write to the right guarded feature skill. Use when an operator says "off-page", "link profile / backlinks", "referring domains", "citations / NAP / directory listings", "web 2.0 properties", or "off-page KPIs / new-lost-toxic links". This is the off-page module hub; its spending/publishing/mutating sub-actions live in /backlink-audit, /citation-builder (reconcile), /citation-submit (real submission), /web2-build (each LEAD-gated and cost-gated server-side).
+name: aios-offpage
+description: Reads the off-page boards and KPIs (referring-domain / backlink profile, citation / NAP listings, Web 2.0 property ledger) and routes any write to the right guarded feature skill. Use when an operator says "off-page", "link profile / backlinks", "referring domains", "citations / NAP / directory listings", "web 2.0 properties", or "off-page KPIs / new-lost-toxic links". This is the off-page module hub; its spending/publishing/mutating sub-actions live in /aios-backlink-audit, /aios-citation-builder (reconcile), /aios-citation-submit (real submission), /aios-web2-build (each LEAD-gated and cost-gated server-side).
 argument-hint: "[board] [client]"
 arguments: [board, client]
 model: opus
@@ -38,16 +38,16 @@ Copy this checklist and check items off as you go:
    - `aios_client.py get /offpage/web2`.
 3. **Summarize grounded state.** Render the **Output format** from the real rows only: referring-domain size, new/lost/toxic, NAP consistency counts, and the web2 ledger (draft / needs_review / published mix).
 4. **Route the write.** If the operator wants to act, hand off - do NOT call a mutation from the hub:
-   - Flag toxic backlinks / disavow review -> `/backlink-audit` (LEAD).
-   - Reconcile/bulk-update an EXISTING NAP listing (mark Submitted/Updated) -> `/citation-builder` (LEAD for bulk).
-   - Actually CREATE new directory listings (a real submission campaign) -> `/citation-submit` (LEAD; cost-gated per row).
-   - Plan / approve a Web 2.0 property -> `/web2-build` (LEAD; publishes; cost-gated).
+   - Flag toxic backlinks / disavow review -> `/aios-backlink-audit` (LEAD).
+   - Reconcile/bulk-update an EXISTING NAP listing (mark Submitted/Updated) -> `/aios-citation-builder` (LEAD for bulk).
+   - Actually CREATE new directory listings (a real submission campaign) -> `/aios-citation-submit` (LEAD; cost-gated per row).
+   - Plan / approve a Web 2.0 property -> `/aios-web2-build` (LEAD; publishes; cost-gated).
 
 ## Decision points
 - If the caller lacks `view_reports` -> every read 403s -> report "requires staff (view_reports)", STOP.
 - If the operator asks to flag/submit/publish -> route to the feature skill; state it is LEAD-only and (for web2) cost-gated + human-gated. The hub never performs the write itself.
-- If `toxicFlagged > 0` -> surface the disavow-review queue size and point to `/backlink-audit`; do not auto-flag more.
-- If citations show `inconsistent`/`missing` -> surface the counts and point to `/citation-builder`; NAP fixes are a LEAD action.
+- If `toxicFlagged > 0` -> surface the disavow-review queue size and point to `/aios-backlink-audit`; do not auto-flag more.
+- If citations show `inconsistent`/`missing` -> surface the counts and point to `/aios-citation-builder`; NAP fixes are a LEAD action.
 - If a board is empty -> report "no rows" (grounded); do not infer a profile that is not there.
 
 ## Common Pitfalls
@@ -67,10 +67,10 @@ Backlinks: <n rows shown>  (toxic/disavow queue: <n>)
 Citations (NAP): consistent <n> · inconsistent <n> · missing <n>
 Web 2.0 ledger: draft <n> · needs_review <n> · published <n>   verified <n>/pending <n>
 Route the work:
-  toxic backlinks / disavow    -> /backlink-audit (LEAD)
-  citations / NAP fixes        -> /citation-builder (LEAD for bulk)
-  new directory listings       -> /citation-submit (LEAD; cost-gated per row)
-  web 2.0 build / approve       -> /web2-build (LEAD; publishes; cost-gated)
+  toxic backlinks / disavow    -> /aios-backlink-audit (LEAD)
+  citations / NAP fixes        -> /aios-citation-builder (LEAD for bulk)
+  new directory listings       -> /aios-citation-submit (LEAD; cost-gated per row)
+  web 2.0 build / approve       -> /aios-web2-build (LEAD; publishes; cost-gated)
 ```
 
 Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` (OFF-* checks) + the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1..c4*.md`; citation/NAP rubric in `local.yaml` (D2). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

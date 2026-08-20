@@ -1,5 +1,5 @@
 ---
-name: rank-report
+name: aios-rank-report
 description: Reports a client's keyword rankings from the rank tracker - current positions, movement, best-ever, and map of unranked terms - and prices the monthly commitment before any keyword is added. Use when an operator asks "where do we rank", wants a ranking / position / SERP report, asks what a keyword moved to, wants to add or pause tracked keywords, wants to change a check cadence, or asks what rank tracking costs a client. Adding keywords or raising cadence re-prices a STANDING monthly cost the CLIENT pays and can be rejected with a 402.
 argument-hint: "[client] [action]"
 arguments: [client, action]

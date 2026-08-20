@@ -95,14 +95,17 @@ async def firecrawl_scrape(
 ) -> FirecrawlPage | None:
     """Render ``url`` via Firecrawl and return a :class:`FirecrawlPage`, or ``None``.
 
-    POSTs ``{base_url}/v1/scrape`` with ``formats: ["markdown"(, "screenshot")]`` and
-    ``onlyMainContent: false`` (we want the WHOLE chrome - header/nav/hero/footer - to
-    read the layout, not just the article body), under Bearer auth. Degrades to ``None``
-    on ANY failure (transport / non-200 / non-JSON / no usable content). A screenshot
-    that cannot be fetched or exceeds the size cap simply comes back ``None`` while the
-    markdown is still returned - a partial success, not a degrade.
+    POSTs ``{base_url}/v1/scrape`` with ``formats: ["markdown"(, "screenshot@fullPage")]``
+    and ``onlyMainContent: false`` (we want the WHOLE chrome - header/nav/hero/footer - to
+    read the layout, not just the article body), under Bearer auth. The screenshot is the
+    ``@fullPage`` variant (the ENTIRE page top-to-bottom, not just the viewport), so the
+    vision analysis SEES every section down to the footer - the plain ``screenshot`` format
+    would clip everything below the fold. Degrades to ``None`` on ANY failure (transport /
+    non-200 / non-JSON / no usable content). A screenshot that cannot be fetched or exceeds
+    the size cap simply comes back ``None`` while the markdown is still returned - a partial
+    success, not a degrade.
     """
-    formats: list[str] = ["markdown"] + (["screenshot"] if want_screenshot else [])
+    formats: list[str] = ["markdown"] + (["screenshot@fullPage"] if want_screenshot else [])
     endpoint = f"{base_url.rstrip('/')}{_SCRAPE_PATH}"
     body: dict[str, Any] = {"url": url, "formats": formats, "onlyMainContent": False}
     try:

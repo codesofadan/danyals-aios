@@ -242,6 +242,52 @@ def test_plugin_payload_carries_elementor_when_enabled() -> None:
     assert payload["content"] and "<h1>" in payload["content"]
 
 
+def test_plugin_payload_carries_design_css_for_default_theme() -> None:
+    # The analyzed design must also reach a NON-Elementor (plain default theme) site: the
+    # payload carries a separate ``design_css`` field the plugin enqueues in <head>. It is
+    # scoped to .aios-page, carries the analyzed palette, and rides regardless of the
+    # Elementor flag (it styles the flat-HTML fallback body).
+    from workers.tasks.content import _plugin_payload
+
+    row = _row()
+    row["source_pack"]["design_profile"] = {
+        "palette": {"primary": "#0a0a0a", "background": "#fffbea", "text": "#111", "accent": "#ff5500"},
+        "typography": {"heading_font": "Poppins, sans-serif", "body_font": "Inter, sans-serif"},
+        "layout": {"container_width": "1080px", "section_order": ["hero", "cta"], "hero_style": "centered"},
+        "components": {"button_style": "solid pill", "card_style": "soft shadow", "spacing_scale": "spacious"},
+    }
+    for flag in (True, False):
+        payload = _plugin_payload(row, _DRAFT, "The Ultimate Guide", settings=_settings(content_elementor_enabled=flag))
+        css = payload["design_css"]
+        assert ".aios-page" in css              # scoped to the generated body wrapper
+        assert "#ff5500" in css                 # the analyzed accent colour is applied
+        assert "Poppins, sans-serif" in css     # the analyzed heading font is applied
+        assert "<style>" not in css             # raw CSS only; the plugin owns the wrapper
+        # The flat body itself still carries NO inline <style> (wp_kses_post would dump it).
+        assert "<style>" not in payload["content"]
+        # A page built to match an analyzed site is a full-width landing page.
+        assert payload["full_width"] is True
+
+
+def test_plugin_payload_full_width_by_page_type_without_profile() -> None:
+    # No design profile, but a landing page_type (service) -> full width. A blog stays
+    # narrow (no full_width key), so long-form articles keep the reading measure.
+    from workers.tasks.content import _plugin_payload
+
+    def _bare(page_type: str) -> dict[str, Any]:
+        return {
+            "code": "CJ-9002", "topic": "t", "page_type": page_type,
+            "outline": {"meta": {"title": "T", "description": "d"}},
+            "keyword_map": {"primary": "t"},
+            "source_pack": {"wp_site_url": "https://client.test"},
+        }
+
+    service = _plugin_payload(_bare("service"), _DRAFT, "T", settings=_settings())
+    blog = _plugin_payload(_bare("blog"), _DRAFT, "T", settings=_settings())
+    assert service.get("full_width") is True
+    assert "full_width" not in blog
+
+
 def test_plugin_payload_is_byte_identical_when_disabled() -> None:
     from workers.tasks.content import _plugin_payload
 

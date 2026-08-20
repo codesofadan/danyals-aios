@@ -1,5 +1,5 @@
 ---
-name: web2-build
+name: aios-web2-build
 description: Plans a branded Web 2.0 link property (WordPress.com / Blogger / Tumblr / Medium) carrying ONE editorial backlink, lets the write worker draft it and park it at needs_review, then holds at the human quality gate for a LEAD to approve or reject - it NEVER auto-publishes. Use when an operator says "web 2.0", "tiered link property", "branded asset / property", "build a web2 backlink", or "publish a web 2.0 post". Spends metered AI generation budget (cost-gated server-side), publishes to an external platform on approval, and enforces footprint diversification + no spam.
 argument-hint: "[client] [platform] [anchor] [target-url]"
 arguments: [client, platform, anchor, target_url]

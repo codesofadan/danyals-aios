@@ -1,6 +1,6 @@
 ---
-name: policy-radar
-description: Reads the Policy Radar brain (watched sources, detected change-events, the KB, the open recommendation queue) plus the Command Center digest, answers an on-demand policy question (POST /policy/ask - pure Claude Cloud API, no web search), and refreshes or resets the daily brief. Use when the operator says "policy", "algorithm update", "Google guideline change", "core update", "ask policy radar about a topic", "generate/refresh the daily policy brief", "reset the policy feed", "what recommendations are open", or asks what changed and who is exposed. Reads are staff-wide; ask spends one metered call under the policy money-dial; acknowledging/dismissing a rec and generating the brief are lead-only; the feed reset is owner-only and destructive. This skill runs any spend/write only after an explicit operator confirm. Applying a recommendation is routed to /policy-brief.
+name: aios-policy-radar
+description: Reads the Policy Radar brain (watched sources, detected change-events, the KB, the open recommendation queue) plus the Command Center digest, answers an on-demand policy question (POST /policy/ask - pure Claude Cloud API, no web search), and refreshes or resets the daily brief. Use when the operator says "policy", "algorithm update", "Google guideline change", "core update", "ask policy radar about a topic", "generate/refresh the daily policy brief", "reset the policy feed", "what recommendations are open", or asks what changed and who is exposed. Reads are staff-wide; ask spends one metered call under the policy money-dial; acknowledging/dismissing a rec and generating the brief are lead-only; the feed reset is owner-only and destructive. This skill runs any spend/write only after an explicit operator confirm. Applying a recommendation is routed to /aios-policy-brief.
 argument-hint: "[rec-status | ask-topic]"
 model: opus
 allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_client.py:*), Read
@@ -45,7 +45,7 @@ Copy this checklist and check items off as you go:
 
 5. **Act only on confirm.** Route each requested action:
    - **acknowledge / dismiss** (lead) - restate the rec verbatim, require an explicit yes, then run `aios_client.py post /policy/recommendations/{id}/acknowledge` (or `/dismiss`).
-   - **apply** - STOP and route to `/policy-brief` (it writes a live audit overlay).
+   - **apply** - STOP and route to `/aios-policy-brief` (it writes a live audit overlay).
    - **ask / generate / reset** - use the On-demand & admin actions below.
 
 ## On-demand & admin actions (each confirm-gated)
@@ -67,14 +67,14 @@ Copy this checklist and check items off as you go:
 3. Run `aios_client.py post /policy/reset`. Response `{changeEvents, kbEntries, recommendations}` = the row counts cleared. Emit the **Admin-action output** block.
 
 ## Decision points
-- If the operator asks to `apply` a recommendation -> **STOP.** Route to `/policy-brief`. `apply` writes an `audit_overlay` row that changes live client guidance; it is owned by that skill, not the read hub.
+- If the operator asks to `apply` a recommendation -> **STOP.** Route to `/aios-policy-brief`. `apply` writes an `audit_overlay` row that changes live client guidance; it is owned by that skill, not the read hub.
 - If the caller is not a lead and wants to transition a rec or generate the brief -> report "requires a lead (owner/admin/manager)"; the endpoint 403s. Do not attempt the POST.
 - If the caller is not the owner and wants to reset -> report "requires the owner"; the endpoint 403s. Do not attempt the POST.
 - If `ask` is requested but the operator has not explicitly confirmed the spend -> STOP; confirm first. It is metered under the `policy` dial.
 - If `ask`/`generate` come back degraded (`status='degraded'` / honest $0) -> the Anthropic key is dormant or the dial/budget blocked; report it honestly. Do NOT retry-loop to force spend.
 - If sources/changes/KB are empty or `lastChecked` is "never" -> no brief has run yet. Report "feed not yet populated; showing baseline recommendations only". Do NOT infer there is no policy risk.
 - If a rec's `clients` list is empty -> it is unscoped/global guidance; say "affects all clients" rather than guessing a client.
-- If asked for the client-facing impact of a specific change -> hand off to `/policy-brief` (it owns the advisory + overlay).
+- If asked for the client-facing impact of a specific change -> hand off to `/aios-policy-brief` (it owns the advisory + overlay).
 
 ## Common Pitfalls
 - Inventing an algorithm update or an impact number because the queue is thin -> forbidden. State only what `changes`/`recommendations`/`ask` returned; an empty feed is reported as empty.
@@ -83,7 +83,7 @@ Copy this checklist and check items off as you go:
 - Running `reset` to "tidy up" without an explicit owner confirm -> it is destructive and irreversible (clears changes/KB/non-baseline recs). Owner + explicit yes only.
 - Reporting `generate`'s items as already present -> they land async; re-read the queue before claiming them.
 - Auto-acknowledging or dismissing a rec because it "looks handled" -> every transition is a lead action behind an explicit operator confirm.
-- Calling `apply` from this hub -> it changes live guidance; route to `/policy-brief`.
+- Calling `apply` from this hub -> it changes live guidance; route to `/aios-policy-brief`.
 - Treating a baseline rec's synthetic `kb-base-*` id as a real KB citation -> it is an evergreen default; label it.
 - Reading `/command-center` `traffic` as live analytics -> it is an explicit audit-derived placeholder (`placeholder: true`); never quote it as organic traffic.
 
@@ -102,7 +102,7 @@ Open recommendations (awaiting a lead): <count>
 Recent change-events: <n>  (top: "<summary>" - <severity>, <sourceName>, <detected>)
 Spend snapshot: $<totalSpent>/<totalCap> (<pct>%)  daily-stop=$<dailyStop>  halted=<yes|no>
 Recommended next step:
-  <apply an exposed rec -> run /policy-brief for the client-facing advisory + overlay>
+  <apply an exposed rec -> run /aios-policy-brief for the client-facing advisory + overlay>
   <acknowledge/dismiss (lead + confirm) -> POST /policy/recommendations/{id}/{acknowledge|dismiss}>
   <deep-dive a topic (confirm - spends) -> POST /policy/ask>
 ```

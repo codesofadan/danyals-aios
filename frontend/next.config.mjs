@@ -7,7 +7,11 @@
 // NOTE (prod topology): the shipped Caddyfile serves the API on its OWN subdomain
 // (cross-origin). Phase D must pick one topology — either keep this proxy and add a
 // frontend Caddy block, or drop the proxy and set API_CORS_ORIGINS on the backend.
-const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? "http://127.0.0.1:8000";
+// `.trim()` guards against a stray trailing space in BACKEND_ORIGIN (a classic
+// `cmd /k "set VAR=%VAR% && ..."` footgun captures the space before `&&`), which
+// would otherwise produce `http://host:8000 /api/v1/:path*` and fail rewrites
+// with `TypeError: Invalid URL` — turning every proxied API call into a 500.
+const BACKEND_ORIGIN = (process.env.BACKEND_ORIGIN ?? "http://127.0.0.1:8000").trim();
 
 // Old top-level paths, redirected after the go-live URL restructure: `/` is now
 // the public free-audit landing page (was the admin dashboard), admin moved under

@@ -1,5 +1,5 @@
 ---
-name: citation-builder
+name: aios-citation-builder
 description: Works the citation / NAP board - reads directory listings by NAP status and the prioritized citation AUDIT PLAN (Generic -> Country -> Niche, each directory built|missing), and on a LEAD's go marks a missing listing Submitted or a drifted listing Updated (single or bulk), resolving each to consistent. Use when an operator says "citations", "NAP consistency", "directory listings", "audit plan", "which directories are missing / built", "citation gap", "geo / niche citations", "submit a citation", "fix / reconcile NAP", or "bulk-update citations". Reading the board and the audit plan needs view_reports; marking listings consistent is a LEAD-only write that mutates shared state; a bulk pass touches many rows at once.
 argument-hint: "[client] [nap-status]"
 arguments: [client, nap_status]
@@ -29,7 +29,7 @@ When the operator wants the prioritized "what to build next" view for a client, 
 1. **Resolve the client id.** Match `$client` to a real `client_id` from the client record; never invent one.
 2. **Read the plan.** Run `aios_client.py get /citation-builder/clients/{id}/audit-plan`. It returns `client`, `resolvedVertical`, `market`, and three build-ordered buckets: `generic` (GLOBAL core/aggregators/APIs every market builds first), `country` (the client's own-market US/UK/CA/AU general directories), `niche` (vertical-specific directories). Each item: `directoryName`, `market`, `tier`, `url`, `status` (`built` | `missing`).
 3. **Render the AUDIT PLAN output.** Priority is Generic -> Country -> Niche; within each bucket keep the returned build order. Do NOT re-rank; the endpoint reuses the same selection + gap logic a campaign uses. `built` = a covering citation already exists; `missing` = a build target. When the client has no citations yet, every item reads `missing`.
-4. **Hand off to the build.** A `missing` directory is a Submit candidate; route it into the reconcile flow below (or a real submission via `/citation-submit`). Never mark a plan item "built" from here - the plan derives status from the actual citation records.
+4. **Hand off to the build.** A `missing` directory is a Submit candidate; route it into the reconcile flow below (or a real submission via `/aios-citation-submit`). Never mark a plan item "built" from here - the plan derives status from the actual citation records.
 
 ## Steps (reconcile flow)
 Copy this checklist and check items off as you go:
@@ -83,7 +83,7 @@ Country (<built>/<total>):
   <directoryName> [<tier>] <built|missing> - <url>   (up to 8)
 Niche (<built>/<total>):
   <directoryName> [<tier>] <built|missing> - <url>   (up to 8)
-Next: <submit the top missing Generic listings first -> reconcile flow or /citation-submit>
+Next: <submit the top missing Generic listings first -> reconcile flow or /aios-citation-submit>
 ```
 
 ## Board output

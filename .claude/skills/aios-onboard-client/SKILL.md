@@ -1,5 +1,5 @@
 ---
-name: onboard-client
+name: aios-onboard-client
 description: Drives a client's onboarding run through its 11 steps, sealing collected access credentials into the encrypted vault and tracking which of them a human has actually verified. Use when an operator starts onboarding a new client, asks what onboarding is outstanding, wants to advance or complete an onboarding step, needs to record a GBP / CMS / analytics / Search Console login, or asks whether a client's access has been tested. Seals secrets into the vault; a sealed credential is never a verified one until a human signs in and says so.
 argument-hint: "[client] [step]"
 arguments: [client, step]

@@ -1,6 +1,6 @@
 ---
-name: citation-submit
-description: Sets up a client's canonical NAP (a business profile) and dispatches a real citation-SUBMISSION campaign across the directory catalog — the direct-API, aggregator, and self-hosted Playwright-bot engines actually CREATE new listings, as opposed to /citation-builder, which only reconciles an existing monitoring board. Use when an operator says "submit citations", "build citations for <client>", "run a citation campaign", "get this client listed on directories", "citation automation", or "list <client> on <market> directories". Dispatching a campaign is a LEAD-only write with a real (if small, ~1c/directory) per-row spend across potentially dozens of directories at once.
+name: aios-citation-submit
+description: Sets up a client's canonical NAP (a business profile) and dispatches a real citation-SUBMISSION campaign across the directory catalog — the direct-API, aggregator, and self-hosted Playwright-bot engines actually CREATE new listings, as opposed to /aios-citation-builder, which only reconciles an existing monitoring board. Use when an operator says "submit citations", "build citations for <client>", "run a citation campaign", "get this client listed on directories", "citation automation", or "list <client> on <market> directories". Dispatching a campaign is a LEAD-only write with a real (if small, ~1c/directory) per-row spend across potentially dozens of directories at once.
 argument-hint: "[client] [market] [tier]"
 arguments: [client, market, tier]
 model: sonnet
@@ -13,7 +13,7 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 ## In plain words (for a non-technical operator)
 **What this does:** it gets your client listed on business directories (like an online phone book — Yelp, Yellow Pages, Brownbook, and dozens more). Each listing is a "citation": your client's exact **Name, Address, Phone, and Website**. More consistent citations = better local search rankings.
 
-**What you type:** `/citation-submit <client> <market>` — e.g. `/citation-submit "Joe's Pizza" US`. Markets are `US`, `UK`, `CA`, `AU`, or `GLOBAL`.
+**What you type:** `/aios-citation-submit <client> <market>` — e.g. `/aios-citation-submit "Joe's Pizza" US`. Markets are `US`, `UK`, `CA`, `AU`, or `GLOBAL`.
 
 **What you'll be asked for:** the client's **real** Name / Address / Phone / Website (exactly as it appears on their Google listing). If you don't know it, stop and ask the client — never guess, because a wrong address sent to 50 directories is 50 mistakes.
 
@@ -23,11 +23,11 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 
 **How long:** a batch of directories runs in the background; you check progress, you don't wait staring at it.
 
-**When NOT to use it:** if you only want to *check* existing listings (not create new ones), use `/citation-builder` instead.
+**When NOT to use it:** if you only want to *check* existing listings (not create new ones), use `/aios-citation-builder` instead.
 
 ---
 
-**Purpose.** Get `$client` an actual, new NAP listing across the citation-directory catalog — via a direct API (Bing Places / Foursquare), an aggregator push (Data Axle), or the self-hosted Playwright bot (bot_fillable / captcha_assisted directories) — not just reconcile a monitoring board. This is the skill that DOES the work `/citation-builder` assumes already happened out-of-band.
+**Purpose.** Get `$client` an actual, new NAP listing across the citation-directory catalog — via a direct API (Bing Places / Foursquare), an aggregator push (Data Axle), or the self-hosted Playwright bot (bot_fillable / captcha_assisted directories) — not just reconcile a monitoring board. This is the skill that DOES the work `/aios-citation-builder` assumes already happened out-of-band.
 
 **Who runs it.** Every write (`business-profiles`, `campaigns`) is LEAD-only (owner/admin/manager). A non-lead call 403s - report "requires a LEAD", STOP. Reading the catalog/profiles needs `view_reports`.
 

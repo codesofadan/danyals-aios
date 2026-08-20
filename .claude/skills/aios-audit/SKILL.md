@@ -1,6 +1,6 @@
 ---
-name: audit
-description: Runs a URL SEO audit (Free or Paid) via the audit engine, tracks the audit board and KPIs, pulls the report PDF / findings.json, and interprets the top grounded findings for a human. Use when an operator says "audit this site", "run an SEO health check on a url", "how did this client's audit score", "pull the audit report", or asks for the audit board / stats. This is the audit module hub; it delegates deep interpretation to /technical-audit, /local-audit, /geo-audit. A Paid run spends metered audit-provider budget (cost-gated server-side).
+name: aios-audit
+description: Runs a URL SEO audit (Free or Paid) via the audit engine, tracks the audit board and KPIs, pulls the report PDF / findings.json, and interprets the top grounded findings for a human. Use when an operator says "audit this site", "run an SEO health check on a url", "how did this client's audit score", "pull the audit report", or asks for the audit board / stats. This is the audit module hub; it delegates deep interpretation to /aios-technical-audit, /aios-local-audit, /aios-geo-audit. A Paid run spends metered audit-provider budget (cost-gated server-side).
 argument-hint: "[client] [url] [tier] [types]"
 arguments: [client, url, tier, types]
 model: opus
@@ -56,7 +56,7 @@ Copy this checklist and check items off as you go:
 - Reporting a composite `score` that is still `null` (pending) as `0/100` -> it is pending, not zero; say "pending".
 - Inventing DA/DR/traffic/ranking numbers to "round out" the summary -> grounding rule: report only what `findings.json` returned.
 - Re-creating a `failed` audit in a loop -> surface the failure reason first; a repeat run without a cause change just re-fails and re-spends.
-- Deep-interpreting technical/local/geo findings inline here -> hand off to `/technical-audit`, `/local-audit`, `/geo-audit` for the rubric-grounded read; the hub gives the headline.
+- Deep-interpreting technical/local/geo findings inline here -> hand off to `/aios-technical-audit`, `/aios-local-audit`, `/aios-geo-audit` for the rubric-grounded read; the hub gives the headline.
 
 ## Output format
 Emit verbatim:
@@ -74,7 +74,7 @@ Needs validation (confidence < 0.6): <check ids or "none">
 Data gaps / [NEEDS:]: <list verbatim or "none">   -> route to a human
 Degrade notes: <"none" | "paid providers dormant -> deterministic subset, NOT a live Paid audit">
 Recommended next:
-  <interpret: /technical-audit | /local-audit | /geo-audit>
+  <interpret: /aios-technical-audit | /aios-local-audit | /aios-geo-audit>
   <or: run Paid types (spends, cost-gated) | pull report.pdf>
 ```
 

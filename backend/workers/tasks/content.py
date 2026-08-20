@@ -1365,6 +1365,55 @@ def _with_layout_css(style: str) -> str:
     return f"<style>{_LAYOUT_CSS}</style>{style}"
 
 
+def _design_css_text(row: dict[str, Any]) -> str:
+    """The design CSS (WITHOUT the ``<style>`` wrapper) the AIOS Publisher plugin enqueues
+    in the page ``<head>`` so the flat-HTML body VISUALLY matches the analyzed site (or the
+    template's classic look) on ANY WordPress theme - including a plain default theme with
+    no Elementor.
+
+    This is the seam that revives ``_design_style_block``: it can't ride inside the post
+    body (the plugin's ``wp_kses_post`` strips a ``<style>`` tag but keeps its text, dumping
+    raw CSS on the page), so the CSS is sent as a SEPARATE ``design_css`` payload field and
+    the plugin prints it in ``<head>`` instead. Scoped to ``.aios-page`` (the body wrapper)
+    so it only styles the generated content. Returns ``""`` when the body is a plain render
+    (no profile AND no blueprint) - there is no ``.aios-page`` wrapper to style, mirroring
+    :func:`_shape_body_html`."""
+    profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
+    specs = _resolve_row_blueprint(row)
+    if not profile and not specs:
+        return ""
+    block = _design_style_block(profile) if profile else _classic_style_block()
+    block = _with_layout_css(block)
+    # Unwrap ``<style>…</style>`` -> the raw CSS text; the plugin owns the wrapping tag
+    # (and re-sanitizes) when it emits the inline stylesheet in the page head.
+    if block.startswith("<style>"):
+        block = block[len("<style>") :]
+    if block.endswith("</style>"):
+        block = block[: -len("</style>")]
+    return block.strip()
+
+
+# Page types that read best at a NARROW article measure (long-form prose). Every other
+# type is a landing page that should use the FULL page width.
+_ARTICLE_PAGE_TYPES = frozenset({"blog", "faq"})
+
+
+def _is_full_width_page(row: dict[str, Any]) -> bool:
+    """Whether the published page should render FULL-WIDTH (a landing page) rather than at
+    the plugin's narrow blog reading measure.
+
+    True when the page was built to MATCH an analyzed site's design (a design profile is
+    present -> a full designed page), or the job's ``page_type`` is a landing type
+    (service / local / homepage / ...), i.e. NOT a long-form ``blog`` / ``faq`` article.
+    The plugin turns this into a ``.aios-article--full`` class that breaks the page out of
+    the theme's narrow content column."""
+    raw = _as_dict(row.get("source_pack"))
+    if _as_dict(raw.get("design_profile")):
+        return True
+    page_type = str(row.get("page_type") or "blog").strip().lower()
+    return page_type not in _ARTICLE_PAGE_TYPES
+
+
 def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
     """Render the draft to HTML and shape it to the job's page BLUEPRINT: wrap the body
     in the blueprint's ordered ``<section class="aios-<kind> aios-layout-<variant>">``
@@ -1801,6 +1850,18 @@ def _plugin_payload(
     if faq:
         payload["faq"] = faq
     payload["cta"] = _derive_cta(row)
+    # Design CSS: the analyzed site's (or template's) palette / fonts / layout / component
+    # styling, sent as a SEPARATE field the plugin enqueues in <head> so the flat-HTML body
+    # matches the design on ANY theme (a plain default theme, no Elementor). Absent -> a
+    # plain render with nothing to style (byte-identical to the prior payload).
+    design_css = _design_css_text(row)
+    if design_css:
+        payload["design_css"] = design_css
+    # Full-width layout: a landing page (a non-article page type, or a page built to MATCH
+    # an analyzed site's design) uses the FULL page width; a blog / FAQ article keeps the
+    # narrow reading measure. The plugin turns this into a `.aios-article--full` class.
+    if _is_full_width_page(row):
+        payload["full_width"] = True
     # Elementor-editable output: attach the widget tree so the plugin writes the builder
     # post-meta (guarded by the setting; absent when disabled -> byte-identical payload).
     settings = settings or get_settings()

@@ -20,7 +20,7 @@ echo   Opening http://localhost:3000 in your browser.
 echo.
 
 REM Launch the dev server in its own window, wait for it to boot, then open the browser.
-start "AIOS Dashboard - dev server" cmd /k "set BACKEND_ORIGIN=%BACKEND_ORIGIN% && npm run dev"
+start "AIOS Dashboard - dev server" cmd /k "set "BACKEND_ORIGIN=%BACKEND_ORIGIN%" && npm run dev"
 timeout /t 9 /nobreak >nul
 start "" http://localhost:3000
 

@@ -1,5 +1,5 @@
 ---
-name: local-seo
+name: aios-local-seo
 description: Reports a client's map-pack rankings and audits their Google Business Profile completeness and NAP consistency across directories. Use when an operator asks about map-pack or local-pack rankings, "do we show in the 3-pack", GBP or Google Business Profile completeness, missing categories or hours, NAP consistency across directories, or wants to add a local keyword or refresh local ranks. Refreshing SPENDS metered budget. GBP sync is read-only and currently always holds. There is no geo-grid.
 argument-hint: "[client] [location]"
 arguments: [client, location]

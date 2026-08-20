@@ -4,7 +4,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.1.0
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -80,6 +80,26 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.4.0 =
+* Design fidelity on ANY theme: the push now sends a `design_css` field (the analyzed
+  site's / template's palette, fonts, layout and spacing) which is enqueued in the page
+  `<head>` — so a published page matches the analyzed design even on a plain default theme
+  with no Elementor. The CSS is sanitized as inert CSS (angle brackets stripped, length
+  capped) and scoped to `.aios-page`, and never rides inside the post body.
+* Full-width landing pages: a new `full_width` flag adds `.aios-article--full`, which
+  breaks the page out of a narrow theme content column and renders it across the full page
+  width. Long-form articles (blog / FAQ) keep the narrow reading measure.
+
+= 1.3.0 =
+* Hardened styling: strip any `<style>`/`<script>` block (tag and contents) from the
+  pushed body before sanitizing, and moved the `.aios-page` layout styles into the enqueued
+  `templates/article.css` — so pushed CSS can never leak onto the page as visible text.
+
+= 1.2.0 =
+* Elementor-editable output: when the push includes an `elementor_data` widget tree, write
+  the Elementor builder post-meta so the page opens fully editable in Elementor. Falls back
+  to the flat HTML body on sites without Elementor.
 
 = 1.1.0 =
 * Added the theme-adaptive article template (`templates/article.css` + renderer):

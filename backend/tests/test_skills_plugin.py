@@ -39,33 +39,39 @@ _SKILLS_DIR = _REPO_ROOT / ".claude" / "skills"
 
 # The 31 skills the plugin ships. Kept explicit so a dropped/renamed skill fails loudly.
 EXPECTED_SKILLS = frozenset({
-    "assign-task", "audit", "backlink-audit", "blog-post", "citation-builder",
-    "citation-submit",
-    "client-snapshot", "content", "geo-audit", "local-audit", "local-service-page",
-    "milestones", "monthly-report", "offpage", "policy-brief", "policy-radar",
-    "report", "sheets-sync", "team-status", "technical-audit", "titles-meta",
-    "upsells", "web2-build",
+    "aios-assign-task", "aios-audit", "aios-backlink-audit", "aios-blog-post",
+    "aios-citation-builder", "aios-citation-submit",
+    "aios-client-snapshot", "aios-content", "aios-geo-audit", "aios-local-audit",
+    "aios-local-service-page",
+    "aios-milestones", "aios-monthly-report", "aios-offpage", "aios-policy-brief",
+    "aios-policy-radar",
+    "aios-report", "aios-sheets-sync", "aios-team-status", "aios-technical-audit",
+    "aios-titles-meta",
+    "aios-upsells", "aios-web2-build",
     # Part 8 - one skill per Part-8 tool module.
-    "billing", "competitor-intel", "data-import", "keyword-research", "local-seo",
-    "on-page-fix", "onboard-client", "rank-report",
+    "aios-billing", "aios-competitor-intel", "aios-data-import", "aios-keyword-research",
+    "aios-local-seo",
+    "aios-on-page-fix", "aios-onboard-client", "aios-rank-report",
 })
 
 # Skills that WRITE / PUBLISH / SPEND must never be auto-invoked by a model turn - a
 # human runs them. The plan's ``content/*`` and ``report*`` globs are resolved to the
 # concrete folder names here.
 WRITE_SKILLS = frozenset({
-    "content", "blog-post", "local-service-page", "titles-meta",  # content/*
-    "report", "monthly-report",                                   # report*
-    "web2-build", "citation-builder", "citation-submit", "backlink-audit", "policy-brief",
-    "sheets-sync", "upsells", "assign-task", "audit",
+    "aios-content", "aios-blog-post", "aios-local-service-page", "aios-titles-meta",  # content/*
+    "aios-report", "aios-monthly-report",                                   # report*
+    "aios-web2-build", "aios-citation-builder", "aios-citation-submit",
+    "aios-backlink-audit", "aios-policy-brief",
+    "aios-sheets-sync", "aios-upsells", "aios-assign-task", "aios-audit",
     # Part 8. Every one of these spends, mutates a live site, seals a secret, or moves
     # money: rank-report re-prices a standing per-client commitment when it adds a
     # keyword; keyword-research / competitor-intel spend provider budget; on-page-fix
     # writes to the client's live WordPress; local-seo's refresh spends; onboard-client
     # seals credentials into the vault; data-import commits rows; billing moves the
     # invoice ledger.
-    "billing", "competitor-intel", "data-import", "keyword-research", "local-seo",
-    "on-page-fix", "onboard-client", "rank-report",
+    "aios-billing", "aios-competitor-intel", "aios-data-import", "aios-keyword-research",
+    "aios-local-seo",
+    "aios-on-page-fix", "aios-onboard-client", "aios-rank-report",
 })
 
 _MAX_DESC = 1024

@@ -1,5 +1,5 @@
 ---
-name: milestones
+name: aios-milestones
 description: Reads the client project milestones (the five-stage delivery timeline per engagement) and the recently-auto-advanced feed, and surfaces stalled or blocked projects. Use when the operator says "milestones", "project status", "delivery timeline", "roadmap", "which projects are stalled", or "what advanced recently". Read-only; stages are auto-advanced from delivery events, never edited by hand here.
 argument-hint: "[client]"
 model: sonnet
@@ -45,7 +45,7 @@ Copy this checklist and check items off as you go:
 - If `health=at_risk` -> flag it even if no stage is `blocked`; state which stage is current.
 - If `$ARGUMENTS[0]` matches no project -> report "no project on file for that client"; route to a human, do not fabricate a timeline.
 - If the auto-advance feed is empty -> report "no recent auto-advances"; an empty feed is a real state, not a reason to invent activity.
-- If asked to advance/edit a stage -> not supported here; stages advance only from backend delivery events. Route the underlying work (e.g. a content sprint) to `/assign-task` or the relevant module.
+- If asked to advance/edit a stage -> not supported here; stages advance only from backend delivery events. Route the underlying work (e.g. a content sprint) to `/aios-assign-task` or the relevant module.
 
 ## Common Pitfalls
 - Inventing a progress % or a due date -> use only the stage-weight formula over real `status` values; the API exposes no manual due date here.

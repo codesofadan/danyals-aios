@@ -247,15 +247,19 @@ export const GOOGLE_FONTS: { name: string; cat: "sans" | "serif" }[] = [
 ];
 
 // The default look for each seeded template — a distinct, considered palette + pairing so
-// the gallery reads as seven finished designs, not seven identical boxes.
+// the gallery reads as seven finished designs, not seven identical boxes. All defaults are
+// a modern editorial / SaaS system: strong sans-serif headings over Inter body, and a
+// confident-but-tasteful accent (no dated serif pairings). `blog` deliberately uses a
+// clean Space Grotesk / Inter pairing with an indigo accent — NOT the old Playfair-serif
+// violet, which read as outdated on a plain WordPress theme.
 export const TEMPLATE_THEME_DEFAULTS: Record<PageTemplate, TemplateTheme> = {
-  service:      { primary: "#1F6FEB", heading: "Poppins",         body: "Inter" },
-  location:     { primary: "#0E9F6E", heading: "Sora",            body: "Inter" },
-  service_area: { primary: "#2563EB", heading: "Manrope",         body: "Inter" },
-  blog:         { primary: "#7C3AED", heading: "Playfair Display", body: "Lora" },
-  faq:          { primary: "#0EA5E9", heading: "Work Sans",       body: "Inter" },
-  local:        { primary: "#EA580C", heading: "Montserrat",      body: "Inter" },
-  homepage:     { primary: "#111827", heading: "Space Grotesk",   body: "Inter" },
+  service:      { primary: "#2563EB", heading: "Space Grotesk", body: "Inter" },
+  location:     { primary: "#059669", heading: "Sora",          body: "Inter" },
+  service_area: { primary: "#0891B2", heading: "Manrope",       body: "Inter" },
+  blog:         { primary: "#4F46E5", heading: "Space Grotesk", body: "Inter" },
+  faq:          { primary: "#0EA5E9", heading: "Manrope",       body: "Inter" },
+  local:        { primary: "#EA580C", heading: "Montserrat",    body: "Inter" },
+  homepage:     { primary: "#0F172A", heading: "Space Grotesk", body: "Inter" },
 };
 
 // The visual section blueprint for each template — drives BOTH the mini-mockup and the

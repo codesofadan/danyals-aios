@@ -1,6 +1,6 @@
 ---
-name: report
-description: The Reports module hub - reads the per-client workbooks, sync-event feed, report-type tab map, and the Google Sheets connection panel, then refreshes one client's workbook by flushing its buffer to its sheet. Use when the operator says "report", "client report", "refresh the workbook", "sync the sheet", "workbook status", or "push the report to Google Sheets". Syncing is a lead-only external write to Google Sheets and is manual-invocation only. For the monthly AI-written narrative use /monthly-report; to push every workbook at once use /sheets-sync.
+name: aios-report
+description: The Reports module hub - reads the per-client workbooks, sync-event feed, report-type tab map, and the Google Sheets connection panel, then refreshes one client's workbook by flushing its buffer to its sheet. Use when the operator says "report", "client report", "refresh the workbook", "sync the sheet", "workbook status", or "push the report to Google Sheets". Syncing is a lead-only external write to Google Sheets and is manual-invocation only. For the monthly AI-written narrative use /aios-monthly-report; to push every workbook at once use /aios-sheets-sync.
 argument-hint: "[client-or-workbook-id]"
 model: sonnet
 disable-model-invocation: true
@@ -51,14 +51,14 @@ Copy this checklist and check items off as you go:
 - If `connected=false` (no Sheets key) -> the sync is a DEGRADE: status flips to `synced` but 0 rows pushed and the buffer is retained. Report "degraded: Sheets not connected, buffer held, 0 rows pushed"; do NOT present it as a live sync.
 - If the workbook id is unknown -> the endpoint 404s. Re-resolve from Step 1; do not sync a guessed id.
 - If `buffer.queued` is 0 and `connected=true` -> there is nothing new to push; the sync is a no-op refresh. Say so rather than implying fresh data moved.
-- If the operator wants EVERY client synced -> route to `/sheets-sync` (POST /reports/sync-all).
+- If the operator wants EVERY client synced -> route to `/aios-sheets-sync` (POST /reports/sync-all).
 
 ## Common Pitfalls
 - Reporting rows as landed in Google Sheets when `connected=false` -> forbidden. A degraded flush pushes 0; state that.
 - Inventing a `rows` count -> use only the `sync-events` `rows` the push recorded.
 - Syncing a workbook id you guessed -> resolve it from `/reports/workbooks` first (a wrong id 404s).
 - Treating the optimistic `status=synced` as proof of a real push -> the status flips even when degraded; verify via `connected` + the sync events.
-- Composing the monthly client narrative here -> that is `/monthly-report` (opus); this hub just refreshes the workbook.
+- Composing the monthly client narrative here -> that is `/aios-monthly-report` (opus); this hub just refreshes the workbook.
 
 ## Output format
 Emit verbatim:
@@ -71,7 +71,7 @@ Buffer: queued=<queued>  flushedToday=<flushedToday>
 Sync result: status=<synced>  rows pushed=<sum from sync-events>  lastSync=<lastSync>
   <per dataset: <dataset> +<rows> (<ago>)>
 State: <LIVE push | DEGRADED (buffer held, 0 rows, Sheets key pending)>
-Recommended next: <monthly narrative -> /monthly-report | push all clients -> /sheets-sync>
+Recommended next: <monthly narrative -> /aios-monthly-report | push all clients -> /aios-sheets-sync>
 ```
 
 Rubric enforced (reference, not inlined): the `GET /reports/types` tab/column map and the audit report-design contract. Shared wiring + the Sheets degrade contract: `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

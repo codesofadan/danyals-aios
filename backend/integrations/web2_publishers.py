@@ -384,7 +384,17 @@ class DevToClient(HttpProviderClient):
             raise ProviderNotConfiguredError(f"dev.to publisher unavailable: {_INSTALL_HINT}")
         super().__init__(
             base_url="https://dev.to/api",
-            headers={"api-key": api_key, "Content-Type": "application/json"},
+            # dev.to sits behind Cloudflare, which 403s the default httpx UA; send a
+            # browser UA (+ the Forem API Accept type) so the write actually lands.
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/vnd.forem.api-v1+json",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+                ),
+            },
             timeout=timeout,
         )
 

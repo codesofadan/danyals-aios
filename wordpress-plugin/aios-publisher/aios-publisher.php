@@ -3,7 +3,7 @@
  * Plugin Name:       AIOS Publisher
  * Plugin URI:        https://xegents.ai/aios-publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
- * Version:           1.3.0
+ * Version:           1.4.0
  * Requires at least: 5.6
  * Requires PHP:      7.2
  * Author:            Xegents AI
@@ -31,7 +31,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AIOS_PUBLISHER_VERSION', '1.3.0' );
+define( 'AIOS_PUBLISHER_VERSION', '1.4.0' );
 define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 
 // wp_options keys. The API key lives in its own option so a "regenerate" is a
@@ -47,6 +47,12 @@ define( 'AIOS_PUBLISHER_META_SCHEMA', '_aios_schema_jsonld' );
 define( 'AIOS_PUBLISHER_META_TAKEAWAYS', '_aios_key_takeaways' );
 define( 'AIOS_PUBLISHER_META_FAQ', '_aios_faq' );
 define( 'AIOS_PUBLISHER_META_CTA', '_aios_cta' );
+// The analyzed-site (or template) design CSS, enqueued in <head> on a managed post so the
+// flat-HTML body matches the design on ANY theme (a plain default theme, no Elementor).
+define( 'AIOS_PUBLISHER_META_DESIGN_CSS', '_aios_design_css' );
+// Whether this is a FULL-WIDTH landing page (breaks out of the theme's narrow content
+// column) rather than a narrow long-form article. Set by the push for non-article pages.
+define( 'AIOS_PUBLISHER_META_FULL_WIDTH', '_aios_full_width' );
 
 /**
  * Return the merged plugin settings (status / post_type / category / author),
@@ -327,6 +333,17 @@ function aios_publisher_rest_publish( $request ) {
 	// optional: an absent field simply skips that component.
 	aios_publisher_store_article_components( $post_id, $request );
 
+	// --- Design CSS: store the analyzed-site / template styling so it can be enqueued in
+	// <head> on the front end (see aios_publisher_enqueue_article_assets). Sanitized as CSS
+	// (no markup) before storage; absent -> the theme + article.css style the page. ---
+	aios_publisher_store_design_css( $post_id, $request );
+
+	// --- Full-width flag: a landing page renders across the full page width (article.css
+	// adds .aios-article--full); a long-form article keeps the narrow reading measure. ---
+	if ( (bool) $request->get_param( 'full_width' ) ) {
+		update_post_meta( $post_id, AIOS_PUBLISHER_META_FULL_WIDTH, 1 );
+	}
+
 	// --- Categories: assign (create if missing) for a 'post' only ---
 	$categories = $request->get_param( 'categories' );
 	if ( 'post' === $post_type && is_array( $categories ) && ! empty( $categories ) ) {
@@ -509,7 +526,8 @@ function aios_publisher_current_managed_post() {
  * @return void
  */
 function aios_publisher_enqueue_article_assets() {
-	if ( ! aios_publisher_current_managed_post() ) {
+	$post_id = aios_publisher_current_managed_post();
+	if ( ! $post_id ) {
 		return;
 	}
 	wp_enqueue_style(
@@ -518,6 +536,16 @@ function aios_publisher_enqueue_article_assets() {
 		array(),
 		AIOS_PUBLISHER_VERSION
 	);
+	// The analyzed-site / template design CSS (colours, fonts, layout, component styling),
+	// attached as an INLINE stylesheet AFTER article.css so it wins on specificity/order.
+	// This is the seam that makes a published page match the analyzed design on ANY theme
+	// (a plain default theme, no Elementor): the CSS is emitted in <head>, never in the post
+	// body where wp_kses_post would strip a <style> tag. Scoped to .aios-page by the sender.
+	$design_css = (string) get_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_CSS, true );
+	$design_css = aios_publisher_sanitize_css( $design_css );
+	if ( '' !== $design_css ) {
+		wp_add_inline_style( 'aios-publisher-article', $design_css );
+	}
 }
 
 /**
@@ -545,7 +573,14 @@ function aios_publisher_render_article( $content ) {
 	$faq       = aios_publisher_render_faq( get_post_meta( $post_id, AIOS_PUBLISHER_META_FAQ, true ) );
 	$cta       = aios_publisher_render_cta( get_post_meta( $post_id, AIOS_PUBLISHER_META_CTA, true ) );
 
-	return '<div class="aios-article">'
+	// A landing page renders full-width (breaks out of the theme's narrow content column);
+	// a long-form article keeps the narrow reading measure.
+	$classes = 'aios-article';
+	if ( get_post_meta( $post_id, AIOS_PUBLISHER_META_FULL_WIDTH, true ) ) {
+		$classes .= ' aios-article--full';
+	}
+
+	return '<div class="' . esc_attr( $classes ) . '">'
 		. $meta
 		. $takeaways
 		. $toc
@@ -803,6 +838,47 @@ function aios_publisher_store_article_components( $post_id, $request ) {
 		if ( '' !== $clean['heading'] || '' !== $clean['text'] ) {
 			update_post_meta( $post_id, AIOS_PUBLISHER_META_CTA, $clean );
 		}
+	}
+}
+
+/**
+ * Sanitize a caller-supplied CSS string for safe emission inside a <style> block.
+ *
+ * The CSS is DATA, never markup: strip every angle bracket so a hostile payload cannot
+ * close the <style> tag and inject a <script> (the only real breakout vector for text
+ * placed inside <style>), and hard-cap the length so a runaway payload cannot bloat every
+ * page render. Returns '' when nothing usable remains. Note: no wp_unslash here - the REST
+ * JSON body param and get_post_meta both return unslashed text, and unslashing would strip
+ * legitimate CSS escape sequences (e.g. content: "\2022").
+ *
+ * @param string $css Raw CSS text (no <style> wrapper).
+ * @return string Sanitized CSS, or ''.
+ */
+function aios_publisher_sanitize_css( $css ) {
+	$css = (string) $css;
+	// Remove any angle brackets: inside <style>, `</style>` is the only way out. No tags,
+	// no `<`, no `>` -> the text is inert CSS that cannot escape the style element.
+	$css = str_replace( array( '<', '>' ), '', $css );
+	$css = trim( $css );
+	if ( strlen( $css ) > 40000 ) {
+		$css = substr( $css, 0, 40000 );
+	}
+	return $css;
+}
+
+/**
+ * Sanitize + store the design CSS from a publish request (the analyzed-site / template
+ * styling). Stored as post meta and enqueued in <head> on the front end so the flat-HTML
+ * body matches the design on any theme. Absent / empty -> nothing stored (degrade).
+ *
+ * @param int             $post_id The created post id.
+ * @param WP_REST_Request $request The REST request.
+ * @return void
+ */
+function aios_publisher_store_design_css( $post_id, $request ) {
+	$css = aios_publisher_sanitize_css( (string) $request->get_param( 'design_css' ) );
+	if ( '' !== $css ) {
+		update_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_CSS, wp_slash( $css ) );
 	}
 }
 

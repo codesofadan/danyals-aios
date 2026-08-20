@@ -15,8 +15,10 @@ import {
   type PageTemplate, type TemplateTheme, type PreviewBlock,
 } from "@/lib/content";
 
-// Preset accent colours the operator can one-click (plus a free colour input).
-const SWATCHES = ["#1F6FEB", "#7C3AED", "#0E9F6E", "#EA580C", "#E11D48", "#0EA5E9", "#111827", "#6E1423"];
+// Preset accent colours the operator can one-click (plus a free colour input). A modern
+// editorial / SaaS row — blues, indigo, teal/emerald, a warm orange and a clean ink — no
+// dated violet default.
+const SWATCHES = ["#2563EB", "#4F46E5", "#0891B2", "#059669", "#EA580C", "#0EA5E9", "#0F172A", "#E11D48"];
 
 function mix(hex: string, toward: "black" | "white", amt: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());

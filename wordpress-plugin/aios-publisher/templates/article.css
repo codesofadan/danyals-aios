@@ -448,6 +448,45 @@
 	border-radius: 10px;
 }
 
+/* -------------------------------------------------------------------------- *
+ * Full-width landing PAGES  (.aios-article--full)
+ * --------------------------------------------------------------------------
+ * A long-form article reads best at the narrow measure set on `.aios-article`
+ * above. A LANDING page must instead use the full page width and BREAK OUT of a
+ * theme content column that would otherwise strangle it into a narrow centre
+ * strip (the reported bug). The backend sets the `full_width` flag (a non-article
+ * page type, or a page built to match an analyzed site) and the renderer adds
+ * `.aios-article--full`; plain blog posts never get it, so they stay narrow.
+ *
+ * The breakout is the canonical full-bleed: the article escapes to the viewport
+ * width regardless of the theme's wrapper, then every top-level block re-centres
+ * at the page width with responsive side gutters — so the design fills the page
+ * instead of a centre column. The enqueued design CSS (loaded after this) sets the
+ * palette/fonts and may cap `.aios-page` to the analyzed container width.
+ * -------------------------------------------------------------------------- */
+.aios-article--full {
+	--aios-page-width: 1200px;
+	width: 100vw;
+	max-width: 100vw;
+	margin-left: calc(50% - 50vw);
+	margin-right: calc(50% - 50vw);
+}
+.aios-article--full > * {
+	max-width: var(--aios-page-width);
+	margin-inline: auto;
+	padding-inline: clamp(16px, 4vw, 32px);
+	box-sizing: border-box;
+}
+/* The design body fills its centred page column; its sections/grids/CTA span the
+   full width and manage their own inner spacing. */
+.aios-article--full .aios-article__body {
+	max-width: 100%;
+}
+.aios-article--full .aios-page {
+	max-width: 100%;
+	margin-inline: 0;
+}
+
 /* Respect reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
 	.aios-article__faq-item summary::after,

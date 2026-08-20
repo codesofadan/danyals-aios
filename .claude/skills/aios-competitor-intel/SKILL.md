@@ -1,5 +1,5 @@
 ---
-name: competitor-intel
+name: aios-competitor-intel
 description: Analyzes a client's tracked competitors and reports keyword gaps, keyword overlap, and an estimated share of voice. Use when an operator asks who the competitors are, wants a competitor or rival analysis, a keyword gap report, "what do they rank for that we don't", share of voice or visibility, or wants to add, discover, or stop tracking a competitor. Discovery and analysis SPEND metered provider budget. Share of voice is a modelled estimate, and the backlink-gap data is not ingested yet.
 argument-hint: "[client] [competitor-domain]"
 arguments: [client, competitor]

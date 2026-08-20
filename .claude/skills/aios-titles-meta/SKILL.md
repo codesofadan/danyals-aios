@@ -1,5 +1,5 @@
 ---
-name: titles-meta
+name: aios-titles-meta
 description: Generates or repairs a page's SERP title tag and meta description to spec (title front-loads the primary keyword and stays under ~60 chars; meta under ~155 chars with the primary, a differentiation hook, and a CTA; both grounded, using the 4 U's framework), then returns the title, meta, their character counts, and the relevant QA signals for a human to approve. Use when an operator asks for "titles and meta", "meta descriptions", "title tags", "SERP snippet copy", or wants to fix a thin or too-long title/description for a client's page. Spends metered AI generation budget and creates (or edits) a content job.
 argument-hint: "[client] [topic]"
 arguments: [client, topic]

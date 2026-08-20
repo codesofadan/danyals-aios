@@ -1,5 +1,5 @@
 ---
-name: blog-post
+name: aios-blog-post
 description: Generates a ranking-grade informational BLOG post grounded in the client's fresh context, with entity coverage, a 40-55 word extractable answer block, and a Q&A/FAQ, then runs the 14-dimension QA gate and returns the draft, JSON-LD, and QA scorecard for a human to approve. Use when an operator says "write a blog / an article / a post on topic", needs informational or how-to / guide content, or wants a top-of-funnel piece for a client. Spends metered AI research + generation budget and creates a content job.
 argument-hint: "[client] [topic]"
 arguments: [client, topic]

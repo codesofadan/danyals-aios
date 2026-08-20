@@ -94,11 +94,12 @@ async def test_scrape_parses_markdown_and_fetches_screenshot_url() -> None:
     assert page is not None
     assert page.markdown == "# Home"
     assert page.screenshot_b64 == base64.b64encode(png).decode("ascii")
-    # POST shape: Bearer auth, markdown+screenshot formats, whole-page (onlyMainContent False).
+    # POST shape: Bearer auth, markdown + FULL-PAGE screenshot (hero->footer, not just the
+    # viewport), whole-page chrome (onlyMainContent False).
     post = http.posts[0]
     assert post["url"] == "https://api.firecrawl.dev/v1/scrape"
     assert post["headers"]["Authorization"] == "Bearer fc-key"
-    assert post["json"]["formats"] == ["markdown", "screenshot"]
+    assert post["json"]["formats"] == ["markdown", "screenshot@fullPage"]
     assert post["json"]["onlyMainContent"] is False
     assert post["json"]["url"] == "https://x.com"
     # The screenshot URL was fetched (redirects disabled).

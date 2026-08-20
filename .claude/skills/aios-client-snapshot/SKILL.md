@@ -1,5 +1,5 @@
 ---
-name: client-snapshot
+name: aios-client-snapshot
 description: Builds a one-page client health brief - the client profile, its living AI context (summary plus folded facts), the context freshness signal, and the platform rollup - so an operator instantly knows what the platform knows about a client. Use when the operator says "snapshot", "brief me on this client", "what do we know about", "client health", or "give me the one-pager". Read-only. Grounds strictly in what the backend returned and labels any stale or degraded context honestly.
 argument-hint: "[client]"
 arguments: [client]
@@ -51,7 +51,7 @@ Copy this checklist and check items off as you go:
 - If `status` is `degraded`/`error`/`pending` (or the provider keys are dormant) -> the summary is a deterministic fake or a held fold. Label it "context degraded/fake (AI keys pending)"; report the facts/freshness but do not quote the summary as a live AI read.
 - If `$client` resolves to no client -> report "no client on file"; route to a human, do not fabricate a profile.
 - If a fact the operator asks for is absent from `facts`/`summary` -> say "not in context"; route it to a human. Never fill it from memory.
-- If the operator needs a client-facing narrative or report -> route to `/monthly-report`; this snapshot is an internal brief.
+- If the operator needs a client-facing narrative or report -> route to `/aios-monthly-report`; this snapshot is an internal brief.
 
 ## Common Pitfalls
 - Filling a missing fact (NAP, contact, contract detail) from memory -> forbidden. A gap is reported as "not in context" and routed to a human.
@@ -73,7 +73,7 @@ Key facts:
   <fact-key>: <value>
   ...  (or "none folded yet")
 Gaps (routed to a human): <asked-for facts absent from context, or "none">
-Next: <internal only | client-facing report -> /monthly-report>
+Next: <internal only | client-facing report -> /aios-monthly-report>
 ```
 
 Rubric enforced (reference, not inlined): the Context module freshness invariant (backend invariant #11 - `event_watermark >= latest_seq` when caught up; `lag = latest_seq - event_watermark`). Shared wiring + the degrade contract: `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

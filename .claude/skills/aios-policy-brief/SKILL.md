@@ -1,5 +1,5 @@
 ---
-name: policy-brief
+name: aios-policy-brief
 description: Turns a policy change-event or an open recommendation into a client-facing advisory (what changed, who is exposed via the audit overlay, the recommended action) and, on a lead's explicit confirm, applies the recommendation so the change is laid on top of the untouched audit engine. Use when the operator says "brief me on this update", "client impact of the core update", "write the advisory for this policy change", "apply this recommendation", or "close the loop on a policy rec". Applying changes live client guidance (writes an audit_overlay row) and is a lead-only, human-confirmed action, so this skill is manual-invocation only.
 argument-hint: "[change-or-rec-id]"
 model: opus

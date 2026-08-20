@@ -71,7 +71,7 @@ DEGRADE_ANALYSIS_FAILED = "analysis_failed"
 
 # Bound the rendered content the parser considers salient; hard-cap the total so a
 # hostile / huge site cannot balloon the prompt.
-_MAX_SECTIONS = 12  # how many section names the profile's section_order may carry
+_MAX_SECTIONS = 20  # how many section names the profile's section_order may carry (hero->footer)
 _MAX_WIREFRAME_CHARS = 20_000  # bound the self-contained wireframe HTML the reply may carry
 
 
@@ -352,9 +352,11 @@ _DESIGN_SYSTEM_PROMPT = (
     "heading_font and body_font - the actual CSS font-family stacks you can identify from "
     'the letterforms/content - and base_size like "16px"), layout (an object with '
     'container_width like "1200px", section_order - an ORDERED array of the section '
-    "KIND names ACTUALLY visible top-to-bottom, drawn from hero/trust_bar/intro/services/"
-    "features/benefits/process/proof/stats/testimonials/reviews/gallery/pricing/about/team/"
-    "service_areas/map/faq/cta/contact - blueprint - an ORDERED array (one object PER section, "
+    "KIND names ACTUALLY visible top-to-bottom, drawn from header/nav/hero/trust_bar/intro/"
+    "services/features/benefits/process/proof/stats/testimonials/reviews/gallery/pricing/about/"
+    "team/service_areas/map/faq/cta/contact/footer - capture EVERY section from the top "
+    "header/nav down to the bottom footer, in the exact order they appear, omitting none - "
+    "blueprint - an ORDERED array (one object PER section, "
     "in exact top-to-bottom sequence) where each object is {kind (the same vocabulary as "
     'section_order), heading (the ACTUAL heading text shown in that section, or ""), layout '
     "(how that section is laid out: split/centered/stacked/grid/numbered-steps/accordion/banner/"

@@ -1,5 +1,5 @@
 ---
-name: content
+name: aios-content
 description: The Content module hub for Danyal AIOS. Creates any content job (service, blog, or local page), recommends a research-first page SET for a site and bulk-generates the picks, extracts a target site's DESIGN profile so a published page matches it, reads the content board + KPIs, pulls a job's draft/keywords/QA/schema, and runs the human review gate. Use when an operator says "write content", "make a page", "write an article/blog", "create a service or local page", "research pages / recommend a page set", "bulk-generate pages", "match the site's design", "check the content board", "what's awaiting review", or "review/approve/reject a draft" for a client. Routes to the deep skill for the page type. Research, bulk generation, and site-design each spend metered AI budget (content dials); approving is a LEAD action.
 argument-hint: "[client] [page-type] [topic]"
 arguments: [client, page_type, topic]
@@ -32,11 +32,11 @@ job needs `publish_content`. The review gate (approve/edit/reject) is LEAD-only
 board / content jobs / awaiting review", "review this draft" for a client.
 
 ## Route by page type first
-- `page_type == local` → prefer **/local-service-page** (city + service; DOCTRINE §8 local
+- `page_type == local` → prefer **/aios-local-service-page** (city + service; DOCTRINE §8 local
   anatomy). Its SOP is the reference implementation.
-- `page_type == blog` → prefer **/blog-post** (informational; PAS default; entity coverage +
+- `page_type == blog` → prefer **/aios-blog-post** (informational; PAS default; entity coverage +
   extractable answer + FAQ).
-- Bulk titles + meta descriptions only → prefer **/titles-meta**.
+- Bulk titles + meta descriptions only → prefer **/aios-titles-meta**.
 - `page_type == service` (or a general request) → run the hub SOP below.
 
 The deep skills carry the tighter, rubric-embedded SOP; the hub does not duplicate their rubric.
@@ -185,7 +185,7 @@ Copy this checklist and check items off as you go:
 - Approving a bulk-created job without its OWN gate check → each `CJ-####` passes the QA
   §11 gate individually; the bulk call only created them.
 - Re-implementing a page-type's rubric in the hub instead of routing to its deep skill → the deep
-  skill owns the rubric; route to it for `local`/`blog`/titles-meta.
+  skill owns the rubric; route to it for `local`/`blog`/aios-titles-meta.
 - Filling a `[NEEDS:]` from memory → forbidden; it routes the gap to a human.
 - Passing an explicit framework "to be safe" → let `Auto` resolve it per DOCTRINE §6 unless the
   operator explicitly asked for a specific framework.
@@ -222,7 +222,7 @@ Differentiation angle (information_gain=<n>): <present | MISSING -> edit>
 Schema: <@type> JSON-LD present? <yes/no>            Words: <words>   Cost: $<cost>
 Context freshness: <lag=0 fresh | lag=N stale by N events>
 Degrade notes: <"none" | "SERPER/ANTHROPIC pending -> research+QA on fake, DO NOT publish">
-Deep skill for this page type: </local-service-page | /blog-post | /titles-meta | hub>
+Deep skill for this page type: </aios-local-service-page | /aios-blog-post | /aios-titles-meta | hub>
 Next action (human gate):
   <PASS -> LEAD may approve: aios_client.py review --code CJ-#### --action approve>
   <FAIL/NEEDS/degrade -> aios_client.py review --code CJ-#### --action edit / supply the fact>

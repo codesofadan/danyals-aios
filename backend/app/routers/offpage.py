@@ -203,9 +203,13 @@ async def act_on_citation(
         raise _CITATION_NOT_FOUND
 
     changes: dict[str, Any] = {"nap_status": "consistent", "action": action_for("consistent")}
-    # Finishing a handoff (the account was bot-built; a human just published the listing
-    # at handoff_url) advances the submission state off the ready-to-finish queue.
-    if row.get("submit_status") == "ready_for_human":
+    # A human acting on a listing (Submit a missing one, finish a bot-built handoff, or
+    # re-sync a drift) is ASSERTING it is now live. Advance ANY not-yet-live submission
+    # state to `submitted` so the row SETTLES to a done state. Without this a manually
+    # handled row lingers at `queued`/`not_started` (there is no local worker to move
+    # it), which renders as a permanent, no-op "Update" action. An already-`verified`
+    # row keeps the stronger state.
+    if row.get("submit_status") not in ("submitted", "verified"):
         changes["submit_status"] = "submitted"
     if body.note is not None:
         changes["note"] = body.note

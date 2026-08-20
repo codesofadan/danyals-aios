@@ -1,5 +1,5 @@
 ---
-name: assign-task
+name: aios-assign-task
 description: Creates and routes a task to a staff member - validating the client and that the assignee is staff (never a portal client), snapshotting the client name, and stamping the priority and due date. Use when the operator says "assign", "delegate", "create a task for", "give this to", or "route this work". Creating and reassigning tasks is a lead-only action (the assign_tasks holders) that mutates the shared board, so this skill is manual-invocation only. Content Sprint tasks carry the human review gate before delivery.
 argument-hint: "[member] [client] [task-title]"
 arguments: [member, client, task]
