@@ -44,7 +44,8 @@ CitationAction = Literal["Submit", "Update"]
 # 7B-4: the citation SUBMISSION pipeline's state - verbatim from
 # public.citation_submit_status (0045) / frontend CitationSubmitStatus (offpage.ts).
 CitationSubmitStatus = Literal[
-    "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked"
+    "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked",
+    "ready_for_human",  # account created + listing prepared; a human finishes at handoff_url
 ]
 Web2Platform = Literal[
     "WordPress.com", "Blogger", "Tumblr", "Medium",
@@ -63,7 +64,8 @@ _BACKLINK_STATUSES: frozenset[str] = frozenset({"new", "lost", "toxic"})
 _NAP_STATUSES: frozenset[str] = frozenset({"consistent", "inconsistent", "missing"})
 _CITATION_ACTIONS: frozenset[str] = frozenset({"Submit", "Update"})
 _CITATION_SUBMIT_STATUSES: frozenset[str] = frozenset(
-    {"not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked"}
+    {"not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked",
+     "ready_for_human"}
 )
 # Verbatim from integrations.web2_publishers.WEB2_PLATFORMS (7B-4's platform expansion).
 _WEB2_PLATFORMS: frozenset[str] = frozenset(
@@ -145,6 +147,7 @@ class CitationResponse(BaseModel):
     note: str
     submit_status: CitationSubmitStatus = Field(serialization_alias="submitStatus")
     proof_url: str = Field(serialization_alias="proofUrl")
+    handoff_url: str = Field(default="", serialization_alias="handoffUrl")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> CitationResponse:
@@ -168,6 +171,7 @@ class CitationResponse(BaseModel):
             action=action_v,
             submit_status=submit_status_v,
             proof_url=row.get("proof_url", ""),
+            handoff_url=row.get("handoff_url", ""),
             note=row.get("note", ""),
         )
 

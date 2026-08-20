@@ -95,6 +95,13 @@ export default function CitationsTab() {
 
   const inconsistentCount = list.filter((c) => c.nap === "inconsistent").length;
 
+  // The handoff queue: accounts the bot created + prepared that a human finishes in
+  // the browser with one click (directories that can't be fully auto-published).
+  const readyToFinish = useMemo(
+    () => list.filter((c) => c.submitStatus === "ready_for_human"),
+    [list],
+  );
+
   // Bulk update — push every drifted listing back to consistent (human-approved run).
   // Backend resolves each id to `consistent`, then the list refetches for fresh state.
   function bulkUpdate() {
@@ -140,6 +147,45 @@ export default function CitationsTab() {
 
       {showCampaign && (
         <CitationCampaignModal onClose={() => setShowCampaign(false)} initialClientId={gapClient || undefined} />
+      )}
+
+      {/* Handoff queue — accounts built by the bot that need a human's final click */}
+      {readyToFinish.length > 0 && (
+        <div style={{
+          border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 14,
+          background: "var(--blush, #f8ecee)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span className="material-symbols-rounded" style={{ color: "var(--maroon-2, #8c1d2e)" }}>touch_app</span>
+            <b>{readyToFinish.length} citation{readyToFinish.length === 1 ? "" : "s"} ready to finish in your browser</b>
+          </div>
+          <div className="cs" style={{ marginBottom: 10 }}>
+            The account is created and the listing is pre-filled for each of these — just open it and click
+            <b> Publish</b> on the directory, then mark it done here. (Some directories can&apos;t be fully
+            auto-published; this is the safe one-click finish.)
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {readyToFinish.map((c) => (
+              <div key={c.id} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+                background: "var(--white, #fff)", border: "1px solid var(--line)", borderRadius: 8,
+              }}>
+                <span style={{ fontWeight: 600, flex: 1 }}>{c.directory}</span>
+                {c.handoffUrl ? (
+                  <a className="ghostbtn" href={c.handoffUrl} target="_blank" rel="noopener noreferrer"
+                    style={{ textDecoration: "none" }}>
+                    <span className="material-symbols-rounded">open_in_new</span>Finish in browser
+                  </a>
+                ) : (
+                  <span className="cs">login &amp; finish manually</span>
+                )}
+                <button className="primary-btn" onClick={() => actOnRow(c)} disabled={act.isPending}>
+                  <span className="material-symbols-rounded">check</span>Mark published
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {flash && (

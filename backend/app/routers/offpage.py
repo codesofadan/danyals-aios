@@ -203,6 +203,10 @@ async def act_on_citation(
         raise _CITATION_NOT_FOUND
 
     changes: dict[str, Any] = {"nap_status": "consistent", "action": action_for("consistent")}
+    # Finishing a handoff (the account was bot-built; a human just published the listing
+    # at handoff_url) advances the submission state off the ready-to-finish queue.
+    if row.get("submit_status") == "ready_for_human":
+        changes["submit_status"] = "submitted"
     if body.note is not None:
         changes["note"] = body.note
     updated = await asyncio.to_thread(repo.update_citation, citation_id, changes)

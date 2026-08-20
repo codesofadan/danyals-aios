@@ -55,7 +55,10 @@ export type CitationAction = "Submit" | "Update";
 // both need attention (blocked = a cost-gate hold or no engine configured, never a
 // guess at a live result).
 export type CitationSubmitStatus =
-  | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked";
+  | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked"
+  // ready_for_human: the bot created the account + prepared the listing; a human
+  // finishes with one click in the browser at handoffUrl.
+  | "ready_for_human";
 
 export const SUBMIT_STATUS_META: Record<CitationSubmitStatus, { label: string; cls: string }> = {
   not_started: { label: "Not started", cls: "mut" },
@@ -65,6 +68,7 @@ export const SUBMIT_STATUS_META: Record<CitationSubmitStatus, { label: string; c
   verified: { label: "Verified", cls: "ok" },
   failed: { label: "Failed", cls: "op-crit" },
   blocked: { label: "Blocked", cls: "warn" },
+  ready_for_human: { label: "Ready to finish", cls: "info" },
 };
 
 export type Citation = {
@@ -76,6 +80,7 @@ export type Citation = {
   note: string; // what drifted / listing detail
   submitStatus: CitationSubmitStatus;
   proofUrl: string; // a submission's screenshot/receipt artifact (blank if none)
+  handoffUrl: string; // ready_for_human: the page a human opens to finish the listing
 };
 
 // --- Web 2.0 automation -----------------------------------------------------
