@@ -124,68 +124,12 @@ export default function CitationsTab() {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">storefront</span>
-          Directory listings &amp; NAP consistency — submit new, update drifted.
-        </div>
-        <div className="op-toolset">
-          <div className="seg">
-            {FILTERS.map((f) => (
-              <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <button className="ghostbtn" onClick={bulkUpdate} disabled={inconsistentCount === 0 || bulk.isPending}>
-            <span className="material-symbols-rounded">sync</span>
-            {bulk.isPending ? "Syncing…" : `Bulk update (${inconsistentCount})`}
-          </button>
-          <button className="primary-btn" onClick={() => setShowCampaign(true)}>
-            <span className="material-symbols-rounded">rocket_launch</span>
-            Build citations
-          </button>
+          Citations — audit a client, build the missing listings, finish the ones that need a click, then monitor.
         </div>
       </div>
 
       {showCampaign && (
         <CitationCampaignModal onClose={() => setShowCampaign(false)} initialClientId={gapClient || undefined} />
-      )}
-
-      {/* Handoff queue — accounts built by the bot that need a human's final click */}
-      {readyToFinish.length > 0 && (
-        <div style={{
-          border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 14,
-          background: "var(--blush, #f8ecee)",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <span className="material-symbols-rounded" style={{ color: "var(--maroon-2, #8c1d2e)" }}>touch_app</span>
-            <b>{readyToFinish.length} citation{readyToFinish.length === 1 ? "" : "s"} ready to finish in your browser</b>
-          </div>
-          <div className="cs" style={{ marginBottom: 10 }}>
-            The account is created and the listing is pre-filled for each of these — just open it and click
-            <b> Publish</b> on the directory, then mark it done here. (Some directories can&apos;t be fully
-            auto-published; this is the safe one-click finish.)
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {readyToFinish.map((c) => (
-              <div key={c.id} style={{
-                display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
-                background: "var(--white, #fff)", border: "1px solid var(--line)", borderRadius: 8,
-              }}>
-                <span style={{ fontWeight: 600, flex: 1 }}>{c.directory}</span>
-                {c.handoffUrl ? (
-                  <a className="ghostbtn" href={c.handoffUrl} target="_blank" rel="noopener noreferrer"
-                    style={{ textDecoration: "none" }}>
-                    <span className="material-symbols-rounded">open_in_new</span>Finish in browser
-                  </a>
-                ) : (
-                  <span className="cs">login &amp; finish manually</span>
-                )}
-                <button className="primary-btn" onClick={() => actOnRow(c)} disabled={act.isPending}>
-                  <span className="material-symbols-rounded">check</span>Mark published
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {flash && (
@@ -194,29 +138,79 @@ export default function CitationsTab() {
         </div>
       )}
 
-      {/* Audit-first: pick a client, AUDIT to discover built-vs-missing, then build the gaps. */}
-      <div className="fld" style={{ marginTop: 4 }}>
-        <label>Citation audit - pick a client, run an audit to discover what&apos;s already built vs missing</label>
-        <select value={gapClient} onChange={(e) => setGapClient(e.target.value)}>
-          <option value="">Choose a client…</option>
-          {(clientsQ.data ?? []).map((c) => (
-            <option key={c.id} value={c.id}>{c.cn}</option>
-          ))}
-        </select>
+      {/* ───────── STEP 1 — Audit a client ───────── */}
+      <div className={w.step}>
+        <div className={w.stepH}><span className={w.stepN}>1</span> Audit a client — what&apos;s already built vs missing</div>
+        <div className="fld" style={{ marginTop: 4 }}>
+          <select value={gapClient} onChange={(e) => setGapClient(e.target.value)}>
+            <option value="">Choose a client…</option>
+            {(clientsQ.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.cn}</option>
+            ))}
+          </select>
+        </div>
+        {gapClient && (
+          <div className="op-toolset" style={{ marginBottom: 2 }}>
+            <button className="primary-btn" onClick={auditClient} disabled={runAudit.isPending}>
+              <span className="material-symbols-rounded">search_check</span>
+              {runAudit.isPending ? "Auditing…" : "Run citation audit"}
+            </button>
+            <button className="ghostbtn co-reject" onClick={clearForClient} disabled={clearCitations.isPending}>
+              <span className="material-symbols-rounded">delete_sweep</span>
+              {clearCitations.isPending ? "Clearing…" : "Clear citations"}
+            </button>
+          </div>
+        )}
+        {!gapClient && (
+          <div className="op-muted" style={{ fontSize: 13 }}>Pick a client to see its citation coverage and build the gaps.</div>
+        )}
       </div>
-      {gapClient && (
-        <div className="op-toolset" style={{ marginBottom: 8 }}>
-          <button className="primary-btn" onClick={auditClient} disabled={runAudit.isPending}>
-            <span className="material-symbols-rounded">search_check</span>
-            {runAudit.isPending ? "Auditing…" : "Run citation audit"}
-          </button>
-          <button className="ghostbtn co-reject" onClick={clearForClient} disabled={clearCitations.isPending}>
-            <span className="material-symbols-rounded">delete_sweep</span>
-            {clearCitations.isPending ? "Clearing…" : "Clear citations"}
-          </button>
-          <span className="op-muted" style={{ alignSelf: "center" }}>
-            Audit first (discover built vs missing), then build only the gaps below.
-          </span>
+
+      {/* ───────── Ready to finish — the handoff queue ───────── */}
+      {readyToFinish.length > 0 && (
+        <div className={w.step} style={{ background: "var(--blush, #f8ecee)", borderColor: "var(--rose, #b85c6b)" }}>
+          <div className={w.stepH}>
+            <span className="material-symbols-rounded" style={{ color: "var(--maroon-2, #8c1d2e)" }}>touch_app</span>
+            {readyToFinish.length} ready to finish in your browser
+          </div>
+          <div className="cs" style={{ marginBottom: 10 }}>
+            The bot created the account + prepared each listing. Open the directory, <b>log in with the account
+            below</b>, click <b>Publish</b>, then mark it done. (Run <code>python tools/finish_citation.py</code>
+            locally to auto-open + log in for you.)
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {readyToFinish.map((c) => {
+              const login = /Login:\s*([^\s|]+)/.exec(c.note)?.[1] ?? "";
+              const pass = /password:\s*([^\s|]+)/.exec(c.note)?.[1] ?? "";
+              return (
+                <div key={c.id} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                  background: "var(--white, #fff)", border: "1px solid var(--line)", borderRadius: 8, flexWrap: "wrap",
+                }}>
+                  <span style={{ fontWeight: 700, minWidth: 150 }}>{c.directory}</span>
+                  {login && (
+                    <span className="cs" style={{ fontFamily: "monospace", flex: 1, minWidth: 200 }}>
+                      {login} <span className="op-muted">/</span> {pass}
+                      <button className="ghostbtn" style={{ padding: "2px 6px", marginLeft: 6 }}
+                        onClick={() => navigator.clipboard?.writeText(`${login}\t${pass}`)}
+                        title="Copy login">
+                        <span className="material-symbols-rounded" style={{ fontSize: 15 }}>content_copy</span>
+                      </button>
+                    </span>
+                  )}
+                  {c.handoffUrl && (
+                    <a className="ghostbtn" href={c.handoffUrl} target="_blank" rel="noopener noreferrer"
+                      style={{ textDecoration: "none" }}>
+                      <span className="material-symbols-rounded">open_in_new</span>Open directory
+                    </a>
+                  )}
+                  <button className="primary-btn" onClick={() => actOnRow(c)} disabled={act.isPending}>
+                    <span className="material-symbols-rounded">check</span>Mark published
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -295,6 +289,24 @@ export default function CitationsTab() {
 
       {/* The prioritized audit plan (generic → country → niche) for the chosen client. */}
       <AuditPlanPanel clientId={gapClient || undefined} />
+
+      {/* ───────── Monitor — all listings ───────── */}
+      <div className={w.stepH} style={{ marginTop: 8, flexWrap: "wrap" }}>
+        <span className="material-symbols-rounded">table_rows</span> All listings
+        <div className="op-toolset" style={{ marginLeft: "auto" }}>
+          <div className="seg">
+            {FILTERS.map((f) => (
+              <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <button className="ghostbtn" onClick={bulkUpdate} disabled={inconsistentCount === 0 || bulk.isPending}>
+            <span className="material-symbols-rounded">sync</span>
+            {bulk.isPending ? "Syncing…" : `Bulk update (${inconsistentCount})`}
+          </button>
+        </div>
+      </div>
 
       <div className="tbl-wrap">
         <table className="tbl op-tbl">

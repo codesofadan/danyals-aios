@@ -282,3 +282,8 @@
   color: var(--muted, #8a8a8a);
   padding: 8px 2px;
 }
+
+/* Citation flow — numbered step sections (added for the guided Audit→Build→Finish→Monitor UX) */
+.step { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; background: var(--white, #fff); }
+.stepH { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 8px; font-size: 15px; }
+.stepN { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--maroon, #6e1423); color: #fff; font-size: 13px; font-weight: 700; }
