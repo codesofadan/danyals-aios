@@ -1391,9 +1391,13 @@ def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
             html = _wrap_sections(html, order)
     if not profile and not specs:
         return html  # nothing to shape by -> plain render (no regression)
-    style = (_design_style_block(profile) if profile else "") or _classic_style_block()
-    style = _with_layout_css(style)
-    return f'{style}\n<div class="aios-page">\n{html}\n</div>'
+    # Styling now lives in the WordPress THEME + the AIOS Publisher plugin's ENQUEUED
+    # article.css (both target the .aios-page / .aios-layout-<variant> class hooks below).
+    # We deliberately DO NOT inline a <style> block into the post body: WordPress'
+    # wp_kses_post() (run by the publisher) STRIPS the <style> tag but KEEPS its text,
+    # which dumps raw CSS onto the page. Emit only the class-hooked markup; the theme/
+    # plugin CSS styles it. (The PDF/Markdown path renders from the draft, not this.)
+    return f'<div class="aios-page">\n{html}\n</div>'
 
 
 def _write_artifacts(

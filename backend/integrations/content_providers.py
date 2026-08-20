@@ -91,9 +91,10 @@ def content_providers_from_settings(settings: Settings) -> ContentProviders | No
         OpenAIImageGenerator(
             api_key=image_key.get_secret_value(),
             model=settings.image_gen_model,
-            # Landscape (16:10-ish) hero/section images — blog + page layouts are wide,
-            # so a square image breaks the layout. gpt-image-1 supports 1536x1024.
-            size="1536x1024",
+            # Landscape (horizontal rectangle) hero/section images — blog + page layouts
+            # are wide, so a square image breaks the layout. Configurable via
+            # image_gen_size (default 1536x1024 for gpt-image-1).
+            size=settings.image_gen_size,
             image_host=content_image_store_from_settings(settings),
         )
         if image_key

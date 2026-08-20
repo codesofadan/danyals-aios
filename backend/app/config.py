@@ -233,6 +233,11 @@ class Settings(BaseSettings):
     serper_api_key: SecretStr | None = None  # Serper.dev SERP research
     image_gen_api_key: SecretStr | None = None  # OpenAI-compatible image generation
     image_gen_model: str = "gpt-image-1"  # image model (provider-configurable)
+    # Generated hero/section images are LANDSCAPE (horizontal rectangle) so they fit the
+    # wide blog/page layouts — a square image breaks the layout. gpt-image-1 supports
+    # 1536x1024; env-tune (e.g. "1792x1024" for dall-e-3, "1024x1024" only if you truly
+    # want squares).
+    image_gen_size: str = "1536x1024"
     # Photographic images in generated pages are ON (operator decision): the hero + section
     # PHOTOS are generated through the OpenAI image API (gpt-image-1, image_gen_api_key).
     # Card/feature GLYPHS are inline SVG icons (never PNGs). Flip off to drop the photos and

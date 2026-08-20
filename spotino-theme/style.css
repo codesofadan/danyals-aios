@@ -1,0 +1,311 @@
+/*
+Theme Name: Spotino
+Theme URI: https://spotino.org
+Author: Spotino
+Author URI: https://spotino.org
+Description: A modern, full-width editorial / SaaS WordPress theme with a wide, comfortably-margined content column, contained hero image, clean typography and a tasteful indigo accent. Ships a theme.json so AIOS-pushed posts (via the AIOS Publisher plugin) auto-adopt the theme's colours + fonts, plus built-in SEO plumbing (Open Graph / Twitter cards, breadcrumbs, related posts, author box).
+Version: 1.2.2
+Requires at least: 6.0
+Tested up to: 6.7
+Requires PHP: 7.4
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: spotino
+Tags: blog, news, editorial, full-width, one-column, custom-logo, custom-menu, featured-images, threaded-comments, translation-ready
+*/
+
+/* ============================================================================
+   Design tokens
+   ========================================================================== */
+:root{
+  --ink:#0f172a;
+  --ink-soft:#334155;
+  --muted:#64748b;
+  --line:#e6e8ec;
+  --line-soft:#eef1f5;
+  --bg:#ffffff;
+  --bg-soft:#f8fafc;
+  --bg-tint:#f4f4ff;
+  --accent:#4f46e5;
+  --accent-ink:#4338ca;
+  --accent-soft:#eef2ff;
+  --white:#ffffff;
+  --radius:14px;
+  --radius-sm:10px;
+  --radius-lg:22px;
+  --wrap:1320px;      /* outer wrapper (header/footer/grids) */
+  --content:1200px;   /* article + section content width — wide, fills a laptop */
+  --gutter:clamp(24px,4vw,56px);
+  --shadow:0 1px 2px rgba(15,23,42,.04), 0 12px 32px -12px rgba(15,23,42,.12);
+  --shadow-sm:0 1px 2px rgba(15,23,42,.05), 0 6px 18px -10px rgba(15,23,42,.14);
+  --font-body:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-head:'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ============================================================================
+   Reset / base
+   ========================================================================== */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink-soft);
+  font-family:var(--font-body);
+  font-size:18px;
+  line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;               /* full-bleed sections never cause a scrollbar */
+}
+img{max-width:100%;height:auto;display:block}
+a{color:var(--accent);text-decoration:none;transition:color .15s ease}
+a:hover{color:var(--accent-ink)}
+h1,h2,h3,h4,h5,h6{
+  font-family:var(--font-head);
+  color:var(--ink);
+  line-height:1.16;
+  font-weight:700;
+  letter-spacing:-.015em;
+  margin:0 0 .5em;
+}
+h1{font-size:clamp(2.2rem,4.8vw,3.4rem)}
+h2{font-size:clamp(1.6rem,3.1vw,2.25rem);margin-top:1.7em}
+h3{font-size:clamp(1.3rem,2vw,1.5rem);margin-top:1.5em}
+h4{font-size:1.15rem;margin-top:1.3em}
+p{margin:0 0 1.15em}
+ul,ol{margin:0 0 1.2em;padding-left:1.35em}
+li{margin:.4em 0}
+strong{color:var(--ink);font-weight:700}
+hr{border:0;border-top:1px solid var(--line);margin:2.5rem 0}
+blockquote{
+  margin:1.9rem 0;padding:1rem 1.6rem;border-left:4px solid var(--accent);
+  background:var(--bg-tint);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+  color:var(--ink);font-size:1.08em;
+}
+blockquote p:last-child{margin-bottom:0}
+code,kbd,pre{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:.9em}
+code{background:var(--bg-soft);padding:.15em .4em;border-radius:6px;border:1px solid var(--line-soft)}
+pre{background:#0f172a;color:#e2e8f0;padding:1.1rem 1.3rem;border-radius:var(--radius);overflow:auto;line-height:1.6}
+pre code{background:none;border:0;padding:0;color:inherit}
+table{width:100%;border-collapse:collapse;margin:1.6rem 0;font-size:.98em}
+th,td{text-align:left;padding:.8rem 1rem;border-bottom:1px solid var(--line)}
+th{font-family:var(--font-head);color:var(--ink);font-weight:600;background:var(--bg-soft)}
+figure{margin:1.9rem 0}
+figcaption{color:var(--muted);font-size:.9em;margin-top:.5rem;text-align:center}
+
+/* ============================================================================
+   Layout primitives — full width, symmetric gutters (no lopsided margin)
+   ========================================================================== */
+/* Outer wrapper for header/footer/listing. Centered, symmetric padding. */
+.wrap{width:100%;max-width:var(--wrap);margin-inline:auto;padding-inline:var(--gutter)}
+/* Article / section content — a wide, centered column. */
+.content{width:100%;max-width:var(--content);margin-inline:auto;padding-inline:var(--gutter)}
+/* Full-bleed: break a child out to the full viewport width, edge to edge. */
+.full-bleed{width:100vw;margin-left:50%;transform:translateX(-50%);max-width:100vw}
+.site-main{display:block}
+.skip-link{position:absolute;left:-9999px}
+.skip-link:focus{left:16px;top:16px;background:#fff;padding:10px 16px;border-radius:8px;box-shadow:var(--shadow);z-index:100}
+
+/* ============================================================================
+   Header — full-width bar
+   ========================================================================== */
+.site-header{
+  position:sticky;top:0;z-index:50;width:100%;
+  background:rgba(255,255,255,.88);
+  backdrop-filter:saturate(160%) blur(10px);
+  border-bottom:1px solid var(--line-soft);
+}
+.site-header .wrap{display:flex;align-items:center;justify-content:space-between;gap:24px;min-height:72px}
+.site-branding{display:flex;align-items:center;gap:12px}
+.site-title{font-family:var(--font-head);font-size:1.34rem;font-weight:700;letter-spacing:-.02em;margin:0}
+.site-title a{color:var(--ink)}
+.site-title a:hover{color:var(--accent)}
+.site-description{color:var(--muted);font-size:.9rem;margin:0}
+.custom-logo{max-height:44px;width:auto}
+.main-nav ul{display:flex;gap:6px;list-style:none;margin:0;padding:0}
+.main-nav a{display:block;padding:9px 14px;border-radius:9px;color:var(--ink-soft);font-weight:500;font-size:.98rem}
+.main-nav a:hover{background:var(--bg-soft);color:var(--ink)}
+.main-nav .current-menu-item>a{color:var(--accent);background:var(--accent-soft)}
+.nav-toggle{display:none;background:none;border:1px solid var(--line);border-radius:9px;padding:8px 11px;cursor:pointer;color:var(--ink)}
+
+/* ============================================================================
+   Hero (front page) — full width
+   ========================================================================== */
+.hero{
+  width:100%;
+  background:
+    radial-gradient(1200px 460px at 82% -10%, var(--accent-soft), transparent 60%),
+    linear-gradient(180deg,var(--bg-soft),var(--bg));
+  border-bottom:1px solid var(--line-soft);
+  padding-block:clamp(60px,8vw,96px);
+}
+.hero .eyebrow{
+  display:inline-block;font-family:var(--font-head);font-weight:600;font-size:.82rem;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--accent);
+  background:var(--accent-soft);padding:6px 14px;border-radius:999px;margin-bottom:20px;
+}
+.hero h1{max-width:18ch;margin-bottom:.35em}
+.hero p{max-width:62ch;font-size:1.2rem;color:var(--ink-soft)}
+.hero-actions{display:flex;flex-wrap:wrap;gap:14px;margin-top:30px}
+
+/* ============================================================================
+   Buttons
+   ========================================================================== */
+.button,.wp-block-button__link,.entry-content .aios-cta a,input[type=submit],button.submit{
+  display:inline-block;font-family:var(--font-head);font-weight:600;font-size:1rem;
+  padding:13px 26px;border-radius:11px;background:var(--accent);color:#fff !important;
+  border:0;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .12s ease,background .15s ease;
+}
+.button:hover,.wp-block-button__link:hover,.entry-content .aios-cta a:hover,input[type=submit]:hover{
+  background:var(--accent-ink);color:#fff !important;transform:translateY(-1px)
+}
+.button.ghost{background:transparent;color:var(--accent) !important;border:1.5px solid var(--line);box-shadow:none}
+.button.ghost:hover{border-color:var(--accent);background:var(--accent-soft)}
+
+/* ============================================================================
+   Post listing grid — full width
+   ========================================================================== */
+.section-head{margin-bottom:26px}
+.section-head h2{margin:0 0 6px}
+.section-head p{color:var(--muted);margin:0}
+.list-wrap{padding-block:clamp(40px,6vw,72px)}
+.post-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:28px}
+.post-card{
+  background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-lg);
+  overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow-sm);
+  transition:transform .16s ease,box-shadow .16s ease;
+}
+.post-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.post-card .thumb{aspect-ratio:16/9;background:var(--bg-soft);overflow:hidden}
+.post-card .thumb img{width:100%;height:100%;object-fit:cover}
+.post-card .card-body{padding:22px 22px 24px;display:flex;flex-direction:column;flex:1}
+.post-card .cat{font-family:var(--font-head);font-size:.78rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+.post-card h3{margin:0 0 10px;font-size:1.26rem;line-height:1.25}
+.post-card h3 a{color:var(--ink)}
+.post-card h3 a:hover{color:var(--accent)}
+.post-card .excerpt{color:var(--muted);font-size:.98rem;margin:0 0 16px}
+.post-card .meta{margin-top:auto;color:var(--muted);font-size:.86rem;display:flex;gap:10px;align-items:center}
+
+/* ============================================================================
+   Single post / page
+   ========================================================================== */
+.article-top{padding-top:clamp(28px,4vw,48px)}
+.breadcrumbs{max-width:var(--content);margin:0 auto 20px;padding-inline:var(--gutter);color:var(--muted);font-size:.9rem}
+.breadcrumbs a{color:var(--muted)}
+.breadcrumbs a:hover{color:var(--accent)}
+.breadcrumbs .sep{opacity:.5;margin:0 .4em}
+
+.entry-header{max-width:var(--content);margin:0 auto 30px;padding-inline:var(--gutter);text-align:center}
+.entry-header .cat{font-family:var(--font-head);font-size:.82rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:inline-block}
+.entry-header h1{margin-bottom:.35em}
+.entry-header .entry-meta{color:var(--muted);font-size:.95rem;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+
+/* Featured hero image — contained (wider than text), with side margins + rounding */
+.entry-featured{max-width:1200px;margin:0 auto clamp(32px,5vw,56px);padding-inline:var(--gutter)}
+.entry-featured img{width:100%;height:clamp(260px,40vw,520px);object-fit:cover;border-radius:var(--radius-lg);box-shadow:var(--shadow)}
+
+/* The reading/content column — wide + centered (symmetric, no left-only margin) */
+.entry-content{max-width:var(--content);margin-inline:auto;padding-inline:var(--gutter);font-size:1.075rem}
+.entry-content img{border-radius:var(--radius);margin:1.9rem auto;box-shadow:var(--shadow-sm)}
+.entry-content h2{padding-top:.2em}
+.entry-content ul{list-style:none;padding-left:0}
+.entry-content ul li{position:relative;padding-left:1.6em}
+.entry-content ul li::before{content:"";position:absolute;left:0;top:.62em;width:.5em;height:.5em;border-radius:50%;background:var(--accent)}
+.entry-content ol{padding-left:1.3em}
+.entry-content ol li::marker{color:var(--accent);font-family:var(--font-head);font-weight:700}
+.entry-content a{text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--line)}
+.entry-content a:hover{text-decoration-color:var(--accent)}
+
+/* Alignment support (wide/full images inside the content column) */
+.alignwide{max-width:min(1180px,94vw);margin-inline:auto}
+.alignfull{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw)}
+.aligncenter{margin-inline:auto}
+
+/* ============================================================================
+   AIOS platform markup (posts pushed by the AIOS content engine)
+   ========================================================================== */
+.entry-content .aios-page{max-width:100%}
+.entry-content .aios-page > section{margin:2.8rem 0}
+.aios-layout-grid ul,.aios-cards ul{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.aios-layout-grid ul li,.aios-cards ul li{background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:var(--radius);padding:20px 22px;margin:0}
+.aios-layout-grid ul li::before,.aios-cards ul li::before{display:none}
+.aios-layout-numbered-steps ol{counter-reset:step;list-style:none;padding-left:0}
+.aios-layout-numbered-steps ol li{position:relative;padding-left:3rem;margin:1rem 0}
+.aios-layout-numbered-steps ol li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:-.1em;width:2rem;height:2rem;display:grid;place-items:center;border-radius:50%;background:var(--accent);color:#fff;font-family:var(--font-head);font-weight:700;font-size:.95rem}
+.aios-cta,.aios-layout-banner{text-align:center;background:linear-gradient(135deg,var(--accent),#6366f1);color:#fff;border-radius:var(--radius-lg);padding:52px 34px;margin:3rem auto}
+.aios-cta h2,.aios-cta h3,.aios-layout-banner h2{color:#fff;margin-top:0}
+.aios-cta p,.aios-layout-banner p{color:rgba(255,255,255,.9)}
+.aios-cta a{background:#fff;color:var(--accent-ink) !important;box-shadow:none}
+.aios-cta a:hover{background:#f1f5ff;color:var(--accent-ink) !important}
+.aios-faq h3,.aios-layout-accordion h3{background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:14px 18px;margin-top:12px;font-size:1.08rem}
+
+/* Native <details> FAQ + Gutenberg group callouts */
+.entry-content details{border:1px solid var(--line);border-radius:var(--radius);padding:2px 20px;margin:12px 0;background:var(--bg)}
+.entry-content details[open]{background:var(--bg-soft)}
+.entry-content summary{cursor:pointer;font-family:var(--font-head);font-weight:600;color:var(--ink);padding:15px 0;list-style:none}
+.entry-content summary::-webkit-details-marker{display:none}
+.entry-content summary::after{content:"+";float:right;color:var(--accent);font-size:1.3em;line-height:1}
+.entry-content details[open] summary::after{content:"\2013"}
+.aios-takeaways,.key-takeaways{background:var(--accent-soft);border:1px solid #e0e3ff;border-radius:var(--radius);padding:24px 28px;margin:2rem auto}
+.aios-takeaways h2,.aios-takeaways h3,.key-takeaways h3{margin-top:0;font-size:1.1rem}
+
+/* ============================================================================
+   Entry footer · tags · author box · related posts
+   ========================================================================== */
+.entry-footer{max-width:var(--content);margin:44px auto 0;padding:24px var(--gutter) 0;border-top:1px solid var(--line);color:var(--muted);font-size:.92rem}
+.tag-links a{display:inline-block;background:var(--bg-soft);border:1px solid var(--line-soft);padding:5px 12px;border-radius:999px;margin:4px 6px 0 0;font-size:.85rem;color:var(--ink-soft)}
+.tag-links a:hover{border-color:var(--accent);color:var(--accent)}
+
+.author-box{max-width:var(--content);margin:36px auto 0;padding:24px 26px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:var(--radius-lg);display:flex;gap:18px;align-items:flex-start}
+.author-box img{width:64px;height:64px;border-radius:50%;flex:none}
+.author-box .a-name{font-family:var(--font-head);font-weight:700;color:var(--ink);font-size:1.1rem;margin:0 0 4px}
+.author-box .a-bio{color:var(--muted);font-size:.95rem;margin:0}
+
+.related-posts{margin-top:clamp(48px,6vw,80px);padding-block:clamp(40px,5vw,64px);background:var(--bg-soft);border-top:1px solid var(--line-soft)}
+.related-posts .section-head h2{margin-bottom:18px}
+
+/* ============================================================================
+   Pagination
+   ========================================================================== */
+.pagination{display:flex;gap:8px;justify-content:center;margin:48px 0 0;flex-wrap:wrap}
+.pagination a,.pagination span{display:grid;place-items:center;min-width:44px;height:44px;padding:0 12px;border-radius:10px;border:1px solid var(--line);color:var(--ink-soft);font-weight:600;font-family:var(--font-head)}
+.pagination a:hover{border-color:var(--accent);color:var(--accent)}
+.pagination .current{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ============================================================================
+   Footer — full width
+   ========================================================================== */
+.site-footer{width:100%;background:var(--ink);color:#cbd5e1;padding:60px 0 34px;margin-top:0}
+.site-footer a{color:#e2e8f0}
+.site-footer a:hover{color:#fff}
+.footer-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:40px;margin-bottom:34px}
+.site-footer h4{color:#fff;font-size:1rem;margin-bottom:14px}
+.site-footer .footer-brand .site-title a{color:#fff}
+.site-footer p{color:#94a3b8;font-size:.95rem}
+.footer-menu ul{list-style:none;margin:0;padding:0}
+.footer-menu li{margin:.4em 0}
+.footer-bottom{border-top:1px solid #1e293b;padding-top:22px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;color:#94a3b8;font-size:.88rem}
+
+/* ============================================================================
+   Widgets / forms
+   ========================================================================== */
+.widget{margin-bottom:28px}
+.widget-title{font-size:1.05rem;margin-bottom:12px}
+input[type=text],input[type=email],input[type=search],input[type=url],textarea{width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;color:var(--ink);background:#fff}
+input:focus,textarea:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* ============================================================================
+   Responsive
+   ========================================================================== */
+@media(max-width:900px){ .footer-grid{grid-template-columns:1fr 1fr} }
+@media(max-width:768px){
+  body{font-size:17px}
+  .main-nav{position:fixed;inset:72px 0 auto 0;background:#fff;border-bottom:1px solid var(--line);padding:12px var(--gutter) 20px;box-shadow:var(--shadow);display:none}
+  .main-nav.open{display:block}
+  .main-nav ul{flex-direction:column;gap:2px}
+  .main-nav a{padding:12px 14px}
+  .nav-toggle{display:inline-flex}
+  .footer-grid{grid-template-columns:1fr}
+  .author-box{flex-direction:column}
+}

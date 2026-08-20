@@ -527,5 +527,8 @@ def test_publish_body_gets_default_template_from_page_type() -> None:
     # structured out of the box.
     row = {"page_type": "service", "source_pack": {"client_name": "Verde Cafe"}}
     out = _shape_body_html(row, _DRAFT)
-    assert "<style>" in out and 'class="aios-page"' in out
+    # No inline <style> (wp_kses_post would dump it as raw CSS text); the theme + plugin
+    # article.css style the .aios-page / section class hooks instead.
+    assert "<style>" not in out
+    assert 'class="aios-page"' in out
     assert "<section" in out

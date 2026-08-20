@@ -933,9 +933,10 @@ def test_image_generation_failure_injects_nothing_and_does_not_crash() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# BUILD 2: the FULL design profile shapes the flat WordPress <style> block.
+# BUILD 2: the FULL design profile still shapes the body into class-hooked sections,
+# but NO inline <style> is emitted (wp_kses_post would dump it as raw visible CSS).
 # --------------------------------------------------------------------------- #
-def test_shape_body_html_emits_a_style_block_from_the_full_profile() -> None:
+def test_shape_body_html_wraps_in_aios_page_without_inline_style() -> None:
     from workers.tasks.content import _shape_body_html
 
     profile = {
@@ -959,15 +960,13 @@ def test_shape_body_html_emits_a_style_block_from_the_full_profile() -> None:
     draft = "# Best Brunch\n\nIntro.\n\n## Our Services\n\nBody.\n\n## Get in Touch\n\nVisit.\n"
     out = _shape_body_html(row, draft)
 
-    assert "<style>" in out and 'class="aios-page"' in out
-    assert "max-width:1080px" in out                 # layout.container_width
-    assert "font-family:Inter, sans-serif" in out    # typography.body_font
-    assert "font-size:18px" in out                   # typography.base_size
-    assert "Poppins, sans-serif" in out              # typography.heading_font
-    assert "padding:72px 0" in out                   # components.spacing_scale (spacious)
-    assert "border-radius:999px" in out              # components.button_style (pill)
-    # The ordered sections are still wrapped (now with the per-kind layout variant) and
-    # the content is preserved.
+    # Styling is delegated to the theme + the AIOS Publisher plugin's article.css; the
+    # body carries NO inline <style> (wp_kses_post would strip the tag and dump its CSS
+    # as raw text) — only the .aios-page / section class hooks those stylesheets target.
+    assert "<style>" not in out
+    assert 'class="aios-page"' in out
+    # The ordered sections are still wrapped (with the per-kind layout variant) and the
+    # content is preserved.
     assert '<section class="aios-hero' in out
     assert "<h1>Best Brunch</h1>" in out
 

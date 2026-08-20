@@ -358,6 +358,96 @@
 	text-decoration: none;
 }
 
+/* -------------------------------------------------------------------------- *
+ * AIOS body layout hooks
+ * --------------------------------------------------------------------------
+ * The pushed body wraps sections in `.aios-page` and marks each block
+ * `.aios-<kind> .aios-layout-<variant>`. Styling lives HERE (enqueued), never
+ * inline — WordPress' wp_kses_post() would otherwise strip an inline <style>
+ * tag and dump its CSS as raw text on the page. Uses the same theme tokens.
+ * -------------------------------------------------------------------------- */
+.aios-page > section {
+	margin: 2.6em 0;
+}
+.aios-page .aios-layout-grid ul,
+.aios-page .aios-cards ul {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+	gap: 18px;
+	margin: 1.4em 0;
+}
+.aios-page .aios-layout-grid li,
+.aios-page .aios-cards li {
+	background: var(--aios-surface);
+	border: 1px solid var(--aios-accent-line);
+	border-radius: 12px;
+	padding: 18px 20px;
+	margin: 0;
+}
+.aios-page .aios-layout-numbered-steps ol {
+	counter-reset: step;
+	list-style: none;
+	padding-left: 0;
+}
+.aios-page .aios-layout-numbered-steps li {
+	position: relative;
+	padding-left: 2.8em;
+	margin: 0.9em 0;
+}
+.aios-page .aios-layout-numbered-steps li::before {
+	counter-increment: step;
+	content: counter(step);
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 1.9em;
+	height: 1.9em;
+	display: grid;
+	place-items: center;
+	border-radius: 50%;
+	background: var(--aios-accent);
+	color: var(--aios-on-accent);
+	font-family: var(--aios-font-heading);
+	font-weight: 700;
+	font-size: 0.9em;
+}
+.aios-page .aios-cta,
+.aios-page .aios-layout-banner {
+	text-align: center;
+	background: var(--aios-accent);
+	color: var(--aios-on-accent);
+	border-radius: 16px;
+	padding: 44px 30px;
+	margin: 2.6em auto;
+}
+.aios-page .aios-cta :is(h2, h3),
+.aios-page .aios-layout-banner :is(h2, h3) {
+	color: var(--aios-on-accent);
+	margin-top: 0;
+}
+.aios-page .aios-cta a {
+	display: inline-block;
+	background: var(--aios-on-accent);
+	color: var(--aios-accent);
+	font-weight: 700;
+	padding: 0.7em 1.5em;
+	border-radius: 999px;
+	text-decoration: none;
+	margin-top: 0.6em;
+}
+.aios-page .aios-layout-accordion h3 {
+	background: var(--aios-surface);
+	border: 1px solid var(--aios-accent-line);
+	border-radius: 8px;
+	padding: 12px 16px;
+	margin-top: 10px;
+}
+.aios-page img {
+	border-radius: 10px;
+}
+
 /* Respect reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
 	.aios-article__faq-item summary::after,

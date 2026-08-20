@@ -3,7 +3,7 @@
  * Plugin Name:       AIOS Publisher
  * Plugin URI:        https://xegents.ai/aios-publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
- * Version:           1.2.0
+ * Version:           1.3.0
  * Requires at least: 5.6
  * Requires PHP:      7.2
  * Author:            Xegents AI
@@ -31,7 +31,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AIOS_PUBLISHER_VERSION', '1.2.0' );
+define( 'AIOS_PUBLISHER_VERSION', '1.3.0' );
 define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 
 // wp_options keys. The API key lives in its own option so a "regenerate" is a
@@ -234,9 +234,16 @@ function aios_publisher_rest_publish( $request ) {
 		);
 	}
 
-	// Body is HTML — wp_kses_post strips scripts/disallowed tags but keeps markup.
+	// Body is HTML. Strip <style>/<script> blocks INCLUDING their contents FIRST:
+	// wp_kses_post() removes those tags but KEEPS their inner text, which would dump raw
+	// CSS/JS onto the page. Styling is owned by the active theme + this plugin's ENQUEUED
+	// article.css (which targets the .aios-page / .aios-layout-* class hooks), never inline.
 	$raw_content = (string) $request->get_param( 'content' );
-	$content     = wp_kses_post( $raw_content );
+	$stripped    = preg_replace( '#<(style|script)\b[^>]*>.*?</\1>#is', '', $raw_content );
+	if ( null !== $stripped ) {
+		$raw_content = $stripped;
+	}
+	$content = wp_kses_post( $raw_content );
 
 	// Status is constrained to the safe set; default from settings (draft).
 	$status = sanitize_key( (string) $request->get_param( 'status' ) );
