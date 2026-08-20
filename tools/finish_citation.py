@@ -53,7 +53,7 @@ NAP = {
     "state": "Punjab", "country": "Pakistan",
     "description": "Xegents is a global AI automation agency — AI audits, custom AI agents, and workflow automation.",
 }
-_WAIT_SECONDS = 240  # how long to leave the browser open for you to finish + click Publish
+_MAX_SECONDS = 900  # safety cap per window (you normally just close it when done)
 
 
 def _fill(pg, patterns, value):
@@ -104,13 +104,18 @@ def _finish_one(d: dict, password: str) -> None:
         _fill(pg, ("input[name=zip_code]", "input[name=zip]", "input[name=postal]", "input[name=postcode]"), NAP["zip"])
         _fill(pg, ("input[name=phone]", "input[name=business_phone]", "input[name=tel]"), NAP["phone"])
         _fill(pg, ("input[name=website]", "input[name=url]", "input[name=web]"), NAP["website"])
-        print("\n  -> The browser is OPEN and pre-filled. Pick the category if asked, then click")
-        print(f"    PUBLISH / Add business. The window stays open ~{_WAIT_SECONDS}s (or press Enter here).\n")
+        print("\n  -> The browser is OPEN + pre-filled. Do the human step (category / captcha),")
+        print("     click PUBLISH, then CLOSE the window to move on to the next directory.\n")
+        # Wait until YOU close the window (natural 'done -> next'), with a safety cap.
+        import time
+        deadline = time.time() + _MAX_SECONDS
+        while b.is_connected() and time.time() < deadline:
+            time.sleep(1.5)
         try:
-            input()
-        except (EOFError, KeyboardInterrupt):
-            pg.wait_for_timeout(_WAIT_SECONDS * 1000)
-        b.close()
+            b.close()
+        except Exception:
+            pass
+        print(f"  [{d['name']}] window closed — next.\n")
 
 
 def main() -> None:

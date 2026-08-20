@@ -24,3 +24,6 @@ Thumbs.db
 # Stray duplicate frontend copy (build artifacts + older mirror; not authoritative)
 daniyals-frontend/
 tools/citation_handoffs.json
+wordpress-plugin.zip
+wordpress-plugin/aios-publisher.zip
+docs/deliverables/*.txt
