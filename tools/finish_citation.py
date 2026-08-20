@@ -40,42 +40,70 @@ def _list(items: list[dict]) -> None:
     print('Finish one:  python tools/finish_citation.py "<name>"   |   all:  --all\n')
 
 
+# The client NAP the listing carries (xegents — a global online business).
+NAP = {
+    "name": "Xegents", "address": "Gulberg III, Main Boulevard", "city": "Lahore",
+    "zip": "54000", "phone": "3088040606", "email": "", "website": "https://xegents.com",
+    "state": "Punjab", "country": "Pakistan",
+    "description": "Xegents is a global AI automation agency — AI audits, custom AI agents, and workflow automation.",
+}
+_WAIT_SECONDS = 240  # how long to leave the browser open for you to finish + click Publish
+
+
+def _fill(pg, patterns, value):
+    for sel in patterns:
+        try:
+            if pg.query_selector(sel):
+                pg.fill(sel, value, timeout=2500); return True
+        except Exception:
+            pass
+    return False
+
+
 def _finish_one(d: dict, password: str) -> None:
     from playwright.sync_api import sync_playwright  # local import: only needed to act
     login_url = d.get("login_url") or d.get("home") or d.get("add_url")
     add_url = d.get("add_url", "")
     email = d.get("login", "")
-    print(f"\n=== {d['name']} ===")
-    print(f"  login: {email}  /  {password}")
-    print(f"  add page: {add_url}")
+    print(f"\n=== {d['name']} ===\n  login: {email}  /  {password}\n  add page: {add_url}")
     with sync_playwright() as pw:
-        # HEADED so you can see + click. No proxy locally (use your own IP).
+        # HEADED so you SEE it + click. No proxy locally (your own IP behaves best).
         b = pw.chromium.launch(headless=False)
-        ctx = b.new_context(viewport={"width": 1440, "height": 950})
+        ctx = b.new_context(viewport={"width": 1500, "height": 1000})
         pg = ctx.new_page()
         try:
-            pg.goto(login_url, timeout=45000)
+            pg.goto(login_url, timeout=45000, wait_until="domcontentloaded")
         except Exception as e:
-            print("  (couldn't auto-open login — do it manually in the window)", str(e)[:60])
-        # best-effort auto-fill of the login form
-        for sel in ("input[type=email]", "input[name=email]", "input[name=username]", "input[name=user_email]"):
+            print("  (open the page manually in the window)", str(e)[:60])
+        # 1) log in
+        _fill(pg, ("input[type=email]", "input[name=email]", "input[name=username]", "input[name=user_email]"), email)
+        _fill(pg, ("input[type=password]", "input[name=password]", "input[name=user_password]"), password)
+        for lbl in ("Log in", "LOG IN", "Login", "Sign in", "Sign In"):
             try:
-                if pg.query_selector(sel):
-                    pg.fill(sel, email, timeout=3000); break
+                el = pg.query_selector(f"button:has-text('{lbl}')")
+                if el:
+                    el.click(); break
             except Exception:
                 pass
-        for sel in ("input[type=password]", "input[name=password]", "input[name=user_password]"):
+        pg.wait_for_timeout(4000)
+        # 2) open the add page + pre-fill the NAP so it's ready to publish
+        if add_url:
             try:
-                if pg.query_selector(sel):
-                    pg.fill(sel, password, timeout=3000); break
+                pg.goto(add_url, timeout=40000, wait_until="domcontentloaded"); pg.wait_for_timeout(3000)
             except Exception:
                 pass
-        print("\n  → The browser is open. Log in if not already, go to the add/edit page,")
-        print("    fill anything missing, and click PUBLISH. Then press Enter here to close.\n")
+        _fill(pg, ("input[name=name]", "input[name=business_name]", "input[name=businessName]", "input[name=company]"), NAP["name"])
+        _fill(pg, ("textarea[name=address]", "input[name=address]", "input[name=business_address]", "input[name=street]"), NAP["address"])
+        _fill(pg, ("input[name=city]",), NAP["city"])
+        _fill(pg, ("input[name=zip_code]", "input[name=zip]", "input[name=postal]", "input[name=postcode]"), NAP["zip"])
+        _fill(pg, ("input[name=phone]", "input[name=business_phone]", "input[name=tel]"), NAP["phone"])
+        _fill(pg, ("input[name=website]", "input[name=url]", "input[name=web]"), NAP["website"])
+        print("\n  → The browser is OPEN and pre-filled. Pick the category if asked, then click")
+        print(f"    PUBLISH / Add business. The window stays open ~{_WAIT_SECONDS}s (or press Enter here).\n")
         try:
             input()
         except (EOFError, KeyboardInterrupt):
-            pg.wait_for_timeout(120000)
+            pg.wait_for_timeout(_WAIT_SECONDS * 1000)
         b.close()
 
 

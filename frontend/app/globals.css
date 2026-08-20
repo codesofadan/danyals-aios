@@ -1625,3 +1625,39 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
 .cred-link .material-symbols-rounded { font-size: 15px; }
 .cred-muted { font-size: 12px; color: var(--muted); padding: 4px 2px; }
 .cred-err { color: var(--warn); }
+
+/* ============================================================================
+   RESPONSIVE — dashboard adapts from wide desktop down to phone.
+   The sidebar stays a fixed rail (tap to expand); .main reclaims width, multi-col
+   grids collapse to one column, toolbars wrap, and tables scroll instead of
+   overflowing the viewport.
+   ============================================================================ */
+@media (max-width: 1180px) {
+  .main { padding: 22px 22px 42px; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 860px) {
+  .main { margin-left: calc(var(--rail-thin) + 14px); padding: 18px 16px 38px; max-width: 100%; }
+  body.nav-pinned .main { margin-left: calc(var(--rail-thin) + 14px); }
+  .kpis { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .panel-h, .card-h, .op-toolset, .wiz-body, .co-wiz-foot { flex-wrap: wrap; row-gap: 10px; }
+  .search { margin-left: 0; width: 100%; }
+  /* any multi-column grid collapses to a single column on narrow screens */
+  [class*="grid"] { grid-template-columns: 1fr !important; }
+  .fld-row { flex-direction: column; gap: 10px; }
+  .kpi .val { font-size: 32px; }
+  h1 { font-size: 30px; }
+  /* tables never overflow the page — they scroll inside their wrapper */
+  .tbl-wrap, .op-tbl-wrap, .co-codes-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tbl, table { min-width: 620px; }
+}
+@media (max-width: 560px) {
+  .main { margin-left: 0; padding: 14px 12px 32px; }
+  .kpis { grid-template-columns: 1fr; }
+  .kpi { padding: 16px; }
+  .kpi .val { font-size: 30px; }
+  .wiz-steps, .co-wiz-steps { overflow-x: auto; }
+  .seg { flex-wrap: wrap; }
+  .card, .panel, .panel-in, .co-wiz-card { padding-left: 14px; padding-right: 14px; }
+  .primary-btn, .ghostbtn { padding: 8px 12px; font-size: 13px; }
+}

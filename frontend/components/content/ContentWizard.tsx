@@ -343,6 +343,34 @@ export default function ContentWizard({
         {/* ───────────────────────── STEP 2 — DESIGN (optional) ───────────────────────── */}
         {step === 2 && (
           <>
+            {/* Template gallery — pick the page layout HERE in the design step */}
+            <div className="fld" style={{ marginBottom: 14 }}>
+              <label>Choose a page template</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button type="button" onClick={() => setTemplate("Auto")}
+                  style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer",
+                    border: `1px solid ${template === "Auto" ? "var(--maroon-2, #8c1d2e)" : "var(--line)"}`,
+                    borderRadius: 10, background: template === "Auto" ? "var(--blush, #f8ecee)" : "#fff" }}>
+                  <div style={{ fontWeight: 800 }}>Auto <span className="cs">(recommended)</span></div>
+                  <div className="cs">Pick the best template from each page&apos;s type + search intent.</div>
+                </button>
+                {PAGE_TEMPLATES.map((t) => (
+                  <button type="button" key={t.key} onClick={() => setTemplate(t.key)}
+                    style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer",
+                      border: `1px solid ${template === t.key ? "var(--maroon-2, #8c1d2e)" : "var(--line)"}`,
+                      borderRadius: 10, background: template === t.key ? "var(--blush, #f8ecee)" : "#fff" }}>
+                    <div style={{ fontWeight: 800 }}>{t.label}</div>
+                    <div className="cs">{t.bestFor}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="fld-hint">
+                The template sets each page&apos;s section layout. {template === "Auto"
+                  ? "Auto adapts per page type."
+                  : `Selected: ${TPL_LABEL[template]}.`} Then optionally match the site&apos;s look below.
+              </div>
+            </div>
+
             <div className="co-wiz-note">
               <span className="material-symbols-rounded">palette</span>
               <div>
