@@ -52,6 +52,7 @@ Web2Platform = Literal[
     "dev.to", "Write.as", "Telegra.ph", "Mataroa", "Ghost", "Mastodon",
     "GitHub Pages", "GitLab Pages", "Micro.blog", "Hashnode", "Hatena Blog",
     "LiveJournal", "Dreamwidth",
+    "Webflow", "HubSpot CMS", "Drupal", "Joomla",
 ]
 Web2Verified = Literal["verified", "pending"]
 # The publish PIPELINE's internal state machine (0028) - distinct from `verified`,
@@ -74,6 +75,7 @@ _WEB2_PLATFORMS: frozenset[str] = frozenset(
         "dev.to", "Write.as", "Telegra.ph", "Mataroa", "Ghost", "Mastodon",
         "GitHub Pages", "GitLab Pages", "Micro.blog", "Hashnode", "Hatena Blog",
         "LiveJournal", "Dreamwidth",
+        "Webflow", "HubSpot CMS", "Drupal", "Joomla",
     }
 )
 _WEB2_VERIFIED: frozenset[str] = frozenset({"verified", "pending"})

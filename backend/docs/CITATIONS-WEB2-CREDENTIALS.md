@@ -78,6 +78,19 @@ Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
 
 ---
 
+## 2b. Web 2.0 — the 4 newest platforms (Webflow / HubSpot CMS / Drupal / Joomla)
+
+Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
+
+| Platform | Vault secret JSON | How to get it |
+|---|---|---|
+| Webflow | `{"api_token": "...", "collection_id": "...", "site": "...", "url_path": "blog"}` | Project Settings → Apps & Integrations → API Access → generate a site API token (Data API v2). `collection_id` from the target CMS collection's settings panel. `site` is the `*.webflow.io` subdomain (Webflow's item response carries no absolute URL). `url_path` is optional (defaults to `"blog"`) — the collection's configured slug path. |
+| HubSpot CMS | `{"access_token": "...", "content_group_id": "..."}` | Settings → Integrations → Private Apps → create one with the `content` scope. `content_group_id` is the target blog's id — HubSpot needs an existing blog to post into. |
+| Drupal | `{"base_url": "...", "username": "...", "password": "...", "content_type": "article"}` | Create an API-only Drupal user (Basic-auth) with permission to create/edit content — Drupal core's JSON:API ships from core >= 8.7, no contrib module needed. `content_type` is optional (defaults to `"article"`), the node bundle machine name. |
+| Joomla | `{"base_url": "...", "api_token": "...", "catid": "..."}` | Users → Edit your user → API Token tab → generate (Joomla 4.3+ core Web Services API). `catid` is the target category id, from that category's edit URL. |
+
+---
+
 ## 3. Citations — direct-API engines (agency-wide keys, `.env`)
 
 Unlike Web2 credentials, these two are **agency-wide** (one key covers every

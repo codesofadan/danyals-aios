@@ -24,7 +24,13 @@ from fastapi import FastAPI
 from app.core.auth import CurrentUser, get_current_user
 from app.db.offpage_repo import get_offpage_repo
 from app.schemas.offpage import Web2CatalogResponse, Web2PlatformCatalogResponse
-from integrations.web2_publishers import WEB2_PLATFORMS
+from integrations.web2_publishers import (
+    PLATFORM_DRUPAL,
+    PLATFORM_HUBSPOT,
+    PLATFORM_JOOMLA,
+    PLATFORM_WEBFLOW,
+    WEB2_PLATFORMS,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -254,8 +260,10 @@ def test_seed_flags_exactly_the_seventeen_real_publishers() -> None:
     rows = _seed_rows()
     ready = {name for name, _at, _t, _m, is_ready in rows if is_ready}
     assert len(ready) == 17
-    # The automation_ready set is EXACTLY the platforms with a real Web2Publisher today.
-    assert ready == set(WEB2_PLATFORMS)
+    # 0063 is FROZEN history (applied, never edited) at the original 17 automation_ready
+    # platforms. WEB2_PLATFORMS has since grown to 21 - the 4 newest (Webflow/HubSpot
+    # CMS/Drupal/Joomla) live in 0068's catalog upsert instead, so exclude them here.
+    assert ready == set(WEB2_PLATFORMS) - {PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA}
 
 
 def test_seed_classifications_are_all_valid() -> None:
@@ -276,3 +284,13 @@ def test_table_migration_has_force_rls_and_policies() -> None:
     assert "web2_platforms_select" in sql and "is_staff()" in sql
     assert "web2_platforms_insert" in sql and "web2_platforms_update" in sql
     assert "unique (name)" in sql  # catalog name is the natural key
+
+
+def test_0068_migration_grows_the_enum_and_flips_the_new_adapters_ready() -> None:
+    matches = list(_MIGRATIONS.glob("00[6-9]*_web2_platforms_new_adapters.sql"))
+    assert len(matches) == 1, "expected exactly one 006x-009x web2_platforms_new_adapters migration"
+    sql = matches[0].read_text(encoding="utf-8").lower()
+    for name in ("webflow", "hubspot cms", "drupal", "joomla"):
+        assert f"alter type public.web2_platform add value if not exists '{name}'" in sql
+    assert "automation_ready" in sql
+    assert "on conflict (name) do update" in sql

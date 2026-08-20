@@ -25,25 +25,32 @@ from integrations.web2_publishers import (
     PLATFORM_CREDENTIAL_FIELDS,
     PLATFORM_DEVTO,
     PLATFORM_DREAMWIDTH,
+    PLATFORM_DRUPAL,
     PLATFORM_GHOST,
     PLATFORM_GITHUB_PAGES,
     PLATFORM_GITLAB_PAGES,
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
+    PLATFORM_HUBSPOT,
+    PLATFORM_JOOMLA,
     PLATFORM_LIVEJOURNAL,
     PLATFORM_MASTODON,
     PLATFORM_MATAROA,
     PLATFORM_MICROBLOG,
     PLATFORM_TELEGRAPH,
+    PLATFORM_WEBFLOW,
     PLATFORM_WRITEAS,
     WEB2_PLATFORMS,
     DevToClient,
     DreamwidthClient,
+    DrupalClient,
     GhostClient,
     GitHubPagesClient,
     GitLabPagesClient,
     HashnodeClient,
     HatenaBlogClient,
+    HubSpotClient,
+    JoomlaClient,
     LiveJournalClient,
     MastodonClient,
     MataroaClient,
@@ -51,6 +58,7 @@ from integrations.web2_publishers import (
     TelegraPhClient,
     Web2Post,
     Web2Publisher,
+    WebflowClient,
     WriteAsClient,
 )
 
@@ -63,6 +71,8 @@ _NEW_PLATFORMS = (
     PLATFORM_MASTODON, PLATFORM_GITHUB_PAGES, PLATFORM_GITLAB_PAGES, PLATFORM_MICROBLOG,
     PLATFORM_HASHNODE, PLATFORM_HATENA, PLATFORM_LIVEJOURNAL, PLATFORM_DREAMWIDTH,
 )
+# The 4 newest adapters (real CMS/site-builder clients, added after the original 17).
+_NEWEST_PLATFORMS = (PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA)
 
 
 def _post(**over: Any) -> Web2Post:
@@ -93,12 +103,12 @@ def _json_response(payload: dict[str, Any], status_code: int = 200) -> httpx.Res
 # --------------------------------------------------------------------------- #
 # 1. The platform catalog itself.
 # --------------------------------------------------------------------------- #
-def test_seventeen_platforms_total() -> None:
-    assert len(WEB2_PLATFORMS) == 17
+def test_twenty_one_platforms_total() -> None:
+    assert len(WEB2_PLATFORMS) == 21
 
 
 def test_every_new_platform_has_credential_fields_documented() -> None:
-    for platform in _NEW_PLATFORMS:
+    for platform in _NEW_PLATFORMS + _NEWEST_PLATFORMS:
         assert platform in PLATFORM_CREDENTIAL_FIELDS
         assert PLATFORM_CREDENTIAL_FIELDS[platform]  # non-empty
 
@@ -118,6 +128,10 @@ def test_every_new_platform_has_credential_fields_documented() -> None:
         (GitLabPagesClient, {"token": "", "project_id": "1"}),
         (HashnodeClient, {"pat": "", "publication_id": "p"}),
         (HatenaBlogClient, {"hatena_id": "", "blog_id": "b", "api_key": "k"}),
+        (WebflowClient, {"api_token": "", "collection_id": "c", "site": "s"}),
+        (HubSpotClient, {"access_token": "", "content_group_id": "g"}),
+        (DrupalClient, {"base_url": "https://x.example", "username": "", "password": "p"}),
+        (JoomlaClient, {"base_url": "https://x.example", "api_token": "", "catid": "1"}),
     ],
 )
 def test_a_blank_or_malformed_credential_refuses_to_construct(
@@ -159,6 +173,14 @@ def test_every_new_client_satisfies_web2publisher() -> None:
     assert isinstance(HatenaBlogClient(hatena_id="h", blog_id="b", api_key="k"), Web2Publisher)
     assert isinstance(LiveJournalClient(username="u", password="p"), Web2Publisher)
     assert isinstance(DreamwidthClient(username="u", password="p"), Web2Publisher)
+    assert isinstance(WebflowClient(api_token="t", collection_id="c", site="s"), Web2Publisher)
+    assert isinstance(HubSpotClient(access_token="t", content_group_id="g"), Web2Publisher)
+    assert isinstance(
+        DrupalClient(base_url="https://x.example", username="u", password="p"), Web2Publisher
+    )
+    assert isinstance(
+        JoomlaClient(base_url="https://x.example", api_token="t", catid="1"), Web2Publisher
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -336,6 +358,82 @@ def test_journal_protocol_client_edits_when_external_id_present(monkeypatch: pyt
     assert result.post_url == "https://acme.dreamwidth.org/7.html"
     fake_proxy.LJ.XMLRPC.editevent.assert_called_once()
     fake_proxy.LJ.XMLRPC.postevent.assert_not_called()
+
+
+def test_webflow_writes_the_item_then_publishes_it() -> None:
+    client = WebflowClient(api_token="t", collection_id="col1", site="acme")
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.path.endswith("/publish"):
+            return _json_response({"itemIds": ["item1"]})
+        return _json_response({"id": "item1"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://acme.webflow.io/blog/gentle-dental-cleanings"
+    assert result.verified is True and result.external_id == "item1"
+    assert any(m == "POST" and p.endswith("/items") for m, p in calls)
+    assert any(m == "POST" and p.endswith("/publish") for m, p in calls)
+
+
+def test_hubspot_creates_a_post_against_the_content_group() -> None:
+    client = HubSpotClient(access_token="t", content_group_id="grp1")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"], seen["auth"] = request.method, request.headers.get("Authorization", "")
+        seen["body"] = json.loads(request.content)
+        return _json_response({"id": 55, "url": "https://acme.hubspotpagebuilder.com/blog/gentle"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://acme.hubspotpagebuilder.com/blog/gentle"
+    assert result.verified is True and result.external_id == "55"
+    assert seen["method"] == "POST" and seen["auth"] == "Bearer t"
+    assert seen["body"]["contentGroupId"] == "grp1"
+
+
+def test_drupal_signs_http_basic_and_resolves_the_node_path() -> None:
+    client = DrupalClient(base_url="https://acme.example", username="api-bot", password="secret")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"], seen["auth"] = request.method, request.headers.get("Authorization", "")
+        seen["path"] = request.url.path
+        return _json_response(
+            {
+                "data": {
+                    "id": "node-uuid-1",
+                    "attributes": {"path": {"alias": "/gentle-dental-cleanings"}},
+                }
+            }
+        )
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://acme.example/gentle-dental-cleanings"
+    assert result.verified is True and result.external_id == "node-uuid-1"
+    assert seen["method"] == "POST" and seen["path"] == "/jsonapi/node/article"
+    assert seen["auth"].startswith("Basic ")  # HTTP Basic, not bearer
+
+
+def test_joomla_falls_back_to_the_non_sef_permalink() -> None:
+    client = JoomlaClient(base_url="https://acme.example", api_token="t", catid="7")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"], seen["auth"] = request.method, request.headers.get("Authorization", "")
+        seen["path"] = request.url.path
+        return _json_response({"data": {"id": "12", "attributes": {}}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://acme.example/index.php?option=com_content&view=article&id=12"
+    assert result.verified is True and result.external_id == "12"
+    assert seen["method"] == "POST" and seen["path"] == "/api/index.php/v1/content/articles"
+    assert seen["auth"] == "Bearer t"
 
 
 # --------------------------------------------------------------------------- #

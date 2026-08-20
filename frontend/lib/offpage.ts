@@ -88,12 +88,14 @@ export type Citation = {
 // 7B-4: grew from 4 to 17 platforms — every one the reference plan tags API-post:
 // Yes, not deprecated, and not a blockchain/brand-risk case (see
 // integrations/web2_publishers.py's module docstring for what was deliberately left
-// out and why). Medium stays draft-only (its publish API is retired).
+// out and why). Medium stays draft-only (its publish API is retired). Grew again to
+// 21 with Webflow / HubSpot CMS / Drupal / Joomla (real CMS/site-builder adapters).
 export type Web2Platform =
   | "WordPress.com" | "Blogger" | "Tumblr" | "Medium"
   | "dev.to" | "Write.as" | "Telegra.ph" | "Mataroa" | "Ghost" | "Mastodon"
   | "GitHub Pages" | "GitLab Pages" | "Micro.blog" | "Hashnode" | "Hatena Blog"
-  | "LiveJournal" | "Dreamwidth";
+  | "LiveJournal" | "Dreamwidth"
+  | "Webflow" | "HubSpot CMS" | "Drupal" | "Joomla";
 export type Web2Verified = "verified" | "pending";
 
 export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = {
@@ -114,6 +116,10 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   "Hatena Blog": { icon: "public", c: SERIES.c3 },
   LiveJournal: { icon: "menu_book", c: SERIES.c4 },
   Dreamwidth: { icon: "menu_book", c: SERIES.c1 },
+  Webflow: { icon: "web_stories", c: SERIES.c2 },
+  "HubSpot CMS": { icon: "hub", c: SERIES.c3 },
+  Drupal: { icon: "water_drop", c: SERIES.c4 },
+  Joomla: { icon: "widgets", c: SERIES.c1 },
 };
 
 // Every platform NOT draft-only can be planned/approved through the pipeline.

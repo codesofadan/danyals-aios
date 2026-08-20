@@ -8,11 +8,12 @@ service/worker layer can meter, cost-log, and diversify it - nothing else calls 
 provider directly. Every placement is human-approved authority work (a real, on-topic
 post), NEVER link spam.
 
-SEVENTEEN platforms, mirroring the frontend ``Web2Platform`` union (offpage.ts) - every
-one the 17 Jul 2026 reference doc tags API-post: Yes, not deprecated, and not a
+TWENTY-ONE platforms, mirroring the frontend ``Web2Platform`` union (offpage.ts) - the
+original 17 the 17 Jul 2026 reference doc tags API-post: Yes, not deprecated, and not a
 blockchain/OAuth1/brand-risk case that would need a materially different credential
 model (Hive/Steemit need a custody-sensitive private key, not an OAuth token; Gab
-carries the doc's own explicit brand-safety warning) - those stay future work:
+carries the doc's own explicit brand-safety warning) - those stay future work - plus 4
+more real CMS/site-builder adapters added in a later pass:
 
 * ``WordPressComClient`` / ``BloggerClient`` / ``TumblrClient`` - real, OAuth2 bearer.
 * ``DevToClient``      - real, dev.to (Forem) API v1, a plain ``api-key`` header.
@@ -35,6 +36,17 @@ carries the doc's own explicit brand-safety warning) - those stay future work:
   Medium publisher. A Medium placement is prepared as a DRAFT (``verified=False``,
   ``draft_only=True``) for a human to paste/publish; the pipeline holds it, never
   claims it is live. ``FakeWeb2Publisher`` models this so the behaviour is testable.
+* ``WebflowClient``    - real, Webflow Data API v2, Bearer site token, a two-step
+  publish (write the CMS item, then hit the collection's ``/publish`` endpoint so it
+  goes live at once).
+* ``HubSpotClient``    - real, HubSpot CMS Blog Post API v3, private-app Bearer
+  token; needs an existing blog (``content_group_id``) to post into.
+* ``DrupalClient``     - real, Drupal core JSON:API (ships in core >= 8.7, no contrib
+  module), HTTP Basic with an API-only Drupal user (Basic-auth is exempt from
+  Drupal's cookie-session CSRF check, so no separate token handshake).
+* ``JoomlaClient``     - real, Joomla's core Web Services API (com_content, Joomla
+  4.3+ "API Token"), Bearer token; builds the always-resolvable non-SEF permalink
+  since Joomla's response carries no absolute public URL.
 
 CREDENTIALS ARE PASSED IN, NEVER READ HERE. A Web 2.0 OAuth token / API key is
 per-account + per-property and lives in the VAULT (exactly like a WordPress
@@ -94,6 +106,10 @@ PLATFORM_HASHNODE = "Hashnode"
 PLATFORM_HATENA = "Hatena Blog"
 PLATFORM_LIVEJOURNAL = "LiveJournal"
 PLATFORM_DREAMWIDTH = "Dreamwidth"
+PLATFORM_WEBFLOW = "Webflow"
+PLATFORM_HUBSPOT = "HubSpot CMS"
+PLATFORM_DRUPAL = "Drupal"
+PLATFORM_JOOMLA = "Joomla"
 
 WEB2_PLATFORMS: frozenset[str] = frozenset(
     {
@@ -101,7 +117,8 @@ WEB2_PLATFORMS: frozenset[str] = frozenset(
         PLATFORM_DEVTO, PLATFORM_WRITEAS, PLATFORM_TELEGRAPH, PLATFORM_MATAROA,
         PLATFORM_GHOST, PLATFORM_MASTODON, PLATFORM_GITHUB_PAGES, PLATFORM_GITLAB_PAGES,
         PLATFORM_MICROBLOG, PLATFORM_HASHNODE, PLATFORM_HATENA, PLATFORM_LIVEJOURNAL,
-        PLATFORM_DREAMWIDTH,
+        PLATFORM_DREAMWIDTH, PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL,
+        PLATFORM_JOOMLA,
     }
 )
 # Medium is draft-only (its publish API is retired); the pipeline never marks it live.
@@ -128,6 +145,10 @@ PLATFORM_CREDENTIAL_FIELDS: dict[str, tuple[str, ...]] = {
     PLATFORM_HATENA: ("hatena_id", "blog_id", "api_key"),
     PLATFORM_LIVEJOURNAL: ("username", "password"),
     PLATFORM_DREAMWIDTH: ("username", "password"),
+    PLATFORM_WEBFLOW: ("api_token", "collection_id", "site"),
+    PLATFORM_HUBSPOT: ("access_token", "content_group_id"),
+    PLATFORM_DRUPAL: ("base_url", "username", "password"),
+    PLATFORM_JOOMLA: ("base_url", "api_token", "catid"),
 }
 
 _INSTALL_HINT = (
@@ -935,6 +956,222 @@ class DreamwidthClient(_LJProtocolClient):
     platform = PLATFORM_DREAMWIDTH
     _endpoint = "https://www.dreamwidth.org/interface/xmlrpc"
     _host = "dreamwidth.org"
+
+
+# --------------------------------------------------------------------------- #
+# Webflow - Data API v2, Bearer site token. A two-step publish: write the CMS item
+# (staged), then hit the collection's /publish endpoint so it goes live at once -
+# the same two-step honesty as GitHubPagesClient's commit-then-enable-Pages.
+# --------------------------------------------------------------------------- #
+class WebflowClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Webflow Data API v2. ``site`` is the
+    ``*.webflow.io`` subdomain - Webflow's item response carries no absolute URL, so
+    the live permalink has to be built from the account's own site slug.
+    ``url_path`` (default ``"blog"``) is the collection's configured slug path; it
+    is an optional constructor kwarg, not a required credential, because most
+    collections use the same default and forcing it into every vault row would be
+    needless friction."""
+
+    provider = "webflow"
+    platform = PLATFORM_WEBFLOW
+
+    def __init__(
+        self, *, api_token: str, collection_id: str, site: str, url_path: str = "blog", timeout: float = 30.0
+    ) -> None:
+        if not api_token or not collection_id or not site:
+            raise ProviderNotConfiguredError(f"Webflow publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.webflow.com/v2",
+            headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._collection_id = collection_id
+        self._site = site
+        self._url_path = url_path.strip("/")
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        field_data: dict[str, object] = {"name": post.title, "slug": slug, "post-body": post.body_html}
+        body: dict[str, object] = {"isArchived": False, "isDraft": False, "fieldData": field_data}
+        base = f"/collections/{self._collection_id}/items"
+        if post.external_id:
+            data = self.request_json("PATCH", f"{base}/{post.external_id}", json_body=body)
+        else:
+            data = self.request_json("POST", base, json_body=body)
+        item_id = data.get("id")
+        if not item_id:
+            raise ProviderCallError("Webflow response missing item id")
+        # Creating/updating an item only STAGES it - Webflow requires this second call
+        # to actually push the collection live, hence the two-step publish.
+        self.request_json("POST", f"{base}/publish", json_body={"itemIds": [str(item_id)]})
+        post_url = f"https://{self._site}.webflow.io/{self._url_path}/{slug}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(item_id))
+
+
+# --------------------------------------------------------------------------- #
+# HubSpot CMS - Blog Post API v3, private-app Bearer token.
+# --------------------------------------------------------------------------- #
+class HubSpotClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the HubSpot CMS Blog Post API v3. Auth = a
+    private-app Bearer token. ``content_group_id`` (the target blog's id) is a
+    required credential field - HubSpot has no "default blog", a post must be
+    created against an existing one."""
+
+    provider = "hubspot"
+    platform = PLATFORM_HUBSPOT
+
+    def __init__(self, *, access_token: str, content_group_id: str, timeout: float = 30.0) -> None:
+        if not access_token or not content_group_id:
+            raise ProviderNotConfiguredError(f"HubSpot CMS publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.hubapi.com/cms/v3/blogs",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._content_group_id = content_group_id
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        body: dict[str, object] = {
+            "name": post.title, "slug": slug, "postBody": post.body_html,
+            "contentGroupId": self._content_group_id, "state": "PUBLISHED",
+        }
+        if post.external_id:
+            data = self.request_json("PATCH", f"/posts/{post.external_id}", json_body=body)
+        else:
+            data = self.request_json("POST", "/posts", json_body=body)
+        post_url = str(data.get("url") or "")
+        post_id = data.get("id")
+        if not post_url:
+            raise ProviderCallError("HubSpot response missing post url")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(post_id) if post_id else None)
+
+
+# --------------------------------------------------------------------------- #
+# Drupal - core JSON:API (ships in core >= 8.7, no contrib module needed).
+# --------------------------------------------------------------------------- #
+class DrupalClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over Drupal core's JSON:API. Auth = HTTP Basic with an
+    API-only Drupal user - Basic-auth requests are exempt from Drupal's cookie-
+    session CSRF check, so no separate CSRF-token handshake is needed (uses
+    ``request_json``'s existing ``auth=`` param rather than hand-rolling a second
+    HTTP path). ``content_type`` is the node bundle machine name, an optional
+    constructor kwarg defaulting to ``"article"`` (not a required credential -
+    most sites publish blog content under the stock article bundle)."""
+
+    provider = "drupal"
+    platform = PLATFORM_DRUPAL
+
+    def __init__(
+        self, *, base_url: str, username: str, password: str,
+        content_type: str = "article", timeout: float = 30.0,
+    ) -> None:
+        if not base_url or not username or not password:
+            raise ProviderNotConfiguredError(f"Drupal publisher unavailable: {_INSTALL_HINT}")
+        self._base = base_url.rstrip("/")
+        super().__init__(
+            base_url=self._base,
+            headers={"Content-Type": "application/vnd.api+json", "Accept": "application/vnd.api+json"},
+            timeout=timeout,
+        )
+        self._auth = (username, password)
+        self._content_type = content_type
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        attrs: dict[str, object] = {
+            "title": post.title,
+            "body": {"value": post.body_html, "format": "full_html"},
+            "status": True,
+        }
+        payload: dict[str, Any] = {"data": {"type": f"node--{self._content_type}", "attributes": attrs}}
+        if post.external_id:
+            payload["data"]["id"] = post.external_id
+            data = self.request_json(
+                "PATCH", f"/jsonapi/node/{self._content_type}/{post.external_id}",
+                json_body=payload, auth=self._auth,
+            )
+        else:
+            data = self.request_json(
+                "POST", f"/jsonapi/node/{self._content_type}", json_body=payload, auth=self._auth,
+            )
+        row = data.get("data") or {}
+        node_attrs = row.get("attributes") or {}
+        node_id = row.get("id")
+        path_field = node_attrs.get("path")
+        path_alias = path_field.get("alias") if isinstance(path_field, dict) else None
+        internal_nid = node_attrs.get("drupal_internal__nid")
+        if path_alias:
+            post_url = f"{self._base}{path_alias}"
+        elif internal_nid:
+            post_url = f"{self._base}/node/{internal_nid}"
+        else:
+            raise ProviderCallError("Drupal response missing a resolvable node path")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(node_id) if node_id else None)
+
+
+# --------------------------------------------------------------------------- #
+# Joomla - core Web Services API (com_content, Joomla 4.3+ "API Token").
+# --------------------------------------------------------------------------- #
+class JoomlaClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over Joomla's core Web Services API. Auth = a
+    per-user Bearer "API Token" (created under User > Edit > API Token, Joomla
+    4.3+). The response carries no absolute public URL - Joomla's SEF routing is
+    site-configured and unknowable from here - so this builds the always-
+    resolvable non-SEF permalink (``index.php?option=com_content&view=article&
+    id=<id>``) rather than guessing a pretty slug URL: the honest choice, exactly
+    like ``GitLabPagesClient`` marking itself unverified when it cannot confirm
+    something. Here we CAN confirm the article exists and is published, just not
+    its pretty URL, so ``verified=True`` with an ugly-but-correct URL is right."""
+
+    provider = "joomla"
+    platform = PLATFORM_JOOMLA
+
+    def __init__(self, *, base_url: str, api_token: str, catid: str, timeout: float = 30.0) -> None:
+        if not base_url or not api_token or not catid:
+            raise ProviderNotConfiguredError(f"Joomla publisher unavailable: {_INSTALL_HINT}")
+        self._base = base_url.rstrip("/")
+        super().__init__(
+            base_url=self._base,
+            headers={
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+            timeout=timeout,
+        )
+        self._catid = catid
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        attrs: dict[str, object] = {
+            "title": post.title,
+            "alias": post.slug or _slugify(post.title),
+            "articletext": post.body_html,
+            "catid": self._catid,
+            "state": 1,
+            "access": 1,
+            "language": "*",
+        }
+        payload: dict[str, object] = {"data": {"type": "articles", "attributes": attrs}}
+        path = "/api/index.php/v1/content/articles"
+        if post.external_id:
+            data = self.request_json("PATCH", f"{path}/{post.external_id}", json_body=payload)
+        else:
+            data = self.request_json("POST", path, json_body=payload)
+        row = data.get("data") or {}
+        row_attrs = row.get("attributes") or {}
+        article_id = row.get("id") or row_attrs.get("id")
+        if not article_id:
+            raise ProviderCallError("Joomla response missing article id")
+        post_url = f"{self._base}/index.php?option=com_content&view=article&id={article_id}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(article_id))
 
 
 # --------------------------------------------------------------------------- #

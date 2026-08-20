@@ -31,27 +31,34 @@ from integrations.web2_publishers import (
     PLATFORM_BLOGGER,
     PLATFORM_DEVTO,
     PLATFORM_DREAMWIDTH,
+    PLATFORM_DRUPAL,
     PLATFORM_GHOST,
     PLATFORM_GITHUB_PAGES,
     PLATFORM_GITLAB_PAGES,
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
+    PLATFORM_HUBSPOT,
+    PLATFORM_JOOMLA,
     PLATFORM_LIVEJOURNAL,
     PLATFORM_MASTODON,
     PLATFORM_MATAROA,
     PLATFORM_MICROBLOG,
     PLATFORM_TELEGRAPH,
     PLATFORM_TUMBLR,
+    PLATFORM_WEBFLOW,
     PLATFORM_WORDPRESS,
     PLATFORM_WRITEAS,
     BloggerClient,
     DevToClient,
     DreamwidthClient,
+    DrupalClient,
     GhostClient,
     GitHubPagesClient,
     GitLabPagesClient,
     HashnodeClient,
     HatenaBlogClient,
+    HubSpotClient,
+    JoomlaClient,
     LiveJournalClient,
     MastodonClient,
     MataroaClient,
@@ -59,6 +66,7 @@ from integrations.web2_publishers import (
     TelegraPhClient,
     TumblrClient,
     Web2Publisher,
+    WebflowClient,
     WordPressComClient,
     WriteAsClient,
 )
@@ -126,6 +134,20 @@ _BUILDERS: dict[str, Any] = {
     ),
     PLATFORM_DREAMWIDTH: lambda c: DreamwidthClient(
         username=c.get("username", ""), password=c.get("password", "")
+    ),
+    PLATFORM_WEBFLOW: lambda c: WebflowClient(
+        api_token=c.get("api_token", ""), collection_id=c.get("collection_id", ""),
+        site=c.get("site", ""), url_path=c.get("url_path", "blog"),
+    ),
+    PLATFORM_HUBSPOT: lambda c: HubSpotClient(
+        access_token=c.get("access_token", ""), content_group_id=c.get("content_group_id", ""),
+    ),
+    PLATFORM_DRUPAL: lambda c: DrupalClient(
+        base_url=c.get("base_url", ""), username=c.get("username", ""),
+        password=c.get("password", ""), content_type=c.get("content_type", "article"),
+    ),
+    PLATFORM_JOOMLA: lambda c: JoomlaClient(
+        base_url=c.get("base_url", ""), api_token=c.get("api_token", ""), catid=c.get("catid", ""),
     ),
 }
 
