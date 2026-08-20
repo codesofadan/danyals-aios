@@ -18,8 +18,10 @@
 import { useMemo, useState } from "react";
 import {
   RESEARCH_CONTENT_TYPES, DIFFICULTY_META, FRAMEWORKS, TARGETS, PAGE_TEMPLATES,
+  TEMPLATE_THEME_DEFAULTS, profileFromTemplate,
   type ContentJob, type ResearchContentType, type ResearchItem,
   type SiteDesignProfile, type Framework, type PublishTarget, type PageTemplate,
+  type TemplateTheme,
 } from "@/lib/content";
 import {
   useContentResearch, useGenerateFromResearch, useSiteDesign,
@@ -27,13 +29,13 @@ import {
 import { useClients } from "@/lib/hooks/clients";
 import ReviewPreview from "./ReviewPreview";
 import LivePageEditor from "./LivePageEditor";
+import TemplateGallery from "./TemplateGallery";
 import type { ReviewAction } from "./ReviewGate";
 
 // One item per non-blank line — how the grounding textareas map to the API arrays.
 const _lines = (s: string): string[] => s.split("\n").map((l) => l.trim()).filter(Boolean);
 
 const FW_OPTIONS: (Framework | "Auto")[] = ["Auto", ...FRAMEWORKS.map((f) => f.key)];
-const TPL_OPTIONS: (PageTemplate | "Auto")[] = ["Auto", ...PAGE_TEMPLATES.map((t) => t.key)];
 const TPL_LABEL: Record<string, string> = { Auto: "Auto", ...Object.fromEntries(PAGE_TEMPLATES.map((t) => [t.key, t.label])) };
 
 // ── ONE unified, industry-neutral placeholder voice for the four grounding fields ──
@@ -84,6 +86,15 @@ export default function ContentWizard({
   const [clientId, setClientId] = useState("");
   const [framework, setFramework] = useState<Framework | "Auto">("Auto");
   const [template, setTemplate] = useState<PageTemplate | "Auto">("Auto");
+  // The editable look for the chosen template (recolour + Google-Font pairing). Seeded
+  // from the template's curated default; synthesised into a design_profile at generate.
+  const [theme, setTheme] = useState<TemplateTheme>(TEMPLATE_THEME_DEFAULTS.service);
+  // Select a template and, when switching to a NEW one, seed its default theme (a
+  // re-click of the same card keeps any customization the operator already made).
+  function selectTemplate(t: PageTemplate | "Auto") {
+    if (t !== "Auto" && t !== template) setTheme(TEMPLATE_THEME_DEFAULTS[t]);
+    setTemplate(t);
+  }
   const [target, setTarget] = useState<PublishTarget>("WordPress");
   const [proof, setProof] = useState("");
   const [testimonials, setTestimonials] = useState("");
@@ -173,6 +184,10 @@ export default function ContentWizard({
     // Proof / first-hand experience is REQUIRED to generate (not just to publish): a page
     // with zero grounding can never clear the E-E-A-T QA gate, so block at input, not review.
     if (picks.length === 0 || !effectiveClientId || _lines(proof).length === 0 || halted || generate.isPending) return;
+    // The look sent to the backend: a matched real site wins if attached; otherwise the
+    // chosen template's theme (colour + fonts) is synthesised into the same design_profile.
+    const themeProfile = template !== "Auto" ? profileFromTemplate(template, theme) : null;
+    const designToSend = attachDesign && design ? design : themeProfile;
     generate.mutate(
       {
         items: picks,
@@ -184,7 +199,7 @@ export default function ContentWizard({
         testimonials: _lines(testimonials).slice(0, 12),
         uniqueData: _lines(uniqueData).slice(0, 12),
         services: _lines(services).slice(0, 20),
-        ...(attachDesign && design ? { designProfile: design } : {}),
+        ...(designToSend ? { designProfile: designToSend } : {}),
       },
       { onSuccess: (r) => { setCodes(r.jobs); setPreviewId(r.jobs[0] ?? null); setStep(4); } },
     );
@@ -194,7 +209,7 @@ export default function ContentWizard({
     setStep(1); setSite(""); setContentType("service"); setCount("");
     setSelected(new Set()); setManualItems([]); setManualTitle("");
     setMaxPages(""); setDesign(null); setAttachDesign(true);
-    setFramework("Auto"); setTemplate("Auto"); setTarget("WordPress");
+    setFramework("Auto"); setTemplate("Auto"); setTheme(TEMPLATE_THEME_DEFAULTS.service); setTarget("WordPress");
     setProof(""); setTestimonials(""); setUniqueData(""); setServices("");
     setCodes(null); setPreviewId(null);
     research.reset(); siteDesign.reset(); generate.reset();
@@ -386,40 +401,22 @@ export default function ContentWizard({
         {/* ───────────────────────── STEP 2 — DESIGN (optional) ───────────────────────── */}
         {step === 2 && (
           <>
-            {/* Template gallery — pick the page layout HERE in the design step */}
+            {/* Template gallery — pick one of the 7 seeded templates, see it live, recolour + re-font it */}
             <div className="fld" style={{ marginBottom: 14 }}>
               <label>Choose a page template</label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button type="button" onClick={() => setTemplate("Auto")}
-                  style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer",
-                    border: `1px solid ${template === "Auto" ? "var(--maroon-2, #8c1d2e)" : "var(--line)"}`,
-                    borderRadius: 10, background: template === "Auto" ? "var(--blush, #f8ecee)" : "#fff" }}>
-                  <div style={{ fontWeight: 800 }}>Auto <span className="cs">(recommended)</span></div>
-                  <div className="cs">Pick the best template from each page&apos;s type + search intent.</div>
-                </button>
-                {PAGE_TEMPLATES.map((t) => (
-                  <button type="button" key={t.key} onClick={() => setTemplate(t.key)}
-                    style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer",
-                      border: `1px solid ${template === t.key ? "var(--maroon-2, #8c1d2e)" : "var(--line)"}`,
-                      borderRadius: 10, background: template === t.key ? "var(--blush, #f8ecee)" : "#fff" }}>
-                    <div style={{ fontWeight: 800 }}>{t.label}</div>
-                    <div className="cs">{t.bestFor}</div>
-                  </button>
-                ))}
+              <div className="fld-hint" style={{ marginTop: 0, marginBottom: 10 }}>
+                Seven ready-made page designs — the best of the best. Pick one to see it live, then
+                recolour it and pair fonts from Google Fonts. Your generated copy is slotted straight in.
               </div>
-              <div className="fld-hint">
-                The template sets each page&apos;s section layout. {template === "Auto"
-                  ? "Auto adapts per page type."
-                  : `Selected: ${TPL_LABEL[template]}.`} Then optionally match the site&apos;s look below.
-              </div>
+              <TemplateGallery value={template} theme={theme} onSelect={selectTemplate} onTheme={setTheme} />
             </div>
 
             <div className="co-wiz-note">
               <span className="material-symbols-rounded">palette</span>
               <div>
-                <b>Match the client&apos;s existing look.</b> Copy the site&apos;s colours, fonts and
-                layout so every generated page fits right in. This step is optional — skip it to
-                use the default styling.
+                <b>Or match the client&apos;s existing look.</b> Instead of a template theme, copy a live
+                site&apos;s colours, fonts and layout so every generated page fits right in. Optional — a
+                matched design overrides the template theme above.
               </div>
             </div>
 
@@ -570,21 +567,22 @@ export default function ContentWizard({
 
             <div className="fld">
               <label>Layout template</label>
-              <div className="co-chips wrap">
-                {TPL_OPTIONS.map((t) => (
-                  <button type="button" key={t}
-                    className={template === t ? "chip on" : "chip"}
-                    onClick={() => setTemplate(t)}>
-                    {TPL_LABEL[t]}
-                  </button>
-                ))}
+              <div className="tpl-summary">
+                <span className="tpl-dot" style={{ background: template === "Auto" ? "var(--line)" : theme.primary }} />
+                <b>{TPL_LABEL[template]}</b>
+                {template !== "Auto" && (
+                  <span className="cs">· {theme.primary} · {theme.heading}/{theme.body}</span>
+                )}
+                <button type="button" className="tpl-summary-edit" onClick={() => setStep(2)}>
+                  <span className="material-symbols-rounded">edit</span> Change in Design
+                </button>
               </div>
               <div className="fld-hint">
                 {template === "Auto"
                   ? (attachDesign && design
-                      ? "Auto — the page mirrors the analyzed site's layout. Pick a template to override it."
-                      : "Auto picks a template from each page type. Pick one to force a specific layout.")
-                  : `${PAGE_TEMPLATES.find((x) => x.key === template)?.bestFor} — content is slotted into this template's sections${attachDesign && design ? " (overrides the analyzed site)" : ""}.`}
+                      ? "Auto — the page mirrors the analyzed site's layout. Pick a template in the Design step to override it."
+                      : "Auto picks a template from each page type. Pick one in the Design step to force a specific layout + theme.")
+                  : `${PAGE_TEMPLATES.find((x) => x.key === template)?.bestFor} — content is slotted into this template${attachDesign && design ? ", styled to the analyzed site" : ", in your chosen theme"}.`}
               </div>
             </div>
 

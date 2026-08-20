@@ -65,8 +65,11 @@ class Settings(BaseSettings):
     jwt_public_key: str | None = None  # Ed25519 PEM (verifies access tokens)
     local_jwt_issuer: str = "aios"  # expected `iss` on our own EdDSA tokens
     jwt_audience: str = "authenticated"  # expected `aud` on our own EdDSA tokens
-    # Access-token lifetime (seconds). Short by default: a leaked token expires fast.
-    jwt_access_ttl_seconds: int = 3600
+    # Access-token lifetime (seconds). 7 days: there is no refresh route, so this IS the
+    # whole session — a shorter value silently logs staff/clients out mid-work. The token
+    # lives in localStorage (Bearer only, never a cookie); a 401 clears it and bounces to
+    # /login. Override with JWT_ACCESS_TTL_SECONDS to tighten it.
+    jwt_access_ttl_seconds: int = 604_800
     # --- Skills gateway (Part 9). A skill token is a SEPARATE, scoped credential
     # the MCP gateway authenticates (app/services/skill_tokens.py). Default TTL is
     # long-lived (30 days) since it drives standing local automation, but it is

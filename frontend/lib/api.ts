@@ -5,7 +5,7 @@
 // TanStack Query hook). Responsibilities kept in ONE place:
 //   • inject the bearer token (from localStorage, readable outside React)
 //   • decode the backend error envelope { error: { type, message, request_id } }
-//   • on 401 → clear the token and bounce to /login (no refresh route; ~1h TTL)
+//   • on 401 → clear the token and bounce to /login (no refresh route; ~7d TTL)
 //   • flag a 503 (backend up, a dependency unconfigured) so a banner can show
 // Bearer auth only — we NEVER send cookies.
 // ============================================================

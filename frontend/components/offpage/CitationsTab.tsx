@@ -124,7 +124,8 @@ export default function CitationsTab() {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">storefront</span>
-          Citations — audit a client, build the missing listings, finish the ones that need a click, then monitor.
+          Citations — audit a client, build the missing listings, and monitor the live ones. Listings are
+          built locally; any that need a human step are finished on your machine, and only completed listings appear here.
         </div>
       </div>
 
@@ -171,12 +172,12 @@ export default function CitationsTab() {
         <div className={w.step} style={{ background: "var(--blush, #f8ecee)", borderColor: "var(--rose, #b85c6b)" }}>
           <div className={w.stepH}>
             <span className="material-symbols-rounded" style={{ color: "var(--maroon-2, #8c1d2e)" }}>touch_app</span>
-            {readyToFinish.length} ready to finish in your browser
+            {readyToFinish.length} ready to finish locally
           </div>
           <div className="cs" style={{ marginBottom: 10 }}>
-            The bot created the account + prepared each listing. Open the directory, <b>log in with the account
-            below</b>, click <b>Publish</b>, then mark it done. (Run <code>python tools/finish_citation.py</code>
-            locally to auto-open + log in for you.)
+            These are finished on your machine, not here: run <code>python tools/finish_citation.py</code> locally
+            and Claude Code opens each directory in a browser — logged in and pre-filled — so you do the one human
+            step (category / captcha), click <b>Publish</b>, then mark it done. Only completed listings stay on the dashboard.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {readyToFinish.map((c) => {

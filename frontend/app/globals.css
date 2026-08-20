@@ -1661,3 +1661,97 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
   .card, .panel, .panel-in, .co-wiz-card { padding-left: 14px; padding-right: 14px; }
   .primary-btn, .ghostbtn { padding: 8px 12px; font-size: 13px; }
 }
+
+/* ============================================================
+   Content · Template gallery + live theme customizer
+   The 7 seeded templates rendered as live mini-mockups, a click-to-open
+   theme customizer (accent colour + Google-Font pairing), and a large
+   browser-framed live preview. Neutral chrome — each preview carries its
+   own colour so the gallery reads as seven finished designs.
+   ============================================================ */
+.tpl-gallery { width: 100%; }
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  gap: 12px;
+}
+.tpl-card {
+  display: flex; flex-direction: column; text-align: left; padding: 0;
+  background: #fff; border: 1px solid var(--line, #e8d2d7); border-radius: 12px;
+  overflow: hidden; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .1s;
+}
+.tpl-card:hover { border-color: var(--rose, #b85c6b); box-shadow: 0 6px 20px rgba(0,0,0,.07); }
+.tpl-card:active { transform: translateY(1px); }
+.tpl-card.on { border-color: var(--maroon-2, #8c1d2e); }
+.tpl-thumb {
+  position: relative; height: 190px; overflow: hidden; background: #fff;
+  border-bottom: 1px solid var(--line, #e8d2d7);
+}
+/* fade the clipped page bottom so a cropped mockup reads as a thumbnail */
+.tpl-thumb::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 46px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), #fff); pointer-events: none;
+}
+.tpl-thumb-auto {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; height: 190px; text-align: center;
+  background: repeating-linear-gradient(45deg, #fafafa, #fafafa 10px, #f3f3f5 10px, #f3f3f5 20px);
+  color: var(--maroon, #6e1423);
+}
+.tpl-thumb-auto .material-symbols-rounded { font-size: 34px; }
+.tpl-auto-txt { font-size: 12px; font-weight: 700; color: #6b6b6b; line-height: 1.35; }
+.tpl-meta { padding: 10px 12px; }
+.tpl-name { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 13.5px; color: var(--ink, #241015); }
+.tpl-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.tpl-best { margin-top: 3px; font-size: 11.5px; line-height: 1.4; color: #7a6a6e;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.tpl-customize {
+  margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  border: 1px solid var(--line, #e8d2d7); border-radius: 12px; padding: 14px;
+  background: var(--blush, #f8ecee);
+}
+.tpl-cz-h { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800;
+  color: var(--maroon-deep, #3f0e18); margin-bottom: 12px; }
+.tpl-cz-h .material-symbols-rounded { font-size: 18px; }
+.tpl-swatches { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.tpl-sw { width: 26px; height: 26px; border-radius: 7px; border: 2px solid transparent;
+  cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.tpl-sw.on { border-color: var(--ink, #241015); box-shadow: 0 0 0 2px #fff inset; }
+.tpl-sw-custom { position: relative; width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+  border: 1px dashed var(--rose, #b85c6b); display: grid; place-items: center; overflow: hidden; background: #fff; }
+.tpl-sw-custom .material-symbols-rounded { font-size: 16px; color: var(--maroon, #6e1423); }
+.tpl-sw-custom input[type="color"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.tpl-font-demo { margin-top: 6px; font-size: 15px; color: var(--ink, #241015);
+  padding: 6px 9px; background: #fff; border: 1px solid var(--line, #e8d2d7); border-radius: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpl-cz-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; grid-column: 1 / -1; }
+.tpl-reset { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700;
+  color: var(--maroon, #6e1423); background: #fff; border: 1px solid var(--line, #e8d2d7);
+  border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.tpl-reset:hover { background: var(--blush-2, #f1dade); }
+.tpl-reset .material-symbols-rounded { font-size: 15px; }
+
+.tpl-cz-preview { border: 1px solid var(--line, #e8d2d7); border-radius: 10px; overflow: hidden;
+  background: #fff; align-self: start; }
+.tpl-cz-preview-bar { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  background: #eef0f2; border-bottom: 1px solid #e3e6ea; }
+.tpl-cz-preview-bar > span { width: 9px; height: 9px; border-radius: 50%; background: #cfd4da; }
+.tpl-cz-url { margin-left: 8px; flex: 1; font-size: 11px; color: #8a8f96; background: #fff;
+  border-radius: 5px; padding: 3px 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-cz-preview-body { max-height: 440px; overflow: auto; }
+
+/* Step 3 compact template summary (the real picker lives in the Design step) */
+.tpl-summary { display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+  border: 1px solid var(--line, #e8d2d7); border-radius: 9px; background: #fff; font-size: 13.5px; }
+.tpl-summary b { color: var(--ink, #241015); }
+.tpl-summary-edit { margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12.5px; font-weight: 700; color: var(--maroon, #6e1423); background: transparent;
+  border: none; cursor: pointer; }
+.tpl-summary-edit .material-symbols-rounded { font-size: 15px; }
+
+@media (max-width: 760px) {
+  .tpl-customize { grid-template-columns: 1fr; }
+  .tpl-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .tpl-thumb, .tpl-thumb-auto { height: 150px; }
+}
