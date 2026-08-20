@@ -21,6 +21,12 @@ from __future__ import annotations
 import json, sys, os, re
 from pathlib import Path
 
+# Windows consoles default to cp1252 and choke on non-ASCII — force UTF-8 output.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HANDOFFS = Path(__file__).with_name("citation_handoffs.json")
 
 
@@ -35,7 +41,7 @@ def _load() -> list[dict]:
 def _list(items: list[dict]) -> None:
     print(f"\n{len(items)} citations ready to finish (log in + click Publish):\n")
     for d in items:
-        print(f"  • {d['name']:26}  login={d.get('login','')}")
+        print(f"  - {d['name']:26}  login={d.get('login','')}")
     print(f"\nPassword for all: {items[0].get('password','') if items else ''}")
     print('Finish one:  python tools/finish_citation.py "<name>"   |   all:  --all\n')
 
@@ -98,7 +104,7 @@ def _finish_one(d: dict, password: str) -> None:
         _fill(pg, ("input[name=zip_code]", "input[name=zip]", "input[name=postal]", "input[name=postcode]"), NAP["zip"])
         _fill(pg, ("input[name=phone]", "input[name=business_phone]", "input[name=tel]"), NAP["phone"])
         _fill(pg, ("input[name=website]", "input[name=url]", "input[name=web]"), NAP["website"])
-        print("\n  → The browser is OPEN and pre-filled. Pick the category if asked, then click")
+        print("\n  -> The browser is OPEN and pre-filled. Pick the category if asked, then click")
         print(f"    PUBLISH / Add business. The window stays open ~{_WAIT_SECONDS}s (or press Enter here).\n")
         try:
             input()
@@ -118,7 +124,7 @@ def main() -> None:
             _finish_one(d, password)
         return
     q = args[0].lower()
-    matches = [d for d in items if q in d["name"].lower()]
+    matches = [d for d in items if d["name"].lower() == q] or [d for d in items if q in d["name"].lower()]
     if not matches:
         print(f'No handoff matching "{args[0]}". Run with no args to list them.'); return
     _finish_one(matches[0], password)
