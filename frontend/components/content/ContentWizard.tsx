@@ -71,6 +71,9 @@ export default function ContentWizard({
   const [contentType, setContentType] = useState<ResearchContentType>("service");
   const [count, setCount] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Skip-research: single pages the admin adds by hand (no research run needed).
+  const [manualItems, setManualItems] = useState<ResearchItem[]>([]);
+  const [manualTitle, setManualTitle] = useState("");
 
   // Step 2 — design
   const [maxPages, setMaxPages] = useState("");
@@ -97,7 +100,11 @@ export default function ContentWizard({
   const siteDesign = useSiteDesign();
   const generate = useGenerateFromResearch();
 
-  const items: ResearchItem[] = research.data?.items ?? [];
+  // Research recommendations PLUS any single pages added by hand (skip-research).
+  const items: ResearchItem[] = useMemo(
+    () => [...manualItems, ...(research.data?.items ?? [])],
+    [manualItems, research.data],
+  );
   const effectiveClientId = clientId || clients[0]?.id || "";
   const selectedCount = useMemo(
     () => items.filter((i) => selected.has(i.title)).length,
@@ -124,6 +131,21 @@ export default function ContentWizard({
       { site: site.trim(), contentType, count: Number.isFinite(n) && n > 0 ? n : undefined },
       { onSuccess: (r) => setSelected(new Set(r.items.map((i) => i.title))) },
     );
+  }
+
+  // Skip research: add ONE page by hand (title/topic) — becomes a selected pick so the
+  // flow continues straight to design → details → generate, no research run needed.
+  function addManualPage() {
+    const t = manualTitle.trim();
+    if (!t) return;
+    const item: ResearchItem = {
+      title: t, pageType: contentType, primaryKeyword: t, secondaryKeywords: [],
+      estVolume: 0, difficulty: "medium", rationale: "Added manually (research skipped)",
+      city: "", service: "",
+    };
+    setManualItems((prev) => (prev.some((p) => p.title === t) ? prev : [...prev, item]));
+    setSelected((prev) => { const n = new Set(prev); n.add(t); return n; });
+    setManualTitle("");
   }
 
   function runSiteDesign() {
@@ -170,7 +192,8 @@ export default function ContentWizard({
 
   function resetWizard() {
     setStep(1); setSite(""); setContentType("service"); setCount("");
-    setSelected(new Set()); setMaxPages(""); setDesign(null); setAttachDesign(true);
+    setSelected(new Set()); setManualItems([]); setManualTitle("");
+    setMaxPages(""); setDesign(null); setAttachDesign(true);
     setFramework("Auto"); setTemplate("Auto"); setTarget("WordPress");
     setProof(""); setTestimonials(""); setUniqueData(""); setServices("");
     setCodes(null); setPreviewId(null);
@@ -263,7 +286,27 @@ export default function ContentWizard({
                 <span className="material-symbols-rounded">{halted ? "block" : "search"}</span>
                 {halted ? "API spend halted" : research.isPending ? "Researching…" : items.length ? "Re-run research" : "Research page set"}
               </button>
+              <span className="op-muted" style={{ alignSelf: "center" }}>— or skip research and add one page —</span>
             </div>
+
+            {/* Skip research: add a single page by hand (for when you just want one page). */}
+            <div className="fld-row" style={{ marginBottom: 8 }}>
+              <div className="fld" style={{ flex: 3 }}>
+                <input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManualPage(); } }}
+                  placeholder="Page title / topic — e.g. Emergency plumbing in Dallas" />
+              </div>
+              <button type="button" className="ghostbtn" style={{ flex: 1 }}
+                onClick={addManualPage} disabled={!manualTitle.trim()}>
+                <span className="material-symbols-rounded">add</span>Add this page
+              </button>
+            </div>
+            {manualItems.length > 0 && (
+              <div className="cs" role="status" style={{ color: "var(--ok)", marginBottom: 4 }}>
+                <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>check</span>{" "}
+                {manualItems.length} page{manualItems.length === 1 ? "" : "s"} added manually — continue to Design when ready.
+              </div>
+            )}
 
             {/* Research takes ~40–60s — show real progress, not a stuck spinner. */}
             {research.isPending && (
