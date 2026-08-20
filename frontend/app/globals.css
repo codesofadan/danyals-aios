@@ -210,10 +210,16 @@ body .material-symbols-rounded {
 /* ---------------- MAIN ---------------- */
 /* the resting rail floats with a --rail-gap margin on every side now, so the
    content needs that same gap clear on both sides of the rail, not just one. */
-.main { position: relative; z-index: 5; margin-left: calc(var(--rail-gap) * 2 + var(--rail-thin)); padding: 26px 34px 46px; max-width: 1500px;
+/* Left margin clears the floating rail on normal/medium widths; once the viewport
+   grows past the 1500px content cap (big monitors, or zooming the browser out), the
+   max() switches to (100vw - cap)/2 so the capped content CENTERS instead of clinging
+   to the left with a big empty gutter on the right. */
+.main { position: relative; z-index: 5;
+  margin-left: max(calc(var(--rail-gap) * 2 + var(--rail-thin)), calc((100vw - 1500px) / 2));
+  margin-right: auto; padding: 26px 34px 46px; max-width: 1500px;
   transition: margin-left .36s cubic-bezier(.4, 0, .2, 1); }
 /* pinning the nav open reflows the page to make room (hover just overlays). */
-body.nav-pinned .main { margin-left: calc(var(--rail-gap) + var(--rail-open) + var(--rail-gap)); }
+body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open) + var(--rail-gap)), calc((100vw - 1500px) / 2)); }
 .topbar { display: flex; align-items: center; gap: 20px; margin-bottom: 26px; }
 .topbar .tt .ey { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--violet-soft); }
 .topbar .tt h1 { font-size: 29px; font-weight: 800; letter-spacing: -.025em; color: var(--fg-strong); margin-top: 3px; }
