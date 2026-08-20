@@ -321,6 +321,17 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                 <div className="fld">
                   <label>Markets</label>
                   <div className="op-toolset">
+                    {(() => {
+                      const allMarkets = [...MARKETS, "GLOBAL" as BusinessMarket];
+                      const allOn = allMarkets.every((m) => markets.has(m));
+                      return (
+                        <button type="button"
+                          className={allOn ? "op-act update" : "ghostbtn"}
+                          onClick={() => setMarkets(allOn ? new Set() : new Set(allMarkets))}>
+                          <span className="material-symbols-rounded">done_all</span> All markets
+                        </button>
+                      );
+                    })()}
                     {[...MARKETS, "GLOBAL" as BusinessMarket].map((m) => (
                       <button
                         type="button" key={m}
@@ -335,6 +346,16 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                 <div className="fld">
                   <label>Automatable tiers</label>
                   <div className="op-toolset">
+                    {(() => {
+                      const allOn = AUTOMATABLE_TIERS.every((t) => tiers.has(t));
+                      return (
+                        <button type="button"
+                          className={allOn ? "op-act update" : "ghostbtn"}
+                          onClick={() => setTiers(allOn ? new Set() : new Set(AUTOMATABLE_TIERS))}>
+                          <span className="material-symbols-rounded">done_all</span> All tiers
+                        </button>
+                      );
+                    })()}
                     {AUTOMATABLE_TIERS.map((t) => (
                       <button
                         type="button" key={t}

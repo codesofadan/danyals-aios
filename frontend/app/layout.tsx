@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { AiosStoreProvider } from "@/lib/store";
@@ -22,6 +22,16 @@ const bricolage = localFont({
 export const metadata: Metadata = {
   title: "AIOS",
   description: "SEO automation platform for the agency — audits, content, clients and Policy Radar.",
+};
+
+// WITHOUT this the dashboard rendered at a ~980px desktop width on phones/tablets and
+// zoomed out — so none of the responsive @media rules ever fired. `width=device-width`
+// makes the layout scale to the real screen so the breakpoints in globals.css take effect
+// on mobile + tablet. maximumScale left generous so pinch-zoom still works (accessibility).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 // Root shell holds only the document chrome + ambient glow, plus the public

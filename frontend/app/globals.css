@@ -1632,34 +1632,51 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
    grids collapse to one column, toolbars wrap, and tables scroll instead of
    overflowing the viewport.
    ============================================================================ */
+/* ============================================================================
+   Comprehensive responsive layer — AUTHORITATIVE (last in the file, so it wins).
+   Works on real devices now that layout.tsx sets width=device-width. The 48px icon
+   rail is the nav on every size, so .main always clears it (never margin-left:0, which
+   slid content under the rail). Wide content scrolls inside its own container — the page
+   itself never scrolls sideways (body is overflow-x:hidden). Tiers ≈ tablet/phone/small.
+   ============================================================================ */
 @media (max-width: 1180px) {
   .main { padding: 22px 22px 42px; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
+  .row, .row.b { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
-  .main { margin-left: calc(var(--rail-thin) + 14px); padding: 18px 16px 38px; max-width: 100%; }
-  body.nav-pinned .main { margin-left: calc(var(--rail-thin) + 14px); }
-  .kpis { grid-template-columns: 1fr 1fr; gap: 12px; }
-  .panel-h, .card-h, .op-toolset, .wiz-body, .co-wiz-foot { flex-wrap: wrap; row-gap: 10px; }
-  .search { margin-left: 0; width: 100%; }
-  /* any multi-column grid collapses to a single column on narrow screens */
-  [class*="grid"] { grid-template-columns: 1fr !important; }
+  .main, body.nav-pinned .main {
+    margin-left: calc(var(--rail-gap) + var(--rail-thin) + 8px); padding: 18px 16px 38px; max-width: 100%;
+  }
+  .search { display: none; }
+  /* every multi-column grid collapses — covers class-named grids AND inline grids
+     (the !important also overrides inline style= grid-template-columns). */
+  [class*="grid"], .kpis, .rings, .cg-body, .sub-legend, .perf-nums, .prio-pick,
+  .row, .row.b, .sub-cards, .tier-cards, .prov-grid, .stat-tiles { grid-template-columns: 1fr !important; }
   .fld-row { flex-direction: column; gap: 10px; }
-  .kpi .val { font-size: 32px; }
-  h1 { font-size: 30px; }
-  /* tables never overflow the page — they scroll inside their wrapper */
-  .tbl-wrap, .op-tbl-wrap, .co-codes-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .tbl, table { min-width: 620px; }
+  /* flex headers / toolbars / segmented controls wrap instead of overflowing */
+  .topbar, .panel-h, .card-h, .card-h .tools, .op-toolset, .wiz-body, .co-wiz-foot,
+  .seg, .panel-hint, .toolbar, .filters, .chips, .co-chips { flex-wrap: wrap; row-gap: 10px; }
+  .topbar .tt { min-width: 0; flex: 1 1 auto; }
+  /* wide content scrolls inside its container (wrappers already do; make bare tables
+     inside cards scroll too, and keep code/step strips scrollable). */
+  .tbl-wrap, .op-tbl-wrap, .co-codes-wrap, .table-wrap, .bk-table-wrap, .cd-wrap,
+  .rbac-wrap, .cd-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .card table, .panel table, .panel-in table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .wiz-steps, .co-wiz-steps { overflow-x: auto; }
+  /* modals + wide dialogs fit the viewport */
+  .modal, .modal-card, .modal-in, [class*="modal-card"] { max-width: 94vw !important; max-height: 88vh; overflow-y: auto; }
+  h1 { font-size: 28px; } .kpi .val { font-size: 30px; }
 }
 @media (max-width: 560px) {
-  .main { margin-left: 0; padding: 14px 12px 32px; }
+  .main, body.nav-pinned .main { margin-left: calc(var(--rail-thin) + 10px); padding: 14px 11px 30px; }
   .kpis { grid-template-columns: 1fr; }
-  .kpi { padding: 16px; }
-  .kpi .val { font-size: 30px; }
-  .wiz-steps, .co-wiz-steps { overflow-x: auto; }
-  .seg { flex-wrap: wrap; }
-  .card, .panel, .panel-in, .co-wiz-card { padding-left: 14px; padding-right: 14px; }
-  .primary-btn, .ghostbtn { padding: 8px 12px; font-size: 13px; }
+  .kpi { padding: 16px; } .kpi .val { font-size: 26px; }
+  .card, .panel, .panel-in, .co-wiz-card { padding-left: 13px; padding-right: 13px; }
+  .primary-btn, .ghostbtn, .btn, .co-btn { padding: 8px 12px; font-size: 13px; }
+  .seg { flex-wrap: nowrap; overflow-x: auto; }
+  .tpl-grid { grid-template-columns: 1fr 1fr; }
+  h1 { font-size: 24px; }
 }
 
 /* ============================================================

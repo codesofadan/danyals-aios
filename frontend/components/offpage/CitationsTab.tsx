@@ -342,15 +342,24 @@ export default function CitationsTab() {
                   <td><span className={`status-pill ${meta.cls}`}>{meta.label}</span></td>
                   <td className="op-muted">{c.note}</td>
                   <td>
-                    <button
-                      className={c.action === "Submit" ? "op-act submit" : "op-act update"}
-                      onClick={() => actOnRow(c)}
-                      disabled={act.isPending}
-                    >
-                      <span className="material-symbols-rounded">
-                        {c.action === "Submit" ? "add_location_alt" : "edit_location_alt"}
-                      </span>{c.action}
-                    </button>
+                    {/* A settled listing (live/submitted or verified, NAP consistent) has no action —
+                        show a done state, not a clickable "Submit". Only offer the action when there's
+                        actually work: not yet submitted, or a drifted NAP to re-sync. */}
+                    {(c.submitStatus === "submitted" || c.submitStatus === "verified") && c.nap !== "inconsistent" ? (
+                      <span className="op-act done" aria-disabled="true">
+                        <span className="material-symbols-rounded">check_circle</span>Done
+                      </span>
+                    ) : (
+                      <button
+                        className={c.action === "Submit" ? "op-act submit" : "op-act update"}
+                        onClick={() => actOnRow(c)}
+                        disabled={act.isPending}
+                      >
+                        <span className="material-symbols-rounded">
+                          {c.action === "Submit" ? "add_location_alt" : "edit_location_alt"}
+                        </span>{c.action}
+                      </button>
+                    )}
                   </td>
                   <td>
                     <span className={`status-pill ${submitMeta.cls}`}>{submitMeta.label}</span>
