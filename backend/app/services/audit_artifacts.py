@@ -13,8 +13,9 @@ caller.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.config import Settings
 
@@ -140,3 +141,31 @@ def local_store_from_settings(settings: Settings) -> LocalArtifactStore | None:
     """Build the local artifact store, or ``None`` when unconfigured."""
     root = settings.audit_artifact_dir
     return LocalArtifactStore(root) if root else None
+
+
+def honest_artifact_flags(
+    store: LocalArtifactStore | None, row: Mapping[str, Any]
+) -> tuple[bool, bool]:
+    """Return ``(pdf_available, json_available)`` for an audit row - the truth the UI
+    can trust to decide whether to show a download button.
+
+    The row's ``pdf_path`` / ``json_path`` columns record the keys the worker set
+    when it COPIED the artifacts. Those columns can outlive the file on disk (an
+    artifact volume that was not carried across a redeploy, a copy the worker never
+    actually made because the store write failed). Serving a download from a stale
+    column then 404s - exactly the "button appears but the file is not on the
+    server" bug. So when an artifact store IS configured we DOWNGRADE each flag to
+    on-disk reality: resolve the key and require the file to exist. When NO store is
+    configured we cannot check, so we trust the columns (prior behavior; keeps the
+    flags meaningful in a store-less deploy and in unit tests).
+
+    NOTE: ``resolve`` does filesystem ``stat`` calls; callers on an async route must
+    invoke this via ``asyncio.to_thread`` so the event loop is never blocked.
+    """
+    pdf_present = bool(row.get("pdf_path"))
+    json_present = bool(row.get("json_path"))
+    if store is None:
+        return pdf_present, json_present
+    pdf_ok = pdf_present and store.resolve(str(row.get("pdf_path") or "")) is not None
+    json_ok = json_present and store.resolve(str(row.get("json_path") or "")) is not None
+    return pdf_ok, json_ok

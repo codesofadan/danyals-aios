@@ -97,7 +97,7 @@ def image_block(url: str, alt: str) -> str:
         return ""
     return (
         '<!-- wp:image {"sizeSlug":"large","linkDestination":"none"} -->\n'
-        f'<figure class="wp-block-image size-large"><img src="{_esc(url)}" alt="{_esc(alt)}"/></figure>\n'
+        f'<figure class="wp-block-image size-large"><img src="{_esc(url)}" alt="{_esc(alt)}" title="{_esc(alt)}"/></figure>\n'
         "<!-- /wp:image -->"
     )
 

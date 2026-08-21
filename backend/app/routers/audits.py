@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -34,6 +34,7 @@ from app.services.activity import record_activity
 from app.services.audit_artifacts import (
     REPORT_HTML_VIEW_HEADERS,
     LocalArtifactStore,
+    honest_artifact_flags,
     local_store_from_settings,
 )
 from app.services.audit_sheets import SHEET_FILES, sheet_media_type
@@ -140,10 +141,26 @@ def get_paid_audit_gate() -> Callable[[str, str, float], GateDecision]:
 PaidAuditGateDep = Annotated[Callable[[str, str, float], GateDecision], Depends(get_paid_audit_gate)]
 
 
+def _rows_to_responses(
+    rows: list[dict[str, Any]], store: LocalArtifactStore | None
+) -> list[AuditResponse]:
+    """Build the AuditRow responses with the pdf/json download flags DOWNGRADED to
+    on-disk reality (see ``honest_artifact_flags``) so the dashboard never offers a
+    download that 404s. Runs in a worker thread (filesystem ``stat`` per row)."""
+    out: list[AuditResponse] = []
+    for r in rows:
+        resp = AuditResponse.from_row(r)
+        resp.pdf, resp.json_ = honest_artifact_flags(store, r)
+        out.append(resp)
+    return out
+
+
 @router.get("/audits", response_model=list[AuditResponse])
-async def list_audits(repo: AuditsRepoDep, page: PageDep, _user: ViewReports) -> list[AuditResponse]:
+async def list_audits(
+    repo: AuditsRepoDep, page: PageDep, store: ArtifactStoreDep, _user: ViewReports
+) -> list[AuditResponse]:
     rows = await asyncio.to_thread(repo.list_audits, limit=page.limit, offset=page.offset)
-    return [AuditResponse.from_row(r) for r in rows]
+    return await asyncio.to_thread(_rows_to_responses, rows, store)
 
 
 @router.get("/audits/stats", response_model=AuditStatsResponse)
@@ -153,11 +170,15 @@ async def audit_stats(repo: AuditsRepoDep, _user: ViewReports) -> AuditStatsResp
 
 
 @router.get("/audits/{audit_id}", response_model=AuditResponse)
-async def get_audit(audit_id: str, repo: AuditsRepoDep, _user: ViewReports) -> AuditResponse:
+async def get_audit(
+    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
+) -> AuditResponse:
     row = await asyncio.to_thread(repo.get_audit, audit_id)
     if row is None:
         raise _AUDIT_NOT_FOUND
-    return AuditResponse.from_row(row)
+    resp = AuditResponse.from_row(row)
+    resp.pdf, resp.json_ = await asyncio.to_thread(honest_artifact_flags, store, row)
+    return resp
 
 
 @router.get("/audits/{audit_id}/report.pdf")

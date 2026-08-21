@@ -329,16 +329,35 @@ async def get_public_report(report_token: str, gateway: PublicGatewayDep, settin
         raise _REPORT_NOT_FOUND
     when = row.get("created_at")
     when_iso = when.isoformat() if isinstance(when, datetime) else (str(when) if when else None)
+    store = local_store_from_settings(settings)
+    has_pdf, has_report = await asyncio.to_thread(_public_report_flags, store, row)
     return PublicReport(
         status=str(row["status"]),
         score=row.get("score"),
         scores=row.get("scores") or {},
-        has_pdf=bool(row.get("pdf_path")),
-        has_report=bool(row.get("json_path")),
+        has_pdf=has_pdf,
+        has_report=has_report,
         url=str(row["url"]),
         when=when_iso,
         fiverr_url=settings.fiverr_upsell_url,
     )
+
+
+def _public_report_flags(
+    store: LocalArtifactStore | None, row: dict[str, Any]
+) -> tuple[bool, bool]:
+    """(has_pdf, has_report) for the public status response, downgraded to on-disk
+    reality when a store is configured so the funnel never shows a dead button.
+
+    ``has_report`` gates the IN-PAGE viewer, which fetches ``report.html`` (resolved
+    by convention from the audit id), so it must reflect THAT file - not
+    ``findings.json``. When no store is configured we cannot check the disk, so we
+    trust the DB columns (prior behavior; keeps the flags meaningful store-less)."""
+    if store is None:
+        return bool(row.get("pdf_path")), bool(row.get("json_path"))
+    has_pdf = bool(row.get("pdf_path")) and store.resolve(str(row.get("pdf_path") or "")) is not None
+    has_report = store.resolve_report_html(str(row["id"])) is not None
+    return has_pdf, has_report
 
 
 @router.get("/audits/{report_token}/report.pdf")

@@ -598,7 +598,10 @@ def _btn(label: str, url: str, cls: str) -> str:
 def _photo(im: Image, cls: str) -> str:
     if not im.url:
         return ""
-    return f'<div class="{cls}"><img src="{_esc(im.url)}" alt="{_esc(im.alt)}" loading="lazy"></div>'
+    return (
+        f'<div class="{cls}"><img src="{_esc(im.url)}" alt="{_esc(im.alt)}" '
+        f'title="{_esc(im.alt)}" loading="lazy"></div>'
+    )
 
 
 def _section_html(s: Section, pal: dict[str, str]) -> str:

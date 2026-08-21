@@ -311,7 +311,11 @@ def _build_widget(
         url = str(block.get("url") or "").strip()
         if not url:
             return None
-        return _widget("image", {"image": {"url": url, "alt": str(block.get("alt") or "")}}, ids, url)
+        alt = str(block.get("alt") or "")
+        # Elementor's image widget carries the media object's alt AND title, so a
+        # published/edited page keeps both attributes on the rendered <img> (parity
+        # with the flat-HTML + Gutenberg renderers, which both emit alt + title).
+        return _widget("image", {"image": {"url": url, "alt": alt, "title": alt}}, ids, url)
     if kind == "button":
         text = str(block.get("text") or "").strip()
         url = str(block.get("url") or "").strip()

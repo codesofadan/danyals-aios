@@ -189,8 +189,16 @@ def _store_artifacts(
             findings_src=result.findings_path,
             html_src=result.html_path,
         )
-    except Exception:
-        logger.warning("audit_artifact_store_failed", audit_id=audit_id)
+    except Exception as exc:
+        # Never fatal (a done audit must not fail on a copy hiccup), but log LOUDLY
+        # with the reason: a real prod failure here (e.g. PermissionError writing to
+        # the artifact volume, or ENOSPC) is exactly why pdf_path ends up NULL and no
+        # download button appears - it must be diagnosable, not swallowed silently.
+        logger.error(
+            "audit_artifact_store_failed",
+            audit_id=audit_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
         return None, None
 
 

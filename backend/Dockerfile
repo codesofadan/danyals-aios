@@ -97,9 +97,23 @@ COPY db/migrations /app/db/migrations
 COPY infra/docker/migrate-entrypoint.sh /app/migrate-entrypoint.sh
 RUN chmod +x /app/migrate-entrypoint.sh
 
-# Non-root + a writable state dir (celery beat schedule + any artifact dirs).
+# Non-root + a writable state dir (celery beat schedule + the artifact dirs the
+# worker WRITES and the api SERVES). These MUST match the *_ARTIFACT_DIR / *_DIR
+# values in docker-compose.yml. Pre-creating them here, owned by `aios`, matters:
+# when the `aios_state` named volume is first mounted at /var/lib/aios, Docker seeds
+# the EMPTY volume from the image's directory INCLUDING its ownership - so the
+# non-root `aios` user can write into these paths from the very first run. Without
+# the seed the volume root can end up root-owned and the worker's copy of report.pdf
+# / findings.json / report.html silently fails (pdf_path stays NULL -> no download).
 RUN useradd --system --create-home --home-dir /home/aios aios \
-    && mkdir -p /var/lib/aios /app/audit-engine/data \
+    && mkdir -p \
+        /var/lib/aios/artifacts/audits \
+        /var/lib/aios/artifacts/content \
+        /var/lib/aios/artifacts/content-images \
+        /var/lib/aios/artifacts/imports \
+        /var/lib/aios/artifacts/citations \
+        /var/lib/aios/backups \
+        /app/audit-engine/data \
     && chown -R aios:aios /var/lib/aios /app
 USER aios
 

@@ -1094,7 +1094,7 @@ def _md_image_html(alt: str, url: str) -> str:
     ``app.services.gutenberg.image_block``'s block shape so both renderers agree."""
     return (
         f'<figure class="wp-block-image size-large">'
-        f'<img src="{url}" alt="{alt}" class="size-large" style="max-width:100%;height:auto" />'
+        f'<img src="{url}" alt="{alt}" title="{alt}" class="size-large" style="max-width:100%;height:auto" />'
         f"</figure>"
     )
 
@@ -1104,7 +1104,7 @@ def _md_inline(text: str) -> str:
     # link; then links and bold. An image INLINE within other text (rare) still gets a
     # bare <img> - a standalone image LINE (the common case) is handled separately in
     # md_to_html, as its own wp-block-image figure, not wrapped in a <p>.
-    text = _MD_IMG_RE.sub(r'<img src="\2" alt="\1" style="max-width:100%;height:auto" />', text)
+    text = _MD_IMG_RE.sub(r'<img src="\2" alt="\1" title="\1" style="max-width:100%;height:auto" />', text)
     text = _MD_LINK_RE.sub(r'<a href="\2">\1</a>', text)
     return _MD_BOLD_RE.sub(r"<strong>\1</strong>", text)
 
@@ -1360,6 +1360,17 @@ _LAYOUT_CSS = (
     ".aios-page .aios-cta,.aios-page .aios-layout-banner{text-align:center;"
     "padding:52px 24px;border-radius:16px;margin:48px auto}"
     ".aios-page .aios-hero,.aios-page section:first-child{padding-top:16px}"
+    # Explicit device breakpoints so the generated body adapts across tablet/mobile
+    # (on top of the intrinsically-fluid max-width:100% media + auto-fit grids above):
+    # collapse multi-column grids to a single column and tighten section rhythm +
+    # heading scale on smaller viewports.
+    "@media(max-width:900px){.aios-page .aios-layout-grid ul{"
+    "grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}"
+    "@media(max-width:640px){.aios-page section{margin:28px auto}"
+    ".aios-page .aios-layout-grid ul{grid-template-columns:1fr;gap:14px}"
+    ".aios-page .aios-cta,.aios-page .aios-layout-banner{padding:36px 18px;margin:32px auto}"
+    ".aios-page h1{font-size:1.9rem}.aios-page h2{font-size:1.5rem}"
+    ".aios-page h3{font-size:1.2rem}}"
 )
 
 
@@ -1376,7 +1387,14 @@ def _classic_style_block() -> str:
         ".aios-page h1{font-size:2.6rem;margin:.2em 0 .4em}"
         ".aios-page h2{font-size:1.9rem;margin:1.4em 0 .5em}"
         ".aios-page h3{font-size:1.3rem;margin:1.1em 0 .3em}"
-        ".aios-page a{color:#2563eb}</style>"
+        ".aios-page img{max-width:100%;height:auto}"
+        ".aios-page a{color:#2563eb}"
+        # Fluid page gutters + a mobile type-scale step-down so the classic (no analyzed
+        # profile) page reads well on phones/tablets, not just desktop.
+        "@media(max-width:768px){.aios-page{padding:0 18px;font-size:16px}"
+        ".aios-page h1{font-size:2rem}.aios-page h2{font-size:1.55rem}"
+        ".aios-page h3{font-size:1.2rem}}"
+        "</style>"
     )
 
 
