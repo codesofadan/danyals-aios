@@ -368,6 +368,17 @@ class Settings(BaseSettings):
     # for a site without Elementor). Set False to publish flat HTML only - the payload is
     # then byte-identical to the pre-Elementor behaviour. Additive + optional. ---
     content_elementor_enabled: bool = True
+    # --- Gutenberg-native page output for DESIGNED pages only (a resolved analyzed-site
+    # profile or a chosen template's blueprint - service/local/landing pages, NEVER a
+    # plain blog/FAQ article, which keeps its existing flat-HTML article-template
+    # rendering unchanged). When True, `content` for a designed page is rendered as native
+    # WordPress Block Editor markup (app.services.gutenberg.model_to_gutenberg, reusing
+    # the SAME PageModel the live editor + Elementor renderers already share) instead of
+    # a flat class-hooked <div> wrap - so it opens fully editable as native blocks on ANY
+    # WordPress site, including one with no Elementor. Set False to keep the pre-existing
+    # flat-HTML wrap for designed pages too (byte-identical to before this setting
+    # existed). Additive + optional; a render failure falls back to the flat wrap. ---
+    content_gutenberg_enabled: bool = True
 
     # --- Multi-client WordPress Connections registry (0058). The per-client publish
     # connections (site_url + auth_method + sealed credential) live in

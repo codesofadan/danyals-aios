@@ -99,9 +99,10 @@ from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
 from app.services.elementor import elementor_json, elementor_json_from_model
+from app.services.gutenberg import model_to_gutenberg
 from app.services.notifications import email_client_sync, notify_leads_sync
 from app.services.page_blueprints import SectionSpec, resolve_blueprint
-from app.services.page_model import model_to_html, page_model_from_dict
+from app.services.page_model import model_to_html, page_model_for_job, page_model_from_dict
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import FakeImageGenerator, GeneratedImage, ImageGenerator
@@ -1081,12 +1082,29 @@ def _extract_title(draft_md: str) -> str:
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _MD_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 _MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_MD_IMG_ONLY_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)$")
+
+
+def _md_image_html(alt: str, url: str) -> str:
+    """A WordPress-native ``wp-block-image`` figure - the SAME class/attribute shape
+    the block editor itself emits (``size-large`` + a responsive ``max-width``
+    fallback). ANY WordPress theme (native or third-party, no custom theme needed)
+    already ships CSS for this exact class - a bare, unclassed ``<img>`` gets none of
+    it and renders at native pixel size, breaking the layout. Mirrors
+    ``app.services.gutenberg.image_block``'s block shape so both renderers agree."""
+    return (
+        f'<figure class="wp-block-image size-large">'
+        f'<img src="{url}" alt="{alt}" class="size-large" style="max-width:100%;height:auto" />'
+        f"</figure>"
+    )
 
 
 def _md_inline(text: str) -> str:
     # Images FIRST (``![alt](url)``) so the link regex never mistakes one for a plain
-    # link; then links and bold. A standalone image line becomes ``<p><img ..></p>``.
-    text = _MD_IMG_RE.sub(r'<img src="\2" alt="\1">', text)
+    # link; then links and bold. An image INLINE within other text (rare) still gets a
+    # bare <img> - a standalone image LINE (the common case) is handled separately in
+    # md_to_html, as its own wp-block-image figure, not wrapped in a <p>.
+    text = _MD_IMG_RE.sub(r'<img src="\2" alt="\1" style="max-width:100%;height:auto" />', text)
     text = _MD_LINK_RE.sub(r'<a href="\2">\1</a>', text)
     return _MD_BOLD_RE.sub(r"<strong>\1</strong>", text)
 
@@ -1120,7 +1138,11 @@ def md_to_html(draft_md: str) -> str:
             bullets.append(s[2:])
         else:
             flush()
-            parts.append(f"<p>{_md_inline(s)}</p>")
+            img_only = _MD_IMG_ONLY_RE.match(s)
+            if img_only:
+                parts.append(_md_image_html(img_only.group(1), img_only.group(2)))
+            else:
+                parts.append(f"<p>{_md_inline(s)}</p>")
     flush()
     return "\n".join(parts)
 
@@ -1429,9 +1451,31 @@ def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
             return model_to_html(page_model_from_dict(saved_model), fragment=True)
         except Exception:
             logger.warning("content_saved_model_render_failed", code=str(row.get("code", "")))
-    html = md_to_html(draft_md)
     profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
     specs = _resolve_row_blueprint(row)
+    # A DESIGNED page (an analyzed site's profile, or a landing page_type with an
+    # actually-resolved blueprint - service/local/... - NEVER a plain blog/FAQ article)
+    # is rendered as native WordPress Block Editor markup instead of a flat class-hooked
+    # <div> wrap - so it opens fully editable as native Gutenberg blocks on ANY
+    # WordPress site, including one with no Elementor. Reuses page_model_for_job - the
+    # SAME PageModel the live editor already builds for this exact job - a proven code
+    # path, not a new one. BOTH _is_full_width_page (excludes blog/FAQ) AND `specs`
+    # (excludes a page_type with no page-type-default template at all, e.g. gbp_post -
+    # nothing resolved to actually render as blocks) must hold; either alone is too
+    # broad or too narrow. A render failure falls back to the flat wrap below, never
+    # fatal.
+    if _is_full_width_page(row) and specs and get_settings().content_gutenberg_enabled:
+        try:
+            # page_model_for_job reads row["draft_md"] itself - it does NOT take the
+            # draft_md PARAMETER this function was called with, and a caller's row
+            # snapshot is not guaranteed to already carry that exact value (e.g. a
+            # guided-edit re-draft). Sync it so the model is built from the draft this
+            # call was actually asked to render, not a stale/absent row field.
+            model_row = {**row, "draft_md": draft_md}
+            return model_to_gutenberg(page_model_for_job(model_row).to_dict())
+        except Exception:
+            logger.warning("content_gutenberg_render_failed", code=str(row.get("code", "")))
+    html = md_to_html(draft_md)
     content_specs = _content_section_specs(specs)
     if content_specs:
         html = _wrap_sections_specs(html, content_specs)

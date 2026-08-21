@@ -806,11 +806,16 @@ def test_md_to_html_covers_headings_lists_links() -> None:
     assert "<ul><li>a</li><li>b</li></ul>" in html
 
 
-def test_md_to_html_renders_an_image_line_as_img_tag() -> None:
-    # A standalone ![alt](url) line becomes a real <img> (not a broken link), so an
-    # injected image reaches the flat WordPress body too.
+def test_md_to_html_renders_an_image_line_as_a_native_wp_image_block() -> None:
+    # A standalone ![alt](url) line becomes a real WordPress wp-block-image figure
+    # (the SAME class shape the block editor itself emits), not a bare <img> - any
+    # theme already ships CSS for this class, so the image is sized/placed correctly
+    # without a custom theme. A responsive max-width fallback rides along too.
     html = md_to_html("# T\n\n![a hero photo](https://cdn.test/hero.png)\n")
-    assert '<img src="https://cdn.test/hero.png" alt="a hero photo">' in html
+    assert '<figure class="wp-block-image size-large">' in html
+    assert 'src="https://cdn.test/hero.png"' in html
+    assert 'alt="a hero photo"' in html
+    assert "max-width:100%" in html
     assert "!" not in html  # the '!' prefix did not survive as literal text
 
 
@@ -937,7 +942,11 @@ def test_image_generation_failure_injects_nothing_and_does_not_crash() -> None:
 # BUILD 2: the FULL design profile still shapes the body into class-hooked sections,
 # but NO inline <style> is emitted (wp_kses_post would dump it as raw visible CSS).
 # --------------------------------------------------------------------------- #
-def test_shape_body_html_wraps_in_aios_page_without_inline_style() -> None:
+def test_shape_body_html_renders_gutenberg_blocks_for_a_designed_page() -> None:
+    """A page with a resolved design profile (or a landing page_type) is a DESIGNED
+    page, not a plain article - it renders as native WordPress Block Editor markup
+    (app.services.gutenberg) instead of the flat class-hooked <div> wrap, so it opens
+    fully editable as native blocks on ANY WordPress site."""
     from workers.tasks.content import _shape_body_html
 
     profile = {
@@ -961,15 +970,17 @@ def test_shape_body_html_wraps_in_aios_page_without_inline_style() -> None:
     draft = "# Best Brunch\n\nIntro.\n\n## Our Services\n\nBody.\n\n## Get in Touch\n\nVisit.\n"
     out = _shape_body_html(row, draft)
 
-    # Styling is delegated to the theme + the AIOS Publisher plugin's article.css; the
-    # body carries NO inline <style> (wp_kses_post would strip the tag and dump its CSS
-    # as raw text) — only the .aios-page / section class hooks those stylesheets target.
+    # No inline <style> here either (wp_kses_post would strip the tag and dump its CSS
+    # as raw text) - the theme + plugin article.css style the aios-sec class hooks.
     assert "<style>" not in out
-    assert 'class="aios-page"' in out
-    # The ordered sections are still wrapped (with the per-kind layout variant) and the
-    # content is preserved.
-    assert '<section class="aios-hero' in out
-    assert "<h1>Best Brunch</h1>" in out
+    # Real Gutenberg block comments (opens editable as native blocks, not one giant
+    # Custom HTML / Classic block), the resolved section order + layout variant, and
+    # the ACTUAL draft content (not just the blueprint's static scaffolding).
+    assert '<!-- wp:group {"className":"aios-sec aios-hero' in out
+    assert "<h1 class=\"wp-block-heading\">Best Brunch</h1>" in out
+    assert "<p>Intro.</p>" in out
+    assert '<!-- wp:group {"className":"aios-sec aios-services' in out
+    assert "Our Services" in out
 
 
 # --------------------------------------------------------------------------- #

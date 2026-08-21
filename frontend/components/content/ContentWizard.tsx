@@ -28,7 +28,6 @@ import {
 } from "@/lib/hooks/content";
 import { useClients } from "@/lib/hooks/clients";
 import ReviewPreview from "./ReviewPreview";
-import LivePageEditor from "./LivePageEditor";
 import TemplateGallery from "./TemplateGallery";
 import type { ReviewAction } from "./ReviewGate";
 
@@ -104,8 +103,6 @@ export default function ContentWizard({
   // Step 4/5 — the queued job codes + which one is previewed
   const [codes, setCodes] = useState<string[] | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  // The job whose page is open in the live editor (null = editor closed).
-  const [editorCode, setEditorCode] = useState<string | null>(null);
 
   const research = useContentResearch();
   const siteDesign = useSiteDesign();
@@ -231,13 +228,6 @@ export default function ContentWizard({
 
   return (
     <section className="card co-wiz-card">
-      {editorCode && (
-        <LivePageEditor
-          code={editorCode}
-          onClose={() => setEditorCode(null)}
-          onPublish={(c) => { onReview(c, "approve"); setEditorCode(null); }}
-        />
-      )}
       <div className="card-h">
         <div>
           <div className="ct">
@@ -684,20 +674,7 @@ export default function ContentWizard({
                   </div>
                 </div>
               ) : (
-                <>
-                  <div className="co-wiz-note">
-                    <span className="material-symbols-rounded">edit_square</span>
-                    <div>
-                      <b>Edit this page live.</b> Open the editor to change any text, swap images and
-                      reorder sections right on the page — exactly as it will publish. Then Save &amp;
-                      Publish to push it to WordPress.
-                    </div>
-                    <button type="button" className="primary-btn" onClick={() => setEditorCode(previewJob.id)}>
-                      Edit page live
-                    </button>
-                  </div>
-                  <ReviewPreview job={previewJob} onAction={onReview} hideActions />
-                </>
+                <ReviewPreview job={previewJob} onAction={onReview} hideActions />
               )
             ) : (
               <div className="co-wiz-empty">

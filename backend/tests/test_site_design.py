@@ -35,6 +35,7 @@ from app.config import Settings
 from app.core.auth import CurrentUser, get_current_user
 from app.routers.content import (
     _seed_source_pack,
+    get_design_analyzer,
     get_design_fetcher,
     get_design_firecrawl,
     get_design_gate,
@@ -45,6 +46,7 @@ from app.services.cost_gate import CostGate, DialMode, GateContext
 from app.services.site_design import (
     DEGRADE_ANALYSIS_FAILED,
     DEGRADE_NO_ANTHROPIC,
+    DesignResult,
     extract_site_design,
 )
 from integrations.firecrawl import FakeFirecrawl, FirecrawlPage
@@ -338,6 +340,87 @@ def test_degrade_bad_json_reply() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 2b. The MEASURED path: profile_from_capture + analyze_website_design (a hand-built
+# SiteCapture fixture, no real Playwright/browser - mirrors
+# tests/modules/site_builder/test_service.py's fixture).
+# --------------------------------------------------------------------------- #
+def _sample_capture() -> Any:
+    from integrations.site_analyzer import SectionSnapshot, SiteCapture, TypographySample, ViewportCapture
+
+    sections = [
+        SectionSnapshot(tag="header", role="header", child_count=2),
+        SectionSnapshot(
+            tag="div", role="section", heading="Grow faster with AIOS",
+            text_sample="The AI platform for agencies.", bg_color="rgb(10, 10, 10)",
+            text_color="rgb(255, 255, 255)", width=1440, height=560, child_count=2,
+        ),
+        SectionSnapshot(
+            tag="div", role="section", heading="Frequently asked questions",
+            text_sample="Answers to common questions.", bg_color="rgb(10, 10, 10)",
+            text_color="rgb(255, 255, 255)", width=1440, height=380, child_count=4,
+        ),
+        SectionSnapshot(tag="footer", role="footer", child_count=5),
+    ]
+    typography = [
+        TypographySample(tag="h1", font_family="Sora, sans-serif", font_size="56px", color="rgb(255, 102, 0)"),
+        TypographySample(tag="p", font_family="Inter, sans-serif", font_size="17px", color="rgb(255, 255, 255)"),
+    ]
+    desktop = ViewportCapture(
+        viewport="desktop", width=1440, height=900, sections=sections,
+        typography=typography, container_width_px=1200,
+    )
+    return SiteCapture(url="https://example.com", title="Example Co", viewports=[desktop])
+
+
+def test_profile_from_capture_reflects_the_real_measured_values() -> None:
+    """The MEASURED profile carries the capture's ACTUAL colours/fonts/section
+    order - not the dataclass defaults - proving this is real evidence, not a
+    templated fallback (the exact bug class the vision-LLM path's own docstring
+    warns about)."""
+    profile = site_design.profile_from_capture(_sample_capture())
+    assert profile.typography.heading_font == "Sora, sans-serif"
+    assert profile.layout.section_order == ["hero", "faq"]
+    assert profile.layout.blueprint[0].kind == "hero"
+    assert profile.layout.blueprint[0].heading == "Grow faster with AIOS"
+    assert profile.layout.container_width == "1200px"
+
+
+def test_analyze_website_design_degrades_when_the_analyzer_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No real Playwright/browser here - a fake analyzer returning ``degraded``
+    proves the wrapper never crashes and carries the reason through, prefixed so a
+    caller can tell this WAS the measured path that failed (not the vision-LLM one)."""
+    import integrations.site_analyzer as site_analyzer_module
+    from integrations.site_analyzer import DEGRADE_CAPTURE_FAILED, CaptureResult
+
+    class _FailingAnalyzer:
+        def capture(self, url: str, *, viewports: Any) -> CaptureResult:
+            return CaptureResult(status="degraded", capture=None, reason=DEGRADE_CAPTURE_FAILED)
+
+    monkeypatch.setattr(site_analyzer_module, "build_site_analyzer", lambda: _FailingAnalyzer())
+    result = site_design.analyze_website_design("https://example.com")
+    assert result.status == "degraded"
+    assert result.profile is None
+    assert result.reason == f"playwright:{DEGRADE_CAPTURE_FAILED}"
+
+
+def test_analyze_website_design_succeeds_with_a_fake_analyzer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import integrations.site_analyzer as site_analyzer_module
+    from integrations.site_analyzer import CaptureResult
+
+    class _OkAnalyzer:
+        def capture(self, url: str, *, viewports: Any) -> CaptureResult:
+            return CaptureResult(status="ok", capture=_sample_capture())
+
+    monkeypatch.setattr(site_analyzer_module, "build_site_analyzer", lambda: _OkAnalyzer())
+    result = site_design.analyze_website_design("example.com")  # schemeless input too
+    assert result.status == "ok"
+    assert result.profile is not None
+    assert result.profile.typography.heading_font == "Sora, sans-serif"
+
+
+# --------------------------------------------------------------------------- #
 # 3. The endpoint (summarizer + gate + firecrawl + fetcher all faked -> no network)
 # --------------------------------------------------------------------------- #
 def _user(role: str) -> CurrentUser:
@@ -347,15 +430,27 @@ def _user(role: str) -> CurrentUser:
     )
 
 
+def _fake_degraded_analyzer(site: str) -> DesignResult:
+    """The default test override for ``get_design_analyzer``: always degrades (as if
+    Playwright were not installed), so every EXISTING test exercises exactly the
+    vision-LLM fallback path it always has - Playwright IS importable in this dev
+    venv, so leaving the real ``analyze_website_design`` wired in a unit test would
+    launch an actual browser + attempt a real navigation."""
+    return DesignResult(status="degraded", profile=None, reason="playwright:not_installed")
+
+
 def _wire(
     app: FastAPI, summarizer: Any, *, role: str = "manager",
     firecrawl: Any = None, fetched: list[str] | None = None,
+    analyzer: Any = None,
 ) -> _FakeCostStore:
     """Override the whole site-design dep graph with fakes (no network).
 
     ``firecrawl`` defaults to a real ``FakeFirecrawl`` (render + screenshot); pass
     ``None`` to exercise the plain-fetcher FALLBACK path. ``fetched`` is what the fake
-    fallback fetcher returns."""
+    fallback fetcher returns. ``analyzer`` defaults to a fake that always degrades (so
+    every pre-existing test still exercises the vision-LLM path); pass a fake that
+    returns ``status='ok'`` to prove the MEASURED path wins when it succeeds."""
     store = _FakeCostStore()
     fetched_pages = fetched if fetched is not None else ["<html><body><h1>Home</h1></body></html>"]
 
@@ -367,6 +462,7 @@ def _wire(
     app.dependency_overrides[get_design_gate] = lambda: _gate(store)
     app.dependency_overrides[get_design_firecrawl] = lambda: firecrawl
     app.dependency_overrides[get_design_fetcher] = lambda: _fake_fetch
+    app.dependency_overrides[get_design_analyzer] = lambda: (analyzer or _fake_degraded_analyzer)
     return store
 
 
@@ -417,6 +513,53 @@ async def test_endpoint_degrades_cleanly_without_key(
     assert body["status"] == "degraded"
     assert body["profile"] is None
     assert body["reason"] == DEGRADE_NO_ANTHROPIC
+
+
+async def test_endpoint_prefers_the_measured_playwright_profile_when_it_succeeds(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    """When the injected analyzer (the real Playwright measurement, in production)
+    returns 'ok', the endpoint uses THAT profile and never touches Firecrawl or the
+    vision-LLM summarizer at all - proving the measured path is genuinely preferred,
+    not just an unused extra branch."""
+    measured_profile = site_design.SiteDesignProfile(
+        palette=site_design.Palette(primary="#123456"),
+        typography=site_design.Typography(heading_font="Measured Sans"),
+    )
+
+    def _fake_ok_analyzer(site: str) -> DesignResult:
+        return DesignResult(status="ok", profile=measured_profile, reason="")
+
+    summ = FakeSystemSummarizer()
+    fc = FakeFirecrawl(page=FirecrawlPage(markdown="# ignored", screenshot_b64="aWdub3JlZA=="))
+    _wire(app, summ, firecrawl=fc, analyzer=_fake_ok_analyzer)
+    resp = await client.post("/api/v1/content/site-design", json={"site": "https://1.2.3.4"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["profile"]["palette"]["primary"] == "#123456"
+    assert body["profile"]["typography"]["heading_font"] == "Measured Sans"
+    assert fc.calls == 0  # the vision-LLM fallback never ran
+    assert summ.calls == 0
+
+
+async def test_endpoint_falls_back_to_vision_when_the_measured_capture_degrades(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    """A degraded analyzer result (Playwright unconfigured, or the target site could
+    not be captured) falls through to the EXISTING vision-LLM path exactly as before -
+    the default ``_wire()`` analyzer already proves this for every other test in this
+    file; this test names the fallback explicitly."""
+    summ = FakeSystemSummarizer()
+    fc = FakeFirecrawl(page=FirecrawlPage(markdown="# Real home", screenshot_b64="c2hvdA=="))
+    _wire(app, summ, firecrawl=fc)  # default analyzer always degrades
+    resp = await client.post("/api/v1/content/site-design", json={"site": "https://1.2.3.4"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["profile"]["palette"]["primary"] == "#0a0a0a"  # the vision-LLM's profile
+    assert fc.calls == 1
+    assert summ.calls == 1
 
 
 async def test_endpoint_requires_publish_content(
@@ -500,16 +643,18 @@ _DRAFT = (
 
 
 def test_publish_body_wraps_sections_when_profile_present() -> None:
+    """A profile present -> a DESIGNED page -> native Gutenberg block markup (not the
+    flat class-hooked <div> wrap), matching workers.tasks.content's own
+    _is_full_width_page rule."""
     row = {"source_pack": {"design_profile": {"layout": {"section_order": ["hero", "services", "cta"]}}}}
     out = _shape_body_html(row, _DRAFT)
-    # The analyzed section order drives the wrap; each section now also carries the
-    # per-kind layout variant (aios-<kind> aios-layout-<variant>).
-    assert '<section class="aios-hero' in out
-    assert '<section class="aios-services' in out
-    assert '<section class="aios-cta' in out
-    # The content itself is preserved inside the wrapped structure.
-    assert "<h1>Best Brunch</h1>" in out
-    assert "<h2>Our Services</h2>" in out
+    # The analyzed section order drives the block groups (aios-sec aios-<kind>).
+    assert '"className":"aios-sec aios-hero' in out
+    assert '"className":"aios-sec aios-services' in out
+    assert '"className":"aios-sec aios-cta' in out
+    # The content itself is preserved inside the block structure.
+    assert "Best Brunch" in out
+    assert "Our Services" in out
 
 
 def test_publish_body_unchanged_without_shaping() -> None:
@@ -522,13 +667,14 @@ def test_publish_body_unchanged_without_shaping() -> None:
 
 
 def test_publish_body_gets_default_template_from_page_type() -> None:
-    # No profile, no chosen template, but a real page type -> the page-type DEFAULT
-    # template shapes the page (classic style + ordered sections), so every page looks
-    # structured out of the box.
+    # No profile, no chosen template, but a real LANDING page type ("service", not
+    # blog/faq) -> a DESIGNED page per _is_full_width_page -> the page-type DEFAULT
+    # template shapes it as native Gutenberg block markup, so every page looks
+    # structured (and is fully block-editable) out of the box.
     row = {"page_type": "service", "source_pack": {"client_name": "Verde Cafe"}}
     out = _shape_body_html(row, _DRAFT)
     # No inline <style> (wp_kses_post would dump it as raw CSS text); the theme + plugin
-    # article.css style the .aios-page / section class hooks instead.
+    # article.css style the aios-sec class hooks instead.
     assert "<style>" not in out
-    assert 'class="aios-page"' in out
-    assert "<section" in out
+    assert "<!-- wp:group" in out
+    assert '"className":"aios-sec' in out

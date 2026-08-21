@@ -75,6 +75,7 @@ from app.services.page_model import (
 from app.services.site_design import (
     DesignResult,
     SystemSummarizer,
+    analyze_website_design,
     build_design_gate,
     build_design_summarizer,
     extract_site_design,
@@ -651,6 +652,17 @@ def get_design_firecrawl(settings: SettingsDep) -> Firecrawl | None:
     return firecrawl_from_settings(settings)
 
 
+def get_design_analyzer() -> Callable[[str], DesignResult]:
+    """Dependency: the PREFERRED measured-design path (a real Playwright browser
+    capture). MUST be overridden in tests with a fake returning a fixed
+    ``DesignResult`` - Playwright is a real, heavy optional dependency (it IS
+    importable in this dev venv even though the base install omits it), so calling
+    the real function here would launch an actual browser + attempt a real
+    navigation against whatever ``site`` a unit test passes, turning a fast,
+    network-free test into a slow/hanging one. Mirrors every other design dep above."""
+    return analyze_website_design
+
+
 def _same_domain_links(html: str, base_url: str, *, limit: int) -> list[str]:
     """Extract up to ``limit`` same-domain internal page URLs from the homepage HTML.
 
@@ -743,6 +755,7 @@ DesignSummarizerDep = Annotated[SystemSummarizer | None, Depends(get_design_summ
 DesignGateDep = Annotated[CostGate, Depends(get_design_gate)]
 DesignFetcherDep = Annotated[DesignFetcher, Depends(get_design_fetcher)]
 DesignFirecrawlDep = Annotated[Firecrawl | None, Depends(get_design_firecrawl)]
+DesignAnalyzerDep = Annotated[Callable[[str], DesignResult], Depends(get_design_analyzer)]
 
 
 async def _gather_design_evidence(
@@ -778,20 +791,25 @@ async def analyze_site_design(
     gate: DesignGateDep,
     firecrawl: DesignFirecrawlDep,
     fetcher: DesignFetcherDep,
+    analyzer: DesignAnalyzerDep,
     actor: PublishContent,
 ) -> SiteDesignResponse:
     """Extract the target site's REAL design profile so a new page can MATCH it.
 
-    RENDERS the site via Firecrawl (runs its JS + CSS) to get clean markdown + a full-page
-    SCREENSHOT, then has Claude analyze the screenshot with VISION under a strict-JSON
-    design contract that also returns a self-contained ``wireframe_html`` preview. When
-    Firecrawl is unconfigured (no key) or a render fails, it FALLS BACK to the plain-httpx
-    fetcher (homepage + same-domain pages, no screenshot). The single paid call is metered
-    under the EXISTING ``content`` money-dial (committed spend = Anthropic token cost
-    only); a missing key, a dial/budget block, or an analysis failure DEGRADES (200,
-    ``status='degraded'``, ``profile=null``) rather than crashing, and the gate is never
-    bypassed. The site URL is SSRF-guarded OFF the event loop; the blocking Anthropic call
-    + the sync gate store run off the loop via ``to_thread``."""
+    PREFERRED path: a real Playwright browser MEASURES the page (actual computed
+    colours/fonts/section structure, not a guess) - see
+    ``app.services.site_design.analyze_website_design``. FALLS BACK to the vision-LLM
+    path (RENDERS the site via Firecrawl to get clean markdown + a full-page SCREENSHOT,
+    then has Claude analyze the screenshot with VISION under a strict-JSON design
+    contract) only when the measured capture degrades (Playwright not installed, or the
+    target site could not be captured - bot protection, timeout, ...); that path itself
+    falls back further to the plain-httpx fetcher when Firecrawl is unconfigured. The
+    single paid Claude call (when the fallback actually runs) is metered under the
+    EXISTING ``content`` money-dial (committed spend = Anthropic token cost only); any
+    failure at any stage DEGRADES (200, ``status='degraded'``, ``profile=null``) rather
+    than crashing, and the gate is never bypassed. The site URL is SSRF-guarded OFF the
+    event loop; every blocking call (Playwright navigation, the Anthropic call, the sync
+    gate store) runs off the loop via ``to_thread``."""
     # SSRF guard: getaddrinfo blocks, so validate off the event loop (invariant #2).
     try:
         await asyncio.to_thread(validate_public_host, body.site)
@@ -801,21 +819,25 @@ async def analyze_site_design(
             detail=f"Site is not a public address: {exc}",
         ) from exc
 
-    max_pages = body.max_pages if body.max_pages is not None else settings.content_design_max_pages
-    content, screenshot_b64 = await _gather_design_evidence(
-        firecrawl, fetcher, http, settings, site=body.site, max_pages=max_pages
-    )
-
-    def _run() -> DesignResult:
-        return extract_site_design(
-            summarizer=summarizer,
-            gate=gate,
-            settings=settings,
-            content=content,
-            screenshot_b64=screenshot_b64,
+    measured = await asyncio.to_thread(analyzer, body.site)
+    if measured.status == "ok":
+        result = measured
+    else:
+        max_pages = body.max_pages if body.max_pages is not None else settings.content_design_max_pages
+        content, screenshot_b64 = await _gather_design_evidence(
+            firecrawl, fetcher, http, settings, site=body.site, max_pages=max_pages
         )
 
-    result = await asyncio.to_thread(_run)
+        def _run() -> DesignResult:
+            return extract_site_design(
+                summarizer=summarizer,
+                gate=gate,
+                settings=settings,
+                content=content,
+                screenshot_b64=screenshot_b64,
+            )
+
+        result = await asyncio.to_thread(_run)
     profile = SiteDesignProfile.model_validate(result.profile.as_dict()) if result.profile else None
     await record_activity(
         actor, kind="content", action="analyzed target site design", target=body.site,

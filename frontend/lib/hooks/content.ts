@@ -12,7 +12,6 @@ import { api } from "@/lib/api";
 import type {
   ContentJob,
   Framework,
-  PageModelDoc,
   PageTemplate,
   PageType,
   PublishTarget,
@@ -166,38 +165,6 @@ export function useGenerateFromResearch() {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
     },
-  });
-}
-
-// --- Live page editor (WYSIWYG in the dashboard) ------------------------------
-// GET the editable page model a job renders to (saved hand-edits if any, else built
-// from the draft + blueprint). PUT saves the edited model onto the job. POST preview
-// renders any model to the EXACT styled HTML the publish path emits (preview ==
-// published). No spend on any of these - pure DB read / write / render.
-export function usePageModel(code: string | null) {
-  return useQuery({
-    queryKey: ["page-model", code],
-    enabled: !!code,
-    queryFn: () => api.get<PageModelDoc>(`/content/jobs/${code}/page-model`),
-    staleTime: Infinity, // the editor owns the working copy once loaded
-  });
-}
-
-export function useSavePageModel() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ code, model }: { code: string; model: PageModelDoc }) =>
-      api.put<{ id: string; saved: boolean }>(`/content/jobs/${code}/page-model`, model),
-    onSuccess: (_r, { code }) => {
-      void qc.invalidateQueries({ queryKey: ["page-model", code] });
-    },
-  });
-}
-
-export function usePreviewPageModel() {
-  return useMutation({
-    mutationFn: (model: PageModelDoc) =>
-      api.post<{ html: string }>("/content/page-model/preview", model),
   });
 }
 

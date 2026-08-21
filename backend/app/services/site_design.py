@@ -47,10 +47,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from app.config import Settings
 from app.logging_setup import get_logger
+
+if TYPE_CHECKING:
+    from integrations.site_analyzer import SiteCapture
 from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
@@ -536,6 +539,64 @@ def build_profile(data: dict[str, Any]) -> SiteDesignProfile:
         notes=_txt(data.get("notes"), defaults.notes),
         wireframe_html=_wireframe(data.get("wireframe_html"), limit=_MAX_WIREFRAME_CHARS),
     )
+
+
+# --------------------------------------------------------------------------- #
+# The MEASURED path: a real Playwright capture (integrations.site_analyzer), reusing
+# app.modules.site_builder.service's DOM analysis rather than re-implementing it. This
+# is the PREFERRED evidence source (real getComputedStyle values, not an LLM guessing
+# hex codes off one screenshot) - see analyze_website_design below, which prefers this
+# and falls back to extract_site_design (the vision-LLM path above) only when a real
+# browser capture degrades (Playwright not installed, or the target site could not be
+# captured at all).
+# --------------------------------------------------------------------------- #
+def profile_from_capture(capture: SiteCapture) -> SiteDesignProfile:
+    """Build a :class:`SiteDesignProfile` from a REAL, Playwright-measured
+    ``SiteCapture`` (``integrations.site_analyzer``).
+
+    Reuses ``app.modules.site_builder.service.design_ir_from_capture`` (the SAME DOM
+    analysis Site Builder already relies on: mode-color palette extraction, computed
+    typography, heading-keyword section classification) rather than re-deriving it,
+    then reshapes that DesignIR-shaped dict into content's own profile dataclass via
+    the EXISTING tolerant :func:`build_profile` parser - so a thin/partial capture is
+    just as usable here as a thin/partial LLM reply already is."""
+    from app.modules.site_builder.service import design_ir_from_capture
+
+    ir = design_ir_from_capture(capture, source_type="existing_site", source_url=capture.url)
+    layout_px = (ir.get("layout") or {}).get("container_width_px")
+    return build_profile(
+        {
+            "palette": ir.get("palette") or {},
+            "typography": ir.get("typography") or {},
+            "layout": {
+                "container_width": f"{int(layout_px)}px" if layout_px else None,
+                "section_order": (ir.get("layout") or {}).get("section_order") or [],
+                "blueprint": [
+                    {"kind": s.get("kind"), "heading": s.get("heading"), "layout": s.get("layout")}
+                    for s in (ir.get("sections") or [])
+                ],
+            },
+            "components": ir.get("components") or {},
+            "notes": ir.get("notes") or "",
+        }
+    )
+
+
+def analyze_website_design(url: str) -> DesignResult:
+    """The preferred, MEASURED analysis: a real Playwright capture of ``url`` (desktop
+    viewport only - a single-page design match needs no responsive breakpoint data),
+    turned into a :class:`SiteDesignProfile`. Degrades (never crashes, never blocks)
+    when Playwright is not installed OR the target site could not be captured (bot
+    protection, timeout, ...) - the caller falls back to :func:`extract_site_design`
+    (the vision-LLM path) in that case. NOTE: this call is BLOCKING (a real browser
+    navigation) - the caller MUST run it off the event loop (``asyncio.to_thread``),
+    exactly like the vision-LLM path already does for its own blocking calls."""
+    from integrations.site_analyzer import DEFAULT_VIEWPORTS, analyze_website, build_site_analyzer
+
+    result = analyze_website(url, analyzer=build_site_analyzer(), viewports=DEFAULT_VIEWPORTS[:1])
+    if result.status != "ok" or result.capture is None:
+        return _degraded(f"playwright:{result.reason}")
+    return DesignResult(status="ok", profile=profile_from_capture(result.capture), reason="")
 
 
 # --------------------------------------------------------------------------- #

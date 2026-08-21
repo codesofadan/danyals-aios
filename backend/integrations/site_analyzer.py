@@ -410,4 +410,12 @@ def analyze_website(
         return CaptureResult(status="degraded", capture=None, reason=DEGRADE_PRIVATE_HOST)
     if analyzer is None:
         return CaptureResult(status="degraded", capture=None, reason=DEGRADE_NO_PLAYWRIGHT)
-    return analyzer.capture(url, viewports=viewports)
+    # validate_public_host only checks the HOST (a bare "example.com" passes it fine),
+    # but a real browser navigation needs a fully-qualified URL - Playwright resolves a
+    # schemeless value against the fresh page's about:blank origin and fails almost
+    # instantly. Default to https:// so a bare-domain input (the common case from a
+    # wizard's plain "site URL" field) still navigates.
+    normalized_url = url.strip()
+    if "://" not in normalized_url:
+        normalized_url = f"https://{normalized_url}"
+    return analyzer.capture(normalized_url, viewports=viewports)
