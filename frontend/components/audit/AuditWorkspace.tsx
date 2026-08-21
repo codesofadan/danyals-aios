@@ -206,16 +206,6 @@ export default function AuditWorkspace() {
                           </button>
                           <button
                             className="au-art"
-                            title="Download findings JSON"
-                            disabled={!r.json}
-                            onClick={() =>
-                              downloadFile(`/audits/${r.id}/findings.json`, `${r.client}-findings-${r.id}.json`)
-                            }
-                          >
-                            <span className="material-symbols-rounded">data_object</span>
-                          </button>
-                          <button
-                            className="au-art"
                             title="Download remediation sheets (Excel)"
                             disabled={!r.json}
                             onClick={() =>

@@ -159,32 +159,6 @@ export default function FreeAuditReport({ report, token }: { report: PublicRepor
               </div>
             ))}
           </section>
-
-          {/* Per-category score bars (the real `scores` map). */}
-          <section className="fa-bars fa-layer">
-            <div className="fa-bars-h">
-              <span className="material-symbols-rounded">bar_chart</span>
-              Category breakdown
-            </div>
-            <ul className="fa-bar-list">
-              {bars.map((b) => (
-                <li key={b.key} className="fa-bar fa-reveal">
-                  <span className="fa-bar-ic" style={{ background: `${b.color}22`, color: b.color }}>
-                    <span className="material-symbols-rounded">{b.icon}</span>
-                  </span>
-                  <div className="fa-bar-main">
-                    <div className="fa-bar-top">
-                      <span className="fa-bar-label">{b.label}</span>
-                      <span className={`fa-bar-score band-${b.band}`}>{b.score}</span>
-                    </div>
-                    <div className="fa-bar-track">
-                      <span className="fa-bar-fill" data-v={b.score} style={{ background: b.color }} />
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
         </>
       )}
 

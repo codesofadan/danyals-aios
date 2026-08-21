@@ -20,11 +20,11 @@ import {
   RESEARCH_CONTENT_TYPES, DIFFICULTY_META, FRAMEWORKS, TARGETS, PAGE_TEMPLATES,
   TEMPLATE_THEME_DEFAULTS, profileFromTemplate,
   type ContentJob, type ResearchContentType, type ResearchItem,
-  type SiteDesignProfile, type Framework, type PublishTarget, type PageTemplate,
+  type Framework, type PublishTarget, type PageTemplate,
   type TemplateTheme,
 } from "@/lib/content";
 import {
-  useContentResearch, useGenerateFromResearch, useSiteDesign,
+  useContentResearch, useGenerateFromResearch,
 } from "@/lib/hooks/content";
 import { useClients } from "@/lib/hooks/clients";
 import ReviewPreview from "./ReviewPreview";
@@ -76,11 +76,6 @@ export default function ContentWizard({
   const [manualItems, setManualItems] = useState<ResearchItem[]>([]);
   const [manualTitle, setManualTitle] = useState("");
 
-  // Step 2 — design
-  const [maxPages, setMaxPages] = useState("");
-  const [design, setDesign] = useState<SiteDesignProfile | null>(null);
-  const [attachDesign, setAttachDesign] = useState(true);
-
   // Step 3 — details (shared across every picked page)
   const [clientId, setClientId] = useState("");
   const [framework, setFramework] = useState<Framework | "Auto">("Auto");
@@ -105,7 +100,6 @@ export default function ContentWizard({
   const [previewId, setPreviewId] = useState<string | null>(null);
 
   const research = useContentResearch();
-  const siteDesign = useSiteDesign();
   const generate = useGenerateFromResearch();
 
   // Research recommendations PLUS any single pages added by hand (skip-research).
@@ -156,15 +150,6 @@ export default function ContentWizard({
     setManualTitle("");
   }
 
-  function runSiteDesign() {
-    if (!site.trim() || halted || siteDesign.isPending) return;
-    const n = parseInt(maxPages, 10);
-    siteDesign.mutate(
-      { site: site.trim(), maxPages: Number.isFinite(n) && n > 0 ? n : undefined },
-      { onSuccess: (r) => { setDesign(r.profile); setAttachDesign(!!r.profile); } },
-    );
-  }
-
   function toggleOne(title: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -183,8 +168,7 @@ export default function ContentWizard({
     if (picks.length === 0 || !effectiveClientId || _lines(proof).length === 0 || halted || generate.isPending) return;
     // The look sent to the backend: a matched real site wins if attached; otherwise the
     // chosen template's theme (colour + fonts) is synthesised into the same design_profile.
-    const themeProfile = template !== "Auto" ? profileFromTemplate(template, theme) : null;
-    const designToSend = attachDesign && design ? design : themeProfile;
+    const designToSend = template !== "Auto" ? profileFromTemplate(template, theme) : null;
     generate.mutate(
       {
         items: picks,
@@ -205,17 +189,15 @@ export default function ContentWizard({
   function resetWizard() {
     setStep(1); setSite(""); setContentType("service"); setCount("");
     setSelected(new Set()); setManualItems([]); setManualTitle("");
-    setMaxPages(""); setDesign(null); setAttachDesign(true);
     setFramework("Auto"); setTemplate("Auto"); setTheme(TEMPLATE_THEME_DEFAULTS.service); setTarget("WordPress");
     setProof(""); setTestimonials(""); setUniqueData(""); setServices("");
     setCodes(null); setPreviewId(null);
-    research.reset(); siteDesign.reset(); generate.reset();
+    research.reset(); generate.reset();
   }
 
   // Proof is a HARD requirement to generate — the details must be supplied by the user.
   const hasRequiredDetails = _lines(proof).length > 0;
   const researchDegraded = research.data?.status === "degraded";
-  const designDegraded = siteDesign.data?.status === "degraded";
   const clientName = clients.find((c) => c.id === effectiveClientId)?.cn ?? "";
 
   // ── per-step footer gating ────────────────────────────────────────────────
@@ -231,11 +213,10 @@ export default function ContentWizard({
       <div className="card-h">
         <div>
           <div className="ct">
-            <span className="material-symbols-rounded" style={{ verticalAlign: "middle", marginRight: 6 }}>auto_awesome</span>
             Create content
           </div>
           <div className="cs">
-            One guided flow: pick the pages, match the site&apos;s design, add the details,
+            One guided flow: pick the pages, choose a template, add the details,
             preview the draft with images, then approve to push a WordPress draft.
           </div>
         </div>
@@ -404,100 +385,9 @@ export default function ContentWizard({
             <div className="co-wiz-note">
               <span className="material-symbols-rounded">palette</span>
               <div>
-                <b>Or match the client&apos;s existing look.</b> Instead of a template theme, copy a live
-                site&apos;s colours, fonts and layout so every generated page fits right in. Optional — a
-                matched design overrides the template theme above.
+                <b>Pick a template and make it yours.</b> Recolour it and pair fonts from Google Fonts — every generated page is built into this layout. Optional: leave it on <b>Auto</b> and the engine chooses a template from each page type.
               </div>
             </div>
-
-            <div className="fld-row">
-              <div className="fld" style={{ flex: 3 }}>
-                <label>Site to copy the design from</label>
-                <input value={site} onChange={(e) => setSite(e.target.value)}
-                  placeholder="https://client-site.com" />
-              </div>
-              <div className="fld" style={{ flex: 1 }}>
-                <label>Max pages <span className="cs">(optional)</span></label>
-                <input value={maxPages} onChange={(e) => setMaxPages(e.target.value.replace(/[^0-9]/g, ""))}
-                  inputMode="numeric" placeholder="auto" />
-              </div>
-            </div>
-
-            <div className="op-toolset" style={{ marginBottom: 6 }}>
-              <button className="primary-btn" type="button" onClick={runSiteDesign}
-                disabled={!site.trim() || halted || siteDesign.isPending}>
-                <span className="material-symbols-rounded">{halted ? "block" : "palette"}</span>
-                {halted ? "API spend halted" : siteDesign.isPending ? "Analysing…" : design ? "Re-analyse design" : "Match this site's design"}
-              </button>
-            </div>
-
-            {siteDesign.isPending && (
-              <div className="co-prog" role="status">
-                <div className="co-prog-bar"><span /></div>
-                <div className="co-prog-txt">Reading the site&apos;s pages and extracting its design system…</div>
-              </div>
-            )}
-            {designDegraded && !design && (
-              <div className="cs" role="status" style={{ color: "var(--warn)" }}>
-                Design analysis degraded — {siteDesign.data?.reason || "no key or the dial/budget blocked the call"}.
-              </div>
-            )}
-
-            {design && (
-              <div className="co-design">
-                {design.wireframeHtml && (
-                  <>
-                    <div className="co-order-lbl op-muted" style={{ marginBottom: 6 }}>
-                      <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>preview</span>{" "}
-                      Preview — how a matching page would look
-                    </div>
-                    <iframe
-                      title="Matching page preview"
-                      srcDoc={design.wireframeHtml}
-                      sandbox=""
-                      loading="lazy"
-                      style={{
-                        width: "100%", height: 320, border: "1px solid var(--line)",
-                        borderRadius: 10, background: "#fff", display: "block", marginBottom: 12,
-                      }}
-                    />
-                  </>
-                )}
-
-                <div className="co-swatches">
-                  {(Object.entries(design.palette) as [string, string][]).map(([name, hex]) => (
-                    <div key={name} className="co-swatch">
-                      <span className="co-swatch-chip" style={{ background: hex }} />
-                      <span className="co-swatch-name">{name}</span>
-                      <span className="co-swatch-hex">{hex}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="co-design-meta">
-                  <div><span className="op-muted">Heading</span> <b>{design.typography.heading_font}</b></div>
-                  <div><span className="op-muted">Body</span> <b>{design.typography.body_font}</b></div>
-                  <div><span className="op-muted">Base size</span> <b>{design.typography.base_size}</b></div>
-                  <div><span className="op-muted">Container</span> <b>{design.layout.container_width}</b></div>
-                  <div><span className="op-muted">Hero</span> <b>{design.layout.hero_style}</b></div>
-                  <div><span className="op-muted">CTA</span> <b>{design.layout.cta_style}</b></div>
-                </div>
-
-                <div className="co-order-lbl op-muted">Section order</div>
-                <ol className="co-order">
-                  {design.layout.section_order.map((s, i) => (
-                    <li key={`${s}-${i}`} className="co-order-item">{s}</li>
-                  ))}
-                </ol>
-
-                {design.notes && <div className="cs" style={{ marginTop: 6 }}>{design.notes}</div>}
-
-                <label className="co-attach">
-                  <input type="checkbox" checked={attachDesign} onChange={(e) => setAttachDesign(e.target.checked)} />
-                  Apply this design to the {selectedCount} selected page{selectedCount === 1 ? "" : "s"}
-                </label>
-              </div>
-            )}
           </>
         )}
 
@@ -569,10 +459,8 @@ export default function ContentWizard({
               </div>
               <div className="fld-hint">
                 {template === "Auto"
-                  ? (attachDesign && design
-                      ? "Auto — the page mirrors the analyzed site's layout. Pick a template in the Design step to override it."
-                      : "Auto picks a template from each page type. Pick one in the Design step to force a specific layout + theme.")
-                  : `${PAGE_TEMPLATES.find((x) => x.key === template)?.bestFor} — content is slotted into this template${attachDesign && design ? ", styled to the analyzed site" : ", in your chosen theme"}.`}
+                  ? "Auto picks a template from each page type. Pick one in the Design step to force a specific layout + theme."
+                  : `${PAGE_TEMPLATES.find((x) => x.key === template)?.bestFor} — content is slotted into this template, in your chosen theme.`}
               </div>
             </div>
 
@@ -614,12 +502,6 @@ export default function ContentWizard({
                 generate. The page won&apos;t build without it.
               </div>
             )}
-            {design && attachDesign && (
-              <div className="cs" role="status" style={{ color: "var(--ok)" }}>
-                <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>palette</span>{" "}
-                The copied site design will be applied to every generated page.
-              </div>
-            )}
 
             {/* recap */}
             <div className="wiz-recap">
@@ -627,7 +509,7 @@ export default function ContentWizard({
               <div>
                 <div className="recap-t">{selectedCount} page{selectedCount === 1 ? "" : "s"} · {clientName || "no client"}</div>
                 <div className="recap-s">
-                  {framework} framework · {target}{design && attachDesign ? " · design matched" : ""}
+                  {framework} framework · {target}
                 </div>
               </div>
               <button type="button" className="recap-edit" onClick={() => setStep(1)}>Edit pages</button>

@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { MODULE_META, REC_OPEN, type RecStatus } from "@/lib/policy";
+import { MODULE_META, type RecStatus } from "@/lib/policy";
 import { useRecommendations } from "@/lib/hooks/policy";
 import ReadMore from "@/components/ui/ReadMore";
 
@@ -12,27 +11,9 @@ const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string 
   dismissed: { label: "Dismissed", cls: "mut", icon: "cancel" },
 };
 
-const FILTERS: { key: RecStatus | "open" | "all"; label: string }[] = [
-  { key: "open", label: "Open" },
-  { key: "applied", label: "Applied" },
-  { key: "dismissed", label: "Dismissed" },
-  { key: "all", label: "All" },
-];
-
 export default function Recommendations() {
   const recsQ = useRecommendations();
-  const recs = recsQ.data ?? [];
-  const [filter, setFilter] = useState<RecStatus | "open" | "all">("open");
-
-  const openCount = recs.filter((r) => REC_OPEN.includes(r.status)).length;
-
-  const rows = useMemo(
-    () =>
-      recs.filter((r) =>
-        filter === "all" ? true : filter === "open" ? REC_OPEN.includes(r.status) : r.status === filter
-      ),
-    [recs, filter]
-  );
+  const rows = recsQ.data ?? [];
 
   return (
     <section className="card pr-cc">
@@ -43,16 +24,6 @@ export default function Recommendations() {
             Command Center — Recommendations
           </div>
           <div className="cs">Closed-loop recommendations from Policy Radar, refreshed daily.</div>
-        </div>
-        <div className="tools">
-          <span className="pr-cc-count">{openCount} open</span>
-          <div className="seg">
-            {FILTERS.map((f) => (
-              <button key={f.key} className={filter === f.key ? "on" : ""} onClick={() => setFilter(f.key)}>
-                {f.label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -104,7 +75,7 @@ export default function Recommendations() {
           />
         )}
         {!recsQ.isLoading && !recsQ.isError && rows.length === 0 && (
-          <div className="pr-empty pr-recs-empty">No {filter} recommendations.</div>
+          <div className="pr-empty pr-recs-empty">No recommendations yet.</div>
         )}
       </div>
     </section>

@@ -25,7 +25,7 @@ export default function ClientInfo() {
 
       <ClientDirectory />
 
-      <div className="row-single">
+      <div className="row-single" style={{ marginTop: 16 }}>
         <SupportActivity />
       </div>
     </>
