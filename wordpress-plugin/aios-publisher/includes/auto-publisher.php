@@ -15,10 +15,80 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Recursively sanitize a WordPress block tree's REAL HTML content (each block's
+ * innerContent string chunks - what serialize_block() actually reconstructs the
+ * markup from, NOT the derived innerHTML convenience field), leaving the block
+ * comment delimiters + JSON attrs alone (serialize_blocks() regenerates those
+ * itself from $block['attrs'], so they are never hand-strung back together here).
+ *
+ * @param array<int,array<string,mixed>> $blocks A parse_blocks() tree.
+ * @return array<int,array<string,mixed>> The same tree, HTML content sanitized in place.
+ */
+function aios_publisher_sanitize_blocks( $blocks ) {
+	foreach ( $blocks as &$block ) {
+		if ( ! empty( $block['innerBlocks'] ) ) {
+			$block['innerBlocks'] = aios_publisher_sanitize_blocks( $block['innerBlocks'] );
+		}
+		if ( ! empty( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
+			foreach ( $block['innerContent'] as &$chunk ) {
+				// A null entry marks WHERE a nested inner block's own serialized markup
+				// goes (handled by the innerBlocks recursion above) - never touch it here,
+				// only the literal HTML string chunks belong to THIS block.
+				if ( is_string( $chunk ) ) {
+					$chunk = wp_kses_post( $chunk );
+				}
+			}
+			unset( $chunk );
+		}
+	}
+	unset( $block );
+	return $blocks;
+}
+
+/**
+ * Sanitize a pushed post body, treating it as DATA (never code) either way.
+ *
+ * A plain push (a long-form blog/FAQ article - no Gutenberg block markup) runs
+ * through the ORIGINAL, unchanged path: a blanket wp_kses_post() over the whole
+ * string. A DESIGNED-page push (app.services.gutenberg's native
+ * `<!-- wp:kind {...} -->` block markup) CANNOT take that path: wp_kses_post()
+ * treats a block comment's JSON attrs as unrecognized "HTML" and strips every `{`
+ * `}` `:` `"` out of it, corrupting the attrs and breaking the block editor's parse
+ * (WordPress's own kses.php special-cases HTML comments just enough to keep the
+ * `<!--`/`-->` delimiters, but still re-filters everything between them as if it
+ * were markup). So a block push is parsed into WordPress's OWN block tree
+ * (`parse_blocks()` - the exact parser the block editor itself uses), only the
+ * REAL HTML content of each block is sanitized (still `wp_kses_post()`, same
+ * security posture as before), and `serialize_blocks()` - again, the block
+ * editor's own function - rebuilds the comment delimiters + attrs JSON correctly.
+ *
+ * @param string $raw_content The pushed `content` field, as sent.
+ * @return string Sanitized HTML (or block markup), ready for `post_content`.
+ */
+function aios_publisher_sanitize_content( $raw_content ) {
+	// Strip <style>/<script> blocks INCLUDING their contents FIRST, either path:
+	// wp_kses_post() removes those tags but KEEPS their inner text, which would dump raw
+	// CSS/JS onto the page. Styling is owned by the active theme + this plugin's ENQUEUED
+	// article.css (which targets the .aios-page / .aios-layout-* class hooks), never inline.
+	$stripped = preg_replace( '#<(style|script)\b[^>]*>.*?</\1>#is', '', $raw_content );
+	if ( null !== $stripped ) {
+		$raw_content = $stripped;
+	}
+
+	if ( false !== strpos( $raw_content, '<!-- wp:' ) ) {
+		$blocks = aios_publisher_sanitize_blocks( parse_blocks( $raw_content ) );
+		return serialize_blocks( $blocks );
+	}
+
+	return wp_kses_post( $raw_content );
+}
+
+/**
  * Create a post from an AIOS push. Treats the payload as DATA (never code): every
- * field is sanitized, the body is run through wp_kses_post, the image URL through
- * esc_url_raw. The post is created at the configured default status (DRAFT), so a
- * human still presses Publish on the WordPress side.
+ * field is sanitized, the body is run through wp_kses_post (or, for a Gutenberg
+ * block push, sanitized block-by-block - see aios_publisher_sanitize_content()),
+ * the image URL through esc_url_raw. The post is created at the configured default
+ * status (DRAFT), so a human still presses Publish on the WordPress side.
  *
  * @param WP_REST_Request $request The REST request.
  * @return WP_REST_Response|WP_Error
@@ -35,16 +105,7 @@ function aios_publisher_rest_publish( $request ) {
 		);
 	}
 
-	// Body is HTML. Strip <style>/<script> blocks INCLUDING their contents FIRST:
-	// wp_kses_post() removes those tags but KEEPS their inner text, which would dump raw
-	// CSS/JS onto the page. Styling is owned by the active theme + this plugin's ENQUEUED
-	// article.css (which targets the .aios-page / .aios-layout-* class hooks), never inline.
-	$raw_content = (string) $request->get_param( 'content' );
-	$stripped    = preg_replace( '#<(style|script)\b[^>]*>.*?</\1>#is', '', $raw_content );
-	if ( null !== $stripped ) {
-		$raw_content = $stripped;
-	}
-	$content = wp_kses_post( $raw_content );
+	$content = aios_publisher_sanitize_content( (string) $request->get_param( 'content' ) );
 
 	// Status is constrained to the safe set; default from settings (draft).
 	$status = sanitize_key( (string) $request->get_param( 'status' ) );

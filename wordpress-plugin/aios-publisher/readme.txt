@@ -4,7 +4,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.5.0
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -80,6 +80,17 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.6.0 =
+* Fixed: a Gutenberg-block push (native `<!-- wp:kind {...} -->` markup, sent for
+  designed/landing pages) was corrupted by the previous blanket `wp_kses_post()` call —
+  WordPress's own sanitizer strips `{ } : "` out of a comment's contents, mangling every
+  block's JSON attributes and breaking the block editor's parse. Block pushes are now
+  parsed into WordPress's own block tree (`parse_blocks()`), sanitized block-by-block
+  (still `wp_kses_post()` on the real HTML, same security posture), and rebuilt with
+  `serialize_blocks()` — the exact functions the block editor itself uses, so the
+  comment delimiters + attributes come out correct. A plain article push (no block
+  markup) is completely unchanged.
 
 = 1.5.0 =
 * Architecture: split into a Core Connector / Auto Publisher / Design-Reconstruction /
