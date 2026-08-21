@@ -4,6 +4,7 @@ import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { FALLBACK_PROVIDER, providerById, STATUS_META, type VaultKey } from "@/lib/vault";
 import { useRevealVaultKey } from "@/lib/hooks/vault";
+import ReadMore from "@/components/ui/ReadMore";
 
 type Props = {
   keys: VaultKey[];
@@ -93,15 +94,20 @@ export default function VaultTable({ keys }: Props) {
             </tr>
           </thead>
           <tbody>
-            {keys.map((k) => {
-              // The backend's `provider` field is unvalidated `str` — fall back rather
-              // than crash on any value outside the known set.
-              const p = providerById[k.provider] ?? FALLBACK_PROVIDER;
-              const st = STATUS_META[k.status];
-              const show = secrets[k.id] !== undefined;
-              const loading = pendingId === k.id;
-              return (
-                <tr key={k.id}>
+            <ReadMore
+              items={keys}
+              initialCount={10}
+              getKey={(k) => k.id}
+              tableColSpan={7}
+              renderItem={(k) => {
+                // The backend's `provider` field is unvalidated `str` — fall back rather
+                // than crash on any value outside the known set.
+                const p = providerById[k.provider] ?? FALLBACK_PROVIDER;
+                const st = STATUS_META[k.status];
+                const show = secrets[k.id] !== undefined;
+                const loading = pendingId === k.id;
+                return (
+                <tr>
                   <td>
                     <div className="kv-prov">
                       <span className="kv-prov-ic" style={{ background: `${p.c}22`, color: p.c }}>
@@ -163,8 +169,9 @@ export default function VaultTable({ keys }: Props) {
                     </div>
                   </td>
                 </tr>
-              );
-            })}
+                );
+              }}
+            />
           </tbody>
         </table>
       </div>

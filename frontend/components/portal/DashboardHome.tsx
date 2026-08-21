@@ -106,9 +106,9 @@ export default function DashboardHome() {
               <div><div className="dh-action-t">Review checkpoint</div><div className="dh-action-s">{counts.review} awaiting sign-off</div></div>
               <span className="material-symbols-rounded dh-action-go">chevron_right</span>
             </Link>
-            <Link href="/team/access" className="dh-action">
-              <span className="dh-action-ic"><span className="material-symbols-rounded">shield_person</span></span>
-              <div><div className="dh-action-t">My access</div><div className="dh-action-s">Features unlocked for you</div></div>
+            <Link href="/team/queue" className="dh-action">
+              <span className="dh-action-ic"><span className="material-symbols-rounded">view_kanban</span></span>
+              <div><div className="dh-action-t">My queue</div><div className="dh-action-s">Everything assigned to you</div></div>
               <span className="material-symbols-rounded dh-action-go">chevron_right</span>
             </Link>
           </div>

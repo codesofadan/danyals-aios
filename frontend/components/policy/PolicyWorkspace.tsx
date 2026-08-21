@@ -2,7 +2,6 @@
 
 import AskBox from "./AskBox";
 import ChangeFeed from "./ChangeFeed";
-import KnowledgeBase from "./KnowledgeBase";
 import Recommendations from "./Recommendations";
 import { useGeneratePolicyBrief } from "@/lib/hooks/policy";
 import { useSpendHalted } from "@/lib/hooks/cost";
@@ -24,10 +23,6 @@ export default function PolicyWorkspace() {
 
       <div className="row-single">
         <ChangeFeed />
-      </div>
-
-      <div className="row-single">
-        <KnowledgeBase />
       </div>
     </div>
   );

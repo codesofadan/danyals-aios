@@ -26,7 +26,7 @@ router = APIRouter(prefix="/rbac", tags=["rbac"])
 
 @router.get("/features", response_model=list[FeatureDef])
 async def list_features(_user: CurrentUserDep) -> list[FeatureDef]:
-    """The 17 access features (frontend ``accessFeatures``)."""
+    """The 11 access features (frontend ``accessFeatures``)."""
     return list(FEATURES)
 
 

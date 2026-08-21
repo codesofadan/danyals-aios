@@ -27,9 +27,9 @@ export default function ToolPage() {
             <div className="pt-empty">
               <span className="material-symbols-rounded">help</span>
               <div className="pt-empty-t">No such tool</div>
-              <div className="pt-empty-s">That tool doesn&apos;t exist. Head back to your access overview.</div>
-              <Link href="/team/access" className="primary-btn" style={{ marginTop: 14 }}>
-                <span className="material-symbols-rounded">arrow_back</span>My Access
+              <div className="pt-empty-s">That tool doesn&apos;t exist. Head back to your team dashboard.</div>
+              <Link href="/team" className="primary-btn" style={{ marginTop: 14 }}>
+                <span className="material-symbols-rounded">arrow_back</span>Team Dashboard
               </Link>
             </div>
           </section>
@@ -54,8 +54,8 @@ export default function ToolPage() {
                 This tool is locked for your account. An admin can unlock it from
                 {" "}<b>Team Management → Access</b>. Ask your lead if you need it.
               </div>
-              <Link href="/team/access" className="primary-btn" style={{ marginTop: 14 }}>
-                <span className="material-symbols-rounded">shield_person</span>See my access
+              <Link href="/team" className="primary-btn" style={{ marginTop: 14 }}>
+                <span className="material-symbols-rounded">arrow_back</span>Back to Team Dashboard
               </Link>
             </div>
           </section>

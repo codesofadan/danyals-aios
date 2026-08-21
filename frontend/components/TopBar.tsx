@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-type Props = { eyebrow?: string; title: string; searchPlaceholder?: string };
+type Props = { eyebrow?: string; title: string; searchPlaceholder?: string; hideSearch?: boolean };
 
 type Dest = { icon: string; label: string; href: string; keywords?: string };
 
@@ -35,8 +35,6 @@ const TEAM_DESTS: Dest[] = [
   { icon: "inbox", label: "Queue", href: "/team/queue", keywords: "tasks work" },
   { icon: "rate_review", label: "Review", href: "/team/review", keywords: "qa approve" },
   { icon: "local_shipping", label: "Deliver", href: "/team/deliver", keywords: "handoff" },
-  { icon: "timeline", label: "Activity", href: "/team/activity", keywords: "log history" },
-  { icon: "vpn_key", label: "Access", href: "/team/access", keywords: "permissions tools" },
 ];
 
 const CLIENT_DESTS: Dest[] = [
@@ -56,7 +54,7 @@ function destsForPath(pathname: string): Dest[] {
   return ADMIN_DESTS.filter((d) => !(HIDE_LOCKED && LOCKED_IN_PROD.has(d.href)));
 }
 
-export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…" }: Props) {
+export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…", hideSearch = false }: Props) {
   const pathname = usePathname() || "/admin";
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -102,78 +100,80 @@ export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…"
         {eyebrow && <div className="ey">{eyebrow}</div>}
         <h1>{title}</h1>
       </div>
-      <div className="topbar-actions">
-        <div style={{ position: "relative" }}>
-          <label className="search">
-            <span className="material-symbols-rounded" style={{ fontSize: 20 }}>search</span>
-            <input
-              placeholder={searchPlaceholder}
-              value={q}
-              onChange={(e) => { setQ(e.target.value); setOpen(true); setActive(0); }}
-              onFocus={() => setOpen(true)}
-              onBlur={() => { blurTimer.current = window.setTimeout(() => setOpen(false), 120); }}
-              onKeyDown={onKeyDown}
-              aria-label="Search the dashboard"
-              autoComplete="off"
-            />
-          </label>
+      {!hideSearch && (
+        <div className="topbar-actions">
+          <div style={{ position: "relative" }}>
+            <label className="search">
+              <span className="material-symbols-rounded" style={{ fontSize: 20 }}>search</span>
+              <input
+                placeholder={searchPlaceholder}
+                value={q}
+                onChange={(e) => { setQ(e.target.value); setOpen(true); setActive(0); }}
+                onFocus={() => setOpen(true)}
+                onBlur={() => { blurTimer.current = window.setTimeout(() => setOpen(false), 120); }}
+                onKeyDown={onKeyDown}
+                aria-label="Search the dashboard"
+                autoComplete="off"
+              />
+            </label>
 
-          {open && (
-            <div
-              role="listbox"
-              onMouseDown={(e) => { e.preventDefault(); if (blurTimer.current) window.clearTimeout(blurTimer.current); }}
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                left: 0,
-                right: 0,
-                zIndex: 60,
-                background: "var(--card, #fff)",
-                border: "1px solid var(--line, #E8D2D7)",
-                borderRadius: 12,
-                boxShadow: "0 12px 32px rgba(63,14,24,0.14)",
-                padding: 6,
-                maxHeight: 340,
-                overflowY: "auto",
-              }}
-            >
-              {results.length === 0 ? (
-                <div style={{ padding: "10px 12px", fontSize: 13, opacity: 0.6 }}>
-                  No matches for &ldquo;{q}&rdquo;
-                </div>
-              ) : (
-                results.map((d, i) => (
-                  <button
-                    key={d.href}
-                    type="button"
-                    role="option"
-                    aria-selected={i === active}
-                    onMouseEnter={() => setActive(i)}
-                    onClick={() => go(d.href)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "9px 11px",
-                      borderRadius: 8,
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      color: "var(--ink, #241015)",
-                      background: i === active ? "var(--blush, #F8ECEE)" : "transparent",
-                    }}
-                  >
-                    <span className="material-symbols-rounded" style={{ fontSize: 19, opacity: 0.7 }}>{d.icon}</span>
-                    <span>{d.label}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
+            {open && (
+              <div
+                role="listbox"
+                onMouseDown={(e) => { e.preventDefault(); if (blurTimer.current) window.clearTimeout(blurTimer.current); }}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  left: 0,
+                  right: 0,
+                  zIndex: 60,
+                  background: "var(--card, #fff)",
+                  border: "1px solid var(--line, #E8D2D7)",
+                  borderRadius: 12,
+                  boxShadow: "0 12px 32px rgba(63,14,24,0.14)",
+                  padding: 6,
+                  maxHeight: 340,
+                  overflowY: "auto",
+                }}
+              >
+                {results.length === 0 ? (
+                  <div style={{ padding: "10px 12px", fontSize: 13, opacity: 0.6 }}>
+                    No matches for &ldquo;{q}&rdquo;
+                  </div>
+                ) : (
+                  results.map((d, i) => (
+                    <button
+                      key={d.href}
+                      type="button"
+                      role="option"
+                      aria-selected={i === active}
+                      onMouseEnter={() => setActive(i)}
+                      onClick={() => go(d.href)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "9px 11px",
+                        borderRadius: 8,
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 14,
+                        color: "var(--ink, #241015)",
+                        background: i === active ? "var(--blush, #F8ECEE)" : "transparent",
+                      }}
+                    >
+                      <span className="material-symbols-rounded" style={{ fontSize: 19, opacity: 0.7 }}>{d.icon}</span>
+                      <span>{d.label}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

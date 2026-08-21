@@ -9,6 +9,7 @@ export default function LeadsPage() {
         eyebrow="Modules · Audit Engine"
         title="Free Audits"
         searchPlaceholder="Search leads, emails, URLs…"
+        hideSearch
       />
       <LeadsWorkspace />
     </>

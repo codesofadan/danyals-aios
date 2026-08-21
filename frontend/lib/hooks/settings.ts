@@ -2,15 +2,40 @@
 
 // ============================================================
 // AIOS · settings data hooks
-// The Settings screen's "My Account" tab reuses GET /me (profile) · PATCH /me ·
-// POST /me/password (change password) — the same hooks the team portal owns,
-// re-exported here so the screen has one hooks entrypoint. The roles matrix
-// reuses useRbac(); the credential panels reuse useMembers() (with
-// useRevealCredentials / useSetPassword) + useClients(). None are duplicated here.
+// The Settings screen's "My Account" panel reuses GET /me (profile) · PATCH /me —
+// the same hooks the team portal owns, re-exported here so the screen has one
+// hooks entrypoint. It also owns the caller's own notification preferences via
+// GET/PUT /settings/notifications (per-user, real endpoints — app/routers/settings.py).
 //
-// (The former workspace / security / notification-preference hooks were removed
-// with their orphaned, unreachable panels — those /settings/* endpoints are not
-// surfaced anywhere in the trimmed Settings screen.)
+// (The former workspace / security / change-password hooks were removed with
+// their now-unreachable panels — Settings no longer surfaces Client Access,
+// Team Access, Roles & Permissions, or a change-password form.)
 // ============================================================
 
-export { useMe, useUpdateMe, useChangePassword } from "./portal";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import type { NotifPref } from "@/lib/data";
+
+export { useMe, useUpdateMe } from "./portal";
+
+export const NOTIF_PREFS_KEY = ["settings", "notifications"] as const;
+
+/** The caller's own notification preferences (GET /settings/notifications, per-user). */
+export function useNotifPrefs() {
+  return useQuery({
+    queryKey: NOTIF_PREFS_KEY,
+    queryFn: () => api.get<NotifPref[]>("/settings/notifications"),
+  });
+}
+
+export type NotifPrefInput = { key: string; email: boolean; inApp: boolean };
+
+/** PUT /settings/notifications — save the caller's own toggle changes. */
+export function useUpdateNotifPrefs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (prefs: NotifPrefInput[]) =>
+      api.put<NotifPref[]>("/settings/notifications", { prefs }),
+    onSuccess: (data) => qc.setQueryData(NOTIF_PREFS_KEY, data),
+  });
+}

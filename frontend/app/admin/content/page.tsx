@@ -9,6 +9,7 @@ export default function ContentModule() {
         eyebrow="Automation · Content Engine"
         title="Content"
         searchPlaceholder="Search jobs, clients, topics…"
+        hideSearch
       />
       <ContentWorkspace />
     </>

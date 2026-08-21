@@ -6,6 +6,7 @@ import {
   type Task, type TeamMemberRecord, type ClientRecord,
   type TaskType, type TaskPriority, type TaskStatus,
 } from "@/lib/data";
+import { useDecideDeadlineRequest, useTaskDeadlineRequests } from "@/lib/hooks/team";
 
 export type NewTask = {
   title: string;
@@ -24,6 +25,36 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = { urgent: "Urgent", high: "
 const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
   todo: "in_progress", in_progress: "review", review: "done", done: "done",
 };
+
+// A small badge on a task row that surfaces a PENDING deadline-change request
+// (POST /tasks/{code}/deadline-requests) with inline approve/reject. due_date
+// only actually moves on approve — reject leaves it untouched.
+function DeadlineBadge({ taskId }: { taskId: string }) {
+  const requestsQ = useTaskDeadlineRequests(taskId);
+  const decideM = useDecideDeadlineRequest();
+  const pending = (requestsQ.data ?? []).find((r) => r.status === "pending");
+  if (!pending) return null;
+  return (
+    <span className="deadline-badge" title={pending.reason || "Deadline change requested"}>
+      <span className="material-symbols-rounded">event_upcoming</span>
+      {pending.requestedDueDate}
+      <button
+        type="button" className="mini-btn xs" disabled={decideM.isPending}
+        onClick={() => decideM.mutate({ code: taskId, requestId: pending.id, action: "approve" })}
+        title="Approve the requested due date"
+      >
+        <span className="material-symbols-rounded">check</span>
+      </button>
+      <button
+        type="button" className="mini-btn xs" disabled={decideM.isPending}
+        onClick={() => decideM.mutate({ code: taskId, requestId: pending.id, action: "reject" })}
+        title="Reject — keep the current due date"
+      >
+        <span className="material-symbols-rounded">close</span>
+      </button>
+    </span>
+  );
+}
 
 export default function AssignTasks({
   tasks, members, clients, onAssign, onStatusChange,
@@ -144,9 +175,20 @@ export default function AssignTasks({
                 </div>
                 <div className="task-assignee">
                   {m ? <span className="av xs" style={{ background: m.c }}>{m.init}</span> : null}
-                  <span className="task-due">Due {t.due}</span>
+                  <span
+                    className="task-due"
+                    title={
+                      t.startedAt
+                        ? `Started ${new Date(t.startedAt).toLocaleString()}`
+                          + (t.completedAt ? ` · Completed ${new Date(t.completedAt).toLocaleString()}` : "")
+                        : undefined
+                    }
+                  >
+                    Due {t.due}
+                  </span>
                 </div>
                 <div className="task-lifecycle" style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+                  <DeadlineBadge taskId={t.id} />
                   <span className={`status-pill ${sm.cls}`}>{sm.label}</span>
                   {t.status === "review" ? (
                     <>

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ContentJob } from "@/lib/content";
+import ReadMore from "@/components/ui/ReadMore";
 
 export type ReviewAction = "approve" | "edit" | "reject";
 
@@ -40,46 +41,51 @@ export default function ReviewGate({
         </div>
       ) : (
         <div className="co-gate-list">
-          {jobs.map((j) => (
-            <div className="co-gate-row" key={j.id} style={{ ["--acc" as string]: j.color }}>
-              <div className="co-gate-main">
-                <div className="co-gate-head">
-                  <span className="co-jid">{j.id}</span>
-                  <span className="co-gate-page">{PAGE_LABEL[j.pageType]}</span>
-                  <span className="co-fw sm">{j.framework}</span>
+          <ReadMore
+            items={jobs}
+            initialCount={10}
+            getKey={(j) => j.id}
+            renderItem={(j) => (
+              <div className="co-gate-row" style={{ ["--acc" as string]: j.color }}>
+                <div className="co-gate-main">
+                  <div className="co-gate-head">
+                    <span className="co-jid">{j.id}</span>
+                    <span className="co-gate-page">{PAGE_LABEL[j.pageType]}</span>
+                    <span className="co-fw sm">{j.framework}</span>
+                  </div>
+                  <div className="co-gate-topic">{j.topic}</div>
+                  <div className="co-gate-meta">
+                    <span className="co-dot" style={{ background: j.color }} />
+                    {j.client}
+                    <span className="co-sep">·</span>
+                    <span className="material-symbols-rounded">edit_note</span>{j.words.toLocaleString()} words
+                    <span className="co-sep">·</span>
+                    <span className="material-symbols-rounded">data_object</span>{j.schema}
+                    <span className="co-sep">·</span>
+                    <span className="material-symbols-rounded">imagesmode</span>{j.images}
+                    <span className="co-sep">·</span>
+                    <span className="co-cost">${j.cost}</span>
+                  </div>
                 </div>
-                <div className="co-gate-topic">{j.topic}</div>
-                <div className="co-gate-meta">
-                  <span className="co-dot" style={{ background: j.color }} />
-                  {j.client}
-                  <span className="co-sep">·</span>
-                  <span className="material-symbols-rounded">edit_note</span>{j.words.toLocaleString()} words
-                  <span className="co-sep">·</span>
-                  <span className="material-symbols-rounded">data_object</span>{j.schema}
-                  <span className="co-sep">·</span>
-                  <span className="material-symbols-rounded">imagesmode</span>{j.images}
-                  <span className="co-sep">·</span>
-                  <span className="co-cost">${j.cost}</span>
-                </div>
-              </div>
-              <div className="co-gate-actions">
-                {onPreview && (
-                  <button className="ghostbtn" onClick={() => onPreview(j.id)}>
-                    <span className="material-symbols-rounded">visibility</span>Preview
+                <div className="co-gate-actions">
+                  {onPreview && (
+                    <button className="ghostbtn" onClick={() => onPreview(j.id)}>
+                      <span className="material-symbols-rounded">visibility</span>Preview
+                    </button>
+                  )}
+                  <button className="primary-btn co-approve" onClick={() => onAction(j.id, "approve")}>
+                    <span className="material-symbols-rounded">check</span>Approve
                   </button>
-                )}
-                <button className="primary-btn co-approve" onClick={() => onAction(j.id, "approve")}>
-                  <span className="material-symbols-rounded">check</span>Approve
-                </button>
-                <button className="ghostbtn" onClick={() => requestEdit(j.id)}>
-                  <span className="material-symbols-rounded">edit</span>Request edit
-                </button>
-                <button className="ghostbtn co-reject" onClick={() => onAction(j.id, "reject")}>
-                  <span className="material-symbols-rounded">close</span>Reject
-                </button>
+                  <button className="ghostbtn" onClick={() => requestEdit(j.id)}>
+                    <span className="material-symbols-rounded">edit</span>Request edit
+                  </button>
+                  <button className="ghostbtn co-reject" onClick={() => onAction(j.id, "reject")}>
+                    <span className="material-symbols-rounded">close</span>Reject
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            )}
+          />
         </div>
       )}
     </section>

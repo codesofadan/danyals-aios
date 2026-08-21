@@ -8,6 +8,7 @@ export default function Settings() {
         eyebrow="Platform · Administration"
         title="Settings"
         searchPlaceholder="Search settings…"
+        hideSearch
       />
 
       <SettingsWorkspace />

@@ -124,6 +124,63 @@ class TasksRepo:
             cur.execute(stmt, params)
             return cur.fetchone()
 
+    # --- deadline-change requests (0074) --------------------------------------
+
+    def insert_deadline_request(self, row: dict[str, Any]) -> dict[str, Any]:
+        cols = list(row.keys())
+        stmt = sql.SQL(
+            "insert into public.task_deadline_requests ({cols}) values ({vals}) returning *"
+        ).format(
+            cols=sql.SQL(", ").join(map(sql.Identifier, cols)),
+            vals=sql.SQL(", ").join([sql.Placeholder()] * len(cols)),
+        )
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, list(row.values()))
+            return cast("dict[str, Any]", cur.fetchone())
+
+    def list_deadline_requests(self, task_id: str) -> _Rows:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.task_deadline_requests "
+                "where task_id = %s order by created_at desc",
+                (task_id,),
+            )
+            return cur.fetchall()
+
+    def get_pending_deadline_request(self, task_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.task_deadline_requests "
+                "where task_id = %s and status = 'pending' limit 1",
+                (task_id,),
+            )
+            return cur.fetchone()
+
+    def get_deadline_request(self, request_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.task_deadline_requests where id = %s limit 1",
+                (request_id,),
+            )
+            return cur.fetchone()
+
+    def decide_deadline_request(
+        self, request_id: str, patch: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Update a request's decision, gated on it still being pending (optimistic)."""
+        cols = list(patch.keys())
+        assignments = sql.SQL(", ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(c)) for c in cols
+        )
+        params: list[Any] = [*patch.values(), request_id]
+        stmt = sql.SQL(
+            "update public.task_deadline_requests set {sets} "
+            "where id = %s and status = 'pending' returning *"
+        ).format(sets=assignments)
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, params)
+            return cur.fetchone()
+
 
 def get_tasks_repo(user: CurrentUserDep) -> TasksRepo:
     """Dependency: a repo bound to the caller's verified user id (RLS-scoped).

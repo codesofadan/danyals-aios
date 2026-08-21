@@ -6,7 +6,7 @@ agree byte-for-byte. Two authoritative datasets are reconciled here:
 * **8 permissions x 6 governance roles** (``DEFAULT_ROLE_PERMS``) - the coarse
   matrix the Team screen renders and the vocabulary shared-base routes enforce
   with ``require_perm``. It covers all six roles, so it is the enforcement base.
-* **17 features x 4 role templates** (``FEATURES`` / ``TEMPLATES``) - the
+* **11 features x 4 role templates** (``FEATURES`` / ``TEMPLATES``) - the
   fine-grained matrix the Add-Member screen renders. Templates seed a user's
   per-user feature grants; ``feature_allows`` enforces fine-grained access where
   a later module needs it. The doc's Full/View/Off is 3-state; the frontend
@@ -88,7 +88,7 @@ class PermissionDef(BaseModel):
 
 
 class FeatureDef(BaseModel):
-    """One of the 17 access features (mirrors ``accessFeatures[]``)."""
+    """One of the 11 access features (mirrors ``accessFeatures[]``)."""
 
     key: str
     label: str
@@ -161,16 +161,10 @@ MODULE_PERM_ROLES: dict[ModulePermKey, frozenset[AppRole]] = {
     "run_research": frozenset({"owner", "admin", "manager"}),
 }
 
-# --- The 17 features (verbatim from ``accessFeatures``) ------------------------
+# --- The 11 features (verbatim from ``accessFeatures``) ------------------------
 
 FEATURES: tuple[FeatureDef, ...] = (
-    FeatureDef(key="rank_tracker", label="Rank Tracker", short="Rank Tracker", icon="trending_up", group="Analytics", desc="Track keyword positions & ranking history"),
     FeatureDef(key="technical_audit", label="Technical Audit", short="Tech Audit", icon="troubleshoot", group="Analytics", desc="Run site audits, review & mark issues fixed"),
-    FeatureDef(key="on_page", label="On-Page Optimizer", short="On-Page", icon="tune", group="Analytics", desc="Review & apply on-page recommendations"),
-    FeatureDef(key="keyword_research", label="Keyword Research", short="Keywords", icon="search", group="Analytics", desc="Find, group & assign keywords"),
-    FeatureDef(key="backlink_manager", label="Backlink Manager", short="Backlinks", icon="hub", group="Analytics", desc="Monitor profile, flag lost or toxic links"),
-    FeatureDef(key="competitor_intel", label="Competitor Intel", short="Competitors", icon="insights", group="Analytics", desc="Compare clients & read gap analysis"),
-    FeatureDef(key="local_seo", label="Local SEO", short="Local SEO", icon="storefront", group="Analytics", desc="Track local & map-pack rankings"),
     FeatureDef(key="content_pipeline", label="Content Pipeline", short="Content", icon="article", group="Content", desc="Briefs, AI drafting, edit & review"),
     FeatureDef(key="publishing", label="Publishing", short="Publishing", icon="rocket_launch", group="Content", desc="Send approved content live to the CMS"),
     FeatureDef(key="reporting", label="Reporting", short="Reporting", icon="summarize", group="Delivery", desc="Build, schedule & send client reports"),
@@ -185,7 +179,7 @@ FEATURES: tuple[FeatureDef, ...] = (
 
 FEATURE_KEYS: tuple[str, ...] = tuple(f.key for f in FEATURES)
 
-# All 17 feature keys, used by the Super Admin template.
+# All 11 feature keys, used by the Super Admin template.
 _ALL_FEATURE_KEYS: tuple[str, ...] = FEATURE_KEYS
 
 # --- The 4 role templates (verbatim from ``roleTemplates``) -------------------
@@ -194,17 +188,17 @@ TEMPLATES: tuple[RoleTemplateDef, ...] = (
     RoleTemplateDef(
         key="seo", label="SEO Specialist", tagline="Analytics & optimization", icon="query_stats",
         role="specialist", color="#4D8DF0",
-        grants=("rank_tracker", "technical_audit", "on_page", "keyword_research", "backlink_manager", "competitor_intel", "local_seo", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
+        grants=("technical_audit", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
     ),
     RoleTemplateDef(
         key="content", label="Content Creator", tagline="Copywriting & publishing", icon="edit_note",
         role="specialist", color="#C77E14",
-        grants=("rank_tracker", "on_page", "keyword_research", "competitor_intel", "content_pipeline", "publishing", "reporting", "task_board", "client_setup"),
+        grants=("content_pipeline", "publishing", "reporting", "task_board", "client_setup"),
     ),
     RoleTemplateDef(
         key="va", label="Virtual Assistant", tagline="Coordination & admin", icon="support_agent",
         role="manager", color="#7B69EE",
-        grants=("rank_tracker", "content_pipeline", "local_seo", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
+        grants=("content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
     ),
     RoleTemplateDef(
         key="super", label="Super Admin", tagline="Full access - everything on", icon="shield_person",

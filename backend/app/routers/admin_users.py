@@ -125,7 +125,7 @@ def _write_grant_overrides(target_id: str, grants: Mapping[str, str]) -> None:
 
 
 def _resolve_grants(role: str, overrides: dict[str, AccessLevel]) -> dict[str, AccessLevel]:
-    """Effective level for all 17 features (owner = all full; else override or off)."""
+    """Effective level for all 11 features (owner = all full; else override or off)."""
     return {
         key: effective_feature_level(cast("Any", role), overrides, key) for key in FEATURE_KEYS
     }
@@ -312,7 +312,7 @@ async def invite_member(
 
 @router.get("/{user_id}/grants", response_model=UserGrantsResponse)
 async def get_grants(user_id: str, current: AccessControl) -> UserGrantsResponse:
-    """Read a user's effective access level for all 17 features (access_control)."""
+    """Read a user's effective access level for all 11 features (access_control)."""
     try:
         target = await asyncio.to_thread(_load_user_min, current.id, user_id)
     except DatabaseNotConfiguredError as exc:

@@ -2,17 +2,16 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import { upsells } from "@/lib/upsells";
+import { freeAuditGigs } from "@/lib/freeAuditGigs";
 
 // Post-report conversion surface: the agency's real Fiverr gigs, shown as
 // "recommended next steps" once a prospect has seen their free score. Cards
 // stagger in for a polished reveal (reduced-motion honored). Links open the
-// live gig on Fiverr in a new tab — consistent with the admin Upsells module.
-// `fiverrUrl` (the backend-owned profile link from the report) powers the
-// section-level "view all" CTA.
+// live gig on Fiverr in a new tab. `fiverrUrl` (the backend-owned profile link
+// from the report) powers the section-level "view all" CTA.
 export default function FiverrUpsells({ fiverrUrl }: { fiverrUrl?: string }) {
   const gridRef = useRef<HTMLDivElement>(null);
-  const active = upsells.filter((u) => u.active);
+  const active = freeAuditGigs;
 
   useEffect(() => {
     const node = gridRef.current;
@@ -61,21 +60,19 @@ export default function FiverrUpsells({ fiverrUrl }: { fiverrUrl?: string }) {
             target="_blank"
             rel="noopener noreferrer"
           >
-            <div className="fa-gig-top">
-              <span className="fa-gig-ic" style={{ background: `${u.color}22`, color: u.color }}>
-                <span className="material-symbols-rounded">{u.icon}</span>
-              </span>
-            </div>
+            {u.image ? (
+              <div className="fa-gig-img" style={{ backgroundImage: `url(${u.image})` }} />
+            ) : (
+              <div className="fa-gig-top">
+                <span className="fa-gig-ic" style={{ background: `${u.color}22`, color: u.color }}>
+                  <span className="material-symbols-rounded">{u.icon}</span>
+                </span>
+              </div>
+            )}
             <div className="fa-gig-title">{u.title}</div>
             <p className="fa-gig-desc">{u.description}</p>
             <div className="fa-gig-foot">
-              {u.price > 0 ? (
-                <span className="fa-gig-price">
-                  from <strong>${u.price}</strong>
-                </span>
-              ) : (
-                <span className="fa-gig-price fa-gig-price-muted">On Fiverr</span>
-              )}
+              <span className="fa-gig-price fa-gig-price-muted">On Fiverr</span>
               <span className="fa-fiverr-cta">
                 View on Fiverr
                 <span className="material-symbols-rounded">arrow_outward</span>

@@ -37,6 +37,34 @@ export function useTickets() {
     queryFn: () => api.get<Ticket[]>("/tickets"),
   });
 }
+
+/** Triage a ticket to a new status (PATCH /tickets/{code}/status). Lead-only. */
+export function useUpdateTicketStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ code, status }: { code: string; status: Ticket["status"] }) =>
+      api.patch<Ticket>(`/tickets/${code}/status`, { status }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: TICKETS_KEY });
+    },
+  });
+}
+
+/**
+ * Send a real, free-text reply on a ticket (POST /tickets/{code}/reply). Lead-only.
+ * When the ticket is client-linked, the backend emails the actual reply text to the
+ * client (not a canned status label) — see `_email_client_ticket_reply`.
+ */
+export function useReplyToTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ code, message }: { code: string; message: string }) =>
+      api.post<Ticket>(`/tickets/${code}/reply`, { message }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: TICKETS_KEY });
+    },
+  });
+}
 export const reportGrantsKey = (clientId: string) =>
   ["clients", clientId, "report-grants"] as const;
 
@@ -163,6 +191,7 @@ export type ClientUpdate = {
   status?: SubStatus;
   renews?: string;
   mrr?: number;
+  contact?: { name: string; role: string; email: string; color: string };
 };
 
 /** Edit a client's account fields (PATCH /clients/{id} → the updated ClientRecord). */

@@ -80,8 +80,8 @@ def test_provision_writes_argon2_credential_and_identity(cur: _RecordingCursor) 
     assert email == "jane@x.com"
     assert password_hash.startswith("$argon2id$")
     assert "secret12" not in password_hash
-    # Template grants seeded via executemany (SEO Specialist = 13 features).
-    assert len(cur.many[0][1]) == 13
+    # Template grants seeded via executemany (SEO Specialist = 7 features).
+    assert len(cur.many[0][1]) == 7
 
 
 def test_provision_without_template_seeds_no_grants(cur: _RecordingCursor) -> None:
@@ -97,7 +97,7 @@ def test_provision_super_template_grants_all_features(cur: _RecordingCursor) -> 
         email="boss@x.com", password="secret12", name="The Boss", role="owner",
         username="boss", template_key="super",
     )
-    assert len(cur.many[0][1]) == 17
+    assert len(cur.many[0][1]) == 11
 
 
 def test_provision_client_pins_client_id(cur: _RecordingCursor) -> None:
@@ -139,7 +139,7 @@ def test_provision_explicit_grants_override_template(cur: _RecordingCursor) -> N
     # An explicit feature_grants map WINS over a template; 'off' entries are dropped.
     provision_user(
         email="c@x.com", password="secret12", name="Cus Tom", role="specialist",
-        username="custom", template_key="super",  # would be all 17...
+        username="custom", template_key="super",  # would be all 11...
         feature_grants={"rank_tracker": "full", "reporting": "view", "billing": "off"},
         must_reset=True, must_setup_2fa=True,
     )

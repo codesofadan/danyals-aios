@@ -390,6 +390,10 @@
 }
 .fa-gig:hover { transform: translateY(-4px); border-color: var(--fa-fiverr); box-shadow: 0 22px 44px -24px rgba(0, 0, 0, .5); }
 .fa-gig-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+.fa-gig-img {
+  margin: -18px -18px 13px; height: 132px; border-radius: 16px 16px 0 0;
+  background-size: cover; background-position: center; background-color: var(--line);
+}
 .fa-gig-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; }
 .fa-gig-ic .material-symbols-rounded { font-size: 22px; }
 .fa-gig-rating { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 800; color: var(--fg-strong); }

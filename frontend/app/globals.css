@@ -251,7 +251,7 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 .kpi .sub { display: flex; align-items: center; gap: 6px; margin-top: 11px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .kpi .delta { display: inline-flex; align-items: center; gap: 2px; font-weight: 800; }
 .kpi .delta.up { color: var(--ok); } .kpi .delta.down { color: var(--crit); }
-.kpi.hero .delta { color: #fff; background: var(--on-accent);
+.kpi.hero .delta { color: var(--hero-1); background: var(--on-accent);
   padding: 3px 9px 3px 6px; border-radius: 999px; letter-spacing: .01em;
   box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--on-accent) 70%, transparent); }
 .kpi .delta .material-symbols-rounded { font-size: 16px; }
@@ -274,6 +274,11 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
   padding: 6px 11px; border-radius: 9px; transition: .18s; }
 .ghostbtn:hover { color: var(--lilac); border-color: var(--line-2); }
 .ghostbtn .material-symbols-rounded { font-size: 16px; }
+
+/* shared "Read more / Show less" list-capping control (components/ui/ReadMore.tsx) */
+.read-more-control { display: flex; justify-content: center; margin-top: 10px; }
+.read-more-row td { text-align: center !important; padding: 12px 8px !important; }
+.read-more-btn { margin: 0 auto; }
 
 /* 2D audit bar chart */
 .bar-wrap { margin-top: 8px; }
@@ -752,7 +757,7 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
   background: var(--well); font-size: 13px; font-weight: 800; color: var(--fg-strong); }
 .board-c { font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .board-list { display: flex; flex-direction: column; }
-.task { display: flex; align-items: center; gap: 13px; padding: 13px 16px; border-top: 1px solid var(--line); }
+.task { display: flex; align-items: center; flex-wrap: wrap; row-gap: 8px; gap: 13px; padding: 13px 16px; border-top: 1px solid var(--line); }
 .task:hover { background: var(--hover); }
 .prio-bar { width: 4px; height: 34px; border-radius: 4px; flex: none; }
 .prio-bar.urgent { background: var(--crit); box-shadow: 0 0 10px color-mix(in srgb, var(--crit) 50%, transparent); }
@@ -1083,6 +1088,10 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 .pw-label.weak { color: var(--crit); } .pw-label.fair { color: var(--warn); }
 .pw-label.good { color: var(--c4); } .pw-label.strong { color: var(--ok); }
 
+/* notification preference toggles (Settings → My Account) */
+.notif-toggles { display: flex; align-items: center; gap: 18px; }
+.notif-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; }
+
 /* actions + saved flash */
 .set-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; }
 .set-actions.end { margin-top: 18px; }
@@ -1135,6 +1144,12 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
   padding: 6px 11px; border-radius: 9px; transition: .16s; white-space: nowrap; }
 .mini-btn:hover { color: var(--lilac); border-color: var(--line-2); }
 .mini-btn .material-symbols-rounded { font-size: 15px; }
+.mini-btn.xs { padding: 3px 6px; }
+.mini-btn.xs .material-symbols-rounded { font-size: 13px; }
+.deadline-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 800;
+  color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); border-radius: 8px;
+  padding: 3px 6px 3px 8px; white-space: nowrap; }
+.deadline-badge .material-symbols-rounded { font-size: 14px; }
 .tc-drawer-row td { background: var(--well); }
 .tc-drawer { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; padding: 4px 2px; }
 .tc-drawer-pass { margin-bottom: 0; flex: 1; min-width: 280px; }
@@ -1569,23 +1584,6 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
   .tmap-group-h { flex-direction: column; width: 96px; flex: none; align-items: flex-start; }
   .tmap-tiles { flex-direction: row; height: 90px; }
   .gantt-rowlabel { width: 116px; }
-}
-
-/* ============================================================
-   TOP PROGRESS BAR — slim, opt-in loading indicator
-   Replaces the old full-screen 3D loader: CSS-only, only shown for
-   explicit useLoader() calls (never on every navigation), effectively
-   free to mount. See components/loader/LoaderProvider.
-   ============================================================ */
-.topbar-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 2000;
-  background: var(--violet); transform-origin: left; transform: scaleX(0); opacity: 0;
-  box-shadow: 0 0 10px color-mix(in srgb, var(--violet) 60%, transparent);
-  transition: transform .5s ease, opacity .2s ease; }
-.topbar-progress.on { opacity: 1; transform: scaleX(.75); transition: transform 3.2s cubic-bezier(.1, .6, .2, 1), opacity .2s ease; }
-
-@media (prefers-reduced-motion: reduce) {
-  .topbar-progress { transition: opacity .2s ease; }
-  .topbar-progress.on { transform: scaleX(1); transition: opacity .2s ease; }
 }
 
 /* ---- Team roster: reveal/copy login credentials -------------------------- */

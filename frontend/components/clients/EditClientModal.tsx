@@ -38,6 +38,9 @@ export default function EditClientModal({
   const [tier, setTier] = useState<SubTier>(client.tier);
   const [status, setStatus] = useState<SubStatus>(client.status);
   const [mrr, setMrr] = useState(String(client.mrr));
+  const [contactName, setContactName] = useState(client.contact.name);
+  const [contactRole, setContactRole] = useState(client.contact.role);
+  const [contactEmail, setContactEmail] = useState(client.contact.email);
 
   // The client's own NAP (client_business_profiles, 0051): loaded independently and
   // saved with its own action (a separate PUT), so a NAP edit never depends on an
@@ -112,6 +115,16 @@ export default function EditClientModal({
     if (status !== client.status) changes.status = status;
     const mrrNum = Math.max(0, Math.round(Number(mrr)) || 0);
     if (mrrNum !== client.mrr) changes.mrr = mrrNum;
+    const contactChanged =
+      contactName.trim() !== client.contact.name
+      || contactRole.trim() !== client.contact.role
+      || contactEmail.trim() !== client.contact.email;
+    if (contactChanged) {
+      changes.contact = {
+        name: contactName.trim(), role: contactRole.trim(), email: contactEmail.trim(),
+        color: client.contact.c,
+      };
+    }
     if (Object.keys(changes).length === 0) { onClose(); return; }
     onSave(changes);
   }
@@ -168,6 +181,21 @@ export default function EditClientModal({
                 <label>MRR ($ / month)</label>
                 <input type="number" min={0} value={mrr} onChange={(e) => setMrr(e.target.value)} placeholder="290" />
               </div>
+            </div>
+
+            <div className="fld-row">
+              <div className="fld">
+                <label>Primary contact name</label>
+                <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="e.g. Dr. Sana Malik" />
+              </div>
+              <div className="fld">
+                <label>Contact role</label>
+                <input value={contactRole} onChange={(e) => setContactRole(e.target.value)} placeholder="e.g. Practice Owner" />
+              </div>
+            </div>
+            <div className="fld">
+              <label>Contact email</label>
+              <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="sana@harbordental.com" />
             </div>
 
             <div className={nap.napBlock}>

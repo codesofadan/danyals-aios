@@ -39,7 +39,9 @@ export default function BudgetTable({ budgets, total, onEditCap }: Props) {
       <div className="card-h">
         <div>
           <div className="ct">Per-Client Budgets</div>
-          <div className="cs">Monthly spend ceilings on the job queue — highest usage first.</div>
+          {/* Caps are all-time ceilings (client_budgets.spent only ever increments —
+              there is no monthly reset), so this must not read "monthly". */}
+          <div className="cs">Spend ceilings on the job queue — highest usage first.</div>
         </div>
         <div className="tools">
           <span className={`pill-tag ${flagged ? "warn" : "ok"}`}>
@@ -55,7 +57,7 @@ export default function BudgetTable({ budgets, total, onEditCap }: Props) {
             <tr>
               <th>Client</th>
               <th>Tier</th>
-              <th className="num">Monthly cap</th>
+              <th className="num">Cap</th>
               <th className="num">Spent</th>
               <th className="num">Remaining</th>
               <th className="cst-usecol">Usage</th>

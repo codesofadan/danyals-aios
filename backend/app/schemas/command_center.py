@@ -297,12 +297,21 @@ def build_client_series(
 
 
 def build_spend_snapshot(
-    budgets: list[dict[str, Any]], settings: dict[str, Any]
+    budgets: list[dict[str, Any]],
+    settings: dict[str, Any],
+    *,
+    month_spent: float | None = None,
 ) -> SpendSnapshot:
-    """Platform MTD spend rollup from the per-client budgets + the spend-stop
-    settings. ``flagged`` = budgets at/above ``_FLAG_THRESHOLD`` % of cap, worst
-    first."""
-    total_spent = sum(int(b.get("spent", 0) or 0) for b in budgets)
+    """Platform spend rollup from the per-client budgets + the spend-stop settings.
+    ``flagged`` = budgets at/above ``_FLAG_THRESHOLD`` % of cap, worst first.
+
+    ``total_spent`` is the REAL calendar-month figure (``month_spent``, from
+    ``cost_log``) when the caller supplies it — the previous behavior summed
+    ``budgets.spent``, which is an ALL-TIME cumulative counter (no monthly reset
+    exists), so the "Month-to-date" label on the dashboard was misleading. Falls
+    back to the all-time sum for callers/tests that don't pass ``month_spent``."""
+    all_time_spent = sum(int(b.get("spent", 0) or 0) for b in budgets)
+    total_spent = round(month_spent) if month_spent is not None else all_time_spent
     total_cap = sum(int(b.get("cap", 0) or 0) for b in budgets)
     pct = round(total_spent / total_cap * 100) if total_cap else 0
     flags: list[SpendFlag] = []
@@ -384,10 +393,16 @@ def build_stat_tiles(
     budgets: list[dict[str, Any]],
     *,
     now: datetime | None = None,
+    month_spent: float | None = None,
 ) -> list[StatTile]:
     """The four admin-home KPI tiles, all from LIVE rows (audits / clients / tasks /
     budgets). ``value`` is real; deltas are honest secondary counts (audits carries a
-    real month-over-month %), never a fabricated trend."""
+    real month-over-month %), never a fabricated trend.
+
+    ``month_spent`` is the REAL calendar-month spend from ``cost_log`` (mirrors the
+    ``/cost`` page's fix for the same all-time-vs-monthly mislabeling bug). When the
+    caller doesn't supply it (older callers/tests), this falls back to the all-time
+    ``budgets.spent`` sum so the tile still renders, just without the month scoping."""
     ref = now or datetime.now(UTC)
 
     audits_this = _count_this_month(audits, ref)
@@ -399,7 +414,8 @@ def build_stat_tiles(
     open_tasks = sum(1 for t in tasks if t.get("status") != "done")
     in_review = sum(1 for t in tasks if t.get("status") == "review")
 
-    total_spent = sum(int(b.get("spent", 0) or 0) for b in budgets)
+    all_time_spent = sum(int(b.get("spent", 0) or 0) for b in budgets)
+    total_spent = round(month_spent) if month_spent is not None else all_time_spent
     total_cap = sum(int(b.get("cap", 0) or 0) for b in budgets)
     spend_pct = round(total_spent / total_cap * 100) if total_cap else 0
 
@@ -453,18 +469,22 @@ def build_command_center(
     gsc_rows: list[dict[str, Any]] | None = None,
     ga4_rows: list[dict[str, Any]] | None = None,
     now: datetime | None = None,
+    month_spent: float | None = None,
 ) -> CommandCenterResponse:
     """Compose the full admin-home payload from the (already RLS-scoped) rows.
     ``gsc_rows``/``ga4_rows`` default to empty (both summaries come back an honest
-    placeholder) so existing callers/tests that predate 7C keep working unchanged."""
+    placeholder) so existing callers/tests that predate 7C keep working unchanged.
+    ``month_spent`` (real, from ``cost_log`` via ``CostRepo.month_spent()``) feeds
+    both the "Spend month-to-date" tile and the spend snapshot so they show a real
+    calendar-month figure instead of the all-time ``budgets.spent`` counter."""
     return CommandCenterResponse(
-        stat_tiles=build_stat_tiles(audits, clients, tasks, budgets, now=now),
+        stat_tiles=build_stat_tiles(audits, clients, tasks, budgets, now=now, month_spent=month_spent),
         audits=build_audit_series(audits, now=now),
         traffic=build_traffic_series(audits, now=now),
         team=build_team_series(tasks, users_by_id),
         clients=build_client_series(clients, audits),
         digest=build_digest(rec_rows),
-        spend=build_spend_snapshot(budgets, settings),
+        spend=build_spend_snapshot(budgets, settings, month_spent=month_spent),
         gsc=build_gsc_summary(gsc_rows or []),
         ga4=build_ga4_summary(ga4_rows or []),
     )

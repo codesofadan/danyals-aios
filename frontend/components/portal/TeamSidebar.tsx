@@ -18,8 +18,6 @@ export default function TeamSidebar() {
     { icon: "view_kanban", label: "My Queue", href: "/team/queue", badge: openCount },
     { icon: "play_circle", label: "Deliver", href: "/team/deliver" },
     { icon: "how_to_reg", label: "Review", href: "/team/review", badge: reviewCount },
-    { icon: "shield_person", label: "My Access", href: "/team/access" },
-    { icon: "history", label: "Activity", href: "/team/activity" },
   ];
 
   // The tools this member can actually open — exactly what the admin

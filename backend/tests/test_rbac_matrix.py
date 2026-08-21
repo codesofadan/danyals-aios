@@ -26,9 +26,9 @@ def test_eight_permissions_unique() -> None:
 
 
 @pytest.mark.unit
-def test_seventeen_features_unique_and_grouped() -> None:
-    assert len(m.FEATURES) == 17
-    assert len(set(m.FEATURE_KEYS)) == 17
+def test_eleven_features_unique_and_grouped() -> None:
+    assert len(m.FEATURES) == 11
+    assert len(set(m.FEATURE_KEYS)) == 11
     assert {f.group for f in m.FEATURES} == {"Analytics", "Content", "Delivery", "Admin"}
 
 

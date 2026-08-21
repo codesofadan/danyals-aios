@@ -358,6 +358,28 @@ async def download_public_report_pdf(
     return FileResponse(path, media_type="application/pdf", filename="free-audit-report.pdf")
 
 
+@router.get("/audits/{report_token}/findings.json")
+async def download_public_report_json(
+    report_token: str, gateway: PublicGatewayDep, store: PublicArtifactStoreDep
+) -> FileResponse:
+    """Serve the raw findings.json for a token, if present. The token is the only guard.
+
+    Mirrors ``download_public_report_pdf`` exactly (same store, same key convention -
+    ``json_path`` is written by the same worker call that writes ``pdf_path``), so the
+    staff admin leads screen can offer an honest JSON download alongside the PDF one.
+    """
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    row = await asyncio.to_thread(gateway.get_by_token, report_token)
+    if row is None:
+        raise _REPORT_NOT_FOUND
+    key = row.get("json_path")
+    path = store.resolve(key) if key else None
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="application/json", filename="free-audit-findings.json")
+
+
 @router.get("/audits/{report_token}/report.html")
 async def view_public_report_html(
     report_token: str, gateway: PublicGatewayDep, store: PublicArtifactStoreDep

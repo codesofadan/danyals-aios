@@ -12,6 +12,7 @@ activity entry linked to the ticket's client so the context layer stays fresh.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from html import escape as html_escape
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from app.db.clients_repo import ClientsRepoDep
 from app.db.tickets_repo import TicketsRepoDep
 from app.schemas.tickets import (
     TicketCreate,
+    TicketReplyRequest,
     TicketResponse,
     TicketStatus,
     TicketStatusUpdate,
@@ -129,6 +131,66 @@ async def update_ticket_status(
             str(client_id), str(ticket.get("subject", "")), body.status
         )
     return TicketResponse.from_row(updated)
+
+
+@router.post("/tickets/{code}/reply", response_model=TicketResponse)
+async def reply_to_ticket(
+    code: str, body: TicketReplyRequest, repo: TicketsRepoDep, actor: ManageClients
+) -> TicketResponse:
+    """Send a real, free-text reply on a ticket/request (lead-only).
+
+    Writes the message into ``support_tickets.reply`` (+ ``replied_at``/``replied_by``)
+    - the FIRST endpoint to ever populate that column (0033 added it, unused since).
+    When the ticket is client-linked (``client_id`` set - mirrors the same check
+    ``update_ticket_status`` uses for its canned status email) the actual reply text
+    is emailed to the client, not a canned status label.
+    """
+    ticket = await asyncio.to_thread(repo.get_ticket_by_code, code)
+    if ticket is None:
+        raise _TICKET_NOT_FOUND
+
+    updated = await asyncio.to_thread(
+        repo.update_ticket_by_code,
+        code,
+        {
+            "reply": body.message,
+            "replied_at": datetime.now(UTC).isoformat(),
+            "replied_by": actor.id,
+        },
+    )
+    if updated is None:
+        raise _TICKET_NOT_FOUND
+
+    client_id = ticket.get("client_id")
+    await record_activity(
+        actor, kind="client", action="replied to a support ticket",
+        target=ticket.get("subject", ""), meta=ticket.get("client_name", ""),
+        entity_type="client" if client_id is not None else None,
+        entity_id=str(client_id) if client_id is not None else None,
+    )
+    # ADMIN/LEAD -> CLIENT: the real reply text (not a canned status label), only on
+    # a client-linked ticket. Best-effort; never blocks the reply from being saved.
+    if client_id is not None:
+        await _email_client_ticket_reply(
+            str(client_id), str(ticket.get("subject", "")), body.message
+        )
+    return TicketResponse.from_row(updated)
+
+
+async def _email_client_ticket_reply(client_id: str, subject: str, message: str) -> None:
+    """Best-effort: email the client the admin's actual free-text reply."""
+    subj = f"Reply to your request: {subject}" if subject else "Reply to your request"
+    text = (
+        f'You have a new reply on your request "{subject}":\n\n{message}\n\n'
+        "Sign in to your client portal to see the full conversation."
+    )
+    html = (
+        "<h2>New reply on your request</h2>"
+        + (f'<p>Re: "{html_escape(subject)}"</p>' if subject else "")
+        + f'<p style="white-space:pre-wrap">{html_escape(message)}</p>'
+        "<p>Sign in to your client portal to see the full conversation.</p>"
+    )
+    await email_client(client_id, subj, html, text)
 
 
 async def _email_client_ticket_update(client_id: str, subject: str, status_: str) -> None:

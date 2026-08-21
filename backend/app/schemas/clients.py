@@ -145,6 +145,7 @@ class ClientUpdate(BaseModel):
     status: SubStatus | None = None
     renews: str | None = None
     mrr: int | None = None
+    contact: ContactInput | None = None
 
     def to_row(self) -> dict[str, Any]:
         mapping = {
@@ -161,6 +162,11 @@ class ClientUpdate(BaseModel):
             value = getattr(self, field)
             if value is not None:
                 row[column] = value
+        if self.contact is not None:
+            row["contact_name"] = self.contact.name
+            row["contact_role"] = self.contact.role
+            row["contact_email"] = self.contact.email
+            row["contact_color"] = self.contact.color
         return row
 
 

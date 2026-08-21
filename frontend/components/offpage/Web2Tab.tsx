@@ -5,6 +5,7 @@ import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Ver
 import { useApproveWeb2, useWeb2, useWeb2Status } from "@/lib/hooks/offpage";
 import Web2PlanModal from "./Web2PlanModal";
 import Web2StatusBoard from "./Web2StatusBoard";
+import ReadMore from "@/components/ui/ReadMore";
 
 type FilterKey = "all" | Web2Verified;
 
@@ -118,66 +119,74 @@ export default function Web2Tab() {
             {web2Q.isError && !web2Q.isLoading && (
               <tr><td colSpan={7} className="op-empty">Couldn&apos;t load placements — {(web2Q.error as Error)?.message ?? "try again"}.</td></tr>
             )}
-            {!web2Q.isLoading && !web2Q.isError && rows.map((w) => {
-              const pm = PLATFORM_META[w.platform as Web2Platform];
-              // Fallback for any status the backend emits that isn't in the map
-              // (e.g. blocked/unchanged/error/skipped) — never crash the page.
-              const pipeline = PIPELINE_META[w.status] ?? { label: w.status, cls: "mut" };
-              return (
-                <tr key={w.id}>
-                  <td className="op-strong">{w.client}</td>
-                  <td>
-                    <span className="op-plat">
-                      <span className="op-plat-ic" style={{ background: pm.c }}>
-                        <span className="material-symbols-rounded">{pm.icon}</span>
-                      </span>
-                      {w.platform}
-                    </span>
-                  </td>
-                  <td>
-                    {w.postUrl ? (
-                      <a
-                        className="op-url"
-                        href={w.postUrl.startsWith("http") ? w.postUrl : `https://${w.postUrl}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {w.postUrl}<span className="material-symbols-rounded">open_in_new</span>
-                      </a>
-                    ) : (
-                      <span className="op-muted">— not yet published —</span>
-                    )}
-                  </td>
-                  <td><span className="op-anchor">{w.anchor}</span></td>
-                  <td>
-                    {w.verified === "verified" ? (
-                      <span className="status-pill ok">
-                        <span className="material-symbols-rounded op-pill-ic">verified</span>Verified
-                      </span>
-                    ) : (
-                      <span className="status-pill info">
-                        <span className="material-symbols-rounded op-pill-ic">hourglass_top</span>Pending
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {w.status === "needs_review" ? (
-                      <div className="op-toolset" style={{ gap: 6 }}>
-                        <button className="op-act update" onClick={() => act(w.id, "approve")} disabled={approve.isPending}>
-                          <span className="material-symbols-rounded">check</span>Approve
-                        </button>
-                        <button className="ghostbtn" onClick={() => act(w.id, "reject")} disabled={approve.isPending}>
-                          <span className="material-symbols-rounded">close</span>Reject
-                        </button>
-                      </div>
-                    ) : (
-                      <span className={`status-pill ${pipeline.cls}`}>{pipeline.label}</span>
-                    )}
-                  </td>
-                  <td className="op-muted">{w.published}</td>
-                </tr>
-              );
-            })}
+            {!web2Q.isLoading && !web2Q.isError && rows.length > 0 && (
+              <ReadMore
+                items={rows}
+                initialCount={10}
+                tableColSpan={7}
+                getKey={(w) => w.id}
+                renderItem={(w) => {
+                  const pm = PLATFORM_META[w.platform as Web2Platform];
+                  // Fallback for any status the backend emits that isn't in the map
+                  // (e.g. blocked/unchanged/error/skipped) — never crash the page.
+                  const pipeline = PIPELINE_META[w.status] ?? { label: w.status, cls: "mut" };
+                  return (
+                    <tr>
+                      <td className="op-strong">{w.client}</td>
+                      <td>
+                        <span className="op-plat">
+                          <span className="op-plat-ic" style={{ background: pm.c }}>
+                            <span className="material-symbols-rounded">{pm.icon}</span>
+                          </span>
+                          {w.platform}
+                        </span>
+                      </td>
+                      <td>
+                        {w.postUrl ? (
+                          <a
+                            className="op-url"
+                            href={w.postUrl.startsWith("http") ? w.postUrl : `https://${w.postUrl}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {w.postUrl}<span className="material-symbols-rounded">open_in_new</span>
+                          </a>
+                        ) : (
+                          <span className="op-muted">— not yet published —</span>
+                        )}
+                      </td>
+                      <td><span className="op-anchor">{w.anchor}</span></td>
+                      <td>
+                        {w.verified === "verified" ? (
+                          <span className="status-pill ok">
+                            <span className="material-symbols-rounded op-pill-ic">verified</span>Verified
+                          </span>
+                        ) : (
+                          <span className="status-pill info">
+                            <span className="material-symbols-rounded op-pill-ic">hourglass_top</span>Pending
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {w.status === "needs_review" ? (
+                          <div className="op-toolset" style={{ gap: 6 }}>
+                            <button className="op-act update" onClick={() => act(w.id, "approve")} disabled={approve.isPending}>
+                              <span className="material-symbols-rounded">check</span>Approve
+                            </button>
+                            <button className="ghostbtn" onClick={() => act(w.id, "reject")} disabled={approve.isPending}>
+                              <span className="material-symbols-rounded">close</span>Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <span className={`status-pill ${pipeline.cls}`}>{pipeline.label}</span>
+                        )}
+                      </td>
+                      <td className="op-muted">{w.published}</td>
+                    </tr>
+                  );
+                }}
+              />
+            )}
             {!web2Q.isLoading && !web2Q.isError && rows.length === 0 && (
               <tr><td colSpan={7} className="op-empty">No placements match this filter.</td></tr>
             )}

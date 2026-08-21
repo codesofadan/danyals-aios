@@ -51,7 +51,7 @@ def _silence_activity(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- GET grants --------------------------------------------------------------
 
 
-async def test_get_grants_resolves_all_17_for_specialist(
+async def test_get_grants_resolves_all_features_for_specialist(
     client: httpx.AsyncClient, as_role: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     as_role("owner")
@@ -61,13 +61,13 @@ async def test_get_grants_resolves_all_17_for_specialist(
     )
     monkeypatch.setattr(
         "app.routers.admin_users._read_grant_overrides",
-        lambda _caller, _uid: {"rank_tracker": "view"},
+        lambda _caller, _uid: {"technical_audit": "view"},
     )
     resp = await client.get("/api/v1/admin/users/u-2/grants")
     assert resp.status_code == 200
     grants = resp.json()["grants"]
-    assert len(grants) == len(FEATURE_KEYS)  # all 17 keys resolved
-    assert grants["rank_tracker"] == "view"
+    assert len(grants) == len(FEATURE_KEYS)  # all keys resolved
+    assert grants["technical_audit"] == "view"
     assert grants["billing"] == "off"  # ungranted -> off
 
 
@@ -105,7 +105,7 @@ async def test_put_grants_requires_access_control(
     # admin holds manage_team but NOT access_control (owner-only by the matrix).
     as_role("admin")
     resp = await client.put(
-        "/api/v1/admin/users/u-2/grants", json={"grants": {"rank_tracker": "full"}}
+        "/api/v1/admin/users/u-2/grants", json={"grants": {"technical_audit": "full"}}
     )
     assert resp.status_code == 403
 
@@ -119,7 +119,7 @@ async def test_put_grants_owner_target_is_locked(
         lambda _caller, uid: {"id": uid, "role": "owner"},
     )
     resp = await client.put(
-        "/api/v1/admin/users/u-owner/grants", json={"grants": {"rank_tracker": "off"}}
+        "/api/v1/admin/users/u-owner/grants", json={"grants": {"technical_audit": "off"}}
     )
     assert resp.status_code == 400
     assert "all-on" in resp.json()["error"]["message"]  # {"error": {...}} envelope
@@ -153,12 +153,12 @@ async def test_put_grants_writes_and_reads_back(
     )
     resp = await client.put(
         "/api/v1/admin/users/u-2/grants",
-        json={"grants": {"rank_tracker": "full", "reporting": "view"}},
+        json={"grants": {"technical_audit": "full", "reporting": "view"}},
     )
     assert resp.status_code == 200
-    assert store == {"rank_tracker": "full", "reporting": "view"}
+    assert store == {"technical_audit": "full", "reporting": "view"}
     grants = resp.json()["grants"]
-    assert grants["rank_tracker"] == "full" and grants["reporting"] == "view"
+    assert grants["technical_audit"] == "full" and grants["reporting"] == "view"
     assert grants["billing"] == "off"
 
 
@@ -238,7 +238,7 @@ async def test_invite_generates_credentials_and_argon2_hash(
 
     # The "content" template seeded that template's feature grants.
     assert rec_cursor.many, "expected template feature grants to be seeded"
-    assert len(rec_cursor.many[0][1]) == 9  # Content Creator template = 9 features
+    assert len(rec_cursor.many[0][1]) == 5  # Content Creator template = 5 features
 
 
 async def test_invite_custom_features_seed_explicit_grants(
@@ -250,11 +250,11 @@ async def test_invite_custom_features_seed_explicit_grants(
     resp = await client.post(
         "/api/v1/admin/users/invite",
         json={"email": "sam@x.com", "name": "Sam Vale", "role": "analyst",
-              "features": ["rank_tracker", "reporting"]},
+              "features": ["technical_audit", "reporting"]},
     )
     assert resp.status_code == 201
     seeded = {(k, lvl) for _uid, k, lvl in rec_cursor.many[0][1]}
-    assert seeded == {("rank_tracker", "full"), ("reporting", "full")}
+    assert seeded == {("technical_audit", "full"), ("reporting", "full")}
 
 
 async def test_invite_requires_manage_team(

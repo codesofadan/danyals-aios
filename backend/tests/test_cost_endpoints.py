@@ -62,6 +62,9 @@ class FakeCostRepo:
     def today_spent(self) -> float:
         return 12.5
 
+    def month_spent(self) -> float:
+        return 187.25
+
     def get_settings(self) -> dict[str, Any]:
         return self.settings
 
@@ -188,6 +191,7 @@ async def test_spend_halt_get_and_toggle(client: httpx.AsyncClient, wire: Callab
     body = got.json()
     assert body["halted"] is False
     assert body["todaySpent"] == 12.5
+    assert body["monthSpent"] == 187.25  # REAL calendar-month figure, not the all-time budget counter
     assert "dailyStop" not in body  # the per-day threshold is gone
     # toggling the halt requires owner/admin
     denied = await client.put("/api/v1/cost/spend-stop", json={"halted": True})
@@ -197,6 +201,7 @@ async def test_spend_halt_get_and_toggle(client: httpx.AsyncClient, wire: Callab
     on = await client.put("/api/v1/cost/spend-stop", json={"halted": True})
     assert on.status_code == 200
     assert on.json()["halted"] is True
+    assert on.json()["monthSpent"] == 187.25
     assert "dailyStop" not in on.json()
     # ...and toggling it OFF restores the normal state
     off = await client.put("/api/v1/cost/spend-stop", json={"halted": False})

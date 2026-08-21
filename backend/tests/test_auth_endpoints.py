@@ -52,7 +52,7 @@ async def test_features_shape(client: httpx.AsyncClient, as_role: Callable[[str]
     resp = await client.get("/api/v1/rbac/features")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body) == 17
+    assert len(body) == 11
     assert {"key", "label", "short", "icon", "group", "desc"} <= body[0].keys()
     assert {f["group"] for f in body} == {"Analytics", "Content", "Delivery", "Admin"}
 
@@ -80,7 +80,7 @@ async def test_templates_shape(client: httpx.AsyncClient, as_role: Callable[[str
     assert resp.status_code == 200
     tpls = {t["key"]: t for t in resp.json()}
     assert set(tpls) == {"seo", "content", "va", "super"}
-    assert len(tpls["super"]["grants"]) == 17
+    assert len(tpls["super"]["grants"]) == 11
     assert tpls["super"]["role"] == "Owner"
 
 

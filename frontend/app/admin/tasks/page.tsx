@@ -9,6 +9,7 @@ export default function TasksPage() {
         eyebrow="Delivery · Task Manager"
         title="Task Manager"
         searchPlaceholder="Search tasks, clients, assignees…"
+        hideSearch
       />
       <TaskManager />
     </>

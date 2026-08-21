@@ -19,6 +19,7 @@ import type {
   PermKey,
   TaskType,
   TaskPriority,
+  DeadlineRequest,
 } from "@/lib/data";
 
 export const MEMBERS_KEY = ["members"] as const;
@@ -227,6 +228,37 @@ export function useReviewTask() {
       void qc.invalidateQueries({ queryKey: MEMBERS_KEY });
       void qc.invalidateQueries({ queryKey: TEAM_MEMBERS_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
+    },
+  });
+}
+
+// --- deadline-change requests (admin side: read + decide) ---------------------
+
+/** A task's deadline-change requests (GET /tasks/{code}/deadline-requests). */
+export function useTaskDeadlineRequests(code: string, enabled = true) {
+  return useQuery({
+    queryKey: ["tasks", code, "deadline-requests"],
+    queryFn: () => api.get<DeadlineRequest[]>(`/tasks/${code}/deadline-requests`),
+    enabled: enabled && !!code,
+  });
+}
+
+/**
+ * A lead's approve/reject decision on a pending deadline-change request
+ * (POST /tasks/{code}/deadline-requests/{id}/decide). Approve actually moves the
+ * task's due_date server-side; reject leaves it untouched. Invalidates both the
+ * request list and the task board (the due date may have moved).
+ */
+export function useDecideDeadlineRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      code, requestId, action,
+    }: { code: string; requestId: string; action: "approve" | "reject" }) =>
+      api.post<DeadlineRequest>(`/tasks/${code}/deadline-requests/${requestId}/decide`, { action }),
+    onSuccess: (_data, { code }) => {
+      void qc.invalidateQueries({ queryKey: ["tasks", code, "deadline-requests"] });
+      void qc.invalidateQueries({ queryKey: TASKS_KEY });
     },
   });
 }

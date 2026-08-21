@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { MODULE_META, REC_OPEN, type RecStatus } from "@/lib/policy";
 import { useRecommendations } from "@/lib/hooks/policy";
+import ReadMore from "@/components/ui/ReadMore";
 
 const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string }> = {
   new: { label: "New", cls: "warn", icon: "fiber_new" },
@@ -60,41 +61,48 @@ export default function Recommendations() {
         {recsQ.isError && !recsQ.isLoading && (
           <div className="pr-empty pr-recs-empty">Couldn&apos;t load recommendations — {(recsQ.error as Error)?.message ?? "try again"}.</div>
         )}
-        {!recsQ.isLoading && !recsQ.isError && rows.map((r) => {
-          const mod = MODULE_META[r.target];
-          const st = STATUS_META[r.status] ?? { label: r.status, cls: "mut", icon: "help" };
-          const settled = r.status === "applied" || r.status === "dismissed";
-          return (
-            <article className={`pr-rec ${settled ? "settled" : ""}`} key={r.id}>
-              <div className="pr-rec-head">
-                <div className="pr-rec-title">{r.title}</div>
-                <span className={`status-pill ${st.cls}`}>
-                  <span className="material-symbols-rounded pr-st-ic">{st.icon}</span>{st.label}
-                </span>
-              </div>
+        {!recsQ.isLoading && !recsQ.isError && rows.length > 0 && (
+          <ReadMore
+            items={rows}
+            initialCount={10}
+            getKey={(r) => r.id}
+            renderItem={(r) => {
+              const mod = MODULE_META[r.target];
+              const st = STATUS_META[r.status] ?? { label: r.status, cls: "mut", icon: "help" };
+              const settled = r.status === "applied" || r.status === "dismissed";
+              return (
+                <article className={`pr-rec ${settled ? "settled" : ""}`}>
+                  <div className="pr-rec-head">
+                    <div className="pr-rec-title">{r.title}</div>
+                    <span className={`status-pill ${st.cls}`}>
+                      <span className="material-symbols-rounded pr-st-ic">{st.icon}</span>{st.label}
+                    </span>
+                  </div>
 
-              <div className="pr-rec-why">
-                <span className="pr-rec-k">Why it matters</span>
-                {r.why}
-              </div>
+                  <div className="pr-rec-why">
+                    <span className="pr-rec-k">Why it matters</span>
+                    {r.why}
+                  </div>
 
-              <div className="pr-rec-tags">
-                <span className="pr-tag"><span className="material-symbols-rounded">{mod.icon}</span>{mod.label}</span>
-                <span className="pr-tag"><span className="material-symbols-rounded">crop_free</span>{r.scope}</span>
-                <span className={`pr-region ${r.region}`}>
-                  <span className="material-symbols-rounded">{r.region === "global" ? "public" : "flag"}</span>
-                  {r.regionLabel}
-                </span>
-                {r.clients && <span className="pr-tag mut"><span className="material-symbols-rounded">groups</span>{r.clients}</span>}
-              </div>
+                  <div className="pr-rec-tags">
+                    <span className="pr-tag"><span className="material-symbols-rounded">{mod.icon}</span>{mod.label}</span>
+                    <span className="pr-tag"><span className="material-symbols-rounded">crop_free</span>{r.scope}</span>
+                    <span className={`pr-region ${r.region}`}>
+                      <span className="material-symbols-rounded">{r.region === "global" ? "public" : "flag"}</span>
+                      {r.regionLabel}
+                    </span>
+                    {r.clients && <span className="pr-tag mut"><span className="material-symbols-rounded">groups</span>{r.clients}</span>}
+                  </div>
 
-              <div className="pr-rec-action">
-                <span className="material-symbols-rounded">arrow_forward</span>
-                <span><span className="pr-rec-k">Recommended action</span>{r.action}</span>
-              </div>
-            </article>
-          );
-        })}
+                  <div className="pr-rec-action">
+                    <span className="material-symbols-rounded">arrow_forward</span>
+                    <span><span className="pr-rec-k">Recommended action</span>{r.action}</span>
+                  </div>
+                </article>
+              );
+            }}
+          />
+        )}
         {!recsQ.isLoading && !recsQ.isError && rows.length === 0 && (
           <div className="pr-empty pr-recs-empty">No {filter} recommendations.</div>
         )}

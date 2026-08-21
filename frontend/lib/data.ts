@@ -388,6 +388,25 @@ export type Task = {
   status: TaskStatus;
   due: string;
   proofUrl: string; // proof-of-completion link (published URL / delivered report); "" when unset
+  startedAt?: string | null; // ISO instant the assignee moved todo -> in_progress (real timer, set once)
+  completedAt?: string | null; // ISO instant the task reached its terminal state (done)
+};
+
+// A team member's request to move a task's due date (public.task_deadline_requests).
+// The assignee may file one within 12h of startedAt (fallback: the task's creation);
+// only a lead's approve/reject decision ever moves the real due date.
+export type DeadlineRequestStatus = "pending" | "approved" | "rejected";
+
+export type DeadlineRequest = {
+  id: string;
+  taskCode: string;
+  requestedBy: string;
+  requestedDueDate: string; // ISO date (YYYY-MM-DD)
+  reason: string;
+  status: DeadlineRequestStatus;
+  decidedBy: string;
+  decidedAt: string;
+  createdAt: string;
 };
 
 export const tasks_seed: Task[] = [
@@ -442,7 +461,7 @@ export const activity_seed: Activity[] = [
 // ============================================================
 // Add Team Member — access model
 // Grounded in danyal-AIOS-Roles-and-Access-Control.pdf:
-// 17 switchable features + 3 ready-made role templates
+// 11 switchable features + 3 ready-made role templates
 // (SEO Specialist, Content Creator, Virtual Assistant) plus
 // the all-access Super Admin. Grants below mirror the doc's
 // "Full Access Matrix" (§07) — a feature is granted when the
@@ -467,15 +486,9 @@ export type AccessFeature = {
   desc: string; // what it unlocks
 };
 
-// The 17 features you switch on or off (doc §01 / §07).
+// The 11 features you switch on or off (doc §01 / §07).
 export const accessFeatures: AccessFeature[] = [
-  { key: "rank_tracker", label: "Rank Tracker", short: "Rank Tracker", icon: "trending_up", group: "Analytics", desc: "Track keyword positions & ranking history" },
   { key: "technical_audit", label: "Technical Audit", short: "Tech Audit", icon: "troubleshoot", group: "Analytics", desc: "Run site audits, review & mark issues fixed" },
-  { key: "on_page", label: "On-Page Optimizer", short: "On-Page", icon: "tune", group: "Analytics", desc: "Review & apply on-page recommendations" },
-  { key: "keyword_research", label: "Keyword Research", short: "Keywords", icon: "search", group: "Analytics", desc: "Find, group & assign keywords" },
-  { key: "backlink_manager", label: "Backlink Manager", short: "Backlinks", icon: "hub", group: "Analytics", desc: "Monitor profile, flag lost or toxic links" },
-  { key: "competitor_intel", label: "Competitor Intel", short: "Competitors", icon: "insights", group: "Analytics", desc: "Compare clients & read gap analysis" },
-  { key: "local_seo", label: "Local SEO", short: "Local SEO", icon: "storefront", group: "Analytics", desc: "Track local & map-pack rankings" },
   { key: "content_pipeline", label: "Content Pipeline", short: "Content", icon: "article", group: "Content", desc: "Briefs, AI drafting, edit & review" },
   { key: "publishing", label: "Publishing", short: "Publishing", icon: "rocket_launch", group: "Content", desc: "Send approved content live to the CMS" },
   { key: "reporting", label: "Reporting", short: "Reporting", icon: "summarize", group: "Delivery", desc: "Build, schedule & send client reports" },
@@ -505,17 +518,17 @@ export const roleTemplates: RoleTemplate[] = [
   {
     key: "seo", label: "SEO Specialist", tagline: "Analytics & optimization", icon: "query_stats",
     role: "Specialist", color: SERIES.c4,
-    grants: ["rank_tracker", "technical_audit", "on_page", "keyword_research", "backlink_manager", "competitor_intel", "local_seo", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
+    grants: ["technical_audit", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
   },
   {
     key: "content", label: "Content Creator", tagline: "Copywriting & publishing", icon: "edit_note",
     role: "Specialist", color: SERIES.c3,
-    grants: ["rank_tracker", "on_page", "keyword_research", "competitor_intel", "content_pipeline", "publishing", "reporting", "task_board", "client_setup"],
+    grants: ["content_pipeline", "publishing", "reporting", "task_board", "client_setup"],
   },
   {
     key: "va", label: "Virtual Assistant", tagline: "Coordination & admin", icon: "support_agent",
     role: "Manager", color: SERIES.c1,
-    grants: ["rank_tracker", "content_pipeline", "local_seo", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
+    grants: ["content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
   },
   {
     key: "super", label: "Super Admin", tagline: "Full access — everything on", icon: "shield_person",
@@ -644,11 +657,11 @@ export const PORTAL_MEMBER_ID = "u-bilal";
 // keyed by teamMembers.id. Drives the "My Access" view honestly.
 export const memberGrants: Record<string, string[]> = {
   "u-danyal": ALL_KEYS, // Owner — everything on
-  "u-ayesha": ["rank_tracker", "on_page", "keyword_research", "competitor_intel", "content_pipeline", "publishing", "reporting", "task_board", "client_setup", "client_onboarding"], // Content Lead
-  "u-bilal": ["rank_tracker", "technical_audit", "on_page", "keyword_research", "backlink_manager", "competitor_intel", "local_seo", "reporting", "task_board", "data_import"], // Technical SEO
-  "u-hina": ["rank_tracker", "on_page", "keyword_research", "content_pipeline", "reporting", "task_board"], // Content Writer
-  "u-usman": ["rank_tracker", "technical_audit", "backlink_manager", "competitor_intel", "reporting", "task_board"], // Backlink Analyst
-  "u-zoya": ["rank_tracker", "on_page", "keyword_research", "local_seo", "content_pipeline", "reporting", "task_board", "client_setup"], // Local SEO
+  "u-ayesha": ["content_pipeline", "publishing", "reporting", "task_board", "client_setup", "client_onboarding"], // Content Lead
+  "u-bilal": ["technical_audit", "reporting", "task_board", "data_import"], // Technical SEO
+  "u-hina": ["content_pipeline", "reporting", "task_board"], // Content Writer
+  "u-usman": ["technical_audit", "reporting", "task_board"], // Backlink Analyst
+  "u-zoya": ["content_pipeline", "reporting", "task_board", "client_setup"], // Local SEO
   "u-sara": ["reporting", "task_board", "client_onboarding", "client_setup", "data_import", "billing"], // Operations Admin
   "u-imran": ["reporting"], // Client Success (Viewer, invited)
 };

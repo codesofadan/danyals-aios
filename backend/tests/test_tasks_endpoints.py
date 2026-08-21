@@ -20,6 +20,7 @@ pytestmark = pytest.mark.unit
 
 _TASK_FIELDS = {
     "id", "title", "client", "type", "assignee", "priority", "status", "due", "proofUrl",
+    "startedAt", "completedAt",
 }
 
 
@@ -337,6 +338,44 @@ async def test_review_non_review_status_409(
     wire("manager", "u-lead")
     resp = await client.post("/api/v1/tasks/J-1/review", json={"action": "approve"})
     assert resp.status_code == 409
+
+
+# --- all-way comms: a non-review task completing notifies leads (TEAM -> ADMIN) ---
+
+async def test_advance_to_done_notifies_leads_for_non_review_type(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_notify_leads(*, kind: str, title: str, body: str = "", **_k: Any) -> None:
+        calls.append((kind, title))
+
+    monkeypatch.setattr("app.routers.tasks.notify_leads", _fake_notify_leads)
+    repo.seed(code="J-1", status="in_progress", type="technical_audit", assignee_id="u-1")
+    wire("specialist", "u-1")
+    resp = await client.post("/api/v1/tasks/J-1/advance")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "done"
+    assert calls and calls[0][0] == "task_completed"
+    assert "J-1" in calls[0][1]
+
+
+async def test_advance_to_review_does_not_also_fire_task_completed(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def _fake_notify_leads(*, kind: str, title: str, body: str = "", **_k: Any) -> None:
+        calls.append(kind)
+
+    monkeypatch.setattr("app.routers.tasks.notify_leads", _fake_notify_leads)
+    repo.seed(code="J-1", status="in_progress", type="content_sprint", assignee_id="u-1")
+    wire("specialist", "u-1")
+    resp = await client.post("/api/v1/tasks/J-1/advance")
+    assert resp.status_code == 200
+    assert calls == ["content_review"]  # never both
 
 
 # --- all-way comms: the review decision emails the assignee (LEAD -> TEAM) --------

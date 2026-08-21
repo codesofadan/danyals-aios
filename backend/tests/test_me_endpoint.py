@@ -127,12 +127,12 @@ async def test_my_grants_self_serve_no_access_control_permission_needed(
     wire("specialist", "u-1")
     monkeypatch.setattr(
         "app.routers.admin_users._read_grant_overrides",
-        lambda _caller, _target: {"rank_tracker": "view"},
+        lambda _caller, _target: {"technical_audit": "view"},
     )
     resp = await client.get("/api/v1/me/grants")
     assert resp.status_code == 200
     grants = resp.json()["grants"]
-    assert grants["rank_tracker"] == "view"
+    assert grants["technical_audit"] == "view"
     assert grants["billing"] == "off"  # ungranted -> off
 
 

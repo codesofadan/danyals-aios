@@ -258,6 +258,7 @@
 .pr-act.dismiss.on { color: var(--crit); background: color-mix(in srgb, var(--crit) 14%, transparent); border-color: color-mix(in srgb, var(--crit) 40%, transparent); }
 .pr-act:disabled { cursor: default; }
 .pr-recs-empty { grid-column: 1 / -1; }
+.pr-recs .read-more-control { grid-column: 1 / -1; }
 
 /* segmented toggle in header (borrow global .seg look) */
 .pr-cc .seg button { padding: 5px 11px; border-radius: 8px; cursor: pointer; }

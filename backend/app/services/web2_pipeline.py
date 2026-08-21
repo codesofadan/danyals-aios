@@ -47,6 +47,7 @@ from typing import Any, Literal, Protocol
 from app.config import Settings
 from app.logging_setup import get_logger
 from app.schemas.content import auto_framework
+from app.services import pricing
 from app.services.content_generator import (
     DEFAULT_TUNING,
     GenerationContext,
@@ -55,6 +56,7 @@ from app.services.content_generator import (
     generate,
 )
 from app.services.content_research import (
+    ContentSpendBlocked,
     FormatDecision,
     ResearchBrief,
     Teardown,
@@ -64,7 +66,7 @@ from app.services.content_research import (
     build_registry,
 )
 from app.services.cost_gate import CostGate, GateContext, GateDecision
-from integrations.llm import Summarizer
+from integrations.llm import LLMResult, Summarizer
 from integrations.web2_publishers import (
     DRAFT_ONLY_PLATFORMS,
     WEB2_PLATFORMS,
@@ -252,6 +254,71 @@ def _seed_brief(keyword: str, geo: str | None, da: float | None) -> ResearchBrie
         degraded=False,
         notes=["web2 property brief: seeded from the anchor (no live SERP research)"],
     )
+
+
+class _Web2GatedWriter:
+    """A ``Summarizer`` that meters every draft call through the cost gate, mirroring
+    ``workers.tasks.content._ContentGatedWriter`` (duplicated locally rather than
+    imported so this module stays free of that module's Celery/DB import chain -
+    ``web2_pipeline`` is deliberately pure of Celery + DB + network).
+
+    ``content_generator.generate()`` makes MULTIPLE separate ``writer.summarize()``
+    calls per article (one per section, one for the direct-answer block, one for
+    photo briefs); each is individually gated + committed here at its REAL cost
+    (``pricing.anthropic_cost`` from the call's actual token usage), never a single
+    flat estimate for the whole article. A gate block mid-draft raises
+    :class:`ContentSpendBlocked`, which ``run_write`` catches to HOLD the placement
+    (never a half-billed, half-written draft).
+    """
+
+    def __init__(
+        self,
+        inner: Summarizer,
+        gate: CostGate,
+        *,
+        settings: Settings,
+        client_id: str | None,
+        job_id: str = "",
+        client_name: str = "",
+    ) -> None:
+        self._inner = inner
+        self._gate = gate
+        self._settings = settings
+        self._client_id = client_id
+        self._job_id = job_id
+        self._client_name = client_name
+        self.calls = 0
+        self.spent: float = 0.0
+
+    def _ctx(self) -> GateContext:
+        return GateContext(
+            feature_key=_WRITE_FEATURE,
+            client_id=self._client_id,
+            provider=_WRITE_PROVIDER,
+            estimated_cost=float(self._settings.content_generate_cost_estimate),
+            job_id=self._job_id,
+            job_type="content",
+            client_name=self._client_name,
+        )
+
+    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        self.calls += 1
+        ctx = self._ctx()
+        decision = self._gate.evaluate(ctx)
+        if not decision.allowed:
+            raise ContentSpendBlocked(decision.outcome)
+        result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens)
+        # Commit the ACTUAL draft spend from the call's real token usage x the
+        # model's unit price (pricing.py), not the flat per-call estimate.
+        actual = pricing.anthropic_cost(
+            self._settings,
+            model=model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+        self.spent += actual
+        self._gate.commit(ctx, actual)
+        return result
 
 
 # --------------------------------------------------------------------------- #
@@ -456,7 +523,8 @@ def run_write(
                 reason="providers_unconfigured", needs=article.needs,
             )
 
-        # R5: cost pre-check BEFORE the paid draft.
+        # R5: cost pre-check BEFORE the paid draft (blocks over-budget clients before
+        # any work happens; the real per-call spend is metered below).
         ctx = _write_ctx(row, web2_id, settings)
         decision = gate.evaluate(ctx)
         if not decision.allowed:
@@ -465,23 +533,38 @@ def run_write(
                 web2_id, "write", "blocked", reason=f"spend_blocked:{decision.outcome}"
             )
 
+        # Every internal writer.summarize() call the generator makes (one per
+        # section + the answer block + photo briefs) is individually gated and
+        # committed to the cost log at its REAL usage-derived cost - never one flat
+        # estimate for the whole article.
+        gated_writer = _Web2GatedWriter(
+            writer, gate, settings=settings, client_id=_client_id(row), job_id=web2_id,
+            client_name=str(row.get("client_name") or ""),
+        )
         article = write(
-            the_plan, writer=writer, model=model,
+            the_plan, writer=gated_writer, model=model,
             source_pack=client.source_pack, context=client.context, tuning=tuning,
         )
-        gate.commit(ctx, ctx.estimated_cost)
         track(
             store, web2_id, status="needs_review", body_md=article.body_md,
             error="" if article.publishable else "draft has unresolved [NEEDS:] gaps",
         )
         logger.info(
             "web2_write_drafted", web2_id=web2_id, words=article.word_count,
-            publishable=article.publishable,
+            publishable=article.publishable, spent=gated_writer.spent,
         )
         return Web2Outcome(
             web2_id, "write", "needs_review",
             reason="drafted" if article.publishable else "drafted_with_gaps",
             needs=article.needs,
+        )
+    except ContentSpendBlocked as blocked:
+        # A gate block landed mid-draft (budget/halt tripped between calls): no
+        # half-written row is persisted (track() never ran above), so the row stays
+        # at "draft" for a clean retry - never a half-billed, half-written draft.
+        logger.info("web2_write_blocked_mid_draft", web2_id=web2_id, outcome=blocked.outcome)
+        return Web2Outcome(
+            web2_id, "write", "blocked", reason=f"spend_blocked:{blocked.outcome}"
         )
     except Exception as exc:  # never re-raise (acks_late would redeliver = double spend)
         logger.exception("web2_write_error", web2_id=web2_id)

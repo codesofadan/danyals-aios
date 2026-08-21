@@ -94,12 +94,16 @@ async def list_cost_log(
 # --- spend halt (the global API-spend kill-switch) ---------------------------
 @router.get("/spend-stop", response_model=SpendStopResponse)
 async def get_spend_stop(repo: CostRepoDep, _user: CurrentUserDep) -> SpendStopResponse:
-    """Read the global API-spend HALT state (+ today's informational paid spend)."""
+    """Read the global API-spend HALT state (+ today's/this month's informational
+    real paid spend, summed live from ``cost_log`` - never the all-time
+    ``client_budgets.spent`` counter)."""
     settings = await asyncio.to_thread(repo.get_settings)
     today = await asyncio.to_thread(repo.today_spent)
+    month = await asyncio.to_thread(repo.month_spent)
     return SpendStopResponse(
         halted=bool(settings.get("halted", False)),
         today_spent=today,
+        month_spent=month,
     )
 
 
@@ -114,6 +118,7 @@ async def set_spend_stop(
     """
     settings = await asyncio.to_thread(repo.update_settings, {"halted": body.halted})
     today = await asyncio.to_thread(repo.today_spent)
+    month = await asyncio.to_thread(repo.month_spent)
     await record_activity(
         actor,
         kind="access",
@@ -123,4 +128,5 @@ async def set_spend_stop(
     return SpendStopResponse(
         halted=bool(settings.get("halted", False)),
         today_spent=today,
+        month_spent=month,
     )

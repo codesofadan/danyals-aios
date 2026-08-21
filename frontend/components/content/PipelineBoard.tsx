@@ -1,6 +1,7 @@
 "use client";
 
 import { COLUMNS, PAGE_TYPE_LABELS, type ContentJob, type ColumnKey } from "@/lib/content";
+import ReadMore from "@/components/ui/ReadMore";
 
 const PAGE_ICON: Record<ContentJob["pageType"], string> = {
   service: "home_repair_service",
@@ -89,9 +90,16 @@ export default function PipelineBoard({
                 <span className="co-col-n">{items.length}</span>
               </div>
               <div className="co-col-body">
-                {items.length === 0
-                  ? <div className="co-empty">No jobs</div>
-                  : items.map((j) => <JobCard key={j.id} job={j} onSelect={onSelect} />)}
+                {items.length === 0 ? (
+                  <div className="co-empty">No jobs</div>
+                ) : (
+                  <ReadMore
+                    items={items}
+                    initialCount={10}
+                    getKey={(j) => j.id}
+                    renderItem={(j) => <JobCard job={j} onSelect={onSelect} />}
+                  />
+                )}
               </div>
             </div>
           );

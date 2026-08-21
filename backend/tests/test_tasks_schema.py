@@ -22,6 +22,7 @@ pytestmark = pytest.mark.unit
 # over the wire it serializes as proofUrl - asserted in test_tasks_endpoints.py.)
 _TASK_FIELDS = {
     "id", "title", "client", "type", "assignee", "priority", "status", "due", "proof_url",
+    "started_at", "completed_at",
 }
 
 

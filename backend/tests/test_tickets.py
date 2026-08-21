@@ -342,3 +342,105 @@ async def test_status_change_survives_email_layer_unconfigured(
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "pending"
+
+
+# --- all-way comms: a free-text reply (ADMIN/LEAD -> CLIENT) -----------------------
+
+async def test_reply_requires_manage_clients(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None]
+) -> None:
+    seeded = repo.seed()
+    wire("specialist", "u-spec")  # specialists lack manage_clients
+    resp = await client.post(
+        f"/api/v1/tickets/{seeded['code']}/reply", json={"message": "On it."}
+    )
+    assert resp.status_code == 403
+
+
+async def test_reply_unknown_code_404(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    wire("admin", "u-admin")
+    resp = await client.post(
+        "/api/v1/tickets/T-9999/reply", json={"message": "hi"}
+    )
+    assert resp.status_code == 404
+
+
+async def test_reply_rejects_blank_message(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None]
+) -> None:
+    seeded = repo.seed()
+    wire("admin", "u-admin")
+    resp = await client.post(
+        f"/api/v1/tickets/{seeded['code']}/reply", json={"message": ""}
+    )
+    assert resp.status_code == 422
+
+
+async def test_reply_writes_the_reply_column_and_emails_the_client(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    async def _fake_email_client(
+        client_id: str, subject: str, html: str, text: str = "", **_k: Any
+    ) -> None:
+        calls.append((client_id, subject, text))
+
+    monkeypatch.setattr("app.routers.tickets.email_client", _fake_email_client)
+    seeded = repo.seed(client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.post(
+        f"/api/v1/tickets/{seeded['code']}/reply",
+        json={"message": "We reset your portal password - check your inbox."},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == _TICKET_KEYS  # the reply text itself never leaks onto the wire
+
+    # the dead `reply` column (0033) is finally written, plus who/when
+    row = repo.rows[seeded["code"]]
+    assert row["reply"] == "We reset your portal password - check your inbox."
+    assert row["replied_by"] == "u-admin"
+    assert row["replied_at"]
+
+    # the client gets the REAL reply text, not a canned status label
+    assert calls and calls[0][0] == "cl-atlas"
+    assert "We reset your portal password" in calls[0][2]
+
+
+async def test_reply_to_a_non_client_ticket_does_not_email(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_email_client(
+        client_id: str, subject: str, html: str, text: str = "", **_k: Any
+    ) -> None:
+        calls.append((client_id, subject))
+
+    monkeypatch.setattr("app.routers.tickets.email_client", _fake_email_client)
+    seeded = repo.seed(client_id=None)
+    wire("admin", "u-admin")
+    resp = await client.post(
+        f"/api/v1/tickets/{seeded['code']}/reply", json={"message": "internal note only"}
+    )
+    assert resp.status_code == 200
+    assert calls == []
+
+
+async def test_reply_survives_email_layer_unconfigured(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None]
+) -> None:
+    # No monkeypatch: the real email_client runs with no DB / no Resend key and must
+    # degrade to a no-op - the reply still returns 200 and persists.
+    seeded = repo.seed(client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.post(
+        f"/api/v1/tickets/{seeded['code']}/reply", json={"message": "hello"}
+    )
+    assert resp.status_code == 200
+    assert repo.rows[seeded["code"]]["reply"] == "hello"

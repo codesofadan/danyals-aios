@@ -105,6 +105,19 @@ class CostRepo:
             rows = cur.fetchall()
         return float(sum(float(r.get("cost", 0) or 0) for r in rows))
 
+    def month_spent(self) -> float:
+        """Real calendar-month-to-date spend, summed from ``cost_log`` (same pattern as
+        ``today_spent``, just a wider UTC window: the 1st of the current month at
+        00:00 UTC). ``client_budgets.spent`` is an ALL-TIME cumulative counter
+        (``add_budget_spend()`` only ever increments; there is no monthly reset
+        anywhere in the schema), so it is NOT a "this month" figure - a "Spend this
+        month" UI tile must read this real, calendar-month-scoped sum instead."""
+        start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select cost from public.cost_log where created_at >= %s", (start,))
+            rows = cur.fetchall()
+        return float(sum(float(r.get("cost", 0) or 0) for r in rows))
+
     # --- spend-halt settings --------------------------------------------------
     def get_settings(self) -> dict[str, Any]:
         with rls_connection(self._user_id) as cur:

@@ -8,6 +8,7 @@ export default function WordPressConnectionsPage() {
         eyebrow="Admin · Delivery"
         title="WordPress Connections"
         searchPlaceholder="Search clients, sites…"
+        hideSearch
       />
       <WpConnections />
     </>

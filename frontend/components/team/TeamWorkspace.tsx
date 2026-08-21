@@ -9,7 +9,6 @@ import {
 import { useClients } from "@/lib/hooks/clients";
 import TeamRoster, { type NewMember } from "./TeamRoster";
 import AssignTasks, { type NewTask } from "./AssignTasks";
-import TeamPerformance from "./TeamPerformance";
 import ActivityLog from "./ActivityLog";
 import AccessControl from "./AccessControl";
 
@@ -25,12 +24,11 @@ function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }
   return null;
 }
 
-type TabKey = "roster" | "assign" | "performance" | "activity" | "access";
+type TabKey = "roster" | "assign" | "activity" | "access";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: "roster", label: "Roster", icon: "badge" },
+  { key: "roster", label: "Team Members", icon: "badge" },
   { key: "assign", label: "Assign Tasks", icon: "assignment_ind" },
-  { key: "performance", label: "Performance", icon: "insights" },
   { key: "activity", label: "Activity Log", icon: "history" },
   { key: "access", label: "Access Control", icon: "admin_panel_settings" },
 ];
@@ -103,7 +101,7 @@ export default function TeamWorkspace() {
       <div className="card-h">
         <div>
           <div className="ct">Team Workspace</div>
-          <div className="cs">Roster, assignments, performance, audit trail &amp; role-based access — one place.</div>
+          <div className="cs">Team Members, assignments, audit trail &amp; role-based access — one place.</div>
         </div>
       </div>
 
@@ -149,7 +147,6 @@ export default function TeamWorkspace() {
             />
           </>
         ))}
-        {tab === "performance" && (panelGuard(membersQ) ?? <TeamPerformance members={members} />)}
         {tab === "activity" && (panelGuard(activityQ) ?? <ActivityLog log={activity} />)}
         {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} />)}
       </div>

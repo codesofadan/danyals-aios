@@ -219,6 +219,20 @@ export default function LeadsWorkspace() {
                             <span className="material-symbols-rounded">picture_as_pdf</span>
                             PDF
                           </button>
+                          <button
+                            className="lead-dl"
+                            title={r.has_report ? "Download the raw findings JSON" : "No findings JSON yet"}
+                            disabled={!r.has_report}
+                            onClick={() =>
+                              downloadFile(
+                                `/public/audits/${encodeURIComponent(r.report_token)}/findings.json`,
+                                `free-audit-${r.url.replace(/[^a-z0-9]+/gi, "-")}.json`,
+                              )
+                            }
+                          >
+                            <span className="material-symbols-rounded">data_object</span>
+                            JSON
+                          </button>
                         </td>
                       </tr>
                     );

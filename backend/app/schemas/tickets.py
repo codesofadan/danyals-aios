@@ -51,6 +51,12 @@ class TicketStatusUpdate(BaseModel):
     status: TicketStatus
 
 
+class TicketReplyRequest(BaseModel):
+    """POST /tickets/{code}/reply body: an admin/lead's free-text reply."""
+
+    message: str = Field(min_length=1, max_length=8000)
+
+
 class TicketResponse(BaseModel):
     """One ticket in the frontend ``Ticket`` shape - and ONLY those 7 keys.
 

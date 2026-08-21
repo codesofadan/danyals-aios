@@ -9,6 +9,7 @@ export default function CostControls() {
         eyebrow="Platform · Cost Controls"
         title="Cost Controls"
         searchPlaceholder="Search clients, jobs, providers…"
+        hideSearch
       />
 
       <CostWorkspace />

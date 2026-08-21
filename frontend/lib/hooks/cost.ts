@@ -8,8 +8,10 @@
 //
 // Spend HALT: /cost/spend-stop is now a single agency-global kill-switch (the old
 // per-day dollar THRESHOLD was removed). The RESPONSE is camelCase
-// (halted/todaySpent, from SpendStopResponse serialization_alias); the toggle body
-// is { halted } (SpendStopUpdate). `useSpendHalted` is the shared, lightweight read
+// (halted/todaySpent/monthSpent, from SpendStopResponse serialization_alias); the
+// toggle body is { halted } (SpendStopUpdate). `monthSpent` is REAL calendar-month
+// spend (summed from cost_log) - the honest source for a "this month" figure, unlike
+// ClientBudget.spent (all-time). `useSpendHalted` is the shared, lightweight read
 // every dashboard surface keys its paid-action CTAs off of.
 // ============================================================
 
@@ -61,9 +63,11 @@ export function useCostLogPage(offset: number, limit: number) {
   });
 }
 
-// SpendStopResponse (serialized): the global API-spend HALT state + today's live
-// paid spend (informational; there is no per-day threshold any more).
-export type SpendStop = { halted: boolean; todaySpent: number };
+// SpendStopResponse (serialized): the global API-spend HALT state + today's/this
+// month's live paid spend (informational; there is no per-day threshold any more).
+// `monthSpent` is REAL calendar-month-to-date spend summed from cost_log - unlike
+// ClientBudget.spent (an all-time cumulative counter), it actually resets monthly.
+export type SpendStop = { halted: boolean; todaySpent: number; monthSpent: number };
 
 export function useSpendStop() {
   return useQuery({

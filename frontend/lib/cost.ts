@@ -96,8 +96,10 @@ export type ClientBudget = {
   id: string;
   cn: string;    // client name
   tier: SubTier;
-  cap: number;   // monthly spend ceiling (USD)
-  spent: number; // month-to-date spend (USD)
+  cap: number;   // spend ceiling (USD) - an all-time cap, not a monthly one
+  spent: number; // ALL-TIME cumulative spend (USD) - client_budgets.spent only ever
+                 // increments (no monthly reset), so this is NOT "this month"; use
+                 // SpendStop.monthSpent for a real calendar-month figure
   c: string;     // accent (SERIES slot)
 };
 
@@ -150,7 +152,7 @@ export const DIAL_MODES: DialMode[] = ["api", "byhand", "off"];
 // --- Global settings --------------------------------------------------------
 // The global API-spend HALT is a single agency-global kill-switch (owner/admin).
 // There is no per-day dollar threshold any more. GET /cost/spend-stop returns
-// only { halted, todaySpent }.
+// { halted, todaySpent, monthSpent }.
 
 export const usd = (n: number, dp = 0) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });

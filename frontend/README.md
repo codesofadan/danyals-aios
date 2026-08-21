@@ -29,7 +29,6 @@ components/
   StatTiles.tsx     KPI row with anime.js count-ups
   charts/
     AuditVolumeChart.tsx   three.js 3D bar chart (fixed 3/4 view, hover tooltip)
-    TrafficChart.tsx       animated SVG area line + hover crosshair
     TeamTracking.tsx       animated bars + count-ups
     ClientProgress.tsx     animated SVG progress rings
 lib/

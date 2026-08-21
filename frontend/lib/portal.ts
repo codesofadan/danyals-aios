@@ -29,3 +29,17 @@ export function cardAction(t: Task): { label: string; icon: string } | null {
   }
   return null; // review = awaiting sign-off, done = delivered
 }
+
+// The assignee may request a due-date change only within 12h of `startedAt`. This
+// is a UX nicety mirroring the server rule — the real gate is enforced there
+// (`POST /tasks/{code}/deadline-requests` 409s past the window); a task that
+// hasn't been started yet always shows the option (the server anchors on the
+// task's assignment time instead, which the frontend doesn't have on hand).
+const DEADLINE_REQUEST_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+export function withinDeadlineRequestWindow(t: Task): boolean {
+  if (!t.startedAt) return true;
+  const started = new Date(t.startedAt).getTime();
+  if (Number.isNaN(started)) return true;
+  return Date.now() - started <= DEADLINE_REQUEST_WINDOW_MS;
+}

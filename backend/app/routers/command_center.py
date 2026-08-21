@@ -67,6 +67,7 @@ async def command_center(
     tasks = await asyncio.to_thread(tasks_repo.list_tasks)
     budgets = await asyncio.to_thread(cost_repo.list_budgets)
     settings = await asyncio.to_thread(cost_repo.get_settings)
+    month_spent = await asyncio.to_thread(cost_repo.month_spent)
     rec_rows = await asyncio.to_thread(policy_repo.list_recommendations)
     users_by_id = await asyncio.to_thread(_resolve_assignees, tasks_repo, tasks)
     gsc_rows = await asyncio.to_thread(site_analytics_repo.list_gsc)
@@ -82,4 +83,5 @@ async def command_center(
         rec_rows=rec_rows,
         gsc_rows=gsc_rows,
         ga4_rows=ga4_rows,
+        month_spent=month_spent,
     )

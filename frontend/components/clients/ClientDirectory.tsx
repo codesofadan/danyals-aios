@@ -190,7 +190,6 @@ export default function ClientDirectory() {
                 <th>Primary contact</th>
                 <th>Subscription</th>
                 <th className="num">Sites</th>
-                <th className="num">MRR</th>
                 <th className="num">Actions</th>
               </tr>
             </thead>
@@ -214,7 +213,6 @@ export default function ClientDirectory() {
                       </div>
                     </td>
                     <td className="num">{c.sites}</td>
-                    <td className="num mrr">{c.mrr ? `$${c.mrr.toLocaleString()}` : "—"}</td>
                     <td className="num">
                       <div className="cd-rowactions">
                         <button className="cd-manage" onClick={() => setInfoEditId(c.id)} title={`Edit ${c.cn}`}>
@@ -243,9 +241,7 @@ export default function ClientDirectory() {
               <tr>
                 <th>Client</th>
                 <th>Admin login</th>
-                <th className="num">Seats</th>
-                <th>2FA</th>
-                <th>Last login</th>
+                <th>Password</th>
               </tr>
             </thead>
             <tbody>
@@ -263,15 +259,7 @@ export default function ClientDirectory() {
                       <CopyButton value={c.portal.admin} label="admin login" />
                     </div>
                   </td>
-                  <td className="num">{c.portal.seats}</td>
-                  <td>
-                    {c.portal.twoFA ? (
-                      <span className="fa-badge on"><span className="material-symbols-rounded">verified_user</span>On</span>
-                    ) : (
-                      <span className="fa-badge off"><span className="material-symbols-rounded">gpp_maybe</span>Off</span>
-                    )}
-                  </td>
-                  <td className="last">{c.portal.lastLogin}</td>
+                  <td className="rp-last">Shown once at creation &amp; emailed — not stored in readable form</td>
                 </tr>
               ))}
             </tbody>

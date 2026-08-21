@@ -163,12 +163,16 @@ class TaskResponse(BaseModel):
     status: TaskStatus
     due: str
     proof_url: str = Field(default="", serialization_alias="proofUrl")
+    started_at: str | None = Field(default=None, serialization_alias="startedAt")
+    completed_at: str | None = Field(default=None, serialization_alias="completedAt")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> TaskResponse:
         priority = row.get("priority")
         status = row.get("status")
         assignee = row.get("assignee_id")
+        started_at = row.get("started_at")
+        completed_at = row.get("completed_at")
         return cls(
             id=str(row["code"]),
             title=row.get("title", ""),
@@ -179,4 +183,67 @@ class TaskResponse(BaseModel):
             status=status if status in _STATUSES else "todo",
             due=format_due(row.get("due_date")),
             proof_url=str(row.get("proof_url") or ""),
+            started_at=started_at.isoformat() if isinstance(started_at, datetime) else started_at,
+            completed_at=(
+                completed_at.isoformat() if isinstance(completed_at, datetime) else completed_at
+            ),
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Deadline-change-request workflow (`task_deadline_requests`, 0074)
+# --------------------------------------------------------------------------- #
+DeadlineRequestStatus = Literal["pending", "approved", "rejected"]
+DeadlineDecideAction = Literal["approve", "reject"]
+
+_DEADLINE_REQUEST_STATUSES: frozenset[str] = frozenset({"pending", "approved", "rejected"})
+
+
+class DeadlineRequestCreate(BaseModel):
+    """POST /tasks/{code}/deadline-requests body: the assignee's ask for a new due date."""
+
+    requested_due_date: date
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class DeadlineRequestDecideRequest(BaseModel):
+    """POST /tasks/{code}/deadline-requests/{id}/decide body: the lead's decision."""
+
+    action: DeadlineDecideAction
+
+
+class DeadlineRequestResponse(BaseModel):
+    """One deadline-change request, camelCase on the wire."""
+
+    id: str
+    task_code: str = Field(serialization_alias="taskCode")
+    requested_by: str = Field(serialization_alias="requestedBy")
+    requested_due_date: str = Field(serialization_alias="requestedDueDate")
+    reason: str = Field(default="")
+    status: DeadlineRequestStatus
+    decided_by: str = Field(default="", serialization_alias="decidedBy")
+    decided_at: str = Field(default="", serialization_alias="decidedAt")
+    created_at: str = Field(serialization_alias="createdAt")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> DeadlineRequestResponse:
+        status = row.get("status")
+        requested_due_date = row.get("requested_due_date")
+        decided_at = row.get("decided_at")
+        created_at = row.get("created_at")
+        decided_by = row.get("decided_by")
+        return cls(
+            id=str(row["id"]),
+            task_code=str(row.get("task_code", "")),
+            requested_by=str(row.get("requested_by", "")),
+            requested_due_date=(
+                requested_due_date.isoformat()
+                if isinstance(requested_due_date, date)
+                else str(requested_due_date or "")
+            ),
+            reason=str(row.get("reason") or ""),
+            status=status if status in _DEADLINE_REQUEST_STATUSES else "pending",
+            decided_by=str(decided_by) if decided_by else "",
+            decided_at=decided_at.isoformat() if isinstance(decided_at, datetime) else (decided_at or ""),
+            created_at=created_at.isoformat() if isinstance(created_at, datetime) else str(created_at or ""),
         )

@@ -254,6 +254,9 @@ class _FakeCostRepo:
     def get_settings(self) -> dict[str, Any]:
         return self._settings
 
+    def month_spent(self) -> float:
+        return float(sum(int(b.get("spent", 0) or 0) for b in self._budgets))
+
 
 class _FakePolicyRepo:
     def __init__(self, recs: list[dict[str, Any]]) -> None:

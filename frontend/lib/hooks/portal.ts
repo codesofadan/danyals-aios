@@ -17,7 +17,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Activity, Task, TeamMemberRecord } from "@/lib/data";
+import type { Activity, DeadlineRequest, Task, TeamMemberRecord } from "@/lib/data";
 import type { ReviewAction } from "@/lib/portal";
 
 export const ME_KEY = ["me"] as const;
@@ -49,14 +49,14 @@ export function useActivity() {
   });
 }
 
-// The backend returns every one of the 17 features as full|view|off; the portal
-// treats "granted" as any non-off level (mirrors lib/data.ts memberGrants).
+// The backend returns every feature as full|view|off; the portal treats
+// "granted" as any non-off level (mirrors lib/data.ts memberGrants).
 type GrantLevel = "full" | "view" | "off";
 type GrantsResponse = { grants: Record<string, GrantLevel> };
 
 /**
  * The signed-in member's granted feature keys (`accessFeatures.key[]`), the
- * shape MyAccess / the sidebar / the tool gate expect. Self-serve (GET /me/grants) —
+ * shape the sidebar / the tool gate expect. Self-serve (GET /me/grants) —
  * no access_control permission required, so every member (not just the owner) sees
  * their real grants instead of a false-locked `[]`.
  */
@@ -121,5 +121,40 @@ export function useReviewTask() {
       void qc.invalidateQueries({ queryKey: ME_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
     },
+  });
+}
+
+export type RequestDeadlineChangeInput = {
+  code: string; // the public J-#### task code
+  requestedDueDate: string; // ISO date (YYYY-MM-DD)
+  reason?: string;
+};
+
+/**
+ * File a deadline-change request for MY task (POST /tasks/{code}/deadline-requests).
+ * Server-enforced: only the task's own assignee, only within 12h of startedAt
+ * (fallback: the task's creation), and only one pending request at a time — a
+ * rejected call surfaces the server's 403/409 message via `error.message`.
+ */
+export function useRequestDeadlineChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ code, requestedDueDate, reason }: RequestDeadlineChangeInput) =>
+      api.post<DeadlineRequest>(`/tasks/${code}/deadline-requests`, {
+        requested_due_date: requestedDueDate,
+        reason: reason || undefined,
+      }),
+    onSuccess: (_data, { code }) => {
+      void qc.invalidateQueries({ queryKey: ["tasks", code, "deadline-requests"] });
+    },
+  });
+}
+
+/** This task's deadline-change requests (GET /tasks/{code}/deadline-requests). */
+export function useTaskDeadlineRequests(code: string, enabled = true) {
+  return useQuery({
+    queryKey: ["tasks", code, "deadline-requests"],
+    queryFn: () => api.get<DeadlineRequest[]>(`/tasks/${code}/deadline-requests`),
+    enabled: enabled && !!code,
   });
 }

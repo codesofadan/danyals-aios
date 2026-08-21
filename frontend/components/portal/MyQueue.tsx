@@ -5,7 +5,8 @@ import {
   TASK_STATUS_META, dueInfo,
   type Task, type TaskStatus,
 } from "@/lib/data";
-import { cardAction } from "@/lib/portal";
+import { cardAction, withinDeadlineRequestWindow } from "@/lib/portal";
+import { useRequestDeadlineChange, useTaskDeadlineRequests } from "@/lib/hooks/portal";
 
 const COLUMNS: { key: TaskStatus; label: string; icon: string }[] = [
   { key: "todo", label: "To do", icon: "radio_button_unchecked" },
@@ -15,6 +16,67 @@ const COLUMNS: { key: TaskStatus; label: string; icon: string }[] = [
 ];
 
 const PRIORITY_LABEL: Record<Task["priority"], string> = { urgent: "Urgent", high: "High", med: "Medium", low: "Low" };
+
+// Inline "Request deadline change" form, shown only when the 12h window is open
+// (client-side nicety) and no request is already pending (real server data).
+function DeadlineRequestForm({ t, onClose }: { t: Task; onClose: () => void }) {
+  const [due, setDue] = useState("");
+  const [reason, setReason] = useState("");
+  const requestM = useRequestDeadlineChange();
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!due) return;
+    requestM.mutate(
+      { code: t.id, requestedDueDate: due, reason: reason.trim() || undefined },
+      { onSuccess: onClose },
+    );
+  }
+
+  return (
+    <form className="pq-deadline-form" onSubmit={submit}>
+      <input type="date" value={due} onChange={(e) => setDue(e.target.value)} required />
+      <input
+        type="text" value={reason} onChange={(e) => setReason(e.target.value)}
+        placeholder="Reason (optional)" maxLength={2000}
+      />
+      <div className="pq-deadline-form-actions">
+        <button type="submit" className="pq-action" disabled={!due || requestM.isPending}>
+          {requestM.isPending ? "Sending…" : "Send request"}
+        </button>
+        <button type="button" className="pq-action ghost" onClick={onClose}>Cancel</button>
+      </div>
+      {requestM.error instanceof Error && (
+        <div className="pq-deadline-error">{requestM.error.message}</div>
+      )}
+    </form>
+  );
+}
+
+function DeadlineRequestAction({ t }: { t: Task }) {
+  const [open, setOpen] = useState(false);
+  const requestsQ = useTaskDeadlineRequests(t.id, open || t.status !== "done");
+  const pending = (requestsQ.data ?? []).some((r) => r.status === "pending");
+
+  if (t.status === "done") return null;
+  if (!withinDeadlineRequestWindow(t)) return null;
+
+  if (pending) {
+    return (
+      <div className="pq-waiting">
+        <span className="material-symbols-rounded">hourglass_top</span>Deadline change pending
+      </div>
+    );
+  }
+
+  if (open) return <DeadlineRequestForm t={t} onClose={() => setOpen(false)} />;
+
+  return (
+    <button className="pq-action ghost" onClick={() => setOpen(true)}>
+      <span className="material-symbols-rounded">event_upcoming</span>Request deadline change
+    </button>
+  );
+}
 
 function Card({ t, onAdvance }: { t: Task; onAdvance: (id: string) => void }) {
   const due = dueInfo(t.due);
@@ -39,6 +101,11 @@ function Card({ t, onAdvance }: { t: Task; onAdvance: (id: string) => void }) {
             <span className="pq-due ok"><span className="material-symbols-rounded">check_circle</span>Delivered</span>
           )}
         </div>
+        {t.startedAt && (
+          <div className="pq-started">
+            Started {new Date(t.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+          </div>
+        )}
         {action && (
           <button className="pq-action" onClick={() => onAdvance(t.id)}>
             <span className="material-symbols-rounded">{action.icon}</span>{action.label}
@@ -49,6 +116,7 @@ function Card({ t, onAdvance }: { t: Task; onAdvance: (id: string) => void }) {
             <span className="material-symbols-rounded">hourglass_top</span>Awaiting sign-off
           </div>
         )}
+        <DeadlineRequestAction t={t} />
       </div>
     </div>
   );

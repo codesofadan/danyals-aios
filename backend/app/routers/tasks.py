@@ -14,6 +14,7 @@ with ``asyncio.to_thread`` and appends an activity entry.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -24,6 +25,9 @@ from app.db.clients_repo import ClientsRepoDep
 from app.db.tasks_repo import TasksRepoDep
 from app.schemas.activity import ActivityKind
 from app.schemas.tasks import (
+    DeadlineRequestCreate,
+    DeadlineRequestDecideRequest,
+    DeadlineRequestResponse,
     TaskAdvanceRequest,
     TaskCreate,
     TaskResponse,
@@ -31,10 +35,16 @@ from app.schemas.tasks import (
     TaskUpdate,
     needs_review,
     next_status,
+    type_from_db,
     type_to_db,
 )
 from app.services.activity import record_activity
 from app.services.notifications import notify, notify_leads
+
+# The assignee may request a due-date change only within this window of the
+# task's start (or, if not yet started, its assignment). Server-enforced here;
+# the frontend mirrors it client-side purely as a UX nicety.
+_DEADLINE_REQUEST_WINDOW = timedelta(hours=12)
 
 router = APIRouter(tags=["tasks"])
 
@@ -192,6 +202,16 @@ async def advance_task(
     patch: dict[str, Any] = {"status": nxt}
     if body is not None and body.proof_url is not None:
         patch["proof_url"] = body.proof_url
+    now = datetime.now(UTC).isoformat()
+    # todo -> in_progress is the real "work started" moment; stamp it once (never
+    # overwritten if somehow already set).
+    if current == "todo" and nxt == "in_progress" and task.get("started_at") is None:
+        patch["started_at"] = now
+    # A task with NO review gate reaches its terminal state HERE (in_progress ->
+    # done); content_sprint's terminal stamp happens on the /review approve path
+    # instead (below), never both.
+    if nxt == "done":
+        patch["completed_at"] = now
     updated = await asyncio.to_thread(repo.update_task_by_code, code, patch, current)
     if updated is None:
         # A racing transition already moved the row (optimistic concurrency).
@@ -217,6 +237,21 @@ async def advance_task(
                 "Approve it or send it back from the review queue."
             ),
         )
+    # A task type with NO review gate (everything except content_sprint) delivers
+    # straight todo->in_progress->done via THIS endpoint, so admin/leads otherwise
+    # never hear about it (content_sprint's completion is already covered above via
+    # the review gate, and again on the /review approve path - never double-notify
+    # it here). Fire the same lead fan-out on that direct-to-done transition.
+    elif nxt == "done":
+        assignee_label = str(assignee_id) if assignee_id is not None else "unassigned"
+        await notify_leads(
+            kind="task_completed",
+            title=f"Task completed: {task.get('title', '')} ({code})",
+            body=(
+                f'"{task.get("title", "A task")}" ({code}, {type_from_db(type_canonical)}) for '
+                f'{task.get("client_name", "a client")} was completed by {assignee_label}.'
+            ),
+        )
     return TaskResponse.from_row(updated)
 
 
@@ -235,8 +270,11 @@ async def review_task(
         )
 
     new_status = "done" if body.action == "approve" else "in_progress"
+    review_patch: dict[str, Any] = {"status": new_status}
+    if body.action == "approve":
+        review_patch["completed_at"] = datetime.now(UTC).isoformat()
     updated = await asyncio.to_thread(
-        repo.update_task_by_code, code, {"status": new_status}, "review"
+        repo.update_task_by_code, code, review_patch, "review"
     )
     if updated is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task changed concurrently")
@@ -322,3 +360,158 @@ async def patch_task(
             ),
         )
     return TaskResponse.from_row(updated)
+
+
+# --------------------------------------------------------------------------- #
+# Deadline-change-request workflow (0074): the assignee asks for a new due date
+# within 12h of starting (or being assigned, if not yet started); a lead approves
+# (due_date actually moves) or rejects (it never does). due_date NEVER changes
+# automatically - only a lead's explicit decision writes it.
+# --------------------------------------------------------------------------- #
+def _deadline_request_anchor(task: dict[str, Any]) -> datetime | None:
+    """The moment the 12h deadline-request window starts counting from:
+    ``started_at`` if the assignee has begun work, else ``created_at`` (assignment
+    time) - so a request is possible even before the assignee clicks Start."""
+    raw = task.get("started_at") or task.get("created_at")
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo is not None else raw.replace(tzinfo=UTC)
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+@router.post(
+    "/tasks/{code}/deadline-requests",
+    response_model=DeadlineRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_deadline_request(
+    code: str, body: DeadlineRequestCreate, repo: TasksRepoDep, actor: ViewReports
+) -> DeadlineRequestResponse:
+    """The task's OWN assignee asks for a new due date, only within 12h of the
+    task's start (fallback: its assignment). 403 if the caller isn't the
+    assignee; 409 if the window has closed or a request is already pending."""
+    task = await asyncio.to_thread(repo.get_task_by_code, code)
+    if task is None:
+        raise _TASK_NOT_FOUND
+    assignee_id = task.get("assignee_id")
+    if (str(assignee_id) if assignee_id is not None else None) != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the task's assignee may request a deadline change",
+        )
+
+    anchor = _deadline_request_anchor(task)
+    if anchor is None or datetime.now(UTC) - anchor > _DEADLINE_REQUEST_WINDOW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The 12-hour deadline-change request window has closed",
+        )
+
+    existing = await asyncio.to_thread(repo.get_pending_deadline_request, str(task["id"]))
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A deadline-change request is already pending for this task",
+        )
+
+    row = await asyncio.to_thread(
+        repo.insert_deadline_request,
+        {
+            "task_id": task["id"],
+            "task_code": code,
+            "requested_by": actor.id,
+            "requested_due_date": body.requested_due_date.isoformat(),
+            "reason": body.reason,
+        },
+    )
+    await notify_leads(
+        kind="deadline_requested",
+        title=f"Deadline change requested: {task.get('title', '')} ({code})",
+        body=(
+            f'The assignee is requesting a new due date '
+            f'({body.requested_due_date.isoformat()}) for "{task.get("title", "a task")}" '
+            f'({code}) — {task.get("client_name", "a client")}.'
+            + (f' Reason: {body.reason}' if body.reason else "")
+        ),
+    )
+    return DeadlineRequestResponse.from_row(row)
+
+
+@router.get("/tasks/{code}/deadline-requests", response_model=list[DeadlineRequestResponse])
+async def list_deadline_requests(
+    code: str, repo: TasksRepoDep, _actor: ViewReports
+) -> list[DeadlineRequestResponse]:
+    """List deadline-change requests for a task (any staff may read)."""
+    task = await asyncio.to_thread(repo.get_task_by_code, code)
+    if task is None:
+        raise _TASK_NOT_FOUND
+    rows = await asyncio.to_thread(repo.list_deadline_requests, str(task["id"]))
+    return [DeadlineRequestResponse.from_row(r) for r in rows]
+
+
+@router.post(
+    "/tasks/{code}/deadline-requests/{request_id}/decide",
+    response_model=DeadlineRequestResponse,
+)
+async def decide_deadline_request(
+    code: str,
+    request_id: str,
+    body: DeadlineRequestDecideRequest,
+    repo: TasksRepoDep,
+    actor: AssignTasks,
+) -> DeadlineRequestResponse:
+    """A lead approves (due_date actually moves) or rejects (it doesn't) a
+    pending deadline-change request. 404 if the request/task doesn't match; 409
+    if it's no longer pending."""
+    task = await asyncio.to_thread(repo.get_task_by_code, code)
+    if task is None:
+        raise _TASK_NOT_FOUND
+    request = await asyncio.to_thread(repo.get_deadline_request, request_id)
+    if request is None or str(request.get("task_id")) != str(task["id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    approved = body.action == "approve"
+    decision_patch: dict[str, Any] = {
+        "status": "approved" if approved else "rejected",
+        "decided_by": actor.id,
+        "decided_at": datetime.now(UTC).isoformat(),
+    }
+    updated = await asyncio.to_thread(
+        repo.decide_deadline_request, request_id, decision_patch
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Request is no longer pending"
+        )
+
+    if approved:
+        # due_date changes ONLY here, on explicit lead approval - never automatic.
+        await asyncio.to_thread(
+            repo.update_task_by_code, code, {"due_date": updated["requested_due_date"]}
+        )
+
+    requested_by = request.get("requested_by")
+    if requested_by is not None:
+        title = task.get("title", "your task")
+        await notify(
+            str(requested_by),
+            kind="deadline_decided",
+            title=(
+                f"Deadline change approved: {title}"
+                if approved
+                else f"Deadline change rejected: {title}"
+            ),
+            body=(
+                f'Your requested due date for "{title}" ({code}) was '
+                + (
+                    f'approved — due date is now {updated["requested_due_date"]}.'
+                    if approved
+                    else "rejected. The original due date stands."
+                )
+            ),
+        )
+    return DeadlineRequestResponse.from_row(updated)

@@ -161,14 +161,18 @@ class CostEntryResponse(BaseModel):
 
 
 class SpendStopResponse(BaseModel):
-    """The org-wide manual API-spend HALT state + today's live paid spend.
+    """The org-wide manual API-spend HALT state + today's/this-month's live paid spend.
 
     ``halted`` is the single agency-global kill-switch (owner/admin). ``today_spent``
     is day-to-date paid spend, kept purely informational (there is no per-day dollar
-    THRESHOLD any more - the manual halt replaced it)."""
+    THRESHOLD any more - the manual halt replaced it). ``month_spent`` is REAL
+    calendar-month-to-date paid spend (summed from ``cost_log.created_at``) - unlike
+    ``client_budgets.spent`` (an all-time cumulative counter), this actually resets
+    each calendar month, so it is what a "Spend this month" UI tile should read."""
 
     halted: bool
     today_spent: float = Field(serialization_alias="todaySpent")
+    month_spent: float = Field(serialization_alias="monthSpent")
 
 
 class SpendStopUpdate(BaseModel):

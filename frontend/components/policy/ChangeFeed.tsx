@@ -2,6 +2,7 @@
 
 import { SEV_META } from "@/lib/policy";
 import { useChanges } from "@/lib/hooks/policy";
+import ReadMore from "@/components/ui/ReadMore";
 
 export default function ChangeFeed() {
   const changesQ = useChanges();
@@ -26,24 +27,31 @@ export default function ChangeFeed() {
         {!changesQ.isLoading && !changesQ.isError && changeEvents.length === 0 && (
           <div className="pr-empty">No changes detected yet.</div>
         )}
-        {!changesQ.isLoading && !changesQ.isError && changeEvents.map((e) => {
-          const sev = SEV_META[e.severity];
-          return (
-            <div className="pr-event" key={e.id}>
-              <span className={`pr-dot pr-sev-${sev.cls}`} title={sev.label} />
-              <div className="pr-event-body">
-                <div className="pr-event-top">
-                  <span className="pr-event-src">{e.sourceName}</span>
-                  <span className={`pr-sev pr-sev-${sev.cls}`}>{sev.label}</span>
+        {!changesQ.isLoading && !changesQ.isError && changeEvents.length > 0 && (
+          <ReadMore
+            items={changeEvents}
+            initialCount={10}
+            getKey={(e) => e.id}
+            renderItem={(e) => {
+              const sev = SEV_META[e.severity];
+              return (
+                <div className="pr-event">
+                  <span className={`pr-dot pr-sev-${sev.cls}`} title={sev.label} />
+                  <div className="pr-event-body">
+                    <div className="pr-event-top">
+                      <span className="pr-event-src">{e.sourceName}</span>
+                      <span className={`pr-sev pr-sev-${sev.cls}`}>{sev.label}</span>
+                    </div>
+                    <div className="pr-event-sum">{e.summary}</div>
+                    <div className="pr-event-ago">
+                      <span className="material-symbols-rounded">schedule</span>Detected {e.detected}
+                    </div>
+                  </div>
                 </div>
-                <div className="pr-event-sum">{e.summary}</div>
-                <div className="pr-event-ago">
-                  <span className="material-symbols-rounded">schedule</span>Detected {e.detected}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            }}
+          />
+        )}
       </div>
     </section>
   );

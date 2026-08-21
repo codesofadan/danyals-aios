@@ -360,6 +360,11 @@ def test_cost_repo_log_and_today_spent(seed: dict[str, Any]) -> None:
     assert _relative_order(log_ids, [seed["cost_log_ids"][0], seed["cost_log_ids"][1]])
     # today_spent sums only rows created today (>= my seeded today cost).
     assert repo.today_spent() >= seed["today_cost"]
+    # month_spent sums the same real cost_log rows over the calendar-month window
+    # (today's seeded row always falls inside "this month") - unlike
+    # client_budgets.spent, this is a REAL month-to-date figure, never an all-time
+    # cumulative counter mislabeled as monthly.
+    assert repo.month_spent() >= seed["today_cost"]
 
 
 def test_cost_repo_settings_update(seed: dict[str, Any]) -> None:

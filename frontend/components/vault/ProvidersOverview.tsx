@@ -1,6 +1,7 @@
 "use client";
 
 import { useIntegrations, type IntegrationStatus } from "@/lib/hooks/integrations";
+import ReadMore from "@/components/ui/ReadMore";
 
 // The API-Management integrations overview: EVERY supported integration with a REAL
 // connected/missing status, from GET /integrations (live config + vault presence) —
@@ -60,37 +61,41 @@ export default function ProvidersOverview() {
                 {cat}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {(byCat.get(cat) ?? []).map((it) => (
-                  <div
-                    key={it.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "9px 12px",
-                      border: "1px solid var(--line, rgba(0,0,0,0.08))",
-                      borderRadius: 10,
-                    }}
-                  >
-                    <span
-                      className="material-symbols-rounded"
-                      style={{ color: it.connected ? "var(--ok, #1FA890)" : "var(--muted)" }}
+                <ReadMore
+                  items={byCat.get(cat) ?? []}
+                  initialCount={10}
+                  getKey={(it) => it.id}
+                  renderItem={(it) => (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "9px 12px",
+                        border: "1px solid var(--line, rgba(0,0,0,0.08))",
+                        borderRadius: 10,
+                      }}
                     >
-                      {it.connected ? "check_circle" : "radio_button_unchecked"}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 650 }}>{it.name}</div>
-                      <div style={{ color: "var(--muted)", fontSize: 12 }}>{it.detail}</div>
+                      <span
+                        className="material-symbols-rounded"
+                        style={{ color: it.connected ? "var(--ok, #1FA890)" : "var(--muted)" }}
+                      >
+                        {it.connected ? "check_circle" : "radio_button_unchecked"}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 650 }}>{it.name}</div>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>{it.detail}</div>
+                      </div>
+                      <span
+                        className={`status-pill ${it.connected ? "ok" : "mut"}`}
+                        title={it.source === "vault" ? "From the key vault" : "From platform config"}
+                        style={{ whiteSpace: "nowrap" }}
+                      >
+                        {it.connected ? "Connected" : "Missing"}
+                      </span>
                     </div>
-                    <span
-                      className={`status-pill ${it.connected ? "ok" : "mut"}`}
-                      title={it.source === "vault" ? "From the key vault" : "From platform config"}
-                      style={{ whiteSpace: "nowrap" }}
-                    >
-                      {it.connected ? "Connected" : "Missing"}
-                    </span>
-                  </div>
-                ))}
+                  )}
+                />
               </div>
             </div>
           ))}

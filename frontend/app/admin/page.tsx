@@ -4,10 +4,8 @@ import TopBar from "@/components/TopBar";
 import StatTiles from "@/components/StatTiles";
 import CommandDigest from "@/components/overview/CommandDigest";
 import SpendSnapshot from "@/components/overview/SpendSnapshot";
-import SiteAnalyticsCard from "@/components/overview/SiteAnalyticsCard";
 import AuditVolumeChart from "@/components/charts/AuditVolumeChart";
 import ClientProgress from "@/components/charts/ClientProgress";
-import TrafficChart from "@/components/charts/TrafficChart";
 import TeamTracking from "@/components/charts/TeamTracking";
 import { useCommandCenter } from "@/lib/hooks/commandCenter";
 
@@ -20,6 +18,7 @@ export default function CommandCenter() {
       <TopBar
         title="Admin Dashboard"
         searchPlaceholder="Search clients, sites, audits…"
+        hideSearch
       />
 
       {isLoading && (
@@ -53,17 +52,12 @@ export default function CommandCenter() {
             <SpendSnapshot spend={data.spend} />
           </div>
 
-          <div className="row-single">
-            <SiteAnalyticsCard gsc={data.gsc} ga4={data.ga4} />
-          </div>
-
           <div className="row">
             <AuditVolumeChart audits={data.audits} />
             <ClientProgress clients={data.clients} />
           </div>
 
-          <div className="row b">
-            <TrafficChart traffic={data.traffic.points} placeholder={data.traffic.placeholder} />
+          <div className="row-single">
             <TeamTracking team={data.team} />
           </div>
         </>

@@ -9,6 +9,7 @@ export default function ReportsPage() {
         eyebrow="Delivery · Reporting"
         title="Reports"
         searchPlaceholder="Search workbooks, clients, datasets…"
+        hideSearch
       />
       <ReportsWorkspace />
     </>

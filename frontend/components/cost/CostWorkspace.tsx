@@ -33,6 +33,11 @@ export default function CostWorkspace() {
   // API-spend HALT: the single agency-global kill-switch (halted === true).
   const halted = spendStopQ.data?.halted ?? false;
   const todaySpent = spendStopQ.data?.todaySpent ?? 0;
+  // REAL calendar-month-to-date spend (summed from cost_log by the backend) - the
+  // honest source for a "Spend this month" tile. `budgets[].spent` is an ALL-TIME
+  // cumulative counter (never reset monthly), so it feeds ONLY the all-time
+  // "Budget used" cap ratio below, never a "this month" figure.
+  const monthSpent = spendStopQ.data?.monthSpent ?? 0;
 
   const totals = useMemo(() => {
     const spent = budgets.reduce((s, b) => s + b.spent, 0);
@@ -91,7 +96,7 @@ export default function CostWorkspace() {
         </div>
       )}
 
-      <CostStats spend={totals.spent} budgetUsed={totals.used} jobs={jobsThisMonth} armed={!halted} todaySpent={todaySpent} />
+      <CostStats spend={monthSpent} budgetUsed={totals.used} jobs={jobsThisMonth} armed={!halted} todaySpent={todaySpent} />
 
       <div className="row">
         <SpendStopCard
