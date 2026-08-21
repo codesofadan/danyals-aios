@@ -38,7 +38,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.config import Settings
 from app.logging_setup import get_logger
@@ -943,7 +943,10 @@ class PlaywrightCitationSubmitter:
         if self._proxy_url:
             launch_kwargs["proxy"] = _parse_proxy(self._proxy_url)  # split auth (see _parse_proxy)
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(**launch_kwargs)
+            # launch_kwargs is intentionally dict[str, object] (heterogeneous values);
+            # Playwright's launch() has many precisely-typed keyword params, so widen
+            # to Any at the **unpack boundary rather than loosen the dict's own type.
+            browser = pw.chromium.launch(**cast("dict[str, Any]", launch_kwargs))
             # A fresh randomized fingerprint per run: UA + viewport + locale/timezone.
             ua = self._rng.choice(_USER_AGENTS)
             vw, vh = self._rng.choice(_VIEWPORTS)

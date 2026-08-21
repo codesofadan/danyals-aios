@@ -1108,7 +1108,11 @@ class _LJProtocolClient:
             event["itemid"] = post.external_id
             method = proxy.LJ.XMLRPC.editevent
         try:
-            result = method(event)
+            # xmlrpc.client's stub types the dynamic proxy call's return as the full
+            # _Marshallable union (whatever an XML-RPC value CAN be); the LiveJournal
+            # protocol always replies with a struct (dict), so narrow it here rather
+            # than let every .get() below fight the union.
+            result = cast("dict[str, Any]", method(event))
         except (xmlrpc.Fault, OSError) as exc:
             raise ProviderCallError(f"{self.platform} XML-RPC call failed: {exc}") from exc
         item_id = result.get("itemid")

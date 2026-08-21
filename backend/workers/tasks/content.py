@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from html import escape as html_escape
@@ -1736,6 +1737,15 @@ def _strip_md(text: str) -> str:
     return text.strip().strip("*").strip()
 
 
+def _first_image_url(draft_md: str) -> str:
+    """The draft's FIRST ``![alt](url)`` image - the hero image, since
+    ``_inject_images`` places one image per section in document order (never all
+    bunched at the end). Used as the featured-image candidate the plugin sideloads
+    into the WordPress media library; ``""`` when the draft has no images at all."""
+    match = _MD_IMG_RE.search(draft_md)
+    return match.group(2).strip() if match else ""
+
+
 def _derive_takeaways(draft_md: str) -> list[str]:
     """Key-takeaway bullets: an explicit takeaways/summary section if the draft has one,
     else the first contiguous bullet list in the body (capped at 6)."""
@@ -1839,6 +1849,11 @@ def _plugin_payload(
         "meta_description": str(meta.get("description") or ""),
         "focus_keyword": str(keyword_map.get("primary") or ""),
     }
+    # Featured image: the draft's hero image, sideloaded by the plugin into the
+    # WordPress media library (never left hotlinked to the AIOS content-image host).
+    featured_image_url = _first_image_url(draft_md)
+    if featured_image_url:
+        payload["featured_image_url"] = featured_image_url
     json_ld = row.get("json_ld")
     if isinstance(json_ld, dict) and json_ld.get("@graph"):
         payload["schema_jsonld"] = json.dumps(json_ld)
@@ -2239,3 +2254,54 @@ def publish_content_job_task(code: str) -> dict[str, Any]:
     # worker (a broker is available here); never blocks or fails the completed publish.
     _fire_indexing_best_effort(store, outcome)
     return outcome.as_dict()
+
+
+# --------------------------------------------------------------------------- #
+# Scheduled publishing (spec section 46). A lead's approve already moved the job
+# to `publishing` (the human gate is unchanged); this sweep only decides WHEN the
+# already-approved push actually fires. Registered in celery_app.py but NOT on the
+# active beat_schedule - like every other beat job, it is currently dormant by the
+# user's 2026-08-19 "all cron off" decision (see celery_app.py's own comment).
+# --------------------------------------------------------------------------- #
+def execute_dispatch_scheduled_publishes(
+    codes: list[str], *, store: ContentStore, enqueue: Callable[[str], None]
+) -> dict[str, Any]:
+    """The pure-ish core (I/O injected via ``store`` + ``enqueue``): for each
+    already-CLAIMED due code, clear ``publish_at`` (a same-status write - already
+    legal for the worker branch of the DB guard) and hand it to the publish worker.
+    Never raises; a code whose row moved/vanished before the clear is skipped, not
+    fatal to the batch."""
+    dispatched: list[str] = []
+    for code in codes:
+        updated = store.update(code, {"publish_at": None})
+        if updated is None:
+            continue
+        enqueue(code)
+        dispatched.append(code)
+    return {"claimed": len(codes), "dispatched": dispatched}
+
+
+def _claim_due_scheduled_codes() -> list[str]:
+    """Claim every ``content_jobs`` row sitting in ``publishing`` with a past-due
+    ``publish_at`` (``FOR UPDATE SKIP LOCKED`` so two concurrent sweeps never claim
+    the same row twice). Returns the claimed codes; the caller dispatches them."""
+    with privileged_connection() as cur:
+        cur.execute(
+            "select code from public.content_jobs "
+            "where status = 'publishing' and publish_at is not null and publish_at <= now() "
+            "for update skip locked"
+        )
+        return [str(row["code"]) for row in cur.fetchall()]
+
+
+@celery_app.task(name="dispatch_scheduled_content_publishes")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
+def dispatch_scheduled_content_publishes() -> dict[str, Any]:
+    """Entry point: claim + dispatch every due scheduled publish. Never re-raises."""
+    try:
+        codes = _claim_due_scheduled_codes()
+        return execute_dispatch_scheduled_publishes(
+            codes, store=PrivilegedContentStore(), enqueue=lambda code: publish_content_job_task.delay(code)
+        )
+    except Exception:
+        logger.exception("dispatch_scheduled_content_publishes_failed")
+        return {"claimed": 0, "dispatched": [], "reason": "task failed"}

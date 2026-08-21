@@ -51,6 +51,7 @@ pytestmark = pytest.mark.unit
 _BACKLINK_KEYS = {"id", "client", "refDomain", "anchor", "authority", "spam", "firstSeen", "status"}
 _CITATION_KEYS = {
     "id", "client", "directory", "nap", "action", "note", "submitStatus", "proofUrl",
+    "handoffUrl",
 }
 _WEB2_KEYS = {
     "id", "client", "platform", "postUrl", "anchor", "verified", "published", "status",

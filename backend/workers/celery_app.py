@@ -104,6 +104,11 @@ celery_app = Celery(
         # successful content publish, and by the on-demand endpoint), so no beat entry /
         # overlap-lock is needed. FREE engines -> no cost dial.
         "app.modules.indexing.tasks",
+        # Website Reconstruction Phase 1+2: analyze_site (real Playwright-measured
+        # website capture -> a persisted, versioned DesignIR). Event-driven (enqueued
+        # per POST /site-builder/analyze), so no beat entry / overlap-lock is needed -
+        # each job id is claimed exactly once by its own row.
+        "app.modules.site_builder.tasks",
         # Reports/cron: the AUTONOMOUS reporting jobs (refresh_client_audits weekly,
         # generate_monthly_reports monthly, sweep_offpage_monitors weekly). All are
         # BEAT-driven (see the beat_schedule below) and idempotent: the audit refresh
@@ -168,6 +173,14 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {}
 
 _BEAT_SCHEDULE_DISABLED = {
+    # Scheduled content publishing (spec section 46). A lead's approve already moved
+    # the job to `publishing` (the human gate is unchanged); this sweep only fires
+    # the already-approved push once its publish_at is due. 5-minute cadence is
+    # plenty for a human-scheduled publish time (not a hot path).
+    "dispatch-scheduled-content-publishes": {
+        "task": "dispatch_scheduled_content_publishes",
+        "schedule": 300.0,
+    },
     "dispatch-context": {
         "task": "dispatch_context",
         "schedule": float(settings.context_debounce_seconds),

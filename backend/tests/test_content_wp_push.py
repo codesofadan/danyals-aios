@@ -228,3 +228,39 @@ def test_plugin_payload_no_faq_when_draft_has_none() -> None:
     payload = _plugin_payload(_publish_row(), "# T\n\nBody only, no FAQ.\n", "T")
     assert "faq" not in payload  # absent -> the plugin omits the FAQ component
     assert "cta" in payload
+
+
+# --------------------------------------------------------------------------- #
+# 6. Featured image: the plugin sideloads the draft's HERO image into the
+# WordPress media library (spec: in-body images must not stay hotlinked forever
+# to the AIOS content-image host).
+# --------------------------------------------------------------------------- #
+def test_first_image_url_is_the_first_markdown_image() -> None:
+    from workers.tasks.content import _first_image_url
+
+    draft = (
+        "# T\n\n![Hero shot](https://img.example/hero.png)\n\nIntro copy.\n\n"
+        "## Section\n\n![Second](https://img.example/second.png)\n"
+    )
+    assert _first_image_url(draft) == "https://img.example/hero.png"
+
+
+def test_first_image_url_empty_when_no_images() -> None:
+    from workers.tasks.content import _first_image_url
+
+    assert _first_image_url("# T\n\nJust text, no images.\n") == ""
+
+
+def test_plugin_payload_carries_featured_image_url_from_the_hero_image() -> None:
+    from workers.tasks.content import _plugin_payload
+
+    draft = "# T\n\n![Hero shot](https://img.example/hero.png)\n\nIntro copy.\n"
+    payload = _plugin_payload(_publish_row(), draft, "T")
+    assert payload["featured_image_url"] == "https://img.example/hero.png"
+
+
+def test_plugin_payload_omits_featured_image_url_when_draft_has_no_images() -> None:
+    from workers.tasks.content import _plugin_payload
+
+    payload = _plugin_payload(_publish_row(), "# T\n\nNo images here.\n", "T")
+    assert "featured_image_url" not in payload

@@ -53,6 +53,7 @@ from workers.tasks.content import (
     WpTarget,
     build_client_wp_target,
     execute_content_job,
+    execute_dispatch_scheduled_publishes,
     md_to_html,
     publish_content_job,
 )
@@ -1018,3 +1019,52 @@ def test_content_published_no_client_is_noop(monkeypatch: pytest.MonkeyPatch) ->
     # An unlinked job (no client_id) neither emits a deliverable nor emails anyone.
     content_mod._emit_content_deliverable({"topic": "X"}, artifact_key=None)
     assert client_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# execute_dispatch_scheduled_publishes (spec section 46: scheduled publishing).
+# The claim SQL (FOR UPDATE SKIP LOCKED) is a thin DB seam exercised only by
+# integration tests; this core takes ALREADY-CLAIMED codes and is pure otherwise.
+# --------------------------------------------------------------------------- #
+class _MultiFakeStore:
+    """A multi-row stand-in ``ContentStore`` (only ``update`` is used here)."""
+
+    def __init__(self, codes: list[str]) -> None:
+        self.rows: dict[str, dict[str, Any]] = {c: {"code": c, "publish_at": "2026-01-01T00:00:00Z"} for c in codes}
+
+    def load(self, code: str) -> dict[str, Any] | None:
+        return self.rows.get(code)
+
+    def update(self, code: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+        row = self.rows.get(code)
+        if row is None:
+            return None
+        row.update(fields)
+        return dict(row)
+
+
+def test_dispatch_scheduled_publishes_clears_publish_at_and_enqueues_each() -> None:
+    store = _MultiFakeStore(["CJ-1", "CJ-2"])
+    enqueued: list[str] = []
+    result = execute_dispatch_scheduled_publishes(["CJ-1", "CJ-2"], store=store, enqueue=enqueued.append)
+    assert enqueued == ["CJ-1", "CJ-2"]
+    assert result == {"claimed": 2, "dispatched": ["CJ-1", "CJ-2"]}
+    assert store.rows["CJ-1"]["publish_at"] is None
+    assert store.rows["CJ-2"]["publish_at"] is None
+
+
+def test_dispatch_scheduled_publishes_skips_a_row_that_vanished() -> None:
+    store = _MultiFakeStore(["CJ-1"])
+    enqueued: list[str] = []
+    result = execute_dispatch_scheduled_publishes(["CJ-1", "CJ-gone"], store=store, enqueue=enqueued.append)
+    assert enqueued == ["CJ-1"]  # CJ-gone's update returned None (raced/deleted) - skipped, not fatal
+    assert result["claimed"] == 2
+    assert result["dispatched"] == ["CJ-1"]
+
+
+def test_dispatch_scheduled_publishes_empty_claim_is_a_noop() -> None:
+    store = _MultiFakeStore([])
+    enqueued: list[str] = []
+    result = execute_dispatch_scheduled_publishes([], store=store, enqueue=enqueued.append)
+    assert enqueued == []
+    assert result == {"claimed": 0, "dispatched": []}

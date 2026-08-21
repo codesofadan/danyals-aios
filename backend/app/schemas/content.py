@@ -239,6 +239,13 @@ class ContentReviewRequest(BaseModel):
 
     action: ReviewAction
     note: str | None = Field(default=None, alias="editInstruction", max_length=4000)
+    # Scheduled publishing (spec section 46): meaningful only for `approve`. When
+    # set to a FUTURE time, the router still moves the job to `publishing` right
+    # now (a human still approves before anything is queued - the existing gate is
+    # unchanged) but defers the actual Celery enqueue to this time instead of
+    # firing immediately. A past/omitted value publishes immediately (today's
+    # behaviour, unchanged).
+    publish_at: datetime | None = Field(default=None, alias="publishAt")
 
 
 class ContentJobUpdate(BaseModel):

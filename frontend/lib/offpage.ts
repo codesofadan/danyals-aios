@@ -56,7 +56,7 @@ export type CitationAction = "Submit" | "Update";
 // guess at a live result).
 export type CitationSubmitStatus =
   | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked"
-  // ready_for_human: the bot created the account + prepared the listing; a human
+  // ready_for_human: the bot created the account + prepared the listing - a human
   // finishes with one click in the browser at handoffUrl.
   | "ready_for_human";
 

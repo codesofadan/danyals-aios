@@ -599,6 +599,100 @@ async def test_review_missing_job_404(
     assert (await client.post("/api/v1/content/jobs/CJ-nope/review", json={"action": "approve"})).status_code == 404
 
 
+# --- scheduled publishing (spec section 46) ------------------------------------
+
+async def test_review_approve_with_future_publish_at_defers_the_enqueue(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("manager")
+    future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review", json={"action": "approve", "publishAt": future}
+    )
+    assert resp.status_code == 200
+    # The human gate is unchanged: the job STILL moves to publishing right now.
+    assert resp.json()["status"] == "publishing"
+    # But the actual Celery push is DEFERRED - not enqueued immediately.
+    assert published == []
+    assert repo.jobs["CJ-1"]["publish_at"] is not None
+
+
+async def test_review_approve_with_past_publish_at_publishes_immediately(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("manager")
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review", json={"action": "approve", "publishAt": past}
+    )
+    assert resp.status_code == 200
+    assert published == ["CJ-1"]  # a past time is treated exactly like "no schedule"
+    assert repo.jobs["CJ-1"]["publish_at"] is None
+
+
+async def test_review_approve_without_publish_at_behaves_as_before(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("manager")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "approve"})
+    assert resp.status_code == 200
+    assert published == ["CJ-1"]
+    assert repo.jobs["CJ-1"]["publish_at"] is None
+
+
+# --- republish (LEAD-only; spec section 46) ------------------------------------
+
+async def test_republish_role_gated_for_specialist(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="done")
+    wire("specialist")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
+    assert resp.status_code == 403
+
+
+async def test_republish_moves_done_to_publishing_and_enqueues(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="done", wp_post_id="4471")
+    wire("owner")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "publishing"
+    assert published == ["CJ-1"]
+
+
+async def test_republish_not_done_is_409(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("manager")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
+    assert resp.status_code == 409
+    assert published == []
+
+
+async def test_republish_optimistic_conflict_409(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    repo.seed(code="CJ-1", status="done")
+    repo.force_race = True
+    wire("manager")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
+    assert resp.status_code == 409
+    assert published == []
+
+
+async def test_republish_missing_job_404(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    wire("owner")
+    assert (await client.post("/api/v1/content/jobs/CJ-nope/republish")).status_code == 404
+
+
 # --- patch (LEAD-only) --------------------------------------------------------
 
 async def test_patch_role_gated_for_specialist(

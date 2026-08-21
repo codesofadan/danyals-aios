@@ -16,6 +16,7 @@ const ADMIN_DESTS: Dest[] = [
   { icon: "fact_check", label: "Audit", href: "/admin/audit", keywords: "seo scan report" },
   { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads public" },
   { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish" },
+  { icon: "auto_awesome", label: "Site Builder", href: "/admin/site-builder", keywords: "website reconstruction wizard design templates gutenberg elementor" },
   { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections sites cms plugin xmlrpc" },
   { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "nap directories" },
   { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "backlinks properties" },

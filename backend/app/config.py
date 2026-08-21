@@ -232,14 +232,14 @@ class Settings(BaseSettings):
     # logged / never in a repr). ---
     serper_api_key: SecretStr | None = None  # Serper.dev SERP research
     image_gen_api_key: SecretStr | None = None  # OpenAI-compatible image generation
-    image_gen_model: str = "gpt-image-1"  # image model (provider-configurable)
+    image_gen_model: str = "gpt-image-2"  # image model (provider-configurable)
     # Generated hero/section images are LANDSCAPE (horizontal rectangle) so they fit the
-    # wide blog/page layouts — a square image breaks the layout. gpt-image-1 supports
-    # 1536x1024; env-tune (e.g. "1792x1024" for dall-e-3, "1024x1024" only if you truly
-    # want squares).
+    # wide blog/page layouts — a square image breaks the layout. gpt-image-2 (like
+    # gpt-image-1 before it) supports 1536x1024; env-tune (e.g. "1792x1024" for
+    # dall-e-3, "1024x1024" only if you truly want squares).
     image_gen_size: str = "1536x1024"
     # Photographic images in generated pages are ON (operator decision): the hero + section
-    # PHOTOS are generated through the OpenAI image API (gpt-image-1, image_gen_api_key).
+    # PHOTOS are generated through the OpenAI image API (gpt-image-2, image_gen_api_key).
     # Card/feature GLYPHS are inline SVG icons (never PNGs). Flip off to drop the photos and
     # run icon-only.
     content_images_enabled: bool = True
@@ -304,8 +304,9 @@ class Settings(BaseSettings):
     # back to ``audit_artifact_dir``; if BOTH are unset no artifact is written. ---
     content_artifact_dir: str | None = None
     # Controlled root generated CONTENT IMAGES (hero/section PNGs) are HOSTED under so
-    # the served URL can be embedded in the draft + the WordPress body. gpt-image-1
-    # returns base64 (``b64_json``), NEVER a hosted url, so the decoded bytes are
+    # the served URL can be embedded in the draft + the WordPress body. gpt-image-2
+    # (and gpt-image-1 before it) returns base64 (``b64_json``), NEVER a hosted url,
+    # so the decoded bytes are
     # written here (filename = sha256(bytes) -> dedup + cache-friendly) and served
     # read-only via the public ``GET /api/v1/public/content-images/{name}`` route.
     # Unset -> falls back to ``<content_artifact_dir>/content-images`` (else

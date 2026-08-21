@@ -15,9 +15,9 @@ Two impls satisfy the Protocol, mirroring the context seams:
   ``ProviderNotConfiguredError``. The provider carries the alt text through - the
   caller's alt is authoritative and always round-trips onto the result. It handles
   BOTH provider response shapes: a hosted ``url`` (dall-e style) is used directly;
-  base64 (``b64_json`` - what ``gpt-image-1`` ALWAYS returns) is decoded and HOSTED
-  through an injected ``ImageHost`` so the result is still a real ``https`` URL, not
-  a multi-MB inline ``data:`` URI.
+  base64 (``b64_json`` - what ``gpt-image-2``/``gpt-image-1`` ALWAYS return) is
+  decoded and HOSTED through an injected ``ImageHost`` so the result is still a real
+  ``https`` URL, not a multi-MB inline ``data:`` URI.
 * ``FakeImageGenerator`` - deterministic, offline: a stable placeholder URL derived
   from sha256(prompt) + the caller's alt, so image tests + degraded runs are
   reproducible with no key.
@@ -74,9 +74,9 @@ class OpenAIImageGenerator(HttpProviderClient):
     BOTH provider shapes:
 
     * a hosted ``data[].url`` (dall-e-3 style) -> used directly;
-    * ``data[].b64_json`` (what ``gpt-image-1`` ALWAYS returns - never a url) ->
-      decoded and HOSTED via the injected ``image_host``, yielding a real ``https``
-      URL (never a multi-MB inline ``data:`` URI in the draft).
+    * ``data[].b64_json`` (what ``gpt-image-2``/``gpt-image-1`` ALWAYS return - never
+      a url) -> decoded and HOSTED via the injected ``image_host``, yielding a real
+      ``https`` URL (never a multi-MB inline ``data:`` URI in the draft).
 
     Either way the result is tagged with the caller's authoritative ``alt``. When a
     ``b64_json`` image arrives but no ``image_host`` is configured, a typed
@@ -90,7 +90,7 @@ class OpenAIImageGenerator(HttpProviderClient):
         self,
         *,
         api_key: str,
-        model: str = "gpt-image-1",
+        model: str = "gpt-image-2",
         size: str = "1024x1024",
         timeout: float = 60.0,
         image_host: ImageHost | None = None,
@@ -121,8 +121,9 @@ class OpenAIImageGenerator(HttpProviderClient):
             # Alt is the caller's - the provider does not author it; carry it through.
             return GeneratedImage(url=url, alt=alt)
 
-        # (2) gpt-image-1 style: base64 PNG (b64_json), never a hosted url. Decode it
-        # and HOST the bytes so the draft embeds a real https URL, not a giant data: URI.
+        # (2) gpt-image-2 / gpt-image-1 style: base64 PNG (b64_json), never a hosted
+        # url. Decode it and HOST the bytes so the draft embeds a real https URL, not
+        # a giant data: URI.
         b64 = first.get("b64_json")
         if isinstance(b64, str) and b64:
             if self._host is None:

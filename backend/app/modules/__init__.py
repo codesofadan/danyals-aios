@@ -31,6 +31,7 @@ from app.modules.local_seo import router as local_seo_router
 from app.modules.on_page import router as on_page_router
 from app.modules.rank_tracker import router as rank_tracker_router
 from app.modules.site_analytics import router as site_analytics_router
+from app.modules.site_builder import router as site_builder_router
 from app.modules.tool_workspaces import router as tool_workspaces_router
 
 # Every module's public router, in include order. ``app/routers/__init__.py``
@@ -61,4 +62,8 @@ MODULE_ROUTERS: list[APIRouter] = [
     # Indexing: submit published/on-demand URLs to search engines (IndexNow + Google
     # Indexing API + sitemap ping). Key-gated + degrade-safe; FREE, so no cost dial.
     indexing_router,
+    # Website Reconstruction Phase 1+2: the DesignIR + one end-to-end site-generation
+    # job (migration 0069). Analyze-only for now; later phases add the renderer +
+    # visual-QA tasks that advance a job past `generating`.
+    site_builder_router,
 ]

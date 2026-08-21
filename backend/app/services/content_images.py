@@ -1,7 +1,8 @@
 """Content-image hosting: give a generated PNG a real, served ``https`` URL.
 
-The image provider ``gpt-image-1`` returns the image as base64 (``b64_json``),
-NEVER a hosted url (unlike dall-e-3). The draft pipeline needs a URL it can embed
+The image provider (``gpt-image-2``, and ``gpt-image-1`` before it) returns the
+image as base64 (``b64_json``), NEVER a hosted url (unlike dall-e-3). The draft
+pipeline needs a URL it can embed
 as ``![alt](url)`` markdown that then flows into the stored ``draft_md``, the
 Elementor tree, AND the published WordPress body - and inlining a multi-MB base64
 ``data:`` URI into every draft would bloat the draft / DB / WordPress payload.

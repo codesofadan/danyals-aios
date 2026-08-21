@@ -27,8 +27,11 @@ from typing import Protocol, runtime_checkable
 
 # Submission outcomes. 'blocked' is distinct from 'failed': a cost-gate hold or an
 # explicit "this directory requires manual review" case, vs. an engine actually
-# erroring out mid-submit.
-CitationSubmitStatus = str  # 'submitted' | 'verified' | 'failed' | 'blocked'
+# erroring out mid-submit. 'ready_for_human' is distinct from both: the bot got far
+# enough to hit a CAPTCHA it couldn't clear (or an undeclared one it wasn't
+# expecting) - the browser profile is left paused, not torn down, so a human can
+# finish the step through a remote session instead of the engine giving up.
+CitationSubmitStatus = str  # 'submitted' | 'verified' | 'failed' | 'blocked' | 'ready_for_human'
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,10 @@ class CitationSubmitResult:
     proof_url: str = ""
     external_ref: str | None = None
     error: str = ""
+    # ready_for_human only: the directory's own page at the moment the bot paused -
+    # a diagnostic breadcrumb (which account/page a human needs to go finish), NOT a
+    # remote-session URL. Empty for every other status.
+    handoff_url: str = ""
 
 
 @runtime_checkable

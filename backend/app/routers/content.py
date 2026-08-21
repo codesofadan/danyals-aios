@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import httpx
@@ -108,6 +109,9 @@ _RICH_COLUMNS: dict[str, str] = {
 _JOB_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content job not found")
 _NOT_IN_REVIEW = HTTPException(
     status_code=status.HTTP_409_CONFLICT, detail="Content job is not awaiting review"
+)
+_NOT_DONE = HTTPException(
+    status_code=status.HTTP_409_CONFLICT, detail="Content job has not completed its first publish yet"
 )
 
 
@@ -832,12 +836,19 @@ async def review_content_job(
     actor: LeadOnly,
 ) -> ContentJobResponse:
     """The human review gate (owner/admin/manager only). ``approve`` -> publishing
-    (and enqueue the publish worker), ``edit`` -> drafting (persist the reviewer's
-    guided-edit note + RE-ENQUEUE the pipeline for a GUIDED re-draft), ``reject`` ->
-    rejected. 409 unless the job is in needs_review (optimistic ``expect_status``).
-    All three transitions run on the RLS path, where the DB guard recognises the lead
-    (its lead branch allows the status change + the ``edit_instruction`` column edit
-    together)."""
+    (and enqueue the publish worker, unless ``publishAt`` schedules it for later),
+    ``edit`` -> drafting (persist the reviewer's guided-edit note + RE-ENQUEUE the
+    pipeline for a GUIDED re-draft), ``reject`` -> rejected. 409 unless the job is in
+    needs_review (optimistic ``expect_status``). All three transitions run on the
+    RLS path, where the DB guard recognises the lead (its lead branch allows the
+    status change + the ``edit_instruction`` column edit together).
+
+    Scheduling (spec section 46): a human STILL approves right now - the job still
+    moves to ``publishing`` immediately, preserving the existing review-gate
+    invariant - but when ``publishAt`` is a FUTURE time, the Celery enqueue is
+    deferred to it instead of firing immediately (see
+    ``workers.tasks.content.dispatch_scheduled_content_publishes``, currently
+    dormant like every other beat job)."""
     job = await asyncio.to_thread(repo.get_job_by_code, code)
     if job is None:
         raise _JOB_NOT_FOUND
@@ -850,11 +861,17 @@ async def review_content_job(
     # publishing; edit/reject remain the ways to fix or drop one.
     new_status = {"approve": "publishing", "edit": "drafting", "reject": "rejected"}[body.action]
     changes: dict[str, Any] = {"status": new_status}
+    schedule_for_later = False
     if body.action == "edit":
         # Persist the reviewer's guided-edit instruction so the worker's re-draft
         # targets exactly what was asked (not a blind regen). Empty note is allowed.
         changes["edit_instruction"] = (body.note or "").strip()
         changes["stage"] = "Edit requested"
+    elif body.action == "approve":
+        publish_at = body.publish_at
+        schedule_for_later = publish_at is not None and publish_at > datetime.now(UTC)
+        changes["publish_at"] = publish_at if schedule_for_later else None
+        changes["stage"] = f"Scheduled for {publish_at.isoformat()}" if schedule_for_later and publish_at else "Publishing"
     updated = await asyncio.to_thread(
         repo.update_job_by_code, code, changes, "needs_review"
     )
@@ -864,8 +881,10 @@ async def review_content_job(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Content job changed concurrently")
 
     if body.action == "approve":
-        # The worker owns publishing->done on the privileged pool; hand it off.
-        enqueue_publish(code)
+        # The worker owns publishing->done on the privileged pool; hand it off NOW
+        # unless a future publishAt asked to defer the actual push.
+        if not schedule_for_later:
+            enqueue_publish(code)
     elif body.action == "edit":
         # The job is back at drafting (worker-owned); re-enqueue the pipeline so it
         # re-drafts applying the guided-edit instruction, then returns to review.
@@ -879,6 +898,45 @@ async def review_content_job(
     client_id = job.get("client_id")
     await record_activity(
         actor, kind="content", action=action, target=job.get("client_name", ""),
+        entity_type="client" if client_id is not None else None,
+        entity_id=str(client_id) if client_id is not None else None,
+    )
+    return ContentJobResponse.from_row(updated)
+
+
+# --------------------------------------------------------------------------- #
+# Republish (LEAD-only) - spec section 46: Update -> Republish.
+# --------------------------------------------------------------------------- #
+@router.post("/content/jobs/{code}/republish", response_model=ContentJobResponse)
+async def republish_content_job(
+    code: str, repo: ContentRepoDep, enqueue_publish: ContentPublishEnqueuerDep, actor: LeadOnly,
+) -> ContentJobResponse:
+    """Re-push an already-published job to WordPress (LEAD-only) - e.g. after the
+    live post was hand-edited on the client's side, or the draft was patched here.
+
+    ``done -> publishing`` is a NEW transition for the app, but NOT a new one for
+    the DB guard: the trigger's lead branch already permits any status change from
+    a lead ("any other legal edit"), so no migration/trigger change was needed -
+    only this endpoint. 409 unless the job has actually finished a first publish
+    (optimistic ``expect_status``). The re-push itself reuses the EXISTING publish
+    worker unchanged - its update-or-create-by ``wp_post_id`` logic is already
+    idempotent, so a re-push updates the SAME WordPress post rather than
+    duplicating it, and the hard QA gate applies exactly as it does on a first
+    publish."""
+    job = await asyncio.to_thread(repo.get_job_by_code, code)
+    if job is None:
+        raise _JOB_NOT_FOUND
+    if job.get("status") != "done":
+        raise _NOT_DONE
+    updated = await asyncio.to_thread(
+        repo.update_job_by_code, code, {"status": "publishing", "stage": "Republishing"}, "done"
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Content job changed concurrently")
+    enqueue_publish(code)
+    client_id = job.get("client_id")
+    await record_activity(
+        actor, kind="content", action="republished content to WordPress", target=job.get("client_name", ""),
         entity_type="client" if client_id is not None else None,
         entity_id=str(client_id) if client_id is not None else None,
     )

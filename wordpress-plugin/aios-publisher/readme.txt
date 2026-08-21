@@ -4,7 +4,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -80,6 +80,17 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.5.0 =
+* Architecture: split into a Core Connector / Auto Publisher / Design-Reconstruction /
+  Theme Adapter ecosystem (`includes/*.php`), loaded by a thin main file. Pure
+  reorganization — no behavior changed.
+* In-body images are now sideloaded into the SAME site's media library and the post
+  body is rewritten to point at the local copies, instead of staying hotlinked to the
+  AIOS content-image host indefinitely (capped at 20 images per push, best-effort per
+  image — a failed sideload just leaves that one image external).
+* The push now sends `featured_image_url` for the draft's hero image, which is
+  sideloaded and set as the post's featured image automatically.
 
 = 1.4.0 =
 * Design fidelity on ANY theme: the push now sends a `design_css` field (the analyzed

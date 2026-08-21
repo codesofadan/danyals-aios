@@ -22,7 +22,7 @@ Anthropic has NO embeddings API - embeddings live in ``integrations.embeddings``
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from app.logging_setup import get_logger
 from integrations.errors import ProviderNotConfiguredError
@@ -121,8 +121,14 @@ class AnthropicSummarizer:
             ],
             messages=[{"role": "user", "content": prompt}],
         )
+        # The SDK's content-block union has grown many non-text variants (thinking,
+        # tool-use, tool-result, ...); getattr(..., "type") isn't a type guard mypy can
+        # narrow on, so read .text via getattr too rather than assert a specific block
+        # class (the runtime filter above already guarantees only text blocks reach it).
         text = "".join(
-            block.text for block in message.content if getattr(block, "type", None) == "text"
+            str(getattr(block, "text", ""))
+            for block in message.content
+            if getattr(block, "type", None) == "text"
         )
         usage = message.usage
         return LLMResult(
@@ -235,13 +241,20 @@ class AnthropicResearcher:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            tools=[
-                {
-                    "type": _WEB_SEARCH_TOOL_TYPE,
-                    "name": _WEB_SEARCH_TOOL_NAME,
-                    "max_uses": max(1, max_searches),
-                }
-            ],
+            # The SDK now ships several dated, structurally-identical web-search-tool
+            # TypedDicts (20250305/20260209/20260318, ...); a plain dict literal
+            # matches more than one so mypy can't pick a single overload. Cast rather
+            # than pin to one dated Param class here.
+            tools=cast(
+                "Any",
+                [
+                    {
+                        "type": _WEB_SEARCH_TOOL_TYPE,
+                        "name": _WEB_SEARCH_TOOL_NAME,
+                        "max_uses": max(1, max_searches),
+                    }
+                ],
+            ),
             messages=[{"role": "user", "content": prompt}],
         )
         text_parts: list[str] = []

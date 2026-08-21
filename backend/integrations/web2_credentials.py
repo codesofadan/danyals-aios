@@ -23,7 +23,7 @@ vault entry must not take a worker down.
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from app.logging_setup import get_logger
 from integrations.errors import ProviderNotConfiguredError
@@ -304,7 +304,10 @@ def build_publisher(*, client_id: str, platform: str, lookup: SecretLookup) -> W
         logger.warning("web2_credential_malformed", client_id=client_id, platform=platform)
         return None
     try:
-        return builder(creds)
+        # _BUILDERS is dict[str, Any] (the lambdas construct many unrelated client
+        # classes), so the call itself is untyped -- cast to the declared return type
+        # rather than let `Any` silently widen the function's real contract.
+        return cast("Web2Publisher | None", builder(creds))
     except ProviderNotConfiguredError:
         logger.warning("web2_credential_incomplete", client_id=client_id, platform=platform)
         return None
