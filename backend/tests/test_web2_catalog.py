@@ -26,33 +26,44 @@ from app.db.offpage_repo import get_offpage_repo
 from app.schemas.offpage import Web2CatalogResponse, Web2PlatformCatalogResponse
 from integrations.web2_publishers import (
     PLATFORM_BLUESKY,
+    PLATFORM_CODEBERG_PAGES,
     PLATFORM_DISQUS,
     PLATFORM_DPASTE,
     PLATFORM_DRUPAL,
+    PLATFORM_FC2,
+    PLATFORM_FIGSHARE,
     PLATFORM_GITHUB_GIST,
     PLATFORM_GITLAB_SNIPPETS,
     PLATFORM_GRAVATAR,
     PLATFORM_HACKMD,
     PLATFORM_HUBSPOT,
+    PLATFORM_INTERNET_ARCHIVE,
     PLATFORM_JOOMLA,
     PLATFORM_LEMMY,
+    PLATFORM_LIVEDOOR,
     PLATFORM_MINDS,
     PLATFORM_MISSKEY,
     PLATFORM_NEOCITIES,
     PLATFORM_NETLIFY,
     PLATFORM_NOTION,
+    PLATFORM_OSF,
     PLATFORM_PASTE_EE,
     PLATFORM_PASTEBIN,
     PLATFORM_PIXELFED,
     PLATFORM_PLURK,
     PLATFORM_RENTRY,
+    PLATFORM_SEESAA,
+    PLATFORM_SOURCEHUT_PAGES,
+    PLATFORM_WARPCAST,
     PLATFORM_WEBFLOW,
     PLATFORM_WHITEWIND,
+    PLATFORM_ZENODO,
     WEB2_PLATFORMS,
 )
 
 # Every platform whose automation_ready=true flip lives OUTSIDE the frozen 0063 seed
-# (0068's 4 newest CMS/site-builder adapters + 0070's 19-platform third pass).
+# (0068's 4 newest CMS/site-builder adapters, 0070's 19-platform third pass, and
+# 0072's 10-platform fourth pass).
 _POST_SEED_READY_PLATFORMS = frozenset(
     {
         PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA,
@@ -61,6 +72,9 @@ _POST_SEED_READY_PLATFORMS = frozenset(
         PLATFORM_DPASTE, PLATFORM_MISSKEY, PLATFORM_LEMMY, PLATFORM_BLUESKY,
         PLATFORM_WHITEWIND, PLATFORM_DISQUS, PLATFORM_PLURK, PLATFORM_PIXELFED,
         PLATFORM_NOTION, PLATFORM_GRAVATAR, PLATFORM_MINDS,
+        PLATFORM_ZENODO, PLATFORM_INTERNET_ARCHIVE, PLATFORM_OSF, PLATFORM_FIGSHARE,
+        PLATFORM_CODEBERG_PAGES, PLATFORM_LIVEDOOR, PLATFORM_FC2, PLATFORM_SEESAA,
+        PLATFORM_WARPCAST, PLATFORM_SOURCEHUT_PAGES,
     }
 )
 
@@ -330,8 +344,8 @@ def test_0068_migration_grows_the_enum_and_flips_the_new_adapters_ready() -> Non
 
 
 def test_batch3_migration_grows_the_enum_and_flips_the_third_pass_ready() -> None:
-    matches = list(_MIGRATIONS.glob("00[6-9]*_web2_platforms_batch3.sql"))
-    assert len(matches) == 1, "expected exactly one 006x-009x web2_platforms_batch3 migration"
+    matches = list(_MIGRATIONS.glob("0[0-9][0-9][0-9]_web2_platforms_batch3.sql"))
+    assert len(matches) == 1, "expected exactly one web2_platforms_batch3 migration"
     sql = matches[0].read_text(encoding="utf-8").lower()
     for name in (
         "hackmd", "github gist", "gitlab snippets", "paste.ee", "pastebin.com",
@@ -341,3 +355,19 @@ def test_batch3_migration_grows_the_enum_and_flips_the_third_pass_ready() -> Non
         assert f"alter type public.web2_platform add value if not exists '{name}'" in sql
     assert "automation_ready" in sql
     assert "on conflict (name) do update" in sql
+
+
+def test_batch4_migration_grows_the_enum_and_adds_the_fourth_pass() -> None:
+    matches = list(_MIGRATIONS.glob("0[0-9][0-9][0-9]_web2_platforms_batch4.sql"))
+    assert len(matches) == 1, "expected exactly one web2_platforms_batch4 migration"
+    sql = matches[0].read_text(encoding="utf-8").lower()
+    for name in (
+        "zenodo", "internet archive", "osf", "figshare", "codeberg pages",
+        "livedoor blog", "fc2 blog", "seesaa blog", "warpcast", "sourcehut pages",
+    ):
+        assert f"alter type public.web2_platform add value if not exists '{name}'" in sql
+    assert "automation_ready" in sql
+    assert "on conflict (name) do update" in sql
+    # The deliberately-skipped platforms are documented, not silently dropped.
+    for skipped in ("codesandbox", "gitbook", "read the docs", "hive", "steemit"):
+        assert skipped in sql

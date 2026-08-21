@@ -30,11 +30,14 @@ from integrations.errors import ProviderNotConfiguredError
 from integrations.web2_publishers import (
     PLATFORM_BLOGGER,
     PLATFORM_BLUESKY,
+    PLATFORM_CODEBERG_PAGES,
     PLATFORM_DEVTO,
     PLATFORM_DISQUS,
     PLATFORM_DPASTE,
     PLATFORM_DREAMWIDTH,
     PLATFORM_DRUPAL,
+    PLATFORM_FC2,
+    PLATFORM_FIGSHARE,
     PLATFORM_GHOST,
     PLATFORM_GITHUB_GIST,
     PLATFORM_GITHUB_PAGES,
@@ -45,8 +48,10 @@ from integrations.web2_publishers import (
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
     PLATFORM_HUBSPOT,
+    PLATFORM_INTERNET_ARCHIVE,
     PLATFORM_JOOMLA,
     PLATFORM_LEMMY,
+    PLATFORM_LIVEDOOR,
     PLATFORM_LIVEJOURNAL,
     PLATFORM_MASTODON,
     PLATFORM_MATAROA,
@@ -56,24 +61,32 @@ from integrations.web2_publishers import (
     PLATFORM_NEOCITIES,
     PLATFORM_NETLIFY,
     PLATFORM_NOTION,
+    PLATFORM_OSF,
     PLATFORM_PASTE_EE,
     PLATFORM_PASTEBIN,
     PLATFORM_PIXELFED,
     PLATFORM_PLURK,
     PLATFORM_RENTRY,
+    PLATFORM_SEESAA,
+    PLATFORM_SOURCEHUT_PAGES,
     PLATFORM_TELEGRAPH,
     PLATFORM_TUMBLR,
+    PLATFORM_WARPCAST,
     PLATFORM_WEBFLOW,
     PLATFORM_WHITEWIND,
     PLATFORM_WORDPRESS,
     PLATFORM_WRITEAS,
+    PLATFORM_ZENODO,
     BloggerClient,
     BlueskyClient,
+    CodebergPagesClient,
     DevToClient,
     DisqusClient,
     DpasteClient,
     DreamwidthClient,
     DrupalClient,
+    FC2BlogClient,
+    FigshareClient,
     GhostClient,
     GitHubGistClient,
     GitHubPagesClient,
@@ -84,8 +97,10 @@ from integrations.web2_publishers import (
     HashnodeClient,
     HatenaBlogClient,
     HubSpotClient,
+    InternetArchiveClient,
     JoomlaClient,
     LemmyClient,
+    LivedoorBlogClient,
     LiveJournalClient,
     MastodonClient,
     MataroaClient,
@@ -95,18 +110,23 @@ from integrations.web2_publishers import (
     NeocitiesClient,
     NetlifyClient,
     NotionClient,
+    OSFClient,
     PastebinClient,
     PasteEeClient,
     PixelfedClient,
     PlurkClient,
     RentryClient,
+    SeesaaBlogClient,
+    SourcehutPagesClient,
     TelegraPhClient,
     TumblrClient,
+    WarpcastClient,
     Web2Publisher,
     WebflowClient,
     WhiteWindClient,
     WordPressComClient,
     WriteAsClient,
+    ZenodoClient,
 )
 
 logger = get_logger("integrations.web2_credentials")
@@ -232,6 +252,33 @@ _BUILDERS: dict[str, Any] = {
         api_token=c.get("api_token", ""), username=c.get("username", "")
     ),
     PLATFORM_MINDS: lambda c: MindsClient(access_token=c.get("access_token", "")),
+    PLATFORM_ZENODO: lambda c: ZenodoClient(
+        access_token=c.get("access_token", ""), creator_name=c.get("creator_name", "")
+    ),
+    PLATFORM_INTERNET_ARCHIVE: lambda c: InternetArchiveClient(
+        access_key=c.get("access_key", ""), secret_key=c.get("secret_key", ""),
+        item_prefix=c.get("item_prefix", ""),
+    ),
+    PLATFORM_OSF: lambda c: OSFClient(access_token=c.get("access_token", "")),
+    PLATFORM_FIGSHARE: lambda c: FigshareClient(access_token=c.get("access_token", "")),
+    PLATFORM_CODEBERG_PAGES: lambda c: CodebergPagesClient(
+        token=c.get("token", ""), owner=c.get("owner", ""), repo=c.get("repo", "")
+    ),
+    PLATFORM_LIVEDOOR: lambda c: LivedoorBlogClient(
+        livedoor_id=c.get("livedoor_id", ""), blog_name=c.get("blog_name", ""), api_key=c.get("api_key", "")
+    ),
+    PLATFORM_FC2: lambda c: FC2BlogClient(
+        blog_id=c.get("blog_id", ""), username=c.get("username", ""), password=c.get("password", "")
+    ),
+    PLATFORM_SEESAA: lambda c: SeesaaBlogClient(
+        blog_id=c.get("blog_id", ""), username=c.get("username", ""), password=c.get("password", "")
+    ),
+    PLATFORM_WARPCAST: lambda c: WarpcastClient(
+        api_key=c.get("api_key", ""), signer_uuid=c.get("signer_uuid", "")
+    ),
+    PLATFORM_SOURCEHUT_PAGES: lambda c: SourcehutPagesClient(
+        token=c.get("token", ""), domain=c.get("domain", "")
+    ),
 }
 
 

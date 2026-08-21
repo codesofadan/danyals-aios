@@ -123,6 +123,29 @@ and why.
 
 ---
 
+## 2d. Web 2.0 — the fourth pass (10 more, Aug 2026)
+
+Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`). Every
+one below was web-verified live/self-serve at build time — see
+`integrations/web2_publishers.py`'s module docstring for the platforms that were
+investigated and deliberately **skipped** this pass instead (CodeSandbox, GitBook,
+Read the Docs, Hive, Steemit) and why.
+
+| Platform | Vault secret JSON | How to get it |
+|---|---|---|
+| Zenodo | `{"access_token": "...", "creator_name": "..."}` | zenodo.org → Applications → Personal access tokens. `creator_name` is optional (defaults to `"Editorial Team"`). Publish is one-way — a second `publish()` call against an already-published record re-fetches instead of erroring. |
+| Internet Archive | `{"access_key": "...", "secret_key": "...", "item_prefix": "..."}` | archive.org/account/s3.php → your S3-like access/secret keys. `item_prefix` is optional — IA item identifiers are GLOBAL (not per-account), so a prefix avoids colliding with an unrelated existing item of the same bare slug. |
+| OSF | `{"access_token": "..."}` | osf.io/settings/tokens → generate a personal access token. Always creates the node with `public: true` explicitly (OSF nodes default private). |
+| Figshare | `{"access_token": "..."}` | figshare.com/account/applications → generate a personal token. Two-step create-then-publish; the public URL uses Figshare's stable DOI convention. |
+| Codeberg Pages | `{"token": "...", "owner": "...", "repo": "..."}` | codeberg.org/user/settings/applications → generate a token with repo scope. Mirrors GitHub Pages, but commits to a dedicated `pages` branch and uses Gitea's `token <TOKEN>` auth scheme. |
+| Livedoor Blog | `{"livedoor_id": "...", "blog_name": "...", "api_key": "..."}` | Blog settings → AtomPub section shows the API key (NOT the account login password). Same AtomPub protocol as Hatena Blog. |
+| FC2 Blog | `{"blog_id": "...", "username": "...", "password": "..."}` | The account's own FC2 Blog credentials (legacy metaWeblog XML-RPC, no OAuth). Shares the `_MetaWeblogClient` base with Seesaa Blog. |
+| Seesaa Blog | `{"blog_id": "...", "username": "...", "password": "..."}` | The account's own Seesaa Blog credentials — the identical metaWeblog XML-RPC protocol as FC2 Blog, different endpoint. |
+| Warpcast | `{"api_key": "...", "signer_uuid": "..."}` | neynar.com dashboard → API key. `signer_uuid` needs a one-time signer-approval handshake completed by the account owner (outside this system) before it can be used here. |
+| Sourcehut Pages | `{"token": "...", "domain": "..."}` | meta.sr.ht/oauth/personal-token → a token scoped to pages.sr.ht. `domain` is the target `*.srht.site` (or connected custom) domain already associated with the account. |
+
+---
+
 ## 3. Citations — direct-API engines (agency-wide keys, `.env`)
 
 Unlike Web2 credentials, these two are **agency-wide** (one key covers every

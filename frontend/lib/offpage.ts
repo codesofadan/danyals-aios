@@ -93,7 +93,12 @@ export type Citation = {
 // then to 40 with a third pass (pastes/gists/static-hosts, ATProto/fediverse, and
 // Disqus/Gravatar as honest thin profile placements). Evernote, Issuu, and Nostr
 // long-form were investigated and deliberately skipped — see the backend module
-// docstring + the batch3 migration header for the historical record.
+// docstring + the batch3 migration header for the historical record. Grew again
+// to 50 with a fourth pass (research repositories, a static-host + a Gitea-based
+// pages host, two legacy AtomPub/metaWeblog blog hosts, and Farcaster/Warpcast) —
+// CodeSandbox, GitBook, Read the Docs, Hive, and Steemit were investigated and
+// deliberately skipped this pass too — see the backend module docstring + the
+// batch4 migration header for the historical record.
 export type Web2Platform =
   | "WordPress.com" | "Blogger" | "Tumblr" | "Medium"
   | "dev.to" | "Write.as" | "Telegra.ph" | "Mataroa" | "Ghost" | "Mastodon"
@@ -103,7 +108,9 @@ export type Web2Platform =
   | "HackMD" | "GitHub Gist" | "GitLab Snippets" | "paste.ee" | "Pastebin.com"
   | "Netlify" | "Neocities" | "rentry.co" | "dpaste.org"
   | "Misskey" | "Lemmy" | "Bluesky" | "WhiteWind"
-  | "Disqus" | "Plurk" | "Pixelfed" | "Notion" | "Gravatar" | "Minds";
+  | "Disqus" | "Plurk" | "Pixelfed" | "Notion" | "Gravatar" | "Minds"
+  | "Zenodo" | "Internet Archive" | "OSF" | "Figshare" | "Codeberg Pages"
+  | "Livedoor Blog" | "FC2 Blog" | "Seesaa Blog" | "Warpcast" | "Sourcehut Pages";
 export type Web2Verified = "verified" | "pending";
 
 export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = {
@@ -147,6 +154,16 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   Notion: { icon: "description", c: SERIES.c2 },
   Gravatar: { icon: "face", c: SERIES.c3 },
   Minds: { icon: "hub", c: SERIES.c4 },
+  Zenodo: { icon: "science", c: SERIES.c1 },
+  "Internet Archive": { icon: "archive", c: SERIES.c2 },
+  OSF: { icon: "science", c: SERIES.c3 },
+  Figshare: { icon: "bar_chart", c: SERIES.c4 },
+  "Codeberg Pages": { icon: "hub", c: SERIES.c1 },
+  "Livedoor Blog": { icon: "public", c: SERIES.c2 },
+  "FC2 Blog": { icon: "rss_feed", c: SERIES.c3 },
+  "Seesaa Blog": { icon: "rss_feed", c: SERIES.c4 },
+  Warpcast: { icon: "alternate_email", c: SERIES.c1 },
+  "Sourcehut Pages": { icon: "web_stories", c: SERIES.c2 },
 };
 
 // Every platform NOT draft-only can be planned/approved through the pipeline.

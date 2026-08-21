@@ -8,7 +8,7 @@ service/worker layer can meter, cost-log, and diversify it - nothing else calls 
 provider directly. Every placement is human-approved authority work (a real, on-topic
 post), NEVER link spam.
 
-FORTY platforms, mirroring the frontend ``Web2Platform`` union (offpage.ts) - the
+FIFTY platforms, mirroring the frontend ``Web2Platform`` union (offpage.ts) - the
 original 17 the 17 Jul 2026 reference doc tags API-post: Yes, not deprecated, and not a
 blockchain/OAuth1/brand-risk case that would need a materially different credential
 model (Hive/Steemit need a custody-sensitive private key, not an OAuth token; Gab
@@ -93,6 +93,65 @@ deliberately NOT built - see the migration header for the historical record:
 * ``MindsClient`` - real, a personal-access-token POST to the account's public
   channel/newsfeed.
 
+FOURTH PASS (10 more, Aug 2026) - research-repository + static-host + legacy-blog +
+fediverse platforms, every one web-verified live/self-serve at build time:
+
+* ``ZenodoClient`` - real, Zenodo's deposit REST API, Bearer token. Publish is
+  ONE-WAY (a published deposit cannot be edited/re-published through this simple
+  flow - only a full new-version workflow supersedes it), so a SECOND
+  ``publish()`` call against an already-published ``external_id`` re-fetches and
+  returns the SAME record rather than erroring or silently re-publishing.
+* ``InternetArchiveClient`` - real, IA's S3-like upload API (s3.us.archive.org).
+  Auth is IA's own ``LOW key:secret`` scheme (not AWS SigV4); one publish = one
+  new "item" holding a single static HTML file, auto-created via
+  ``x-archive-auto-make-bucket``. A documented ``503 SlowDown`` needs no special
+  handling - it already falls inside ``HttpProviderClient``'s universal
+  ``5xx`` transient range.
+* ``OSFClient`` - real, the Open Science Framework's JSON:API v2, Bearer token.
+  ``public: true`` is set EXPLICITLY on every create (OSF nodes default private).
+* ``FigshareClient`` - real, Figshare API v2, a raw ``token`` auth scheme (not
+  Bearer). Two-step publish (create, then a separate explicit
+  ``.../publish`` call) mirroring Zenodo's own draft-then-publish design; the
+  public URL uses Figshare's stable DOI convention rather than guessing the
+  title-slugged web path (not reliably derivable from the API alone).
+* ``CodebergPagesClient`` - real, mirrors ``GitHubPagesClient`` almost exactly
+  (Codeberg runs Gitea; the Contents API is API-compatible) - the two
+  differences are Gitea's own ``token <TOKEN>`` auth header and Codeberg
+  Pages' dedicated ``pages`` branch (not ``main``/``gh-pages``).
+* ``LivedoorBlogClient`` - real, Livedoor Blog's AtomPub API - the exact same
+  protocol as ``HatenaBlogClient`` (reuses its Atom-entry XML builder/parser
+  directly), HTTP Basic with a separately-issued AtomPub API key (never the
+  account password).
+* ``FC2BlogClient`` / ``SeesaaBlogClient`` - real, the shared legacy
+  metaWeblog XML-RPC protocol (one ``_MetaWeblogClient`` base, two hosts -
+  the same pattern ``_LJProtocolClient`` already establishes for
+  LiveJournal/Dreamwidth). ``newPost``/``editPost`` return only a bare post id,
+  never a permalink, so both follow up with the protocol's own ``getPost`` to
+  read back the host-assigned URL rather than guessing a subdomain pattern.
+* ``WarpcastClient`` - real, Farcaster casts via the Neynar API (``x-api-key``
+  header, NOT ``Authorization: Bearer``), needing a pre-approved
+  ``signer_uuid`` credential (the one-time signer handshake happens outside
+  this system, by the account owner).
+* ``SourcehutPagesClient`` - real, pages.sr.ht's GraphQL API - a ``publish``
+  mutation taking a tarball ``Upload``, built entirely from the stdlib
+  (``tarfile`` + ``io.BytesIO``) and sent as a standard GraphQL multipart
+  request (no new dependency).
+
+Investigated and DELIBERATELY NOT built this pass (see the migration header for
+the historical record): **CodeSandbox** (the modern SDK's sandbox-creation call has
+no publicly documented raw HTTP endpoint behind ``CSB_API_KEY``; the older,
+keyless "Define API" is a different, legacy code-demo product not gated by any
+per-account credential and not a durable article host), **GitBook** (creating a
+Space is confirmed, but pushing real page CONTENT into it needs an undocumented
+change-request/content-operations flow - only a CLI reference was found, no
+verifiable REST shape), **Read the Docs** (a documented project-create call exists,
+but "live" requires a connected git repo + a Sphinx/MkDocs build - the same
+content-model mismatch that ruled out GitLab Pages' CI dependency, just too severe
+to half-support here), and **Hive**/**Steemit** (both need custody-sensitive
+secp256k1 transaction signing - the identical "new heavy crypto dependency" bar
+that got Nostr dropped last pass; nothing suitable already sits in
+``pyproject.toml``, so both stay skipped for the same reason).
+
 CREDENTIALS ARE PASSED IN, NEVER READ HERE. A Web 2.0 OAuth token / API key is
 per-account + per-property and lives in the VAULT (exactly like a WordPress
 application password); ``integrations.web2_credentials`` decrypts it and constructs
@@ -116,15 +175,17 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import io
 import json
 import re
 import secrets
+import tarfile
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 from urllib.parse import quote
 
 import jwt as pyjwt  # already a base dependency (pyjwt[crypto]) - signs Ghost's Admin JWT
@@ -178,6 +239,17 @@ PLATFORM_PIXELFED = "Pixelfed"
 PLATFORM_NOTION = "Notion"
 PLATFORM_GRAVATAR = "Gravatar"
 PLATFORM_MINDS = "Minds"
+# Fourth pass (Aug 2026) - 10 more real clients (see the module docstring above).
+PLATFORM_ZENODO = "Zenodo"
+PLATFORM_INTERNET_ARCHIVE = "Internet Archive"
+PLATFORM_OSF = "OSF"
+PLATFORM_FIGSHARE = "Figshare"
+PLATFORM_CODEBERG_PAGES = "Codeberg Pages"
+PLATFORM_LIVEDOOR = "Livedoor Blog"
+PLATFORM_FC2 = "FC2 Blog"
+PLATFORM_SEESAA = "Seesaa Blog"
+PLATFORM_WARPCAST = "Warpcast"
+PLATFORM_SOURCEHUT_PAGES = "Sourcehut Pages"
 
 WEB2_PLATFORMS: frozenset[str] = frozenset(
     {
@@ -192,6 +264,9 @@ WEB2_PLATFORMS: frozenset[str] = frozenset(
         PLATFORM_DPASTE, PLATFORM_MISSKEY, PLATFORM_LEMMY, PLATFORM_BLUESKY,
         PLATFORM_WHITEWIND, PLATFORM_DISQUS, PLATFORM_PLURK, PLATFORM_PIXELFED,
         PLATFORM_NOTION, PLATFORM_GRAVATAR, PLATFORM_MINDS,
+        PLATFORM_ZENODO, PLATFORM_INTERNET_ARCHIVE, PLATFORM_OSF, PLATFORM_FIGSHARE,
+        PLATFORM_CODEBERG_PAGES, PLATFORM_LIVEDOOR, PLATFORM_FC2, PLATFORM_SEESAA,
+        PLATFORM_WARPCAST, PLATFORM_SOURCEHUT_PAGES,
     }
 )
 # Medium is draft-only (its publish API is retired); the pipeline never marks it live.
@@ -243,6 +318,16 @@ PLATFORM_CREDENTIAL_FIELDS: dict[str, tuple[str, ...]] = {
     PLATFORM_NOTION: ("integration_token", "parent_page_id"),
     PLATFORM_GRAVATAR: ("api_token", "username"),
     PLATFORM_MINDS: ("access_token",),
+    PLATFORM_ZENODO: ("access_token",),
+    PLATFORM_INTERNET_ARCHIVE: ("access_key", "secret_key"),
+    PLATFORM_OSF: ("access_token",),
+    PLATFORM_FIGSHARE: ("access_token",),
+    PLATFORM_CODEBERG_PAGES: ("token", "owner", "repo"),
+    PLATFORM_LIVEDOOR: ("livedoor_id", "blog_name", "api_key"),
+    PLATFORM_FC2: ("blog_id", "username", "password"),
+    PLATFORM_SEESAA: ("blog_id", "username", "password"),
+    PLATFORM_WARPCAST: ("api_key", "signer_uuid"),
+    PLATFORM_SOURCEHUT_PAGES: ("token", "domain"),
 }
 
 _INSTALL_HINT = (
@@ -2194,6 +2279,525 @@ class MindsClient(HttpProviderClient):
             raise ProviderCallError("Minds response missing activity guid")
         post_url = f"https://www.minds.com/newsfeed/{guid}"
         return Web2PublishResult(post_url=post_url, verified=True, external_id=str(guid))
+
+
+# =============================================================================
+# FOURTH PASS (10 more, Aug 2026) - see the module docstring above for the full
+# rationale + what was deliberately skipped this round.
+# =============================================================================
+
+# --------------------------------------------------------------------------- #
+# Zenodo - deposit REST API, Bearer token. Publish is ONE-WAY - a published
+# deposit cannot be edited/re-published through this simple flow (only a full
+# new-version workflow supersedes it), so a SECOND publish() call against an
+# already-published external_id re-fetches and returns the SAME record.
+# --------------------------------------------------------------------------- #
+class ZenodoClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Zenodo REST API (zenodo.org/api). Creates
+    a deposition with metadata, then calls the separate ``actions/publish`` step
+    to make it live - Zenodo's own two-step design (a draft deposit is private
+    until explicitly published). Because a published deposit's metadata cannot
+    be edited through this simple flow (a genuine update needs Zenodo's full
+    new-version workflow), a SECOND ``publish()`` call against an already-set
+    ``external_id`` is treated as already-done: this re-fetches and returns the
+    EXISTING record rather than attempting an unsupported "update" or erroring."""
+
+    provider = "zenodo"
+    platform = PLATFORM_ZENODO
+    _DEFAULT_CREATOR = "Editorial Team"
+
+    def __init__(self, *, access_token: str, creator_name: str = "", timeout: float = 30.0) -> None:
+        if not access_token:
+            raise ProviderNotConfiguredError(f"Zenodo publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://zenodo.org/api",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._creator_name = creator_name or self._DEFAULT_CREATOR
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        if post.external_id:
+            # Already published once - re-fetch the SAME record rather than
+            # guessing at an unsupported second publish.
+            data = self.request_json("GET", f"/deposit/depositions/{post.external_id}")
+            return self._result_from(data)
+        description = post.body_html + f'<p><a href="{post.target_url}">{post.anchor}</a></p>'
+        metadata: dict[str, object] = {
+            "title": post.title,
+            "description": description,
+            "upload_type": "publication",
+            "publication_type": "other",
+            "creators": [{"name": self._creator_name}],
+        }
+        created = self.request_json("POST", "/deposit/depositions", json_body={"metadata": metadata})
+        deposit_id = created.get("id")
+        if not deposit_id:
+            raise ProviderCallError("Zenodo response missing deposition id")
+        published = self.request_json("POST", f"/deposit/depositions/{deposit_id}/actions/publish")
+        return self._result_from(published)
+
+    def _result_from(self, data: dict[str, Any]) -> Web2PublishResult:
+        links = data.get("links") or {}
+        post_url = str(links.get("record_html") or links.get("html") or "")
+        deposit_id = data.get("id")
+        if not post_url or not deposit_id:
+            raise ProviderCallError("Zenodo response missing a record url/id")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(deposit_id))
+
+
+# --------------------------------------------------------------------------- #
+# Internet Archive - S3-like upload API (a distinct protocol from AWS S3: the
+# item ("bucket") is auto-created on first PUT via a dedicated header, and auth
+# is IA's own non-standard "LOW key:secret" scheme, not AWS SigV4).
+# --------------------------------------------------------------------------- #
+class InternetArchiveClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Internet Archive's S3-like upload API
+    (s3.us.archive.org). One publish = one new "item" (``bucket``) holding a
+    single static HTML file - ``x-archive-auto-make-bucket: 1`` creates the item
+    on first upload, so no separate provisioning step is needed. IA item
+    identifiers are GLOBAL (not per-account), so the optional ``item_prefix``
+    constructor kwarg lets a client namespace its slugs and avoid colliding with
+    an unrelated existing item of the same bare slug.
+
+    A documented ``503 SlowDown`` (IA's own back-pressure response) needs no
+    extra ``transient_statuses`` opt-in - it already falls inside
+    ``HttpProviderClient``'s universal ``500 <= status < 600`` transient range,
+    so it retries with backoff for free; nothing further to wire here."""
+
+    provider = "internet_archive"
+    platform = PLATFORM_INTERNET_ARCHIVE
+
+    def __init__(
+        self, *, access_key: str, secret_key: str, item_prefix: str = "", timeout: float = 30.0,
+    ) -> None:
+        if not access_key or not secret_key:
+            raise ProviderNotConfiguredError(f"Internet Archive publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://s3.us.archive.org",
+            headers={"Authorization": f"LOW {access_key}:{secret_key}"},
+            timeout=timeout,
+        )
+        self._item_prefix = item_prefix.strip("-")
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        bucket = f"{self._item_prefix}-{slug}" if self._item_prefix else slug
+        filename = f"{slug}.html"
+        content = _static_page(post).encode("utf-8")
+        response = self._client.put(
+            f"/{bucket}/{filename}",
+            content=content,
+            headers={"Content-Type": "text/html", "x-archive-auto-make-bucket": "1"},
+        )
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Internet Archive upload failed with status {response.status_code}")
+        post_url = f"https://archive.org/details/{bucket}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=bucket)
+
+
+# --------------------------------------------------------------------------- #
+# OSF (Open Science Framework) - JSON:API v2, Bearer token. `public: true` MUST
+# be set explicitly - a created node defaults to PRIVATE otherwise, which would
+# silently produce an unreachable "placement".
+# --------------------------------------------------------------------------- #
+class OSFClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the OSF (Open Science Framework) v2 API
+    (api.osf.io), JSON:API format. Creates a public project node carrying the
+    article as its description + the backlink - OSF nodes have no rich body
+    field, so the full article renders as plain text (the same trade-off
+    ``HackMDClient``/``GitHubGistClient`` document for their markdown-only
+    bodies)."""
+
+    provider = "osf"
+    platform = PLATFORM_OSF
+
+    def __init__(self, *, access_token: str, timeout: float = 30.0) -> None:
+        if not access_token:
+            raise ProviderNotConfiguredError(f"OSF publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.osf.io/v2",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
+            timeout=timeout,
+        )
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        description = _html_to_text(post.body_html) + f"\n\n{post.anchor}: {post.target_url}"
+        attrs: dict[str, object] = {
+            "title": post.title, "category": "project", "public": True, "description": description[:1000],
+        }
+        payload: dict[str, Any] = {"data": {"type": "nodes", "attributes": attrs}}
+        if post.external_id:
+            payload["data"]["id"] = post.external_id
+            data = self.request_json("PATCH", f"/nodes/{post.external_id}/", json_body=payload)
+        else:
+            data = self.request_json("POST", "/nodes/", json_body=payload)
+        row = data.get("data") or {}
+        node_id = row.get("id")
+        post_url = str((row.get("links") or {}).get("html") or "")
+        if not node_id or not post_url:
+            raise ProviderCallError("OSF response missing node id/url")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(node_id))
+
+
+# --------------------------------------------------------------------------- #
+# Figshare - REST API v2. Auth is `token <ACCESS_TOKEN>` (Figshare's own scheme,
+# not Bearer). Two-step publish: create (a draft by default) then an explicit
+# publish call - mirrors Zenodo's own two-step design.
+# --------------------------------------------------------------------------- #
+class FigshareClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Figshare API v2 (api.figshare.com).
+    Creating/publishing an article both return only a bare ``{"location": url}``
+    (never the full row), so the article id is parsed off the trailing path
+    segment. The public citation URL uses Figshare's stable DOI convention
+    (``doi.org/10.6084/m9.figshare.<id>``) rather than guessing the
+    title-slugged ``figshare.com/articles/...`` web path, which is not
+    reliably derivable from the API response alone. An update
+    (``external_id`` set) edits the article then re-publishes it - Figshare's
+    own documented workflow for revising an already-published item."""
+
+    provider = "figshare"
+    platform = PLATFORM_FIGSHARE
+
+    def __init__(self, *, access_token: str, timeout: float = 30.0) -> None:
+        if not access_token:
+            raise ProviderNotConfiguredError(f"Figshare publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.figshare.com/v2",
+            headers={"Authorization": f"token {access_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+
+    def _location_id(self, data: dict[str, Any]) -> str:
+        location = str(data.get("location") or "")
+        if not location:
+            raise ProviderCallError("Figshare response missing location")
+        return location.rstrip("/").rsplit("/", 1)[-1]
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        description = post.body_html + f'<p><a href="{post.target_url}">{post.anchor}</a></p>'
+        body: dict[str, object] = {"title": post.title, "description": description}
+        if post.external_id:
+            article_id = post.external_id
+            self.request_json("PUT", f"/account/articles/{article_id}", json_body=body)
+        else:
+            created = self.request_json("POST", "/account/articles", json_body=body)
+            article_id = self._location_id(created)
+        published = self.request_json("POST", f"/account/articles/{article_id}/publish")
+        public_id = self._location_id(published)
+        post_url = f"https://doi.org/10.6084/m9.figshare.{public_id}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=article_id)
+
+
+# --------------------------------------------------------------------------- #
+# Codeberg Pages - mirrors GitHubPagesClient almost exactly: Codeberg runs
+# Gitea, whose Contents API is API-compatible with GitHub's, but Gitea's own
+# auth scheme is `Authorization: token <TOKEN>` (not `Bearer`), and Codeberg
+# Pages serves off a dedicated `pages` branch (not `main`/`gh-pages`).
+# --------------------------------------------------------------------------- #
+class CodebergPagesClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over Codeberg (Gitea) - commits the article as a
+    static HTML file to the repo's ``pages`` branch via the Contents API
+    (best-effort repo creation first, exactly like ``GitHubPagesClient``).
+    Public URL is the per-project Codeberg Pages form,
+    ``https://{owner}.codeberg.page/{slug}/``. Assumes the repo either already
+    exists WITH a ``pages`` branch, or does not exist yet (so ``auto_init``
+    creates that branch directly) - the same "assumes prior setup" honesty
+    ``GitHubPagesClient`` already documents for its own repo."""
+
+    provider = "codeberg_pages"
+    platform = PLATFORM_CODEBERG_PAGES
+    _BRANCH = "pages"
+
+    def __init__(self, *, token: str, owner: str, repo: str, timeout: float = 30.0) -> None:
+        if not token or not owner or not repo:
+            raise ProviderNotConfiguredError(f"Codeberg Pages publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://codeberg.org/api/v1",
+            headers={"Authorization": f"token {token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._owner, self._repo = owner, repo
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        self._ensure_repo()
+        slug = post.slug or _slugify(post.title)
+        api_path = f"/repos/{self._owner}/{self._repo}/contents/{slug}/index.html"
+        content_b64 = base64.b64encode(_static_page(post).encode("utf-8")).decode("ascii")
+        body: dict[str, object] = {
+            "message": f"web2: publish {slug}", "content": content_b64, "branch": self._BRANCH,
+        }
+        existing_sha = self._existing_sha(api_path) if post.external_id else None
+        if existing_sha:
+            body["sha"] = existing_sha
+        self.request_json("PUT", api_path, json_body=body)
+        post_url = f"https://{self._owner}.codeberg.page/{slug}/"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=slug)
+
+    def _existing_sha(self, api_path: str) -> str | None:
+        try:
+            data = self.request_json("GET", f"{api_path}?ref={self._BRANCH}")
+        except ProviderCallError:
+            return None
+        sha = data.get("sha")
+        return str(sha) if sha else None
+
+    def _ensure_repo(self) -> None:
+        # Best-effort idempotent setup, not the publish itself - a 4xx here (repo
+        # already exists) is safe to swallow, same as GitHubPagesClient's Pages toggle.
+        with contextlib.suppress(ProviderCallError):
+            self.request_json(
+                "POST", "/user/repos",
+                json_body={"name": self._repo, "auto_init": True, "default_branch": self._BRANCH},
+            )
+
+
+# --------------------------------------------------------------------------- #
+# Livedoor Blog - AtomPub (RFC 5023), the exact same protocol as
+# HatenaBlogClient - reuses its Atom-entry XML builder/parser directly (only
+# the endpoint + the Basic-auth credential differ: Livedoor's password slot is
+# a separately-issued AtomPub API key, never the account login password).
+# --------------------------------------------------------------------------- #
+class LivedoorBlogClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over Livedoor Blog's AtomPub API. Auth = HTTP
+    Basic with the Livedoor ID + the blog's own AtomPub API key (issued
+    separately under blog settings, NOT the account password)."""
+
+    provider = "livedoor_blog"
+    platform = PLATFORM_LIVEDOOR
+
+    def __init__(self, *, livedoor_id: str, blog_name: str, api_key: str, timeout: float = 30.0) -> None:
+        if not livedoor_id or not blog_name or not api_key:
+            raise ProviderNotConfiguredError(f"Livedoor Blog publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url=f"https://livedoor.blogcms.jp/atompub/{blog_name}",
+            headers={"Content-Type": "application/atom+xml;type=entry"},
+            timeout=timeout,
+        )
+        self._auth = (livedoor_id, api_key)
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        entry = _hatena_entry_xml(post)
+        path = f"/article/{post.external_id}" if post.external_id else "/article"
+        response = self._client.request(
+            "PUT" if post.external_id else "POST", path, content=entry.encode("utf-8"), auth=self._auth,
+        )
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Livedoor Blog request failed with status {response.status_code}")
+        member_id, alt_link = _parse_hatena_response(response.text)
+        if not alt_link:
+            raise ProviderCallError("Livedoor Blog response missing the entry link")
+        return Web2PublishResult(post_url=alt_link, verified=True, external_id=member_id or post.external_id)
+
+
+# --------------------------------------------------------------------------- #
+# FC2 Blog / Seesaa Blog - the shared legacy metaWeblog XML-RPC protocol
+# (metaWeblog.newPost/editPost/getPost); no OAuth, username + password. One
+# shared base, mirroring how _LJProtocolClient is shared by LiveJournal/
+# Dreamwidth for their own shared legacy protocol.
+# --------------------------------------------------------------------------- #
+class _MetaWeblogClient:
+    """Shared metaWeblog XML-RPC publisher - the protocol FC2 Blog and Seesaa
+    Blog (and several other legacy Japanese blog hosts) implement verbatim.
+    ``newPost``/``editPost`` return only a bare post id, never a permalink, so
+    this always follows up with the protocol's own ``getPost`` to read back the
+    real, host-assigned ``permaLink``/``link`` - safer than guessing a
+    subdomain-based URL pattern per host."""
+
+    platform = ""
+    _endpoint = ""
+
+    def __init__(self, *, blog_id: str, username: str, password: str) -> None:
+        if not blog_id or not username or not password:
+            raise ProviderNotConfiguredError(
+                f"{self.platform} publisher unavailable: pass a per-account blog id + "
+                "username + password (per-property, from the vault) to publish a Web 2.0 property"
+            )
+        self._blog_id, self._username, self._password = blog_id, username, password
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        import xmlrpc.client as xmlrpc
+
+        proxy = xmlrpc.ServerProxy(self._endpoint)
+        content_struct: dict[str, object] = {
+            "title": post.title,
+            "description": post.body_html + f'<p><a href="{post.target_url}">{post.anchor}</a></p>',
+        }
+        try:
+            if post.external_id:
+                proxy.metaWeblog.editPost(post.external_id, self._username, self._password, content_struct, True)
+                post_id: Any = post.external_id
+            else:
+                post_id = proxy.metaWeblog.newPost(
+                    self._blog_id, self._username, self._password, content_struct, True
+                )
+            fetched = cast(
+                "dict[str, Any]", proxy.metaWeblog.getPost(post_id, self._username, self._password)
+            )
+        except (xmlrpc.Fault, OSError) as exc:
+            raise ProviderCallError(f"{self.platform} XML-RPC call failed: {exc}") from exc
+        post_url = str(fetched.get("permaLink") or fetched.get("link") or "")
+        if not post_url:
+            raise ProviderCallError(f"{self.platform} response missing a permalink")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(post_id))
+
+
+class FC2BlogClient(_MetaWeblogClient):
+    provider = "fc2_blog"
+    platform = PLATFORM_FC2
+    _endpoint = "http://blog.fc2.com/xmlrpc.php"
+
+
+class SeesaaBlogClient(_MetaWeblogClient):
+    provider = "seesaa_blog"
+    platform = PLATFORM_SEESAA
+    # The SSL endpoint is preferred over the plain-HTTP blog.seesaa.jp/rpc one.
+    _endpoint = "https://ssl.seesaa.jp/blog/rpc"
+
+
+# --------------------------------------------------------------------------- #
+# Warpcast (via Neynar) - Farcaster casts. Auth is an `x-api-key` header (NOT
+# `Authorization: Bearer`); a pre-approved `signer_uuid` rides in the JSON body.
+# --------------------------------------------------------------------------- #
+class WarpcastClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Neynar API's Farcaster cast endpoint.
+    ``signer_uuid`` must already be approved by the account owner (a one-time
+    handshake outside this system - Neynar's signer-approval flow); this client
+    only ever casts with an ALREADY-approved signer. The public permalink uses
+    Warpcast's documented short-hash convention (``0x`` + the first 4 bytes/8
+    hex chars of the cast hash); if the response is missing the author's
+    username (needed to build that permalink), this returns ``verified=False``
+    with a conversation-id fallback URL rather than guessing."""
+
+    provider = "warpcast_neynar"
+    platform = PLATFORM_WARPCAST
+    _MAX_CHARS = 320
+
+    def __init__(self, *, api_key: str, signer_uuid: str, timeout: float = 30.0) -> None:
+        if not api_key or not signer_uuid:
+            raise ProviderNotConfiguredError(f"Warpcast publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.neynar.com/v2/farcaster",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._signer_uuid = signer_uuid
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        text = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.target_url}"
+        body: dict[str, object] = {
+            "signer_uuid": self._signer_uuid,
+            "text": text[: self._MAX_CHARS],
+            "embeds": [{"url": post.target_url}],
+        }
+        data = self.request_json("POST", "/cast", json_body=body)
+        cast = data.get("cast") or {}
+        cast_hash = cast.get("hash")
+        if not cast_hash:
+            raise ProviderCallError("Warpcast/Neynar response missing cast hash")
+        author = cast.get("author") or {}
+        username = author.get("username")
+        raw_hash = str(cast_hash)
+        short_hash = raw_hash[2:10] if raw_hash.startswith("0x") else raw_hash[:8]
+        if username:
+            post_url = f"https://warpcast.com/{username}/0x{short_hash}"
+            verified = True
+        else:
+            # Cannot build the real per-user permalink without a username - an
+            # honest fallback, never a guessed URL.
+            post_url = f"https://warpcast.com/~/conversations/{raw_hash}"
+            verified = False
+        return Web2PublishResult(post_url=post_url, verified=verified, external_id=raw_hash)
+
+
+# --------------------------------------------------------------------------- #
+# Sourcehut Pages - a GraphQL `publish` mutation taking a tarball Upload; the
+# tarball is built entirely from the stdlib (tarfile + io.BytesIO) and sent as
+# a standard GraphQL multipart request (operations + map + file part) - no new
+# dependency needed.
+# --------------------------------------------------------------------------- #
+def _build_pages_tarball(post: Web2Post) -> bytes:
+    """A minimal ``.tar.gz`` containing one ``index.html`` (regular file, mode
+    644, no symlinks) - exactly the shape pages.sr.ht's ``publish`` mutation
+    documents as its accepted ``content`` upload."""
+    buf = io.BytesIO()
+    content = _static_page(post).encode("utf-8")
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo(name="index.html")
+        info.size = len(content)
+        info.mode = 0o644
+        tar.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
+class SourcehutPagesClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over pages.sr.ht's GraphQL API
+    (``POST https://pages.sr.ht/query``). The ``publish(domain, content)``
+    mutation updates the site if ``domain`` already exists on this account, or
+    creates it - so ``external_id`` needs no separate branch, every call is the
+    same request. Sent as a standard GraphQL multipart request (the
+    ``graphql-multipart-request-spec`` - an ``operations`` JSON part, a ``map``
+    JSON part, and the file part), which ``httpx``'s ``files=``/``data=``
+    already produces without any extra library."""
+
+    provider = "sourcehut_pages"
+    platform = PLATFORM_SOURCEHUT_PAGES
+    _ENDPOINT = "https://pages.sr.ht/query"
+    _MUTATION = (
+        "mutation Publish($domain: String!, $content: Upload!) { "
+        "publish(domain: $domain, content: $content) { id domain } }"
+    )
+
+    def __init__(self, *, token: str, domain: str, timeout: float = 30.0) -> None:
+        if not token or not domain:
+            raise ProviderNotConfiguredError(f"Sourcehut Pages publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+        self._domain = domain
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        tarball = _build_pages_tarball(post)
+        operations = json.dumps(
+            {"query": self._MUTATION, "variables": {"domain": self._domain, "content": None}}
+        )
+        map_ = json.dumps({"0": ["variables.content"]})
+        response = self._client.post(
+            self._ENDPOINT,
+            data={"operations": operations, "map": map_},
+            files={"0": ("site.tar.gz", tarball, "application/gzip")},
+        )
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Sourcehut Pages request failed with status {response.status_code}")
+        data = response.json()
+        if data.get("errors"):
+            raise ProviderCallError(f"Sourcehut Pages GraphQL error: {data['errors']}")
+        site = (data.get("data") or {}).get("publish") or {}
+        domain = site.get("domain")
+        if not domain:
+            raise ProviderCallError("Sourcehut Pages response missing domain")
+        post_url = f"https://{domain}/"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(site.get("id") or domain))
 
 
 # --------------------------------------------------------------------------- #

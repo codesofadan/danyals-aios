@@ -23,12 +23,15 @@ from integrations.errors import ProviderCallError, ProviderNotConfiguredError
 from integrations.web2_credentials import build_publisher, vault_provider_for
 from integrations.web2_publishers import (
     PLATFORM_BLUESKY,
+    PLATFORM_CODEBERG_PAGES,
     PLATFORM_CREDENTIAL_FIELDS,
     PLATFORM_DEVTO,
     PLATFORM_DISQUS,
     PLATFORM_DPASTE,
     PLATFORM_DREAMWIDTH,
     PLATFORM_DRUPAL,
+    PLATFORM_FC2,
+    PLATFORM_FIGSHARE,
     PLATFORM_GHOST,
     PLATFORM_GITHUB_GIST,
     PLATFORM_GITHUB_PAGES,
@@ -39,8 +42,10 @@ from integrations.web2_publishers import (
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
     PLATFORM_HUBSPOT,
+    PLATFORM_INTERNET_ARCHIVE,
     PLATFORM_JOOMLA,
     PLATFORM_LEMMY,
+    PLATFORM_LIVEDOOR,
     PLATFORM_LIVEJOURNAL,
     PLATFORM_MASTODON,
     PLATFORM_MATAROA,
@@ -50,22 +55,30 @@ from integrations.web2_publishers import (
     PLATFORM_NEOCITIES,
     PLATFORM_NETLIFY,
     PLATFORM_NOTION,
+    PLATFORM_OSF,
     PLATFORM_PASTE_EE,
     PLATFORM_PASTEBIN,
     PLATFORM_PIXELFED,
     PLATFORM_PLURK,
     PLATFORM_RENTRY,
+    PLATFORM_SEESAA,
+    PLATFORM_SOURCEHUT_PAGES,
     PLATFORM_TELEGRAPH,
+    PLATFORM_WARPCAST,
     PLATFORM_WEBFLOW,
     PLATFORM_WHITEWIND,
     PLATFORM_WRITEAS,
+    PLATFORM_ZENODO,
     WEB2_PLATFORMS,
     BlueskyClient,
+    CodebergPagesClient,
     DevToClient,
     DisqusClient,
     DpasteClient,
     DreamwidthClient,
     DrupalClient,
+    FC2BlogClient,
+    FigshareClient,
     GhostClient,
     GitHubGistClient,
     GitHubPagesClient,
@@ -76,8 +89,10 @@ from integrations.web2_publishers import (
     HashnodeClient,
     HatenaBlogClient,
     HubSpotClient,
+    InternetArchiveClient,
     JoomlaClient,
     LemmyClient,
+    LivedoorBlogClient,
     LiveJournalClient,
     MastodonClient,
     MataroaClient,
@@ -87,17 +102,22 @@ from integrations.web2_publishers import (
     NeocitiesClient,
     NetlifyClient,
     NotionClient,
+    OSFClient,
     PastebinClient,
     PasteEeClient,
     PixelfedClient,
     PlurkClient,
     RentryClient,
+    SeesaaBlogClient,
+    SourcehutPagesClient,
     TelegraPhClient,
+    WarpcastClient,
     Web2Post,
     Web2Publisher,
     WebflowClient,
     WhiteWindClient,
     WriteAsClient,
+    ZenodoClient,
 )
 
 pytestmark = pytest.mark.unit
@@ -122,6 +142,12 @@ _BATCH3_PLATFORMS = (
     PLATFORM_NOTION, PLATFORM_GRAVATAR, PLATFORM_MINDS,
 )
 _ANONYMOUS_PLATFORMS = (PLATFORM_RENTRY, PLATFORM_DPASTE)
+# Fourth pass (10 more, Aug 2026) - see web2_publishers.py's module docstring.
+_BATCH4_PLATFORMS = (
+    PLATFORM_ZENODO, PLATFORM_INTERNET_ARCHIVE, PLATFORM_OSF, PLATFORM_FIGSHARE,
+    PLATFORM_CODEBERG_PAGES, PLATFORM_LIVEDOOR, PLATFORM_FC2, PLATFORM_SEESAA,
+    PLATFORM_WARPCAST, PLATFORM_SOURCEHUT_PAGES,
+)
 
 
 def _post(**over: Any) -> Web2Post:
@@ -152,12 +178,12 @@ def _json_response(payload: dict[str, Any], status_code: int = 200) -> httpx.Res
 # --------------------------------------------------------------------------- #
 # 1. The platform catalog itself.
 # --------------------------------------------------------------------------- #
-def test_forty_platforms_total() -> None:
-    assert len(WEB2_PLATFORMS) == 40
+def test_fifty_platforms_total() -> None:
+    assert len(WEB2_PLATFORMS) == 50
 
 
 def test_every_new_platform_has_credential_fields_documented() -> None:
-    for platform in _NEW_PLATFORMS + _NEWEST_PLATFORMS + _BATCH3_PLATFORMS:
+    for platform in _NEW_PLATFORMS + _NEWEST_PLATFORMS + _BATCH3_PLATFORMS + _BATCH4_PLATFORMS:
         assert platform in PLATFORM_CREDENTIAL_FIELDS
         assert PLATFORM_CREDENTIAL_FIELDS[platform]  # non-empty
 
@@ -208,6 +234,14 @@ def test_anonymous_platforms_have_no_credential_fields() -> None:
         (NotionClient, {"integration_token": "", "parent_page_id": "p"}),
         (GravatarClient, {"api_token": "", "username": "u"}),
         (MindsClient, {"access_token": ""}),
+        (ZenodoClient, {"access_token": ""}),
+        (InternetArchiveClient, {"access_key": "", "secret_key": "sk"}),
+        (OSFClient, {"access_token": ""}),
+        (FigshareClient, {"access_token": ""}),
+        (CodebergPagesClient, {"token": "", "owner": "o", "repo": "r"}),
+        (LivedoorBlogClient, {"livedoor_id": "", "blog_name": "b", "api_key": "k"}),
+        (WarpcastClient, {"api_key": "", "signer_uuid": "s"}),
+        (SourcehutPagesClient, {"token": "", "domain": "d"}),
     ],
 )
 def test_a_blank_or_malformed_credential_refuses_to_construct(
@@ -229,6 +263,16 @@ def test_journal_clients_refuse_a_blank_username_or_password(ctor: type) -> None
         ctor(username="", password="")
     with pytest.raises(ProviderNotConfiguredError):
         ctor(username="alice", password="")
+
+
+@pytest.mark.parametrize("ctor", [FC2BlogClient, SeesaaBlogClient])
+def test_metaweblog_clients_refuse_a_blank_blog_id_or_credential(ctor: type) -> None:
+    with pytest.raises(ProviderNotConfiguredError):
+        ctor(blog_id="", username="alice", password="secret")
+    with pytest.raises(ProviderNotConfiguredError):
+        ctor(blog_id="42", username="", password="secret")
+    with pytest.raises(ProviderNotConfiguredError):
+        ctor(blog_id="42", username="alice", password="")
 
 
 def test_writeas_and_microblog_never_hard_refuse_construction() -> None:
@@ -290,6 +334,19 @@ def test_batch3_clients_satisfy_web2publisher() -> None:
     assert isinstance(NotionClient(integration_token="t", parent_page_id="p"), Web2Publisher)
     assert isinstance(GravatarClient(api_token="t", username="u"), Web2Publisher)
     assert isinstance(MindsClient(access_token="t"), Web2Publisher)
+
+
+def test_batch4_clients_satisfy_web2publisher() -> None:
+    assert isinstance(ZenodoClient(access_token="t"), Web2Publisher)
+    assert isinstance(InternetArchiveClient(access_key="ak", secret_key="sk"), Web2Publisher)
+    assert isinstance(OSFClient(access_token="t"), Web2Publisher)
+    assert isinstance(FigshareClient(access_token="t"), Web2Publisher)
+    assert isinstance(CodebergPagesClient(token="t", owner="o", repo="r"), Web2Publisher)
+    assert isinstance(LivedoorBlogClient(livedoor_id="l", blog_name="b", api_key="k"), Web2Publisher)
+    assert isinstance(FC2BlogClient(blog_id="1", username="u", password="p"), Web2Publisher)
+    assert isinstance(SeesaaBlogClient(blog_id="1", username="u", password="p"), Web2Publisher)
+    assert isinstance(WarpcastClient(api_key="k", signer_uuid="s"), Web2Publisher)
+    assert isinstance(SourcehutPagesClient(token="t", domain="d"), Web2Publisher)
 
 
 # --------------------------------------------------------------------------- #
@@ -820,6 +877,212 @@ def test_minds_posts_an_activity_to_the_public_channel() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 4c. Batch4 real HTTP behaviour via MockTransport - one test per new client.
+# --------------------------------------------------------------------------- #
+def test_zenodo_creates_then_publishes_a_deposition() -> None:
+    client = ZenodoClient(access_token="t")
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("/actions/publish"):
+            return _json_response(
+                {"id": 42, "links": {"record_html": "https://zenodo.org/records/42"}}
+            )
+        return _json_response({"id": 42, "links": {}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://zenodo.org/records/42"
+    assert result.external_id == "42"
+    assert any(p.endswith("/deposit/depositions") for p in calls)
+    assert any(p.endswith("/actions/publish") for p in calls)
+
+
+def test_zenodo_second_publish_call_refetches_instead_of_republishing() -> None:
+    client = ZenodoClient(access_token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"], seen["path"] = request.method, request.url.path
+        return _json_response({"id": 42, "links": {"record_html": "https://zenodo.org/records/42"}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id="42"))
+    assert result.post_url == "https://zenodo.org/records/42"
+    assert seen["method"] == "GET" and seen["path"].endswith("/deposit/depositions/42")
+
+
+def test_internet_archive_puts_a_static_file_with_the_low_auth_scheme() -> None:
+    client = InternetArchiveClient(access_key="ak", secret_key="sk")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        seen["auto_make_bucket"] = request.headers.get("x-archive-auto-make-bucket")
+        return httpx.Response(200)
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://archive.org/details/gentle-dental-cleanings"
+    assert seen["auth"] == "LOW ak:sk"
+    assert seen["auto_make_bucket"] == "1"
+
+
+def test_osf_creates_a_public_node() -> None:
+    client = OSFClient(access_token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return _json_response(
+            {"data": {"id": "abc12", "links": {"html": "https://osf.io/abc12/"}}}
+        )
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://osf.io/abc12/"
+    assert result.external_id == "abc12"
+    assert seen["body"]["data"]["attributes"]["public"] is True
+
+
+def test_figshare_creates_then_publishes_and_uses_the_doi_url() -> None:
+    client = FigshareClient(access_token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        if request.url.path.endswith("/publish"):
+            return _json_response({"location": "https://api.figshare.com/v2/articles/999"})
+        return _json_response({"location": "https://api.figshare.com/v2/account/articles/123"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://doi.org/10.6084/m9.figshare.999"
+    assert result.external_id == "123"
+    assert seen["auth"] == "token t"  # Figshare's own scheme, not Bearer
+
+
+def test_codeberg_pages_commits_a_file_to_the_pages_branch() -> None:
+    client = CodebergPagesClient(token="t", owner="acme", repo="site")
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.path.endswith("/repos"):
+            return _json_response({}, status_code=201)
+        return _json_response({"content": {"sha": "abc"}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://acme.codeberg.page/gentle-dental-cleanings/"
+    assert any(m == "POST" and p.endswith("/repos") for m, p in calls)
+    assert any(m == "PUT" and "/contents/" in p for m, p in calls)
+
+
+def test_livedoor_blog_signs_http_basic_and_reuses_the_hatena_atom_parser() -> None:
+    client = LivedoorBlogClient(livedoor_id="acme", blog_name="acmeblog", api_key="k")
+    atom = (
+        '<?xml version="1.0"?><entry xmlns="http://www.w3.org/2005/Atom">'
+        '<id>tag:blog.livedoor.com,2013:acme-12345-67890</id>'
+        '<link rel="alternate" href="https://acme.livedoor.blogcms.jp/archives/1.html"/></entry>'
+    )
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization", "")
+        return httpx.Response(201, text=atom, headers={"Content-Type": "application/atom+xml"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://acme.livedoor.blogcms.jp/archives/1.html"
+    assert seen["auth"].startswith("Basic ")
+
+
+def test_fc2_and_seesaa_metaweblog_clients_fetch_the_real_permalink(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_proxy = MagicMock()
+    fake_proxy.metaWeblog.newPost.return_value = "77"
+    fake_proxy.metaWeblog.getPost.return_value = {"permaLink": "https://acme.blog.fc2.com/blog-entry-77.html"}
+    monkeypatch.setattr("xmlrpc.client.ServerProxy", lambda *_a, **_k: fake_proxy)
+
+    client = FC2BlogClient(blog_id="42", username="acme", password="secret")
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://acme.blog.fc2.com/blog-entry-77.html"
+    assert result.external_id == "77"
+    fake_proxy.metaWeblog.newPost.assert_called_once()
+    call_args = fake_proxy.metaWeblog.newPost.call_args[0]
+    assert call_args[0] == "42" and call_args[1] == "acme" and call_args[2] == "secret"
+    assert call_args[4] is True  # publish=True
+    fake_proxy.metaWeblog.getPost.assert_called_once_with("77", "acme", "secret")
+
+
+def test_seesaa_metaweblog_client_edits_when_external_id_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_proxy = MagicMock()
+    fake_proxy.metaWeblog.getPost.return_value = {"link": "https://acme.seesaa.net/article/1.html"}
+    monkeypatch.setattr("xmlrpc.client.ServerProxy", lambda *_a, **_k: fake_proxy)
+
+    client = SeesaaBlogClient(blog_id="42", username="acme", password="secret")
+    result = client.publish(client.platform, _post(external_id="9"))
+    assert result.post_url == "https://acme.seesaa.net/article/1.html"
+    fake_proxy.metaWeblog.editPost.assert_called_once()
+    fake_proxy.metaWeblog.newPost.assert_not_called()
+
+
+def test_warpcast_casts_via_neynar_with_the_xapikey_header() -> None:
+    client = WarpcastClient(api_key="k", signer_uuid="s")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["header"] = request.headers.get("x-api-key")
+        seen["auth"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return _json_response(
+            {"cast": {"hash": "0x1234567890abcdef", "author": {"username": "acme"}}}
+        )
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://warpcast.com/acme/0x12345678"
+    assert result.verified is True
+    assert seen["header"] == "k" and seen["auth"] is None
+    assert seen["body"]["signer_uuid"] == "s"
+
+
+def test_warpcast_marks_unverified_without_a_username() -> None:
+    client = WarpcastClient(api_key="k", signer_uuid="s")
+    _with_mock(client, lambda req: _json_response({"cast": {"hash": "0xabc123", "author": {}}}))
+    result = client.publish(client.platform, _post())
+    assert result.verified is False
+    assert "0xabc123" in result.post_url
+
+
+def test_sourcehut_pages_sends_a_graphql_multipart_tarball() -> None:
+    client = SourcehutPagesClient(token="t", domain="client.srht.site")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        seen["content_type"] = request.headers.get("Content-Type", "")
+        return _json_response({"data": {"publish": {"id": "site1", "domain": "client.srht.site"}}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://client.srht.site/"
+    assert result.external_id == "site1"
+    assert seen["auth"] == "Bearer t"
+    assert "multipart/form-data" in seen["content_type"]
+
+
+def test_sourcehut_pages_surfaces_graphql_errors() -> None:
+    client = SourcehutPagesClient(token="t", domain="client.srht.site")
+    _with_mock(client, lambda req: _json_response({"errors": [{"message": "domain taken"}]}))
+    with pytest.raises(ProviderCallError):
+        client.publish(client.platform, _post())
+
+
+# --------------------------------------------------------------------------- #
 # 5. The vault-backed credential factory (integrations/web2_credentials.py).
 # --------------------------------------------------------------------------- #
 def test_vault_provider_naming_convention() -> None:
@@ -861,3 +1124,20 @@ def test_build_publisher_constructs_the_real_client_when_the_vault_row_is_comple
     publisher = build_publisher(client_id="cl-42", platform=PLATFORM_DEVTO, lookup=lookup)
     assert isinstance(publisher, DevToClient)
     assert seen == {"provider": "web2:dev.to", "label": "cl-42"}
+
+
+def test_build_publisher_wires_a_batch4_platform_end_to_end() -> None:
+    # Proves the factory correctly wires one of the 10 new platforms, not just the
+    # pre-existing dev.to case above.
+    publisher = build_publisher(
+        client_id="cl-7", platform=PLATFORM_ZENODO, lookup=lambda **_k: json.dumps({"access_token": "real"})
+    )
+    assert isinstance(publisher, ZenodoClient)
+
+
+def test_build_publisher_degrades_to_none_for_an_incomplete_batch4_credential() -> None:
+    publisher = build_publisher(
+        client_id="cl-7", platform=PLATFORM_CODEBERG_PAGES,
+        lookup=lambda **_k: json.dumps({"token": "", "owner": "acme", "repo": "site"}),
+    )
+    assert publisher is None
