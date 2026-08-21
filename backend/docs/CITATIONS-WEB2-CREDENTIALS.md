@@ -91,6 +91,38 @@ Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
 
 ---
 
+## 2c. Web 2.0 — the third pass (19 more, Aug 2026)
+
+Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`). Every
+one below was web-verified live/self-serve at build time — see
+`integrations/web2_publishers.py`'s module docstring for the platforms that were
+investigated and deliberately **skipped** instead (Evernote, Issuu, Nostr long-form)
+and why.
+
+| Platform | Vault secret JSON | How to get it |
+|---|---|---|
+| HackMD | `{"token": "..."}` | hackmd.io → Settings → API → generate a token. |
+| GitHub Gist | `{"token": "..."}` | A PAT (classic or fine-grained) with `gist` scope. |
+| GitLab Snippets | `{"token": "..."}` | A PAT with `api` scope. |
+| paste.ee | `{"api_key": "..."}` | paste.ee/account/api → generate a key. |
+| Pastebin.com | `{"api_dev_key": "..."}` | pastebin.com/doc_api → your account's `api_dev_key`. No edit endpoint reachable with just this key — every publish is a new paste. |
+| Netlify | `{"api_token": "...", "site_id": "..."}` | User settings → Applications → Personal access tokens; `site_id` is an existing site (create one by hand first). One deploy replaces the whole site's prior deploy. |
+| Neocities | `{"api_key": "...", "sitename": "..."}` | Site Settings → API key; `sitename` is the account's own `{sitename}.neocities.org` subdomain. |
+| rentry.co | `{}` | **Fully anonymous** — no credential at all, just a vault row (even an empty `{}`) to opt the client in. |
+| dpaste.org | `{}` | **Fully anonymous** — no credential at all, same as rentry.co. |
+| Misskey | `{"token": "...", "instance_url": "https://misskey.io"}` | On the instance: Settings → API → generate an access token. `instance_url` is optional (defaults to misskey.io). |
+| Lemmy | `{"username": "...", "password": "...", "community": "...", "base_url": "https://lemmy.world"}` | Sign up on the instance; `community` is the target community's name (the backlink posts as a link-post into it). `base_url` is optional. |
+| Bluesky | `{"identifier": "...", "app_password": "..."}` | bsky.app/settings/app-passwords → generate an **App Password** (never the main account password). |
+| WhiteWind | `{"identifier": "...", "app_password": "..."}` | Reuses the SAME Bluesky account/App Password as above — not a separate signup, just a different XRPC record collection. |
+| Disqus | `{"access_token": "...", "api_key": "...", "username": "..."}` | disqus.com/api/docs → register an app for a public/secret key pair, then OAuth2 for the `access_token`. A **thin profile placement**, not an article — updates the account's public profile `url`/`about` fields. |
+| Plurk | `{"consumer_key": "...", "consumer_secret": "...", "access_token": "...", "access_token_secret": "..."}` | plurk.com/PlurkApp → register an OAuth1 app, then complete the OAuth1 dance for a user token. The one OAuth1 (not OAuth2) platform here. |
+| Pixelfed | `{"access_token": "...", "placeholder_image_url": "...", "instance_url": "https://pixelfed.social"}` | Register an app on the instance for a token. `placeholder_image_url` is a fixed brand image URL — Pixelfed (unlike Mastodon) requires an image on every post, so this client fetches + uploads it each publish. |
+| Notion | `{"integration_token": "...", "parent_page_id": "..."}` | notion.so/my-integrations → create an internal integration, then **share a parent page with it** (Notion can't create a page at the workspace root). Always publishes `verified=False` — a human must still open the created page and toggle "Share to web" (the API has no endpoint for that, confirmed against 2026 docs). |
+| Gravatar | `{"api_token": "...", "username": "..."}` | Gravatar Developer Dashboard → API key. A **thin profile placement**, not an article — updates the profile's `description` + a public `links` entry. |
+| Minds | `{"access_token": "..."}` | Settings → API → personal access token. |
+
+---
+
 ## 3. Citations — direct-API engines (agency-wide keys, `.env`)
 
 Unlike Web2 credentials, these two are **agency-wide** (one key covers every

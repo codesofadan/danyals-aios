@@ -53,6 +53,10 @@ Web2Platform = Literal[
     "GitHub Pages", "GitLab Pages", "Micro.blog", "Hashnode", "Hatena Blog",
     "LiveJournal", "Dreamwidth",
     "Webflow", "HubSpot CMS", "Drupal", "Joomla",
+    "HackMD", "GitHub Gist", "GitLab Snippets", "paste.ee", "Pastebin.com",
+    "Netlify", "Neocities", "rentry.co", "dpaste.org",
+    "Misskey", "Lemmy", "Bluesky", "WhiteWind",
+    "Disqus", "Plurk", "Pixelfed", "Notion", "Gravatar", "Minds",
 ]
 Web2Verified = Literal["verified", "pending"]
 # The publish PIPELINE's internal state machine (0028) - distinct from `verified`,
@@ -76,6 +80,10 @@ _WEB2_PLATFORMS: frozenset[str] = frozenset(
         "GitHub Pages", "GitLab Pages", "Micro.blog", "Hashnode", "Hatena Blog",
         "LiveJournal", "Dreamwidth",
         "Webflow", "HubSpot CMS", "Drupal", "Joomla",
+        "HackMD", "GitHub Gist", "GitLab Snippets", "paste.ee", "Pastebin.com",
+        "Netlify", "Neocities", "rentry.co", "dpaste.org",
+        "Misskey", "Lemmy", "Bluesky", "WhiteWind",
+        "Disqus", "Plurk", "Pixelfed", "Notion", "Gravatar", "Minds",
     }
 )
 _WEB2_VERIFIED: frozenset[str] = frozenset({"verified", "pending"})
@@ -231,10 +239,12 @@ class Web2PlatformCatalogResponse(BaseModel):
     """One row of the Web 2.0 platform CATALOG (``public.web2_platforms``, 0062/0063) -
     reference data, not tenant data (there is no ``client_id`` to leak).
 
-    ``automationReady`` marks the 17 platforms the pipeline can publish to TODAY (a real
-    ``Web2Publisher`` class + the ``web2_platform`` enum value both exist); the other 33
-    are catalogued build targets. ``authType`` is verbatim from the ``web2_auth_type``
-    enum; ``authorityTier`` is a directional high/medium/low (not a DA number)."""
+    ``automationReady`` marks a platform the pipeline can publish to TODAY (a real
+    ``Web2Publisher`` class + the ``web2_platform`` enum value both exist - the 0063 seed
+    shipped 17 of these, since grown by 0068 + 0070's catalog upserts to match
+    ``integrations.web2_publishers.WEB2_PLATFORMS``); every other row is a catalogued
+    build target. ``authType`` is verbatim from the ``web2_auth_type`` enum;
+    ``authorityTier`` is a directional high/medium/low (not a DA number)."""
 
     id: str
     name: str

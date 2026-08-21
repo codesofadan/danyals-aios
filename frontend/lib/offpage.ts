@@ -89,13 +89,21 @@ export type Citation = {
 // Yes, not deprecated, and not a blockchain/brand-risk case (see
 // integrations/web2_publishers.py's module docstring for what was deliberately left
 // out and why). Medium stays draft-only (its publish API is retired). Grew again to
-// 21 with Webflow / HubSpot CMS / Drupal / Joomla (real CMS/site-builder adapters).
+// 21 with Webflow / HubSpot CMS / Drupal / Joomla (real CMS/site-builder adapters),
+// then to 40 with a third pass (pastes/gists/static-hosts, ATProto/fediverse, and
+// Disqus/Gravatar as honest thin profile placements). Evernote, Issuu, and Nostr
+// long-form were investigated and deliberately skipped — see the backend module
+// docstring + the batch3 migration header for the historical record.
 export type Web2Platform =
   | "WordPress.com" | "Blogger" | "Tumblr" | "Medium"
   | "dev.to" | "Write.as" | "Telegra.ph" | "Mataroa" | "Ghost" | "Mastodon"
   | "GitHub Pages" | "GitLab Pages" | "Micro.blog" | "Hashnode" | "Hatena Blog"
   | "LiveJournal" | "Dreamwidth"
-  | "Webflow" | "HubSpot CMS" | "Drupal" | "Joomla";
+  | "Webflow" | "HubSpot CMS" | "Drupal" | "Joomla"
+  | "HackMD" | "GitHub Gist" | "GitLab Snippets" | "paste.ee" | "Pastebin.com"
+  | "Netlify" | "Neocities" | "rentry.co" | "dpaste.org"
+  | "Misskey" | "Lemmy" | "Bluesky" | "WhiteWind"
+  | "Disqus" | "Plurk" | "Pixelfed" | "Notion" | "Gravatar" | "Minds";
 export type Web2Verified = "verified" | "pending";
 
 export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = {
@@ -120,6 +128,25 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   "HubSpot CMS": { icon: "hub", c: SERIES.c3 },
   Drupal: { icon: "water_drop", c: SERIES.c4 },
   Joomla: { icon: "widgets", c: SERIES.c1 },
+  HackMD: { icon: "description", c: SERIES.c2 },
+  "GitHub Gist": { icon: "code", c: SERIES.c3 },
+  "GitLab Snippets": { icon: "code", c: SERIES.c4 },
+  "paste.ee": { icon: "content_paste", c: SERIES.c1 },
+  "Pastebin.com": { icon: "content_paste", c: SERIES.c2 },
+  Netlify: { icon: "cloud", c: SERIES.c3 },
+  Neocities: { icon: "public", c: SERIES.c4 },
+  "rentry.co": { icon: "edit_note", c: SERIES.c1 },
+  "dpaste.org": { icon: "content_paste", c: SERIES.c2 },
+  Misskey: { icon: "alternate_email", c: SERIES.c3 },
+  Lemmy: { icon: "forum", c: SERIES.c4 },
+  Bluesky: { icon: "cloud", c: SERIES.c1 },
+  WhiteWind: { icon: "history_edu", c: SERIES.c2 },
+  Disqus: { icon: "chat_bubble", c: SERIES.c3 },
+  Plurk: { icon: "alternate_email", c: SERIES.c4 },
+  Pixelfed: { icon: "image", c: SERIES.c1 },
+  Notion: { icon: "description", c: SERIES.c2 },
+  Gravatar: { icon: "face", c: SERIES.c3 },
+  Minds: { icon: "hub", c: SERIES.c4 },
 };
 
 // Every platform NOT draft-only can be planned/approved through the pipeline.

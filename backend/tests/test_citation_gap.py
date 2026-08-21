@@ -162,7 +162,7 @@ def test_web2_board_rollup_counts() -> None:
     board = web2_status_board({"WordPress.com": 1, "Tumblr": 2})
     assert board.connected_count == 2
     assert board.total_count == len(board.platforms)
-    # 17 platforms, Medium is the only draft-only one
+    # Whatever the current platform total is, Medium is the only draft-only one.
     assert board.live_count == board.total_count - 1
 
 

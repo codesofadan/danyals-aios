@@ -29,44 +29,82 @@ from app.logging_setup import get_logger
 from integrations.errors import ProviderNotConfiguredError
 from integrations.web2_publishers import (
     PLATFORM_BLOGGER,
+    PLATFORM_BLUESKY,
     PLATFORM_DEVTO,
+    PLATFORM_DISQUS,
+    PLATFORM_DPASTE,
     PLATFORM_DREAMWIDTH,
     PLATFORM_DRUPAL,
     PLATFORM_GHOST,
+    PLATFORM_GITHUB_GIST,
     PLATFORM_GITHUB_PAGES,
     PLATFORM_GITLAB_PAGES,
+    PLATFORM_GITLAB_SNIPPETS,
+    PLATFORM_GRAVATAR,
+    PLATFORM_HACKMD,
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
     PLATFORM_HUBSPOT,
     PLATFORM_JOOMLA,
+    PLATFORM_LEMMY,
     PLATFORM_LIVEJOURNAL,
     PLATFORM_MASTODON,
     PLATFORM_MATAROA,
     PLATFORM_MICROBLOG,
+    PLATFORM_MINDS,
+    PLATFORM_MISSKEY,
+    PLATFORM_NEOCITIES,
+    PLATFORM_NETLIFY,
+    PLATFORM_NOTION,
+    PLATFORM_PASTE_EE,
+    PLATFORM_PASTEBIN,
+    PLATFORM_PIXELFED,
+    PLATFORM_PLURK,
+    PLATFORM_RENTRY,
     PLATFORM_TELEGRAPH,
     PLATFORM_TUMBLR,
     PLATFORM_WEBFLOW,
+    PLATFORM_WHITEWIND,
     PLATFORM_WORDPRESS,
     PLATFORM_WRITEAS,
     BloggerClient,
+    BlueskyClient,
     DevToClient,
+    DisqusClient,
+    DpasteClient,
     DreamwidthClient,
     DrupalClient,
     GhostClient,
+    GitHubGistClient,
     GitHubPagesClient,
     GitLabPagesClient,
+    GitLabSnippetsClient,
+    GravatarClient,
+    HackMDClient,
     HashnodeClient,
     HatenaBlogClient,
     HubSpotClient,
     JoomlaClient,
+    LemmyClient,
     LiveJournalClient,
     MastodonClient,
     MataroaClient,
     MicroBlogClient,
+    MindsClient,
+    MisskeyClient,
+    NeocitiesClient,
+    NetlifyClient,
+    NotionClient,
+    PastebinClient,
+    PasteEeClient,
+    PixelfedClient,
+    PlurkClient,
+    RentryClient,
     TelegraPhClient,
     TumblrClient,
     Web2Publisher,
     WebflowClient,
+    WhiteWindClient,
     WordPressComClient,
     WriteAsClient,
 )
@@ -149,6 +187,51 @@ _BUILDERS: dict[str, Any] = {
     PLATFORM_JOOMLA: lambda c: JoomlaClient(
         base_url=c.get("base_url", ""), api_token=c.get("api_token", ""), catid=c.get("catid", ""),
     ),
+    PLATFORM_HACKMD: lambda c: HackMDClient(token=c.get("token", "")),
+    PLATFORM_GITHUB_GIST: lambda c: GitHubGistClient(token=c.get("token", "")),
+    PLATFORM_GITLAB_SNIPPETS: lambda c: GitLabSnippetsClient(token=c.get("token", "")),
+    PLATFORM_PASTE_EE: lambda c: PasteEeClient(api_key=c.get("api_key", "")),
+    PLATFORM_PASTEBIN: lambda c: PastebinClient(api_dev_key=c.get("api_dev_key", "")),
+    PLATFORM_NETLIFY: lambda c: NetlifyClient(
+        api_token=c.get("api_token", ""), site_id=c.get("site_id", "")
+    ),
+    PLATFORM_NEOCITIES: lambda c: NeocitiesClient(
+        api_key=c.get("api_key", ""), sitename=c.get("sitename", "")
+    ),
+    # Anonymous - no credential fields are read from the vault row at all.
+    PLATFORM_RENTRY: lambda _c: RentryClient(),
+    PLATFORM_DPASTE: lambda _c: DpasteClient(),
+    PLATFORM_MISSKEY: lambda c: MisskeyClient(
+        token=c.get("token", ""), instance_url=c.get("instance_url") or "https://misskey.io"
+    ),
+    PLATFORM_LEMMY: lambda c: LemmyClient(
+        username=c.get("username", ""), password=c.get("password", ""),
+        community=c.get("community", ""), base_url=c.get("base_url") or "https://lemmy.world",
+    ),
+    PLATFORM_BLUESKY: lambda c: BlueskyClient(
+        identifier=c.get("identifier", ""), app_password=c.get("app_password", "")
+    ),
+    PLATFORM_WHITEWIND: lambda c: WhiteWindClient(
+        identifier=c.get("identifier", ""), app_password=c.get("app_password", "")
+    ),
+    PLATFORM_DISQUS: lambda c: DisqusClient(
+        access_token=c.get("access_token", ""), api_key=c.get("api_key", ""), username=c.get("username", ""),
+    ),
+    PLATFORM_PLURK: lambda c: PlurkClient(
+        consumer_key=c.get("consumer_key", ""), consumer_secret=c.get("consumer_secret", ""),
+        access_token=c.get("access_token", ""), access_token_secret=c.get("access_token_secret", ""),
+    ),
+    PLATFORM_PIXELFED: lambda c: PixelfedClient(
+        access_token=c.get("access_token", ""), placeholder_image_url=c.get("placeholder_image_url", ""),
+        instance_url=c.get("instance_url") or "https://pixelfed.social",
+    ),
+    PLATFORM_NOTION: lambda c: NotionClient(
+        integration_token=c.get("integration_token", ""), parent_page_id=c.get("parent_page_id", ""),
+    ),
+    PLATFORM_GRAVATAR: lambda c: GravatarClient(
+        api_token=c.get("api_token", ""), username=c.get("username", "")
+    ),
+    PLATFORM_MINDS: lambda c: MindsClient(access_token=c.get("access_token", "")),
 }
 
 

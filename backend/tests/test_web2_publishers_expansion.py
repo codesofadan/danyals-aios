@@ -22,43 +22,81 @@ import pytest
 from integrations.errors import ProviderCallError, ProviderNotConfiguredError
 from integrations.web2_credentials import build_publisher, vault_provider_for
 from integrations.web2_publishers import (
+    PLATFORM_BLUESKY,
     PLATFORM_CREDENTIAL_FIELDS,
     PLATFORM_DEVTO,
+    PLATFORM_DISQUS,
+    PLATFORM_DPASTE,
     PLATFORM_DREAMWIDTH,
     PLATFORM_DRUPAL,
     PLATFORM_GHOST,
+    PLATFORM_GITHUB_GIST,
     PLATFORM_GITHUB_PAGES,
     PLATFORM_GITLAB_PAGES,
+    PLATFORM_GITLAB_SNIPPETS,
+    PLATFORM_GRAVATAR,
+    PLATFORM_HACKMD,
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
     PLATFORM_HUBSPOT,
     PLATFORM_JOOMLA,
+    PLATFORM_LEMMY,
     PLATFORM_LIVEJOURNAL,
     PLATFORM_MASTODON,
     PLATFORM_MATAROA,
     PLATFORM_MICROBLOG,
+    PLATFORM_MINDS,
+    PLATFORM_MISSKEY,
+    PLATFORM_NEOCITIES,
+    PLATFORM_NETLIFY,
+    PLATFORM_NOTION,
+    PLATFORM_PASTE_EE,
+    PLATFORM_PASTEBIN,
+    PLATFORM_PIXELFED,
+    PLATFORM_PLURK,
+    PLATFORM_RENTRY,
     PLATFORM_TELEGRAPH,
     PLATFORM_WEBFLOW,
+    PLATFORM_WHITEWIND,
     PLATFORM_WRITEAS,
     WEB2_PLATFORMS,
+    BlueskyClient,
     DevToClient,
+    DisqusClient,
+    DpasteClient,
     DreamwidthClient,
     DrupalClient,
     GhostClient,
+    GitHubGistClient,
     GitHubPagesClient,
     GitLabPagesClient,
+    GitLabSnippetsClient,
+    GravatarClient,
+    HackMDClient,
     HashnodeClient,
     HatenaBlogClient,
     HubSpotClient,
     JoomlaClient,
+    LemmyClient,
     LiveJournalClient,
     MastodonClient,
     MataroaClient,
     MicroBlogClient,
+    MindsClient,
+    MisskeyClient,
+    NeocitiesClient,
+    NetlifyClient,
+    NotionClient,
+    PastebinClient,
+    PasteEeClient,
+    PixelfedClient,
+    PlurkClient,
+    RentryClient,
     TelegraPhClient,
     Web2Post,
     Web2Publisher,
     WebflowClient,
+    WhiteWindClient,
     WriteAsClient,
 )
 
@@ -73,6 +111,17 @@ _NEW_PLATFORMS = (
 )
 # The 4 newest adapters (real CMS/site-builder clients, added after the original 17).
 _NEWEST_PLATFORMS = (PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA)
+# Third pass (19 more, Aug 2026) - see web2_publishers.py's module docstring. Two of
+# these (rentry.co/dpaste.org) are fully ANONYMOUS - no credential fields at all - so
+# they are tracked separately from the "every platform has non-empty credential
+# fields" assertion below.
+_BATCH3_PLATFORMS = (
+    PLATFORM_HACKMD, PLATFORM_GITHUB_GIST, PLATFORM_GITLAB_SNIPPETS, PLATFORM_PASTE_EE,
+    PLATFORM_PASTEBIN, PLATFORM_NETLIFY, PLATFORM_NEOCITIES, PLATFORM_MISSKEY, PLATFORM_LEMMY,
+    PLATFORM_BLUESKY, PLATFORM_WHITEWIND, PLATFORM_DISQUS, PLATFORM_PLURK, PLATFORM_PIXELFED,
+    PLATFORM_NOTION, PLATFORM_GRAVATAR, PLATFORM_MINDS,
+)
+_ANONYMOUS_PLATFORMS = (PLATFORM_RENTRY, PLATFORM_DPASTE)
 
 
 def _post(**over: Any) -> Web2Post:
@@ -103,14 +152,21 @@ def _json_response(payload: dict[str, Any], status_code: int = 200) -> httpx.Res
 # --------------------------------------------------------------------------- #
 # 1. The platform catalog itself.
 # --------------------------------------------------------------------------- #
-def test_twenty_one_platforms_total() -> None:
-    assert len(WEB2_PLATFORMS) == 21
+def test_forty_platforms_total() -> None:
+    assert len(WEB2_PLATFORMS) == 40
 
 
 def test_every_new_platform_has_credential_fields_documented() -> None:
-    for platform in _NEW_PLATFORMS + _NEWEST_PLATFORMS:
+    for platform in _NEW_PLATFORMS + _NEWEST_PLATFORMS + _BATCH3_PLATFORMS:
         assert platform in PLATFORM_CREDENTIAL_FIELDS
         assert PLATFORM_CREDENTIAL_FIELDS[platform]  # non-empty
+
+
+def test_anonymous_platforms_have_no_credential_fields() -> None:
+    # rentry.co / dpaste.org need no vault credential fields at all - anonymous.
+    for platform in _ANONYMOUS_PLATFORMS:
+        assert platform in PLATFORM_CREDENTIAL_FIELDS
+        assert PLATFORM_CREDENTIAL_FIELDS[platform] == ()
 
 
 # --------------------------------------------------------------------------- #
@@ -132,6 +188,26 @@ def test_every_new_platform_has_credential_fields_documented() -> None:
         (HubSpotClient, {"access_token": "", "content_group_id": "g"}),
         (DrupalClient, {"base_url": "https://x.example", "username": "", "password": "p"}),
         (JoomlaClient, {"base_url": "https://x.example", "api_token": "", "catid": "1"}),
+        (HackMDClient, {"token": ""}),
+        (GitHubGistClient, {"token": ""}),
+        (GitLabSnippetsClient, {"token": ""}),
+        (PasteEeClient, {"api_key": ""}),
+        (PastebinClient, {"api_dev_key": ""}),
+        (NetlifyClient, {"api_token": "", "site_id": "s"}),
+        (NeocitiesClient, {"api_key": "", "sitename": "s"}),
+        (MisskeyClient, {"token": ""}),
+        (LemmyClient, {"username": "", "password": "p", "community": "c"}),
+        (BlueskyClient, {"identifier": "", "app_password": "p"}),
+        (WhiteWindClient, {"identifier": "", "app_password": "p"}),
+        (DisqusClient, {"access_token": "", "api_key": "k", "username": "u"}),
+        (
+            PlurkClient,
+            {"consumer_key": "", "consumer_secret": "cs", "access_token": "at", "access_token_secret": "ats"},
+        ),
+        (PixelfedClient, {"access_token": "", "placeholder_image_url": "https://cdn.example/brand.jpg"}),
+        (NotionClient, {"integration_token": "", "parent_page_id": "p"}),
+        (GravatarClient, {"api_token": "", "username": "u"}),
+        (MindsClient, {"access_token": ""}),
     ],
 )
 def test_a_blank_or_malformed_credential_refuses_to_construct(
@@ -139,6 +215,12 @@ def test_a_blank_or_malformed_credential_refuses_to_construct(
 ) -> None:
     with pytest.raises(ProviderNotConfiguredError):
         ctor(**kwargs)
+
+
+def test_rentry_and_dpaste_never_hard_refuse_construction() -> None:
+    # Fully anonymous - no credential to be blank in the first place.
+    RentryClient()
+    DpasteClient()
 
 
 @pytest.mark.parametrize("ctor", [LiveJournalClient, DreamwidthClient])
@@ -181,6 +263,33 @@ def test_every_new_client_satisfies_web2publisher() -> None:
     assert isinstance(
         JoomlaClient(base_url="https://x.example", api_token="t", catid="1"), Web2Publisher
     )
+
+
+def test_batch3_clients_satisfy_web2publisher() -> None:
+    assert isinstance(HackMDClient(token="t"), Web2Publisher)
+    assert isinstance(GitHubGistClient(token="t"), Web2Publisher)
+    assert isinstance(GitLabSnippetsClient(token="t"), Web2Publisher)
+    assert isinstance(PasteEeClient(api_key="k"), Web2Publisher)
+    assert isinstance(PastebinClient(api_dev_key="k"), Web2Publisher)
+    assert isinstance(NetlifyClient(api_token="t", site_id="s"), Web2Publisher)
+    assert isinstance(NeocitiesClient(api_key="k", sitename="s"), Web2Publisher)
+    assert isinstance(RentryClient(), Web2Publisher)
+    assert isinstance(DpasteClient(), Web2Publisher)
+    assert isinstance(MisskeyClient(token="t"), Web2Publisher)
+    assert isinstance(LemmyClient(username="u", password="p", community="c"), Web2Publisher)
+    assert isinstance(BlueskyClient(identifier="i", app_password="p"), Web2Publisher)
+    assert isinstance(WhiteWindClient(identifier="i", app_password="p"), Web2Publisher)
+    assert isinstance(DisqusClient(access_token="t", api_key="k", username="u"), Web2Publisher)
+    assert isinstance(
+        PlurkClient(consumer_key="ck", consumer_secret="cs", access_token="at", access_token_secret="ats"),
+        Web2Publisher,
+    )
+    assert isinstance(
+        PixelfedClient(access_token="t", placeholder_image_url="https://cdn.example/brand.jpg"), Web2Publisher
+    )
+    assert isinstance(NotionClient(integration_token="t", parent_page_id="p"), Web2Publisher)
+    assert isinstance(GravatarClient(api_token="t", username="u"), Web2Publisher)
+    assert isinstance(MindsClient(access_token="t"), Web2Publisher)
 
 
 # --------------------------------------------------------------------------- #
@@ -434,6 +543,280 @@ def test_joomla_falls_back_to_the_non_sef_permalink() -> None:
     assert result.verified is True and result.external_id == "12"
     assert seen["method"] == "POST" and seen["path"] == "/api/index.php/v1/content/articles"
     assert seen["auth"] == "Bearer t"
+
+
+# --------------------------------------------------------------------------- #
+# 4b. Batch3 real HTTP behaviour via MockTransport - one test per new client.
+# --------------------------------------------------------------------------- #
+def test_hackmd_creates_a_public_note() -> None:
+    client = HackMDClient(token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return _json_response({"id": "note1", "publishLink": "https://hackmd.io/@acme/note1"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://hackmd.io/@acme/note1"
+    assert seen["auth"] == "Bearer t"
+    assert seen["body"]["readPermission"] == "guest"
+
+
+def test_github_gist_creates_a_public_gist() -> None:
+    client = GitHubGistClient(token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return _json_response({"id": "g1", "html_url": "https://gist.github.com/acme/g1"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://gist.github.com/acme/g1"
+    assert seen["body"]["public"] is True
+
+
+def test_gitlab_snippets_creates_a_public_snippet() -> None:
+    client = GitLabSnippetsClient(token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["header"] = request.headers.get("PRIVATE-TOKEN")
+        return _json_response({"id": 5, "web_url": "https://gitlab.com/-/snippets/5"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://gitlab.com/-/snippets/5"
+    assert seen["header"] == "t"
+
+
+def test_paste_ee_creates_a_paste_and_ignores_external_id() -> None:
+    client = PasteEeClient(api_key="k")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("X-Auth-Token")
+        return _json_response({"id": "p1", "link": "https://paste.ee/p/p1"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id="ignored"))
+    assert result.post_url == "https://paste.ee/p/p1"
+    assert seen["auth"] == "k"
+
+
+def test_pastebin_uses_form_params_and_returns_a_bare_text_url() -> None:
+    client = PastebinClient(api_dev_key="k")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content.decode()
+        return httpx.Response(200, text="https://pastebin.com/abc123")
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://pastebin.com/abc123"
+    assert "api_dev_key=k" in seen["body"]
+
+
+def test_netlify_uploads_the_file_only_when_the_digest_is_required() -> None:
+    client = NetlifyClient(api_token="t", site_id="site1")
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.path.endswith("/deploys") and request.method == "POST":
+            body = json.loads(request.content)
+            digest = body["files"]["/index.html"]
+            return _json_response({"id": "deploy1", "required": [digest], "ssl_url": "https://acme.netlify.app"})
+        return httpx.Response(200, json={"id": "index.html"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://acme.netlify.app"
+    assert any(m == "PUT" and "/files/index.html" in p for m, p in calls)
+
+
+def test_neocities_uploads_a_static_file() -> None:
+    client = NeocitiesClient(api_key="k", sitename="acme")
+    _with_mock(client, lambda req: _json_response({"result": "success"}))
+    result = client.publish(client.platform, _post())
+    assert result.post_url.startswith("https://acme.neocities.org/")
+
+
+def test_rentry_fetches_a_csrf_cookie_then_posts_anonymously() -> None:
+    client = RentryClient()
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        if request.url.path == "/":
+            return httpx.Response(200, headers={"set-cookie": "csrftoken=tok123; Path=/"})
+        return _json_response(
+            {"status": "200", "content": {"url": "https://rentry.co/abc123", "edit_code": "xyz"}}
+        )
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://rentry.co/abc123"
+    assert result.external_id == "https://rentry.co/abc123:xyz"
+    assert calls[0] == "GET /"
+
+
+def test_dpaste_is_fully_anonymous_and_returns_a_bare_url() -> None:
+    client = DpasteClient()
+    _with_mock(client, lambda req: httpx.Response(200, text="https://dpaste.org/abc123\n"))
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://dpaste.org/abc123"
+
+
+def test_misskey_puts_the_token_in_the_json_body_not_a_header() -> None:
+    client = MisskeyClient(token="t")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth_header"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return _json_response({"createdNote": {"id": "n1"}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://misskey.io/notes/n1"
+    assert seen["auth_header"] is None
+    assert seen["body"]["i"] == "t"
+
+
+def test_lemmy_logs_in_resolves_the_community_then_posts_a_link_post() -> None:
+    client = LemmyClient(username="u", password="p", community="seo")
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.path == "/api/v3/user/login":
+            return _json_response({"jwt": "jwt1"})
+        if request.url.path == "/api/v3/community":
+            return _json_response({"community_view": {"community": {"id": 7}}})
+        return _json_response({"post_view": {"post": {"id": 99, "ap_id": "https://lemmy.world/post/99"}}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://lemmy.world/post/99"
+    assert any(p == "/api/v3/user/login" for _m, p in calls)
+    assert any(p == "/api/v3/community" for _m, p in calls)
+
+
+def test_bluesky_logs_in_then_creates_a_record_with_a_link_facet() -> None:
+    client = BlueskyClient(identifier="acme.bsky.social", app_password="app-pass")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("createSession"):
+            return _json_response({"accessJwt": "jwt1", "did": "did:plc:acme"})
+        seen["body"] = json.loads(request.content)
+        return _json_response({"uri": "at://did:plc:acme/app.bsky.feed.post/abc123"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://bsky.app/profile/did:plc:acme/post/abc123"
+    assert seen["body"]["record"]["facets"][0]["features"][0]["uri"] == "https://client.example/services"
+
+
+def test_whitewind_reuses_the_bluesky_session_for_a_long_form_entry() -> None:
+    client = WhiteWindClient(identifier="acme.bsky.social", app_password="app-pass")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("createSession"):
+            return _json_response({"accessJwt": "jwt1", "did": "did:plc:acme"})
+        seen["body"] = json.loads(request.content)
+        return _json_response({"uri": "at://did:plc:acme/com.whtwnd.blog.entry/xyz789"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://whtwnd.com/acme.bsky.social/xyz789"
+    assert seen["body"]["collection"] == "com.whtwnd.blog.entry"
+
+
+def test_disqus_updates_the_profile_url_field() -> None:
+    client = DisqusClient(access_token="t", api_key="k", username="acme")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["params"] = dict(request.url.params)
+        return _json_response({"code": 0, "response": {}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://disqus.com/by/acme/"
+    assert seen["params"]["url"] == "https://client.example/services"
+
+
+def test_plurk_signs_oauth1_and_builds_a_base36_url() -> None:
+    client = PlurkClient(
+        consumer_key="ck", consumer_secret="cs", access_token="at", access_token_secret="ats"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("Authorization", "").startswith("OAuth ")
+        return _json_response({"plurk_id": 46656})  # 46656 == 36**3 -> base36 "1000"
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://www.plurk.com/p/1000"
+
+
+def test_pixelfed_uploads_the_placeholder_image_before_posting() -> None:
+    client = PixelfedClient(access_token="t", placeholder_image_url="https://cdn.example/brand.jpg")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "cdn.example":
+            return httpx.Response(200, content=b"fake-jpeg-bytes")
+        if request.url.path.endswith("/media"):
+            return _json_response({"id": "media1"})
+        return _json_response({"id": 5, "url": "https://pixelfed.social/p/acme/5"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://pixelfed.social/p/acme/5"
+
+
+def test_notion_creates_a_page_but_is_never_claimed_verified() -> None:
+    client = NotionClient(integration_token="t", parent_page_id="parent1")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return _json_response({"id": "page1", "url": "https://notion.so/page1"})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert result.post_url == "https://notion.so/page1"
+    assert result.verified is False  # a human must still flip "Share to web"
+    assert seen["body"]["parent"]["page_id"] == "parent1"
+
+
+def test_gravatar_updates_the_profile_and_builds_the_public_url() -> None:
+    client = GravatarClient(api_token="t", username="acme")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return _json_response({})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://gravatar.com/acme"
+    assert seen["auth"] == "Bearer t"
+    assert seen["body"]["links"][0]["url"] == "https://client.example/services"
+
+
+def test_minds_posts_an_activity_to_the_public_channel() -> None:
+    client = MindsClient(access_token="t")
+    _with_mock(client, lambda req: _json_response({"entity": {"guid": "guid1"}}))
+    result = client.publish(client.platform, _post())
+    assert result.post_url == "https://www.minds.com/newsfeed/guid1"
 
 
 # --------------------------------------------------------------------------- #

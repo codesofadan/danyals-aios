@@ -25,11 +25,43 @@ from app.core.auth import CurrentUser, get_current_user
 from app.db.offpage_repo import get_offpage_repo
 from app.schemas.offpage import Web2CatalogResponse, Web2PlatformCatalogResponse
 from integrations.web2_publishers import (
+    PLATFORM_BLUESKY,
+    PLATFORM_DISQUS,
+    PLATFORM_DPASTE,
     PLATFORM_DRUPAL,
+    PLATFORM_GITHUB_GIST,
+    PLATFORM_GITLAB_SNIPPETS,
+    PLATFORM_GRAVATAR,
+    PLATFORM_HACKMD,
     PLATFORM_HUBSPOT,
     PLATFORM_JOOMLA,
+    PLATFORM_LEMMY,
+    PLATFORM_MINDS,
+    PLATFORM_MISSKEY,
+    PLATFORM_NEOCITIES,
+    PLATFORM_NETLIFY,
+    PLATFORM_NOTION,
+    PLATFORM_PASTE_EE,
+    PLATFORM_PASTEBIN,
+    PLATFORM_PIXELFED,
+    PLATFORM_PLURK,
+    PLATFORM_RENTRY,
     PLATFORM_WEBFLOW,
+    PLATFORM_WHITEWIND,
     WEB2_PLATFORMS,
+)
+
+# Every platform whose automation_ready=true flip lives OUTSIDE the frozen 0063 seed
+# (0068's 4 newest CMS/site-builder adapters + 0070's 19-platform third pass).
+_POST_SEED_READY_PLATFORMS = frozenset(
+    {
+        PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA,
+        PLATFORM_HACKMD, PLATFORM_GITHUB_GIST, PLATFORM_GITLAB_SNIPPETS, PLATFORM_PASTE_EE,
+        PLATFORM_PASTEBIN, PLATFORM_NETLIFY, PLATFORM_NEOCITIES, PLATFORM_RENTRY,
+        PLATFORM_DPASTE, PLATFORM_MISSKEY, PLATFORM_LEMMY, PLATFORM_BLUESKY,
+        PLATFORM_WHITEWIND, PLATFORM_DISQUS, PLATFORM_PLURK, PLATFORM_PIXELFED,
+        PLATFORM_NOTION, PLATFORM_GRAVATAR, PLATFORM_MINDS,
+    }
 )
 
 pytestmark = pytest.mark.unit
@@ -261,9 +293,10 @@ def test_seed_flags_exactly_the_seventeen_real_publishers() -> None:
     ready = {name for name, _at, _t, _m, is_ready in rows if is_ready}
     assert len(ready) == 17
     # 0063 is FROZEN history (applied, never edited) at the original 17 automation_ready
-    # platforms. WEB2_PLATFORMS has since grown to 21 - the 4 newest (Webflow/HubSpot
-    # CMS/Drupal/Joomla) live in 0068's catalog upsert instead, so exclude them here.
-    assert ready == set(WEB2_PLATFORMS) - {PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA}
+    # platforms. WEB2_PLATFORMS has since grown to 40 - the 4 newest (Webflow/HubSpot
+    # CMS/Drupal/Joomla, 0068) plus the 19-platform third pass (0070) all live in later
+    # catalog upserts instead, so exclude every one of them here.
+    assert ready == set(WEB2_PLATFORMS) - _POST_SEED_READY_PLATFORMS
 
 
 def test_seed_classifications_are_all_valid() -> None:
@@ -291,6 +324,20 @@ def test_0068_migration_grows_the_enum_and_flips_the_new_adapters_ready() -> Non
     assert len(matches) == 1, "expected exactly one 006x-009x web2_platforms_new_adapters migration"
     sql = matches[0].read_text(encoding="utf-8").lower()
     for name in ("webflow", "hubspot cms", "drupal", "joomla"):
+        assert f"alter type public.web2_platform add value if not exists '{name}'" in sql
+    assert "automation_ready" in sql
+    assert "on conflict (name) do update" in sql
+
+
+def test_batch3_migration_grows_the_enum_and_flips_the_third_pass_ready() -> None:
+    matches = list(_MIGRATIONS.glob("00[6-9]*_web2_platforms_batch3.sql"))
+    assert len(matches) == 1, "expected exactly one 006x-009x web2_platforms_batch3 migration"
+    sql = matches[0].read_text(encoding="utf-8").lower()
+    for name in (
+        "hackmd", "github gist", "gitlab snippets", "paste.ee", "pastebin.com",
+        "netlify", "neocities", "rentry.co", "dpaste.org", "misskey", "lemmy",
+        "bluesky", "whitewind", "disqus", "plurk", "pixelfed", "notion", "gravatar", "minds",
+    ):
         assert f"alter type public.web2_platform add value if not exists '{name}'" in sql
     assert "automation_ready" in sql
     assert "on conflict (name) do update" in sql

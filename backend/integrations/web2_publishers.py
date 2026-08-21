@@ -8,12 +8,13 @@ service/worker layer can meter, cost-log, and diversify it - nothing else calls 
 provider directly. Every placement is human-approved authority work (a real, on-topic
 post), NEVER link spam.
 
-TWENTY-ONE platforms, mirroring the frontend ``Web2Platform`` union (offpage.ts) - the
+FORTY platforms, mirroring the frontend ``Web2Platform`` union (offpage.ts) - the
 original 17 the 17 Jul 2026 reference doc tags API-post: Yes, not deprecated, and not a
 blockchain/OAuth1/brand-risk case that would need a materially different credential
 model (Hive/Steemit need a custody-sensitive private key, not an OAuth token; Gab
 carries the doc's own explicit brand-safety warning) - those stay future work - plus 4
-more real CMS/site-builder adapters added in a later pass:
+more real CMS/site-builder adapters added in a later pass, plus a THIRD pass of 19 more
+(pastes/gists/static-hosts, ATProto/fediverse, and 3 honest profile/thin placements):
 
 * ``WordPressComClient`` / ``BloggerClient`` / ``TumblrClient`` - real, OAuth2 bearer.
 * ``DevToClient``      - real, dev.to (Forem) API v1, a plain ``api-key`` header.
@@ -48,6 +49,50 @@ more real CMS/site-builder adapters added in a later pass:
   4.3+ "API Token"), Bearer token; builds the always-resolvable non-SEF permalink
   since Joomla's response carries no absolute public URL.
 
+THIRD PASS (19 more, Aug 2026) - every one web-verified live/self-serve at build time;
+Evernote (developer tokens disabled, OAuth needs a manual up-to-5-day review), Issuu
+(API gated to paid tiers AND a document/flipbook content model that does not fit a
+plain HTML article without a fragile conversion step), and Nostr long-form/NIP-23
+(would need a new, fairly heavy secp256k1-signing dependency to do the BIP-340 Schnorr
+signing correctly - reported as skipped rather than hand-rolled) were investigated and
+deliberately NOT built - see the migration header for the historical record:
+
+* ``HackMDClient``, ``GitHubGistClient``, ``GitLabSnippetsClient``, ``PasteEeClient``,
+  ``NetlifyClient``, ``NeocitiesClient`` - real, plain PAT/API-key Bearer (or
+  GitLab's ``PRIVATE-TOKEN``) header + JSON REST, mirroring ``DevToClient``.
+* ``PastebinClient`` - real, but the classic ``api_post.php`` endpoint is
+  form-encoded and returns a bare TEXT url (not JSON), so it bypasses
+  ``request_json`` for its one call, same as ``TelegraPhClient``.
+* ``RentryClient`` / ``DpasteClient`` - real, fully ANONYMOUS (no credential at all -
+  ``PLATFORM_CREDENTIAL_FIELDS`` is an empty tuple for both); rentry needs a
+  CSRF cookie handshake first (an httpx cookie jar), dpaste is a bare POST.
+* ``MisskeyClient`` - real, distinct fediverse software from Mastodon (its own
+  client, not a Mastodon instance); the access token rides IN THE JSON BODY
+  (``i``), never an Authorization header - a documented Misskey quirk.
+* ``LemmyClient`` - real, POST .../user/login for a JWT, resolve the target
+  community name to an id, then post a LINK post (``url`` = the backlink) into it.
+* ``BlueskyClient`` / ``WhiteWindClient`` - real, AT Protocol (App Password ->
+  ``createSession`` -> ``createRecord``/``putRecord``); WhiteWind reuses the SAME
+  Bluesky account/session to write a ``com.whtwnd.blog.entry`` long-form record
+  (a genuine full article, unlike Bluesky's ~300-grapheme post).
+* ``DisqusClient`` / ``GravatarClient`` - real, but a THIN PROFILE placement, NOT
+  an article (same honesty as Medium's draft-only note) - there is no
+  "article" concept on either platform, only one profile/bio the backlink
+  lives on; every publish() call just re-asserts that same profile.
+* ``PlurkClient`` - real, the one OAuth1 (not OAuth2) platform here - every call
+  is individually HMAC-SHA1 signed (hand-rolled, no new OAuth1 dependency for a
+  single caller).
+* ``PixelfedClient`` - real, Mastodon-compatible REST but REQUIRES an image on
+  every post (unlike Mastodon); ``Web2Post`` has no image field, so this client
+  takes a fixed brand ``placeholder_image_url``, fetches it once, and uploads it
+  as the post's required media.
+* ``NotionClient`` - real, creates a genuine Notion page under a pre-existing
+  parent - but Notion's API has NO endpoint to flip "Share to web" (verified
+  against 2026 docs), so this ALWAYS returns ``verified=False``, same honesty as
+  ``GitLabPagesClient``'s CI-pending publish.
+* ``MindsClient`` - real, a personal-access-token POST to the account's public
+  channel/newsfeed.
+
 CREDENTIALS ARE PASSED IN, NEVER READ HERE. A Web 2.0 OAuth token / API key is
 per-account + per-property and lives in the VAULT (exactly like a WordPress
 application password); ``integrations.web2_credentials`` decrypts it and constructs
@@ -70,12 +115,15 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import hmac
 import json
 import re
+import secrets
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import quote
 
@@ -110,6 +158,26 @@ PLATFORM_WEBFLOW = "Webflow"
 PLATFORM_HUBSPOT = "HubSpot CMS"
 PLATFORM_DRUPAL = "Drupal"
 PLATFORM_JOOMLA = "Joomla"
+# Third pass (Aug 2026) - 19 more real clients (see the module docstring above).
+PLATFORM_HACKMD = "HackMD"
+PLATFORM_GITHUB_GIST = "GitHub Gist"
+PLATFORM_GITLAB_SNIPPETS = "GitLab Snippets"
+PLATFORM_PASTE_EE = "paste.ee"
+PLATFORM_PASTEBIN = "Pastebin.com"
+PLATFORM_NETLIFY = "Netlify"
+PLATFORM_NEOCITIES = "Neocities"
+PLATFORM_RENTRY = "rentry.co"
+PLATFORM_DPASTE = "dpaste.org"
+PLATFORM_MISSKEY = "Misskey"
+PLATFORM_LEMMY = "Lemmy"
+PLATFORM_BLUESKY = "Bluesky"
+PLATFORM_WHITEWIND = "WhiteWind"
+PLATFORM_DISQUS = "Disqus"
+PLATFORM_PLURK = "Plurk"
+PLATFORM_PIXELFED = "Pixelfed"
+PLATFORM_NOTION = "Notion"
+PLATFORM_GRAVATAR = "Gravatar"
+PLATFORM_MINDS = "Minds"
 
 WEB2_PLATFORMS: frozenset[str] = frozenset(
     {
@@ -119,6 +187,11 @@ WEB2_PLATFORMS: frozenset[str] = frozenset(
         PLATFORM_MICROBLOG, PLATFORM_HASHNODE, PLATFORM_HATENA, PLATFORM_LIVEJOURNAL,
         PLATFORM_DREAMWIDTH, PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL,
         PLATFORM_JOOMLA,
+        PLATFORM_HACKMD, PLATFORM_GITHUB_GIST, PLATFORM_GITLAB_SNIPPETS, PLATFORM_PASTE_EE,
+        PLATFORM_PASTEBIN, PLATFORM_NETLIFY, PLATFORM_NEOCITIES, PLATFORM_RENTRY,
+        PLATFORM_DPASTE, PLATFORM_MISSKEY, PLATFORM_LEMMY, PLATFORM_BLUESKY,
+        PLATFORM_WHITEWIND, PLATFORM_DISQUS, PLATFORM_PLURK, PLATFORM_PIXELFED,
+        PLATFORM_NOTION, PLATFORM_GRAVATAR, PLATFORM_MINDS,
     }
 )
 # Medium is draft-only (its publish API is retired); the pipeline never marks it live.
@@ -149,6 +222,27 @@ PLATFORM_CREDENTIAL_FIELDS: dict[str, tuple[str, ...]] = {
     PLATFORM_HUBSPOT: ("access_token", "content_group_id"),
     PLATFORM_DRUPAL: ("base_url", "username", "password"),
     PLATFORM_JOOMLA: ("base_url", "api_token", "catid"),
+    PLATFORM_HACKMD: ("token",),
+    PLATFORM_GITHUB_GIST: ("token",),
+    PLATFORM_GITLAB_SNIPPETS: ("token",),
+    PLATFORM_PASTE_EE: ("api_key",),
+    PLATFORM_PASTEBIN: ("api_dev_key",),
+    PLATFORM_NETLIFY: ("api_token", "site_id"),
+    PLATFORM_NEOCITIES: ("api_key", "sitename"),
+    # rentry.co / dpaste.org are fully anonymous - no credential fields at all; a
+    # vault row must still exist (even an empty ``{}``) to opt a client into them.
+    PLATFORM_RENTRY: (),
+    PLATFORM_DPASTE: (),
+    PLATFORM_MISSKEY: ("token",),
+    PLATFORM_LEMMY: ("username", "password", "community"),
+    PLATFORM_BLUESKY: ("identifier", "app_password"),
+    PLATFORM_WHITEWIND: ("identifier", "app_password"),
+    PLATFORM_DISQUS: ("access_token", "api_key", "username"),
+    PLATFORM_PLURK: ("consumer_key", "consumer_secret", "access_token", "access_token_secret"),
+    PLATFORM_PIXELFED: ("access_token", "placeholder_image_url"),
+    PLATFORM_NOTION: ("integration_token", "parent_page_id"),
+    PLATFORM_GRAVATAR: ("api_token", "username"),
+    PLATFORM_MINDS: ("access_token",),
 }
 
 _INSTALL_HINT = (
@@ -1172,6 +1266,934 @@ class JoomlaClient(HttpProviderClient):
             raise ProviderCallError("Joomla response missing article id")
         post_url = f"{self._base}/index.php?option=com_content&view=article&id={article_id}"
         return Web2PublishResult(post_url=post_url, verified=True, external_id=str(article_id))
+
+
+# --------------------------------------------------------------------------- #
+# HackMD - Bearer PAT, JSON REST. Notes have no separate title field on write,
+# so the title is folded into the note's markdown as an H1.
+# --------------------------------------------------------------------------- #
+class HackMDClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over api.hackmd.io (a self-issued Bearer PAT,
+    Settings > API). ``readPermission: 'guest'`` makes the note publicly
+    viewable at its returned ``publishLink``."""
+
+    provider = "hackmd"
+    platform = PLATFORM_HACKMD
+
+    def __init__(self, *, token: str, timeout: float = 30.0) -> None:
+        if not token:
+            raise ProviderNotConfiguredError(f"HackMD publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.hackmd.io/v1",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        content = f"# {post.title}\n\n{_html_to_text(post.body_html)}\n\n[{post.anchor}]({post.target_url})"
+        body: dict[str, object] = {"content": content, "readPermission": "guest", "writePermission": "owner"}
+        if post.external_id:
+            self.request_json("PATCH", f"/notes/{post.external_id}", json_body=body)
+            data = self.request_json("GET", f"/notes/{post.external_id}")
+            note_id: object = post.external_id
+        else:
+            data = self.request_json("POST", "/notes", json_body=body)
+            note_id = data.get("id")
+        post_url = str(data.get("publishLink") or "")
+        if not post_url:
+            raise ProviderCallError("HackMD response missing publishLink")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(note_id) if note_id else None)
+
+
+# --------------------------------------------------------------------------- #
+# GitHub Gist - a PAT Bearer, JSON REST.
+# --------------------------------------------------------------------------- #
+class GitHubGistClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the GitHub Gist API. A PAT (classic or
+    fine-grained, ``gist`` scope) rides as a Bearer token; GitHub renders gist
+    content as Markdown, so ``body_html`` is stripped to plain text first (the
+    same markdown caveat ``DevToClient`` documents)."""
+
+    provider = "github_gist"
+    platform = PLATFORM_GITHUB_GIST
+
+    def __init__(self, *, token: str, timeout: float = 30.0) -> None:
+        if not token:
+            raise ProviderNotConfiguredError(f"GitHub Gist publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.github.com",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json",
+            },
+            timeout=timeout,
+        )
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        content = f"# {post.title}\n\n{_html_to_text(post.body_html)}\n\n[{post.anchor}]({post.target_url})"
+        body: dict[str, object] = {
+            "description": post.title, "public": True, "files": {f"{slug}.md": {"content": content}},
+        }
+        if post.external_id:
+            data = self.request_json("PATCH", f"/gists/{post.external_id}", json_body=body)
+        else:
+            data = self.request_json("POST", "/gists", json_body=body)
+        post_url = str(data.get("html_url") or "")
+        gist_id = data.get("id")
+        if not post_url:
+            raise ProviderCallError("GitHub Gist response missing html_url")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(gist_id) if gist_id else None)
+
+
+# --------------------------------------------------------------------------- #
+# GitLab Snippets - a PAT via the PRIVATE-TOKEN header (GitLab's own scheme).
+# --------------------------------------------------------------------------- #
+class GitLabSnippetsClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the GitLab Snippets API (gitlab.com).
+    ``visibility: 'public'`` makes the snippet indexable at its returned
+    ``web_url``."""
+
+    provider = "gitlab_snippets"
+    platform = PLATFORM_GITLAB_SNIPPETS
+
+    def __init__(self, *, token: str, timeout: float = 30.0) -> None:
+        if not token:
+            raise ProviderNotConfiguredError(f"GitLab Snippets publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://gitlab.com/api/v4",
+            headers={"PRIVATE-TOKEN": token, "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        content = f"# {post.title}\n\n{_html_to_text(post.body_html)}\n\n[{post.anchor}]({post.target_url})"
+        body: dict[str, object] = {
+            "title": post.title, "file_name": f"{slug}.md", "content": content, "visibility": "public",
+        }
+        if post.external_id:
+            data = self.request_json("PUT", f"/snippets/{post.external_id}", json_body=body)
+        else:
+            data = self.request_json("POST", "/snippets", json_body=body)
+        post_url = str(data.get("web_url") or "")
+        snippet_id = data.get("id")
+        if not post_url:
+            raise ProviderCallError("GitLab Snippets response missing web_url")
+        return Web2PublishResult(
+            post_url=post_url, verified=True, external_id=str(snippet_id) if snippet_id else None
+        )
+
+
+# --------------------------------------------------------------------------- #
+# paste.ee - X-Auth-Token header, JSON REST. No documented edit endpoint.
+# --------------------------------------------------------------------------- #
+class PasteEeClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the paste.ee API (a self-issued
+    ``X-Auth-Token``). paste.ee has no documented edit endpoint, so an
+    ``external_id`` is ignored - every ``publish()`` call creates a NEW paste,
+    never silently claims to have updated an old one."""
+
+    provider = "paste_ee"
+    platform = PLATFORM_PASTE_EE
+
+    def __init__(self, *, api_key: str, timeout: float = 30.0) -> None:
+        if not api_key:
+            raise ProviderNotConfiguredError(f"paste.ee publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.paste.ee/v1",
+            headers={"X-Auth-Token": api_key, "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        content = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        body = {"description": post.title, "sections": [{"name": post.title, "contents": content}]}
+        data = self.request_json("POST", "/pastes", json_body=body)
+        post_url = str(data.get("link") or "")
+        paste_id = data.get("id")
+        if not post_url:
+            raise ProviderCallError("paste.ee response missing link")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(paste_id) if paste_id else None)
+
+
+# --------------------------------------------------------------------------- #
+# Pastebin.com - the classic api_post.php: form-encoded, and the response is a
+# bare TEXT url (not JSON), so this bypasses request_json for its one call.
+# --------------------------------------------------------------------------- #
+class PastebinClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the classic Pastebin API. No edit endpoint is
+    reachable with just the ``api_dev_key`` (editing needs the paste OWNER's
+    separately-logged-in ``api_user_key``, a handshake this client does not
+    perform), so ``external_id`` is ignored - every call creates a NEW paste."""
+
+    provider = "pastebin"
+    platform = PLATFORM_PASTEBIN
+    _ENDPOINT = "https://pastebin.com/api/api_post.php"
+
+    def __init__(self, *, api_dev_key: str, timeout: float = 30.0) -> None:
+        if not api_dev_key:
+            raise ProviderNotConfiguredError(f"Pastebin.com publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(timeout=timeout)
+        self._api_dev_key = api_dev_key
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        content = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        params = {
+            "api_dev_key": self._api_dev_key,
+            "api_option": "paste",
+            "api_paste_code": content,
+            "api_paste_name": post.title,
+            "api_paste_private": "0",
+            "api_paste_expire_date": "N",
+        }
+        response = self._client.post(self._ENDPOINT, data=params)
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Pastebin request failed with status {response.status_code}")
+        text = response.text.strip()
+        if not text.startswith("http"):
+            raise ProviderCallError(f"Pastebin error: {text}")
+        return Web2PublishResult(post_url=text, verified=True, external_id=None)
+
+
+# --------------------------------------------------------------------------- #
+# Netlify - a PAT + the 'digest' deploy flow (sha1 the file, upload only if the
+# digest is not already stored) to push a single static HTML page live.
+# --------------------------------------------------------------------------- #
+class NetlifyClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Netlify API. One deploy = one static
+    ``index.html`` (mirrors ``_static_page``) REPLACING the whole site's prior
+    deploy - this client is meant for one branded property per Netlify site,
+    not a multi-page site. ``site_id`` must already exist (created once by
+    hand or via the Sites API, out of scope here)."""
+
+    provider = "netlify"
+    platform = PLATFORM_NETLIFY
+
+    def __init__(self, *, api_token: str, site_id: str, timeout: float = 30.0) -> None:
+        if not api_token or not site_id:
+            raise ProviderNotConfiguredError(f"Netlify publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.netlify.com/api/v1",
+            headers={"Authorization": f"Bearer {api_token}"},
+            timeout=timeout,
+        )
+        self._site_id = site_id
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        content = _static_page(post).encode("utf-8")
+        # Content-addressing only (Netlify's own deploy-digest protocol) - not a
+        # security use, hence usedforsecurity=False.
+        digest = hashlib.sha1(content, usedforsecurity=False).hexdigest()
+        data = self.request_json(
+            "POST", f"/sites/{self._site_id}/deploys", json_body={"files": {"/index.html": digest}},
+        )
+        deploy_id = data.get("id")
+        required = data.get("required") or []
+        if not deploy_id:
+            raise ProviderCallError("Netlify response missing deploy id")
+        if digest in required:
+            response = self._client.put(
+                f"/deploys/{deploy_id}/files/index.html",
+                content=content,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+            if response.status_code >= 400:
+                raise ProviderCallError(f"Netlify file upload failed with status {response.status_code}")
+        post_url = str(data.get("ssl_url") or data.get("deploy_ssl_url") or "")
+        if not post_url:
+            raise ProviderCallError("Netlify response missing ssl_url")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(deploy_id))
+
+
+# --------------------------------------------------------------------------- #
+# Neocities - a site API key (Bearer) + a multipart upload of one static file.
+# --------------------------------------------------------------------------- #
+class NeocitiesClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Neocities API. ``sitename`` is the
+    account's own ``{sitename}.neocities.org`` subdomain, needed to build the
+    live URL - the upload response carries none."""
+
+    provider = "neocities"
+    platform = PLATFORM_NEOCITIES
+
+    def __init__(self, *, api_key: str, sitename: str, timeout: float = 30.0) -> None:
+        if not api_key or not sitename:
+            raise ProviderNotConfiguredError(f"Neocities publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://neocities.org/api", headers={"Authorization": f"Bearer {api_key}"}, timeout=timeout,
+        )
+        self._sitename = sitename
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        filename = f"{slug}.html"
+        content = _static_page(post).encode("utf-8")
+        response = self._client.post("/upload", files={filename: (filename, content, "text/html")})
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Neocities upload failed with status {response.status_code}")
+        data = response.json()
+        if data.get("result") != "success":
+            raise ProviderCallError(f"Neocities error: {data.get('message')}")
+        post_url = f"https://{self._sitename}.neocities.org/{filename}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=filename)
+
+
+# --------------------------------------------------------------------------- #
+# rentry.co - fully anonymous (no credential at all); a CSRF cookie handshake.
+# --------------------------------------------------------------------------- #
+class RentryClient:
+    """Real ``Web2Publisher`` over rentry.co's unofficial (but actively
+    community-maintained) anonymous posting endpoint - no account, no
+    credential at all (``PLATFORM_CREDENTIAL_FIELDS`` is empty for this
+    platform). Not an ``HttpProviderClient`` subclass: the flow needs a cookie
+    jar (the CSRF token rides in a ``csrftoken`` cookie set by an initial GET),
+    which a plain ``httpx.Client`` keeps automatically. An update
+    (``external_id`` set, ``"<url>:<edit_code>"``) reuses that SAME edit_code -
+    rentry has no account/OAuth, so the edit_code IS the write credential for
+    that one page, and the (possibly rotated) edit_code is stored back as the
+    new ``external_id``."""
+
+    provider = "rentry"
+    platform = PLATFORM_RENTRY
+    _BASE = "https://rentry.co"
+
+    def __init__(self, *, timeout: float = 30.0) -> None:
+        import httpx
+
+        self._client = httpx.Client(base_url=self._BASE, timeout=timeout, follow_redirects=True)
+
+    def _csrf_token(self) -> str:
+        self._client.get("/")
+        token = self._client.cookies.get("csrftoken")
+        if not token:
+            raise ProviderCallError("rentry.co did not set a csrftoken cookie")
+        return str(token)
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        text = f"# {post.title}\n\n{_html_to_text(post.body_html)}\n\n[{post.anchor}]({post.target_url})"
+        edit_code = None
+        if post.external_id and ":" in post.external_id:
+            _, _, edit_code = post.external_id.partition(":")
+        edit_code = edit_code or secrets.token_hex(8)
+        csrf = self._csrf_token()
+        response = self._client.post(
+            "/api/new",
+            data={"csrfmiddlewaretoken": csrf, "text": text, "edit_code": edit_code},
+            headers={"Referer": f"{self._BASE}/"},
+        )
+        if response.status_code >= 400:
+            raise ProviderCallError(f"rentry.co request failed with status {response.status_code}")
+        data = response.json()
+        if data.get("status") != "200":
+            raise ProviderCallError(f"rentry.co error: {data.get('errors')}")
+        content = data.get("content") or {}
+        url = str(content.get("url") or "")
+        returned_edit_code = str(content.get("edit_code") or edit_code)
+        if not url:
+            raise ProviderCallError("rentry.co response missing url")
+        full_url = url if url.startswith("http") else f"{self._BASE}/{url}"
+        return Web2PublishResult(post_url=full_url, verified=True, external_id=f"{url}:{returned_edit_code}")
+
+
+# --------------------------------------------------------------------------- #
+# dpaste.org - fully anonymous, no key or cookie handshake at all.
+# --------------------------------------------------------------------------- #
+class DpasteClient:
+    """Real ``Web2Publisher`` over dpaste.org's anonymous API - literally no
+    key, no cookie, no account (``PLATFORM_CREDENTIAL_FIELDS`` is empty, same as
+    ``RentryClient``). No edit endpoint exists, so ``external_id`` is always
+    ignored and every ``publish()`` call creates a brand NEW paste."""
+
+    provider = "dpaste"
+    platform = PLATFORM_DPASTE
+    _BASE = "https://dpaste.org"
+
+    def __init__(self, *, timeout: float = 30.0) -> None:
+        import httpx
+
+        self._client = httpx.Client(base_url=self._BASE, timeout=timeout, follow_redirects=True)
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        content = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        response = self._client.post("/api/", data={"content": content, "format": "url", "expiry_days": "365"})
+        if response.status_code >= 400:
+            raise ProviderCallError(f"dpaste.org request failed with status {response.status_code}")
+        url = response.text.strip()
+        if not url.startswith("http"):
+            raise ProviderCallError(f"dpaste.org error: {url}")
+        return Web2PublishResult(post_url=url, verified=True, external_id=None)
+
+
+# --------------------------------------------------------------------------- #
+# Misskey - distinct fediverse software from Mastodon; the token rides IN THE
+# JSON BODY (`i`), never an Authorization header - a documented Misskey quirk.
+# --------------------------------------------------------------------------- #
+class MisskeyClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over a Misskey instance's REST API (misskey.io by
+    default; ``instance_url`` is overridable for any Misskey instance). Misskey
+    has no note-edit endpoint, so ``external_id`` is ignored - every
+    ``publish()`` call creates a NEW note, never claims to update the old one."""
+
+    provider = "misskey"
+    platform = PLATFORM_MISSKEY
+    _MAX_CHARS = 3000
+
+    def __init__(self, *, token: str, instance_url: str = "https://misskey.io", timeout: float = 30.0) -> None:
+        if not token:
+            raise ProviderNotConfiguredError(f"Misskey publisher unavailable: {_INSTALL_HINT}")
+        self._instance = instance_url.rstrip("/")
+        super().__init__(
+            base_url=self._instance, headers={"Content-Type": "application/json"}, timeout=timeout,
+        )
+        self._token = token
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        text = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        body = {"i": self._token, "text": text[: self._MAX_CHARS]}
+        data = self.request_json("POST", "/api/notes/create", json_body=body)
+        note = data.get("createdNote") or {}
+        note_id = note.get("id")
+        if not note_id:
+            raise ProviderCallError("Misskey response missing createdNote.id")
+        post_url = f"{self._instance}/notes/{note_id}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(note_id))
+
+
+# --------------------------------------------------------------------------- #
+# Lemmy - login for a JWT, resolve the target community name to an id, then
+# post a LINK post (url = the backlink) into it.
+# --------------------------------------------------------------------------- #
+class LemmyClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Lemmy REST API v3 (lemmy.world by
+    default). The backlink rides as the post's own ``url`` field (a Lemmy link
+    post), with the article text as ``body``. An ``external_id`` (an existing
+    post id) skips community resolution and PUTs an edit directly."""
+
+    provider = "lemmy"
+    platform = PLATFORM_LEMMY
+
+    def __init__(
+        self, *, username: str, password: str, community: str,
+        base_url: str = "https://lemmy.world", timeout: float = 30.0,
+    ) -> None:
+        if not username or not password or not community:
+            raise ProviderNotConfiguredError(f"Lemmy publisher unavailable: {_INSTALL_HINT}")
+        self._base = base_url.rstrip("/")
+        super().__init__(base_url=self._base, headers={"Content-Type": "application/json"}, timeout=timeout)
+        self._username, self._password, self._community = username, password, community
+        self._jwt: str | None = None
+
+    def _login(self) -> None:
+        if self._jwt is not None:
+            return
+        data = self.request_json(
+            "POST", "/api/v3/user/login",
+            json_body={"username_or_email": self._username, "password": self._password},
+        )
+        jwt = data.get("jwt")
+        if not jwt:
+            raise ProviderCallError("Lemmy login response missing jwt")
+        self._jwt = str(jwt)
+        self._client.headers["Authorization"] = f"Bearer {self._jwt}"
+
+    def _community_id(self) -> int:
+        data = self.request_json("GET", "/api/v3/community", params={"name": self._community})
+        community = (data.get("community_view") or {}).get("community") or {}
+        cid = community.get("id")
+        if cid is None:
+            raise ProviderCallError(f"Lemmy: community '{self._community}' not found")
+        return int(cid)
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        self._login()
+        body_text = _html_to_text(post.body_html)
+        if post.external_id:
+            data = self.request_json(
+                "PUT", "/api/v3/post",
+                json_body={
+                    "post_id": int(post.external_id), "name": post.title,
+                    "url": post.target_url, "body": body_text,
+                },
+            )
+        else:
+            community_id = self._community_id()
+            data = self.request_json(
+                "POST", "/api/v3/post",
+                json_body={
+                    "name": post.title, "url": post.target_url, "body": body_text, "community_id": community_id,
+                },
+            )
+        row = (data.get("post_view") or {}).get("post") or {}
+        post_id = row.get("id")
+        if not post_id:
+            raise ProviderCallError("Lemmy response missing post id")
+        post_url = str(row.get("ap_id") or f"{self._base}/post/{post_id}")
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(post_id))
+
+
+# --------------------------------------------------------------------------- #
+# AT Protocol (Bluesky) - shared session handling for BlueskyClient and
+# WhiteWindClient, which rides on the SAME account (an App Password), just a
+# different XRPC record collection.
+# --------------------------------------------------------------------------- #
+class _ATProtoClient(HttpProviderClient):
+    """Shared AT Protocol session base. ``identifier`` is a handle or email;
+    ``app_password`` is a Bluesky App Password (Settings > App Passwords) -
+    NEVER the main account password. Logs in once (cached) and rides the
+    session's ``accessJwt`` as a bearer header on every subsequent call."""
+
+    platform: str = ""
+
+    def __init__(self, *, identifier: str, app_password: str, timeout: float = 30.0) -> None:
+        if not identifier or not app_password:
+            raise ProviderNotConfiguredError(f"{self.platform} publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://bsky.social/xrpc", headers={"Content-Type": "application/json"}, timeout=timeout,
+        )
+        self._identifier = identifier
+        self._app_password = app_password
+        self._did: str | None = None
+
+    def _session(self) -> str:
+        if self._did is not None:
+            return self._did
+        data = self.request_json(
+            "POST", "/com.atproto.server.createSession",
+            json_body={"identifier": self._identifier, "password": self._app_password},
+        )
+        access_jwt, did = data.get("accessJwt"), data.get("did")
+        if not access_jwt or not did:
+            raise ProviderCallError(f"{self.platform} login response missing accessJwt/did")
+        self._client.headers["Authorization"] = f"Bearer {access_jwt}"
+        self._did = str(did)
+        return self._did
+
+
+def _link_facet(text: str, url: str) -> dict[str, Any] | None:
+    """An AT Protocol rich-text ``facet`` making ``url`` (if present in
+    ``text``) a real clickable link - byte (not character) offsets, per the
+    AT Protocol spec."""
+    idx = text.find(url)
+    if idx < 0:
+        return None
+    prefix_bytes = len(text[:idx].encode("utf-8"))
+    url_bytes = len(url.encode("utf-8"))
+    return {
+        "index": {"byteStart": prefix_bytes, "byteEnd": prefix_bytes + url_bytes},
+        "features": [{"$type": "app.bsky.richtext.facet#link", "uri": url}],
+    }
+
+
+class BlueskyClient(_ATProtoClient):
+    """Real ``Web2Publisher`` over the AT Protocol (Bluesky). Folds title + a
+    plain-text body + the backlink into one post, capped near Bluesky's
+    ~300-grapheme limit (approximated in characters - good enough for the
+    ASCII-heavy article text this pipeline produces). An ``external_id`` (the
+    record key, ``rkey``) uses ``putRecord`` to overwrite that SAME post in
+    place instead of creating a new one - AT Protocol supports this directly,
+    unlike most platforms here that have no edit endpoint at all."""
+
+    provider = "bluesky"
+    platform = PLATFORM_BLUESKY
+    _MAX_CHARS = 300
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        did = self._session()
+        text = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        text = text[: self._MAX_CHARS]
+        record: dict[str, object] = {
+            "$type": "app.bsky.feed.post", "text": text, "createdAt": datetime.now(UTC).isoformat(),
+        }
+        facet = _link_facet(text, post.target_url)
+        if facet:
+            record["facets"] = [facet]
+        body: dict[str, object] = {"repo": did, "collection": "app.bsky.feed.post", "record": record}
+        if post.external_id:
+            body["rkey"] = post.external_id
+            data = self.request_json("POST", "/com.atproto.repo.putRecord", json_body=body)
+        else:
+            data = self.request_json("POST", "/com.atproto.repo.createRecord", json_body=body)
+        uri = str(data.get("uri") or "")
+        if not uri:
+            raise ProviderCallError("Bluesky response missing record uri")
+        rkey = uri.rsplit("/", 1)[-1]
+        post_url = f"https://bsky.app/profile/{did}/post/{rkey}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=rkey)
+
+
+class WhiteWindClient(_ATProtoClient):
+    """Real ``Web2Publisher`` over WhiteWind (whtwnd.com), an ATProto long-form
+    blog service. Reuses the SAME Bluesky/ATProto account (App Password) as
+    ``BlueskyClient`` - not a separate signup, just a different XRPC record
+    collection (``com.whtwnd.blog.entry``) written to the same PDS and rendered
+    as a public HTML article at whtwnd.com. Unlike ``BlueskyClient`` this
+    carries the FULL article text - no grapheme cap - the genuine long-form
+    counterpart."""
+
+    provider = "whitewind"
+    platform = PLATFORM_WHITEWIND
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        did = self._session()
+        content = _html_to_text(post.body_html) + f"\n\n[{post.anchor}]({post.target_url})"
+        record: dict[str, object] = {
+            "$type": "com.whtwnd.blog.entry", "title": post.title, "content": content,
+            "createdAt": datetime.now(UTC).isoformat(),
+        }
+        body: dict[str, object] = {"repo": did, "collection": "com.whtwnd.blog.entry", "record": record}
+        if post.external_id:
+            body["rkey"] = post.external_id
+            data = self.request_json("POST", "/com.atproto.repo.putRecord", json_body=body)
+        else:
+            data = self.request_json("POST", "/com.atproto.repo.createRecord", json_body=body)
+        uri = str(data.get("uri") or "")
+        if not uri:
+            raise ProviderCallError("WhiteWind response missing record uri")
+        rkey = uri.rsplit("/", 1)[-1]
+        post_url = f"https://whtwnd.com/{self._identifier}/{rkey}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=rkey)
+
+
+# --------------------------------------------------------------------------- #
+# Disqus - OAuth2, a THIN PROFILE placement (not an article): there is no
+# "post an article" endpoint, only a public profile the backlink lives on.
+# --------------------------------------------------------------------------- #
+class DisqusClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Disqus REST API v3. Every ``publish()``
+    call OVERWRITES the SAME public profile's ``url``/``about`` fields (there is
+    only ever one profile), so ``external_id`` is meaningless here and ignored -
+    same honesty as Medium's draft-only note, just for a different reason
+    (a profile, not a missing publish API)."""
+
+    provider = "disqus"
+    platform = PLATFORM_DISQUS
+
+    def __init__(self, *, access_token: str, api_key: str, username: str, timeout: float = 30.0) -> None:
+        if not access_token or not api_key or not username:
+            raise ProviderNotConfiguredError(f"Disqus publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(base_url="https://disqus.com/api/3.0", timeout=timeout)
+        self._access_token, self._api_key, self._username = access_token, api_key, username
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        about = f"{post.title} - {post.anchor}"[:255]
+        params = {
+            "access_token": self._access_token, "api_key": self._api_key,
+            "url": post.target_url, "about": about,
+        }
+        data = self.request_json("POST", "/users/updateProfile.json", params=params)
+        if data.get("code") != 0:
+            raise ProviderCallError(f"Disqus error: {data.get('response')}")
+        post_url = f"https://disqus.com/by/{self._username}/"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=self._username)
+
+
+# --------------------------------------------------------------------------- #
+# Plurk - the one OAuth1 (not OAuth2) platform here; every call is individually
+# HMAC-SHA1 signed (hand-rolled - not worth a whole OAuth1 dependency for one
+# caller).
+# --------------------------------------------------------------------------- #
+def _oauth1_authorization_header(
+    *, method: str, url: str, consumer_key: str, consumer_secret: str,
+    token: str, token_secret: str, extra_params: dict[str, str],
+) -> str:
+    """A minimal RFC 5849 OAuth1 HMAC-SHA1 ``Authorization`` header."""
+    oauth_params = {
+        "oauth_consumer_key": consumer_key,
+        "oauth_nonce": secrets.token_hex(16),
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp": str(int(time.time())),
+        "oauth_token": token,
+        "oauth_version": "1.0",
+    }
+    all_params = {**oauth_params, **extra_params}
+    normalized = "&".join(
+        f"{quote(k, safe='')}={quote(str(v), safe='')}" for k, v in sorted(all_params.items())
+    )
+    base_string = "&".join([method.upper(), quote(url, safe=""), quote(normalized, safe="")])
+    signing_key = f"{quote(consumer_secret, safe='')}&{quote(token_secret, safe='')}"
+    signature = base64.b64encode(
+        hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
+    ).decode()
+    oauth_params["oauth_signature"] = signature
+    header_params = ", ".join(f'{quote(k, safe="")}="{quote(v, safe="")}"' for k, v in sorted(oauth_params.items()))
+    return f"OAuth {header_params}"
+
+
+_BASE36_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _to_base36(value: int) -> str:
+    """Plurk short-URL ids are base36-encoded (``plurk.com/p/<base36 id>``)."""
+    if value == 0:
+        return "0"
+    digits: list[str] = []
+    n = abs(value)
+    while n:
+        n, remainder = divmod(n, 36)
+        digits.append(_BASE36_DIGITS[remainder])
+    return "".join(reversed(digits))
+
+
+class PlurkClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Plurk API (OAuth1 - see
+    ``_oauth1_authorization_header``). Posts to the account's public timeline;
+    Plurk has no documented edit-by-API for an existing plurk, so
+    ``external_id`` is ignored and every call creates a NEW plurk."""
+
+    provider = "plurk"
+    platform = PLATFORM_PLURK
+    _ENDPOINT = "https://www.plurk.com/APP/Timeline/plurkAdd"
+
+    def __init__(
+        self, *, consumer_key: str, consumer_secret: str,
+        access_token: str, access_token_secret: str, timeout: float = 30.0,
+    ) -> None:
+        if not consumer_key or not consumer_secret or not access_token or not access_token_secret:
+            raise ProviderNotConfiguredError(f"Plurk publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(timeout=timeout)
+        self._consumer_key, self._consumer_secret = consumer_key, consumer_secret
+        self._access_token, self._access_token_secret = access_token, access_token_secret
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        content = f"{post.title} - {_html_to_text(post.body_html)[:200]} {post.anchor}: {post.target_url}"
+        params = {"content": content[:360], "qualifier": "shares", "lang": "en"}
+        self._client.headers["Authorization"] = _oauth1_authorization_header(
+            method="POST", url=self._ENDPOINT,
+            consumer_key=self._consumer_key, consumer_secret=self._consumer_secret,
+            token=self._access_token, token_secret=self._access_token_secret,
+            extra_params=params,
+        )
+        data = self.request_json("POST", self._ENDPOINT, params=params)
+        plurk_id = data.get("plurk_id")
+        if plurk_id is None:
+            raise ProviderCallError("Plurk response missing plurk_id")
+        post_url = f"https://www.plurk.com/p/{_to_base36(int(plurk_id))}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(plurk_id))
+
+
+# --------------------------------------------------------------------------- #
+# Pixelfed - Mastodon-compatible REST, but REQUIRES an image on every post
+# (unlike Mastodon) - a fixed brand placeholder image is uploaded each time.
+# --------------------------------------------------------------------------- #
+class PixelfedClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over Pixelfed's Mastodon-compatible REST API
+    (pixelfed.social by default). ``Web2Post`` carries no image field, so this
+    client takes a fixed ``placeholder_image_url`` (a brand image), fetches it
+    once per publish, and uploads it as the post's required media - the
+    documented fix for the structural mismatch between a text-only
+    ``Web2Post`` and Pixelfed's image-required timeline."""
+
+    provider = "pixelfed"
+    platform = PLATFORM_PIXELFED
+    _MAX_CHARS = 500
+
+    def __init__(
+        self, *, access_token: str, placeholder_image_url: str,
+        instance_url: str = "https://pixelfed.social", timeout: float = 30.0,
+    ) -> None:
+        if not access_token or not placeholder_image_url:
+            raise ProviderNotConfiguredError(
+                "Pixelfed publisher unavailable: pass a per-account access token + a brand "
+                "placeholder_image_url (Pixelfed requires an image on every post)"
+            )
+        super().__init__(
+            base_url=instance_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=timeout,
+        )
+        self._placeholder_image_url = placeholder_image_url
+
+    def _upload_placeholder_media(self) -> str:
+        image = self._client.get(self._placeholder_image_url)
+        if image.status_code >= 400:
+            raise ProviderCallError(f"Pixelfed placeholder image fetch failed with status {image.status_code}")
+        response = self._client.post("/api/v2/media", files={"file": ("brand.jpg", image.content, "image/jpeg")})
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Pixelfed media upload failed with status {response.status_code}")
+        media_id = response.json().get("id")
+        if not media_id:
+            raise ProviderCallError("Pixelfed media upload response missing id")
+        return str(media_id)
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        media_id = self._upload_placeholder_media()
+        text = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        body = {"status": text[: self._MAX_CHARS], "media_ids": [media_id]}
+        data = self.request_json("POST", "/api/v1/statuses", json_body=body)
+        post_url = str(data.get("url") or "")
+        status_id = data.get("id")
+        if not post_url:
+            raise ProviderCallError("Pixelfed response missing status url")
+        return Web2PublishResult(
+            post_url=post_url, verified=True, external_id=str(status_id) if status_id else None
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Notion - creates a genuine page, but the API has NO endpoint to flip "Share
+# to web" (verified against 2026 docs) - a human must do that, so this ALWAYS
+# returns verified=False, the same honesty as GitLabPagesClient's CI-pending
+# publish.
+# --------------------------------------------------------------------------- #
+class NotionClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Notion API (api.notion.com). Creates a
+    page nested under a pre-existing ``parent_page_id`` the integration has
+    access to (Notion's API cannot create a page at the workspace root), with
+    the article rendered as paragraph blocks. A human must still open the page
+    and toggle "Share to web" before it is a live, indexable placement -
+    ``verified`` is always ``False`` here, never claimed live."""
+
+    provider = "notion"
+    platform = PLATFORM_NOTION
+    _NOTION_VERSION = "2022-06-28"
+
+    def __init__(self, *, integration_token: str, parent_page_id: str, timeout: float = 30.0) -> None:
+        if not integration_token or not parent_page_id:
+            raise ProviderNotConfiguredError(f"Notion publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.notion.com/v1",
+            headers={
+                "Authorization": f"Bearer {integration_token}",
+                "Notion-Version": self._NOTION_VERSION,
+                "Content-Type": "application/json",
+            },
+            timeout=timeout,
+        )
+        self._parent_page_id = parent_page_id
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        text = _html_to_text(post.body_html) + f"\n\n{post.anchor}: {post.target_url}"
+        blocks: list[dict[str, object]] = [
+            {
+                "object": "block", "type": "paragraph",
+                "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk[:2000]}}]},
+            }
+            for chunk in text.split("\n\n") if chunk.strip()
+        ]
+        if post.external_id:
+            self.request_json(
+                "PATCH", f"/blocks/{post.external_id}/children", json_body={"children": blocks}
+            )
+            page_id: object = post.external_id
+            data = self.request_json("GET", f"/pages/{post.external_id}")
+        else:
+            body: dict[str, object] = {
+                "parent": {"page_id": self._parent_page_id},
+                "properties": {"title": {"title": [{"text": {"content": post.title}}]}},
+                "children": blocks,
+            }
+            data = self.request_json("POST", "/pages", json_body=body)
+            page_id = data.get("id")
+        if not page_id:
+            raise ProviderCallError("Notion response missing page id")
+        post_url = str(data.get("url") or f"https://notion.so/{str(page_id).replace('-', '')}")
+        return Web2PublishResult(post_url=post_url, verified=False, external_id=str(page_id))
+
+
+# --------------------------------------------------------------------------- #
+# Gravatar - OAuth2 Bearer, a THIN PROFILE placement (not an article): same
+# honesty as DisqusClient, for the same reason (only one profile, ever).
+# --------------------------------------------------------------------------- #
+class GravatarClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over Gravatar's REST API (api.gravatar.com/v3).
+    Updates the profile's ``description`` + a public ``links`` entry carrying
+    the backlink; ``external_id``/update is meaningless (one profile, ever) and
+    every ``publish()`` call re-asserts the same fields. ``username`` builds
+    the public profile URL directly rather than trusting it back in the
+    response."""
+
+    provider = "gravatar"
+    platform = PLATFORM_GRAVATAR
+
+    def __init__(self, *, api_token: str, username: str, timeout: float = 30.0) -> None:
+        if not api_token or not username:
+            raise ProviderNotConfiguredError(f"Gravatar publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://api.gravatar.com/v3",
+            headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._username = username
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        body = {
+            "description": f"{post.title}: {post.anchor}"[:200],
+            "links": [{"label": post.anchor[:50], "url": post.target_url}],
+        }
+        self.request_json("PATCH", "/me", json_body=body)
+        post_url = f"https://gravatar.com/{self._username}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=self._username)
+
+
+# --------------------------------------------------------------------------- #
+# Minds - a personal-access-token Bearer POST to the account's public channel.
+# --------------------------------------------------------------------------- #
+class MindsClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Minds API (a self-serve personal access
+    token, Settings > API); posts a text activity to the account's public
+    channel/newsfeed timeline."""
+
+    provider = "minds"
+    platform = PLATFORM_MINDS
+
+    def __init__(self, *, access_token: str, timeout: float = 30.0) -> None:
+        if not access_token:
+            raise ProviderNotConfiguredError(f"Minds publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://www.minds.com/api/v3",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        text = f"{post.title}\n\n{_html_to_text(post.body_html)}\n\n{post.anchor}: {post.target_url}"
+        data = self.request_json("POST", "/newsfeed/activity", json_body={"message": text})
+        entity = data.get("entity") or {}
+        guid = entity.get("guid") or data.get("guid")
+        if not guid:
+            raise ProviderCallError("Minds response missing activity guid")
+        post_url = f"https://www.minds.com/newsfeed/{guid}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(guid))
 
 
 # --------------------------------------------------------------------------- #
