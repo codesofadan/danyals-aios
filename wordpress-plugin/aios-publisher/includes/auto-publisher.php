@@ -139,6 +139,23 @@ function aios_publisher_rest_publish( $request ) {
 	if ( $author > 0 ) {
 		$postarr['post_author'] = $author;
 	}
+	// Tags (the post_tag taxonomy the active theme displays/links) - the same keyword
+	// research the content job already ran. wp_insert_post() creates any tag that
+	// doesn't exist yet. Only 'post' has post_tag registered by default - 'page'
+	// silently ignores tags_input, so this is safe to pass either way.
+	$tags = $request->get_param( 'tags' );
+	if ( is_array( $tags ) ) {
+		$clean_tags = array();
+		foreach ( $tags as $tag ) {
+			$tag = sanitize_text_field( (string) $tag );
+			if ( '' !== $tag ) {
+				$clean_tags[] = $tag;
+			}
+		}
+		if ( ! empty( $clean_tags ) ) {
+			$postarr['tags_input'] = $clean_tags;
+		}
+	}
 
 	$post_id = wp_insert_post( wp_slash( $postarr ), true );
 	if ( is_wp_error( $post_id ) ) {

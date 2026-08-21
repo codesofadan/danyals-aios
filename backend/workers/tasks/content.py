@@ -1851,6 +1851,34 @@ def _derive_faq(draft_md: str) -> list[dict[str, str]]:
     return faq[:8]
 
 
+def _derive_tags(row: dict[str, Any], *, limit: int = 8) -> list[str]:
+    """WordPress post TAGS (the ``post_tag`` taxonomy the active theme displays/
+    links) derived from the SAME keyword research every job already ran - the
+    primary target keyword first, then its secondary keywords, deduped
+    case-insensitively and length-capped so a broad brief can't produce a runaway
+    tag list. Title-cased for display (WordPress tag pages read the raw string)."""
+    keyword_map = _as_dict(row.get("keyword_map"))
+    primary = str(keyword_map.get("primary") or "").strip()
+    secondary = keyword_map.get("secondary")
+    candidates = [primary]
+    if isinstance(secondary, list):
+        candidates += [str(s) for s in secondary]
+    seen: set[str] = set()
+    tags: list[str] = []
+    for raw in candidates:
+        tag = raw.strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(tag)
+        if len(tags) >= limit:
+            break
+    return tags
+
+
 def _derive_cta(row: dict[str, Any]) -> dict[str, str]:
     """A closing call-to-action for the article (always present; best practice). The
     button defaults to the client's own site."""
@@ -1893,6 +1921,11 @@ def _plugin_payload(
         "meta_description": str(meta.get("description") or ""),
         "focus_keyword": str(keyword_map.get("primary") or ""),
     }
+    # WordPress post tags (the post_tag taxonomy the theme displays/links) - the same
+    # keyword research every job already ran, never a second AI call.
+    tags = _derive_tags(row)
+    if tags:
+        payload["tags"] = tags
     # Featured image: the draft's hero image, sideloaded by the plugin into the
     # WordPress media library (never left hotlinked to the AIOS content-image host).
     featured_image_url = _first_image_url(draft_md)

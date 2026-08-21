@@ -4,7 +4,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -80,6 +80,14 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.7.0 =
+* Every push now sends `tags` (the content job's own keyword research - primary
+  target keyword + secondary keywords, deduped) which the plugin assigns to the
+  post via WordPress's own `post_tag` taxonomy (`tags_input`, creating any tag
+  that doesn't exist yet). Pages ignore this (no `post_tag` support by default);
+  posts get real, clickable tags matching whatever the active theme does with
+  them.
 
 = 1.6.0 =
 * Fixed: a Gutenberg-block push (native `<!-- wp:kind {...} -->` markup, sent for

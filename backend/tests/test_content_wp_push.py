@@ -124,8 +124,25 @@ def test_approve_pushes_to_plugin_and_stores_wp_urls() -> None:
     assert "<h1>Best Brunch in Portland</h1>" in pushed["content"]
     assert pushed["meta_title"] == "Best Brunch in Portland (2026)"
     assert pushed["focus_keyword"] == "best brunch in portland"
+    assert pushed["tags"] == ["best brunch in portland"]  # derived from keyword_map.primary
     assert "schema_jsonld" in pushed  # the JSON-LD graph rode along
     assert "api_key" not in pushed
+
+
+def test_pushed_tags_combine_primary_and_secondary_keywords_deduped_and_capped() -> None:
+    row = _publish_row(
+        keyword_map={
+            "primary": "Best Brunch",
+            "secondary": ["brunch spots", "best brunch", "weekend brunch", "  ", "Best Brunch"],
+        }
+    )
+    store = FakeContentStore(row)
+    fake = FakeWordPressPluginPublisher(site_url="https://verde.example")
+    publish_content_job(store, None, "CJ-4200", settings=_settings(), resolve_wp_plugin=_plugin(fake))
+    pushed = fake.published[0]
+    # primary first, then secondary; a case-insensitive dupe of "Best Brunch" dropped;
+    # a blank secondary entry skipped.
+    assert pushed["tags"] == ["Best Brunch", "brunch spots", "weekend brunch"]
 
 
 # --------------------------------------------------------------------------- #
