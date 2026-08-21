@@ -42,6 +42,7 @@ from integrations.web2_publishers import (
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
     PLATFORM_HUBSPOT,
+    PLATFORM_HYGRAPH,
     PLATFORM_INTERNET_ARCHIVE,
     PLATFORM_JOOMLA,
     PLATFORM_LEMMY,
@@ -61,13 +62,16 @@ from integrations.web2_publishers import (
     PLATFORM_PIXELFED,
     PLATFORM_PLURK,
     PLATFORM_RENTRY,
+    PLATFORM_SANITY,
     PLATFORM_SEESAA,
     PLATFORM_SOURCEHUT_PAGES,
+    PLATFORM_STORYBLOK,
     PLATFORM_TELEGRAPH,
     PLATFORM_WARPCAST,
     PLATFORM_WEBFLOW,
     PLATFORM_WHITEWIND,
     PLATFORM_WRITEAS,
+    PLATFORM_WRITEFREELY,
     PLATFORM_ZENODO,
     WEB2_PLATFORMS,
     BlueskyClient,
@@ -89,6 +93,7 @@ from integrations.web2_publishers import (
     HashnodeClient,
     HatenaBlogClient,
     HubSpotClient,
+    HygraphClient,
     InternetArchiveClient,
     JoomlaClient,
     LemmyClient,
@@ -108,8 +113,10 @@ from integrations.web2_publishers import (
     PixelfedClient,
     PlurkClient,
     RentryClient,
+    SanityClient,
     SeesaaBlogClient,
     SourcehutPagesClient,
+    StoryblokClient,
     TelegraPhClient,
     WarpcastClient,
     Web2Post,
@@ -117,6 +124,7 @@ from integrations.web2_publishers import (
     WebflowClient,
     WhiteWindClient,
     WriteAsClient,
+    WriteFreelyEuClient,
     ZenodoClient,
 )
 
@@ -148,6 +156,12 @@ _BATCH4_PLATFORMS = (
     PLATFORM_CODEBERG_PAGES, PLATFORM_LIVEDOOR, PLATFORM_FC2, PLATFORM_SEESAA,
     PLATFORM_WARPCAST, PLATFORM_SOURCEHUT_PAGES,
 )
+# Fifth pass (3 more, Aug 2026) - headless CMSs, see web2_publishers.py's module
+# docstring. Every one always returns verified=False (no rendered public page of
+# their own), same honesty as PLATFORM_NOTION above.
+_BATCH5_PLATFORMS = (PLATFORM_SANITY, PLATFORM_STORYBLOK, PLATFORM_HYGRAPH)
+# Sixth pass (1 more, Aug 2026) - a caller-chosen WriteFreely instance.
+_BATCH6_PLATFORMS = (PLATFORM_WRITEFREELY,)
 
 
 def _post(**over: Any) -> Web2Post:
@@ -178,12 +192,15 @@ def _json_response(payload: dict[str, Any], status_code: int = 200) -> httpx.Res
 # --------------------------------------------------------------------------- #
 # 1. The platform catalog itself.
 # --------------------------------------------------------------------------- #
-def test_fifty_platforms_total() -> None:
-    assert len(WEB2_PLATFORMS) == 50
+def test_fifty_four_platforms_total() -> None:
+    assert len(WEB2_PLATFORMS) == 54
 
 
 def test_every_new_platform_has_credential_fields_documented() -> None:
-    for platform in _NEW_PLATFORMS + _NEWEST_PLATFORMS + _BATCH3_PLATFORMS + _BATCH4_PLATFORMS:
+    for platform in (
+        _NEW_PLATFORMS + _NEWEST_PLATFORMS + _BATCH3_PLATFORMS + _BATCH4_PLATFORMS + _BATCH5_PLATFORMS
+        + _BATCH6_PLATFORMS
+    ):
         assert platform in PLATFORM_CREDENTIAL_FIELDS
         assert PLATFORM_CREDENTIAL_FIELDS[platform]  # non-empty
 
@@ -347,6 +364,40 @@ def test_batch4_clients_satisfy_web2publisher() -> None:
     assert isinstance(SeesaaBlogClient(blog_id="1", username="u", password="p"), Web2Publisher)
     assert isinstance(WarpcastClient(api_key="k", signer_uuid="s"), Web2Publisher)
     assert isinstance(SourcehutPagesClient(token="t", domain="d"), Web2Publisher)
+
+
+def test_batch5_clients_satisfy_web2publisher() -> None:
+    assert isinstance(
+        SanityClient(api_token="t", project_id="p", dataset="production"), Web2Publisher
+    )
+    assert isinstance(StoryblokClient(token="t", space_id="s"), Web2Publisher)
+    assert isinstance(HygraphClient(endpoint="https://x.example/graphql", token="t"), Web2Publisher)
+
+
+def test_writefreely_client_satisfies_web2publisher_and_allows_anonymous_posting() -> None:
+    assert isinstance(WriteFreelyEuClient(instance_url="https://text.tchncs.de"), Web2Publisher)
+
+
+def test_writefreely_client_refuses_a_blank_instance_url() -> None:
+    with pytest.raises(ProviderNotConfiguredError):
+        WriteFreelyEuClient(instance_url="")
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [
+        lambda: SanityClient(api_token="", project_id="p", dataset="production"),
+        lambda: SanityClient(api_token="t", project_id="", dataset="production"),
+        lambda: SanityClient(api_token="t", project_id="p", dataset=""),
+        lambda: StoryblokClient(token="", space_id="s"),
+        lambda: StoryblokClient(token="t", space_id=""),
+        lambda: HygraphClient(endpoint="", token="t"),
+        lambda: HygraphClient(endpoint="https://x.example/graphql", token=""),
+    ],
+)
+def test_batch5_clients_refuse_a_blank_required_field(ctor: Callable[[], Any]) -> None:
+    with pytest.raises(ProviderNotConfiguredError):
+        ctor()
 
 
 # --------------------------------------------------------------------------- #
@@ -1080,6 +1131,86 @@ def test_sourcehut_pages_surfaces_graphql_errors() -> None:
     _with_mock(client, lambda req: _json_response({"errors": [{"message": "domain taken"}]}))
     with pytest.raises(ProviderCallError):
         client.publish(client.platform, _post())
+
+
+def test_sanity_creates_a_document_but_is_never_claimed_verified() -> None:
+    client = SanityClient(api_token="t", project_id="proj1", dataset="production")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return _json_response({"results": [{"id": "doc-1"}]})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert seen["auth"] == "Bearer t"
+    assert seen["body"]["mutations"][0]["create"]["_type"] == "post"
+    assert result.verified is False
+    assert result.external_id == "doc-1"
+    assert "proj1.sanity.studio" in result.post_url
+
+
+def test_storyblok_publishes_via_a_raw_non_bearer_token() -> None:
+    client = StoryblokClient(token="t", space_id="123")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization")
+        seen["body"] = json.loads(request.content)
+        return _json_response({"story": {"id": 999}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert seen["auth"] == "t"
+    assert seen["body"]["story"]["content"]["component"] == "page"
+    assert result.verified is False
+    assert result.external_id == "999"
+    assert "123" in result.post_url
+
+
+def test_hygraph_creates_then_publishes_via_two_graphql_mutations() -> None:
+    client = HygraphClient(endpoint="https://api.hygraph.example/v2/proj/master", token="t")
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "createPost" in body["query"]:
+            return _json_response({"data": {"createPost": {"id": "e1"}}})
+        return _json_response({"data": {"publishPost": {"id": "e1"}}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert len(calls) == 2
+    assert calls[0]["variables"]["title"] == "Gentle Dental Cleanings"
+    assert calls[1]["variables"]["id"] == "e1"
+    assert result.verified is False
+    assert result.external_id == "e1"
+
+
+def test_hygraph_surfaces_graphql_errors() -> None:
+    client = HygraphClient(endpoint="https://api.hygraph.example/v2/proj/master", token="t")
+    _with_mock(client, lambda req: _json_response({"errors": [{"message": "bad schema"}]}))
+    with pytest.raises(ProviderCallError):
+        client.publish(client.platform, _post(external_id=None))
+
+
+def test_writefreely_posts_anonymously_against_the_chosen_instance() -> None:
+    client = WriteFreelyEuClient(instance_url="https://text.tchncs.de")
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["auth"] = request.headers.get("Authorization")
+        return _json_response({"data": {"slug": "gentle-dental-cleanings", "id": 7}})
+
+    _with_mock(client, handler)
+    result = client.publish(client.platform, _post(external_id=None))
+    assert seen["path"] == "/api/posts"
+    assert seen["auth"] is None
+    assert result.post_url == "https://text.tchncs.de/gentle-dental-cleanings"
+    assert result.verified is True and result.external_id == "7"
 
 
 # --------------------------------------------------------------------------- #

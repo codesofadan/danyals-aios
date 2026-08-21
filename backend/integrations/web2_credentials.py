@@ -48,6 +48,7 @@ from integrations.web2_publishers import (
     PLATFORM_HASHNODE,
     PLATFORM_HATENA,
     PLATFORM_HUBSPOT,
+    PLATFORM_HYGRAPH,
     PLATFORM_INTERNET_ARCHIVE,
     PLATFORM_JOOMLA,
     PLATFORM_LEMMY,
@@ -67,8 +68,10 @@ from integrations.web2_publishers import (
     PLATFORM_PIXELFED,
     PLATFORM_PLURK,
     PLATFORM_RENTRY,
+    PLATFORM_SANITY,
     PLATFORM_SEESAA,
     PLATFORM_SOURCEHUT_PAGES,
+    PLATFORM_STORYBLOK,
     PLATFORM_TELEGRAPH,
     PLATFORM_TUMBLR,
     PLATFORM_WARPCAST,
@@ -76,6 +79,7 @@ from integrations.web2_publishers import (
     PLATFORM_WHITEWIND,
     PLATFORM_WORDPRESS,
     PLATFORM_WRITEAS,
+    PLATFORM_WRITEFREELY,
     PLATFORM_ZENODO,
     BloggerClient,
     BlueskyClient,
@@ -97,6 +101,7 @@ from integrations.web2_publishers import (
     HashnodeClient,
     HatenaBlogClient,
     HubSpotClient,
+    HygraphClient,
     InternetArchiveClient,
     JoomlaClient,
     LemmyClient,
@@ -116,8 +121,10 @@ from integrations.web2_publishers import (
     PixelfedClient,
     PlurkClient,
     RentryClient,
+    SanityClient,
     SeesaaBlogClient,
     SourcehutPagesClient,
+    StoryblokClient,
     TelegraPhClient,
     TumblrClient,
     WarpcastClient,
@@ -126,6 +133,7 @@ from integrations.web2_publishers import (
     WhiteWindClient,
     WordPressComClient,
     WriteAsClient,
+    WriteFreelyEuClient,
     ZenodoClient,
 )
 
@@ -278,6 +286,20 @@ _BUILDERS: dict[str, Any] = {
     ),
     PLATFORM_SOURCEHUT_PAGES: lambda c: SourcehutPagesClient(
         token=c.get("token", ""), domain=c.get("domain", "")
+    ),
+    PLATFORM_SANITY: lambda c: SanityClient(
+        api_token=c.get("api_token", ""), project_id=c.get("project_id", ""),
+        dataset=c.get("dataset", ""), doc_type=c.get("doc_type") or "post",
+    ),
+    PLATFORM_STORYBLOK: lambda c: StoryblokClient(
+        token=c.get("token", ""), space_id=c.get("space_id", ""),
+        component=c.get("component") or "page",
+    ),
+    PLATFORM_HYGRAPH: lambda c: HygraphClient(
+        endpoint=c.get("endpoint", ""), token=c.get("token", ""), model=c.get("model") or "post",
+    ),
+    PLATFORM_WRITEFREELY: lambda c: WriteFreelyEuClient(
+        instance_url=c.get("instance_url", ""), token=c.get("token", ""), target=c.get("target", ""),
     ),
 }
 

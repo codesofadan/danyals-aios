@@ -6,6 +6,7 @@
 // EXTERNAL API. Reads /citation-builder/web2-status + /engine-status; degrades cleanly.
 
 import { useCitationEngineStatus, useWeb2Status } from "@/lib/hooks/offpage";
+import { PLATFORM_ISSUES, type Web2Platform } from "@/lib/offpage";
 import w from "./Wave4.module.css";
 
 function StatusDot({ connected, draftOnly }: { connected: boolean; draftOnly?: boolean }) {
@@ -43,10 +44,23 @@ export default function Web2StatusBoard() {
       )}
       {web2 && (
         <div className={w.board}>
-          {web2.platforms.map((p) => (
+          {web2.platforms.map((p) => {
+            const issue = PLATFORM_ISSUES[p.platform as Web2Platform];
+            return (
             <div key={p.platform} className={w.card}>
               <div className={w.cardHead}>
-                <span className={w.cardName}>{p.platform}</span>
+                <span className={w.cardName}>
+                  {p.platform}
+                  {issue && (
+                    <span
+                      title={issue}
+                      aria-label={`Not connected: ${issue}`}
+                      style={{ color: "#e0293a", marginLeft: 4, fontWeight: 700, cursor: "help" }}
+                    >
+                      *
+                    </span>
+                  )}
+                </span>
                 <span>
                   <StatusDot connected={p.connected} draftOnly={p.draftOnly} />
                   <span
@@ -66,7 +80,8 @@ export default function Web2StatusBoard() {
               )}
               {p.externalNote && <div className={w.external}>{p.externalNote}</div>}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

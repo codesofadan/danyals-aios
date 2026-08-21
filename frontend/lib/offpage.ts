@@ -110,7 +110,8 @@ export type Web2Platform =
   | "Misskey" | "Lemmy" | "Bluesky" | "WhiteWind"
   | "Disqus" | "Plurk" | "Pixelfed" | "Notion" | "Gravatar" | "Minds"
   | "Zenodo" | "Internet Archive" | "OSF" | "Figshare" | "Codeberg Pages"
-  | "Livedoor Blog" | "FC2 Blog" | "Seesaa Blog" | "Warpcast" | "Sourcehut Pages";
+  | "Livedoor Blog" | "FC2 Blog" | "Seesaa Blog" | "Warpcast" | "Sourcehut Pages"
+  | "Sanity" | "Storyblok" | "Hygraph" | "WriteFreely";
 export type Web2Verified = "verified" | "pending";
 
 export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = {
@@ -164,12 +165,29 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   "Seesaa Blog": { icon: "rss_feed", c: SERIES.c4 },
   Warpcast: { icon: "alternate_email", c: SERIES.c1 },
   "Sourcehut Pages": { icon: "web_stories", c: SERIES.c2 },
+  Sanity: { icon: "dataset", c: SERIES.c3 },
+  Storyblok: { icon: "widgets", c: SERIES.c4 },
+  Hygraph: { icon: "dataset", c: SERIES.c1 },
+  WriteFreely: { icon: "edit_note", c: SERIES.c2 },
 };
 
 // Every platform NOT draft-only can be planned/approved through the pipeline.
 export const LIVE_WEB2_PLATFORMS: Web2Platform[] = (
   Object.keys(PLATFORM_META) as Web2Platform[]
 ).filter((p) => p !== "Medium");
+
+// House account created, but the platform can't actually publish yet - a payment,
+// business-verification, or app-review step outside our control is unresolved. The
+// dashboard flags these with a small red asterisk rather than hiding them, so a lead
+// knows to chase the underlying account issue rather than assume it's simply unbuilt.
+export const PLATFORM_ISSUES: Partial<Record<Web2Platform, string>> = {
+  Blogger: "Google OAuth consent not completed - only a client id/secret exist, no user token yet",
+  Drupal: "No login on the target Drupal site yet (still a Tugboat QA preview, not a live host)",
+  "Hatena Blog": "Hatena account created, but no blog id / AtomPub API key issued yet",
+  "HubSpot CMS": "Private app token exists, but no target blog (content group) configured yet",
+  Notion: "Integration created, but not yet shared with a parent page to publish under",
+  Storyblok: "Management token exists, but no target space configured yet",
+};
 
 export type Web2Property = {
   id: string;

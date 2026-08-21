@@ -146,6 +146,51 @@ Read the Docs, Hive, Steemit) and why.
 
 ---
 
+## 2e. Web 2.0 — the fifth pass (3 more, Aug 2026): headless CMSs
+
+Same vault convention. All three are **headless** — the platform stores content but
+renders no public page of its own, so (same honesty as Notion in §2c) every client
+here **always returns `verified=False`**; `post_url` is a best-effort deep link into
+the platform's own admin UI, not a guaranteed public URL. Each also assumes a
+project-specific content schema (`doc_type`/`component`/`model`, all overridable) —
+if the target project's schema differs, the call fails with a clear provider error
+rather than silently succeeding.
+
+| Platform | Vault secret JSON | How to get it |
+|---|---|---|
+| Sanity | `{"api_token": "...", "project_id": "...", "dataset": "production", "doc_type": "post"}` | sanity.io/manage → project → API → Tokens, create one with **Editor** (write) permission. `dataset` is usually `"production"`. `doc_type` must match an actual document type in the project's schema. |
+| Storyblok | `{"token": "...", "space_id": "...", "component": "page"}` | app.storyblok.com → space Settings → Access Tokens → generate a **Management API** personal access token (not the public/preview token). `component` must match an actual content-type in the space's schema. |
+| Hygraph | `{"endpoint": "...", "token": "...", "model": "post"}` | app.hygraph.com → project → Settings → API Access for the Content API `endpoint`, then Permanent Auth Tokens for `token` (needs create/publish mutation permission on the target model). `model` must be an existing content model exposing `title`/`slug`/`content` fields. |
+
+---
+
+## 2f. Web 2.0 — the sixth pass (1 more, Aug 2026): a EU-reachable WriteFreely instance
+
+Same vault convention. Reuses the identical write.as/WriteFreely API `PLATFORM_WRITEAS`
+already speaks (§1), just pointed at a caller-chosen `instance_url` instead of
+write.as itself. Several public WriteFreely instances are individually EU-operator-run
+(check the current list at writefreely.org/instances — e.g. Germany's
+`text.tchncs.de`) and support a fully anonymous post, same as Write.as. **Honesty
+caveat:** every one of these is a volunteer-run community project with no SLA — it can
+go invite-only or vanish without notice. Pick one, sign up by hand, and re-verify it is
+still open before depending on it for a client deliverable.
+
+Candidates investigated and **rejected** this pass (no real HTTP publish API, or the
+platform's own Terms of Service explicitly bans this pipeline's use case) — see
+`integrations/web2_publishers.py`'s module docstring and migration `0077`'s header for
+the full record: Qiita (ToS explicitly bans SEO/affiliate-purpose posting), Zenn (no
+HTTP write API — GitHub-sync only, needs a manual per-account bootstrap), Bear Blog (no
+write API of any kind), Substack (no official publish API; only unofficial
+reverse-engineered clients exist, which the platform's own Acceptable Use Policy
+prohibits), Plume (project no longer maintained; maintainers themselves recommend
+WriteFreely instead).
+
+| Platform | Vault secret JSON | How to get it |
+|---|---|---|
+| WriteFreely | `{"instance_url": "...", "token": "...", "target": "..."}` | Pick an open instance from writefreely.org/instances, sign up by hand (email only, no phone/ID). `token`/`target` are optional — a blank token posts anonymously (public-by-URL, not part of a listed blog); `target` is the collection alias if the account has one. |
+
+---
+
 ## 3. Citations — direct-API engines (agency-wide keys, `.env`)
 
 Unlike Web2 credentials, these two are **agency-wide** (one key covers every

@@ -250,6 +250,20 @@ PLATFORM_FC2 = "FC2 Blog"
 PLATFORM_SEESAA = "Seesaa Blog"
 PLATFORM_WARPCAST = "Warpcast"
 PLATFORM_SOURCEHUT_PAGES = "Sourcehut Pages"
+# Fifth pass (Aug 2026) - 3 headless-CMS adapters. All three are DATABASE-only
+# platforms (no rendered public page of their own - a client's separate frontend
+# must query + render the content for it to become a live, indexable placement),
+# so - same honesty as NotionClient - every one of these ALWAYS returns
+# ``verified=False``; ``post_url`` is a best-effort deep link into the platform's
+# own content-management UI, not a guaranteed public URL.
+PLATFORM_SANITY = "Sanity"
+PLATFORM_STORYBLOK = "Storyblok"
+PLATFORM_HYGRAPH = "Hygraph"
+# Sixth pass (Aug 2026) - one more: a caller-chosen, EU-reachable WriteFreely
+# instance (distinct credential shape from PLATFORM_WRITEAS, which is pinned to
+# write.as itself). See WriteFreelyEuClient's docstring for the "volunteer-run,
+# no SLA" honesty caveat that comes with any public community instance.
+PLATFORM_WRITEFREELY = "WriteFreely"
 
 WEB2_PLATFORMS: frozenset[str] = frozenset(
     {
@@ -267,6 +281,8 @@ WEB2_PLATFORMS: frozenset[str] = frozenset(
         PLATFORM_ZENODO, PLATFORM_INTERNET_ARCHIVE, PLATFORM_OSF, PLATFORM_FIGSHARE,
         PLATFORM_CODEBERG_PAGES, PLATFORM_LIVEDOOR, PLATFORM_FC2, PLATFORM_SEESAA,
         PLATFORM_WARPCAST, PLATFORM_SOURCEHUT_PAGES,
+        PLATFORM_SANITY, PLATFORM_STORYBLOK, PLATFORM_HYGRAPH,
+        PLATFORM_WRITEFREELY,
     }
 )
 # Medium is draft-only (its publish API is retired); the pipeline never marks it live.
@@ -328,6 +344,10 @@ PLATFORM_CREDENTIAL_FIELDS: dict[str, tuple[str, ...]] = {
     PLATFORM_SEESAA: ("blog_id", "username", "password"),
     PLATFORM_WARPCAST: ("api_key", "signer_uuid"),
     PLATFORM_SOURCEHUT_PAGES: ("token", "domain"),
+    PLATFORM_SANITY: ("api_token", "project_id", "dataset"),
+    PLATFORM_STORYBLOK: ("token", "space_id"),
+    PLATFORM_HYGRAPH: ("endpoint", "token"),
+    PLATFORM_WRITEFREELY: ("instance_url",),
 }
 
 _INSTALL_HINT = (
@@ -650,6 +670,54 @@ class WriteAsClient(HttpProviderClient):
         slug = str(result.get("slug") or post.slug or "")
         post_id = result.get("id")
         post_url = f"https://{self._target}.write.as/{slug}" if self._target else f"https://write.as/{slug}"
+        return Web2PublishResult(post_url=post_url, verified=True, external_id=str(post_id) if post_id else None)
+
+
+# --------------------------------------------------------------------------- #
+# WriteFreely (a EU-reachable instance, distinct from Write.as itself) - the
+# IDENTICAL open-source WriteFreely API WriteAsClient already speaks, but
+# ``instance_url`` is caller-supplied instead of hardcoded to write.as, so a
+# lead can point this at any open public WriteFreely instance - several are
+# individually EU-operator-run (e.g. Germany's text.tchncs.de, per the official
+# writefreely.org/instances directory) and, same as Write.as, allow a fully
+# ANONYMOUS post with no bearer token at all. HONESTY, same spirit as this
+# module's other caveats: a public community instance is a volunteer-run
+# project with no SLA/contract - it can vanish or go invite-only at any time,
+# unlike every corporate-operated platform above. Pick one live instance from
+# the directory, confirm it is still open, then paste its URL below.
+# --------------------------------------------------------------------------- #
+class WriteFreelyEuClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over a caller-chosen WriteFreely instance's API
+    (writefreely.org - the same open protocol Write.as itself runs). ``target``
+    is the collection alias on that instance; an empty target posts
+    anonymously, exactly like ``WriteAsClient``."""
+
+    provider = "writefreely_eu"
+    platform = PLATFORM_WRITEFREELY
+
+    def __init__(
+        self, *, instance_url: str, token: str = "", target: str = "", timeout: float = 30.0
+    ) -> None:
+        if not instance_url:
+            raise ProviderNotConfiguredError(f"WriteFreely publisher unavailable: {_INSTALL_HINT}")
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        self._instance = instance_url.rstrip("/")
+        super().__init__(base_url=self._instance, headers=headers, timeout=timeout)
+        self._target = target
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        base = f"/api/collections/{self._target}/posts" if self._target else "/api/posts"
+        url = f"{base}/{post.external_id}" if post.external_id else base
+        body = {"title": post.title, "body": post.body_html}
+        data = self.request_json("PUT" if post.external_id else "POST", url, json_body=body)
+        result = data.get("data") or {}
+        slug = str(result.get("slug") or post.slug or "")
+        post_id = result.get("id")
+        post_url = f"{self._instance}/{self._target}/{slug}" if self._target else f"{self._instance}/{slug}"
         return Web2PublishResult(post_url=post_url, verified=True, external_id=str(post_id) if post_id else None)
 
 
@@ -2802,6 +2870,211 @@ class SourcehutPagesClient(HttpProviderClient):
             raise ProviderCallError("Sourcehut Pages response missing domain")
         post_url = f"https://{domain}/"
         return Web2PublishResult(post_url=post_url, verified=True, external_id=str(site.get("id") or domain))
+
+
+# --------------------------------------------------------------------------- #
+# Sanity - Content Lake Mutate API, Bearer token. HEADLESS: the Content Lake has
+# no rendered public page of its own, so ``verified`` is always False (same
+# honesty as NotionClient) and ``post_url`` is a best-effort Sanity Studio deep
+# link, not a guaranteed public URL. The document ``_type`` is project-specific
+# schema (``sanity_doc_type``, default "post") - a mismatched schema surfaces as
+# a normal ``ProviderCallError`` from Sanity's own 400 response, never silently
+# accepted.
+# --------------------------------------------------------------------------- #
+class SanityClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Sanity Content Lake Mutate API
+    (``{project_id}.api.sanity.io``). Creates (or, with ``external_id`` set,
+    patches) one document of type ``sanity_doc_type`` (default ``"post"``) in
+    ``dataset``, with the body folded into a single Portable Text block."""
+
+    provider = "sanity"
+    platform = PLATFORM_SANITY
+    _API_VERSION = "v2024-01-01"
+
+    def __init__(
+        self,
+        *,
+        api_token: str,
+        project_id: str,
+        dataset: str,
+        doc_type: str = "post",
+        timeout: float = 30.0,
+    ) -> None:
+        if not api_token or not project_id or not dataset:
+            raise ProviderNotConfiguredError(f"Sanity publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url=f"https://{project_id}.api.sanity.io/{self._API_VERSION}",
+            headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._project_id = project_id
+        self._dataset = dataset
+        self._doc_type = doc_type or "post"
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        text = _html_to_text(post.body_html) + f"\n\n{post.anchor}: {post.target_url}"
+        body_block = {
+            "_type": "block",
+            "style": "normal",
+            "children": [{"_type": "span", "text": text}],
+        }
+        doc: dict[str, object] = {
+            "_type": self._doc_type,
+            "title": post.title,
+            "slug": {"_type": "slug", "current": slug},
+            "body": [body_block],
+        }
+        if post.external_id:
+            doc["_id"] = post.external_id
+            mutation = {"createOrReplace": doc}
+        else:
+            mutation = {"create": doc}
+        data = self.request_json(
+            "POST",
+            f"/data/mutate/{self._dataset}?returnIds=true",
+            json_body={"mutations": [mutation]},
+        )
+        results = data.get("results") or []
+        doc_id = str(results[0].get("id")) if results else post.external_id
+        if not doc_id:
+            raise ProviderCallError("Sanity response missing document id")
+        post_url = f"https://{self._project_id}.sanity.studio/structure/{self._doc_type};{doc_id}"
+        return Web2PublishResult(post_url=post_url, verified=False, external_id=doc_id)
+
+
+# --------------------------------------------------------------------------- #
+# Storyblok - Management API v1, a raw (non-Bearer) personal access token.
+# HEADLESS: same honesty as Sanity/Notion above - ``verified`` is always False,
+# ``post_url`` is a best-effort editor deep link. The story's ``component``
+# (content-type schema) is project-specific (``story_component``, default
+# "page").
+# --------------------------------------------------------------------------- #
+class StoryblokClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over the Storyblok Management API
+    (``mapi.storyblok.com``). Creates (or, with ``external_id`` set, updates)
+    one story of component ``story_component`` (default ``"page"``) in
+    ``space_id``, auto-publishing it (``?publish=1``) so the story enters the
+    space's live content -- rendering it still needs the client's own
+    frontend, so ``verified`` stays False."""
+
+    provider = "storyblok"
+    platform = PLATFORM_STORYBLOK
+
+    def __init__(
+        self,
+        *,
+        token: str,
+        space_id: str,
+        component: str = "page",
+        timeout: float = 30.0,
+    ) -> None:
+        if not token or not space_id:
+            raise ProviderNotConfiguredError(f"Storyblok publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            base_url="https://mapi.storyblok.com/v1",
+            headers={"Authorization": token, "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._space_id = space_id
+        self._component = component or "page"
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        text = _html_to_text(post.body_html) + f"\n\n{post.anchor}: {post.target_url}"
+        story = {
+            "name": post.title,
+            "slug": slug,
+            "content": {"component": self._component, "title": post.title, "text": text},
+        }
+        base = f"/spaces/{self._space_id}/stories"
+        if post.external_id:
+            data = self.request_json(
+                "PUT", f"{base}/{post.external_id}?publish=1", json_body={"story": story}
+            )
+        else:
+            data = self.request_json("POST", f"{base}?publish=1", json_body={"story": story})
+        row = data.get("story") or {}
+        story_id = row.get("id")
+        if not story_id:
+            raise ProviderCallError("Storyblok response missing story id")
+        post_url = f"https://app.storyblok.com/#/me/spaces/{self._space_id}/stories/0/0/{story_id}"
+        return Web2PublishResult(post_url=post_url, verified=False, external_id=str(story_id))
+
+
+# --------------------------------------------------------------------------- #
+# Hygraph - Content API, GraphQL, a Permanent Auth Token (PAT) Bearer. HEADLESS:
+# same honesty as Sanity/Storyblok/Notion above - ``verified`` is always False.
+# The model name + its create/publish mutations are project-specific schema
+# (``model``, default "post", assumed to expose ``title``/``slug``/``content``
+# String fields) - a schema mismatch surfaces as a normal GraphQL error, never
+# silently accepted.
+# --------------------------------------------------------------------------- #
+class HygraphClient(HttpProviderClient):
+    """Real ``Web2Publisher`` over a Hygraph project's Content API (GraphQL).
+    Runs ``create{Model}`` then ``publish{Model}`` (to ``PUBLISHED``) against
+    the caller-supplied ``endpoint`` -- Hygraph's env-scoped Content API URL,
+    e.g. ``https://api-<region>.hygraph.com/v2/<project>/master``."""
+
+    provider = "hygraph"
+    platform = PLATFORM_HYGRAPH
+
+    def __init__(self, *, endpoint: str, token: str, model: str = "post", timeout: float = 30.0) -> None:
+        if not endpoint or not token:
+            raise ProviderNotConfiguredError(f"Hygraph publisher unavailable: {_INSTALL_HINT}")
+        super().__init__(
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        self._endpoint = endpoint.rstrip("/")
+        model_name = (model or "post").strip()
+        self._type_name = model_name[:1].upper() + model_name[1:]
+
+    def _graphql(self, query: str, variables: dict[str, object]) -> dict[str, Any]:
+        response = self._client.post(self._endpoint, json={"query": query, "variables": variables})
+        if response.status_code >= 400:
+            raise ProviderCallError(f"Hygraph request failed with status {response.status_code}")
+        data: dict[str, Any] = response.json()
+        if data.get("errors"):
+            raise ProviderCallError(f"Hygraph GraphQL error: {data['errors']}")
+        return data
+
+    def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
+        if platform != self.platform:
+            raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
+        slug = post.slug or _slugify(post.title)
+        text = _html_to_text(post.body_html) + f"\n\n{post.anchor}: {post.target_url}"
+        entry_id: object
+        if post.external_id:
+            entry_id = post.external_id
+            update_query = (
+                f"mutation Update($id: ID!, $title: String!, $content: String!) {{ "
+                f"update{self._type_name}(where: {{id: $id}}, "
+                f"data: {{title: $title, content: $content}}) {{ id }} }}"
+            )
+            self._graphql(update_query, {"id": entry_id, "title": post.title, "content": text})
+        else:
+            create_query = (
+                f"mutation Create($title: String!, $slug: String!, $content: String!) {{ "
+                f"create{self._type_name}(data: {{title: $title, slug: $slug, content: $content}}) "
+                f"{{ id }} }}"
+            )
+            created = self._graphql(create_query, {"title": post.title, "slug": slug, "content": text})
+            entry = ((created.get("data") or {}).get(f"create{self._type_name}")) or {}
+            entry_id = entry.get("id")
+        if not entry_id:
+            raise ProviderCallError("Hygraph response missing entry id")
+        publish_query = (
+            f"mutation Publish($id: ID!) {{ "
+            f"publish{self._type_name}(where: {{id: $id}}, to: PUBLISHED) {{ id }} }}"
+        )
+        self._graphql(publish_query, {"id": entry_id})
+        post_url = f"{self._endpoint}#{entry_id}"
+        return Web2PublishResult(post_url=post_url, verified=False, external_id=str(entry_id))
 
 
 # --------------------------------------------------------------------------- #

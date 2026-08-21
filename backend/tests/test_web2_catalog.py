@@ -37,6 +37,7 @@ from integrations.web2_publishers import (
     PLATFORM_GRAVATAR,
     PLATFORM_HACKMD,
     PLATFORM_HUBSPOT,
+    PLATFORM_HYGRAPH,
     PLATFORM_INTERNET_ARCHIVE,
     PLATFORM_JOOMLA,
     PLATFORM_LEMMY,
@@ -52,18 +53,22 @@ from integrations.web2_publishers import (
     PLATFORM_PIXELFED,
     PLATFORM_PLURK,
     PLATFORM_RENTRY,
+    PLATFORM_SANITY,
     PLATFORM_SEESAA,
     PLATFORM_SOURCEHUT_PAGES,
+    PLATFORM_STORYBLOK,
     PLATFORM_WARPCAST,
     PLATFORM_WEBFLOW,
     PLATFORM_WHITEWIND,
+    PLATFORM_WRITEFREELY,
     PLATFORM_ZENODO,
     WEB2_PLATFORMS,
 )
 
 # Every platform whose automation_ready=true flip lives OUTSIDE the frozen 0063 seed
-# (0068's 4 newest CMS/site-builder adapters, 0070's 19-platform third pass, and
-# 0072's 10-platform fourth pass).
+# (0068's 4 newest CMS/site-builder adapters, 0070's 19-platform third pass, 0072's
+# 10-platform fourth pass, 0076's 3-platform fifth pass, and 0077's 1-platform sixth
+# pass).
 _POST_SEED_READY_PLATFORMS = frozenset(
     {
         PLATFORM_WEBFLOW, PLATFORM_HUBSPOT, PLATFORM_DRUPAL, PLATFORM_JOOMLA,
@@ -75,6 +80,8 @@ _POST_SEED_READY_PLATFORMS = frozenset(
         PLATFORM_ZENODO, PLATFORM_INTERNET_ARCHIVE, PLATFORM_OSF, PLATFORM_FIGSHARE,
         PLATFORM_CODEBERG_PAGES, PLATFORM_LIVEDOOR, PLATFORM_FC2, PLATFORM_SEESAA,
         PLATFORM_WARPCAST, PLATFORM_SOURCEHUT_PAGES,
+        PLATFORM_SANITY, PLATFORM_STORYBLOK, PLATFORM_HYGRAPH,
+        PLATFORM_WRITEFREELY,
     }
 )
 
@@ -370,4 +377,26 @@ def test_batch4_migration_grows_the_enum_and_adds_the_fourth_pass() -> None:
     assert "on conflict (name) do update" in sql
     # The deliberately-skipped platforms are documented, not silently dropped.
     for skipped in ("codesandbox", "gitbook", "read the docs", "hive", "steemit"):
+        assert skipped in sql
+
+
+def test_batch5_migration_grows_the_enum_and_adds_the_fifth_pass() -> None:
+    matches = list(_MIGRATIONS.glob("0[0-9][0-9][0-9]_web2_platforms_batch5.sql"))
+    assert len(matches) == 1, "expected exactly one web2_platforms_batch5 migration"
+    sql = matches[0].read_text(encoding="utf-8").lower()
+    for name in ("sanity", "storyblok", "hygraph"):
+        assert f"alter type public.web2_platform add value if not exists '{name}'" in sql
+    assert "automation_ready" in sql
+    assert "on conflict (name) do update" in sql
+
+
+def test_batch6_migration_grows_the_enum_and_adds_the_sixth_pass() -> None:
+    matches = list(_MIGRATIONS.glob("0[0-9][0-9][0-9]_web2_platforms_batch6.sql"))
+    assert len(matches) == 1, "expected exactly one web2_platforms_batch6 migration"
+    sql = matches[0].read_text(encoding="utf-8").lower()
+    assert "alter type public.web2_platform add value if not exists 'writefreely'" in sql
+    assert "automation_ready" in sql
+    assert "on conflict (name) do update" in sql
+    # The deliberately-rejected candidates are documented, not silently dropped.
+    for skipped in ("qiita", "zenn", "bear blog", "substack", "plume"):
         assert skipped in sql

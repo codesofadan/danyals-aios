@@ -84,11 +84,12 @@ def test_web2_platform_union_includes_medium() -> None:
     platforms = set(typing.get_args(Web2Platform))
     # 7B-4 grew this from 4 to 17 platforms, then Webflow/HubSpot CMS/Drupal/Joomla
     # grew it again to 21, then a third pass of 19 more grew it to 40, then a fourth
-    # pass of 10 more grew it to 50 (integrations/web2_publishers.py); the ORIGINAL
-    # four must still all be present, and Medium specifically - the one that is easy
-    # to drop since it is draft-only (no live publisher exists for it).
+    # pass of 10 more grew it to 50, then a fifth pass of 3 headless CMSs grew it to 53
+    # (integrations/web2_publishers.py); the ORIGINAL four must still all be present,
+    # and Medium specifically - the one that is easy to drop since it is draft-only
+    # (no live publisher exists for it).
     assert {"WordPress.com", "Blogger", "Tumblr", "Medium"} <= platforms
-    assert len(platforms) == 50
+    assert len(platforms) == 54
     assert "Medium" in platforms  # §3: the one that is easy to drop
 
 
