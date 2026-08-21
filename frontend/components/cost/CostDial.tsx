@@ -1,6 +1,7 @@
 "use client";
 
 import { DIAL_MODES, DIAL_MODE_META, providerMeta, type DialFeature, type DialMode } from "@/lib/cost";
+import ReadMore from "@/components/ui/ReadMore";
 
 type Props = {
   dial: DialFeature[];

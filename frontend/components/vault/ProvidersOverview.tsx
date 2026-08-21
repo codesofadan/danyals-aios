@@ -63,7 +63,7 @@ export default function ProvidersOverview() {
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <ReadMore
                   items={byCat.get(cat) ?? []}
-                  initialCount={10}
+                  initialCount={5}
                   getKey={(it) => it.id}
                   renderItem={(it) => (
                     <div

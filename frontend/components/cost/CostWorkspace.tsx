@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { type DialMode, type Provider } from "@/lib/cost";
+import { type DialMode } from "@/lib/cost";
 import {
   useBudgets, useCostLog, useDial, useSpendStop,
   useSetBudget, useSetDial, useSetSpendStop,
@@ -11,8 +11,6 @@ import SpendStopCard from "./SpendStopCard";
 import CostDial from "./CostDial";
 import BudgetTable from "./BudgetTable";
 import CostLog from "./CostLog";
-import ProviderBreakdown from "./ProviderBreakdown";
-import SpendHeatmap from "./SpendHeatmap";
 
 export default function CostWorkspace() {
   const budgetsQ = useBudgets();
@@ -47,17 +45,7 @@ export default function CostWorkspace() {
   }, [budgets]);
 
   // Derived from the recent cost-log window: a job can have multiple provider rows
-  // (one per API call), so "jobs this month" is the count of DISTINCT job ids, and
-  // the provider breakdown groups+sums cost per provider.
-  const providerSpend = useMemo(() => {
-    const byProvider = new Map<Provider, number>();
-    for (const e of costLog) byProvider.set(e.provider, (byProvider.get(e.provider) ?? 0) + e.cost);
-    return [...byProvider.entries()].map(([provider, amount]) => ({ provider, amount }));
-  }, [costLog]);
-  const providerTotal = useMemo(
-    () => providerSpend.reduce((s, p) => s + p.amount, 0),
-    [providerSpend],
-  );
+  // (one per API call), so "jobs this month" is the count of DISTINCT job ids.
   const jobsThisMonth = useMemo(() => new Set(costLog.map((e) => e.id)).size, [costLog]);
 
   function handleEditCap(id: string, cap: number) {
@@ -112,13 +100,8 @@ export default function CostWorkspace() {
         <BudgetTable budgets={budgets} total={totals} onEditCap={handleEditCap} />
       </div>
 
-      <div className="row">
-        <CostLog />
-        <ProviderBreakdown data={providerSpend} total={providerTotal} />
-      </div>
-
       <div className="row-single">
-        <SpendHeatmap log={costLog} />
+        <CostLog />
       </div>
     </div>
   );

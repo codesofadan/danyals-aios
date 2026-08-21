@@ -1,16 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { TeamRole, PermKey, TaskStatus } from "@/lib/data";
+import type { TaskStatus } from "@/lib/data";
 import {
-  useMembers, useTeamMembers, useTasks, useActivity, useRbac,
+  useMembers, useTeamMembers, useTasks, useActivity,
   useAddMember, useAssignTask, useAdvanceTask, useReviewTask,
 } from "@/lib/hooks/team";
 import { useClients } from "@/lib/hooks/clients";
 import TeamRoster, { type NewMember } from "./TeamRoster";
 import AssignTasks, { type NewTask } from "./AssignTasks";
 import ActivityLog from "./ActivityLog";
-import AccessControl from "./AccessControl";
 
 // Centred muted state for a tab panel (loading / error). Self-styled so it never
 // depends on a class that might not exist.
@@ -24,13 +23,12 @@ function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }
   return null;
 }
 
-type TabKey = "roster" | "assign" | "activity" | "access";
+type TabKey = "roster" | "assign" | "activity";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "roster", label: "Team Members", icon: "badge" },
   { key: "assign", label: "Assign Tasks", icon: "assignment_ind" },
   { key: "activity", label: "Activity Log", icon: "history" },
-  { key: "access", label: "Access Control", icon: "admin_panel_settings" },
 ];
 
 export default function TeamWorkspace() {
@@ -40,7 +38,6 @@ export default function TeamWorkspace() {
   const teamMembersQ = useTeamMembers();
   const tasksQ = useTasks();
   const activityQ = useActivity();
-  const rbacQ = useRbac();
   const clientsQ = useClients();
 
   const members = membersQ.data ?? [];
@@ -50,7 +47,6 @@ export default function TeamWorkspace() {
   const assignableMembers = teamMembersQ.data ?? members;
   const tasks = tasksQ.data ?? [];
   const activity = activityQ.data ?? [];
-  const rolePerms = rbacQ.data ?? ({} as Record<TeamRole, PermKey[]>);
   const clients = clientsQ.data ?? [];
 
   const addMember = useAddMember();
@@ -148,7 +144,6 @@ export default function TeamWorkspace() {
           </>
         ))}
         {tab === "activity" && (panelGuard(activityQ) ?? <ActivityLog log={activity} />)}
-        {tab === "access" && (panelGuard(rbacQ) ?? <AccessControl rolePerms={rolePerms} />)}
       </div>
     </section>
   );

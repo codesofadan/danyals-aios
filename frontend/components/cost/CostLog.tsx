@@ -6,6 +6,7 @@ import {
   type JobType,
 } from "@/lib/cost";
 import { useCostLogPage } from "@/lib/hooks/cost";
+import ReadMore from "@/components/ui/ReadMore";
 
 type Filter = "all" | JobType;
 
@@ -76,40 +77,47 @@ export default function CostLog() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
-              // Tolerant lookups: the backend logs free-form provider/type
-              // strings (audit_engine, serper, ...); never crash on one.
-              const jt = jobTypeMeta(r.type);
-              const pv = providerMeta(r.provider);
-              return (
-                <tr key={`${r.id}-${r.provider}-${i}`}>
-                  <td><span className="cst-job">{r.id}</span></td>
-                  <td className="cst-log-cli">{r.client}</td>
-                  <td>
-                    <span className={`cst-type ${jt.cls}`}>
-                      <span className="material-symbols-rounded">{jt.icon}</span>{jt.label}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="cst-prov">
-                      <span className="cst-prov-dot" style={{ background: pv.c }} />
-                      {providerLabel(r.provider)}
-                    </span>
-                  </td>
-                  <td>
-                    {r.cached ? (
-                      <span className="cst-cache yes"><span className="material-symbols-rounded">bolt</span>Cached</span>
-                    ) : !pv.paid ? (
-                      <span className="cst-cache free">Free</span>
-                    ) : (
-                      <span className="cst-cache no">Live</span>
-                    )}
-                  </td>
-                  <td className={`num cst-cost ${r.cost === 0 ? "zero" : ""}`}>{usd(r.cost, 2)}</td>
-                  <td className="num cst-time">{r.time}</td>
-                </tr>
-              );
-            })}
+            <ReadMore
+              items={rows}
+              initialCount={7}
+              tableColSpan={7}
+              getKey={(r, i) => `${r.id}-${r.provider}-${i}`}
+              moreLabel={(remaining) => `Show more (${remaining} more)`}
+              renderItem={(r) => {
+                // Tolerant lookups: the backend logs free-form provider/type
+                // strings (audit_engine, serper, ...); never crash on one.
+                const jt = jobTypeMeta(r.type);
+                const pv = providerMeta(r.provider);
+                return (
+                  <tr>
+                    <td><span className="cst-job">{r.id}</span></td>
+                    <td className="cst-log-cli">{r.client}</td>
+                    <td>
+                      <span className={`cst-type ${jt.cls}`}>
+                        <span className="material-symbols-rounded">{jt.icon}</span>{jt.label}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="cst-prov">
+                        <span className="cst-prov-dot" style={{ background: pv.c }} />
+                        {providerLabel(r.provider)}
+                      </span>
+                    </td>
+                    <td>
+                      {r.cached ? (
+                        <span className="cst-cache yes"><span className="material-symbols-rounded">bolt</span>Cached</span>
+                      ) : !pv.paid ? (
+                        <span className="cst-cache free">Free</span>
+                      ) : (
+                        <span className="cst-cache no">Live</span>
+                      )}
+                    </td>
+                    <td className={`num cst-cost ${r.cost === 0 ? "zero" : ""}`}>{usd(r.cost, 2)}</td>
+                    <td className="num cst-time">{r.time}</td>
+                  </tr>
+                );
+              }}
+            />
             {rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="cst-log-empty">
