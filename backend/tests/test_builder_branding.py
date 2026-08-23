@@ -1,6 +1,6 @@
 """P0-9 gate: the builder's name never appears in the shipped product.
 
-`context/PRODUCT-OVERHAUL-BACKLOG.md` states it as a hard rule, and the master
+`docs/architecture/PRODUCT-OVERHAUL-BACKLOG.md` states it as a hard rule, and the master
 plan's platform-wide Definition of Done repeats it: *the builder's name appears
 nowhere in the running software, its configuration, its tests, or its output.*
 
@@ -11,10 +11,11 @@ out; this does.
 
 **Scope, stated precisely.** This sweeps what SHIPS or RUNS: backend source and
 tests, the frontend bundle, the WordPress plugin, packaging metadata, infra
-config, and the operator scripts. It deliberately does NOT sweep `docs/` or
-`context/` — those are the project's own historical record (including the backlog
-entry that states this rule), and rewriting history to satisfy a lint is
-dishonest, not compliant.
+config, and the operator scripts. It deliberately does NOT sweep `docs/` — that is
+the project's own historical record (including the backlog entry that states this
+rule), and rewriting history to satisfy a lint is dishonest, not compliant.
+(`context/` was folded into `docs/architecture/` on 2026-08-23, so one exclusion
+now covers what used to need two.)
 """
 
 from __future__ import annotations

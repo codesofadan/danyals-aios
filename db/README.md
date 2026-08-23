@@ -54,7 +54,7 @@ not in tables — a single source of truth, mirrored from `frontend/lib/*.ts`.
 
 The module **operational** stores (content jobs, backlinks, …) and the
 client-facing records live in **Google Sheets** — see
-`../context/AIOS-Data-Flow-Structure.pdf`. Postgres still holds the durable
+`../docs/architecture/reference/AIOS-Data-Flow-Structure.pdf`. Postgres still holds the durable
 **job ledgers** for long-running work: `audits` (0008) tracks each audit run's
 status, the engine's run_uuid, artifact refs, score, cost and runtime so the API
 can report progress and serve results.

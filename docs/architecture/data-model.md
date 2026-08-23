@@ -2,7 +2,7 @@
 
 The source of truth is the ordered SQL in `db/migrations/` (`0000`–`0053`) with a snapshot
 at `db/schema.sql`. This page indexes the tables by domain with their migration number.
-Grounded in `backend/CLAUDE.md`, `context/ARCHITECTURE-AND-PLAN.md`, and the migration set.
+Grounded in `backend/CLAUDE.md`, `ARCHITECTURE-AND-PLAN.md`, and the migration set.
 
 ## The two hard rules (never move)
 

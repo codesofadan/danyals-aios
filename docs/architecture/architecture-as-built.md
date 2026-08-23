@@ -1,7 +1,7 @@
 # Architecture
 
 Source of truth: `backend/CLAUDE.md`, `backend/docs/ARCHITECTURE.md`,
-`context/ARCHITECTURE-AND-PLAN.md`.
+`ARCHITECTURE-AND-PLAN.md`.
 
 ## Shape
 
