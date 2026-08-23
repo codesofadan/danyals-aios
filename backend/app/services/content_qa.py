@@ -66,11 +66,17 @@ from app.services.content_research import ResearchBrief
 from app.services.content_schema import ValidationResult
 
 # --------------------------------------------------------------------------- #
-# QA gate. Canonical doctrine = the SEO-CONTENT-OS knowledge base
+# QA scorecard. Canonical doctrine = the SEO-CONTENT-OS knowledge base
 # (backend/seo-content-os/knowledge/quality-gates/ — the PLAN + G0-G13 fail-fast
-# gate stack). This 14-dimension scorecard is the code projection of those gates:
-# EVERY dimension below MIN_DIMENSION_SCORE blocks publish (fail-fast, like the gate
-# stack), and the five critical dims below carry the hard non-negotiables.
+# gate stack). This 14-dimension scorecard is the code projection of those gates.
+#
+# `passed` IS A VERDICT, NOT AN ENFORCEMENT. Nothing in the platform refuses to
+# publish on it: `publish_content_job` reads the stored score, logs it
+# (`content_publish_qa_advisory`) and publishes regardless, and `PublishBlocked` is
+# raised nowhere. The only enforced boundary is the HUMAN review gate. Making this a
+# real gate is P0-4 / D-4 — see `docs/CONTENT-MODULE.md`. Said plainly here because a
+# comment claiming a dimension "blocks publish" is exactly the kind of thing an
+# engineer trusts without checking.
 # --------------------------------------------------------------------------- #
 # Each dimension maps to a SEO-CONTENT-OS gate (noted inline).
 QA_DIMENSIONS: tuple[str, ...] = (
@@ -720,10 +726,13 @@ def score(
     CTA/UX, and originality, degrading to conservative proxies when absent. Doctrine
     floors are applied last, so no judge can override a hard rule.
 
-    Publish (``passed``) iff no dimension < :data:`MIN_DIMENSION_SCORE`, the
-    weighted total >= :data:`WEIGHTED_TOTAL_THRESHOLD`, and no
-    :data:`HARD_GATE_DIMENSIONS` dim fell below :data:`HARD_GATE_FLOOR`. Both
-    thresholds + the weights are PROVISIONAL (R4), calibrated by the golden-set.
+    ``passed`` is True iff no dimension < :data:`MIN_DIMENSION_SCORE`, the weighted
+    total >= :data:`WEIGHTED_TOTAL_THRESHOLD`, and no :data:`HARD_GATE_DIMENSIONS`
+    dim fell below :data:`HARD_GATE_FLOOR`. Both thresholds + the weights are
+    PROVISIONAL, calibrated by the golden-set at P7A-11.
+
+    ``passed=False`` does NOT prevent publication — it is advisory (P0-4 / D-4).
+    Callers must not read this as a gate.
     """
     notes: list[str] = []
     dimensions: dict[str, int] = {}

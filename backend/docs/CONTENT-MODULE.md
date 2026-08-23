@@ -73,19 +73,40 @@ a non-lead's `needs_review→publishing`/`→done`/column-edit is REJECTED, a le
 CAN approve/reject/edit, the worker CAN do the system transitions (and an illegal
 system jump is rejected), and a portal client is fully excluded.
 
-## The QA gate (a hard publish gate)
+## The QA score (ADVISORY — there is no automated publish gate)
+
+> **Corrected 2026-08-23.** This section previously described a hard publish gate.
+> It does not exist and did not exist at the audited commit. `PublishBlocked` is
+> defined (`workers/tasks/content.py:382`) and caught twice (`:2129`, `:2371`) but
+> **raised nowhere** — `grep -rn "raise PublishBlocked" app workers integrations`
+> returns nothing, and the code says so at `:47`, `:2102` and `:2358`. WU-6 corrected
+> three docstrings and missed this file and `CLAUDE.md`. Anyone reading the old text
+> would reasonably believe an automated quality gate stood between a bad draft and a
+> client's live site. **Nothing does.** Making one real is P0-4 / D-4.
 
 The merged `content_qa` §11 scorecard scores 14 dimensions (0–100) and rolls them
-up with a weight vector into a weighted total. The publish decision is:
+up with a weight vector into a weighted total. The score's VERDICT is:
 
 > **no single dimension < `MIN_DIMENSION_SCORE` (70) AND weighted total ≥
 > `WEIGHTED_TOTAL_THRESHOLD` (85) AND no hard-gate dimension tripped.**
 
-The QA score is ATTACHED at `needs_review` so the reviewer sees it. At publish
-time `publish_content_job` **re-checks `qa_score.passed`** and NEVER publishes a
-sub-threshold draft — it raises the typed `PublishBlocked` carrying the critical
-`blocked_by` dimensions, and the draft stays unpublished. So a lead can approve,
-but the gate still refuses a draft that does not actually clear the bar.
+What actually happens today:
+
+* The score IS computed and STORED on the `qa_score` column at `needs_review`
+  (`workers/tasks/content.py:1052`), and is fetchable at `GET /content/jobs/{code}/qa`.
+* At publish time `publish_content_job` reads it and **only logs it**
+  (`content_publish_qa_advisory`, `:2110`), then publishes regardless. **A
+  sub-threshold draft is published.**
+* `qa_score` is NOT part of the 15-key `ContentJobResponse` the review endpoint
+  returns, so **the approving lead is not shown the verdict and is never required to
+  acknowledge it.** D-4 asks for "advisory **+ mandatory acknowledgement**"; only the
+  advisory half exists.
+
+**The only enforced quality boundary is the human review gate** — a lead must move
+`needs_review → publishing`, and the DB trigger enforces that. `PublishBlocked` and
+its two catch sites are deliberately KEPT as the seam a calibrated gate re-enables
+through; the `acks_late` reasoning for catching rather than re-raising is still
+correct and worth not re-deriving.
 
 ### Golden-set & calibration honesty (R4 → P7A-11)
 
