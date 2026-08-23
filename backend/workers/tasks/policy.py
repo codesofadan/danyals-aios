@@ -37,6 +37,7 @@ cores, per the worker template.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from app.config import Settings, get_settings
@@ -381,7 +382,34 @@ def watch_sources(
 # --------------------------------------------------------------------------- #
 # Celery entry point (thin; import the app AFTER the pure cores, per the template)
 # --------------------------------------------------------------------------- #
+from app.jobs import JobContext, JobOutcome, JobTarget  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402
+from app.jobs.status import JobQueue  # noqa: E402
 from workers.celery_app import celery_app  # noqa: E402 - after the pure cores, per the worker template
+
+
+def _policy_daily_target(force: bool = False) -> JobTarget:
+    """One brief per UTC day - unless an operator explicitly asked for another.
+
+    Including the date is what makes a recurring job safe to re-fire: the same day's
+    work is the same unit of work, and a second attempt at it must do nothing. `force`
+    drops the key because a manual refresh is a DIFFERENT unit of work by definition.
+    """
+    if force:
+        return JobTarget()
+    return JobTarget(idempotency_key=f"policy.daily:{datetime.now(UTC).date().isoformat()}")
+
+
+def _policy_reason_code(reason: str) -> str:
+    """A stable identifier for why no brief was generated.
+
+    `run_policy_generation` already returns machine-ish reasons; this only normalises
+    them to the contract's format so an operator can count them.
+    """
+    code = (reason or "").strip().lower().replace(" ", "_").replace("-", "_")
+    code = "".join(ch for ch in code if ch.isalnum() or ch == "_").strip("_")
+    return code if len(code) >= 3 else "generation_unavailable"
+
 
 
 @celery_app.task(name="watch_policy_sources")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
@@ -407,36 +435,53 @@ def watch_policy_sources() -> dict[str, Any]:
         return {"claimed": 0, "state": "failed"}
 
 
-@celery_app.task(name="generate_policy_daily")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def generate_policy_daily(force: bool = False) -> dict[str, Any]:
-    """BEAT entry point (+ manual trigger): generate the day's policy brief via Anthropic.
+@aios_job(
+    name="generate_policy_daily",
+    job_name="policy.daily_brief",
+    queue=JobQueue.LONG,
+    max_attempts=2,
+    retry_backoff=300.0,
+    scope_type="workspace",
+    target=_policy_daily_target,
+)
+def generate_policy_daily(ctx: JobContext, force: bool = False) -> JobOutcome:
+    """BEAT job (+ manual trigger): generate the day's policy brief via Anthropic.
 
-    Wires the (key-gated) pure-generation summarizer, the cost gate, and the privileged
-    store, then runs the pure core (``run_policy_generation``) and persists its items
-    (``store_generated_items``). ONCE PER DAY: unless ``force`` is set (the manual
-    ``POST /policy/generate`` refresh), a run is SKIPPED when generator items already exist
-    for the current UTC day (``count_generated_today``), so a re-delivered beat tick never
-    double-spends. Total degradation: a keyless deploy, a dial/budget block, or a research
-    failure simply writes NOTHING (state='degraded'); the task NEVER re-raises (acks_late
-    would otherwise redeliver + re-spend)."""
-    try:
-        settings = get_settings()
-        store = service_policy_watch_repo()
-        if not force and store.count_generated_today() > 0:
-            return {"state": "skipped", "reason": "already_generated_today", "written": 0}
-        result = run_policy_generation(
-            summarizer=build_ask_summarizer(settings),
-            gate=_gate(),
-            settings=settings,
+    THE TEXTBOOK IDEMPOTENCY CASE, and now it is enforced in two places rather than
+    one. The key is `policy.daily:<UTC date>`, so a redelivered beat tick, a double
+    click, or two workers racing the same morning produce ONE run - the contract
+    refuses the second before any Anthropic call is made. `force=True` (the manual
+    `POST /policy/generate` refresh) deliberately carries NO key, because an operator
+    asking for a refresh means it.
+
+    The module's own `count_generated_today()` check is kept as defence in depth: it is
+    DB-backed truth about what was actually written, where the key is a statement about
+    what was attempted. Belt and braces on the one task here that spends per run.
+    """
+    settings = get_settings()
+    store = service_policy_watch_repo()
+    if not force and store.count_generated_today() > 0:
+        return JobOutcome.completed(
+            "a brief already exists for today", result={"written": 0, "reason": "already_today"}
         )
-        if result.status != "ok":
-            return {"state": result.status, "reason": result.reason, "written": 0}
-        written = store_generated_items(store, result.items)
-        logger.info("generate_policy_daily_done", written=written, forced=force)
-        return {"state": "ok", "written": written}
-    except Exception:  # never re-raise: acks_late would redeliver the beat task
-        logger.exception("generate_policy_daily_task_failed")
-        return {"state": "failed", "written": 0}
+
+    result = run_policy_generation(
+        summarizer=build_ask_summarizer(settings), gate=_gate(), settings=settings
+    )
+    if result.status != "ok":
+        # A keyless deploy, a dial or budget block, or a research failure. Nothing was
+        # written and nothing was charged - a refusal, not a success with zero items.
+        return JobOutcome.blocked(
+            _policy_reason_code(result.reason),
+            f"no brief generated: {result.reason or result.status}",
+            result={"written": 0, "state": result.status, "reason": result.reason},
+        )
+
+    written = store_generated_items(store, result.items)
+    logger.info("generate_policy_daily_done", written=written, forced=force)
+    return JobOutcome.completed(
+        f"wrote {written} policy item(s)", result={"written": written}
+    )
 
 
 @celery_app.task(name="reset_policy_feed")  # type: ignore[untyped-decorator]  # celery's decorator is untyped

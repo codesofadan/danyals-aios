@@ -267,6 +267,9 @@ def execute_gbp_sync(
 # --------------------------------------------------------------------------- #
 # Celery entry points (thin; import the app lazily-free at module load).
 # --------------------------------------------------------------------------- #
+from app.jobs import JobBlocked, JobContext, JobOutcome, RetryableJobError  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402
+from app.jobs.status import JobQueue  # noqa: E402
 from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
 
 
@@ -292,49 +295,77 @@ def _try_beat_lock() -> Any | None:
     return None
 
 
-@celery_app.task(name="refresh_local_ranks")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def refresh_local_ranks() -> dict[str, Any]:
-    """BEAT task: refresh the due map-pack rankings under the R6 overlap lock.
+@aios_job(
+    name="refresh_local_ranks",
+    job_name="local_seo.rank_refresh",
+    queue=JobQueue.LONG,
+    max_attempts=2,
+    retry_backoff=300.0,
+    scope_type="workspace",
+)
+def refresh_local_ranks(ctx: JobContext) -> JobOutcome:
+    """BEAT job: refresh the due map-pack rankings under the R6 overlap lock.
 
-    Wraps the pure core in a guard so the task NEVER re-raises (a redelivery would
-    re-run PAID checks); a failure comes back as a result dict.
+    TWO REFUSALS, both now loud instead of a result dict nobody read.
+
+    NO LIVE PROVIDER is the more important one. Without a vendor key the provider
+    factory returns `FakeLocalPackProvider`, whose positions are SYNTHETIC - and once
+    written to `local_rankings` they are indistinguishable from measured history and
+    would be charted to a client as real map-pack movement. Refusing to run is the
+    correct behaviour and `blocked` is the honest word for it.
+
+    BEAT OVERLAP means a previous tick is still draining. Skipping is right - the rows
+    are still due and the next tick takes them - but it is still work this run did not
+    do, so it is `blocked` rather than a success. If overlaps become frequent that is a
+    real signal (the sweep cannot keep up) and it should be visible, not smoothed away.
+
+    `max_attempts=2` and no client: the sweep is platform-wide, and each PAID check
+    inside it is individually cost-gated, so a retry re-claims only what is still due.
     """
     settings = get_settings()
     try:
         if not local_pack_provider_is_live(settings):
-            # Refuse rather than persist. Without a vendor key the provider factory
-            # returns FakeLocalPackProvider, whose positions are synthetic - and once
-            # written to local_rankings they are indistinguishable from measured history
-            # and would be charted to the client as real map-pack movement.
-            logger.info("local_rank_refresh_degraded", reason="no_live_map_pack_provider")
-            return {
-                "state": "degraded",
-                "reason": "no live map-pack provider configured (set SERPER_API_KEY)",
-                "claimed": 0,
-            }
-    except Exception:
-        logger.exception("local_rank_refresh_liveness_check_failed")
-        return {"state": "error", "reason": "task failed", "claimed": 0}
+            raise JobBlocked(
+                "no_live_map_pack_provider",
+                "no live map-pack provider is configured (set SERPER_API_KEY); refusing "
+                "to write synthetic positions that would chart to a client as real "
+                "map-pack movement",
+            )
+    except JobBlocked:
+        raise
+    except Exception as exc:
+        raise RetryableJobError(f"the provider liveness check failed: {type(exc).__name__}") from exc
+
     lock = _try_beat_lock()
     if lock is None:
-        # A previous tick is still draining. Skipping is the correct behaviour: the
-        # rows are still due and the next tick will take them.
-        logger.info("local_rank_refresh_skipped", reason="beat_overlap")
-        return {"state": "skipped", "reason": "beat_overlap", "claimed": 0}
+        raise JobBlocked(
+            "beat_overlap",
+            "a previous refresh tick is still draining; the due rows remain due and the "
+            "next tick will take them",
+        )
     try:
-        return execute_refresh(
+        result = execute_refresh(
             service_local_store(),
             local_pack_provider_from_settings(settings),
             _gate(),
             settings,
             batch=settings.local_rank_refresh_batch,
         )
-    except Exception:
-        logger.exception("refresh_local_ranks_task_failed")
-        return {"state": "error", "reason": "task failed", "claimed": 0}
     finally:
-        lock.__exit__(None, None, None)  # releases the advisory lock with the session
+        lock.__exit__(None, None, None)
 
+    claimed = int(result.get("claimed", 0) or 0)
+    state = str(result.get("state", "ok"))
+    if state not in {"ok", "done"}:
+        return JobOutcome.degraded(
+            "partial_refresh",
+            f"refresh finished as '{state}': {result.get('reason', 'no reason given')}",
+            result=result,
+        )
+    return JobOutcome.completed(
+        f"refreshed {claimed} due ranking(s)" if claimed else "no rankings were due",
+        result=result,
+    )
 
 @celery_app.task(name="sync_gbp_profile")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
 def sync_gbp_profile(profile_id: str) -> dict[str, Any]:

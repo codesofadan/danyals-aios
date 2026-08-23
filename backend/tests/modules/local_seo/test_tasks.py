@@ -66,9 +66,12 @@ def test_the_beat_refuses_rather_than_persisting_synthetic_map_pack_positions(
     took_lock: list[str] = []
     monkeypatch.setattr(wk, "_try_beat_lock", lambda: took_lock.append("lock"))
 
-    result = refresh_local_ranks()
+    disposition = refresh_local_ranks.run()
 
-    assert result["state"] == "degraded"
+    assert disposition["status"] == "blocked", (
+        "refusing to write synthetic positions is a REFUSAL, not a degraded success - "
+        "nothing was spent and nothing was written"
+    )
     assert took_lock == [], "the beat took the lock despite there being no live vendor"
 
 _CLIENT = "cl-1"
@@ -541,8 +544,12 @@ def test_the_beat_returns_immediately_when_a_previous_tick_holds_the_lock(
     second batch of PAID checks on top - it returns and lets the next tick take them.
     """
     monkeypatch.setattr(wk, "_try_beat_lock", lambda: None)  # someone else holds it
-    result = refresh_local_ranks()
-    assert result == {"state": "skipped", "reason": "beat_overlap", "claimed": 0}
+    disposition = refresh_local_ranks.run()
+    assert disposition["status"] == "blocked", (
+        "an overlapped tick did NOT do its work; recording that as success is how a "
+        "sweep that can never keep up stays invisible"
+    )
+    assert "still draining" in disposition["detail"]
 
 
 def test_the_beat_runs_and_releases_the_lock_when_it_is_free(
@@ -560,7 +567,7 @@ def test_the_beat_runs_and_releases_the_lock_when_it_is_free(
     monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
     monkeypatch.setattr(wk, "local_pack_provider_from_settings", lambda _s: FakeLocalPackProvider())
 
-    assert refresh_local_ranks()["state"] == "ok"
+    assert refresh_local_ranks.run()["status"] == "completed"
     assert released == [True], "the advisory lock must be released after the sweep"
 
 
@@ -583,17 +590,32 @@ def test_the_lock_is_released_even_when_the_sweep_blows_up(
     monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
     monkeypatch.setattr(wk, "local_pack_provider_from_settings", _boom)
 
-    assert refresh_local_ranks()["state"] == "error"  # not a raise
-    assert released == [True]
+    disposition = refresh_local_ranks.run()
+    assert disposition["status"] == "failed"  # recorded, not raised out of the task
+    assert released == [True], (
+        "a lock leaked on the error path wedges the beat FOREVER - every later tick "
+        "sees it held and skips"
+    )
 
 
 # --------------------------------------------------------------------------- #
 # 6. The Celery entry points - the never-re-raise guarantee.
 # --------------------------------------------------------------------------- #
-def test_the_refresh_task_returns_a_result_dict_instead_of_raising(
+def test_a_failure_is_recorded_and_dead_lettered_rather_than_redelivered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With ``task_acks_late``, a raise redelivers the job -> a second PAID sweep."""
+    """The acks_late guarantee, now stronger than the version it replaces.
+
+    The old contract was "never raise, return an error dict" - safe, but the dict went
+    to a result backend that expires in an hour and nobody read it. Under the job
+    contract an UNCLASSIFIED exception is permanent: the run is recorded `failed` and
+    dead-lettered for replay, and still nothing propagates out of the task, so there is
+    no redelivery and no second PAID sweep.
+    """
+    from tests.test_job_contract import FakeStore
+
+    job_store = FakeStore()
+    monkeypatch.setattr("app.jobs.celery_task.job_runs_store", lambda: job_store)
 
     class _Lock:
         def __exit__(self, *a: Any) -> None:
@@ -604,8 +626,11 @@ def test_the_refresh_task_returns_a_result_dict_instead_of_raising(
 
     monkeypatch.setattr(wk, "_try_beat_lock", lambda: _Lock())
     monkeypatch.setattr(wk, "service_local_store", _boom)
-    result = refresh_local_ranks()
-    assert result == {"state": "error", "reason": "task failed", "claimed": 0}
+
+    disposition = refresh_local_ranks.run()
+    assert disposition["status"] == "failed"
+    assert job_store.dead_letters, "lost work must be replayable"
+    assert not job_store.defers, "an unclassified error must not burn the retry budget"
 
 
 def test_the_tasks_are_registered_under_their_stable_names() -> None:
