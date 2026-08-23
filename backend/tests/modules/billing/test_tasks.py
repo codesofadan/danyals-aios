@@ -154,22 +154,86 @@ def test_the_pure_core_never_re_raises(boom: BaseException) -> None:
     assert execute_mark_past_due(store, _settings()) == {"state": "error", "flipped": 0}
 
 
-def test_the_celery_entry_point_never_re_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The outer guard catches anything the core's own try/except could not - e.g. the
-    # store factory or get_settings() itself failing.
-    def _explode() -> Any:
-        raise RuntimeError("no pool")
+# The entry point now runs under the JOB CONTRACT (@aios_job), which replaces the old
+# "never re-raise, return an error dict" template. The guarantee is strictly stronger:
+# a transient failure is RETRIED with backoff and then DEAD-LETTERED, instead of being
+# returned to a result backend that expires in an hour and telling nobody.
+@pytest.fixture
+def job_store(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from tests.test_job_contract import FakeStore
 
-    monkeypatch.setattr("app.modules.billing.tasks.service_billing_store", _explode)
-    assert mark_past_due() == {"state": "error", "flipped": 0}
+    fake = FakeStore()
+    monkeypatch.setattr("app.jobs.celery_task.job_runs_store", lambda: fake)
+    return fake
 
 
-def test_the_celery_entry_point_returns_the_core_result(
-    monkeypatch: pytest.MonkeyPatch
+def test_a_successful_sweep_records_a_completed_run(
+    monkeypatch: pytest.MonkeyPatch, job_store: Any
 ) -> None:
     store = FakeBillingStore([{"id": "a", "status": "open", "days_overdue": 3}])
     monkeypatch.setattr("app.modules.billing.tasks.service_billing_store", lambda: store)
-    assert mark_past_due() == {"state": "ok", "flipped": 1}
+
+    disposition = mark_past_due.run()
+    assert disposition["status"] == "completed"
+    assert disposition["result"] == {"flipped": 1}
+
+    row = job_store.rows[disposition["run_id"]]
+    assert row["job_name"] == "billing.past_due_sweep"
+    assert row["client_id"] is None, "a platform-wide sweep must not consume a tenant's slots"
+
+
+def test_a_clean_sweep_still_records_a_run(
+    monkeypatch: pytest.MonkeyPatch, job_store: Any
+) -> None:
+    """Finding nothing to do is a successful outcome, not a silent no-op. Before the
+    contract, a quiet night and a broken worker were indistinguishable."""
+    monkeypatch.setattr(
+        "app.modules.billing.tasks.service_billing_store", lambda: FakeBillingStore([])
+    )
+    disposition = mark_past_due.run()
+    assert disposition["status"] == "completed"
+    assert disposition["result"] == {"flipped": 0}
+    assert "no overdue invoices" in disposition["detail"]
+
+
+def test_an_unreachable_store_is_retried_rather_than_swallowed(
+    monkeypatch: pytest.MonkeyPatch, job_store: Any
+) -> None:
+    """The behaviour change worth having.
+
+    This used to return ``{"state": "error", "flipped": 0}`` - a value nothing acted
+    on. Now it is a bounded retry, and after the budget a dead letter an operator can
+    see and replay.
+    """
+    from celery.exceptions import Retry
+
+    store = FakeBillingStore()
+    store.explode = RuntimeError("db is down")
+    monkeypatch.setattr("app.modules.billing.tasks.service_billing_store", lambda: store)
+
+    with pytest.raises(Retry):
+        mark_past_due.run()
+    assert job_store.defers, "the run should have been deferred for a retry"
+    assert not job_store.dead_letters, "not dead-lettered while the attempt budget remains"
+
+
+def test_the_sweep_is_deliberately_not_keyed(
+    monkeypatch: pytest.MonkeyPatch, job_store: Any
+) -> None:
+    """A per-day idempotency key would suppress a legitimate re-run.
+
+    An invoice can fall due at 14:00; the 02:00 sweep is not the same unit of work as
+    a 14:00 one. The task is internally idempotent and spends nothing, which is the
+    case the contract documents as safe to leave un-keyed.
+    """
+    monkeypatch.setattr(
+        "app.modules.billing.tasks.service_billing_store",
+        lambda: FakeBillingStore([{"id": "a", "status": "open", "days_overdue": 3}]),
+    )
+    first = mark_past_due.run()
+    second = mark_past_due.run()
+    assert first["run_id"] != second["run_id"], "a second sweep must actually run"
+    assert job_store.rows[first["run_id"]]["idempotency_key"] is None
 
 
 # --------------------------------------------------------------------------- #

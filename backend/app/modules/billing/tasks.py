@@ -33,6 +33,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import Settings, get_settings
+from app.jobs.status import JobQueue
 from app.logging_setup import get_logger
 from app.modules.billing.repo import ServiceBillingStore, service_billing_store
 
@@ -63,17 +64,42 @@ def execute_mark_past_due(store: ServiceBillingStore, settings: Settings) -> dic
 # --------------------------------------------------------------------------- #
 # Celery entry point (thin; import the app after the pure core).
 # --------------------------------------------------------------------------- #
-from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
+from app.jobs import JobContext, JobOutcome, RetryableJobError  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402 - after the pure core, per the worker template
 
 
-@celery_app.task(name="mark_past_due")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def mark_past_due() -> dict[str, Any]:
-    """BEAT task: flip every overdue ``open`` invoice to ``past_due``.
+@aios_job(
+    name="mark_past_due",
+    job_name="billing.past_due_sweep",
+    queue=JobQueue.STANDARD,
+    # A DB blip is transient and this sweep is internally idempotent, so retrying is
+    # free. Three attempts, then a dead letter an operator can see and replay - rather
+    # than the previous behaviour, which returned {"state": "error"} to a result backend
+    # that expires in an hour and told nobody.
+    max_attempts=3,
+    retry_backoff=60.0,
+    scope_type="workspace",
+)
+def mark_past_due(ctx: JobContext) -> JobOutcome:
+    """BEAT job: flip every overdue ``open`` invoice to ``past_due``.
 
-    Wraps the pure core in a guard so the task NEVER re-raises (acks_late-safe); a
-    failure is returned as an ``error`` result dict."""
-    try:
-        return execute_mark_past_due(service_billing_store(), get_settings())
-    except Exception:
-        logger.exception("mark_past_due_task_failed")
-        return {"state": "error", "flipped": 0}
+    NO IDEMPOTENCY KEY, deliberately. A per-day key would suppress a legitimate
+    re-run: an invoice can fall due at 14:00 and the 02:00 sweep is not the same unit
+    of work as a 14:00 one. The task is internally idempotent (``where status='open'``)
+    and spends nothing, which is exactly the case the contract documents as safe to
+    leave un-keyed. A money-SPENDING sweep would need a key.
+
+    Platform-wide, so no client and no concurrency cap - a sweep that belongs to no
+    tenant must not consume a tenant's slots.
+    """
+    result = execute_mark_past_due(service_billing_store(), get_settings())
+    if result["state"] == "error":
+        # The core logs the exception itself (`logger.exception`) and returns rather
+        # than raising, so the traceback is in the log; this re-raises inside the
+        # contract so the run is retried and then dead-lettered instead of vanishing.
+        raise RetryableJobError("the billing store was unreachable")
+    flipped = int(result["flipped"])
+    return JobOutcome.completed(
+        f"flipped {flipped} overdue invoice(s) to past_due" if flipped else "no overdue invoices",
+        result={"flipped": flipped},
+    )
