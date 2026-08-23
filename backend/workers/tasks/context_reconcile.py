@@ -196,22 +196,45 @@ def _context_resolver(repo: ReconcileRepo) -> ContextResolver:
 # --------------------------------------------------------------------------- #
 # Celery entry point (thin; import the app after the pure core, per the template)
 # --------------------------------------------------------------------------- #
+import psycopg  # noqa: E402
+
 from app.db.context_repo import service_context_repo  # noqa: E402 - after the pure core
-from workers.celery_app import celery_app  # noqa: E402 - after the pure core
+from app.jobs import JobBlocked, JobContext, JobOutcome  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402 - after the pure core
+from app.jobs.status import JobQueue  # noqa: E402
 
 
-@celery_app.task(name="reconcile_context_vectors")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def reconcile_context_vectors() -> dict[str, Any]:
-    """BEAT task: reconcile the whole vector ledger against the store.
+@aios_job(
+    name="reconcile_context_vectors",
+    job_name="context.reconcile",
+    queue=JobQueue.LONG,
+    max_attempts=2,
+    retry_backoff=300.0,
+    retry_on=(psycopg.OperationalError,),
+    scope_type="workspace",
+)
+def reconcile_context_vectors(ctx: JobContext) -> JobOutcome:
+    """BEAT job: reconcile the whole vector ledger against the store.
 
-    Wires the service_role repo + the REAL vector store (from the key-gated bundle);
-    SKIPS when providers are unconfigured (a degraded deploy has no store to
-    reconcile). Repair is gated on ``context_reconcile_repair``. Never re-raises."""
+    THE SKIP IS NOW A LOUD REFUSAL. This used to return ``{"skipped":
+    "providers_unconfigured"}`` and log at INFO - so on a deploy with no Pinecone or
+    Voyage key, a sweep that reconciled nothing looked exactly like a sweep that found
+    nothing to reconcile. It is a genuine, substantiated `blocked`: the job deliberately
+    did not do its expensive work, and it can say precisely why.
+
+    LONG, because it walks EVERY entity with vectors - a safety net rather than a hot
+    path, and deliberately rare. Two attempts only: it is a drift detector, so a missed
+    sweep is caught by the next one and there is no value in a long retry ladder.
+    """
     settings = get_settings()
     bundle = context_providers_from_settings(settings)
     if bundle is None:
-        logger.info("context_reconcile_skipped", reason="providers_unconfigured")
-        return {"skipped": "providers_unconfigured"}
+        raise JobBlocked(
+            "providers_unconfigured",
+            "no vector store is configured, so there is nothing to reconcile against "
+            "(set PINECONE_API_KEY + PINECONE_INDEX and EMBEDDINGS_API_KEY)",
+        )
+
     repo = service_context_repo()
     repair = settings.context_reconcile_repair
     report = run_reconcile_sweep(
@@ -222,4 +245,17 @@ def reconcile_context_vectors() -> dict[str, Any]:
         context_for=_context_resolver(repo) if repair else None,
         model=bundle.model_summary,
     )
-    return report.as_dict()
+    result = report.as_dict()
+    drift = int(result.get("drifted", 0) or 0)
+    if drift and not repair:
+        # Detected and deliberately not repaired: the sweep did its job, but the ledger
+        # is still wrong and somebody has to know. Reporting this as a clean success is
+        # how drift becomes permanent.
+        return JobOutcome.degraded(
+            "drift_detected_repair_disabled",
+            f"{drift} vector(s) drifted and CONTEXT_RECONCILE_REPAIR is off, so nothing "
+            "was corrected",
+            result=result,
+        )
+    detail = f"repaired {drift} drifted vector(s)" if drift else "no drift"
+    return JobOutcome.completed(detail, result=result)

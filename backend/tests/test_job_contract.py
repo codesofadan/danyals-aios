@@ -883,3 +883,37 @@ def test_the_python_validator_matches_the_database_constraint() -> None:
         "the DB check constraint's pattern must match app.jobs.contract._REASON_CODE_RE"
     )
     assert "job_runs_reason_code_required_ck" in sql
+
+
+@pytest.mark.unit
+def test_a_returned_failure_is_dead_lettered_like_a_raised_one() -> None:
+    """Failing politely must not make a job LESS visible than failing loudly.
+
+    A job can fail by raising, or by returning `JobOutcome.failed(...)` because it knows
+    exactly what went wrong. Both are the same thing to an operator - work the platform
+    accepted and did not deliver - so both belong in the dead-letter queue. Found while
+    migrating `compact_context`, whose core never raises and reports its own errors.
+    """
+    store = FakeStore()
+
+    def polite(ctx: JobContext) -> JobOutcome:
+        return JobOutcome.failed("CompactionError", "the fold could not be applied")
+
+    disp = run_job(polite, spec=_spec(), store=store, target=_TARGET, deps=_deps())
+    assert disp.status == JobStatus.FAILED.value
+    assert store.dead_letters, "a returned failure must be replayable, exactly like a raised one"
+    assert store.dead_letters[0]["error_type"] == "CompactionError"
+
+
+@pytest.mark.unit
+def test_a_degraded_outcome_is_not_dead_lettered() -> None:
+    """The boundary of the rule above. A degraded run DID deliver something and is not
+    lost work - dead-lettering it would invite a replay that redoes what already
+    succeeded."""
+    store = FakeStore()
+
+    def partial(ctx: JobContext) -> JobOutcome:
+        return JobOutcome.degraded("wp_rest_rejected", "published 2 of 10 pages")
+
+    run_job(partial, spec=_spec(), store=store, target=_TARGET, deps=_deps())
+    assert not store.dead_letters

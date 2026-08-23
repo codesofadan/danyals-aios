@@ -369,7 +369,27 @@ def run_job(
         )
 
     # --- 4 · FINISH --------------------------------------------------------
-    return _finish(store, log, run_id=run_id, correlation=correlation, outcome=outcome)
+    disposition = _finish(store, log, run_id=run_id, correlation=correlation, outcome=outcome)
+
+    # A job may fail by RAISING or by RETURNING JobOutcome.failed(...). Both are the
+    # same thing to an operator - work the platform accepted and did not deliver - so
+    # both must reach the dead-letter queue. Without this, a job that knows exactly why
+    # it failed and says so politely is LESS visible than one that throws, which is
+    # precisely backwards.
+    if outcome.status is JobStatus.FAILED:
+        _write_dead_letter(
+            store,
+            log,
+            run_id=run_id,
+            args=args,
+            kwargs=kwargs,
+            reason_code=outcome.reason_code or "returned_failure",
+            error_type=outcome.error_type,
+            error_message=outcome.error_message,
+            traceback_text="",
+            attempt=attempt,
+        )
+    return disposition
 
 
 def _finish(
@@ -484,16 +504,45 @@ def _handle_failure(
         correlation=correlation,
         outcome=JobOutcome.failed(error_type, error_message, detail=detail),
     )
+    _write_dead_letter(
+        store,
+        log,
+        run_id=run_id,
+        args=args,
+        kwargs=kwargs,
+        # An exhausted-retry failure and a permanent one are different problems with
+        # different fixes, so the DLQ can be grouped by which it was.
+        reason_code="retries_exhausted" if transient else "permanent_error",
+        error_type=error_type,
+        error_message=error_message,
+        traceback_text=_sanitize("".join(traceback.format_exception(exc))[-8000:]),
+        attempt=attempt,
+    )
+    return disposition
+
+
+def _write_dead_letter(
+    store: JobRunStore,
+    log: Any,
+    *,
+    run_id: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    reason_code: str,
+    error_type: str,
+    error_message: str,
+    traceback_text: str,
+    attempt: int,
+) -> None:
+    """Record lost work, and never let failing to record it mask the failure itself."""
     try:
         dead_letter_id = store.dead_letter(
             run_id,
             payload={"args": _jsonable(args), "kwargs": _jsonable(kwargs)},
-            # An exhausted-retry failure and a permanent one are different problems
-            # with different fixes, so the DLQ can be grouped by which it was.
-            reason_code="retries_exhausted" if transient else "permanent_error",
+            reason_code=reason_code,
             error_type=error_type,
             error_message=error_message,
-            traceback=_sanitize("".join(traceback.format_exception(exc))[-8000:]),
+            traceback=traceback_text,
         )
     except Exception as write_exc:
         log.error("job.dead_letter_write_failed", error=type(write_exc).__name__)
@@ -504,7 +553,6 @@ def _handle_failure(
             error_type=error_type,
             dead_letter_id=dead_letter_id,
         )
-    return disposition
 
 
 # --------------------------------------------------------------------------- #

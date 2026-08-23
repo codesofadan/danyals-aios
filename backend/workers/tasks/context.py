@@ -465,30 +465,115 @@ def gated_providers_for(
 # --------------------------------------------------------------------------- #
 # Celery entry points (thin; import the app lazily-free at module load)
 # --------------------------------------------------------------------------- #
-from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
+import psycopg  # noqa: E402
+
+from app.jobs import JobContext, JobOutcome, JobTarget  # noqa: E402
+from app.jobs.celery_task import aios_job, enqueue_child  # noqa: E402
+from app.jobs.status import JobQueue  # noqa: E402
 
 
-@celery_app.task(name="compact_context")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def compact_context(entity_type: str, entity_id: str) -> dict[str, Any]:
-    """Compact ONE entity. Wires the concrete store + gated providers and runs the
-    pure core, which never raises - so this task never re-raises (acks_late-safe)."""
+def _reason_code(reason: str) -> str:
+    """Normalise a compaction reason into a stable snake_case identifier.
+
+    The module already emits machine-ish reasons - ``providers_unconfigured``,
+    ``spend_blocked:blocked_cap`` - which is most of the work. Only the qualified form
+    needs splitting: the code is the class of refusal (``spend_blocked``) and the full
+    string stays in the human-readable `reason`, so an operator can both GROUP by cause
+    and read the specific one.
+    """
+    head = reason.split(":", 1)[0].strip().lower() or "unspecified"
+    return head if len(head) >= 3 else "unspecified"
+
+
+def _compact_target(entity_type: str, entity_id: str) -> JobTarget:
+    """A client's compactions are capped against that client; other entities are not.
+
+    Un-keyed on purpose: re-compacting after new events is legitimate work, and the
+    dispatcher already prevents double-dispatch at the database with FOR UPDATE SKIP
+    LOCKED - which is the right place for that guarantee, not an idempotency key.
+    """
+    return JobTarget(
+        client_id=entity_id if entity_type == "client" else None,
+        scope_id=entity_id,
+    )
+
+
+@aios_job(
+    name="compact_context",
+    job_name="context.compact",
+    queue=JobQueue.STANDARD,
+    max_attempts=1,
+    # One client's 300 dirty rows must not own every worker. Compaction is cheap but
+    # it is AI spend, so the cap is also a spend-rate limit per tenant.
+    client_concurrency=3,
+    scope_type="entity_context",
+    target=_compact_target,
+)
+def compact_context(ctx: JobContext, entity_type: str, entity_id: str) -> JobOutcome:
+    """Compact ONE entity's living context.
+
+    THE FOUR STATES FINALLY HAVE SOMEWHERE TO GO. `execute_compaction` has always
+    returned one of `unchanged | summarized | degraded | error` with a reason - and the
+    task discarded that distinction into a result dict nothing read. A cost-gate block
+    (`spend_blocked:...`) and a missing provider key (`providers_unconfigured`) are
+    genuine PARTIAL outcomes: the watermark holds, nothing is corrupted, and the
+    context is staler than it should be. That is `degraded`, and now it is recorded as
+    degraded rather than as success.
+
+    `max_attempts=1`: the core never raises and handles its own degradation, so there
+    is no transient class to retry. A redelivery would re-fold and double-spend, which
+    is the reason the core was written never to re-raise in the first place.
+    """
     settings = get_settings()
     store = service_context_repo()
     providers = gated_providers_for(settings, entity_type, entity_id)
     outcome = execute_compaction(store, providers, entity_type, entity_id, settings=settings)
-    return outcome.as_dict()
+    result = outcome.as_dict()
+
+    if outcome.state == "degraded":
+        return JobOutcome.degraded(
+            _reason_code(outcome.reason),
+            f"context held at watermark {outcome.watermark}: {outcome.reason}",
+            result=result,
+        )
+    if outcome.state == "error":
+        return JobOutcome.failed(
+            "CompactionError", outcome.reason[:500], detail="compaction failed", result=result
+        )
+    detail = (
+        f"folded {outcome.events_folded} event(s) to version {outcome.version}"
+        if outcome.state == "summarized"
+        else "already current"
+    )
+    return JobOutcome.completed(detail, result=result)
 
 
-@celery_app.task(name="dispatch_context")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def dispatch_context() -> dict[str, Any]:
-    """BEAT task: claim due dirty rows (SKIP LOCKED) and fan out one
-    ``compact_context`` per claim. The debounce lives in ``context_dirty`` +
-    ``next_eligible_at``; this just drains what is due."""
+@aios_job(
+    name="dispatch_context",
+    job_name="context.dispatch",
+    queue=JobQueue.STANDARD,
+    max_attempts=3,
+    retry_backoff=60.0,
+    retry_on=(psycopg.OperationalError,),
+    scope_type="workspace",
+)
+def dispatch_context(ctx: JobContext) -> JobOutcome:
+    """BEAT job: claim due dirty rows (SKIP LOCKED) and fan out one compaction each.
+
+    THIS FAN-OUT DOES CARRY THE CORRELATION ID, unlike the report sweeps - because its
+    child is migrated. `compact_context` runs under `@aios_job` and strips the reserved
+    kwargs, so `enqueue_child` is safe here and one sweep plus its N compactions are a
+    single indexed query in `job_runs`. Children before parents; this is the payoff.
+    """
     settings = get_settings()
     store = service_context_repo()
     dispatched = dispatch_due(
         store,
         batch=settings.context_dispatch_batch,
-        enqueue=lambda et, eid: compact_context.delay(et, eid),
+        enqueue=lambda et, eid: enqueue_child(ctx, "compact_context", et, eid),
     )
-    return {"claimed": len(dispatched)}
+    claimed = len(dispatched)
+    return JobOutcome.completed(
+        f"claimed {claimed} due entit{'y' if claimed == 1 else 'ies'}",
+        result={"claimed": claimed},
+    )
