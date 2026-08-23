@@ -162,9 +162,14 @@ def test_plugin_push_failure_is_swallowed_and_job_advances(tmp_path: Any) -> Non
     )
 
     # Fell back to the artifact path: still delivered, NEVER failed / crashed.
-    assert out.status == "done"
+    #
+    # P0-4: the terminal status is `degraded`, not `done`. This case is the clearest
+    # of the three — the plugin push actually RAISED, so the page demonstrably did not
+    # reach the site, and recording that as `done` told every board, stat and client
+    # report that it had.
+    assert out.status == "degraded"
     assert out.state == "degraded"
-    assert store.row["status"] == "done"
+    assert store.row["status"] == "degraded"
     assert store.row.get("wp_url") is None  # nothing pushed
     assert store.row["md_path"] == "CJ-4200/content.md"
 

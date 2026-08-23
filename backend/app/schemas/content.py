@@ -49,8 +49,12 @@ _PAGE_TEMPLATES: frozenset[str] = frozenset(
 )
 PublishTarget = Literal["WordPress", "PDF/Markdown"]
 Framework = Literal["AIDA", "PAS", "BAB", "FAB", "4 Ps", "PASTOR", "4 U's"]
+# `degraded` (P0-4): the pipeline ran to completion but the outcome was partial -
+# in practice a publish that produced a real artifact yet reached no live site. It
+# is terminal and it is NOT a success; see db/migrations/0081.
 JobStatus = Literal[
-    "queued", "drafting", "needs_review", "publishing", "done", "failed", "rejected"
+    "queued", "drafting", "needs_review", "publishing", "done", "degraded",
+    "failed", "rejected"
 ]
 
 _PAGE_TYPES: frozenset[str] = frozenset({"service", "blog", "local", "gbp_post"})
@@ -59,7 +63,10 @@ _FRAMEWORKS: frozenset[str] = frozenset(
     {"AIDA", "PAS", "BAB", "FAB", "4 Ps", "PASTOR", "4 U's"}
 )
 _STATUSES: frozenset[str] = frozenset(
-    {"queued", "drafting", "needs_review", "publishing", "done", "failed", "rejected"}
+    {
+        "queued", "drafting", "needs_review", "publishing", "done", "degraded",
+        "failed", "rejected",
+    }
 )
 
 # Server rule: content type -> the framework "Auto" resolves to. gbp_post uses

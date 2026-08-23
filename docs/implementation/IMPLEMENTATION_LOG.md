@@ -1041,13 +1041,27 @@ asserts the email is suppressed **and** the deliverable is still emitted.
 
 ### What this did NOT fix
 
-- **No `app/jobs/` integration yet.** `JobOutcome.degraded(reason_code, reason)` and
-  `is_success()` live in WU-8, which is **uncommitted** at the time of writing. Building
-  against a file that exists only in the working tree would be building on sand — the
-  parallel session amended that exact signature mid-flight, which is the hazard
-  demonstrating the point. Deferred until WU-8 is committed; `reason_code` will adopt
-  R3B's closed vocabulary (`no_transport`, `credential_invalid`) rather than inventing
-  two words.
+- ~~No `app/jobs/` integration yet.~~ **Done, once WU-8 was committed (`84be4a5`).**
+  Deliberately deferred until then: the parallel session amended
+  `JobOutcome.degraded()`'s signature mid-flight, so building against a working-tree-only
+  file would have been building on sand. Now wired two ways:
+  - `PublishOutcome` gained `reason_code`, carrying R3B's closed vocabulary
+    (`no_transport` for an exhausted transport cascade) — adopted rather than invented,
+    since R3B derived it from the real capability-discovery failure modes. `reason`
+    stays the human sentence; `reason_code` is what an operator surface groups by.
+  - **The client-facing decision now routes through the platform vocabulary, not a local
+    boolean.** `_publish_artifact` maps this module's terminal word onto the canonical
+    one with `terminal_for("content_status", status)` and asks `is_success()`. That is
+    invariant #13 honoured literally: every client-facing success claim passes through
+    one function. A local flag would have been a second, drifting definition of "did
+    this succeed" — exactly the divergence that produced this defect in the first place.
+  - `test_the_client_email_gate_is_the_platform_vocabulary_not_a_local_flag` pins the
+    mapping, so if `content_status.degraded` were ever mapped to `COMPLETED` the
+    suppression could not silently stop working while still passing its own test.
+
+  The worker is **not** switched to `JobOutcome` wholesale — migrating the 39 existing
+  tasks onto `@aios_job` is its own piece of work with its own guide
+  (`backend/docs/JOB-CONTRACT.md`), not a side effect of this one.
 - **The second degraded exit** ("no artifact store configured") still holds at
   `publishing` with a stage marker. It is already honest at the DB level — it never
   claimed `done` — but it should route through the same vocabulary rather than remain a

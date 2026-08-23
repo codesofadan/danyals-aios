@@ -1,0 +1,39 @@
+-- 0081_content_degraded_label.sql - add the 'degraded' label to content_status.
+--
+-- This migration exists ON ITS OWN, and MUST be applied + COMMITTED before 0082,
+-- because PostgreSQL forbids using a freshly-added enum label in the SAME
+-- transaction that adds it (error 55P04 "unsafe use of new value ... of enum
+-- type"). This repository already learned that at 0009_app_role_client.sql and
+-- again at 0078/0079; the split is the house pattern, not a preference.
+--
+-- WHY THE LABEL IS NEEDED (P0-4, "stop reporting success we did not achieve").
+--
+-- `publish_content_job` tries four transports to get a page onto the client's
+-- WordPress site. When none is available - typically because no per-site
+-- credential has been sealed into the vault yet - it renders a PDF/Markdown
+-- artifact locally and then writes:
+--
+--     store.update(code, {"status": "done", "stage": "Published (artifact-only ...)"})
+--
+-- The caveat lives ONLY in the free-text `stage` string. Every consumer that
+-- matters keys off `status`: the dashboard tiles, `/content/stats`, the
+-- `content_status` report series, and the monthly client report. So a job that put
+-- nothing on the client's website is indistinguishable from one that did.
+--
+-- It is worse than a wrong tile. The same branch calls `_emit_content_deliverable`,
+-- which EMAILS THE CLIENT to tell them their new content is live. A client can
+-- therefore be notified that a page is published, follow the notification, and find
+-- nothing - while the operator's board shows the job green.
+--
+-- `degraded` is the honest word for "the pipeline ran to completion and the outcome
+-- was partial". It deliberately matches the platform-wide job vocabulary in
+-- `app/jobs/status.py` (JobStatus.DEGRADED) rather than inventing a second,
+-- content-only notion of partial success - the spine's rule is ONE status
+-- vocabulary used identically by every module, and two different degraded
+-- semantics is how that rule dies at birth.
+--
+-- NOT a failure: nothing crashed, the draft exists, the artifact is real and
+-- downloadable, and the job is complete in the sense that it will not progress
+-- further on its own. It simply did not achieve what `done` claims.
+
+alter type public.content_status add value if not exists 'degraded';

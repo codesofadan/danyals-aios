@@ -68,6 +68,8 @@ from psycopg.types.json import Jsonb
 
 from app.config import Settings, get_settings
 from app.db.database import privileged_connection
+from app.jobs import is_success
+from app.jobs.status import terminal_for
 from app.logging_setup import get_logger
 from app.schemas.content import schema_for
 from app.services import pricing
@@ -361,6 +363,13 @@ class PublishOutcome:
     status: str
     state: str  # published | degraded | failed | noop
     reason: str = ""
+    #: Stable machine identifier for a degraded/failed outcome, from R3B's closed
+    #: publish vocabulary (`no_transport`, `credential_invalid`, ...). `reason` stays
+    #: the human sentence. Empty on a clean publish. This is the same contract as
+    #: `app.jobs.JobOutcome.degraded(reason_code, reason)`; it is carried here rather
+    #: than switching this worker to JobOutcome wholesale, because migrating the 39
+    #: existing tasks onto @aios_job is its own piece of work (docs/JOB-CONTRACT.md).
+    reason_code: str = ""
     wp_post_id: int | None = None
     url: str = ""
     pdf_key: str | None = None
@@ -372,6 +381,7 @@ class PublishOutcome:
             "status": self.status,
             "state": self.state,
             "reason": self.reason,
+            "reason_code": self.reason_code,
             "wp_post_id": self.wp_post_id,
             "url": self.url,
             "pdf_key": self.pdf_key,
@@ -2273,12 +2283,53 @@ def _publish_artifact(
         _safe_stage(store, code, "Publish held — no artifact store configured")
         return PublishOutcome(code, "publishing", "degraded", reason="no artifact store configured")
     stage = "Published (artifact-only — WordPress credentials pending)" if degraded else "Published"
-    store.update(code, {"status": "done", "stage": stage, "pdf_path": pdf_key, "md_path": md_key})
-    _emit_content_deliverable(row, artifact_key=pdf_key or md_key)
-    reason = "degraded: artifact-only (no WordPress credentials)" if degraded else "rendered PDF/Markdown"
-    logger.info("content_published_artifact", code=code, degraded=degraded)
+    # P0-4. This used to write `status="done"` in BOTH cases and carry the caveat only
+    # in the free-text `stage`. Every consumer that matters keys off `status` - the
+    # dashboard tiles, /content/stats, the `content_status` report series, the monthly
+    # client report - so a job that put nothing on the client's site was
+    # indistinguishable from one that did. `degraded` is the honest terminal word and
+    # matches the platform vocabulary (app/jobs/status.py JobStatus.DEGRADED), so the
+    # cross-module rollup counts it correctly instead of as a success.
+    status = "degraded" if degraded else "done"
+    store.update(code, {"status": status, "stage": stage, "pdf_path": pdf_key, "md_path": md_key})
+    # Whether the client may be told their work is live is decided by the PLATFORM
+    # vocabulary, not by a local boolean. `terminal_for` maps this module's word onto
+    # the canonical one and `is_success` is True for `completed` and nothing else, so
+    # every client-facing success claim in the product passes through one function
+    # (backend/CLAUDE.md invariant #13). A local flag would have been a second,
+    # drifting definition of "did this succeed".
+    canonical = terminal_for("content_status", status)
+    live = canonical is not None and is_success(canonical)
+    # The deliverable is still emitted when degraded: the PDF/Markdown is real, it is
+    # downloadable, and withholding it would lose genuine work. The client EMAIL is a
+    # different matter - it says the content "has been published", which is false here
+    # and would send the client to their portal expecting a live page. Suppressed
+    # rather than reworded: whether to notify a client about a degraded delivery, and
+    # in what words, is an operator's decision about their own client relationship,
+    # not one to invent inside a worker.
+    _emit_content_deliverable(row, artifact_key=pdf_key or md_key, live=live)
+    # `no_transport`: the whole cascade (per-client connection, plugin, REST
+    # app-password) was exhausted without a usable route to the site. R3B's closed
+    # vocabulary, adopted rather than invented - it was derived from the real
+    # capability-discovery failure modes.
+    reason_code = "" if not degraded else "no_transport"
+    reason = (
+        "the WordPress transport cascade was exhausted; the artifact was rendered but "
+        "nothing reached the client's site"
+        if degraded
+        else "rendered PDF/Markdown"
+    )
+    logger.info(
+        "content_published_artifact", code=code, degraded=degraded, reason_code=reason_code or None
+    )
     return PublishOutcome(
-        code, "done", "degraded" if degraded else "published", reason=reason, pdf_key=pdf_key, md_key=md_key
+        code,
+        status,
+        "degraded" if degraded else "published",
+        reason=reason,
+        reason_code=reason_code,
+        pdf_key=pdf_key,
+        md_key=md_key,
     )
 
 
@@ -2290,13 +2341,22 @@ def _safe_stage(store: ContentStore, code: str, stage: str) -> None:
         logger.warning("content_stage_write_failed", code=code)
 
 
-def _emit_content_deliverable(row: dict[str, Any], *, artifact_key: str | None) -> None:
-    """Publish a client deliverable for a PUBLISHED content job (best-effort; the
-    emit itself never raises). An unlinked job (no client) is skipped.
+def _emit_content_deliverable(
+    row: dict[str, Any], *, artifact_key: str | None, live: bool = True
+) -> None:
+    """Publish a client deliverable for a content job (best-effort; never raises).
+    An unlinked job (no client) is skipped.
 
-    Also emails the CLIENT that new content is live (ADMIN/LEAD -> CLIENT). Both legs
-    are best-effort + key-gated, so a keyless/failing provider or an unresolvable
-    recipient degrades silently and can never fail the completed publish.
+    ``live`` is whether the content actually reached the client's website. It gates
+    the EMAIL only - the deliverable itself is emitted either way, because the
+    rendered artifact is real work the client should be able to open.
+
+    The email tells the client their content "has been published" and sends them to
+    the portal to view it. On a degraded publish nothing reached their site, so that
+    message is untrue and produces exactly the worst outcome: a client who follows a
+    notification and finds nothing, while the operator's board shows the job green.
+    Both legs remain best-effort + key-gated, so a keyless/failing provider or an
+    unresolvable recipient degrades silently and can never fail the publish.
     """
     client_id = row.get("client_id")
     if not client_id:
@@ -2314,6 +2374,10 @@ def _emit_content_deliverable(row: dict[str, Any], *, artifact_key: str | None) 
         artifact_key=artifact_key,
         media_type="application/pdf",
     )
+    if not live:
+        # Deliverable emitted above; the "published" announcement deliberately is not.
+        logger.info("content_deliverable_email_suppressed", reason="degraded_publish")
+        return
     topic = str(row.get("topic") or "New content")
     who = str(row.get("client_name") or "there")
     subject = f"New content published: {topic}"

@@ -50,6 +50,7 @@ from integrations.wordpress import (
 from workers.tasks.content import (
     ClientWpTarget,
     MeteredCostGate,
+    PublishOutcome,
     WpTarget,
     build_client_wp_target,
     execute_content_job,
@@ -625,8 +626,15 @@ def test_publish_degraded_no_wp_creds_is_artifact_only(tmp_path: Any) -> None:
     )
 
     assert out.state == "degraded"
-    assert out.status == "done"  # still delivers an artifact, never crashes
-    assert store.row["md_path"] == "CJ-4200/content.md"
+    # P0-4. This previously asserted `status == "done"`, which is the defect itself
+    # encoded as a test: a job that put NOTHING on the client's website recorded the
+    # same terminal status as one that did, with the caveat living only in the
+    # free-text `stage`. Every consumer keys off `status`, so the board, the stats
+    # endpoint, the report series and the monthly client report all counted it as a
+    # publish. `degraded` is terminal and is not a success.
+    assert out.status == "degraded"
+    assert store.row["status"] == "degraded"
+    assert store.row["md_path"] == "CJ-4200/content.md"  # the artifact is still real
     assert "artifact-only" in store.row["stage"].lower()
 
 
@@ -732,7 +740,8 @@ def test_publish_degrades_cleanly_when_no_connection(tmp_path: Any) -> None:
         resolve_client_wp=lambda row, settings: None,  # no connection configured
         resolve_wp=lambda row, settings: None,          # no legacy vault credential
     )
-    assert out.state == "degraded" and store.row["status"] == "done"
+    # P0-4: terminal, but NOT `done` — nothing reached the client's website.
+    assert out.state == "degraded" and store.row["status"] == "degraded"
     assert "artifact-only" in store.row["stage"].lower()
 
 
@@ -1005,8 +1014,9 @@ def test_content_needs_review_notifies_the_leads(monkeypatch: pytest.MonkeyPatch
 
 
 def test_content_published_emails_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    # ADMIN/LEAD -> CLIENT: publishing content emits a portal deliverable AND emails
-    # the client that new content is live.
+    # ADMIN/LEAD -> CLIENT: a publish that actually reached the site emits a portal
+    # deliverable AND emails the client that new content is live. `live` defaults to
+    # True, so this is the unchanged happy path.
     import workers.tasks.content as content_mod
 
     client_calls: list[tuple[Any, ...]] = []
@@ -1019,6 +1029,80 @@ def test_content_published_emails_the_client(monkeypatch: pytest.MonkeyPatch) ->
     )
     assert client_calls and client_calls[0][0] == _CLIENT_ID
     assert "Spring Menu" in client_calls[0][1]  # subject carries the topic
+
+
+def test_the_degraded_publish_carries_a_machine_readable_reason_code(tmp_path: Any) -> None:
+    """A degradation an operator can GROUP BY, not just read.
+
+    `reason` is a sentence for a human; `reason_code` is the stable identifier an
+    operator surface aggregates on ("how many jobs died for want of a transport this
+    week?"). The code is R3B's `no_transport`, adopted from the research wave's closed
+    publish vocabulary rather than invented here, so it matches what the job contract
+    and the rest of the platform will group by.
+    """
+    from app.services.content_artifacts import LocalContentArtifactStore
+
+    store = FakeContentStore(_publish_row(target="WordPress"))
+    out = publish_content_job(
+        store, None, "CJ-4200",
+        settings=_settings(), artifacts=LocalContentArtifactStore(tmp_path),
+        resolve_wp=lambda row, settings: None,
+    )
+
+    assert out.reason_code == "no_transport"
+    assert out.as_dict()["reason_code"] == "no_transport"
+    # A clean publish carries no code - the field means "why not", not "what happened".
+    assert PublishOutcome("CJ-1", "done", "published").reason_code == ""
+
+
+def test_the_client_email_gate_is_the_platform_vocabulary_not_a_local_flag() -> None:
+    """Invariant #13: every client-facing success claim passes through `is_success`.
+
+    `_publish_artifact` does not decide "may we tell the client this is live?" with a
+    local boolean. It maps this module's terminal word onto the canonical vocabulary
+    via `terminal_for` and asks `is_success`. This test pins that the mapping gives the
+    answers the gate depends on - if `content_status.degraded` were ever mapped to
+    COMPLETED, the suppression above would silently stop working while still passing
+    its own test.
+    """
+    from app.jobs import is_success
+    from app.jobs.status import terminal_for
+
+    done = terminal_for("content_status", "done")
+    degraded = terminal_for("content_status", "degraded")
+
+    assert done is not None and is_success(done), "a real publish must count as success"
+    assert degraded is not None, "an unmapped terminal word vanishes from every rollup"
+    assert not is_success(degraded), "a degraded publish must never count as a success"
+
+
+def test_a_degraded_publish_does_not_tell_the_client_their_content_is_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The half of P0-4 that reaches a human.
+
+    The degraded branch called this function unconditionally, so a client whose page
+    never reached their site was emailed "a new piece of content has been published"
+    and sent to the portal to view it. They would follow the notification and find
+    nothing, while the operator's board showed the job green. The deliverable IS still
+    emitted - the rendered artifact is real work and withholding it would lose it -
+    but the announcement is not made.
+    """
+    import workers.tasks.content as content_mod
+
+    client_calls: list[tuple[Any, ...]] = []
+    deliverables: list[dict[str, Any]] = []
+    monkeypatch.setattr(content_mod, "email_client_sync", lambda *a, **k: client_calls.append(a))
+    monkeypatch.setattr(content_mod, "emit_deliverable", lambda **k: deliverables.append(k))
+
+    content_mod._emit_content_deliverable(
+        {"client_id": _CLIENT_ID, "client_name": "Verde Cafe", "topic": "Spring Menu", "id": "j1"},
+        artifact_key="CJ-4200/content.pdf",
+        live=False,
+    )
+
+    assert client_calls == [], "the client was told their content is live when it is not"
+    assert len(deliverables) == 1, "the real artifact should still reach the portal"
 
 
 def test_content_published_no_client_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:

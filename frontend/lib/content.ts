@@ -29,9 +29,15 @@ export const PAGE_TEMPLATES: { key: PageTemplate; label: string; bestFor: string
 
 // Job state machine: queued → drafting → needs_review → publishing → done
 // (plus failed/retry and rejected off the review gate).
+//
+// `degraded` is terminal and is NOT a success: the pipeline finished but the
+// outcome was partial — in practice a publish that rendered a real artifact but
+// reached no live site (no WordPress credential). It previously reported as
+// "done", so a job that put nothing on the client's website looked identical to
+// one that did. Never render it with a success affordance.
 export type JobStatus =
   | "queued" | "drafting" | "needs_review" | "publishing" | "done"
-  | "failed" | "rejected";
+  | "degraded" | "failed" | "rejected";
 
 export type ContentJob = {
   id: string;
@@ -52,13 +58,25 @@ export type ContentJob = {
 };
 
 // Kanban columns — membership is derived from job.status.
-export type ColumnKey = "queued" | "drafting" | "needs_review" | "publishing" | "done";
+export type ColumnKey =
+  | "queued" | "drafting" | "needs_review" | "publishing" | "done" | "degraded";
+
+// The board filters strictly by `status`, so a status with no column here does not
+// merely lose its styling — it matches nothing and DISAPPEARS from the board. That is
+// why `degraded` is a column and not just a tone: a job that finished without
+// reaching the client's site is precisely the one an operator must not lose sight of.
+//
+// The label says "Not Live" rather than "Degraded" deliberately. `degraded` is the
+// platform's vocabulary word (app/jobs/status.py) and stays the key, but a board is
+// read at a glance and the operator needs the CONSEQUENCE, not the taxonomy: the page
+// is not on the client's website. The card's stage string carries the cause.
 export const COLUMNS: { key: ColumnKey; label: string; icon: string; tone: string }[] = [
   { key: "queued",       label: "Queued",       icon: "inbox",         tone: "mut" },
   { key: "drafting",     label: "Drafting",     icon: "auto_awesome",  tone: "info" },
   { key: "needs_review", label: "Needs Review", icon: "rate_review",   tone: "warn" },
   { key: "publishing",   label: "Publishing",   icon: "rocket_launch", tone: "info" },
   { key: "done",         label: "Done",         icon: "check_circle",  tone: "ok" },
+  { key: "degraded",     label: "Not Live",     icon: "warning",       tone: "warn" },
 ];
 
 // The 7 copywriting frameworks, auto-selected by content type + search intent.
