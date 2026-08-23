@@ -36,7 +36,11 @@ from typing import Any
 
 from app.config import Settings, get_settings
 from app.logging_setup import get_logger
-from app.modules.local_seo.provider import LocalPackProvider, local_pack_provider_from_settings
+from app.modules.local_seo.provider import (
+    LocalPackProvider,
+    local_pack_provider_from_settings,
+    local_pack_provider_is_live,
+)
 from app.modules.local_seo.repo import ServiceLocalStore, service_local_store
 from app.modules.local_seo.service import rank_delta
 from app.services.cost_gate import CostGate, GateContext
@@ -296,6 +300,21 @@ def refresh_local_ranks() -> dict[str, Any]:
     re-run PAID checks); a failure comes back as a result dict.
     """
     settings = get_settings()
+    try:
+        if not local_pack_provider_is_live(settings):
+            # Refuse rather than persist. Without a vendor key the provider factory
+            # returns FakeLocalPackProvider, whose positions are synthetic - and once
+            # written to local_rankings they are indistinguishable from measured history
+            # and would be charted to the client as real map-pack movement.
+            logger.info("local_rank_refresh_degraded", reason="no_live_map_pack_provider")
+            return {
+                "state": "degraded",
+                "reason": "no live map-pack provider configured (set SERPER_API_KEY)",
+                "claimed": 0,
+            }
+    except Exception:
+        logger.exception("local_rank_refresh_liveness_check_failed")
+        return {"state": "error", "reason": "task failed", "claimed": 0}
     lock = _try_beat_lock()
     if lock is None:
         # A previous tick is still draining. Skipping is the correct behaviour: the

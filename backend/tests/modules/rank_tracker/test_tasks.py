@@ -34,7 +34,7 @@ import pytest
 
 from app.config import Settings
 from app.modules.rank_tracker import tasks as wk
-from app.modules.rank_tracker.provider import FakeRankProvider, SerpSnapshot
+from app.modules.rank_tracker.provider import FakeRankProvider, RankPricing, SerpSnapshot
 from app.modules.rank_tracker.tasks import (
     check_keyword_rank,
     dispatch_due,
@@ -46,6 +46,62 @@ from app.modules.rank_tracker.tasks import (
 from app.services.cost_gate import CostGate, DialMode, GateContext
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _provider_reports_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every task test to a LIVE vendor.
+
+    The entry points now refuse to run when no real rank vendor is configured, because
+    FakeRankProvider's positions would otherwise be written to the ranking ledger and
+    become fabricated rank history. The tests in this file assert the never-re-raise,
+    gate-ordering and idempotency contracts, which only exist BEYOND that guard - so
+    liveness is stubbed on, and the guard itself is covered by its own tests below.
+    """
+    monkeypatch.setattr(
+        wk, "rank_pricing_from_settings", lambda _s: RankPricing("serper", True, 0.003)
+    )
+
+
+def test_the_check_task_refuses_rather_than_persisting_synthetic_positions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No live vendor MUST NOT write a snapshot.
+
+    A keyless deploy resolves to FakeRankProvider, whose positions are sha256-seeded.
+    Once in ``rankings`` they are indistinguishable from a measured check and would be
+    charted to the client as real performance.
+    """
+    monkeypatch.setattr(
+        wk, "rank_pricing_from_settings", lambda _s: RankPricing("fake", False, 0.0)
+    )
+    called: list[str] = []
+    monkeypatch.setattr(wk, "execute_rank_check", lambda *a, **k: called.append("ran"))
+
+    result = check_keyword_rank("kw-1")
+
+    assert result["state"] == "degraded"
+    assert called == [], "the check ran despite there being no live vendor"
+
+
+def test_the_dispatch_task_refuses_rather_than_burning_the_nightly_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No live vendor MUST NOT claim the due rows.
+
+    Claiming marks them checked for the day, so a degraded fan-out would both lose the
+    nightly slot and fill the ledger with synthetic positions.
+    """
+    monkeypatch.setattr(
+        wk, "rank_pricing_from_settings", lambda _s: RankPricing("fake", False, 0.0)
+    )
+    claimed: list[str] = []
+    monkeypatch.setattr(wk, "dispatch_due", lambda *a, **k: claimed.append("claimed") or [])
+
+    result = dispatch_rank_checks()
+
+    assert result["state"] == "degraded"
+    assert claimed == [], "due rows were claimed despite there being no live vendor"
 
 _TODAY = date(2026, 7, 17)
 _DOMAIN = "northpeak.example"

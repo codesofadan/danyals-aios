@@ -32,6 +32,7 @@ from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from integrations.keyword_data import (
     KeywordDataProvider,
+    keyword_data_is_live,
     keyword_data_provider_from_settings,
 )
 
@@ -187,15 +188,32 @@ def research_keywords(seed: str, geo: str | None = None, client_id: str | None =
     re-run a paid pull); a failure is returned as an ``error`` result dict."""
     settings = get_settings()
     try:
-        return execute_research(
-            service_keyword_store(),
-            keyword_data_provider_from_settings(settings),
-            _gate(),
-            settings,
-            seed=seed,
-            geo=geo,
-            client_id=client_id,
-        )
+        return _research_or_degrade(settings, seed=seed, geo=geo, client_id=client_id)
     except Exception:
         logger.exception("research_keywords_task_failed", seed=seed)
         return {"state": "error", "reason": "task failed", "saved": 0}
+
+
+def _research_or_degrade(
+    settings: Any, *, seed: str, geo: str | None, client_id: str | None
+) -> dict[str, Any]:
+    """The gate + the run. Split out so the entry point's guard wraps BOTH."""
+    if not keyword_data_is_live(settings):
+        # Refuse rather than persist. The fake provider hashes the seed into plausible
+        # volume/difficulty/intent; saved to the keyword bank those become the basis of
+        # a content strategy that was never grounded in real demand.
+        logger.info("research_keywords_degraded", seed=seed, reason="no_live_keyword_provider")
+        return {
+            "state": "degraded",
+            "reason": "no live keyword-data provider configured (set DATAFORSEO_LOGIN/PASSWORD)",
+            "saved": 0,
+        }
+    return execute_research(
+        service_keyword_store(),
+        keyword_data_provider_from_settings(settings),
+        _gate(),
+        settings,
+        seed=seed,
+        geo=geo,
+        client_id=client_id,
+    )

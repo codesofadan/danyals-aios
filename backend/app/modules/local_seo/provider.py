@@ -320,6 +320,22 @@ class FakeLocalPackProvider:
         )
 
 
+def local_pack_provider_is_live(settings: Settings) -> bool:
+    """Whether a REAL map-pack vendor is configured.
+
+    Exists so a caller can refuse to persist before it ever constructs a provider.
+    ``local_pack_provider_from_settings`` degrades to ``FakeLocalPackProvider`` so the
+    module stays unit-testable, but a fake result written to ``local_rankings`` is
+    fabricated ranking history that is indistinguishable from a measured one once it
+    is in the table. The worker gates on this instead.
+    """
+    serper = settings.serper_api_key
+    if serper and serper.get_secret_value():
+        return True
+    dfs_password = settings.dataforseo_password
+    return bool(settings.dataforseo_login and dfs_password and dfs_password.get_secret_value())
+
+
 def local_pack_provider_from_settings(settings: Settings) -> LocalPackProvider:
     """The map-pack provider for this deploy: the house Serper Places default, the
     DataForSEO Maps fallback, else the deterministic fake (NEVER ``None``).

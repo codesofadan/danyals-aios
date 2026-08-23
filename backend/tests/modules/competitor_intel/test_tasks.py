@@ -21,12 +21,27 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from app.modules.competitor_intel import tasks as wk
 from app.modules.competitor_intel.tasks import execute_discovery, execute_gap_analysis
 from app.services.cost_gate import CostGate, GateContext
 from integrations.content_research import OrganicResult, SerpResult
 from integrations.keyword_data import RankedKeyword
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _serp_source_reports_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every task test to a LIVE SERP source.
+
+    ``discover_competitors`` used to discard the live flag, so a keyless deploy wrote
+    "competitors" mined from hash-derived example.test results into the client's
+    competitor set. It now refuses; the guard has its own test below.
+    """
+    real = wk.serp_source_from_settings
+    monkeypatch.setattr(
+        wk, "serp_source_from_settings", lambda s: (real(s)[0], True)
+    )
 
 
 # --------------------------------------------------------------------------- #

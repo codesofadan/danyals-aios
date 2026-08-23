@@ -299,13 +299,36 @@ def test_factory_degrades_without_writer_key() -> None:
     assert content_providers_from_settings(_settings()) is None
 
 
-def test_factory_builds_fakes_for_enrichment_without_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Only the writer key present -> real writer, fake enrichment seams.
+def test_factory_degrades_rather_than_faking_serp_research(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No Serper key MUST degrade the whole bundle - never substitute a fake.
+
+    This test previously asserted the opposite (that the factory silently returned
+    ``FakeSerpResearcher``). That behaviour meant a deploy holding an Anthropic key but
+    no Serper key drafted articles from research synthesised out of a hash of the
+    keyword and PUBLISHED THEM TO A CLIENT'S LIVE SITE, with no downstream signal that
+    the grounding was invented. Degrading here is what makes the worker hold the job at
+    `drafting` and say why.
+    """
     monkeypatch.setattr(cp, "AnthropicSummarizer", lambda **_k: "WRITER")
-    bundle = content_providers_from_settings(_settings(anthropic_api_key="ak"))
+    assert content_providers_from_settings(_settings(anthropic_api_key="ak")) is None
+
+
+def test_factory_builds_the_bundle_once_the_research_key_lands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Writer + research keys present, image key absent -> a real bundle. A missing image
+    # key is NOT a fabrication risk: the worker injects only a real hosted image and
+    # skips a fake/empty one, so it degrades visibly rather than inventing evidence.
+    monkeypatch.setattr(cp, "AnthropicSummarizer", lambda **_k: "WRITER")
+    monkeypatch.setattr(cp, "SerperResearcher", lambda **_k: "SERP")
+    bundle = content_providers_from_settings(
+        _settings(anthropic_api_key="ak", serper_api_key="sk")
+    )
     assert isinstance(bundle, ContentProviders)
     assert bundle.writer == "WRITER"
-    assert isinstance(bundle.serp, FakeSerpResearcher)
+    assert bundle.serp == "SERP"
     assert isinstance(bundle.images, FakeImageGenerator)
     assert isinstance(bundle.wordpress, FakeWordPressPublisher)
     assert bundle.model_writer == "claude-haiku-4-5"
@@ -373,7 +396,12 @@ def test_factory_wires_a_real_image_host_when_an_artifact_root_is_set(
     monkeypatch.setattr(cp, "OpenAIImageGenerator", lambda **kw: built.update(kw) or "IMAGES")
 
     bundle = content_providers_from_settings(
-        _settings(anthropic_api_key="ak", image_gen_api_key="ik", content_image_dir="/var/imgs")
+        _settings(
+            anthropic_api_key="ak",
+            serper_api_key="sk",
+            image_gen_api_key="ik",
+            content_image_dir="/var/imgs",
+        )
     )
     assert isinstance(bundle, ContentProviders)
     assert isinstance(built["image_host"], LocalContentImageStore)

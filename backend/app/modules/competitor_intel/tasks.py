@@ -369,7 +369,20 @@ def discover_competitors(client_id: str) -> dict[str, Any]:
     """
     settings = get_settings()
     try:
-        researcher, _live = serp_source_from_settings(settings)
+        researcher, live = serp_source_from_settings(settings)
+        if not live:
+            # The live flag used to be discarded here. Without it, a keyless deploy
+            # proposed "competitors" mined from FakeSerpResearcher's hash-derived
+            # example.test results and wrote them to the client's competitor set as
+            # real discoveries.
+            logger.info(
+                "discover_competitors_degraded", client_id=client_id, reason="no_live_serp_source"
+            )
+            return {
+                "state": "degraded",
+                "reason": "no live SERP source configured (set SERPER_API_KEY)",
+                "client_id": client_id,
+            }
         return execute_discovery(
             service_competitor_store(), researcher, _gate(), settings, client_id=client_id
         )

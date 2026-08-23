@@ -5,13 +5,22 @@ returns a ``ContentProviders`` bundle when the module can actually function, els
 ``None`` (degraded) - the later pipeline chunk holds the job and reports 'degraded'
 until the keys land, exactly as the context compactor does.
 
-The WRITER (Anthropic, reused from ``integrations.llm``) is the gate: content
-fundamentally needs an LLM to draft, so a missing ``ANTHROPIC_API_KEY`` degrades
-the whole module to ``None``. With the writer present the factory assembles the
-ENRICHMENT seams per available key - a real ``SerperResearcher`` /
-``OpenAIImageGenerator`` when its key is set, else the deterministic fake - so the
-module runs (draft-only) the moment the writer key lands and lights up research +
-images as those keys arrive.
+TWO keys gate the module, and both degrade it to ``None``:
+
+* ``ANTHROPIC_API_KEY`` - content fundamentally needs an LLM to draft.
+* ``SERPER_API_KEY`` - content fundamentally needs REAL research to be grounded.
+
+The research key is a gate, not an enrichment, and that is a deliberate correction.
+This factory used to substitute ``FakeSerpResearcher`` when the Serper key was absent;
+that fake synthesises "competitors" from a SHA-256 of the keyword, so a writer-key-only
+deploy drafted articles from invented research and the pipeline PUBLISHED THEM TO
+CLIENTS' LIVE SITES. Nothing downstream could tell it from real research because the
+``SerpResearcher`` protocol carries no liveness signal. Degrading is the honest
+behaviour: the worker holds the job at ``drafting`` and reports the reason.
+
+IMAGES remain an enrichment. A missing ``IMAGE_GEN_API_KEY`` falls back to the fake
+generator because the worker injects only a REAL hosted image and skips a fake or empty
+one - a missing image is a visible absence, not fabricated evidence.
 
 WORDPRESS IS ALWAYS THE FAKE HERE. A WordPress application password is per-site and
 lives in the vault, NOT in settings; the SERVICE layer (a later chunk) decrypts it
@@ -65,9 +74,25 @@ def content_providers_from_settings(settings: Settings) -> ContentProviders | No
     dep raises ``ProviderNotConfiguredError`` naming the fix. No secret is ever
     logged - the degraded path logs only the reason.
     """
+    # BOTH gates are checked BEFORE anything is constructed. Constructing the writer
+    # first would raise ProviderNotConfiguredError on a deploy that is merely missing
+    # the AI extra, turning an orderly degrade into a crash - and it would do that work
+    # even when the research key is absent and the bundle is doomed anyway.
     anthropic_key = settings.anthropic_api_key
-    if not anthropic_key:
+    if not anthropic_key or not anthropic_key.get_secret_value():
         logger.info("content_providers_degraded", reason="missing_writer_key")
+        return None
+
+    serper_key = settings.serper_api_key
+    if not serper_key or not serper_key.get_secret_value():
+        # NEVER substitute the synthetic researcher on the production path.
+        # FakeSerpResearcher synthesises "competitors" from a SHA-256 of the keyword
+        # (example.test URLs, template snippets). Drafting from it yields an article
+        # whose research is invented, which the pipeline would then PUBLISH TO A
+        # CLIENT'S LIVE SITE, and no downstream stage can tell it from real research.
+        # Degrade exactly as a missing writer key does: the worker holds the job at
+        # `drafting` via _hold_degraded and reports the reason honestly.
+        logger.info("content_providers_degraded", reason="missing_serper_key")
         return None
 
     writer = AnthropicSummarizer(
@@ -75,13 +100,7 @@ def content_providers_from_settings(settings: Settings) -> ContentProviders | No
         model_summary=settings.anthropic_model_summary,
         model_heavy=settings.anthropic_model_heavy,
     )
-
-    serper_key = settings.serper_api_key
-    serp: SerpResearcher = (
-        SerperResearcher(api_key=serper_key.get_secret_value())
-        if serper_key
-        else FakeSerpResearcher()
-    )
+    serp: SerpResearcher = SerperResearcher(api_key=serper_key.get_secret_value())
 
     image_key = settings.image_gen_api_key
     # gpt-image-2 (like gpt-image-1 before it) returns base64 (b64_json), not a hosted

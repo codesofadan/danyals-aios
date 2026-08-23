@@ -397,6 +397,19 @@ class FakeKeywordDataProvider:
         return out
 
 
+def keyword_data_is_live(settings: Settings) -> bool:
+    """Whether REAL keyword metrics are available.
+
+    ``keyword_data_provider_from_settings`` degrades to ``FakeKeywordDataProvider`` so
+    the module stays unit-testable offline, but that fake derives volume, difficulty and
+    intent from a hash of the term. Persisted into the keyword bank those numbers are
+    indistinguishable from measured metrics, and an operator would build a content
+    strategy on invented demand. Callers that WRITE must gate on this.
+    """
+    password = settings.dataforseo_password
+    return bool(settings.dataforseo_login and password and password.get_secret_value())
+
+
 def keyword_data_provider_from_settings(settings: Settings) -> KeywordDataProvider:
     """The real DataForSEO provider when the credential pair is present, else the
     deterministic fake (so the module runs offline / keyless). No secret is logged -

@@ -35,6 +35,33 @@ from integrations.keyword_data import FakeKeywordDataProvider, KeywordMetric
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _keyword_provider_reports_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every task test to a LIVE keyword-data vendor.
+
+    ``research_keywords`` now refuses when no real vendor is configured: the fake
+    provider hashes the seed into plausible volume/difficulty/intent, and saving those
+    to the keyword bank would let an operator build a strategy on invented demand. The
+    contracts asserted here live beyond that guard; the guard has its own test below.
+    """
+    monkeypatch.setattr(wk, "keyword_data_is_live", lambda _s: True)
+
+
+def test_the_task_refuses_rather_than_saving_synthetic_keyword_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No live vendor MUST NOT write to the keyword bank."""
+    monkeypatch.setattr(wk, "keyword_data_is_live", lambda _s: False)
+    ran: list[str] = []
+    monkeypatch.setattr(wk, "execute_research", lambda *a, **k: ran.append("ran"))
+
+    result = research_keywords("storage units")
+
+    assert result["state"] == "degraded"
+    assert result["saved"] == 0
+    assert ran == [], "research ran despite there being no live keyword vendor"
+
+
 # --------------------------------------------------------------------------- #
 # Fakes.
 # --------------------------------------------------------------------------- #

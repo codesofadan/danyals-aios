@@ -45,6 +45,32 @@ from app.services.cost_gate import CostGate, DialMode, GateContext
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _provider_reports_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every task test to a LIVE map-pack vendor.
+
+    ``refresh_local_ranks`` now refuses when no real vendor is configured, because
+    FakeLocalPackProvider's positions would otherwise land in ``local_rankings`` as
+    fabricated map-pack history. The contracts asserted in this file (the overlap lock,
+    never-re-raise) live beyond that guard; the guard has its own test below.
+    """
+    monkeypatch.setattr(wk, "local_pack_provider_is_live", lambda _s: True)
+
+
+def test_the_beat_refuses_rather_than_persisting_synthetic_map_pack_positions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No live vendor MUST NOT refresh, and MUST NOT take the lock."""
+    monkeypatch.setattr(wk, "local_pack_provider_is_live", lambda _s: False)
+    took_lock: list[str] = []
+    monkeypatch.setattr(wk, "_try_beat_lock", lambda: took_lock.append("lock"))
+
+    result = refresh_local_ranks()
+
+    assert result["state"] == "degraded"
+    assert took_lock == [], "the beat took the lock despite there being no live vendor"
+
 _CLIENT = "cl-1"
 _PROFILE = "gp-1"
 

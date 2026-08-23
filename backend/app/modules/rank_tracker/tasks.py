@@ -55,6 +55,7 @@ from app.logging_setup import get_logger
 from app.modules.rank_tracker.provider import (
     RankProvider,
     find_all_positions,
+    rank_pricing_from_settings,
     rank_provider_from_settings,
 )
 from app.modules.rank_tracker.repo import ServiceRankStore, service_rank_store
@@ -352,6 +353,18 @@ def check_keyword_rank(keyword_id: str, force: bool = False) -> dict[str, Any]:
     """
     settings = get_settings()
     try:
+        if not rank_pricing_from_settings(settings).live:
+            # Refuse rather than persist. A keyless deploy resolves to FakeRankProvider,
+            # whose positions are synthetic; written to the ranking ledger they become
+            # fabricated rank history shown to the client as measured performance.
+            logger.info(
+                "rank_check_degraded", keyword_id=keyword_id, reason="no_live_rank_provider"
+            )
+            return {
+                "state": "degraded",
+                "reason": "no live rank provider configured",
+                "keyword_id": keyword_id,
+            }
         return execute_rank_check(
             service_rank_store(),
             rank_provider_from_settings(settings),
@@ -375,6 +388,16 @@ def dispatch_rank_checks() -> dict[str, Any]:
     """
     settings = get_settings()
     try:
+        if not rank_pricing_from_settings(settings).live:
+            # Do not even claim the due rows: claiming marks them checked for the day, so
+            # a degraded fan-out would silently burn the nightly slot AND fill the ledger
+            # with synthetic positions.
+            logger.info("dispatch_rank_checks_degraded", reason="no_live_rank_provider")
+            return {
+                "state": "degraded",
+                "reason": "no live rank provider configured",
+                "claimed": 0,
+            }
         dispatched = dispatch_due(
             service_rank_store(),
             batch=int(settings.rank_tracker_dispatch_batch),
