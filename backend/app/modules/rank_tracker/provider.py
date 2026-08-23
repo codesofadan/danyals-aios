@@ -63,9 +63,27 @@ _DFS_HINT = (
     "set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable live rank checks via DataForSEO"
 )
 
-# How deep the SERP is read. 100 is the industry-standard rank-tracking window: past it
-# a position is not commercially meaningful, and every vendor prices by result page.
-DEFAULT_DEPTH = 100
+# How deep the SERP is read, and therefore what a rank check COSTS.
+#
+# This was 100, with a comment reasoning that "100 is the industry-standard tracking
+# window ... and every vendor prices by result page". The second half is true and is
+# exactly why the first half was expensive: both vendors bill per result page, so
+# depth 100 is FIVE TIMES the price of depth 20 for the platform's largest line item.
+#
+#   Serper       ceil(depth/10) pages  ->  depth 100 = 10 units, depth 20 = 2
+#   DataForSEO   ceil(depth/10) pages  ->  same, since 19 September 2025 (see _dfs_cost)
+#
+# 20 is the commercially meaningful window. A keyword sitting at position 87 is not a
+# ranking anybody acts on; it is page nine. Tracking it costs 5x and buys a number that
+# changes nothing. A deeper read is still possible - `depth` remains a parameter - but
+# it now PRICES correctly, so the cost gate sees the real number and an operator
+# confirming an expensive pull is confirming a true figure.
+#
+# NOTE there is a second source of truth: `settings.rank_tracker_depth` is what the
+# scheduled worker and the router actually pass (`tasks.py:149`, `router.py:127/147`).
+# Both are 20; `tests/modules/rank_tracker/test_depth_and_pricing.py` pins them
+# together, because fixing one and not the other leaves the live path overspending.
+DEFAULT_DEPTH = 20
 
 # The keys ``settings.rank_tracker_provider`` accepts. 'serper' is the default (the
 # house vendor); 'dataforseo' is the contracted fallback; 'fake' forces the offline
@@ -212,10 +230,22 @@ def _serper_cost(base: float, depth: int) -> float:
 
 
 def _dfs_cost(base: float, depth: int) -> float:
-    """DataForSEO's live SERP endpoint prices per task, deeper reads costing more;
-    priced per 100-result block, rounded up."""
-    blocks = max(1, -(-max(depth, 1) // 100))
-    return round(base * blocks, 6)
+    """DataForSEO Organic SERP: priced per 10 results, rounded up.
+
+    THIS WAS `ceil(depth / 100)` - DataForSEO's PRE-19-SEPTEMBER-2025 model, when the
+    base price covered 100 results. On that date the depth covered by the base price of
+    Organic SERP endpoints changed to 10 (vendor help-centre, verified in R5 §3.2). The
+    stale form under-priced a depth-100 organic read by 10x, so the tracker both
+    overspent on depth AND under-reported that it was doing so - the ledger showed one
+    unit where the vendor billed ten.
+
+    Organic only. DataForSEO's revision applies "exclusively to Organic search-type
+    endpoints" and does NOT extend to Google Maps, whose base price still includes 100
+    results - which is why the geo-grid in `local_seo` runs at depth 100 deliberately
+    and is priced as a single unit there. Do not unify these two functions.
+    """
+    pages = max(1, -(-max(depth, 1) // 10))
+    return round(base * pages, 6)
 
 
 def _free(_base: float, _depth: int) -> float:

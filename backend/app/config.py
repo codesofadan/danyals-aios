@@ -515,7 +515,10 @@ class Settings(BaseSettings):
     # monthly commitment projection, so the two can never disagree. ---
     rank_tracker_provider: str = "serper"  # serper | dataforseo | fake
     rank_tracker_cost_estimate: float = 0.001  # one SERP read (Serper ~ $1/1k queries)
-    rank_tracker_depth: int = 100  # how deep the SERP is read (the tracking window)
+    # 20, not 100: both vendors bill per 10-result page, so depth 100 is 5x the price
+    # of depth 20 on the platform's largest line item and buys positions nobody acts
+    # on. Kept in step with `rank_tracker.provider.DEFAULT_DEPTH` by a test.
+    rank_tracker_depth: int = 20  # how deep the SERP is read (the tracking window)
     rank_tracker_dispatch_batch: int = 200  # keywords claimed per nightly beat tick
     rank_tracker_history_retention_days: int = 730  # hard-purge history past 2 years
     rank_tracker_rollup_after_days: int = 90  # thin to one snapshot/week past 90 days
