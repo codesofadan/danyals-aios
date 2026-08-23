@@ -100,31 +100,84 @@ Cheap to fix, and several are client-visible.
 
 ### 2.1 Build artefacts committed as source
 
-| Path | Size | Problem |
-|---|---|---|
-| `SEO-CONTENT-OS.zip` | 1.1 MB | **A zip with no source folder in this repo.** Opaque blob; nothing can review, diff or test it. |
-| `aios-publisher.zip` | 24 KB | Duplicates `wordpress-plugin/aios-publisher/`. Two copies, one reviewable. |
-| `spotino-theme.zip` | 16 KB | Duplicates `spotino-theme/`. Same. |
+> **⚠️ CORRECTED 2026-08-23, before execution.** The first version of this section listed
+> all three zips as litter and put `SEO-CONTENT-OS.zip` first on a delete list. **That was
+> wrong and would have destroyed the canonical content doctrine.** The error came from a
+> reference check that filtered by file extension and so missed a `.ps1`; re-running it
+> with no filter changed the disposition of three of the six items below. The corrected
+> findings stand; the original conclusions did not survive contact with evidence, and the
+> record of that is left visible deliberately.
 
-A zip in version control is a diff nobody can read. Where a distributable is genuinely
-needed, it should be produced by a build step, not committed — and `.gitignore` already
-carries `wordpress-plugin/aios-publisher.zip`, so the intent existed and the file at the
-root simply escaped it.
+| Path | Size | Verified disposition |
+|---|---|---|
+| `SEO-CONTENT-OS.zip` | 1.1 MB | **DO NOT DELETE. Extract, do not remove.** |
+| `aios-publisher.zip` | 24 KB | **Delete — it is stale, and it is actively harmful.** |
+| `spotino-theme.zip` | 16 KB | **Delete — byte-identical to `spotino-theme/`.** |
+
+**`SEO-CONTENT-OS.zip` is the single most important file in this section and nearly the
+worst possible thing to delete.** It contains 87 `knowledge/` files plus scripts and
+research, and it is the **only copy** of the material that `backend/docs/CONTENT-DOCTRINE.md`
+declares *"the single canonical spine for what a ranking-grade page is"*.
+`content_qa.py:70` and `content_generator.py:55,59` both cite
+`backend/seo-content-os/knowledge/` as the justification for their numeric constants — and
+**that directory has never existed**: `git log --all -- backend/seo-content-os` returns
+zero commits. The zip is what the code's constants are justified by, and the planned seed
+for the SEO intelligence substrate (R6-1, which explicitly claims ownership).
+
+The original critique — *opaque, ungreppable, unreviewable, unversioned at file level* — is
+correct and is exactly why it must be **extracted into the tree**, not removed. Deleting it
+resolves the opacity by destroying the content. R6-1 owns that extraction and targets
+`knowledge-base/seo-content-os/`; this audit touches it only to say **hands off**. Note the
+open licence question (research O-18) blocks seeding, not extraction.
+
+**`aios-publisher.zip` is not a duplicate — it is a stale build with client impact.**
+Verified by comparison: the zip is plugin **v1.4.0** and contains 4 files; the source
+folder is **v1.7.0** and contains 8, including the entire `includes/` directory —
+`core-connector.php`, `auto-publisher.php`, `design-reconstruction.php`,
+`theme-adapter.php`, ~1,475 lines, i.e. most of the plugin.
+
+And `push-to-wordpress.ps1` instructs the operator: *"Install + activate the AIOS
+Publisher plugin (`aios-publisher.zip`)"*. **So the documented install procedure ships a
+three-versions-stale plugin, missing most of its code, to a client's WordPress site.**
+That is a live defect surfaced by a folder audit, not a tidiness item. Deleting the zip
+and correcting the instruction to build from source fixes it.
+
+`spotino-theme.zip` is genuinely redundant — `diff -rq` against `spotino-theme/` reports
+no differences.
+
+Where a distributable is genuinely needed it should be produced by a build step, not
+committed; `.gitignore` already carries `wordpress-plugin/aios-publisher.zip`, so the
+intent existed and the root copy simply escaped it.
 
 ### 2.2 Files at the root that belong to nothing
 
-| Path | Size | Referenced by |
-|---|---|---|
-| `best-ai-agents-featured.png` | 428 KB | 1 file |
-| `best-ai-agents-for-seo-agencies-2026.html` | 16 KB | **0 files** |
-| `scratchpad-hero/hero.html` | — | scratchpad, by its own name |
-| `push-to-wordpress.ps1` | 8 KB | 2 files |
-| `Start-Backend.bat`, `Start-Dashboard.bat`, `Finish-Citations.bat` | — | operator launchers, undifferentiated from source |
+> **⚠️ ALSO CORRECTED.** The "0 files" against the HTML below was an artefact of the same
+> filtered grep. `push-to-wordpress.ps1:23` reads it: `$ContentFile = Join-Path
+> $PSScriptRoot "best-ai-agents-for-seo-agencies-2026.html"`.
 
-These are a marketing artefact, a one-off scratch file, and platform-specific operator
-scripts, all sitting at the same level as `backend/` and `frontend/`. The root of a
-repository is the first thing a new engineer — or a client's future developer — reads.
-Ours currently says "assorted".
+| Path | Size | Verified disposition |
+|---|---|---|
+| `push-to-wordpress.ps1` + `best-ai-agents-*.html` + `best-ai-agents-*.png` | ~452 KB | **Move together — a coherent tool, not three orphans.** |
+| `scratchpad-hero/hero.html` | 4 KB | **Delete** — zero references anywhere, scratchpad by its own name. |
+| `Start-Backend.bat`, `Start-Dashboard.bat`, `Finish-Citations.bat` | — | **Leave at root.** |
+
+The first three are **one artefact**: a one-shot demo publisher, the article it publishes,
+and that article's featured image. Separating them would break the script; deleting the
+HTML — as the first draft of this audit proposed — would break it silently, since the
+failure would only appear when an operator next ran it. They move together to
+`tools/wordpress-demo/`, with the `$PSScriptRoot` reference still resolving because the
+script and its content stay side by side.
+
+**The `.bat` launchers stay at root, reversing this audit's first recommendation.** They
+are double-click entry points for a non-technical operator, and each resolves its paths
+from `%~dp0` — its own directory — assuming that directory is the repo root
+(`cd /d "%~dp0backend"`, `backend\.venv\Scripts\python.exe tools\finish_citation.py`).
+Moving them requires rewriting those paths, and **a Windows batch file cannot be executed
+or tested from this environment.** Moving an operator's untestable entry point to buy
+tidiness is a bad trade: the downside is a client-facing workflow that silently stops
+working, and the upside is three fewer lines in a directory listing. A launcher at the
+repository root is as legitimate as a `Makefile`; it is not clutter merely because it is
+platform-specific.
 
 ### 2.3 A second, undocumented frontend
 
@@ -156,9 +209,23 @@ documents**, and here they went on to scope engineering work.
 
 ### 2.5 Dead frontend code with no owner
 
-`components/{backups,gmb,milestones,tiers,upsells}/` — 19 files, **zero importers**.
-Their pages were deleted; the components were not. Part of ~5,900 orphaned lines
-(~20% of the frontend), alongside 81 dead CSS classes and 26 exported-but-unused hooks.
+`components/{backups,gmb,milestones,tiers,upsells}/` — 19 files, **zero importers**
+(verified twice). Their admin pages were deleted in `158c204`; the components were not.
+Part of ~5,900 orphaned lines (~20% of the frontend), alongside 81 dead CSS classes and 26
+exported-but-unused hooks.
+
+> **⚠️ These are NOT a cleanup item, and this audit does not delete them.** Checked against
+> `DECISIONS_LOG.md`: **milestones are explicitly inside the v1 Portal module**
+> (*"task queue, review checkpoint, milestones, notifications…"*) and **upsells are v1 too**
+> (D-7: *"keep in portal + free audit; remove only the Reports-tab instance"*). So two of
+> the five directories are dead **because their page was removed, not because the feature
+> was** — and v1 has to rebuild that UI. Deleting it would destroy work the plan requires,
+> which is the opposite of cleanup.
+>
+> The correct disposition is per-directory and it is a **product decision**: for each, is
+> the feature v1, v1.1, or gone? Only "gone" justifies deletion. `gmb` maps to GBP posts
+> (deferred to v1.1), `backups` is ops tooling, `tiers` is unresolved. Left in place with
+> this note rather than guessed at.
 
 The hooks are the interesting ones: they front **working backend endpoints with no UI** —
 report-grant management, password change, Sheets sync, GSC/GA4 sync, key rotation. That
@@ -275,13 +342,16 @@ deliberately placed where they cannot collide with module work.
 
 Deletions and moves only; nothing imports any of it.
 
-1. Delete `SEO-CONTENT-OS.zip`, `aios-publisher.zip`, `spotino-theme.zip`,
-   `best-ai-agents-*.{png,html}`, `scratchpad-hero/`.
-2. Move the three `.bat` files and `push-to-wordpress.ps1` into `scripts/`.
-3. Delete the 19 orphaned frontend components, 81 dead CSS classes, and the 6 dead
-   `EXTRAS` entries — **after** deciding the 26 dead hooks (§2.5): each is either wired
-   to a UI or deleted with its endpoint, and that is a product call, not a cleanup call.
-4. Decide `dashboard/`: `tools/` with a README, or delete.
+1. Delete `spotino-theme.zip` (byte-identical duplicate), `aios-publisher.zip` (stale
+   v1.4.0 missing `includes/`; correct the install instruction that points at it), and
+   `scratchpad-hero/`. **`SEO-CONTENT-OS.zip` is NOT deleted** — see §2.1.
+2. Move `push-to-wordpress.ps1` + its HTML + its PNG together into
+   `tools/wordpress-demo/`. **The `.bat` launchers stay at root** — see §2.2.
+3. **Deferred, not done:** the 19 orphaned components, 81 dead CSS classes, 6 dead
+   `EXTRAS` entries and 26 dead hooks. Every one is a **product** call (§2.5) — two of the
+   five component directories belong to v1-scoped features whose pages were removed, and
+   the hooks front working endpoints. Cleanup does not get to decide what ships.
+4. **Deferred:** `dashboard/` — `tools/` with a README, or delete. Also a product call.
 5. Add the CI guards in §5 — **first**, so nothing regresses while the rest proceeds.
 
 **Gate:** full suite unchanged; `tsc` clean; no import resolves to a deleted path.

@@ -4,7 +4,14 @@
 # AIOS Publisher plugin's own endpoint (no AIOS backend required).
 #
 # PREREQUISITES on the WordPress side:
-#   1. Install + activate the AIOS Publisher plugin (aios-publisher.zip).
+#   1. Install + activate the AIOS Publisher plugin. BUILD IT FROM SOURCE:
+#        cd wordpress-plugin && zip -r ../aios-publisher.zip aios-publisher
+#      There used to be a committed `aios-publisher.zip` at the repo root and this
+#      line pointed at it. It was DELETED because it had gone stale: it carried
+#      plugin v1.4.0 with 4 files, while the source is v1.7.0 with 8 - the whole
+#      `includes/` directory (core-connector, auto-publisher, design-reconstruction,
+#      theme-adapter; ~1,475 lines, i.e. most of the plugin) was missing from it.
+#      Following the old instruction installed a broken plugin on a client's site.
 #   2. wp-admin -> AIOS Publisher -> Settings: copy the API Key below.
 #   3. (Recommended) Install + activate Yoast SEO and the Spotino theme.
 #

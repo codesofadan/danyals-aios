@@ -26,6 +26,13 @@ daniyals-frontend/
 tools/citation_handoffs.json
 wordpress-plugin.zip
 wordpress-plugin/aios-publisher.zip
+# Built plugin/theme distributables, wherever they are produced. A committed zip is a
+# diff nobody can read, and the root copies had gone stale in exactly the way that
+# predicts: aios-publisher.zip carried plugin v1.4.0 (4 files) while source was v1.7.0
+# (8 files, the whole includes/ directory missing), and the install instructions pointed
+# at it. Build these; do not commit them.
+/aios-publisher.zip
+/spotino-theme.zip
 docs/deliverables/*.txt
 
 # Project comms / reference exports — MUST never enter the repo (SEC-017).
