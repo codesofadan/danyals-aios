@@ -107,7 +107,8 @@ def test_no_hardcoded_unit_price_anywhere_in_the_frontend() -> None:
 # --------------------------------------------------------------------------- #
 # Prevented defect: `lib/vault.ts` shipped a `vaultKeys` array of realistic fake
 # secrets (`sk-ant-api03-…`, `AIzaSy…`, WordPress application passwords) and
-# `lib/data.ts` shipped plaintext client-portal passwords (`"Np!Dental#2026"`).
+# `lib/data.ts` shipped plaintext client-portal passwords (a real portal login for
+# the demo client, quoted verbatim in the source).
 # Fake or not, everything in this tree is served to every browser that loads the
 # app, and a realistic fake is indistinguishable from a leak during triage.
 
@@ -118,10 +119,24 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("OpenAI API key", re.compile(r"\bsk-[A-Za-z0-9]{20,}")),
     ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    # A literal password assigned to a password-ish key: `pass: "Np!Dental#2026"`.
+    # A literal password assigned to a password-ish KEY: `pass: "…"` (object syntax).
     (
         "literal password",
         re.compile(r"\b(?:pass|password|passwd|secret|apiKey|api_key|token)\s*:\s*[\"'][^\"'\s]{6,}[\"']"),
+    ),
+    # A credential ASSIGNED to a const/let/var. The pattern above only matched object
+    # syntax (`pass: "..."`), which is why `components/TestGate.tsx` shipped a shared
+    # `const GATE_USER/GATE_PASS = "<redacted>"` gate straight to the browser -- readable
+    # by anyone who opened devtools -- while this guard stayed green. An assignment is
+    # the same defect wearing different syntax.
+    (
+        "hardcoded credential constant",
+        re.compile(
+            r"\b(?:const|let|var)\s+[A-Za-z_$][\w$]*"
+            r"(?:PASS|PASSWORD|PASSWD|SECRET|API_?KEY|TOKEN|CREDENTIAL)[\w$]*"
+            r"\s*=\s*[\"'][^\"'\s]{4,}[\"']",
+            re.IGNORECASE,
+        ),
     ),
 )
 

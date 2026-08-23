@@ -86,7 +86,7 @@ down. That is the exact failure mode `ADM-003` exists to prevent.
 
 | Deleted | What it was |
 |---|---|
-| `clientDirectory` | **Eight fake clients carrying plaintext portal passwords** (`"Np!Dental#2026"`, …) shipped in the browser bundle |
+| `clientDirectory` | **Eight fake clients carrying plaintext portal passwords** shipped in the browser bundle (one was a real demo-client portal login; redacted here and rotated under D-15) |
 | `teamMembers` | Eight fake staff with fabricated on-time / utilisation / quality percentages |
 | `tasks_seed`, `activity_seed` | A fake task board and activity feed |
 | `teamCredentials` | **Eight plaintext staff passwords**, keyed by member id |
