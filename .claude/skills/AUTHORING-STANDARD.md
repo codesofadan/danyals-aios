@@ -85,7 +85,7 @@ YAML frontmatter starts at **byte 0** with `---` and ends with `---`. Only `name
 `$name` (from `arguments`), `${CLAUDE_PROJECT_DIR}` (the repo root — use it to reference
 `.claude/skills/_shared/aios_client.py` and the shared `reference/` regardless of cwd),
 `${CLAUDE_SKILL_DIR}` (this skill's own dir — use it for skill-local files), `${CLAUDE_SESSION_ID}`.
-Multi-word positional args MUST be quoted when invoked: `/local-service-page acme "San Jose" "AC repair"`.
+Multi-word positional args MUST be quoted when invoked: `/aios-local-service-page acme "San Jose" "AC repair"`.
 
 **Dynamic context injection:** a `` !`<command>` `` line runs a shell command and inlines its
 output **before** Claude sees the body — use it to pull the caller's fresh state (e.g. the
@@ -333,6 +333,6 @@ Testing
 
 ---
 
-*This standard is the source of truth for skill shape. The `/local-service-page` skill is the
+*This standard is the source of truth for skill shape. The `/aios-local-service-page` skill is the
 fully-worked reference implementation that conforms to it — copy that skill, don't start from
 scratch.*

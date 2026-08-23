@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { AiosStoreProvider } from "@/lib/store";
 import { AuthProvider } from "@/lib/auth";
 import { QueryProvider } from "@/lib/query";
 import { LoaderProvider } from "@/components/loader/LoaderProvider";
@@ -54,17 +53,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body suppressHydrationWarning>
         <div className="glow a" />
         <div className="glow b" />
-        {/* Auth owns the bearer token (outermost); Query serves server data;
-            the legacy demo store stays nested for screens not yet swapped. */}
+        {/* Auth owns the bearer token (outermost); Query serves all server data.
+            There is no client-side demo store: every screen reads the live API. */}
         <AuthProvider>
           <QueryProvider>
-            <AiosStoreProvider>
-              <LoaderProvider>
-                {children}
-                <DemoSwitcher />
-                <ClickFX />
-              </LoaderProvider>
-            </AiosStoreProvider>
+            <LoaderProvider>
+              {children}
+              <DemoSwitcher />
+              <ClickFX />
+            </LoaderProvider>
           </QueryProvider>
         </AuthProvider>
       </body>

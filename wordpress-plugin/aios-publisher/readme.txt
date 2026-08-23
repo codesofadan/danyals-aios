@@ -1,5 +1,4 @@
 === AIOS Publisher ===
-Contributors: xegentsai
 Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6

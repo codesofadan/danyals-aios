@@ -1,0 +1,36 @@
+-- 0078_user_status_suspended.sql - add the 'suspended' label to user_status.
+--
+-- WHY THIS EXISTS
+-- ---------------
+-- Until now there was NO WAY TO REMOVE A PERSON FROM THE SYSTEM. `user_status`
+-- carried only ('active', 'away', 'invited', 'offline') - four PRESENCE states,
+-- none of them an ACCESS state. `login()` never read status at all, and
+-- `get_current_user` read it into `CurrentUser` and then ignored it. The result:
+-- a departing team member kept full access to every client's data, and their
+-- 7-day bearer token stayed valid until it expired on its own. Meanwhile the
+-- `manage_team` permission advertised the capability in the UI.
+--
+-- This is the gap the Phase-2 audit's second pass found MISSING FROM THE
+-- REQUIREMENTS ENTIRELY, not merely unbuilt (see docs/audit/README.md).
+--
+-- WHY IT IS ITS OWN MIGRATION
+-- ---------------------------
+-- PostgreSQL forbids USING a freshly-added enum label in the same transaction
+-- that adds it (55P04, "unsafe use of new value ... of enum type"). 0079 needs
+-- to reference 'suspended' in a CHECK-adjacent context, so the ADD VALUE must be
+-- applied and COMMITTED first. Same reason 0009_app_role_client.sql stands alone.
+--
+-- SEMANTICS
+-- ---------
+-- 'suspended' is an ACCESS state, not a presence state, and it is deliberately
+-- distinct from the four that exist:
+--   active / away / offline - the person WORKS here; these describe availability.
+--   invited                 - provisioned, has not signed in yet.
+--   suspended               - the person MAY NOT ACCESS the platform. Enforced at
+--                             login AND on every authenticated request.
+--
+-- The row is KEPT, never deleted: `tasks.assignee_id`, `activity_log.actor_id`
+-- and every audit trail reference the user id. Deleting the row would either
+-- cascade away history or break those references - so offboarding suspends.
+
+alter type public.user_status add value if not exists 'suspended';

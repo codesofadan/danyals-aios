@@ -124,7 +124,12 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     resp = await client.get("/api/v1/cost/dial")
     assert resp.status_code == 200
     dial = {d["key"]: d for d in resp.json()}
-    assert len(dial) == 17  # +1 citations (7B-4), +1 site_analytics (7C), +1 policy watcher, +1 gmb
+    # +1 citations (7B-4), +1 site_analytics (7C), +1 policy watcher, +1 gmb,
+    # +1 public_audit (P0-2: the free funnel gets its OWN dial so an operator can
+    # switch the lead magnet off without disabling every client's paid audit).
+    assert len(dial) == 18
+    assert dial["public_audit"]["key"] == "public_audit"
+    assert dial["public_audit"]["provider"] == "AuditEngine"
     assert dial["keywords"]["mode"] == "off"  # default
     assert dial["tech_audit"]["mode"] == "api"
     # Part 8: the tool modules' spends are dial-controllable. rank_tracker is the
@@ -207,3 +212,94 @@ async def test_spend_halt_get_and_toggle(client: httpx.AsyncClient, wire: Callab
     off = await client.put("/api/v1/cost/spend-stop", json={"halted": False})
     assert off.status_code == 200
     assert off.json()["halted"] is False
+
+
+# --------------------------------------------------------------------------- #
+# WS-1 (Truth) · GET /cost/pricing — live unit prices, never hardcoded ones
+# --------------------------------------------------------------------------- #
+async def test_pricing_reports_the_settings_the_gate_actually_bills_at(
+    client: httpx.AsyncClient, wire: Callable[[str], None]
+) -> None:
+    """Every figure served must equal the ``Settings`` value ``pricing.py`` computes from.
+
+    This is the whole point of the endpoint: the UI previously shipped hardcoded
+    strings ("$0.30 / search") that were ~300x the real Serper price and could not
+    track an env change. Assert against ``Settings`` and ``pricing`` directly, so
+    the test fails if the two ever diverge rather than pinning a literal here too.
+    """
+    from app.config import Settings
+    from app.services import pricing
+
+    wire("viewer")
+    resp = await client.get("/api/v1/cost/pricing")
+    assert resp.status_code == 200
+    by_provider = {p["provider"]: p for p in resp.json()}
+
+    s = Settings(_env_file=None, app_env="dev")
+
+    serper = by_provider["Serper"]
+    assert serper["paid"] is True
+    assert serper["lines"][0]["amount"] == s.price_serper_per_query
+    # The served number IS the number one real call commits.
+    assert pricing.serper_cost(s, queries=1) == serper["lines"][0]["amount"]
+
+    dfs = by_provider["DataForSEO"]
+    assert dfs["lines"][0]["amount"] == pricing.dataforseo_cost(s, calls=1)
+
+    places = by_provider["Places"]
+    assert places["lines"][0]["amount"] == pricing.google_api_cost(s, calls=1)
+
+    img = by_provider["ImageGen"]
+    assert img["lines"][0]["amount"] == pricing.image_cost(s, images=1)
+
+    anthropic = {line["label"]: line["amount"] for line in by_provider["Anthropic"]["lines"]}
+    assert anthropic["Haiku input"] == s.price_anthropic_haiku_input_per_mtok
+    assert anthropic["Opus output"] == s.price_anthropic_opus_output_per_mtok
+    # A million haiku input tokens must cost exactly the quoted per-MTok price.
+    assert pricing.anthropic_cost(
+        s, model="claude-haiku-4-5", input_tokens=1_000_000, output_tokens=0
+    ) == anthropic["Haiku input"]
+
+
+async def test_pricing_marks_free_tier_providers_as_free_not_unpriced(
+    client: httpx.AsyncClient, wire: Callable[[str], None]
+) -> None:
+    """A free-tier provider is stated as free — never left as an unpriced blank."""
+    wire("viewer")
+    rows = {p["provider"]: p for p in (await client.get("/api/v1/cost/pricing")).json()}
+    for name in ("PageSpeed", "Google"):
+        assert rows[name]["paid"] is False
+        assert rows[name]["lines"] and rows[name]["lines"][0]["amount"] == 0.0
+
+
+async def test_pricing_tracks_an_env_override(
+    client: httpx.AsyncClient, wire: Callable[[str], None], app: FastAPI
+) -> None:
+    """Re-pricing a provider by env must move the number on screen, with no deploy."""
+    from app.config import Settings, get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, app_env="dev", price_serper_per_query=0.004
+    )
+    wire("viewer")
+    rows = {p["provider"]: p for p in (await client.get("/api/v1/cost/pricing")).json()}
+    assert rows["Serper"]["lines"][0]["amount"] == 0.004
+
+
+async def test_pricing_requires_authentication(client: httpx.AsyncClient) -> None:
+    """Unit prices are internal cost data: no anonymous read."""
+    resp = await client.get("/api/v1/cost/pricing")
+    assert resp.status_code in (401, 403)
+
+
+async def test_no_dial_note_quotes_a_price(client: httpx.AsyncClient, wire: Callable[[str], None]) -> None:
+    """Dial notes describe WHAT a feature spends on, never HOW MUCH.
+
+    A price baked into a note string cannot track settings and goes stale silently
+    (the content dial read "~$0.90/pg" against a token-billed provider).
+    """
+    import re
+
+    wire("viewer")
+    for d in (await client.get("/api/v1/cost/dial")).json():
+        assert not re.search(r"\$\s*\d", d["note"]), f"dial {d['key']} note quotes a price: {d['note']}"

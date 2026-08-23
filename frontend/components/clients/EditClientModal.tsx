@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TIER_PRICE, type ClientRecord, type SubStatus, type SubTier } from "@/lib/data";
+import type { ClientRecord, SubStatus, SubTier } from "@/lib/data";
 import {
   useClientBusinessProfile, useSaveClientBusinessProfile, type ClientUpdate,
 } from "@/lib/hooks/clients";
@@ -159,7 +159,7 @@ export default function EditClientModal({
                   <span className="material-symbols-rounded tpl-ic">workspace_premium</span>
                   <select value={tier} onChange={(e) => setTier(e.target.value as SubTier)} aria-label="Plan tier">
                     {TIERS.map((t) => (
-                      <option key={t} value={t}>{t} — ${TIER_PRICE[t]}/mo</option>
+                      <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
                 </div>

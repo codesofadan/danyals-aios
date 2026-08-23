@@ -6,13 +6,20 @@ Ed25519 PRIVATE key (API-only); :mod:`app.core.auth` verifies it with the PUBLIC
 key under a strict ``["EdDSA"]`` allow-list. Claims are deliberately minimal and
 mirror the Supabase shape enough that the downstream user-load + RBAC are
 unchanged: ``sub`` (the user uuid), ``role``, plus the registered ``aud``/
-``iss``/``iat``/``exp``. Nothing sensitive rides in the token - authorization is
-re-derived server-side from the ``users`` row on every request.
+``iss``/``iat``/``exp``/``jti``. Nothing sensitive rides in the token -
+authorization is re-derived server-side from the ``users`` row on every request.
+
+``jti`` + ``iat`` are what make an otherwise self-contained, stateless token
+REVOCABLE before its own expiry (P0-7). Without them a signed-out or offboarded
+person's token stayed valid for its full multi-day life. See
+:mod:`app.services.token_denylist` for the two revocation mechanisms and for why
+that layer fails open while the Postgres-backed suspension check does not.
 """
 
 from __future__ import annotations
 
 import time
+import uuid
 
 import jwt
 
@@ -50,5 +57,15 @@ def issue_access_token(
         "iss": settings.local_jwt_issuer,
         "iat": now,
         "exp": now + lifetime,
+        # A unique id for THIS token, so a single session can be revoked without
+        # touching the person's other sessions (sign-out). Random, not derived:
+        # a `jti` computed from the user or the issue time would collide across
+        # simultaneous logins and let one sign-out kill another session.
+        #
+        # `iat` is load-bearing too, and not merely informational: it is what the
+        # per-user revocation epoch compares against to close every session
+        # opened before a password change or a suspension - one write instead of
+        # a server-side session table. See app/services/token_denylist.py.
+        "jti": uuid.uuid4().hex,
     }
     return jwt.encode(payload, private_pem, algorithm=JWT_ALGORITHM)

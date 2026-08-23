@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field
 
 from app.util.timefmt import relative_ago
 
-Provider = Literal["Serper", "DataForSEO", "Anthropic", "PageSpeed", "Places", "Voyage", "Google"]
+# The dial/cost-log provider vocabulary. "AuditEngine" is the local audit engine
+# itself: a paid COMPREHENSIVE run's spend is derived at runtime from the run's own
+# observables (tokens + Serper queries + Places calls), so it has no flat unit price -
+# see `provider_pricing` below and `app/services/pricing.audit_cost`.
+Provider = Literal[
+    "Serper", "DataForSEO", "Anthropic", "PageSpeed", "Places", "Voyage", "Google", "AuditEngine"
+]
 DialMode = Literal["api", "byhand", "off"]
 JobType = Literal["audit", "content", "backlinks"]
 
@@ -28,8 +34,17 @@ class DialFeatureMeta(BaseModel):
 # everything else is reference data merged in at response time.
 DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     DialFeatureMeta(key="tech_audit", label="Technical Audit", icon="troubleshoot", provider="DataForSEO", note="Live crawl + rank data", default_mode="api"),
+    # P0-2 - the PUBLIC free-audit funnel, on its OWN dial rather than sharing
+    # "tech_audit" with the paid audit. Two reasons it must be separate: the funnel
+    # is UNAUTHENTICATED (its abuse profile is nothing like an authenticated audit's),
+    # and an operator needs to be able to switch the lead magnet off during an abuse
+    # episode WITHOUT also disabling the paid product every client is paying for.
+    # A condensed free run makes no paid-provider call, so this dial is about
+    # AVAILABILITY and blast radius, not spend - but it still routes through the same
+    # gate, so the agency-global spend halt reaches it like everything else.
+    DialFeatureMeta(key="public_audit", label="Free Audit Funnel", icon="campaign", provider="AuditEngine", note="Public lead magnet — condensed, no paid providers", default_mode="api"),
     DialFeatureMeta(key="cwv", label="Core Web Vitals", icon="speed", provider="PageSpeed", note="Free tier — always on", default_mode="api"),
-    DialFeatureMeta(key="content", label="Content Pipeline", icon="article", provider="Anthropic", note="Claude drafting, ~$0.90/pg", default_mode="api"),
+    DialFeatureMeta(key="content", label="Content Pipeline", icon="article", provider="Anthropic", note="Claude drafting — billed per token", default_mode="api"),
     DialFeatureMeta(key="backlinks", label="Backlink Manager", icon="hub", provider="Serper", note="Paid — review before pull", default_mode="byhand"),
     # 7B-4 — citation/Web2 SUBMISSION (building new listings/posts) is a distinct
     # spend from "backlinks" (which meters MONITORING pulls + Web2 publish calls,
@@ -193,3 +208,132 @@ def merge_dial(stored_modes: dict[str, str]) -> list[DialFeatureResponse]:
             )
         )
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Provider unit pricing (GET /cost/pricing)
+# --------------------------------------------------------------------------- #
+# The UI used to render hardcoded unit prices ("$0.30 / search", "$0.75 / task").
+# Every one of them was wrong by two to three orders of magnitude against the
+# prices the cost gate actually bills at. These models expose the SAME
+# ``Settings`` values ``app.services.pricing`` computes real spend from, so an
+# operator reads the number the platform charges itself - and it moves when the
+# env var moves. No price is ever written in the frontend again.
+
+
+class ProviderPriceLine(BaseModel):
+    """One priced dimension of a provider (a provider may have several).
+
+    ``amount`` is USD. ``basis`` names what one ``amount`` buys, in the provider's
+    own billing unit - never rescaled for display, so the figure is checkable
+    against the provider's price sheet.
+    """
+
+    label: str
+    amount: float
+    basis: str
+
+
+class ProviderPricingResponse(BaseModel):
+    """Live unit pricing for one provider, with the settings key it came from.
+
+    ``paid`` distinguishes a provider that bills from one that is free-tier: a
+    free-tier provider still passes the cost gate (for spend visibility and dial
+    parity) but commits $0. ``source`` names the ``Settings`` field(s) behind the
+    numbers so any figure on screen is traceable to a configured value.
+    """
+
+    provider: str
+    paid: bool
+    source: str
+    lines: list[ProviderPriceLine]
+
+
+def provider_pricing(settings: Any) -> list[ProviderPricingResponse]:
+    """Build the live unit-price table from ``Settings``.
+
+    Ordered to match the dial. Anthropic carries six lines (three model tiers x
+    input/output) because that is genuinely how it bills - collapsing it to a
+    single "per page" figure is what produced the fabricated number this replaces.
+    """
+    return [
+        ProviderPricingResponse(
+            provider="Serper", paid=True, source="price_serper_per_query",
+            lines=[
+                ProviderPriceLine(
+                    label="SERP query", amount=settings.price_serper_per_query,
+                    basis="per query",
+                )
+            ],
+        ),
+        ProviderPricingResponse(
+            provider="DataForSEO", paid=True, source="price_dataforseo_per_call",
+            lines=[
+                ProviderPriceLine(
+                    label="API call", amount=settings.price_dataforseo_per_call,
+                    basis="per call",
+                )
+            ],
+        ),
+        ProviderPricingResponse(
+            provider="Anthropic", paid=True,
+            source="price_anthropic_*_per_mtok, price_web_search_per_search",
+            lines=[
+                ProviderPriceLine(label="Haiku input", amount=settings.price_anthropic_haiku_input_per_mtok, basis="per 1M tokens"),
+                ProviderPriceLine(label="Haiku output", amount=settings.price_anthropic_haiku_output_per_mtok, basis="per 1M tokens"),
+                ProviderPriceLine(label="Sonnet input", amount=settings.price_anthropic_sonnet_input_per_mtok, basis="per 1M tokens"),
+                ProviderPriceLine(label="Sonnet output", amount=settings.price_anthropic_sonnet_output_per_mtok, basis="per 1M tokens"),
+                ProviderPriceLine(label="Opus input", amount=settings.price_anthropic_opus_input_per_mtok, basis="per 1M tokens"),
+                ProviderPriceLine(label="Opus output", amount=settings.price_anthropic_opus_output_per_mtok, basis="per 1M tokens"),
+                ProviderPriceLine(label="Web search", amount=settings.price_web_search_per_search, basis="per search"),
+            ],
+        ),
+        ProviderPricingResponse(
+            provider="Places", paid=True, source="price_google_per_call",
+            lines=[
+                ProviderPriceLine(
+                    label="Places / geocode lookup", amount=settings.price_google_per_call,
+                    basis="per call",
+                )
+            ],
+        ),
+        ProviderPricingResponse(
+            provider="Voyage", paid=True, source="price_voyage_per_mtok",
+            lines=[
+                ProviderPriceLine(
+                    label="Embedding", amount=settings.price_voyage_per_mtok,
+                    basis="per 1M tokens",
+                )
+            ],
+        ),
+        ProviderPricingResponse(
+            provider="AuditEngine", paid=True,
+            source="derived at runtime — app/services/pricing.audit_cost",
+            # Deliberately NO price lines. A comprehensive audit's cost is whatever
+            # that particular run actually consumed (its reported token usage, Serper
+            # queries and Places calls); there is no per-run constant, and inventing
+            # one is exactly the "~$1.50 / run" figure this endpoint replaced. A free
+            # run costs 0 because it calls no paid provider.
+            lines=[],
+        ),
+        ProviderPricingResponse(
+            provider="ImageGen", paid=True, source="price_image_per_image",
+            lines=[
+                ProviderPriceLine(
+                    label="Generated image", amount=settings.price_image_per_image,
+                    basis="per image",
+                )
+            ],
+        ),
+        # Free-tier providers. They are gated for spend VISIBILITY, not because
+        # they bill; the gate commits $0 for them. Stated explicitly so the UI can
+        # say "free tier" as a fact rather than as an unpriced blank.
+        ProviderPricingResponse(
+            provider="PageSpeed", paid=False, source="free tier (no configured price)",
+            lines=[ProviderPriceLine(label="PageSpeed Insights", amount=0.0, basis="free tier")],
+        ),
+        ProviderPricingResponse(
+            provider="Google", paid=False, source="free tier (no configured price)",
+            lines=[ProviderPriceLine(label="Search Console + GA4", amount=0.0, basis="free tier")],
+        ),
+    ]

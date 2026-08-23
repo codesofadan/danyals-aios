@@ -75,14 +75,26 @@ jobs:
       # table x op correctness matrix (+ the auto-discovering pg_policies oracle),
       # the real-token route-contract suite, portal isolation, repo/SQL parity and
       # the vault round-trip - run against an EPHEMERAL local Postgres with the
-      # migrations applied. Both DSNs point at the throwaway superuser DB (the RLS
-      # pool SETs ROLE authenticated per request; the admin pool is BYPASSRLS),
-      # mirroring the local dev stack. The signing keypair + vault master key are
-      # minted fresh below. Nothing here is a real secret - the DB is created and
-      # dropped with the job; live-provider suites (Serper / Anthropic / Voyage /
-      # Pinecone / audit-engine) still auto-skip since their keys are unset.
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/aios_test
-      DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/aios_test
+      # migrations applied.
+      #
+      # THE DSNs MUST NAME THE REAL ROLES. `rls_connection` does NOT issue a
+      # `SET ROLE`: the RLS pool applies row-level security because it LOGS IN as
+      # `authenticated` (see app/db/database.py's module contract). Both DSNs
+      # previously pointed at the `postgres` SUPERUSER, under a comment claiming
+      # the pool "SETs ROLE authenticated per request" - which it does not. A
+      # superuser BYPASSES RLS unconditionally, FORCE or not, so every tenant-
+      # isolation proof in this job was running against a connection that could
+      # see everything. Eleven tests failed as a result, and this job has been red.
+      #
+      # `authenticated` and `service_role` are created by migration 0000; their
+      # passwords are set in the step below, after the migrations apply. Nothing
+      # here is a real secret - the DB is created and dropped with the job.
+      # Live-provider suites (Serper / Anthropic / Voyage / Pinecone /
+      # audit-engine) still auto-skip since their keys are unset.
+      DATABASE_URL: postgresql://authenticated:ci_authenticated_pw@localhost:5432/aios_test
+      DATABASE_ADMIN_URL: postgresql://service_role:ci_service_role_pw@localhost:5432/aios_test
+      # Superuser DSN for the migration step only (it must create roles/schemas).
+      MIGRATION_DSN: postgresql://postgres:postgres@localhost:5432/aios_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -96,8 +108,33 @@ jobs:
         run: |
           for f in ../db/migrations/*.sql; do
             echo "applying $f"
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+            psql "$MIGRATION_DSN" -v ON_ERROR_STOP=1 -f "$f"
           done
+
+      - name: Give the RLS roles a login password
+        # 0000 creates `authenticated` and `service_role` with LOGIN but no
+        # password, so the app's two pools cannot connect as them until this runs.
+        # This is what makes the RLS proofs in this job real: the authenticated
+        # pool is subject to row-level security, and service_role is BYPASSRLS.
+        run: |
+          psql "$MIGRATION_DSN" -v ON_ERROR_STOP=1 -c \
+            "alter role authenticated with login password 'ci_authenticated_pw';"
+          psql "$MIGRATION_DSN" -v ON_ERROR_STOP=1 -c \
+            "alter role service_role with login password 'ci_service_role_pw';"
+
+      - name: Prove RLS is actually in force for this job
+        # A guard on the guard. If a future change points DATABASE_URL back at a
+        # superuser, every isolation assertion below would pass VACUOUSLY (a
+        # BYPASSRLS connection sees all rows and denies nothing). Fail here
+        # instead, with a message that says why.
+        run: |
+          set -e
+          bypass=$(psql "$DATABASE_URL" -tAc "select rolbypassrls from pg_roles where rolname = current_user")
+          echo "RLS pool connects as: $(psql "$DATABASE_URL" -tAc 'select current_user') (bypassrls=$bypass)"
+          if [ "$bypass" != "f" ]; then
+            echo "::error::DATABASE_URL connects as a BYPASSRLS role. Every tenant-isolation test in this job would pass vacuously. Point it at the 'authenticated' role."
+            exit 1
+          fi
       - name: Mint an ephemeral EdDSA keypair + vault key (test-only, never a prod secret)
         run: |
           python - <<'PY' >> "$GITHUB_ENV"

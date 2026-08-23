@@ -27,3 +27,9 @@ tools/citation_handoffs.json
 wordpress-plugin.zip
 wordpress-plugin/aios-publisher.zip
 docs/deliverables/*.txt
+
+# Project comms / reference exports — MUST never enter the repo (SEC-017).
+# The WhatsApp export was moved to ../danyals-aios-project-reference/ on 2026-08-23.
+# It was never committed; this entry exists so it can never be added by accident.
+whatsapp chats, media and calls/
+*.opus

@@ -119,3 +119,54 @@ async def test_ip_limiter_handles_missing_client() -> None:
     redis = _FakeRedis()
     # A request with no ``.client`` (e.g. a test transport) must not error.
     assert await dep(request=_FakeRequest(None), redis=redis) is None  # type: ignore[call-arg]
+
+
+# --- fail-CLOSED posture (spend-causing unauthenticated routes) -------------
+# The default is fail-open, which is right where the limiter guards a caller who
+# is already bounded by authentication, permissions and budget caps. It is wrong
+# where the limiter is the ONLY control on an anonymous caller's ability to cause
+# real work: there, a Redis outage would silently remove the control entirely.
+
+
+@pytest.mark.unit
+async def test_ip_limiter_fails_closed_when_asked_to() -> None:
+    dep = rate_limit_ip("public_audit", limit=1, per_seconds=60, fail_closed=True)
+    redis: Any = _FakeRedis(raise_on="incr")
+    req: Any = _FakeRequest("9.9.9.9")
+    with pytest.raises(HTTPException) as exc:
+        await dep(request=req, redis=redis)  # type: ignore[call-arg]
+    # 503 (temporarily can't serve), NOT 429 (you asked too often) — the caller did
+    # nothing wrong, and the distinction matters to a client deciding how to retry.
+    assert exc.value.status_code == 503
+    assert exc.value.headers is not None and exc.value.headers.get("Retry-After")
+
+
+@pytest.mark.unit
+async def test_user_limiter_fails_closed_when_asked_to() -> None:
+    dep = rate_limit("audit_create", limit=1, per_seconds=60, fail_closed=True)
+    redis: Any = _FakeRedis(raise_on="incr")
+    with pytest.raises(HTTPException) as exc:
+        await dep(user=_user(), redis=redis)  # type: ignore[call-arg]
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.unit
+async def test_fail_closed_is_opt_in_not_the_default() -> None:
+    """Login must NEVER fail closed: a cache blip would lock every user out."""
+    dep = rate_limit_ip("auth_login", limit=1, per_seconds=60)
+    redis: Any = _FakeRedis(raise_on="incr")
+    req: Any = _FakeRequest("9.9.9.9")
+    assert await dep(request=req, redis=redis) is None  # type: ignore[call-arg]
+
+
+@pytest.mark.unit
+async def test_a_throttled_request_still_carries_retry_after() -> None:
+    dep = rate_limit_ip("public_audit", limit=1, per_seconds=30)
+    redis = _FakeRedis()
+    req: Any = _FakeRequest("5.5.5.5")
+    await dep(request=req, redis=redis)  # type: ignore[call-arg]
+    with pytest.raises(HTTPException) as exc:
+        await dep(request=req, redis=redis)  # type: ignore[call-arg]
+    assert exc.value.status_code == 429
+    assert exc.value.headers is not None
+    assert exc.value.headers["Retry-After"] == "30"

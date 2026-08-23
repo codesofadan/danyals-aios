@@ -1,14 +1,15 @@
 // ============================================================
-// AIOS · mock data layer
-// Swap these arrays for FastAPI / Postgres queries when the
-// backend is wired. Shapes mirror the data model in
-// aios/context-docs/ARCHITECTURE-AND-PLAN.md §8.
+// AIOS · shared client-side CATALOGUE + display metadata.
+//
+// This module holds ONLY static product catalogue data (role
+// templates, feature lists, report definitions) and presentational
+// metadata (palette, status labels, icons). It holds NO business
+// data: every client, member, task, activity row and metric is
+// fetched from the API through `lib/hooks/*`.
+//
+// Do not reintroduce seed arrays here. A number rendered to an
+// operator must come from the API, never from this file.
 // ============================================================
-
-export type AuditPoint = { w: string; v: number };
-export type TrafficPoint = { m: string; v: number };
-export type TeamMember = { nm: string; init: string; c: string; jobs: number };
-export type Client = { cn: string; cd: string; p: number };
 
 // Categorical palette — mirrors the Avant-Garde theme tokens (--c1…--c5)
 // so JS-drawn charts match the CSS-driven surfaces.
@@ -19,35 +20,6 @@ export const SERIES = {
   c4: "#4CC9F0", // cyan
   c5: "#FF4D9D", // magenta
 } as const;
-
-export const audits: AuditPoint[] = [
-  { w: "W1", v: 64 }, { w: "W2", v: 78 }, { w: "W3", v: 71 }, { w: "W4", v: 92 },
-  { w: "W5", v: 85 }, { w: "W6", v: 104 }, { w: "W7", v: 97 }, { w: "W8", v: 126 },
-  { w: "W9", v: 118 }, { w: "W10", v: 141 }, { w: "W11", v: 133 }, { w: "W12", v: 158 },
-];
-
-export const traffic: TrafficPoint[] = [
-  { m: "Aug", v: 214 }, { m: "Sep", v: 229 }, { m: "Oct", v: 238 }, { m: "Nov", v: 256 },
-  { m: "Dec", v: 247 }, { m: "Jan", v: 271 }, { m: "Feb", v: 284 }, { m: "Mar", v: 279 },
-  { m: "Apr", v: 298 }, { m: "May", v: 307 }, { m: "Jun", v: 312 }, { m: "Jul", v: 318 },
-];
-
-export const team: TeamMember[] = [
-  { nm: "Ayesha", init: "AY", c: SERIES.c1, jobs: 48 },
-  { nm: "Bilal", init: "BI", c: SERIES.c2, jobs: 41 },
-  { nm: "Hina", init: "HI", c: SERIES.c4, jobs: 37 },
-  { nm: "Usman", init: "US", c: SERIES.c3, jobs: 29 },
-  { nm: "Zoya", init: "ZO", c: SERIES.c5, jobs: 22 },
-];
-
-export const clients: Client[] = [
-  { cn: "NorthPeak Dental", cd: "Actionable audit", p: 92 },
-  { cn: "Lumen Realty", cd: "Content sprint", p: 78 },
-  { cn: "Verde Cafe", cd: "Technical audit", p: 64 },
-  { cn: "Atlas Legal", cd: "Onboarding", p: 45 },
-  { cn: "BrightHVAC", cd: "WordPress push", p: 83 },
-  { cn: "Coastline Fit", cd: "Local SEO", p: 57 },
-];
 
 // ============================================================
 // Client Info module — directory, growth, subscriptions,
@@ -90,70 +62,10 @@ export type ClientRecord = {
 };
 
 // Total active accounts on the platform, month over month.
-export type GrowthPoint = { m: string; v: number };
-// No fabricated growth series — a live analytics source is not wired yet.
-export const clientGrowth: GrowthPoint[] = [];
-
-// Plan pricing (USD / month) — drives MRR + subscription mix.
-export const TIER_PRICE: Record<SubTier, number> = { Starter: 290, Growth: 690, Scale: 1490 };
+// Subscription-tier accent colours (presentation only). The tier itself and a
+// client's MRR are real per-client columns served by GET /clients — there is no
+// hardcoded price table here, because a plan price is not a platform constant.
 export const TIER_COLOR: Record<SubTier, string> = { Starter: SERIES.c4, Growth: SERIES.c1, Scale: SERIES.c3 };
-
-// Aggregate subscription mix across the full 42-account base
-// (the directory below lists a featured/recent subset).
-// No fabricated subscription mix — billing data is not wired yet.
-export const subStatusMix: { status: SubStatus; label: string; count: number; c: string }[] = [];
-export const subTierMix: { tier: SubTier; count: number }[] = [];
-
-export const clientDirectory: ClientRecord[] = [
-  {
-    id: "cl-northpeak", cn: "NorthPeak Dental", industry: "Healthcare", sites: 2, since: "2023",
-    contact: { name: "Dr. Sana Malik", role: "Practice Owner", email: "sana@northpeakdental.com", init: "SM", c: SERIES.c1 },
-    tier: "Scale", status: "active", renews: "Aug 14, 2026", mrr: 1490,
-    portal: { admin: "admin@northpeakdental.com", pass: "Np!Dental#2026", seats: 6, twoFA: true, lastLogin: "2h ago" },
-  },
-  {
-    id: "cl-lumen", cn: "Lumen Realty", industry: "Real Estate", sites: 3, since: "2024",
-    contact: { name: "Hamza Iqbal", role: "Marketing Lead", email: "hamza@lumenrealty.co", init: "HI", c: SERIES.c2 },
-    tier: "Growth", status: "active", renews: "Sep 02, 2026", mrr: 690,
-    portal: { admin: "hamza@lumenrealty.co", pass: "Lumen$Realty7", seats: 4, twoFA: true, lastLogin: "1d ago" },
-  },
-  {
-    id: "cl-verde", cn: "Verde Cafe", industry: "Hospitality", sites: 1, since: "2025",
-    contact: { name: "Nadia Rehman", role: "Founder", email: "nadia@verdecafe.pk", init: "NR", c: SERIES.c5 },
-    tier: "Starter", status: "trial", renews: "Jul 21, 2026", mrr: 290,
-    portal: { admin: "nadia@verdecafe.pk", pass: "Verde@Cafe1", seats: 2, twoFA: false, lastLogin: "5h ago" },
-  },
-  {
-    id: "cl-atlas", cn: "Atlas Legal", industry: "Legal Services", sites: 1, since: "2025",
-    contact: { name: "Omar Sheikh", role: "Managing Partner", email: "omar@atlaslegal.com", init: "OS", c: SERIES.c4 },
-    tier: "Growth", status: "past_due", renews: "Jul 05, 2026", mrr: 690,
-    portal: { admin: "omar@atlaslegal.com", pass: "Atlas!Legal9", seats: 3, twoFA: true, lastLogin: "3d ago" },
-  },
-  {
-    id: "cl-brighthvac", cn: "BrightHVAC", industry: "Home Services", sites: 2, since: "2024",
-    contact: { name: "Farah Yousaf", role: "Operations Manager", email: "farah@brighthvac.com", init: "FY", c: SERIES.c3 },
-    tier: "Growth", status: "active", renews: "Oct 18, 2026", mrr: 690,
-    portal: { admin: "farah@brighthvac.com", pass: "Bright#HVAC22", seats: 5, twoFA: true, lastLogin: "6h ago" },
-  },
-  {
-    id: "cl-coastline", cn: "Coastline Fit", industry: "Fitness", sites: 1, since: "2025",
-    contact: { name: "Bilal Anwar", role: "Owner", email: "bilal@coastlinefit.com", init: "BA", c: SERIES.c2 },
-    tier: "Starter", status: "active", renews: "Nov 30, 2026", mrr: 290,
-    portal: { admin: "bilal@coastlinefit.com", pass: "Coast$Fit44", seats: 2, twoFA: false, lastLogin: "12h ago" },
-  },
-  {
-    id: "cl-meridian", cn: "Meridian Wealth", industry: "Finance", sites: 2, since: "2023",
-    contact: { name: "Zara Khan", role: "CMO", email: "zara@meridianwealth.com", init: "ZK", c: SERIES.c1 },
-    tier: "Scale", status: "active", renews: "Aug 27, 2026", mrr: 1490,
-    portal: { admin: "zara@meridianwealth.com", pass: "Merid!an88", seats: 8, twoFA: true, lastLogin: "40m ago" },
-  },
-  {
-    id: "cl-orchard", cn: "Orchard Pediatrics", industry: "Healthcare", sites: 1, since: "2026",
-    contact: { name: "Dr. Imran Ali", role: "Clinic Director", email: "imran@orchardpeds.com", init: "IA", c: SERIES.c5 },
-    tier: "Starter", status: "paused", renews: "—", mrr: 0,
-    portal: { admin: "imran@orchardpeds.com", pass: "Orchard@Peds3", seats: 2, twoFA: false, lastLogin: "18d ago" },
-  },
-];
 
 export type Ticket = {
   id: string;
@@ -164,9 +76,6 @@ export type Ticket = {
   status: "open" | "pending" | "resolved";
   ago: string;
 };
-
-// No fabricated tickets — the support feed is not wired into this view yet.
-export const tickets: Ticket[] = [];
 
 // ============================================================
 // Client report access — what each client is allowed to SEE.
@@ -249,20 +158,6 @@ export const reportBundles: ReportBundle[] = [
     color: SERIES.c3, grants: ["content_status", "keyword_map", "rank_tracker", "monthly_report"],
   },
 ];
-
-// Per-client report visibility, keyed by clientDirectory.id. This is
-// the map the client portal reads to decide what to render — a report
-// NOT in this list is hidden and its data is never returned.
-export const clientReportGrants: Record<string, string[]> = {
-  "cl-northpeak": ["audit_scores", "rank_tracker", "traffic", "core_web_vitals", "content_status", "milestones", "progress_dashboard", "monthly_report", "roi_summary"],
-  "cl-lumen": ["audit_scores", "rank_tracker", "traffic", "content_status", "keyword_map", "milestones", "monthly_report"],
-  "cl-verde": ["audit_scores", "rank_tracker", "local_seo", "monthly_report"],
-  "cl-atlas": ["progress_dashboard", "monthly_report", "milestones"],
-  "cl-brighthvac": ["audit_scores", "rank_tracker", "traffic", "content_status", "milestones", "progress_dashboard", "monthly_report"],
-  "cl-coastline": ["audit_scores", "rank_tracker", "local_seo", "monthly_report"],
-  "cl-meridian": ALL_REPORT_KEYS,
-  "cl-orchard": ["milestones", "monthly_report"],
-};
 
 // The payload the Add-Client wizard emits back to the directory.
 export type NewClient = {
@@ -353,17 +248,6 @@ export type TeamMemberRecord = {
   joined: string; // month + year
 };
 
-export const teamMembers: TeamMemberRecord[] = [
-  { id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1, title: "Founder / Super Admin", email: "danyal@qanry.com", role: "Owner", status: "active", activeTasks: 3, completed: 61, onTime: 98, utilization: 72, quality: 99, joined: "Jan 2023" },
-  { id: "u-ayesha", name: "Ayesha Raza", init: "AY", c: SERIES.c1, title: "Content Lead", email: "ayesha@qanry.com", role: "Manager", status: "active", activeTasks: 6, completed: 48, onTime: 94, utilization: 88, quality: 96, joined: "Mar 2023" },
-  { id: "u-bilal", name: "Bilal Anwar", init: "BI", c: SERIES.c2, title: "Technical SEO Specialist", email: "bilal@qanry.com", role: "Specialist", status: "active", activeTasks: 5, completed: 41, onTime: 91, utilization: 84, quality: 93, joined: "May 2023" },
-  { id: "u-hina", name: "Hina Shah", init: "HI", c: SERIES.c4, title: "Content Writer", email: "hina@qanry.com", role: "Specialist", status: "away", activeTasks: 4, completed: 37, onTime: 89, utilization: 76, quality: 95, joined: "Aug 2023" },
-  { id: "u-usman", name: "Usman Tariq", init: "US", c: SERIES.c3, title: "Backlink Analyst", email: "usman@qanry.com", role: "Analyst", status: "active", activeTasks: 3, completed: 29, onTime: 92, utilization: 68, quality: 90, joined: "Nov 2023" },
-  { id: "u-zoya", name: "Zoya Kamal", init: "ZO", c: SERIES.c5, title: "Local SEO Specialist", email: "zoya@qanry.com", role: "Specialist", status: "active", activeTasks: 4, completed: 22, onTime: 88, utilization: 71, quality: 92, joined: "Feb 2024" },
-  { id: "u-sara", name: "Sara Naveed", init: "SN", c: SERIES.c2, title: "Operations Admin", email: "sara@qanry.com", role: "Admin", status: "active", activeTasks: 2, completed: 34, onTime: 96, utilization: 63, quality: 97, joined: "Jun 2024" },
-  { id: "u-imran", name: "Imran Qureshi", init: "IQ", c: SERIES.c4, title: "Client Success", email: "imran@qanry.com", role: "Viewer", status: "invited", activeTasks: 0, completed: 0, onTime: 0, utilization: 0, quality: 0, joined: "Jul 2026" },
-];
-
 // --- Tasks ------------------------------------------------------------------
 export type TaskType = "Technical Audit" | "Actionable Audit" | "Content Sprint" | "Backlink Audit" | "Local SEO" | "Publishing";
 export type TaskPriority = "urgent" | "high" | "med" | "low";
@@ -409,17 +293,6 @@ export type DeadlineRequest = {
   createdAt: string;
 };
 
-export const tasks_seed: Task[] = [
-  { id: "J-2041", title: "Full technical crawl + CWV pass", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "high", status: "in_progress", due: "Jul 12", proofUrl: "" },
-  { id: "J-2039", title: "Service-page content sprint (6 pages)", client: "Lumen Realty", type: "Content Sprint", assignee: "u-hina", priority: "high", status: "in_progress", due: "Jul 14", proofUrl: "" },
-  { id: "J-2037", title: "Map-pack + NAP consistency fixes", client: "Verde Cafe", type: "Local SEO", assignee: "u-zoya", priority: "med", status: "todo", due: "Jul 15", proofUrl: "" },
-  { id: "J-2035", title: "Backlink profile + toxic-link sweep", client: "Meridian Wealth", type: "Backlink Audit", assignee: "u-usman", priority: "med", status: "review", due: "Jul 11", proofUrl: "" },
-  { id: "J-2032", title: "Actionable audit — per-page fixes", client: "Atlas Legal", type: "Actionable Audit", assignee: "u-bilal", priority: "urgent", status: "todo", due: "Jul 10", proofUrl: "" },
-  { id: "J-2030", title: "WordPress publish — 4 blog posts", client: "BrightHVAC", type: "Publishing", assignee: "u-ayesha", priority: "low", status: "review", due: "Jul 13", proofUrl: "" },
-  { id: "J-2028", title: "Local SEO audit + GBP categories", client: "Coastline Fit", type: "Local SEO", assignee: "u-zoya", priority: "low", status: "done", due: "Jul 08", proofUrl: "https://coastlinefit.example/blog/local-seo-report" },
-  { id: "J-2025", title: "Technical audit — second site", client: "NorthPeak Dental", type: "Technical Audit", assignee: "u-bilal", priority: "med", status: "done", due: "Jul 07", proofUrl: "https://northpeakdental.example/reports/tech-audit-2.pdf" },
-];
-
 // --- Activity log -----------------------------------------------------------
 export type ActivityKind = "task" | "member" | "audit" | "content" | "access" | "login" | "client";
 
@@ -444,19 +317,6 @@ export type Activity = {
   meta?: string; // client / context
   ago: string;
 };
-
-export const activity_seed: Activity[] = [
-  { id: "a-01", kind: "audit", actorInit: "BI", actorName: "Bilal Anwar", actorColor: SERIES.c2, action: "started a technical audit", target: "J-2041", meta: "NorthPeak Dental", ago: "8m ago" },
-  { id: "a-02", kind: "content", actorInit: "HI", actorName: "Hina Shah", actorColor: SERIES.c4, action: "submitted for review", target: "Service-page sprint", meta: "Lumen Realty", ago: "26m ago" },
-  { id: "a-03", kind: "access", actorInit: "DA", actorName: "Danyal Ahmed", actorColor: SERIES.c1, action: "granted publish access to", target: "Manager role", meta: "Access control", ago: "1h ago" },
-  { id: "a-04", kind: "task", actorInit: "AY", actorName: "Ayesha Raza", actorColor: SERIES.c1, action: "assigned", target: "J-2030 · Publishing", meta: "BrightHVAC", ago: "2h ago" },
-  { id: "a-05", kind: "member", actorInit: "DA", actorName: "Danyal Ahmed", actorColor: SERIES.c1, action: "invited", target: "Imran Qureshi", meta: "Viewer", ago: "3h ago" },
-  { id: "a-06", kind: "audit", actorInit: "US", actorName: "Usman Tariq", actorColor: SERIES.c3, action: "flagged 3 toxic links on", target: "J-2035", meta: "Meridian Wealth", ago: "4h ago" },
-  { id: "a-07", kind: "task", actorInit: "ZO", actorName: "Zoya Kamal", actorColor: SERIES.c5, action: "completed", target: "J-2028 · Local SEO", meta: "Coastline Fit", ago: "6h ago" },
-  { id: "a-08", kind: "login", actorInit: "SN", actorName: "Sara Naveed", actorColor: SERIES.c2, action: "signed in from", target: "Karachi, PK", ago: "7h ago" },
-  { id: "a-09", kind: "content", actorInit: "AY", actorName: "Ayesha Raza", actorColor: SERIES.c1, action: "approved 4 posts at the review gate for", target: "J-2030", meta: "BrightHVAC", ago: "9h ago" },
-  { id: "a-10", kind: "access", actorInit: "DA", actorName: "Danyal Ahmed", actorColor: SERIES.c1, action: "enabled 2FA requirement for", target: "all Admin logins", meta: "Security", ago: "1d ago" },
-];
 
 // ============================================================
 // Add Team Member — access model
@@ -545,40 +405,14 @@ export const roleTemplates: RoleTemplate[] = [
 // bundle. Reuses the RBAC matrix (rolePerms) and members above.
 // ============================================================
 
-// The signed-in operator (agency super-admin). Own-profile tab edits this.
-export type OperatorProfile = {
-  id: string;
-  name: string;
-  init: string;
-  c: string;
-  title: string;
-  email: string;
-  role: TeamRole;
-  twoFA: boolean;
-  phone: string;
-};
+// --- Settings wire contracts ------------------------------------------------
+// These types are the FRONTEND HALF OF A LOCKED API CONTRACT: backend
+// `SecurityPolicyResponse` and `WorkspaceSettingsResponse` are pinned to them
+// field-for-field by backend/tests/test_contract_lock.py. Change a field here
+// only together with its backend model. They carry NO default values on
+// purpose — every setting shown to an operator is the one the API returned.
 
-export const operatorProfile: OperatorProfile = {
-  id: "u-danyal", name: "Danyal Ahmed", init: "DA", c: SERIES.c1,
-  title: "Founder / Super Admin", email: "danyal@qanry.com", role: "Owner",
-  twoFA: true, phone: "+92 300 1234567",
-};
-
-// Login credentials, keyed by teamMembers.id. The Team Access tab
-// resets these; passwords are shown masked and revealed on demand.
-export type Credential = { pass: string; twoFA: boolean; mustReset: boolean; lastChanged: string };
-export const teamCredentials: Record<string, Credential> = {
-  "u-danyal": { pass: "Xg!Danyal#2026", twoFA: true, mustReset: false, lastChanged: "Jun 2026" },
-  "u-ayesha": { pass: "Ayesha@Content4", twoFA: true, mustReset: false, lastChanged: "May 2026" },
-  "u-bilal": { pass: "Bilal$Tech88", twoFA: false, mustReset: false, lastChanged: "Apr 2026" },
-  "u-hina": { pass: "Hina!Write21", twoFA: false, mustReset: true, lastChanged: "Feb 2026" },
-  "u-usman": { pass: "Usman#Links7", twoFA: true, mustReset: false, lastChanged: "Jun 2026" },
-  "u-zoya": { pass: "Zoya@Local55", twoFA: false, mustReset: false, lastChanged: "Mar 2026" },
-  "u-sara": { pass: "Sara!Ops2026", twoFA: true, mustReset: false, lastChanged: "Jul 2026" },
-  "u-imran": { pass: "Imran@Temp01", twoFA: false, mustReset: true, lastChanged: "—" },
-};
-
-// Platform-wide security policy (Security tab).
+// Platform-wide security policy (GET/PUT /settings/security).
 export type SecurityPolicy = {
   enforce2FA: boolean;
   strongPasswords: boolean;
@@ -590,31 +424,7 @@ export type SecurityPolicy = {
   auditLogging: boolean;
 };
 
-export const securityDefaults: SecurityPolicy = {
-  enforce2FA: true, strongPasswords: true, minPassLength: 12, rotationDays: 90,
-  sessionTimeout: 30, singleSession: false, ipAllowlist: false, auditLogging: true,
-};
-
-export const PASS_LENGTHS = [8, 10, 12, 16] as const;
-export const ROTATION_OPTIONS: { v: number; label: string }[] = [
-  { v: 30, label: "Every 30 days" }, { v: 60, label: "Every 60 days" },
-  { v: 90, label: "Every 90 days" }, { v: 180, label: "Every 180 days" }, { v: 0, label: "Never" },
-];
-export const SESSION_OPTIONS = [15, 30, 60, 120, 480];
-
-// Notification preferences (Notifications tab).
-export type NotifPref = { key: string; label: string; desc: string; icon: string; email: boolean; inApp: boolean };
-export const notificationDefaults: NotifPref[] = [
-  { key: "audit_done", label: "Audit completed", desc: "A free or paid audit finishes and the report is ready", icon: "fact_check", email: true, inApp: true },
-  { key: "content_review", label: "Content ready for review", desc: "A draft hits the review gate awaiting approval", icon: "rocket_launch", email: true, inApp: true },
-  { key: "new_ticket", label: "New support ticket", desc: "A client opens or escalates a support ticket", icon: "confirmation_number", email: true, inApp: true },
-  { key: "past_due", label: "Subscription past due", desc: "A client's renewal payment fails or lapses", icon: "payments", email: true, inApp: false },
-  { key: "member_login", label: "New sign-in", desc: "A team member signs in from a new device or location", icon: "login", email: false, inApp: true },
-  { key: "access_change", label: "Access changed", desc: "Roles or permissions are granted or revoked", icon: "admin_panel_settings", email: true, inApp: true },
-  { key: "weekly_digest", label: "Weekly digest", desc: "Monday summary of audits, jobs and client health", icon: "summarize", email: true, inApp: false },
-];
-
-// General workspace settings (Workspace tab).
+// General workspace settings (GET/PUT /settings/workspace).
 export type WorkspaceSettingsData = {
   agencyName: string;
   supportEmail: string;
@@ -625,19 +435,8 @@ export type WorkspaceSettingsData = {
   brandColor: string;
 };
 
-export const workspaceDefaults: WorkspaceSettingsData = {
-  agencyName: "AIOS", supportEmail: "support@qanry.com",
-  timezone: "Asia/Karachi (PKT)", language: "English (US)", weekStart: "Monday",
-  defaultTier: "Growth", brandColor: SERIES.c1,
-};
-
-export const TIMEZONES = [
-  "Asia/Karachi (PKT)", "Asia/Dubai (GST)", "Europe/London (GMT)",
-  "America/New_York (EST)", "America/Los_Angeles (PST)", "Asia/Singapore (SGT)",
-];
-export const LANGUAGES = ["English (US)", "English (UK)", "Urdu", "Arabic", "French", "Spanish"];
-export const BRAND_COLORS = [SERIES.c1, SERIES.c2, SERIES.c4, SERIES.c3, SERIES.c5];
-
+// Notification preferences (Notifications tab).
+export type NotifPref = { key: string; label: string; desc: string; icon: string; email: boolean; inApp: boolean };
 // ============================================================
 // Team Portal — the member-facing view (Module 3 · §5).
 // A signed-in specialist sees ONLY their own queue, deliverables,
@@ -646,25 +445,6 @@ export const BRAND_COLORS = [SERIES.c1, SERIES.c2, SERIES.c4, SERIES.c3, SERIES.
 // scoped to a single teamMembers.id. Swap for the /me + /tasks?
 // assignee=<id> API calls when the backend is wired.
 // ============================================================
-
-// The member currently signed in to the portal (demo default —
-// Bilal, an active Technical SEO Specialist with a live queue).
-// The portal lets you switch this to preview any member's view.
-export const PORTAL_MEMBER_ID = "u-bilal";
-
-// Features each member has been granted by the admin
-// (accessFeatures.key[]) — mirrors the Add-Member wizard output,
-// keyed by teamMembers.id. Drives the "My Access" view honestly.
-export const memberGrants: Record<string, string[]> = {
-  "u-danyal": ALL_KEYS, // Owner — everything on
-  "u-ayesha": ["content_pipeline", "publishing", "reporting", "task_board", "client_setup", "client_onboarding"], // Content Lead
-  "u-bilal": ["technical_audit", "reporting", "task_board", "data_import"], // Technical SEO
-  "u-hina": ["content_pipeline", "reporting", "task_board"], // Content Writer
-  "u-usman": ["technical_audit", "reporting", "task_board"], // Backlink Analyst
-  "u-zoya": ["content_pipeline", "reporting", "task_board", "client_setup"], // Local SEO
-  "u-sara": ["reporting", "task_board", "client_onboarding", "client_setup", "data_import", "billing"], // Operations Admin
-  "u-imran": ["reporting"], // Client Success (Viewer, invited)
-};
 
 // Roles allowed to sign off the content review checkpoint.
 export const CAN_REVIEW: TeamRole[] = ["Owner", "Admin", "Manager"];
@@ -679,23 +459,62 @@ export const TASK_ACTION: Record<TaskType, { run: string; icon: string; deliver:
   "Publishing": { run: "Open publisher", icon: "rocket_launch", deliver: "Publish live" },
 };
 
-// Portal's frame of reference for "due" math — matches the demo
-// clock (today = Jul 10, 2026). Parses the "Mon DD" due strings
-// on tasks_seed into an at-a-glance urgency without a real Date.
+// --- Due-date urgency -------------------------------------------------------
+// Computed against the REAL clock. It previously compared every due date to a
+// hardcoded demo "today" (Jul 10, 2026), so every "due today / Nd overdue" label
+// in the portal was fabricated. Accepts either an ISO date (`YYYY-MM-DD`,
+// authoritative) or the legacy year-less display string (`"Jul 12"`), for which
+// the year is inferred as the nearest one — so a December task read in January
+// is 3 weeks late, not 11 months early.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-export const PORTAL_TODAY = { m: 6, d: 10 }; // month index 6 = Jul
+const MS_PER_DAY = 86_400_000;
+
+/** Local midnight for `d` — so day deltas are whole days, not partial ones. */
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Parse a due string to a local-midnight Date, or null when unparseable. */
+export function parseDue(due: string, now: Date = new Date()): Date | null {
+  const raw = (due || "").trim();
+  if (!raw) return null;
+
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (iso) {
+    const dt = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const short = /^([A-Za-z]{3})\s+(\d{1,2})$/.exec(raw);
+  if (!short) return null;
+  const m = MONTHS.indexOf(short[1][0].toUpperCase() + short[1].slice(1, 3).toLowerCase());
+  const d = parseInt(short[2], 10);
+  if (m < 0 || Number.isNaN(d) || d < 1 || d > 31) return null;
+
+  // Year-less input: pick whichever of {last, this, next} year lands closest to
+  // today, so the label never silently jumps ~12 months across a year boundary.
+  const today = startOfDay(now);
+  let best: Date | null = null;
+  for (const y of [today.getFullYear() - 1, today.getFullYear(), today.getFullYear() + 1]) {
+    const cand = new Date(y, m, d);
+    if (cand.getMonth() !== m) continue; // e.g. "Feb 30" in a non-leap year
+    if (best === null || Math.abs(+cand - +today) < Math.abs(+best - +today)) best = cand;
+  }
+  return best;
+}
 
 export type DueInfo = { label: string; days: number; tone: "overdue" | "today" | "soon" | "ok" };
 
-export function dueInfo(due: string): DueInfo {
-  const [mon, dayStr] = due.trim().split(/\s+/);
-  const m = MONTHS.indexOf(mon);
-  const d = parseInt(dayStr, 10);
-  if (m < 0 || Number.isNaN(d)) return { label: due, days: 99, tone: "ok" };
-  // crude day-of-year delta — fine within the demo's July window.
-  const days = (m - PORTAL_TODAY.m) * 30 + (d - PORTAL_TODAY.d);
+/** Whole-day urgency for a due date, measured from the real current date. */
+export function dueInfo(due: string, now: Date = new Date()): DueInfo {
+  const target = parseDue(due, now);
+  // Unparseable / unset: show it verbatim and sort it last. Never guess.
+  if (target === null) return { label: (due || "").trim() || "No due date", days: 99, tone: "ok" };
+
+  const days = Math.round((+target - +startOfDay(now)) / MS_PER_DAY);
+  const label = `${MONTHS[target.getMonth()]} ${String(target.getDate()).padStart(2, "0")}`;
   if (days < 0) return { label: `${Math.abs(days)}d overdue`, days, tone: "overdue" };
   if (days === 0) return { label: "Due today", days, tone: "today" };
   if (days <= 2) return { label: `Due in ${days}d`, days, tone: "soon" };
-  return { label: `Due ${due}`, days, tone: "ok" };
+  return { label: `Due ${label}`, days, tone: "ok" };
 }

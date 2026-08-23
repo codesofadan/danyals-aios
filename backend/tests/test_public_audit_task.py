@@ -23,6 +23,8 @@ class FakeStore:
         self.row = row
         self.updates: list[dict[str, Any]] = []
         self.costs: list[float] = []
+        self.evaluated: list[float] = []
+        self.gate = GateDecision("call", cost=0.0)
 
     def load(self, public_audit_id: str) -> dict[str, Any] | None:
         return self.row
@@ -32,10 +34,14 @@ class FakeStore:
         if self.row is not None:
             self.row.update(fields)
 
+    # The gate verdict this store returns. `execute_public_audit` DOES call
+    # `evaluate` now: the funnel is pre-flighted against the `public_audit` dial
+    # and the agency-global spend halt before the engine is launched.
+    gate: GateDecision = GateDecision("call", cost=0.0)
+
     def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
-        # Public audits are always Free ($0) and never gated; execute_public_audit
-        # never calls this. Present only to satisfy the AuditStore protocol.
-        return GateDecision("call", cost=0.0)
+        self.evaluated.append(cost)
+        return self.gate
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         self.costs.append(cost)
@@ -140,3 +146,121 @@ def test_public_task_is_registered() -> None:
     celery_import = __import__("workers.celery_app", fromlist=["celery_app"])
     celery_import.celery_app.loader.import_default_modules()
     assert "run_public_audit" in celery_import.celery_app.tasks
+
+
+# --------------------------------------------------------------------------- #
+# P0-2 · the funnel is gated, and its cost is DERIVED
+# --------------------------------------------------------------------------- #
+
+
+def test_the_gate_is_consulted_before_the_engine_is_launched() -> None:
+    """The public path used to be the one place that could reach a provider
+    without the gate ever seeing it: `evaluate` returned an unconditional
+    ``call``. It must now be asked, on every run, before any work starts."""
+    store = FakeStore(_row())
+    launched: list[str] = []
+
+    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+        launched.append(url)
+        return AuditRunResult(ok=True, run_uuid="u-1", artifact_dir="/a", score=70, mode="free")
+
+    execute_public_audit(store, _settings(), "pa-1", runner=_runner)  # type: ignore[arg-type]
+    assert store.evaluated, "the gate was never consulted"
+    assert launched == ["https://example.com"]
+
+
+def test_a_spend_halt_stops_the_funnel_without_running_the_engine() -> None:
+    """The agency-global kill-switch must reach the free funnel like everything else."""
+    store = FakeStore(_row())
+    store.gate = GateDecision("blocked_halt", reason="API spend is halted")
+    launched: list[str] = []
+
+    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+        launched.append(url)
+        raise AssertionError("the engine must not run while spend is halted")
+
+    out = execute_public_audit(store, _settings(), "pa-1", runner=_runner)  # type: ignore[arg-type]
+    assert out["status"] == "blocked"
+    assert launched == []
+    assert store.costs == []  # nothing spent, so nothing logged
+    # The row carries an honest reason, never a half-finished "done".
+    assert store.row is not None and store.row["status"] == "failed"
+    assert "halted" in store.row["error"]
+
+
+def test_an_off_dial_stops_the_funnel_without_running_the_engine() -> None:
+    """An operator switching the lead magnet off during an abuse episode."""
+    store = FakeStore(_row())
+    store.gate = GateDecision("skip", reason="feature dial is off")
+
+    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+        raise AssertionError("the engine must not run while the dial is off")
+
+    out = execute_public_audit(store, _settings(), "pa-1", runner=_runner)  # type: ignore[arg-type]
+    assert out["status"] == "blocked"
+    assert store.row is not None and store.row["status"] == "failed"
+
+
+def test_the_committed_cost_is_derived_from_the_engines_reported_mode() -> None:
+    """A free run logs $0 BECAUSE the run reported ``mode="free"``.
+
+    The defect this replaces was a literal `0.0` committed regardless of what the
+    engine actually did — which is how a run with Serper, Places, citations and
+    PSI enabled recorded $0.00.
+    """
+    store = FakeStore(_row())
+
+    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+        return AuditRunResult(
+            ok=True, run_uuid="u-1", artifact_dir="/a", score=70,
+            mode="free", pages_crawled=12,
+        )
+
+    execute_public_audit(store, _settings(), "pa-1", runner=_runner)  # type: ignore[arg-type]
+    assert store.costs == [0.0]
+
+
+def test_a_funnel_that_did_paid_work_records_the_real_cost_not_zero() -> None:
+    """The regression test for the original defect.
+
+    If anything ever re-widens this path, the ledger must show the money. Proven
+    by handing the worker a run that reports paid work and asserting the committed
+    figure is the REAL computed cost, not the previous hardcoded zero.
+    """
+    from app.services import pricing
+
+    store = FakeStore(_row())
+    settings = _settings()
+
+    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+        return AuditRunResult(
+            ok=True, run_uuid="u-1", artifact_dir="/a", score=70,
+            mode="paid", pages_crawled=40,
+            usage={"serper_queries": 25, "places_calls": 10,
+                   "input_tokens": 50_000, "output_tokens": 8_000,
+                   "model": "claude-haiku-4-5"},
+        )
+
+    execute_public_audit(store, settings, "pa-1", runner=_runner)  # type: ignore[arg-type]
+    expected = pricing.audit_cost(
+        settings, pages_crawled=40, mode="paid",
+        usage={"serper_queries": 25, "places_calls": 10,
+               "input_tokens": 50_000, "output_tokens": 8_000,
+               "model": "claude-haiku-4-5"},
+    )
+    assert expected > 0, "the fixture must represent real spend for this test to mean anything"
+    assert store.costs == [expected]
+
+
+def test_an_engine_that_reports_no_mode_is_priced_as_what_we_asked_for() -> None:
+    """A run that dies before writing run.json must not be charged for a 21-agent
+    fan-out that ``--mode free`` makes impossible — that is a fabricated cost in
+    the other direction."""
+    store = FakeStore(_row())
+
+    def _runner(cfg: AuditEngineConfig, *, url: str, tier: str) -> AuditRunResult:
+        # ok=False but a run_uuid was minted: the engine started, then failed.
+        return AuditRunResult(ok=False, run_uuid="u-1", error="boom", mode="", pages_crawled=0)
+
+    execute_public_audit(store, _settings(), "pa-1", runner=_runner)  # type: ignore[arg-type]
+    assert store.costs == [0.0]

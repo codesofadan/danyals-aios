@@ -441,7 +441,15 @@ def _matrix_cases(env: Any) -> list[dict[str, Any]]:
 
     valid_client_body = {"cn": "Neg Co"}
     valid_site_body = {"domain": "neg.example"}
-    valid_portal_user = {"email": f"neg-{env['tag']}@example.com", "name": "Neg", "password": _PASSWORD}
+    # `username` is REQUIRED by PortalUserRequest and was missing here, so this
+    # body could only ever produce a 422 — which is what masked the stale 403
+    # expectation below behind a validation error instead of an authz result.
+    valid_portal_user = {
+        "email": f"neg-{env['tag']}@example.com",
+        "name": "Neg",
+        "username": f"neg-{env['tag']}",
+        "password": _PASSWORD,
+    }
     valid_audit_body = {"client_id": t, "url": _PUBLIC_URL, "tier": "Free", "types": ["technical"]}
     valid_task_body = {
         "title": "Neg",
@@ -480,7 +488,21 @@ def _matrix_cases(env: Any) -> list[dict[str, Any]]:
         c("clients.delete.specialist", "specialist", "DELETE", f"{v}/clients/{missing}", 403),
         c("clients.sites.owner", "owner", "GET", f"{v}/clients/{t}/sites", 200, shape=SiteResponse, is_list=True),
         c("clients.sites.post.specialist", "specialist", "POST", f"{v}/clients/{t}/sites", 403, body=valid_site_body),
-        c("clients.portalusers.admin", "admin", "POST", f"{v}/clients/{t}/portal-users", 403, body=valid_portal_user),
+        # Provisioning a client's PORTAL login is gated by `manage_clients`, NOT by
+        # owner — deliberately, so the Add-Client wizard's final step cannot 403 for
+        # the admin/manager who was just allowed to create the client (see
+        # `create_portal_user`). It is not an escalation: the role is fixed to
+        # `client` and the tenant is pinned from the PATH, so this endpoint can
+        # neither mint a staff account nor point a login at another tenant.
+        # This case previously expected 403 and shipped an INVALID body, so it
+        # asserted neither the permission nor the shape.
+        c("clients.portalusers.admin", "admin", "POST", f"{v}/clients/{t}/portal-users", 201,
+          shape=MemberResponse, body=valid_portal_user),
+        # The boundary that actually matters: a role WITHOUT `manage_clients` is
+        # refused — and refused at the authz gate, before the body is even read.
+        c("clients.portalusers.specialist", "specialist", "POST", f"{v}/clients/{t}/portal-users", 403,
+          body={**valid_portal_user, "email": f"neg-spec-{env['tag']}@example.com",
+                "username": f"neg-spec-{env['tag']}"}),
         c("sites.delete.specialist", "specialist", "DELETE", f"{v}/sites/{missing}", 403),
         # --- vault ---
         c("vault.list.owner", "owner", "GET", f"{v}/vault/keys", 200, shape=VaultKeyResponse, is_list=True),

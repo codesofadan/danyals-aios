@@ -123,6 +123,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // Tell the SERVER first, then clear locally.
+    //
+    // Sign-out used to be purely client-side: this cleared `localStorage` and the
+    // bearer token itself stayed valid for its full multi-day life, so anyone who
+    // had copied it kept working access. POST /auth/logout revokes that specific
+    // token by its `jti` (the person's other sessions are untouched).
+    //
+    // Fire-and-forget on purpose: the local session is cleared either way, so a
+    // network failure can never trap someone in a signed-in state they are trying
+    // to leave. The token is still bounded by its own expiry in that case.
+    void api.post("/auth/logout", {}).catch(() => undefined);
     clearSession();
     persist(null);
   }, [persist]);

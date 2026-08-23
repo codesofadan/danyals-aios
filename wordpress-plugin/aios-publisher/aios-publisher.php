@@ -1,13 +1,11 @@
 <?php
 /**
  * Plugin Name:       AIOS Publisher
- * Plugin URI:        https://xegents.ai/aios-publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
  * Version:           1.7.0
  * Requires at least: 5.6
  * Requires PHP:      7.2
- * Author:            Xegents AI
- * Author URI:        https://xegents.ai
+ * Author:            AIOS
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       aios-publisher

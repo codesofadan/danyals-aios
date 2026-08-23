@@ -17,12 +17,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ClientBudget, CostEntry, DialFeature, DialMode } from "@/lib/cost";
+import type { ClientBudget, CostEntry, DialFeature, DialMode, ProviderPricing } from "@/lib/cost";
 
 export const BUDGETS_KEY = ["cost", "budgets"] as const;
 export const DIAL_KEY = ["cost", "dial"] as const;
 export const COST_LOG_KEY = ["cost", "log"] as const;
 export const SPEND_STOP_KEY = ["cost", "spend-stop"] as const;
+export const PRICING_KEY = ["cost", "pricing"] as const;
 
 // The recent-window size the stat cards (provider breakdown / heatmap / jobs count)
 // aggregate over. The cost-log TABLE paginates independently (useCostLogPage).
@@ -33,6 +34,20 @@ export function useBudgets() {
   return useQuery({
     queryKey: BUDGETS_KEY,
     queryFn: () => api.get<ClientBudget[]>("/cost/budgets"),
+  });
+}
+
+/** Live per-provider unit prices (GET /cost/pricing).
+ *
+ * The prices are read from server settings, so they change only on a deploy or
+ * an env change — cached long and never refetched on focus. This is the ONLY
+ * place a unit price enters the UI; nothing in `lib/cost.ts` hardcodes one. */
+export function useProviderPricing() {
+  return useQuery({
+    queryKey: PRICING_KEY,
+    queryFn: () => api.get<ProviderPricing[]>("/cost/pricing"),
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }
 

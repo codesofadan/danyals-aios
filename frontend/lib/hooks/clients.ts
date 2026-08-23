@@ -7,7 +7,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
-  TIER_PRICE,
   type ClientRecord,
   type NewClient,
   type SubStatus,
@@ -23,8 +22,9 @@ export const TICKETS_KEY = ["tickets"] as const;
  * NAP is a separate table (client_business_profiles, 0051); it rides in the POST body as
  * `business` and is persisted alongside the client. Defined here (not in the reserved
  * data.ts) so the wizard can carry it without changing the shared NewClient shape. */
-// `mrr` is the free monthly amount the wizard collects (any value); when omitted we
-// fall back to the tier's preset price (TIER_PRICE) for older callers.
+// `mrr` is the monthly amount the wizard collects (any value). There is NO
+// tier->price fallback: a client's MRR is a real figure an operator enters,
+// never one the UI invents.
 export type NewClientInput = NewClient & { nap?: ClientBusinessProfileInput; mrr?: number };
 
 export const clientBusinessProfileKey = (clientId: string) =>
@@ -126,8 +126,8 @@ export function useSaveGrants() {
  * Create a client, then grant its initial report set. The wizard emits a `NewClient`;
  * the backend `POST /clients` takes a NESTED {contact, portal} shape and does NOT
  * accept report grants (that is a separate PUT) — and it never persists the portal
- * password. MRR is derived client-side from the tier (TIER_PRICE), since the wizard
- * collects the tier, not a dollar amount.
+ * password. MRR is whatever the operator entered; an omitted amount is persisted
+ * as 0 (unknown), never back-filled from a hardcoded tier price.
  *
  * Third step: the wizard's step-3 "temporary password" is generated client-side and
  * shown to the operator — it only WORKS if it's also sent to POST /clients/{id}/
@@ -144,7 +144,7 @@ export function useCreateClient() {
         cn: input.cn,
         industry: input.industry,
         tier: input.tier,
-        mrr: input.mrr ?? TIER_PRICE[input.tier],
+        mrr: input.mrr ?? 0,
         contact: { name: input.contactName, email: input.contactEmail },
         portal: { admin: input.adminLogin },
         // The NAP the wizard collected (persisted into client_business_profiles); an

@@ -93,6 +93,11 @@ class AuditEngineConfig:
     timeout_seconds: int = 1500
     max_pages: int = 100
     profile: str = "general"
+    # The PUBLIC free funnel crawls a CONDENSED slice, not the full breadth
+    # (DECISIONS_LOG D-1: "Free (condensed, ~10-15 pages, public lead magnet)").
+    # Kept separate from `max_pages` so tuning the paid audit's depth can never
+    # silently widen an unauthenticated, unbilled crawl.
+    free_max_pages: int = 15
 
 
 @dataclass(frozen=True)
@@ -158,15 +163,9 @@ def build_argv(
           GEO; the engine has no per-team flag, so agents are all-or-nothing).
         - ``strategy`` -> ``--ai-narrative on`` (the strategy recommendation prose).
 
-    ``comprehensive=False`` (the PUBLIC free-audit funnel) is now the COMPREHENSIVE
-    lead-gen audit: every dimension runs (on-page + technical + the GEO/AI-search
-    checks are deterministic and always run) and the now-wired paid providers are
-    turned ON so off-page, Local SEO, GEO, and Strategy carry REAL data. It runs
-    ``--mode auto`` (degrade-safe: a missing key skips that integration silently),
-    ``--profile local`` (unlocks Places + citations + the local analyzers - the
-    engine gates them behind profile=local), ``--serper --places --citations
-    --psi`` on, and agents + narrative OFF to bound cost. ``--no-moz`` always
-    (Moz needs a separate paid key, out of scope). See the COST NOTE below.
+    ``comprehensive=False`` (the PUBLIC free-audit funnel) is the CONDENSED,
+    GENUINELY FREE lead magnet - ``--mode free``. See the FREE FUNNEL note below.
+    ``--no-moz`` always (Moz needs a separate paid key, out of scope).
     """
     base = [
         "-m", "audit_engine.cli.main", "full", domain,
@@ -208,30 +207,60 @@ def build_argv(
         )
         argv += ["--ai-narrative", "on"] if "strategy" in selected else ["--ai-narrative", "off"]
         return argv
-    # PUBLIC free-audit funnel (comprehensive=False): the comprehensive lead-gen
-    # audit. On-page + technical + the GEO/AI-search checks always run
-    # deterministically; the now-wired paid providers are turned ON so off-page,
-    # Local SEO, GEO, and Strategy carry REAL data. ``--mode auto`` is
-    # degrade-safe: any provider whose key is absent returns a stub and is
-    # skipped SILENTLY - the section still renders, the run never crashes.
-    # ``--profile local`` unlocks Places + citations + the local analyzers (the
-    # engine gates those behind profile=local), so the Local SEO section and the
-    # off-page citation snapshot get real data. Agents + AI narrative stay OFF to
-    # bound cost/time; the deterministic checks + wired APIs already fill all six
-    # report sections (the engine's always-on A5 GEO analyst still fires when an
-    # Anthropic key is present).
+    # ---------------------------------------------------------------------- #
+    # PUBLIC free-audit funnel (comprehensive=False)
+    # ---------------------------------------------------------------------- #
+    # This path is UNAUTHENTICATED. Anyone on the internet can trigger it with an
+    # email address, so whatever it spends per run is multiplied by whatever
+    # volume an abuser chooses. It runs ``--mode free``.
     #
-    # COST NOTE: this path is NO LONGER $0. Each public/free audit now spends on
-    # Serper (SERP + citation discovery) and Google Places (when the business
-    # resolves) per run. This is intentional - a comprehensive lead-generation
-    # audit - but the owner should know the free funnel is now a metered cost.
-    # A missing provider key simply skips that spend and degrades the section.
-    engine_mode = "paid" if mode == "paid" else "auto"
+    # WHAT THIS REPLACED, and why (P0-2 / AUD-001 / AUD-002 / MT-005 / ADM-026):
+    # it previously forced ``engine_mode = "auto"`` with ``--serper --places
+    # --citations --psi`` and ``--profile local``, i.e. the caller asked for
+    # ``mode="free"`` and this function silently UPGRADED it to a paid-provider
+    # run. Combined with a hardcoded ``0.0`` in the worker's cost commit, the
+    # platform spent real Serper and Google Places money on every anonymous
+    # request and recorded $0.00 against it - a denial-of-wallet vector with no
+    # ledger entry to notice it by.
+    #
+    # ``--mode free`` is the ENGINE-SIDE guarantee, not merely a caller-side
+    # intention: the CLI hard-clears psi/moz/serper/places/citations after
+    # parsing, so no future flag added here can reintroduce paid spend on this
+    # path. Belt and braces, the paid flags are also passed explicitly off.
+    #
+    # Because the engine then reports ``mode="free"`` in run.json,
+    # ``pricing.audit_cost`` returns 0.0 from the run's OWN reported mode. The
+    # zero in the cost ledger is therefore DERIVED and true, not asserted - and
+    # if this path is ever re-widened to a paid mode, the recorded cost becomes
+    # non-zero automatically instead of silently staying at zero.
+    #
+    # SCOPE (DECISIONS_LOG D-1): free = CONDENSED (~10-15 pages). The full
+    # multi-agent narrative run is the paid, authenticated product.
+    #
+    # KNOWN ENGINE INCONSISTENCY: the engine's own ``--mode`` help text says free
+    # mode keeps "free PSI (rate-limited)", but the code sets ``psi = False``.
+    # PageSpeed is genuinely free-tier, so a condensed free audit could carry
+    # Core Web Vitals. Not changed here: the audit engine is a separate product
+    # with its own CI and is explicitly out of the recovery's change scope.
+    # `mode` is HONOURED here, never overridden. The bug this replaced was
+    # precisely a silent override in this spot - the caller asked for "free" and
+    # got "auto" with every provider on. Hardcoding "free" instead would be the
+    # same mistake mirrored: a caller asking for "paid" would be silently
+    # downgraded. The light path is public-only today, but the function stays a
+    # faithful function of its arguments.
+    paid = mode == "paid"
+    provider_flags = (
+        ["--psi", "--serper", "--places", "--citations"]
+        if paid
+        else ["--no-psi", "--no-serper", "--no-places", "--no-citations"]
+    )
     return [
         "-m", "audit_engine.cli.main", "full", domain,
-        "--profile", "local", "--max-pages", str(max_pages), "--no-moz",
-        "--mode", engine_mode,
-        "--psi", "--serper", "--places", "--citations",
+        "--profile", profile, "--max-pages", str(max_pages), "--no-moz",
+        "--mode", "paid" if paid else "free",
+        *provider_flags,
+        # No AI fan-out on the light path in either mode: the 21 specialist agents
+        # and the narrative are the comprehensive (authenticated) product.
         "--agents", "off", "--ai-narrative", "off",
     ]
 
@@ -306,14 +335,18 @@ def run_audit(
         return AuditRunResult(ok=False, error="audit engine interpreter not found")
 
     mode = "paid" if (tier == "paid" or comprehensive) else "free"
+    # The public funnel crawls the condensed breadth; the authenticated audit
+    # keeps the full one. Selected here (not inside build_argv) so the argv
+    # builder stays a pure function of its arguments.
+    pages = cfg.max_pages if comprehensive else cfg.free_max_pages
     argv = build_argv(
-        domain=url, mode=mode, max_pages=cfg.max_pages, profile=cfg.profile,
+        domain=url, mode=mode, max_pages=pages, profile=cfg.profile,
         comprehensive=comprehensive, types=types,
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}
     started = time.monotonic()
-    logger.info("audit_engine_start", mode=mode, max_pages=cfg.max_pages)
+    logger.info("audit_engine_start", mode=mode, max_pages=pages)
     try:
         proc = subprocess.run(
             [cfg.engine_python, *argv],

@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "aios-backend"
 version = "0.1.0"
-description = "AIOS platform backend - FastAPI API + Celery workers (Xegents AI)"
+description = "AIOS platform backend - FastAPI API + Celery workers"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-authors = [{ name = "Xegents AI", email = "business.zainsaeed@gmail.com" }]
+authors = [{ name = "AIOS" }]
 dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",

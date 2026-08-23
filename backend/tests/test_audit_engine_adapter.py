@@ -30,26 +30,53 @@ def test_domain_to_slug() -> None:
     assert domain_to_slug("example.com") == "example.com"
 
 
-def test_build_argv_public_is_comprehensive_with_real_data() -> None:
-    # The PUBLIC free-audit path (comprehensive=False, tier=free -> mode="free")
-    # is now the comprehensive lead-gen run: degrade-safe --mode auto with the
-    # wired providers ON, profile local (unlocks Places/citations), agents off.
-    argv = build_argv(domain="example.com", mode="free", max_pages=20, profile="general")
+def test_build_argv_public_funnel_is_condensed_and_spends_nothing() -> None:
+    """P0-2: the UNAUTHENTICATED funnel must reach no paid provider.
+
+    This test previously asserted the DEFECT: it required ``--mode auto`` with
+    ``--serper --places --citations --psi`` on, because the funnel had been
+    widened to a "comprehensive lead-gen audit" without anyone costing it. The
+    worker then committed a hardcoded $0.00, so the spend was invisible. Per
+    DECISIONS_LOG D-1 the free audit is CONDENSED and genuinely free.
+    """
+    argv = build_argv(domain="example.com", mode="free", max_pages=15, profile="general")
     assert argv[:4] == ["-m", "audit_engine.cli.main", "full", "example.com"]
-    # degrade-safe auto mode (never "free", which would disable every provider)
-    assert argv[argv.index("--mode") + 1] == "auto"
-    # profile forced local so Places + citations + local analyzers unlock
-    assert argv[argv.index("--profile") + 1] == "local"
-    # the now-wired providers are ON (real off-page/local/technical data)
-    for flag in ("--psi", "--serper", "--places", "--citations", "--no-moz"):
-        assert flag in argv
-    # never disable the wired providers for the public path
-    for flag in ("--no-serper", "--no-places", "--no-citations"):
-        assert flag not in argv
-    # agents + narrative OFF to bound cost (deterministic checks fill the sections)
+
+    # `--mode free` is the ENGINE-SIDE guarantee: the CLI hard-clears
+    # psi/moz/serper/places/citations after parsing, so no flag added here later
+    # can reintroduce paid spend on this path.
+    assert argv[argv.index("--mode") + 1] == "free"
+
+    # Belt and braces: every paid integration is ALSO passed explicitly off, so
+    # the intent is readable in the command line an operator sees in a log.
+    for flag in ("--no-psi", "--no-serper", "--no-places", "--no-citations", "--no-moz"):
+        assert flag in argv, f"{flag} missing — the free funnel could spend"
+    for flag in ("--serper", "--places", "--citations", "--psi"):
+        assert flag not in argv, f"{flag} present — the free funnel would spend"
+
+    # `--profile local` is what unlocks Places + citations in the engine; the free
+    # path must not request it.
+    assert argv[argv.index("--profile") + 1] == "general"
+
+    # No AI fan-out either: agents and narrative are the other paid dimension.
     assert argv[argv.index("--agents") + 1] == "off"
     assert argv[argv.index("--ai-narrative") + 1] == "off"
-    assert argv[argv.index("--max-pages") + 1] == "20"
+
+    # Condensed breadth (D-1: ~10-15 pages), not the paid audit's full crawl.
+    assert argv[argv.index("--max-pages") + 1] == "15"
+
+
+def test_the_free_funnel_uses_its_own_crawl_breadth() -> None:
+    """`free_max_pages` is a SEPARATE knob from `max_pages` on purpose.
+
+    Sharing one would mean raising the paid audit's depth silently widens an
+    unauthenticated, unbilled crawl.
+    """
+    from integrations.audit_engine import AuditEngineConfig
+
+    cfg = AuditEngineConfig(engine_dir="/x", engine_python="/x/py")
+    assert cfg.free_max_pages < cfg.max_pages
+    assert cfg.free_max_pages <= 15  # DECISIONS_LOG D-1: "condensed, ~10-15 pages"
 
 
 def test_build_argv_paid_enables_providers() -> None:

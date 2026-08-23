@@ -20,7 +20,8 @@ from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.auth import CurrentUser, require_perm
+from app.core.auth import SUSPENDED_STATUS, CurrentUser, require_perm
+from app.core.deps import RedisDep, SettingsDep
 from app.core.pagination import PageDep
 from app.db.database import (
     DatabaseNotConfiguredError,
@@ -36,6 +37,8 @@ from app.schemas.identity import (
     MemberResponse,
     ProvisionUserRequest,
     SetPasswordRequest,
+    SuspendUserRequest,
+    SuspensionResponse,
     UpdateGrantsRequest,
     UserGrantsResponse,
 )
@@ -45,6 +48,7 @@ from app.services.login_credentials import reveal_password, set_password
 from app.services.notifications import notify
 from app.services.provisioning import provision_user
 from app.services.team_metrics import ZERO_METRICS, TeamMetricsDep
+from app.services.token_denylist import revoke_all_for_user
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
 logger = get_logger("app.admin_users")
@@ -81,9 +85,75 @@ def _fetch_all_users(
 
 
 def _load_user_min(caller_id: str, target_id: str) -> dict[str, Any] | None:
-    """Load ``{id, role}`` for ``target_id`` via the RLS-scoped path (staff reads roster)."""
+    """Load ``{id, role, status, name}`` for ``target_id`` via the RLS-scoped path."""
     with rls_connection(caller_id) as cur:
-        cur.execute("select id, role from public.users where id = %s limit 1", (target_id,))
+        cur.execute(
+            "select id, role, status, name from public.users where id = %s limit 1", (target_id,)
+        )
+        return cur.fetchone()
+
+
+def _count_active_owners() -> int:
+    """How many owners can still sign in.
+
+    Privileged read: RLS-scoped counting would be filtered by the caller's own
+    visibility, and this is a SAFETY interlock - it must see the true count, not
+    the caller's view of it.
+    """
+    with privileged_connection() as cur:
+        cur.execute(
+            "select count(*) as n from public.users "
+            "where role = 'owner' and status <> %s",
+            (SUSPENDED_STATUS,),
+        )
+        row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
+
+def _set_suspension(
+    *, target_id: str, actor_id: str, suspended: bool, reason: str
+) -> dict[str, Any] | None:
+    """Flip a user's access state and stamp the audit columns, atomically.
+
+    Privileged, not RLS-scoped: `users_update` policy permits a staff member to
+    edit a roster row, but access revocation is a SERVER decision that must not
+    depend on the actor's own row visibility. Authorization for it is enforced in
+    the endpoint (permission + escalation + interlocks) before we get here.
+
+    One statement, so status and the audit stamp can never disagree - a row that
+    says `suspended` with no `suspended_at` would make an incident timeline
+    unreconstructable.
+    """
+    with privileged_connection() as cur:
+        if suspended:
+            cur.execute(
+                """
+                update public.users
+                   set status = %s,
+                       suspended_at = now(),
+                       suspended_by = %s,
+                       suspended_reason = %s
+                 where id = %s
+             returning id, name, role, status
+                """,
+                (SUSPENDED_STATUS, actor_id, reason, target_id),
+            )
+        else:
+            # Reactivation returns the person to `active`, not to whatever
+            # presence state they held before - "away" or "offline" would be a
+            # stale claim about someone who has not signed in since.
+            cur.execute(
+                """
+                update public.users
+                   set status = 'active',
+                       suspended_at = null,
+                       suspended_by = null,
+                       suspended_reason = ''
+                 where id = %s
+             returning id, name, role, status
+                """,
+                (target_id,),
+            )
         return cur.fetchone()
 
 
@@ -420,13 +490,24 @@ async def get_member_credentials(user_id: str, current: ManageTeam) -> MemberCre
 
 @router.post("/{user_id}/password", response_model=MemberCredentials)
 async def set_member_password(
-    user_id: str, body: SetPasswordRequest, current: ManageTeam
+    user_id: str,
+    body: SetPasswordRequest,
+    current: ManageTeam,
+    redis: RedisDep,
+    settings: SettingsDep,
 ) -> MemberCredentials:
     """Set/rotate a member's login password and return it once (owner/admin).
 
     With no ``password`` in the body the server generates a strong one. The new
     password is hashed (argon2id) AND sealed for future reveal; ``must_reset`` is
     cleared so the shared password logs in directly.
+
+    **Rotating the password also ends every session the OLD password opened.**
+    Without that, changing a password after a suspected compromise accomplished
+    nothing for days: the attacker's existing bearer token kept working until its
+    own expiry, because the token never consults the password again. One
+    per-user revocation epoch closes all of them (see
+    `app.services.token_denylist`).
     """
     try:
         target = await asyncio.to_thread(_load_cred_target, current.id, user_id)
@@ -449,6 +530,18 @@ async def set_member_password(
     ok = await asyncio.to_thread(set_password, user_id, new_password)
     if not ok:
         raise _USER_NOT_FOUND
+
+    # End the sessions the OLD password opened. Best-effort by design: the
+    # password change itself has already taken effect in Postgres, and failing
+    # the request here would leave the operator believing the rotation did not
+    # happen when it did. Logged loudly so the gap is visible.
+    if not await revoke_all_for_user(
+        redis, user_id=user_id, max_token_ttl=settings.jwt_access_ttl_seconds
+    ):
+        logger.warning(
+            "password_rotation_token_revocation_unavailable", target=user_id, actor=current.id
+        )
+
     await record_activity(
         current, kind="access", action="reset login password",
         target=str(target.get("name") or target.get("username") or ""),
@@ -461,3 +554,187 @@ async def set_member_password(
         password=new_password,
         available=True,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Offboarding (P0-6 / P0-7)
+# --------------------------------------------------------------------------- #
+# Until this existed there was NO WAY to remove a person from the platform. The
+# `user_status` enum had no access state, `login()` never read status, and the
+# multi-day bearer token could not be revoked - so a departing team member kept
+# full access to every client's data until their token expired on its own, while
+# `manage_team` advertised the capability in the UI.
+#
+# Suspension, not deletion: `tasks.assignee_id`, `activity_log.actor_id` and every
+# audit trail reference the user id. Deleting the row would cascade away history
+# or break those references - so an offboarded person's record is kept and their
+# ACCESS is closed.
+
+
+def _load_full_user(caller_id: str, target_id: str) -> dict[str, Any] | None:
+    """The full roster row for one user (RLS path), for a MemberResponse."""
+    with rls_connection(caller_id) as cur:
+        cur.execute("select * from public.users where id = %s limit 1", (target_id,))
+        return cur.fetchone()
+
+
+async def _member_with_metrics(
+    metrics: TeamMetricsDep, caller_id: str, user_id: str
+) -> MemberResponse:
+    """One roster row in the same shape (and with the same metrics overlay) the
+    list endpoint returns, so a suspend/reactivate response drops straight into
+    whatever the caller already renders."""
+    row = await asyncio.to_thread(_load_full_user, caller_id, user_id)
+    if row is None:
+        raise _USER_NOT_FOUND
+    overlaid = await _overlay_metrics(metrics, [MemberResponse.from_row(row)])
+    return overlaid[0]
+
+
+def _suspension_guard(actor: CurrentUser, target: dict[str, Any]) -> None:
+    """Refuse the three suspensions that would damage the platform itself.
+
+    These are interlocks, not permission checks - `manage_team` has already been
+    verified by the dependency. Each one prevents an action that is authorised but
+    catastrophic:
+
+    1. **Self-suspension.** An operator would revoke their own session mid-request
+       and could not undo it. Always a mistake, never a legitimate offboarding -
+       a person leaving is offboarded BY someone.
+    2. **Suspending an owner or admin without being an owner.** The mirror of the
+       existing escalation guard on provisioning: if an admin cannot CREATE an
+       admin, an admin must not be able to REMOVE one. Otherwise the weaker role
+       can neutralise the stronger.
+    3. **Suspending the last owner.** Owner is the only role that can restore
+       another owner, so this would leave the platform permanently ownerless with
+       no in-product recovery path.
+    """
+    target_id = str(target["id"])
+    target_role = str(target["role"])
+
+    if target_id == actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot suspend your own account.",
+        )
+    if target_role in _ELEVATED_ROLES and not actor.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a super-admin can suspend an owner or admin.",
+        )
+    if target_role == "owner" and _count_active_owners() <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot suspend the last remaining super-admin.",
+        )
+
+
+@router.post("/{user_id}/suspend", response_model=SuspensionResponse)
+async def suspend_user(
+    user_id: str,
+    body: SuspendUserRequest,
+    current: ManageTeam,
+    redis: RedisDep,
+    settings: SettingsDep,
+    metrics: TeamMetricsDep,
+) -> SuspensionResponse:
+    """Offboard a person: close their access and end their live sessions.
+
+    Two layers, and the order matters. The DATABASE flip is the boundary - once
+    `status = 'suspended'`, `get_current_user` refuses every subsequent request
+    whatever else is broken. The Redis revocation is written AFTERWARDS and is a
+    latency optimisation on top of it, so a Redis failure can never leave a
+    suspension half-applied.
+    """
+    try:
+        target = await asyncio.to_thread(_load_user_min, current.id, user_id)
+    except DatabaseNotConfiguredError as exc:
+        raise _DB_NOT_CONFIGURED from exc
+    if target is None:
+        raise _USER_NOT_FOUND
+
+    # Idempotent: re-suspending an already-suspended account is a no-op, not an
+    # error. An operator retrying after a timeout must not see a failure.
+    if str(target.get("status") or "") == SUSPENDED_STATUS:
+        member = await _member_with_metrics(metrics, current.id, user_id)
+        # `tokens_revoked` is False, not True: THIS call revoked nothing. The
+        # earlier suspension already did, and claiming otherwise would be exactly
+        # the kind of unearned success this recovery is removing.
+        return SuspensionResponse(user=member, status=SUSPENDED_STATUS, tokens_revoked=False)
+
+    # `_count_active_owners` inside the guard hits the DB, so run the whole guard
+    # off the event loop (psycopg is sync).
+    await asyncio.to_thread(_suspension_guard, current, target)
+
+    updated = await asyncio.to_thread(
+        _set_suspension,
+        target_id=user_id,
+        actor_id=current.id,
+        suspended=True,
+        reason=body.reason,
+    )
+    if updated is None:
+        raise _USER_NOT_FOUND
+
+    # Now end the sessions the person already holds. Reported honestly: a False
+    # here means the cache layer did not engage, NOT that they still have access.
+    revoked = await revoke_all_for_user(
+        redis, user_id=user_id, max_token_ttl=settings.jwt_access_ttl_seconds
+    )
+    if not revoked:
+        logger.warning("suspend_token_revocation_unavailable", target=user_id, actor=current.id)
+
+    logger.info("user_suspended", target=user_id, actor=current.id, tokens_revoked=revoked)
+    await record_activity(
+        current, kind="access", action="suspended member",
+        target=str(updated.get("name") or user_id),
+        meta=body.reason or "no reason given",
+        entity_type="user", entity_id=user_id,
+    )
+    member = await _member_with_metrics(metrics, current.id, user_id)
+    return SuspensionResponse(user=member, status=SUSPENDED_STATUS, tokens_revoked=revoked)
+
+
+@router.post("/{user_id}/reactivate", response_model=SuspensionResponse)
+async def reactivate_user(
+    user_id: str,
+    current: ManageTeam,
+    metrics: TeamMetricsDep,
+) -> SuspensionResponse:
+    """Restore a suspended person's access.
+
+    Restoring an OWNER or ADMIN is owner-only, mirroring both the provisioning
+    escalation guard and the suspend interlock: an admin who cannot create or
+    remove an admin must not be able to reinstate one either.
+
+    No token revocation is undone, and none should be: the old sessions stay dead
+    and the person signs in again. `tokens_revoked` is reported as False because
+    nothing was revoked by THIS call - it is not a claim that old tokens work.
+    """
+    try:
+        target = await asyncio.to_thread(_load_user_min, current.id, user_id)
+    except DatabaseNotConfiguredError as exc:
+        raise _DB_NOT_CONFIGURED from exc
+    if target is None:
+        raise _USER_NOT_FOUND
+
+    if str(target["role"]) in _ELEVATED_ROLES and not current.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a super-admin can reactivate an owner or admin.",
+        )
+
+    updated = await asyncio.to_thread(
+        _set_suspension, target_id=user_id, actor_id=current.id, suspended=False, reason=""
+    )
+    if updated is None:
+        raise _USER_NOT_FOUND
+
+    logger.info("user_reactivated", target=user_id, actor=current.id)
+    await record_activity(
+        current, kind="access", action="reactivated member",
+        target=str(updated.get("name") or user_id), meta="access restored",
+        entity_type="user", entity_id=user_id,
+    )
+    member = await _member_with_metrics(metrics, current.id, user_id)
+    return SuspensionResponse(user=member, status="active", tokens_revoked=False)

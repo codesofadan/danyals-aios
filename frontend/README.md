@@ -1,6 +1,6 @@
 # AIOS Dashboard
 
-The web dashboard for **AIOS** — the SEO automation platform (Xegents AI). Next.js
+The web dashboard for **AIOS** — the SEO automation platform. Next.js
 App Router, TypeScript, with a persistent sidebar shell so modules mount as pages.
 
 ## Run
@@ -21,7 +21,7 @@ npm run dev        # http://localhost:3000
 app/
   layout.tsx        Root shell — fonts, sidebar, ambient backdrop; children = page
   page.tsx          Command Center (admin/super-admin overview)
-  globals.css       Full design system (dark-navy + violet Xegents brand)
+  globals.css       Full design system (dark-navy + violet brand)
 components/
   Sidebar.tsx       Icon rail that expands on hover; active state from the route
   TopBar.tsx        Reusable page header (eyebrow + title + search)

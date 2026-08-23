@@ -14,14 +14,14 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
-from fastapi.dependencies.utils import get_flat_dependant
+from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 
 from app.core.auth import get_current_user
 from app.core.deps import get_redis
 from app.routers.public import (
     get_public_audit_enqueuer,
-    get_public_cost_logger,
+    get_public_funnel_gate,
     get_public_gateway,
 )
 from app.routers.public import router as public_router
@@ -37,6 +37,7 @@ class FakeGateway:
         self.by_token: dict[str, dict[str, Any]] = {}
         self._by_email: dict[str, dict[str, Any]] = {}
         self._seq = 0
+        self.count_today_raises = False
 
     def seed(self, token: str, **over: Any) -> dict[str, Any]:
         row: dict[str, Any] = {
@@ -70,6 +71,20 @@ class FakeGateway:
     def get_by_token(self, report_token: str) -> dict[str, Any] | None:
         return self.by_token.get(report_token)
 
+    def delete_by_id(self, public_audit_id: str) -> None:
+        for token, row in list(self.by_token.items()):
+            if row["id"] == public_audit_id:
+                self.by_token.pop(token)
+                self._by_email.pop(str(row["email"]).lower(), None)
+
+    def count_today(self) -> int:
+        """Rows created "today". The fake creates everything in one run, so the
+        insert count IS today's count. `count_today_raises` simulates the DB being
+        unreachable, which the endpoint must treat as a closed funnel."""
+        if self.count_today_raises:
+            raise RuntimeError("public_audits count unavailable")
+        return self._seq
+
 
 @pytest.fixture
 def gateway() -> FakeGateway:
@@ -82,8 +97,9 @@ def enqueued() -> list[str]:
 
 
 @pytest.fixture
-def cost_logged() -> list[str]:
-    return []
+def funnel_open() -> list[bool]:
+    """One-element switch for the cost gate's verdict, flipped per test."""
+    return [True]
 
 
 class _NoThrottleRedis:
@@ -99,18 +115,18 @@ class _NoThrottleRedis:
 
 @pytest.fixture(autouse=True)
 def wire(
-    app: FastAPI, gateway: FakeGateway, enqueued: list[str], cost_logged: list[str]
+    app: FastAPI, gateway: FakeGateway, enqueued: list[str], funnel_open: list[bool]
 ) -> None:
     app.dependency_overrides[get_public_gateway] = lambda: gateway
     app.dependency_overrides[get_public_audit_enqueuer] = lambda: enqueued.append
-    app.dependency_overrides[get_public_cost_logger] = lambda: cost_logged.append
+    app.dependency_overrides[get_public_funnel_gate] = lambda: (lambda: funnel_open[0])
     # Pin the rate-limiter to a non-throttling redis so many POSTs in this module
     # (all from one test IP) stay deterministic regardless of a live local Redis.
     app.dependency_overrides[get_redis] = lambda: _NoThrottleRedis()
 
 
 async def test_create_returns_token_not_internal_id(
-    client: httpx.AsyncClient, gateway: FakeGateway, enqueued: list[str], cost_logged: list[str]
+    client: httpx.AsyncClient, gateway: FakeGateway, enqueued: list[str]
 ) -> None:
     resp = await client.post(
         "/api/v1/public/audits", json={"email": "Lead@Example.com", "url": _PUBLIC_URL}
@@ -120,10 +136,10 @@ async def test_create_returns_token_not_internal_id(
     assert set(body) == {"report_token", "status"}  # NEVER the internal id
     assert body["status"] == "queued"
     assert body["report_token"] in gateway.by_token
-    # enqueued + $0 cost logged for the new row's internal id
+    # Enqueued for the new row's internal id. NO cost row is written here: the
+    # worker commits exactly one ledger entry, priced from what the run did.
     row = gateway.by_token[body["report_token"]]
     assert enqueued == [row["id"]]
-    assert cost_logged == [row["id"]]
 
 
 async def test_no_auth_header_still_succeeds(client: httpx.AsyncClient) -> None:
@@ -207,11 +223,173 @@ async def test_unknown_token_404(client: httpx.AsyncClient) -> None:
     assert resp.status_code == 404
 
 
+def _all_dependency_calls(dependant: Dependant) -> set[Any]:
+    """Every callable in a route's dependency TREE, flattened.
+
+    Walks the tree here rather than through FastAPI's private
+    ``get_flat_dependant`` helper, which is not part of the public API and was
+    removed in FastAPI 0.141 - taking this whole module's collection down with
+    it. The walk is cycle-safe (FastAPI caches sub-dependants by identity, and a
+    self-referential graph would otherwise hang).
+    """
+    calls: set[Any] = set()
+    seen: set[int] = set()
+    stack: list[Dependant] = [dependant]
+    while stack:
+        node = stack.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        for sub in node.dependencies:
+            if sub.call is not None:
+                calls.add(sub.call)
+            stack.append(sub)
+    return calls
+
+
 def test_public_routes_have_no_auth_dependency() -> None:
     """Introspect every public route: get_current_user must not appear anywhere."""
     routes = [r for r in public_router.routes if isinstance(r, APIRoute)]
     assert routes, "expected the public router to declare routes"
     for route in routes:
-        flat = get_flat_dependant(route.dependant)
-        calls = {dep.call for dep in flat.dependencies}
+        calls = _all_dependency_calls(route.dependant)
         assert get_current_user not in calls, f"{route.path} must not require auth"
+
+
+# --------------------------------------------------------------------------- #
+# P0-2 · the funnel's abuse controls
+# --------------------------------------------------------------------------- #
+# The defect: this unauthenticated route ran the engine with Serper + Google
+# Places + citations + PSI enabled and committed a hardcoded $0.00 to the cost
+# ledger, behind a per-IP limiter that failed OPEN. Anyone could spend the
+# agency's provider budget from the internet, and nothing in the money ledger
+# would show it. Each test below pins one of the controls that closes that.
+
+
+async def test_a_closed_dial_refuses_the_funnel_without_creating_a_row(
+    client: httpx.AsyncClient, gateway: FakeGateway, enqueued: list[str], funnel_open: list[bool]
+) -> None:
+    """An operator turning the funnel off must stop it BEFORE any work is booked."""
+    funnel_open[0] = False
+    resp = await client.post(
+        "/api/v1/public/audits", json={"email": "closed@example.com", "url": _PUBLIC_URL}
+    )
+    assert resp.status_code == 503
+    assert resp.headers.get("Retry-After")
+    # Nothing was created and nothing was queued — not merely "not run".
+    assert gateway.by_token == {}
+    assert enqueued == []
+    # The refusal never names which control closed the funnel.
+    message = resp.json()["error"]["message"]
+    assert "dial" not in message.lower() and "cap" not in message.lower()
+
+
+async def test_a_gate_failure_closes_the_funnel_rather_than_opening_it(
+    client: httpx.AsyncClient, app: FastAPI, gateway: FakeGateway
+) -> None:
+    """Unable to establish that spending is permitted must mean: do not spend."""
+
+    def _boom() -> bool:
+        raise RuntimeError("cost store unavailable")
+
+    app.dependency_overrides[get_public_funnel_gate] = lambda: _boom
+    resp = await client.post(
+        "/api/v1/public/audits", json={"email": "boom@example.com", "url": _PUBLIC_URL}
+    )
+    assert resp.status_code == 503
+    assert gateway.by_token == {}
+
+
+async def test_the_daily_cap_is_enforced_agency_wide(
+    client: httpx.AsyncClient, app: FastAPI, gateway: FakeGateway
+) -> None:
+    """Per-IP limiting bounds one abuser; this bounds a distributed one.
+
+    Every request here uses a DIFFERENT email, so the one-per-email rule is not
+    what stops it — the agency-wide ceiling is.
+    """
+    from app.config import Settings, get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, app_env="dev", public_audit_daily_cap=2
+    )
+    for i in range(2):
+        ok = await client.post(
+            "/api/v1/public/audits", json={"email": f"lead{i}@example.com", "url": _PUBLIC_URL}
+        )
+        assert ok.status_code == 201, ok.text
+
+    over = await client.post(
+        "/api/v1/public/audits", json={"email": "lead2@example.com", "url": _PUBLIC_URL}
+    )
+    assert over.status_code == 503
+    assert len(gateway.by_token) == 2  # the third was never created
+
+
+async def test_an_uncountable_daily_cap_closes_the_funnel(
+    client: httpx.AsyncClient, gateway: FakeGateway
+) -> None:
+    """An unenforceable ceiling is treated as reached, not as absent."""
+    gateway.count_today_raises = True
+    resp = await client.post(
+        "/api/v1/public/audits", json={"email": "nocount@example.com", "url": _PUBLIC_URL}
+    )
+    assert resp.status_code == 503
+    assert gateway.by_token == {}
+
+
+async def test_a_zero_daily_cap_disables_the_ceiling_not_the_funnel(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    """`0` means "no daily ceiling configured" — it must not read as "cap of zero"."""
+    from app.config import Settings, get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, app_env="dev", public_audit_daily_cap=0
+    )
+    resp = await client.post(
+        "/api/v1/public/audits", json={"email": "uncapped@example.com", "url": _PUBLIC_URL}
+    )
+    assert resp.status_code == 201
+
+
+async def test_the_per_ip_limiter_fails_closed_on_this_route(
+    client: httpx.AsyncClient, app: FastAPI, gateway: FakeGateway
+) -> None:
+    """A Redis outage must not silently remove the only control on an anon caller.
+
+    Contrast `test_ratelimit`'s fail-OPEN cases: those guard authenticated callers
+    who are already bounded by permissions and budget caps.
+    """
+
+    class _DeadRedis:
+        async def incr(self, key: str) -> int:
+            raise ConnectionError("redis down")
+
+        async def expire(self, key: str, seconds: int) -> None:
+            raise ConnectionError("redis down")
+
+    app.dependency_overrides[get_redis] = lambda: _DeadRedis()
+    resp = await client.post(
+        "/api/v1/public/audits", json={"email": "noredis@example.com", "url": _PUBLIC_URL}
+    )
+    assert resp.status_code == 503
+    assert gateway.by_token == {}
+
+
+async def test_the_funnel_meters_under_its_own_dial_not_the_paid_audits(
+    client: httpx.AsyncClient,
+) -> None:
+    """Switching the lead magnet off must not disable the paid product.
+
+    They shared the `tech_audit` dial, so the only way to stop the free funnel was
+    to stop every client's technical audit too.
+    """
+    from app.routers.public import _COST_FEATURE
+    from app.schemas.cost import DIAL_KEYS
+
+    assert _COST_FEATURE == "public_audit"
+    assert _COST_FEATURE != "tech_audit"
+    # An UNREGISTERED dial key resolves to "off" and is rejected by PATCH
+    # /cost/dials — i.e. unswitchable-on. Registration is what makes it a control.
+    assert _COST_FEATURE in DIAL_KEYS

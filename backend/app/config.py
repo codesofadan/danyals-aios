@@ -104,6 +104,18 @@ class Settings(BaseSettings):
     audit_timeout_seconds: int = 1500
     audit_max_pages: int = 100  # default crawl breadth passed to the engine
     audit_profile: str = "general"  # engine --profile
+    # Crawl breadth for the PUBLIC free funnel. DECISIONS_LOG D-1 scopes the free
+    # audit to a CONDENSED ~10-15 page lead magnet; the full breadth above is the
+    # paid, authenticated product. Deliberately a SEPARATE knob so raising the
+    # paid audit's depth can never silently widen an unauthenticated crawl.
+    audit_free_max_pages: int = 15
+    # Hard daily ceiling on public free audits, agency-wide (UTC day). The public
+    # funnel is UNAUTHENTICATED, so per-IP rate limiting alone bounds one abuser,
+    # not a distributed one. This is the backstop that bounds the platform's total
+    # daily exposure regardless of source. Counted from `public_audits.created_at`
+    # in Postgres rather than Redis: the count must survive a cache flush, and the
+    # check FAILS CLOSED (see routers/public.py).
+    public_audit_daily_cap: int = 200
     # Controlled root the worker copies each run's report PDF + findings.json
     # into (under <audit_id>/), and the API serves guarded downloads from. On the
     # single-VPS deploy the API + worker share this filesystem. Unset -> no

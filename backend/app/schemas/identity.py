@@ -72,7 +72,12 @@ class ChangePasswordRequest(BaseModel):
 
 
 class PortalUserRequest(BaseModel):
-    """Payload for provisioning a client PORTAL login (owner-only).
+    """Payload for provisioning a client PORTAL login.
+
+    Authorization note: the endpoint is gated by ``manage_clients``, NOT by owner.
+    This docstring said "owner-only" long after the guard was deliberately widened
+    so the Add-Client wizard's final step could not 403 for the admin or manager
+    who had just been allowed to create the client.
 
     Carries no role and no client_id: the role is fixed to ``client`` and the
     tenant comes from the path, so a caller can never provision a staff account
@@ -240,3 +245,34 @@ class SetPasswordRequest(BaseModel):
     """Set/rotate a member's login password. ``password`` absent -> server generates."""
 
     password: SecretStr | None = Field(default=None, min_length=8)
+
+
+# --------------------------------------------------------------------------- #
+# Offboarding (P0-6)
+# --------------------------------------------------------------------------- #
+class SuspendUserRequest(BaseModel):
+    """Body for ``POST /admin/users/{id}/suspend``.
+
+    ``reason`` is optional but strongly encouraged: it is what an incident
+    timeline or a later dispute is reconstructed from, and it is stored on the
+    row (`users.suspended_reason`) as well as in the activity log.
+    """
+
+    reason: str = Field(default="", max_length=500)
+
+
+class SuspensionResponse(BaseModel):
+    """The outcome of a suspend / reactivate.
+
+    ``tokens_revoked`` is reported HONESTLY rather than assumed. Access revocation
+    itself is enforced against Postgres on every request and always holds; this
+    flag says whether the ADDITIONAL Redis-backed session cut-off was also
+    recorded. False means Redis was unreachable, so any token the person already
+    holds keeps passing the cache check - it will still be refused by the database
+    status check, but an operator should know the belt-and-braces layer did not
+    engage. Never report a revocation that did not happen.
+    """
+
+    user: MemberResponse
+    status: str
+    tokens_revoked: bool = Field(serialization_alias="tokensRevoked")

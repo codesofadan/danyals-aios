@@ -157,14 +157,3 @@ export type TierClient = {
   c: string; // avatar accent
   tier: TierKey;
 };
-
-export const tierClients: TierClient[] = [
-  { id: "cl-northpeak", cn: "NorthPeak Dental", industry: "Healthcare", init: "ND", c: SERIES.c1, tier: "fully" },
-  { id: "cl-meridian", cn: "Meridian Wealth", industry: "Finance", init: "MW", c: SERIES.c1, tier: "fully" },
-  { id: "cl-lumen", cn: "Lumen Realty", industry: "Real Estate", init: "LR", c: SERIES.c2, tier: "semi" },
-  { id: "cl-atlas", cn: "Atlas Legal", industry: "Legal Services", init: "AL", c: SERIES.c4, tier: "semi" },
-  { id: "cl-brighthvac", cn: "BrightHVAC", industry: "Home Services", init: "BH", c: SERIES.c3, tier: "semi" },
-  { id: "cl-verde", cn: "Verde Cafe", industry: "Hospitality", init: "VC", c: SERIES.c5, tier: "free" },
-  { id: "cl-coastline", cn: "Coastline Fit", industry: "Fitness", init: "CF", c: SERIES.c2, tier: "free" },
-  { id: "cl-orchard", cn: "Orchard Pediatrics", industry: "Healthcare", init: "OP", c: SERIES.c5, tier: "free" },
-];

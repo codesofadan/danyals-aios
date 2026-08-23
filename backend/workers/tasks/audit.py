@@ -44,6 +44,13 @@ logger = get_logger("workers.audit")
 _COST_FEATURE = "tech_audit"
 _COST_PROVIDER = "audit_engine"
 _COST_JOB_TYPE = "audit"
+# The PUBLIC funnel meters under its OWN dial key, not the paid audit's: it is
+# unauthenticated, and an operator must be able to switch the lead magnet off in
+# an abuse episode without disabling the paid product every client pays for. Must
+# stay registered in `app.schemas.cost.DIAL_FEATURES` - an unregistered key
+# resolves to "off" AND is rejected by PATCH /cost/dials, i.e. it is
+# unswitchable-on, not merely defaulted-off.
+_PUBLIC_COST_FEATURE = "public_audit"
 _PUBLIC_COST_JOB_TYPE = "public_audit"
 _ERROR_MAX = 500  # cap the stored error string; it is server-side only
 
@@ -446,17 +453,15 @@ class PublicAuditStore:
     def update(self, public_audit_id: str, fields: dict[str, Any]) -> None:
         _dynamic_update("public_audits", public_audit_id, fields)
 
-    def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
-        # A public audit is ALWAYS the Free tier ($0): it makes no paid-provider
-        # call, so it is never gated. Present only to satisfy the AuditStore
-        # protocol; ``execute_public_audit`` never calls it (it runs Free-only).
-        return GateDecision("call", cost=0.0)
+    def _ctx(self, row: dict[str, Any], cost: float) -> GateContext:
+        """The gate context for one public run.
 
-    def record_cost(self, row: dict[str, Any], cost: float) -> None:
-        # No tenant: client_id is None (the money-dial handles a global/no-client
-        # feature spend). A public run is Free, so cost is always 0.
-        ctx = GateContext(
-            feature_key=_COST_FEATURE,
+        No tenant, so ``client_id`` is ``None`` and no per-client budget cap
+        applies - the agency-global spend halt and the ``public_audit`` dial are
+        what bound this path.
+        """
+        return GateContext(
+            feature_key=_PUBLIC_COST_FEATURE,
             client_id=None,
             provider=_COST_PROVIDER,
             estimated_cost=cost,
@@ -464,7 +469,27 @@ class PublicAuditStore:
             job_type=_PUBLIC_COST_JOB_TYPE,
             client_name="",
         )
-        PostgresCostStore().record_cost(ctx, cost, cached=False)
+
+    def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
+        """Pre-flight the run through the SAME gate every paid call passes.
+
+        This used to return an unconditional ``call`` on the reasoning that a
+        public run is free and therefore needs no gate. That reasoning is what let
+        the funnel bypass the gate entirely while ``build_argv`` was silently
+        running it with paid providers on - the one path in the system that could
+        reach a provider without the gate ever seeing it. The gate is now consulted
+        on every run, so a spend halt or an ``off``/``byhand`` dial stops the
+        funnel whatever the engine is currently configured to do.
+        """
+        return CostGate(PostgresCostStore(), _NullCostCache()).evaluate(self._ctx(row, cost))
+
+    def record_cost(self, row: dict[str, Any], cost: float) -> None:
+        """Commit the run's REAL cost.
+
+        The caller computes it from the run's own observables
+        (``pricing.audit_cost``); this method no longer assumes zero.
+        """
+        PostgresCostStore().record_cost(self._ctx(row, cost), cost, cached=False)
 
 
 def execute_public_audit(
@@ -479,13 +504,25 @@ def execute_public_audit(
 
     Mirrors ``execute_audit`` (queued -> running -> done|failed; never stuck,
     never re-raises, idempotent on redelivery) but over ``public_audits`` and
-    ALWAYS at the Free tier. The run is COMPREHENSIVE (tier="free" now maps to the
-    engine's degrade-safe ``--mode auto`` with the wired providers ON - see
-    ``build_argv``), so every dimension gets real data. The public ledger entry is
-    still recorded at $0 (no tenant to attribute provider spend to); see the COST
-    NOTE above. Injected store + runner keep it unit-testable with fakes. The live
-    engine run is DEFERRED exactly like the tenant worker: with no engine env the
-    adapter returns ``ok=False`` (run_uuid None) and the row is marked ``failed``.
+    ALWAYS at the Free tier: a CONDENSED ``--mode free`` engine run that calls no
+    paid provider (DECISIONS_LOG D-1; see ``build_argv``).
+
+    Two P0-2 changes from the previous behaviour:
+
+    * **The run is gated.** The ``public_audit`` dial and the agency-global spend
+      halt are consulted BEFORE the engine is launched. This path used to be the
+      one place in the system that could reach a provider without the gate ever
+      seeing it.
+    * **The committed cost is DERIVED, never asserted.** It is
+      ``pricing.audit_cost`` over the engine's own ``run.json`` observables - the
+      same computation the paid path uses. For a genuine free run that is 0.0, but
+      it is 0.0 *because the run reported* ``mode="free"``, not because a literal
+      was written here. If this path is ever re-widened, the ledger becomes
+      truthful automatically instead of silently staying at zero.
+
+    Injected store + runner keep it unit-testable with fakes. The live engine run
+    is DEFERRED exactly like the tenant worker: with no engine env the adapter
+    returns ``ok=False`` (run_uuid None) and the row is marked ``failed``.
     """
     row = store.load(public_audit_id)
     if row is None:
@@ -495,14 +532,39 @@ def execute_public_audit(
         # Idempotency: a redelivered job (acks_late) must not re-run the engine.
         return {"public_audit_id": public_audit_id, "status": "done", "reason": "already complete"}
 
+    # Pre-flight the gate BEFORE launching the engine. A spend halt or an
+    # `off`/`byhand` dial must stop the funnel here, not after the work is done.
+    # The row is marked failed with the operator-set reason on it, so the lead
+    # sees an honest "unavailable", never a fabricated report.
+    decision = store.evaluate(row, 0.0)
+    if not decision.allowed:
+        logger.info(
+            "public_audit_gate_blocked",
+            public_audit_id=public_audit_id,
+            outcome=decision.outcome,
+            reason=decision.reason,
+        )
+        store.update(
+            public_audit_id,
+            {
+                "status": "failed",
+                "error": f"free audit unavailable: {decision.reason or decision.outcome}"[:_ERROR_MAX],
+            },
+        )
+        return {
+            "public_audit_id": public_audit_id,
+            "status": "blocked",
+            "reason": decision.reason or decision.outcome,
+        }
+
     store.update(public_audit_id, {"status": "running"})
 
     try:
-        # Public = Free tier, but the light path (comprehensive=False, tier="free")
-        # now runs the engine's degrade-safe ``--mode auto`` with the wired
-        # providers ON, so all six dimensions get real data (see build_argv). A
-        # missing provider key skips that integration silently; the run never
-        # crashes. COST NOTE: this now incurs real Serper/Places spend per run.
+        # CONDENSED + GENUINELY FREE: `tier="free"` with `comprehensive=False`
+        # builds `--mode free`, which the engine enforces by hard-clearing every
+        # paid integration after parsing. No Serper, no Places, no citations, no
+        # PSI - so there is no per-run spend to meter and no denial-of-wallet
+        # vector on an unauthenticated endpoint. See build_argv's FREE FUNNEL note.
         result = runner(_config_from_settings(settings), url=row["url"], tier="free")
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("public_audit_job_crashed", public_audit_id=public_audit_id)
@@ -512,9 +574,36 @@ def execute_public_audit(
         )
         return {"public_audit_id": public_audit_id, "status": "failed", "reason": "worker error"}
 
-    # Log the run through the cost path once the engine actually started (Free -> $0).
+    # Commit the run's cost once the engine actually started. COMPUTED from the
+    # run's own observables via the same function the paid path uses - never a
+    # literal. `mode="free"` makes this 0.0 by derivation; any other mode prices
+    # the real work. This is the fix for "the free audit spends real money and
+    # logs $0.00": the number now follows the run instead of asserting it.
     if result.run_uuid is not None:
-        _safe_record_cost(store, row, 0.0)
+        # The engine's OWN reported mode is authoritative - it knows what it
+        # actually ran. When it reports none (an older build, or a run that died
+        # before writing run.json), fall back to the mode we INVOKED it with
+        # rather than to the derived paid estimate: charging this path for a
+        # 21-agent fan-out that `--mode free` makes impossible would be a
+        # fabricated cost in the other direction.
+        cost = pricing.audit_cost(
+            settings,
+            pages_crawled=result.pages_crawled,
+            mode=result.mode or "free",
+            usage=result.usage,
+        )
+        if cost > 0:
+            # A "free" funnel that priced above zero means the engine did paid
+            # work. Record it truthfully AND say so loudly - this is exactly the
+            # condition that went unnoticed before, and it must never be silent.
+            logger.warning(
+                "public_audit_incurred_cost",
+                public_audit_id=public_audit_id,
+                cost=cost,
+                engine_mode=result.mode,
+                pages_crawled=result.pages_crawled,
+            )
+        _safe_record_cost(store, row, cost)
 
     if not result.ok:
         store.update(

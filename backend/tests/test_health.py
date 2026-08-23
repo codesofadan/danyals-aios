@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from asgi_lifespan import LifespanManager
+from fastapi import FastAPI
 
 from app.main import create_app
 
@@ -51,3 +52,49 @@ async def test_unhandled_error_returns_envelope_with_request_id() -> None:
     # no internals leaked to the client
     assert "kaboom" not in resp.text
     assert "RuntimeError" not in resp.text
+
+
+# --------------------------------------------------------------------------- #
+# The error envelope must preserve PROTOCOL headers
+# --------------------------------------------------------------------------- #
+# `_error_response` used to build a fresh header dict containing only
+# X-Request-ID, discarding whatever the raiser attached to its HTTPException.
+# Two live consequences: every 401 the platform emitted was missing the
+# `WWW-Authenticate` field RFC 9110 requires, and every 429 from the rate limiter
+# was missing its `Retry-After` — so a throttled client had nothing to back off
+# on, which is precisely the retry storm the limiter exists to prevent.
+
+
+@pytest.mark.unit
+async def test_a_401_carries_www_authenticate_through_the_envelope(
+    client: httpx.AsyncClient,
+) -> None:
+    resp = await client.get("/api/v1/clients")
+    assert resp.status_code in (401, 403)
+    if resp.status_code == 401:
+        assert resp.headers.get("WWW-Authenticate") == "Bearer"
+    # The envelope shape is unchanged.
+    assert set(resp.json()["error"]) >= {"type", "message", "request_id"}
+
+
+@pytest.mark.unit
+async def test_the_envelope_preserves_raiser_headers_and_keeps_its_own_request_id(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    from fastapi import HTTPException
+
+    from app.core.errors import REQUEST_ID_HEADER
+
+    @app.get("/api/v1/_test_headers")
+    async def _raise() -> None:
+        raise HTTPException(
+            status_code=503,
+            detail="nope",
+            # A raiser must not be able to hijack the request's correlation id.
+            headers={"Retry-After": "42", REQUEST_ID_HEADER: "attacker-supplied"},
+        )
+
+    resp = await client.get("/api/v1/_test_headers")
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "42"
+    assert resp.headers[REQUEST_ID_HEADER] != "attacker-supplied"

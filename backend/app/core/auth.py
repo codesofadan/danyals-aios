@@ -29,8 +29,9 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from app.core.deps import SettingsDep
+from app.core.deps import RedisDep, SettingsDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
+from app.logging_setup import get_logger
 from app.rbac import (
     AccessLevel,
     AppRole,
@@ -41,12 +42,15 @@ from app.rbac import (
     role_has_module_perm,
     role_has_perm,
 )
+from app.services.token_denylist import is_revoked
 
 # The ONE algorithm we accept. A single-entry allow-list is the whole defense
 # against alg-confusion and `none`: PyJWT rejects any token whose header `alg` is
 # not in this list BEFORE selecting a verifier, so an attacker cannot downgrade to
 # HS256 (and try the public key as an HMAC secret) or to `none` (no signature).
 _ALLOWED_ALGS = ["EdDSA"]
+
+logger = get_logger("app.auth")
 
 _bearer = HTTPBearer(auto_error=False, description="Local EdDSA access token")
 
@@ -60,6 +64,23 @@ _UNAUTHORIZED = HTTPException(
     detail="Missing, invalid, or expired credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
+
+# A suspended account. 403, not 401: the credential is genuine and correctly
+# signed - it is the ACCOUNT that is closed - and a 401 would invite the client to
+# re-authenticate, which is exactly what must not succeed. The message is
+# deliberate: an offboarded person should understand why they are locked out
+# rather than believe the platform is broken. It leaks nothing, because reaching
+# this line already required a valid signed token for that very account.
+_SUSPENDED = HTTPException(
+    status_code=status.HTTP_403_FORBIDDEN,
+    detail="This account has been suspended. Contact your administrator.",
+)
+
+# The one status that denies access. Every other value of `user_status`
+# (active / away / invited / offline) describes PRESENCE, not permission - a
+# person marked "away" is still an employee, and "invited" is how every account
+# starts before its first sign-in.
+SUSPENDED_STATUS = "suspended"
 
 
 class CurrentUser(BaseModel):
@@ -134,6 +155,7 @@ def _load_user_row(user_id: str) -> dict[str, Any] | None:
 async def get_current_user(
     request: Request,
     settings: SettingsDep,
+    redis: RedisDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> CurrentUser:
     """FastAPI dependency: the verified, provisioned caller (else 401/403)."""
@@ -158,9 +180,31 @@ async def get_current_user(
         raise _UNAUTHORIZED from exc
 
     user_id = str(claims["sub"])
-    # Stash the token so downstream deps can reuse the verified bearer if needed
-    # (RLS access itself now flows through rls_connection off the verified sub).
+
+    # REVOCATION. A signature check alone only proves the token was minted by us
+    # and has not expired - it cannot know the token was signed out, or that the
+    # account's password changed, or that the person was offboarded an hour ago.
+    # Two mechanisms answer that (see app/services/token_denylist.py): this
+    # token's own `jti`, and a per-user epoch that closes every session issued
+    # before an instant.
+    #
+    # This layer FAILS OPEN on a Redis problem, deliberately. It is not the
+    # boundary: the `suspended` check below runs against Postgres on every
+    # request and cannot be bypassed by a cache outage.
+    if await is_revoked(
+        redis,
+        jti=claims.get("jti"),
+        user_id=user_id,
+        issued_at=claims.get("iat"),
+    ):
+        logger.info("revoked_token_rejected", user_id=user_id)
+        raise _UNAUTHORIZED
+
+    # Stash the verified claims so a route can revoke THIS token on sign-out
+    # without re-parsing the bearer (the raw token is also kept for any dep that
+    # still wants it; RLS access itself flows through rls_connection off `sub`).
     request.state.access_token = token
+    request.state.token_claims = claims
 
     try:
         row = await asyncio.to_thread(_load_user_row, user_id)
@@ -173,6 +217,22 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not provisioned",
         )
+
+    # OFFBOARDING IS ENFORCED HERE, on EVERY authenticated request.
+    #
+    # This is the load-bearing check, not the suspend endpoint and not the login
+    # check: an already-issued token lives for days, so refusing at login alone
+    # would leave a departed person working normally until their token expired.
+    # `status` was already being loaded into `CurrentUser` and then never read.
+    #
+    # It is enforced against POSTGRES, not a cache, so it needs no Redis and
+    # cannot be defeated by a cache outage or a stale entry: the moment the row
+    # says `suspended`, the next request fails. That is what makes the revocation
+    # in `app/services/token_denylist.py` a hardening layer rather than the
+    # boundary itself.
+    if str(row.get("status") or "") == SUSPENDED_STATUS:
+        logger.warning("suspended_user_request_rejected", user_id=user_id)
+        raise _SUSPENDED
 
     raw_client_id = row.get("client_id")
     return CurrentUser(

@@ -116,4 +116,4 @@ See [CLAUDE.md](CLAUDE.md) for the full workspace map and operating philosophy.
 
 ## License
 
-Proprietary. Built by Xegents AI for Danyal.
+Proprietary.

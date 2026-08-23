@@ -59,12 +59,33 @@ def _error_response(
     message: str,
     request_id: str | None,
     extra: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+    """Build the standard error envelope, preserving any protocol headers.
+
+    ``headers`` carries the response headers the RAISER attached to its
+    ``HTTPException``. They are part of the HTTP contract, not decoration:
+
+    * ``WWW-Authenticate`` on a 401 is REQUIRED by RFC 9110 §11.6.1 - a 401
+      without it is malformed, and it is what tells a client which scheme to use.
+    * ``Retry-After`` on a 429/503 is how a well-behaved client backs off.
+      Dropping it makes a rate-limited client retry immediately, which is exactly
+      the retry storm the limiter exists to prevent.
+
+    This envelope previously discarded them, so every 401 the platform emitted was
+    missing its ``WWW-Authenticate`` and every 429 its ``Retry-After``, despite
+    both being set correctly at the raise site.
+
+    ``X-Request-ID`` always wins: it is set by this layer and a raiser must not be
+    able to overwrite the request's own correlation id.
+    """
     error: dict[str, Any] = {"type": error_type, "message": message, "request_id": request_id}
     if extra:
         error.update(extra)
-    headers = {REQUEST_ID_HEADER: request_id} if request_id else None
-    return JSONResponse(status_code=status_code, content={"error": error}, headers=headers)
+    out: dict[str, str] = dict(headers or {})
+    if request_id:
+        out[REQUEST_ID_HEADER] = request_id
+    return JSONResponse(status_code=status_code, content={"error": error}, headers=out or None)
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -111,11 +132,15 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         rid = _request_id(request)
+        # `exc.headers` carries the raiser's protocol headers (WWW-Authenticate on
+        # a 401, Retry-After on a 429/503). Forward them: they are contract.
+        raw = getattr(exc, "headers", None)
         return _error_response(
             status_code=exc.status_code,
             error_type=ErrorCode.HTTP,
             message=str(exc.detail),
             request_id=rid,
+            headers={str(k): str(v) for k, v in raw.items()} if raw else None,
         )
 
     @app.exception_handler(RequestValidationError)

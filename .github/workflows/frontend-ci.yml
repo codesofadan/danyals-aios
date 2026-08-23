@@ -1,0 +1,63 @@
+name: frontend-ci
+
+# The dashboard had NO automated check of any kind: no test runner, no typecheck
+# in CI, no build gate. It was also the only part of the system the Phase-2 audit
+# could fully verify by running it — `npm ci` -> `tsc --noEmit` -> `next build` all
+# passed. This job locks that in so it keeps passing, at zero cost to write.
+#
+# Blocking on purpose. A dashboard that does not compile is not a smaller problem
+# than a backend that does not import.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+defaults:
+  run:
+    working-directory: frontend
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match the runtime the Dockerfile builds against.
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` (not `npm install`): installs the lockfile exactly and fails if
+      # package.json and the lock have drifted. The backend has no equivalent
+      # lock today — see docs/implementation/TEST_BASELINE.md risk R-B1.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # The build is a real gate, not a duplicate of the typecheck: it catches
+      # what `tsc` cannot — a bad `next.config.mjs`, a server/client boundary
+      # violation, a missing font or static asset, a prerender-time crash.
+      # No backend runs in this job, and none is needed: every screen fetches
+      # client-side through `lib/api.ts`, so a clean build is itself the proof
+      # that nothing reaches for the API at build time. The env is left at its
+      # production defaults (`NEXT_PUBLIC_API_BASE_URL` = the relative `/api/v1`)
+      # so CI builds the same artefact the Dockerfile does.
+      - name: Build
+        run: npx next build

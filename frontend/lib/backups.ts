@@ -23,18 +23,6 @@ export type Snapshot = {
   status: SnapStatus;
 };
 
-// Most recent first. Nightly = Postgres (app data + KB) + vault;
-// a weekly/manual "Full" also captures the file artifacts volume.
-export const snapshots: Snapshot[] = [
-  { id: "bk-0710-0200", ts: "Today · 02:00", type: "Nightly", scope: "Database", size: "1.82 GB", duration: "3m 48s", status: "success" },
-  { id: "bk-0709-0200", ts: "Yesterday · 02:00", type: "Nightly", scope: "Database", size: "1.80 GB", duration: "3m 41s", status: "success" },
-  { id: "bk-0708-1520", ts: "Jul 08 · 15:20", type: "Manual", scope: "Full (DB + files)", size: "40.9 GB", duration: "21m 12s", status: "success" },
-  { id: "bk-0708-0200", ts: "Jul 08 · 02:00", type: "Nightly", scope: "Database", size: "1.79 GB", duration: "3m 39s", status: "success" },
-  { id: "bk-0707-0200", ts: "Jul 07 · 02:00", type: "Nightly", scope: "Database", size: "1.78 GB", duration: "3m 44s", status: "success" },
-  { id: "bk-0706-0200", ts: "Jul 06 · 02:00", type: "Nightly", scope: "Database", size: "—", duration: "0m 18s", status: "failed" },
-  { id: "bk-0705-0200", ts: "Jul 05 · 02:00", type: "Nightly", scope: "Database", size: "1.76 GB", duration: "3m 52s", status: "success" },
-];
-
 export type ProtectedStore = {
   key: string;
   name: string;

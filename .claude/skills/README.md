@@ -8,7 +8,7 @@ gate, and return a pinned deliverable. **They never invent data and never re-imp
 logic.**
 
 > The two AI surfaces of the platform, and where these skills sit:
-> - **Local Claude Code skills (this plugin).** Slash commands (`/content`, …) that call the
+> - **Local Claude Code skills (this plugin).** Slash commands (`/aios-content`, …) that call the
 >   backend from your machine. This is what you install below.
 > - **The web dashboard (Anthropic-API).** A separate hosted product; not these skills.
 >
@@ -24,13 +24,13 @@ You don't need to be technical. A "skill" is just a **command you type that does
 
 | You want to… | Type this | What you get |
 |---|---|---|
-| See how a client is doing | `/client-snapshot "Joe's Pizza"` | A one-page summary of the client |
-| Write a web page for a service + city | `/local-service-page "Joe's Pizza" "Dallas" "emergency plumbing"` | A ready-to-review page (you approve before it goes live) |
-| Write a blog article | `/blog-post "Joe's Pizza" "how to unclog a drain"` | A ready-to-review article |
-| Get the client listed on directories | `/citation-submit "Joe's Pizza" US` | New listings across directories (some finish with one click) |
-| Check the client's directory listings | `/citation-builder "Joe's Pizza"` | What's listed, what's missing, what's wrong |
-| Run a website audit | `/audit "joespizza.com"` | A scored SEO health report |
-| Make the monthly client report | `/monthly-report "Joe's Pizza"` | A shareable report |
+| See how a client is doing | `/aios-client-snapshot "Joe's Pizza"` | A one-page summary of the client |
+| Write a web page for a service + city | `/aios-local-service-page "Joe's Pizza" "Dallas" "emergency plumbing"` | A ready-to-review page (you approve before it goes live) |
+| Write a blog article | `/aios-blog-post "Joe's Pizza" "how to unclog a drain"` | A ready-to-review article |
+| Get the client listed on directories | `/aios-citation-submit "Joe's Pizza" US` | New listings across directories (some finish with one click) |
+| Check the client's directory listings | `/aios-citation-builder "Joe's Pizza"` | What's listed, what's missing, what's wrong |
+| Run a website audit | `/aios-audit "joespizza.com"` | A scored SEO health report |
+| Make the monthly client report | `/aios-monthly-report "Joe's Pizza"` | A shareable report |
 
 **Three rules that keep you safe:**
 1. **Nothing goes live on its own.** Content is written for you to **review and approve** first. Directory listings that can't be fully automated hand you a ready page to click **Publish** yourself.
@@ -62,10 +62,10 @@ You don't need to be technical. A "skill" is just a **command you type that does
 │       ├── output-formats.md         # exact backend response fields the content skills read
 │       ├── part8-output-formats.md   # response fields for the Part-8 tool-module skills
 │       └── skill-parity.md           # how skills stay in lockstep with the backend routes
-├── content/SKILL.md              # /content    - the content module hub
-├── local-service-page/SKILL.md   # /local-service-page - city+service page (reference impl)
-├── blog-post/SKILL.md            # /blog-post   - informational blog
-├── titles-meta/SKILL.md          # /titles-meta - bulk titles + meta descriptions
+├── aios-content/SKILL.md             # /aios-content            - the content module hub
+├── aios-local-service-page/SKILL.md  # /aios-local-service-page - city+service page (reference impl)
+├── aios-blog-post/SKILL.md           # /aios-blog-post          - informational blog
+├── aios-titles-meta/SKILL.md         # /aios-titles-meta        - bulk titles + meta descriptions
 └── … (one directory per feature — 31 skills total; see the table below)
 ```
 
@@ -89,7 +89,7 @@ Claude Code and the slash commands appear. You only need Python 3 (stdlib only �
 
 3. **Set the two environment variables** (below). Skills read them at call time.
 
-4. **Verify.** In Claude Code run `/content` — it should reach the backend and print the
+4. **Verify.** In Claude Code run `/aios-content` — it should reach the backend and print the
    content board, or a clear auth/connection error if the env vars are wrong.
 
 ---
@@ -133,10 +133,10 @@ Run a skill by typing its slash command in Claude Code. Multi-word arguments mus
 
 | Command | What it does | Side effects |
 |---|---|---|
-| `/content` | The content module hub — create any content job (service/blog/local), read the board + stats, run the review gate. Routes you to the deep skill for the page type. | Creating a job spends metered AI budget. |
-| `/local-service-page acme "San Jose" "AC repair"` | A ranking-grade **local** page (city + service) grounded in fresh client context, QA-gated. | Spends AI budget; creates a content job. |
-| `/blog-post acme "how tankless water heaters save money"` | A ranking-grade **informational blog** (entity coverage + extractable answer + FAQ). | Spends AI budget; creates a content job. |
-| `/titles-meta acme "AC repair San Jose"` | Titles + meta descriptions to spec (title ≤ ~60, meta ≤ ~155, primary front-loaded, grounded). | Spends AI budget; creates a content job. |
+| `/aios-content` | The content module hub — create any content job (service/blog/local), read the board + stats, run the review gate. Routes you to the deep skill for the page type. | Creating a job spends metered AI budget. |
+| `/aios-local-service-page acme "San Jose" "AC repair"` | A ranking-grade **local** page (city + service) grounded in fresh client context, QA-gated. | Spends AI budget; creates a content job. |
+| `/aios-blog-post acme "how tankless water heaters save money"` | A ranking-grade **informational blog** (entity coverage + extractable answer + FAQ). | Spends AI budget; creates a content job. |
+| `/aios-titles-meta acme "AC repair San Jose"` | Titles + meta descriptions to spec (title ≤ ~60, meta ≤ ~155, primary front-loaded, grounded). | Spends AI budget; creates a content job. |
 
 **Every content skill ends at the human review gate.** It surfaces the QA scorecard (the 14
 dimensions, `weighted_total`, `passed`, `blocked_by`) and any `[NEEDS:]` markers, then STOPS.

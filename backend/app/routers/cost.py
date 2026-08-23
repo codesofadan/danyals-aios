@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, CurrentUserDep, require_perm, require_role
+from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
 from app.db.cost_repo import CostRepoDep
 from app.schemas.cost import (
@@ -23,9 +24,11 @@ from app.schemas.cost import (
     CostEntryResponse,
     DialFeatureResponse,
     DialUpdate,
+    ProviderPricingResponse,
     SpendStopResponse,
     SpendStopUpdate,
     merge_dial,
+    provider_pricing,
 )
 from app.services.activity import record_activity
 
@@ -89,6 +92,19 @@ async def list_cost_log(
 ) -> list[CostEntryResponse]:
     rows = await asyncio.to_thread(repo.list_cost_log, page.limit, page.offset)
     return [CostEntryResponse.from_row(r) for r in rows]
+
+
+# --- provider unit pricing ---------------------------------------------------
+@router.get("/pricing", response_model=list[ProviderPricingResponse])
+async def get_pricing(settings: SettingsDep, _user: CurrentUserDep) -> list[ProviderPricingResponse]:
+    """The LIVE per-provider unit prices the cost gate bills at.
+
+    Reads the same ``Settings`` fields ``app.services.pricing`` uses to compute
+    committed spend, so what an operator sees on the Cost screen is what the
+    platform actually charges itself - and it tracks an env change without a
+    frontend deploy. Pure settings read: no DB, no provider call, any staff role.
+    """
+    return provider_pricing(settings)
 
 
 # --- spend halt (the global API-spend kill-switch) ---------------------------

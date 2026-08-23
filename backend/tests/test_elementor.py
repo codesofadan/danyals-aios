@@ -13,6 +13,7 @@ payload carries ``elementor_data`` when the setting is enabled and is byte-ident
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pytest
@@ -238,8 +239,14 @@ def test_plugin_payload_carries_elementor_when_enabled() -> None:
     assert any(
         str(s["settings"].get("_css_classes", "")).startswith("aios-hero") for s in tree
     )
-    # The flat HTML body is STILL present (the non-Elementor fallback).
-    assert payload["content"] and "<h1>" in payload["content"]
+    # The flat HTML body is STILL present (the non-Elementor fallback), and it
+    # carries a real top-level heading. Matched as an H1 ELEMENT rather than the
+    # literal "<h1>": the Gutenberg emitter attributes its headings
+    # (`<h1 class="wp-block-heading">`), so a bare-tag substring check asserted a
+    # formatting detail, not the SEO property that actually matters.
+    body = payload["content"]
+    assert body
+    assert re.search(r"<h1\b[^>]*>", body), "publish body must contain an <h1> element"
 
 
 def test_plugin_payload_carries_design_css_for_default_theme() -> None:

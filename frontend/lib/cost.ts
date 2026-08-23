@@ -1,10 +1,14 @@
 // ============================================================
-// AIOS · Cost Controls mock data — swap for FastAPI/Postgres later.
+// AIOS · Cost Controls — WIRE TYPES + display metadata.
 // "Cost is a dial." Every external provider call passes a cost gate:
 //   tier allows? → cached? → under cap? → call + log cost, else skip/stub/halt.
-// Three controls live here: the per-feature cost dial, per-client
-// budget caps (on the job queue) and the global daily spend-stop.
-// Shapes mirror the §8 data model (jobs, cost_log, budgets).
+//
+// NO PRICES LIVE IN THIS FILE. Unit prices come from GET /cost/pricing, which
+// reads the same `Settings` values the cost gate bills at (see backend
+// app/services/pricing.py). The hardcoded strings that used to sit here were
+// wrong by two to three orders of magnitude against what the platform actually
+// charges itself, and they could never track an env change. Do not reintroduce
+// a literal price.
 // ============================================================
 import { SERIES, type SubTier } from "@/lib/data";
 
@@ -15,15 +19,18 @@ export type Provider = "Serper" | "DataForSEO" | "Anthropic" | "PageSpeed" | "Pl
 export type JobType = "audit" | "content" | "backlinks";
 export type DialMode = "api" | "byhand" | "off";
 
-// Paid providers behind the cost gate + what each call buys.
-export const PROVIDERS: Record<Provider, { c: string; use: string; unit: string; paid: boolean }> = {
-  Serper:     { c: SERIES.c2, use: "SERP + keyword pulls",        unit: "$0.30 / search",  paid: true },
-  DataForSEO: { c: SERIES.c4, use: "Rank tracking + audit data",  unit: "$0.75 / task",    paid: true },
-  Anthropic:  { c: SERIES.c1, use: "Content drafting (Claude)",   unit: "~$0.90 / page",   paid: true },
-  Places:     { c: SERIES.c5, use: "Local / GBP lookups",         unit: "$0.17 / lookup",  paid: true },
-  PageSpeed:  { c: SERIES.c3, use: "Core Web Vitals",             unit: "free tier",       paid: false },
-  Voyage:     { c: SERIES.c1, use: "Context embeddings",          unit: "~$0.02 / 1k tok", paid: true },
-  Google:     { c: SERIES.c5, use: "Search Console + GA4",        unit: "free tier",       paid: false },
+// Providers behind the cost gate: accent colour + what each call buys.
+// `paid` says whether the provider BILLS at all (a free-tier provider is still
+// gated, for spend visibility and dial parity — it just commits $0). The unit
+// PRICE is not here: read it from `useProviderPricing()`.
+export const PROVIDERS: Record<Provider, { c: string; use: string; paid: boolean }> = {
+  Serper:     { c: SERIES.c2, use: "SERP + keyword pulls",       paid: true },
+  DataForSEO: { c: SERIES.c4, use: "Rank tracking + audit data", paid: true },
+  Anthropic:  { c: SERIES.c1, use: "Content drafting (Claude)",  paid: true },
+  Places:     { c: SERIES.c5, use: "Local / GBP lookups",        paid: true },
+  PageSpeed:  { c: SERIES.c3, use: "Core Web Vitals",            paid: false },
+  Voyage:     { c: SERIES.c1, use: "Context embeddings",         paid: true },
+  Google:     { c: SERIES.c5, use: "Search Console + GA4",       paid: false },
 };
 
 export const JOB_TYPE_META: Record<JobType, { label: string; cls: string; icon: string }> = {
@@ -41,7 +48,7 @@ export const JOB_TYPE_META: Record<JobType, { label: string; cls: string; icon: 
 // resolve through these helpers instead: recognized names (any casing) map to
 // canonical meta, anything else gets a neutral fallback — never a crash.
 // ---------------------------------------------------------------------------
-export type ProviderMeta = { c: string; use: string; unit: string; paid: boolean };
+export type ProviderMeta = { c: string; use: string; paid: boolean };
 
 const PROVIDER_ALIASES: Record<string, Provider> = {
   serper: "Serper",
@@ -60,9 +67,14 @@ const PROVIDER_ALIASES: Record<string, Provider> = {
 };
 
 // Extra spend sources that are real but not one of the 7 dial providers.
+// The audit engine has NO flat per-run price: its cost is derived at runtime
+// from what the run actually did (tokens, Serper queries, Places calls) — see
+// backend app/services/pricing.py::audit_cost. Any "per run" figure here would
+// be an invention, so there is none.
 const PROVIDER_EXTRAS: Record<string, ProviderMeta> = {
-  auditengine: { c: SERIES.c3, use: "Comprehensive audit run", unit: "~$1.50 / run", paid: true },
-  fake: { c: "var(--muted)", use: "Deterministic fake (no key)", unit: "free", paid: false },
+  auditengine: { c: SERIES.c3, use: "Comprehensive audit run", paid: true },
+  imagegen: { c: SERIES.c1, use: "AI image generation", paid: true },
+  fake: { c: "var(--muted)", use: "Deterministic fake (no key)", paid: false },
 };
 
 export function providerMeta(p: string): ProviderMeta {
@@ -73,7 +85,9 @@ export function providerMeta(p: string): ProviderMeta {
   if (alias) return PROVIDERS[alias];
   const extra = PROVIDER_EXTRAS[key];
   if (extra) return extra;
-  return { c: "var(--muted)", use: String(p || "Unknown provider"), unit: "", paid: true };
+  // Unknown provider: assume it BILLS. Erring toward "paid" means an
+  // unrecognised spend source is never shown to an operator as free.
+  return { c: "var(--muted)", use: String(p || "Unknown provider"), paid: true };
 }
 
 /** Human label for a raw provider string ("audit_engine" → "Audit Engine"). */
@@ -156,3 +170,33 @@ export const DIAL_MODES: DialMode[] = ["api", "byhand", "off"];
 
 export const usd = (n: number, dp = 0) =>
   "$" + n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
+// --- Live provider unit pricing (GET /cost/pricing) --------------------------
+// The ONLY source of a unit price in the UI. Mirrors backend
+// `ProviderPricingResponse`: `amount` is USD, `basis` names what one `amount`
+// buys in the provider's own billing unit, and `source` names the Settings field
+// the figure came from — so any price on screen is traceable to a live value.
+export type ProviderPriceLine = { label: string; amount: number; basis: string };
+export type ProviderPricing = {
+  provider: string;
+  paid: boolean;
+  source: string;
+  lines: ProviderPriceLine[];
+};
+
+/** Format a USD unit price at whatever precision it actually needs (max 6dp). */
+export function unitPrice(amount: number): string {
+  if (amount === 0) return "$0";
+  const dp = Math.min(6, Math.max(2, Math.ceil(-Math.log10(Math.abs(amount))) + 2));
+  return "$" + amount.toFixed(dp).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** One-line summary of a provider's pricing, e.g. "$0.001 per query". */
+export function pricingSummary(p: ProviderPricing | undefined): string {
+  if (!p) return "";
+  if (!p.paid) return "Free tier";
+  const first = p.lines[0];
+  if (!first) return "";
+  const more = p.lines.length > 1 ? ` (+${p.lines.length - 1} more)` : "";
+  return `${unitPrice(first.amount)} ${first.basis}${more}`;
+}

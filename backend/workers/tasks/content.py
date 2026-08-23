@@ -35,12 +35,22 @@ Design mirrors ``workers/tasks/audit.py`` + ``workers/tasks/context.py``:
   cost-gate block or absent keys DEGRADES (holds at ``drafting`` with an honest $0
   marker) and catches up when keys/budget return. The core NEVER raises.
 
-Publish (P7A-8) is the same discipline: :func:`publish_content_job` re-checks the
-QA hard gate (``qa_score.passed``) and BLOCKS a sub-threshold draft (raising the
-typed :class:`PublishBlocked` - never publishing it); a passing job goes to
-WordPress (per-site app-password from the vault, idempotent via ``wp_post_id``) or
-renders PDF/Markdown to the traversal-safe artifact store, then ``publishing ->
-done``. No WP credential degrades to artifact-only, never a crash.
+Publish (P7A-8): :func:`publish_content_job` pushes an APPROVED job to WordPress
+(per-site app-password from the vault, idempotent via ``wp_post_id``) or renders
+PDF/Markdown to the traversal-safe artifact store, then ``publishing -> done``.
+No WP credential degrades to artifact-only, never a crash.
+
+QA IS ADVISORY, NOT A GATE. This docstring previously claimed publish "re-checks
+the QA hard gate and BLOCKS a sub-threshold draft"; it does not, and has not since
+the product decision recorded at the check site below. The scorecard is computed
+at drafting and logged, and the HUMAN review gate (a lead moving needs_review ->
+publishing) is the quality gate. :class:`PublishBlocked` is consequently NEVER
+RAISED anywhere in this codebase - it is kept as the seam D-4's calibrated gate
+will re-enable through, not as a control that currently protects anything.
+
+The distinction matters: an engineer reading the old wording would reasonably
+believe an automated quality gate stood between a bad draft and a client's live
+site. Nothing does, by design and by decision - so the code now says so.
 """
 
 from __future__ import annotations
@@ -2055,9 +2065,9 @@ def publish_content_job(
     """Publish an APPROVED content job (the approve path moves it to ``publishing``
     first, then calls this).
 
-    Re-checks the QA hard gate: a sub-threshold draft (``qa_score.passed`` not True)
-    is NEVER published - it raises :class:`PublishBlocked`. A passing ``WordPress`` job
-    is pushed, in order: (1) to the client's AIOS Publisher PLUGIN as a DRAFT (the
+    QA IS ADVISORY (see the check below and the module docstring): the scorecard is
+    logged, not enforced, and no draft is blocked here. A ``WordPress`` job is
+    pushed, in order: (1) to the client's AIOS Publisher PLUGIN as a DRAFT (the
     host-independent push - its own endpoint + shared key, bypassing header-stripping
     / app-passwords) when a plugin target is configured, recording the returned
     permalink + edit link; else (2) to WordPress over the REST app-password (per-site,
@@ -2080,13 +2090,23 @@ def publish_content_job(
         # else here is not ready to publish.
         return PublishOutcome(code, status, "noop", reason="not in the publishing state")
 
-    # QA is ADVISORY, not a gate (product decision): the automated QA scorecard is
-    # still computed at drafting and surfaced for the reviewer, but it NO LONGER blocks
-    # publish. The HUMAN review gate (a lead approving needs_review -> publishing) is the
-    # quality gate now - "QA approves it after reading". This keeps a job from taking a
-    # long, token-heavy rewrite loop just to clear an automated threshold; generation
-    # aims for top quality up front and a person signs off. The qa_score is logged for
-    # visibility.
+    # QA is ADVISORY, not a gate (product decision). The scorecard is computed at
+    # drafting and logged here, but it does NOT block publish. The HUMAN review gate
+    # (a lead moving needs_review -> publishing) is the quality gate - "QA approves
+    # it after reading". This keeps a job from taking a long, token-heavy rewrite
+    # loop just to clear an automated threshold.
+    #
+    # PLAN NOTE (P0-11 / D-4): the master plan lists "QA gate -> advisory until
+    # calibrated" as a P0, on the audit's finding that a hard publish gate rested on
+    # a self-declared uncalibrated score. That finding is STALE - this path was
+    # already advisory at the audited commit, and `PublishBlocked` is raised nowhere
+    # in the codebase. What the plan asks for is therefore already true.
+    #
+    # What is NOT yet built is D-4's other half: "advisory + MANDATORY
+    # ACKNOWLEDGEMENT until calibrated". The verdict is written to the server log
+    # only - the reviewer approving the draft is never shown it and never has to
+    # acknowledge a sub-threshold score. Closing that needs a decision on the
+    # acknowledgement's shape, so it is recorded as open rather than guessed at.
     qa = _as_dict(row.get("qa_score"))
     logger.info(
         "content_publish_qa_advisory",
@@ -2333,10 +2353,15 @@ def run_content_job(code: str) -> dict[str, Any]:
 
 @celery_app.task(name="publish_content_job")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
 def publish_content_job_task(code: str) -> dict[str, Any]:
-    """Entry point for an async publish: wire the concrete seams and publish. A QA
-    block is caught + returned (never re-raised: acks_late would redeliver). The
-    synchronous approve router instead calls ``publish_content_job`` directly and
-    surfaces :class:`PublishBlocked` to the reviewer."""
+    """Entry point for an async publish: wire the concrete seams and publish.
+
+    The :class:`PublishBlocked` handler below is CURRENTLY UNREACHABLE - QA is
+    advisory and nothing raises it (see the module docstring). It is retained
+    deliberately rather than deleted: it is the catch site a calibrated gate (D-4)
+    re-enables through, and removing it would mean re-deriving the acks_late
+    reasoning later. The reason it must be caught rather than re-raised is
+    unchanged and still correct: with ``task_acks_late`` a raised exception
+    redelivers the job and republishes it."""
     settings = get_settings()
     store = PrivilegedContentStore()
     providers = content_providers_from_settings(settings)

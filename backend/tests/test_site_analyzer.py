@@ -76,14 +76,14 @@ def test_public_host_delegates_to_the_injected_analyzer() -> None:
 
 
 def test_bare_domain_is_normalized_to_https_before_the_analyzer_sees_it() -> None:
-    """A schemeless input ("xegents.com") passes validate_public_host fine (it only
+    """A schemeless input ("example.com") passes validate_public_host fine (it only
     checks the HOST), but Playwright's page.goto needs a fully-qualified URL or it
     fails almost instantly against about:blank's origin - this is the exact bug that
     produced 'analysis_failed:capture_failed' on a real bare-domain wizard input."""
-    fake = _FakeAnalyzer(_ok_result("https://xegents.com"))
-    result = analyze_website("xegents.com", analyzer=fake)
+    fake = _FakeAnalyzer(_ok_result("https://example.com"))
+    result = analyze_website("example.com", analyzer=fake)
     assert result.status == "ok"
-    assert fake.calls == ["https://xegents.com"]
+    assert fake.calls == ["https://example.com"]
 
 
 def test_already_schemed_url_is_untouched() -> None:

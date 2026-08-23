@@ -22,6 +22,69 @@ const OLD_ADMIN_PATHS = [
   "reports", "upsells", "tiers", "cost", "vault", "backups", "settings",
 ];
 
+// --- Content Security Policy (P0-8) -----------------------------------------
+// The app had NO CSP. That matters more here than in a typical dashboard because
+// the access token is a 7-day bearer credential held in `localStorage`
+// (lib/api.ts): any script that runs on this origin can read it and then use it
+// from anywhere, for a week. Until the token gains a `jti` + denylist and a
+// shorter TTL, the edge policy is the only thing narrowing that blast radius.
+//
+// What this policy actually buys, stated honestly:
+//
+//   connect-src 'self'   — the important one. Injected script may read the token
+//                          but cannot POST it to an attacker-controlled host.
+//   frame-ancestors      — no clickjacking; supersedes X-Frame-Options.
+//   object-src / base-uri / form-action — closes plugin, <base>-hijack and
+//                          form-exfiltration vectors.
+//
+// What it does NOT buy, and why:
+//
+//   script-src keeps 'unsafe-inline' (and 'unsafe-eval' in dev) because Next.js
+//   injects inline bootstrap/hydration scripts. Removing it needs nonce-based
+//   middleware, which forces every route to render dynamically and would give up
+//   the fully-static build this app currently produces. That is a deliberate
+//   trade, recorded in docs/implementation/IMPLEMENTATION_LOG.md — not an
+//   oversight. So this policy mitigates EXFILTRATION, not injection.
+//
+//   img-src allows https: because the product legitimately renders images from
+//   arbitrary client sites (WordPress media, audit screenshots, content
+//   previews). That leaves an image-beacon side channel; closing it would break
+//   real functionality, so it is accepted and named rather than hidden.
+//
+// fonts.googleapis.com / fonts.gstatic.com are the Material Symbols icon font.
+// When that font is self-hosted (a separate planned change) both hosts should be
+// dropped from style-src and font-src.
+const isDev = process.env.NODE_ENV !== "production";
+
+const CSP_DIRECTIVES = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob: https:",
+  // Same-origin only. `/api/v1/*` is same-origin via the rewrite proxy above; a
+  // deployment that serves the API on its own subdomain must add that origin
+  // here, or every request will be blocked.
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "upgrade-insecure-requests",
+].join("; ");
+
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: CSP_DIRECTIVES },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  // Redundant with frame-ancestors for modern browsers; kept for older ones.
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  // No feature of this app needs any of these.
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+];
+
 const nextConfig = {
   reactStrictMode: true,
   // Emit a self-contained server bundle (.next/standalone) for a small Docker
@@ -52,6 +115,12 @@ const nextConfig = {
         permanent: true,
       })),
     ];
+  },
+  // Emitted by Next itself rather than only at the edge, so the policy travels
+  // with the app in every deployment topology (Docker, Caddy, nginx, `next
+  // start`) instead of depending on one reverse proxy being configured right.
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
   async rewrites() {
     return [

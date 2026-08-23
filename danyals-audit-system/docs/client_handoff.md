@@ -194,7 +194,7 @@ Add the key to `.env` and re-run. No restart needed.
 The site is probably blocking the user agent or returning 403/429. Check:
 
 ```
-curl -A "SEO-AUDIT-OS/0.1 (+https://github.com/xegents/seo-audit-os)" -I https://<domain>
+curl -A "SEO-AUDIT-OS/0.1" -I https://<domain>
 ```
 
 If you get a 403, the client's hosting provider is blocking the audit crawler. Ask the client to whitelist the user agent, or run in free mode against a smaller page count.

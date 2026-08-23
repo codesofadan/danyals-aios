@@ -32,7 +32,7 @@ _BRAND = "AIOS"
 _ACCENT = "#6E1423"  # maroon
 _INK = "#241015"
 _MUTED = "#6b6b6b"
-_FOOTER = "AIOS - Xegents AI. You are receiving this because of activity on your account."
+_FOOTER = "AIOS. You are receiving this because of activity on your account."
 
 
 @dataclass(frozen=True)

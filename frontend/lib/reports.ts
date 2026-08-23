@@ -39,18 +39,6 @@ export type Workbook = {
   status: SyncStatus;
 };
 
-// Eight live client workbooks — names mirror the client directory.
-export const workbooks: Workbook[] = [
-  { id: "wb-northpeak", client: "NorthPeak Dental", sheet: "1a7Fq…D4x", tabs: ["audit", "content", "milestones"], rows: 428, lastSync: "2m ago", status: "synced" },
-  { id: "wb-lumen", client: "Lumen Realty", sheet: "1kR2p…9Lm", tabs: ["audit", "content", "milestones"], rows: 512, lastSync: "4m ago", status: "synced" },
-  { id: "wb-verde", client: "Verde Cafe", sheet: "1Zx8t…Qw3", tabs: ["audit", "milestones"], rows: 96, lastSync: "syncing…", status: "syncing" },
-  { id: "wb-atlas", client: "Atlas Legal", sheet: "1Nm4v…7Hs", tabs: ["audit", "content", "milestones"], rows: 0, lastSync: "1h ago", status: "error" },
-  { id: "wb-brighthvac", client: "BrightHVAC", sheet: "1Pd6y…B2k", tabs: ["audit", "content", "milestones"], rows: 337, lastSync: "8m ago", status: "synced" },
-  { id: "wb-coastline", client: "Coastline Fit", sheet: "1Tg9w…M5r", tabs: ["audit", "content"], rows: 154, lastSync: "12m ago", status: "synced" },
-  { id: "wb-meridian", client: "Meridian Wealth", sheet: "1Yh3s…C8n", tabs: ["audit", "content", "milestones"], rows: 604, lastSync: "3m ago", status: "synced" },
-  { id: "wb-orchard", client: "Orchard Pediatrics", sheet: "1Ub5j…F1q", tabs: ["milestones"], rows: 42, lastSync: "34m ago", status: "synced" },
-];
-
 // --- Service account + master workbook (the Sheets connection) --------------
 export const sheetsConnection = {
   account: "aios-sheets@aios-prod.iam.gserviceaccount.com",
@@ -80,27 +68,6 @@ export type ReportType = {
   columns: string; // the columns written to the tab
 };
 
-export const reportTypes: ReportType[] = [
-  {
-    key: "audit",
-    title: "Audit scores",
-    desc: "Every free & paid audit run, rolled up per site.",
-    columns: "Site · Category · Score · Δ vs last · Issues · Fixed · Run date",
-  },
-  {
-    key: "content",
-    title: "Content status",
-    desc: "Content-job pipeline state as drafts move to live.",
-    columns: "Job · Type · Stage · Assignee · Words · Published URL · Updated",
-  },
-  {
-    key: "milestones",
-    title: "Milestone state",
-    desc: "Onboarding & delivery milestones per engagement.",
-    columns: "Milestone · Owner · Due · Status · Completed · Progress %",
-  },
-];
-
 // --- Recent sync activity (pushes to Sheets) --------------------------------
 export type SyncEvent = {
   id: string;
@@ -109,14 +76,3 @@ export type SyncEvent = {
   rows: number;
   ago: string;
 };
-
-export const syncActivity: SyncEvent[] = [
-  { id: "s-01", client: "Meridian Wealth", dataset: "audit", rows: 128, ago: "3m ago" },
-  { id: "s-02", client: "NorthPeak Dental", dataset: "content", rows: 46, ago: "2m ago" },
-  { id: "s-03", client: "Lumen Realty", dataset: "milestones", rows: 12, ago: "4m ago" },
-  { id: "s-04", client: "BrightHVAC", dataset: "audit", rows: 214, ago: "8m ago" },
-  { id: "s-05", client: "Coastline Fit", dataset: "content", rows: 33, ago: "12m ago" },
-  { id: "s-06", client: "Master Rollup", dataset: "milestones", rows: 61, ago: "16m ago" },
-  { id: "s-07", client: "Orchard Pediatrics", dataset: "milestones", rows: 42, ago: "34m ago" },
-  { id: "s-08", client: "Lumen Realty", dataset: "audit", rows: 176, ago: "41m ago" },
-];

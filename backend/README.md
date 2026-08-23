@@ -1,6 +1,6 @@
 # AIOS backend
 
-FastAPI API + Celery workers for the AIOS SEO-automation platform (Xegents AI).
+FastAPI API + Celery workers for the AIOS SEO-automation platform.
 This is the **Part 1 foundation**: a runnable, tested skeleton (config, logging,
 request-id + error envelope, liveness/readiness, Supabase + Redis seams, a Celery
 worker, dev Docker, CI). Business logic (auth, DB tables, the module endpoints)

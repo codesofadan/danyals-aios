@@ -25,7 +25,7 @@ from asgi_lifespan import LifespanManager
 from app.config import get_settings
 from app.db.database import privileged_connection
 from app.main import create_app
-from app.routers.public import get_public_audit_enqueuer, get_public_cost_logger
+from app.routers.public import get_public_audit_enqueuer, get_public_funnel_gate
 
 pytestmark = pytest.mark.integration
 
@@ -58,11 +58,13 @@ async def test_public_funnel_end_to_end() -> None:
     email = f"lead_{uuid4().hex[:10]}@example.com"
 
     app = create_app()
-    # No live broker / no cost side effects: the DB gateway stays REAL.
+    # No live broker: the DB gateway stays REAL (this test's whole point is the
+    # real `public_audits` round-trip, including the real daily-cap count query).
+    # The cost gate is pinned OPEN so the assertion under test is the funnel's
+    # behaviour, not whichever dial mode this database happens to hold.
     enqueued: list[str] = []
-    cost_logged: list[str] = []
     app.dependency_overrides[get_public_audit_enqueuer] = lambda: enqueued.append
-    app.dependency_overrides[get_public_cost_logger] = lambda: cost_logged.append
+    app.dependency_overrides[get_public_funnel_gate] = lambda: (lambda: True)
 
     async with LifespanManager(app):
         try:
@@ -85,7 +87,8 @@ async def test_public_funnel_end_to_end() -> None:
                 assert row["url"] == _PUBLIC_URL
                 assert row["report_token"] == token
                 assert enqueued == [str(row["id"])]  # worker enqueued
-                assert cost_logged == [str(row["id"])]  # $0 funnel cost logged
+                # NO cost row is written at request time any more: the worker
+                # commits exactly one ledger entry, priced from what the run did.
 
                 # --- one-audit-per-email: a SECOND POST same email -> 409 ---
                 dup = await ac.post(

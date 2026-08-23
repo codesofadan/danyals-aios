@@ -1,6 +1,7 @@
 "use client";
 
-import { DIAL_MODES, DIAL_MODE_META, providerMeta, type DialFeature, type DialMode } from "@/lib/cost";
+import { DIAL_MODES, DIAL_MODE_META, pricingSummary, providerMeta, type DialFeature, type DialMode } from "@/lib/cost";
+import { useProviderPricing } from "@/lib/hooks/cost";
 import ReadMore from "@/components/ui/ReadMore";
 
 type Props = {
@@ -11,6 +12,11 @@ type Props = {
 
 export default function CostDial({ dial, onSetMode, halted = false }: Props) {
   const live = dial.filter((d) => d.mode === "api").length;
+  // Live unit prices from GET /cost/pricing — the same Settings values the cost
+  // gate bills at. While it loads (or if it fails) the row simply shows no price
+  // rather than a placeholder figure: an absent number beats an invented one.
+  const pricingQ = useProviderPricing();
+  const priceByProvider = new Map((pricingQ.data ?? []).map((p) => [p.provider, p]));
 
   return (
     <section className="card cst-dial">
@@ -40,6 +46,7 @@ export default function CostDial({ dial, onSetMode, halted = false }: Props) {
       <div className={`cst-dial-list ${halted ? "halted" : ""}`}>
         {dial.map((d) => {
           const pv = providerMeta(d.provider);
+          const price = pricingSummary(priceByProvider.get(d.provider));
           return (
             <div key={d.key} className="cst-dial-row">
               <span className="cst-dial-ic" style={{ color: pv.c, background: `${pv.c}22` }}>
@@ -49,6 +56,7 @@ export default function CostDial({ dial, onSetMode, halted = false }: Props) {
                 <div className="cst-dial-name">{d.label}</div>
                 <div className="cst-dial-sub">
                   <b style={{ color: pv.c }}>{d.provider}</b> · {d.note}
+                  {price && <> · <span title={`Live unit price for ${d.provider}`}>{price}</span></>}
                 </div>
               </div>
               <div className="cst-dial-seg" role="group" aria-label={`${d.label} mode`}>

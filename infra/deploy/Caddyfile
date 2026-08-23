@@ -30,6 +30,24 @@ api.example.com {
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		# CSP for the API ORIGIN. This host serves JSON and file downloads, never
+		# an application UI, so the policy is maximally restrictive: nothing may
+		# execute, embed, or be embedded if a response is ever opened directly in
+		# a browser. The DASHBOARD's (necessarily looser) policy is emitted by
+		# Next.js itself - see frontend/next.config.mjs.
+		#
+		# One exception is handled in application code, not here: the audit
+		# report.html download route sets its own narrower policy
+		# (`REPORT_HTML_VIEW_HEADERS` in app/services/audit_artifacts.py) allowing
+		# inline styles and data: images. Caddy's `header` REPLACES a header of the
+		# same name, so this directive is applied only where the app did not set one.
+		# `sandbox` is deliberately NOT included: this host streams PDF and JSON
+		# downloads, and a bare `sandbox` would apply the most restrictive sandbox
+		# to any response a browser renders inline. The substantive protections
+		# here are default-src/frame-ancestors/base-uri/form-action.
+		?Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 		# Do not advertise the server software.
 		-Server
 	}

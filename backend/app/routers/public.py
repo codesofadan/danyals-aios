@@ -12,13 +12,25 @@ Fiverr upsell link. Security posture (read before touching this file):
   (``clients``/``users``/``audits``) is ever reachable from here.
 * The ``report_token`` IS the capability: 24 random bytes (hex) minted by the DB.
   Knowing it grants read of exactly that one curated report - nothing else.
-* One free audit per email (409 on a repeat), SSRF-guarded target URL, and
-  per-IP rate limited (abuse control). The free audit is now COMPREHENSIVE: it
-  runs all six SEO dimensions (on-page, off-page, technical, local, GEO/AI-search,
-  strategy) with real provider data. COST NOTE: this means each free run now
-  spends on the wired providers (Serper + Google Places, degrade-safe) - it is no
-  longer $0. Intended as a comprehensive lead-generation audit; the owner should
-  know the funnel is now a metered cost (a missing key skips that spend).
+* FOUR independent abuse controls, because this is the only route on the platform
+  an anonymous caller can use to cause real work (P0-2 / MT-005 / ADM-026):
+    1. **SSRF-guarded** target URL (no internal address is ever crawled).
+    2. **One free audit per email** (409 on a repeat), enforced by a DB unique
+       index on ``lower(email)``, not only by the pre-check.
+    3. **Per-IP rate limit, FAILING CLOSED.** If Redis cannot be consulted the
+       request is refused, not waved through: a fail-open limiter means a cache
+       outage silently removes the control.
+    4. **An agency-wide daily cap** counted from Postgres. Per-IP limiting bounds
+       one abuser; the daily cap bounds a distributed one and is the ceiling on
+       the platform's total daily exposure. It also fails closed.
+  Plus the **cost gate**: the ``public_audit`` dial and the agency-global spend
+  halt are consulted before a row is even created, so an operator can switch the
+  lead magnet off during an abuse episode without touching the paid product.
+* The free audit is **CONDENSED and GENUINELY FREE** (DECISIONS_LOG D-1): the
+  engine runs ``--mode free``, which hard-clears every paid integration, so a run
+  calls no paid provider and costs $0 by construction rather than by assertion.
+  It previously ran ``--mode auto`` with Serper + Places + citations + PSI on
+  while committing a hardcoded $0.00 to the ledger - real spend, invisible.
 * The tokenized report is CURATED: it returns the score/status/flags + the upsell
   link, and NEVER the internal id, the email, the stored error, or artifact paths.
 """
@@ -50,21 +62,34 @@ from app.services.content_images import (
     LocalContentImageStore,
     content_image_store_from_settings,
 )
-from app.services.cost_gate import GateContext
+from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 
 logger = get_logger("app.public")
 
+
+class _NoCostCache:
+    """A no-op ``CostCache``. The funnel pre-check asks the gate a policy question
+    (halt? dial?) and makes no provider call, so there is nothing to cache."""
+
+    def get(self, key: str) -> Any | None:
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        return None
+
 router = APIRouter(prefix="/public", tags=["public"])
 
-# Cost grouping for the funnel-entry $0 log (mirrors the worker's constants).
-_COST_FEATURE = "tech_audit"
+# The funnel's OWN dial feature (registered in app.schemas.cost.DIAL_FEATURES).
+# Deliberately NOT the paid audit's "tech_audit": an operator must be able to
+# switch the unauthenticated lead magnet off without disabling the paid product.
+_COST_FEATURE = "public_audit"
 _COST_PROVIDER = "audit_engine"
 _COST_JOB_TYPE = "public_audit"
 
-# The free audit is COMPREHENSIVE: it defaults to all six SEO dimensions. The
-# engine runs every dimension deterministically and enables the wired providers
-# for the paid dimensions (degrade-safe) - see integrations.audit_engine.build_argv.
+# The dimensions the condensed free run reports on. The engine's deterministic
+# analyzers cover these without any paid provider; the paid dimensions
+# (off-page/local via Serper + Places) are the authenticated product.
 _DEFAULT_TYPES: tuple[AuditTypeKey, ...] = (
     "onpage",
     "offpage",
@@ -84,19 +109,32 @@ _REPORT_NOT_FOUND = HTTPException(
 _ARTIFACT_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not available"
 )
+# One message for every "not accepting free audits right now" case - a daily cap
+# hit, an operator-disabled dial, a spend halt, or a cap check that could not run.
+# Deliberately uniform: an anonymous caller learns the funnel is closed, never
+# which control closed it or where the ceiling sits.
+_FUNNEL_UNAVAILABLE = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail="Free audits are temporarily unavailable. Please try again later.",
+    headers={"Retry-After": "3600"},
+)
 
 
 # --------------------------------------------------------------------------- #
 # Request / response shapes
 # --------------------------------------------------------------------------- #
 class PublicAuditCreate(BaseModel):
-    """Landing-page payload. ``email`` is validated (``EmailStr``); ``types`` is
-    optional and defaults to ALL six dimensions (the comprehensive free audit).
+    """Landing-page payload. ``email`` is validated (``EmailStr``).
 
-    ``types`` is accepted for API compatibility but does not scope the public run:
-    the free funnel always runs the full comprehensive engine pass (all six
-    dimensions with real data) - the engine's light/public path is not
-    per-dimension scopeable (see integrations.audit_engine.build_argv)."""
+    ``types`` is accepted for wire compatibility with the existing landing page
+    but does NOT scope the run, and never did: the engine has no per-dimension
+    flag on its light path (see ``integrations.audit_engine.build_argv``). The
+    public funnel runs one fixed CONDENSED shape - the deterministic on-page,
+    technical and AI-search analyzers, no paid provider (DECISIONS_LOG D-1).
+
+    The report renders whatever score categories that run actually produced, so a
+    caller asking for a dimension the condensed run does not cover simply does not
+    see it - it is never fabricated to match the request."""
 
     email: EmailStr
     url: str = Field(min_length=1, max_length=2048)
@@ -133,6 +171,7 @@ class PublicAuditsGateway(Protocol):
     def insert(self, email: str, url: str, source: str) -> dict[str, Any]: ...
     def get_by_token(self, report_token: str) -> dict[str, Any] | None: ...
     def delete_by_id(self, public_audit_id: str) -> None: ...
+    def count_today(self) -> int: ...
 
 
 class PrivilegedPublicAuditsGateway:
@@ -177,6 +216,21 @@ class PrivilegedPublicAuditsGateway:
         with privileged_connection() as cur:
             cur.execute("delete from public.public_audits where id = %s", (public_audit_id,))
 
+    def count_today(self) -> int:
+        """Public audits created so far in the current UTC day.
+
+        Counted in Postgres, not Redis: the agency-wide ceiling is a spend control
+        and must survive a cache flush or a cold cache. ``created_at`` is the row's
+        own insert timestamp, so the count cannot drift from what was accepted.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select count(*) as n from public.public_audits "
+                "where created_at >= date_trunc('day', now() at time zone 'utc')"
+            )
+            row = cur.fetchone()
+            return int(row["n"]) if row else 0
+
 
 def get_public_gateway() -> PublicAuditsGateway:
     """Dependency: the privileged public-audits gateway (overridable in tests)."""
@@ -204,30 +258,39 @@ def get_public_audit_enqueuer() -> Callable[[str], None]:
 PublicEnqueuerDep = Annotated[Callable[[str], None], Depends(get_public_audit_enqueuer)]
 
 
-def get_public_cost_logger() -> Callable[[str], None]:
-    """Dependency: log the funnel-entry $0 cost (Free) via the Part-2 cost path.
+def get_public_funnel_gate() -> Callable[[], bool]:
+    """Dependency: is the free-audit funnel currently open?
 
-    Public runs never spend, but the funnel entry is still recorded at $0 so the
-    money-dial ledger accounts for every audit the platform initiates. Overridable
-    in tests (the default writes through the privileged cost store).
+    Consults the SAME cost gate every paid call passes, under the funnel's own
+    ``public_audit`` dial. Returns True only for an ``api`` dial with no
+    agency-global spend halt engaged.
+
+    This REPLACES a "funnel-entry $0 cost" writer that logged a hardcoded $0.00
+    into the money ledger at request time. That row asserted a cost before any
+    work had happened and was a duplicate of the worker's own commit - the
+    worker now writes exactly one ledger row per run, with the cost DERIVED from
+    what the run actually did (``workers/tasks/audit.py``). What the request path
+    needs from the gate is not a ledger entry: it is permission to proceed.
+
+    Overridable in tests (the default reads through the privileged cost store).
     """
 
-    def _log(public_audit_id: str) -> None:
+    def _open() -> bool:
         ctx = GateContext(
             feature_key=_COST_FEATURE,
             client_id=None,
             provider=_COST_PROVIDER,
             estimated_cost=0.0,
-            job_id=public_audit_id,
+            job_id="",
             job_type=_COST_JOB_TYPE,
             client_name="",
         )
-        PostgresCostStore().record_cost(ctx, 0.0, cached=False)
+        return CostGate(PostgresCostStore(), _NoCostCache()).evaluate(ctx).allowed
 
-    return _log
+    return _open
 
 
-PublicCostLoggerDep = Annotated[Callable[[str], None], Depends(get_public_cost_logger)]
+PublicFunnelGateDep = Annotated[Callable[[], bool], Depends(get_public_funnel_gate)]
 
 
 def get_public_artifact_store(settings: SettingsDep) -> LocalArtifactStore | None:
@@ -259,22 +322,52 @@ _IMAGE_CACHE_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
     "/audits",
     response_model=PublicAuditCreated,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rate_limit_ip("public_audit", 5))],
+    # FAIL CLOSED. On every other route the limiter is one control among several
+    # (authentication, permissions, budget caps); here it is the only thing between
+    # an anonymous caller and a crawl, so "we cannot count" must mean "no".
+    dependencies=[Depends(rate_limit_ip("public_audit", 5, fail_closed=True))],
 )
 async def create_public_audit(
     body: PublicAuditCreate,
     gateway: PublicGatewayDep,
     enqueue: PublicEnqueuerDep,
-    log_cost: PublicCostLoggerDep,
+    funnel_open: PublicFunnelGateDep,
+    settings: SettingsDep,
 ) -> PublicAuditCreated:
-    """Create ONE free audit for an email (lead capture). Comprehensive, SSRF-guarded.
+    """Create ONE condensed free audit for an email (lead capture). SSRF-guarded.
 
-    The free funnel now runs ALL six SEO dimensions with real provider data, so
-    paid audit types are NO LONGER rejected here. The one-free-audit-per-email,
-    SSRF, and per-IP rate-limit guards are retained. COST NOTE: each run now spends
-    on the wired providers (Serper + Google Places, degrade-safe) - no longer $0.
+    Order of checks is deliberate, cheapest-and-most-decisive first: the funnel
+    gate and the daily cap decide whether we are accepting ANY request right now,
+    and both run before the SSRF DNS lookup so a closed funnel costs no work. The
+    per-request guards (SSRF, one-per-email) follow.
     """
-    # SSRF guard: getaddrinfo blocks, so validate off the event loop.
+    # 1. Is the funnel open at all? The operator dial + the agency-global spend
+    #    halt. A gate failure is treated as CLOSED: if we cannot establish that
+    #    spending is permitted, we do not spend.
+    try:
+        is_open = await asyncio.to_thread(funnel_open)
+    except Exception:
+        logger.error("public_audit_gate_check_failed")
+        raise _FUNNEL_UNAVAILABLE from None
+    if not is_open:
+        logger.info("public_audit_funnel_closed")
+        raise _FUNNEL_UNAVAILABLE
+
+    # 2. The agency-wide daily ceiling. Per-IP limiting bounds ONE abuser; this
+    #    bounds a distributed one. FAILS CLOSED for the same reason as the gate:
+    #    an uncountable ceiling is an unenforced ceiling.
+    cap = settings.public_audit_daily_cap
+    if cap > 0:
+        try:
+            used = await asyncio.to_thread(gateway.count_today)
+        except Exception:
+            logger.error("public_audit_daily_cap_check_failed")
+            raise _FUNNEL_UNAVAILABLE from None
+        if used >= cap:
+            logger.warning("public_audit_daily_cap_reached", used=used, cap=cap)
+            raise _FUNNEL_UNAVAILABLE
+
+    # 3. SSRF guard: getaddrinfo blocks, so validate off the event loop.
     try:
         await asyncio.to_thread(validate_public_host, body.url)
     except PrivateAddressError as exc:
@@ -312,12 +405,9 @@ async def create_public_audit(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The audit service is temporarily unavailable. Please try again shortly.",
         ) from exc
-    # Funnel-entry $0 cost (Free). Never fail the 201 on a cost-logging hiccup.
-    try:
-        await asyncio.to_thread(log_cost, public_audit_id)
-    except Exception:
-        logger.warning("public_audit_cost_log_failed", public_audit_id=public_audit_id)
-
+    # No cost row is written here. The WORKER commits exactly one ledger entry per
+    # run, priced from what the run actually did - see workers/tasks/audit.py. A $0
+    # row written at request time asserted a cost before any work existed.
     return PublicAuditCreated(report_token=str(row["report_token"]), status=str(row["status"]))
 
 
