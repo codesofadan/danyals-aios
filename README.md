@@ -8,7 +8,7 @@ product with its own dependency set.
 
 | Folder | What lives here | State |
 |---|---|---|
-| `frontend/` | The dashboard app (Next.js 14, App Router): modules for audit, content, off-page, clients, reports, policy radar, cost, tiers, and more, plus a Command Center and Settings. | Runnable |
+| `frontend/` | The dashboard app (Next.js 15, App Router): modules for audit, content, off-page, clients, reports, policy radar, cost, tiers, and more, plus a Command Center and Settings. | Runnable |
 | `backend/` | API service (FastAPI) that the frontend calls and that orchestrates the modules and jobs. ~82k lines across `app/`, `integrations/` and `workers/`; 202 test files. | Built |
 | `db/` | Database schema and 81 ordered SQL migrations (self-hosted PostgreSQL 16), with row-level security enforced on every tenant table. | Built |
 | `infra/` | Deployment and ops: systemd units, Caddy, CI. | Built |
@@ -35,7 +35,9 @@ Requires Node 18.17+ (tested on Node 24).
 
 ## Stack
 
-- **Frontend:** Next.js 14.2, React 18, TypeScript, three.js, anime.js
+- **Frontend:** Next.js 15.5, React 19, TypeScript, anime.js
+  (an earlier version of this line said Next 14.2 / React 18 / three.js; the first two
+  were a major version behind and `three` is not a dependency at all)
 - **Backend:** FastAPI (Python 3.11+), Celery + Redis for jobs
 - **Data:** self-hosted PostgreSQL 16 (identity, secrets, knowledge base) with RLS as the
   tenant boundary; Redis for the queue, cache and write-buffer
