@@ -17,15 +17,35 @@ WorkingDirectory=/opt/aios/backend
 Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/aios/ms-playwright
 # Same root-owned env file as the API (see aios-api.service for the footgun note).
 EnvironmentFile=/etc/aios/aios.env
-ExecStart=/opt/aios/backend/.venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=4
+# -Q IS REQUIRED. A worker started without it consumes ONLY the default queue
+# ("celery"), so every job the job contract routes to a duration class - interactive,
+# standard, long, browser - would sit in Redis forever with nothing reading it, and
+# the platform would look idle rather than broken. The queues are declared in
+# app/jobs/status.py (JobQueue) and asserted against this line by
+# tests/test_job_queues.py.
+#
+# `celery` is the LEGACY default: the tasks that predate the contract still publish
+# there, and it stays in the list until every one of them is migrated to @aios_job.
+#
+# SPLITTING THE IMAGE (target architecture): `browser` is its own class because it is
+# the only one needing Chromium + Playwright. When the api/worker-browser image split
+# lands, drop `browser` from this line and give it its own unit with its own memory
+# envelope - that is what stops an audit taking the API host down with it. Until then
+# one worker serves all four, which is correct but not yet isolated.
+ExecStart=/opt/aios/backend/.venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=4 -Q celery,interactive,standard,long,browser
 Restart=always
 RestartSec=5
-# Celery does a WARM shutdown on SIGTERM (waits for running tasks). We allow up to
-# the hard task_time_limit (1800s) so an in-flight job finishes cleanly on a deploy.
-# INVARIANT #8: task_acks_late=True + the Redis broker's visibility_timeout >=
-# task_time_limit make a job that IS killed safe to redeliver (a sequential re-run,
-# never a concurrent double-run / double API spend). Ops may lower this to speed
-# deploys, accepting that a long in-flight job is then redelivered after restart.
+# Celery does a WARM shutdown on SIGTERM (waits for running tasks).
+# INVARIANT #8: task_acks_late=True + the Redis broker's visibility_timeout >= the
+# longest task_time_limit make a job that IS killed safe to redeliver (a sequential
+# re-run, never a concurrent double-run / double API spend).
+#
+# This is DELIBERATELY below the browser class's 7200s limit: waiting two hours to
+# finish a deploy is worse than re-running one job. What makes that acceptable is the
+# job contract - a redelivered job re-claims its IDEMPOTENCY KEY first, so one that
+# already reached a terminal state is skipped rather than re-run, and one that did
+# not is resumed as a fresh attempt against its budget. Before the contract, this
+# same kill re-did paid work.
 TimeoutStopSec=1800
 
 # --- Hardening --------------------------------------------------------------

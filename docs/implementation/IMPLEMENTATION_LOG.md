@@ -684,3 +684,376 @@ contracts they assert live *beyond* the new guard) plus a dedicated refusal test
   as test doubles constructed by the suites. That is now enforced rather than assumed:
   the new AST guard fails the build the moment any of them is constructed on a
   production path.
+
+---
+
+## WU-8 · P0-3 — the job contract (spine item 1)  ✅
+
+*Phase 2 item 1 of the AIOS v2 rescue plan. The plan's own words: "Nothing else
+unblocks until this lands — and the beat schedule must not be restored before it."*
+
+### What was wrong
+
+39 Celery tasks, and the job layer had no idempotency key, no retry accounting, no
+dead-letter queue, no correlation id, no per-client cap, and no shared status
+vocabulary. Verified from the code, not assumed:
+
+- `grep -rn "autoretry_for\|max_retries\|retry_backoff" workers/ app/modules/` → **zero
+  matches**. Nothing retries.
+- `grep -rln "dead_letter\|dlq" backend/ db/` → **zero files**. Nothing is replayable.
+- `workers/celery_app.py:173` → `beat_schedule = {}`. Nothing runs on a schedule.
+- Eighteen separate `*_status` enums across the migrations. `audit_status` says
+  `done`, `site_job_status` says `completed`, `scheduled_job_status` says `ok` — and
+  **not one of them can say `degraded`**. That is the mechanical reason a WordPress
+  publish that reached no website recorded `done`: `done` was the only terminal word
+  the schema had.
+
+### What changed
+
+**`db/migrations/0080_job_contract.sql`** — `job_status` (queued · running ·
+completed · degraded · blocked · failed · cancelled), `job_queue` (interactive ·
+standard · long · browser), and two tables: `job_runs` (the execution ledger, one row
+per logical unit of work) and `job_dead_letters` (the replayable record of everything
+that failed). Both server-written on `service_role`, staff-readable, ENABLE+FORCE RLS.
+
+The point of the table is its CHECK constraints, which make specific lies
+unrepresentable rather than merely discouraged:
+
+| Constraint | The lie it refuses to store |
+|---|---|
+| `job_runs_reason_required_ck` | a `degraded`/`blocked` row with no written reason |
+| `job_runs_error_required_ck` | a `failed` row with no error type |
+| `job_runs_finished_ck` | terminal without `finished_at`, or `finished_at` while running |
+| `job_dead_letters_resolution_ck` | a dead letter closed with no decision recorded |
+
+**`app/jobs/`** — the contract, split so the hard part is Celery-free:
+
+- `status.py` — the one vocabulary. `is_success()` returns True for `completed` and
+  **nothing else**; `DOMAIN_TERMINAL_MAP` translates each module's terminal words into
+  it. The duration classes own the time limits, so
+  `BROKER_VISIBILITY_TIMEOUT = max(TIME_LIMITS) + 300` is derived rather than
+  hardcoded (invariant #8 can no longer drift).
+- `contract.py` — `JobOutcome` (terminal by construction: `completed()` takes no
+  reason because there is nothing to explain; `degraded()`/`blocked()` cannot be built
+  without one), the four exception classes, and `JobContext` with throttled
+  `heartbeat()` / `cancelled()` / `checkpoint()`.
+- `runner.py` — `run_job`: claim → start → execute → finish → dead-letter. Pure over a
+  `JobRunStore` Protocol, never raises, and never performs the retry itself (it
+  returns a `Disposition`).
+- `celery_task.py` — `@aios_job`, `enqueue`, `enqueue_child`, and the router. The only
+  Celery-aware module.
+
+**`app/db/job_runs_repo.py`** — the privileged store the runner drives plus the
+RLS-scoped read repo the API uses. **`app/routers/jobs.py`** + `app/schemas/jobs.py` —
+the operator surface (8 endpoints). **`workers/tasks/job_maintenance.py`** — the
+stuck-run reaper.
+
+### Three defects found while building it
+
+1. **`SOFT_TIME_LIMITS` was `hard - 60`, which is ZERO on the 60s interactive class.**
+   Celery reads 0 as falsy — no soft limit at all, so an overrunning interactive job
+   would be hard-killed with no chance to record an honest outcome. Now
+   `hard - min(60, max(5, hard // 4))`, and a test asserts every class has a positive
+   soft limit below its hard one.
+
+2. **`JobContext` initialised its throttle clocks to `0.0`, so the FIRST heartbeat and
+   the FIRST cancellation poll were both silently skipped** (a monotonic clock can
+   legitimately start at 0). Now `-inf`.
+
+3. **The DLQ-replay endpoint creates a run row without knowing the job's spec, which
+   would violate `attempt <= max_attempts` on the job's second attempt.** `start()`
+   now re-stamps `max_attempts` from the running code's spec — which also fixes the
+   latent case of a queued row created before a job's budget was changed.
+
+### One deployment hazard caught before it shipped
+
+Setting `task_default_queue="standard"` looked tidy and was a live-deploy hazard: the
+39 legacy tasks publish to the DEFAULT queue, so renaming it strands every message
+already sitting on `celery` at the moment of a deploy — and `aios-worker.service`
+starts `celery worker` with **no `-Q`**, which consumes only the default queue, so
+every job routed to a duration class would have sat in Redis with nothing reading it.
+The platform would have looked idle rather than broken.
+
+Fixed both ways: the default queue stays `celery`, and the worker unit now passes
+`-Q celery,interactive,standard,long,browser`. A test reads
+`infra/systemd/aios-worker.service` and fails if a duration class is ever added
+without being added there too — **proven non-vacuous** by removing `browser` from the
+line and watching it fail.
+
+### What proves it
+
+| Suite | Count | Proves |
+|---|---|---|
+| `tests/test_job_contract.py` | 35 | Every runner branch against an in-memory store: idempotent skip, duplicate-delivery drop, retry ladder + budget exhaustion, permanent-vs-transient classification, cooperative cancellation, cap deferral vs honest block, ledger-outage handling, secret redaction |
+| `tests/test_job_queues.py` | 12 | The visibility-timeout invariant against the LIVE config, Python↔Postgres enum parity read from the migration, the deployed worker's `-Q` |
+| `tests/test_aios_job_decorator.py` | 8 | The Celery binding: registration, routing, time limits, reserved-kwarg stripping, a real `Retry` |
+| `tests/test_jobs_endpoints.py` | 19 | The staff boundary, that `degraded` is never folded into a success count, and that replay cannot double-spend |
+| `tests/integration/test_job_runs_store.py` | 18 | The SQL against **real PG16**: partial-index idempotency, the advisory-lock cap, every CHECK constraint, the heartbeat reaper |
+
+`db/ci/verify_fresh_apply.py` against a throwaway PG16: **82 migrations apply in order
+from zero, RLS gate green, 78 tables all FORCE**.
+
+| | |
+|---|---|
+| Suite before | 4,932 passed · 9 failed · 4 skipped |
+| **Suite after** | **5,005 passed · 9 failed · 4 skipped** (+73 tests, zero regressions) |
+| The 9 | Unchanged, and **byte-for-byte the same test ids** as the baseline run: the documented pre-existing beat-schedule class (`TEST_BASELINE.md` §2.1) |
+
+`ruff` clean across the tree; `mypy --strict` clean on 277 files.
+
+### What this did NOT fix
+
+- **The beat schedule is still empty.** Deliberate, and the correct ordering: the
+  contract lands first, because restoring a schedule over a ledger that still
+  mis-reports is how a double-spend happens. The 9 tests stay red until then.
+- **No existing task has been migrated.** The contract is the envelope; moving the 39
+  tasks into it is per-module work, and the router falls through for unregistered
+  tasks so a half-migrated system works.
+- **`content_status` still has no `degraded` label (P0-4).** A credential-less publish
+  still records `done` on the module table. Until that lands a job records its
+  degradation on the `job_runs` row, so the rollup is honest even while the module
+  table is not. `DOMAIN_TERMINAL_MAP` carries an explicit note where the extra row
+  will go.
+- **The browser queue is not yet its own image.** It is a separate queue precisely so
+  it can be peeled onto its own worker; today one unit serves all four.
+- **No frontend.** The eight endpoints exist and are tested; nothing renders them yet.
+
+### Amended after the Phase 1 research wave landed
+
+The cross-track index (`docs/research/README.md`, "Requirements this wave imposes on
+Phase 2") requires that **every block is a typed refusal with a stable machine code**,
+and R3B independently specifies a closed fourteen-value `blocked_reason` vocabulary for
+content publishing. So `job_runs.reason_code` and `job_dead_letters.reason_code` were
+added **while the contract was still uncommitted and nothing depended on it** — later
+it is a data migration.
+
+`degraded` and `blocked` now require both halves: prose for a person (`reason`) and a
+stable snake_case identifier for everything else (`reason_code`), enforced by
+`job_runs_reason_code_required_ck` and a format check mirrored by a Python validator.
+Deliberately NOT a Postgres enum — the closed vocabularies belong to the modules, and
+pinning them in the contract would force a migration every time a module learns a new
+way to refuse. `DOMAIN_TERMINAL_MAP["content_status"]` also gained its `degraded` row
+ahead of P0-4's migration `0081`, because an unmapped terminal word silently vanishes
+from every cross-module count.
+
+This is the parallel-phase design working as intended: Phase 1 changed Phase 2's
+schema before Phase 2 shipped it.
+
+Full design + migration guide: `backend/docs/JOB-CONTRACT.md`.
+
+---
+
+## WU-9 · A false claim in an always-loaded doc, and how far it travelled  ✅
+
+*Not planned work. Found while adding invariant #13 next to invariant #12.*
+
+### The claim
+
+`backend/CLAUDE.md` invariant #12 asserted, in its title and its body:
+
+> "the QA gate is a **hard gate**" · "The **QA §11 scorecard is a hard publish gate**:
+> `publish_content_job` re-checks `qa_score.passed` and **NEVER publishes a
+> sub-threshold draft** (raises `PublishBlocked`)."
+
+It is false, and was false at the audited commit. Verified rather than inferred:
+
+```
+$ grep -rn "raise PublishBlocked" app workers integrations
+(no matches)
+```
+
+`PublishBlocked` is defined (`workers/tasks/content.py:382`) and caught twice
+(`:2129`, `:2371`) but **raised nowhere**. `publish_content_job` reads the stored
+score, emits `content_publish_qa_advisory` (`:2110`) and publishes regardless. The
+code says so itself at `:47`, `:2102` and `:2358`.
+
+WU-6 established exactly this and corrected three docstrings in `workers/tasks/content.py`.
+It missed four other places, which is how the claim survived.
+
+### How far it travelled
+
+This is the part worth recording. The claim did not stay in one file:
+
+| Where | What it said |
+|---|---|
+| `backend/CLAUDE.md` #12 (title + body) | "hard gate", "NEVER publishes a sub-threshold draft" |
+| `backend/docs/CONTENT-MODULE.md` §"The QA gate (a hard publish gate)" | described the mechanism in detail — "it raises the typed `PublishBlocked`… the gate still refuses a draft that does not actually clear the bar" |
+| `app/services/content_qa.py:72` | "EVERY dimension below MIN_DIMENSION_SCORE **blocks publish**" |
+| `app/services/content_qa.py:723` | "**Publish** (`passed`) iff…" |
+
+And then out of the codebase entirely, into the Phase 1 recovery specification —
+**citing `backend/CLAUDE.md` item 12 as its evidence**:
+
+- `DANIEL_PROJECT_RECOVERY_SPECIFICATION.md:95` — *"The content QA scorecard is a hard
+  publish gate… **[CONFIRMED — `[CODE]` `backend/CLAUDE.md` item 12]**"*
+- `:1748` CN-1, a **P1** finding — *"…yet enforced as a hard publish gate"*
+- `:1933` records the contradiction explicitly — `[CODE]` said hard gate,
+  `[RESEARCH-AUG]` said *"now advisory, not a blocker"* — and **resolved it in favour
+  of the documentation.** The research note was right; the doc was wrong.
+- `OPEN_QUESTIONS.md` Q-4 — *"the codebase **states** it is a hard gate"* (the wording
+  is honest: the author read the documentation, not the call sites)
+- `DECISIONS_REQUIRED.md` D-4 — *"**Context.** The code enforces it as a hard publish
+  gate…"*
+
+**D-4 is therefore not the decision it was framed as.** It was escalated as "hard gate
+or advisory?" — and the answer to that half has been "advisory" the whole time. What is
+genuinely open is narrower: whether to build D-4's *other* half (mandatory
+acknowledgement) and, later, a calibrated hard gate. CN-1's premise — an uncalibrated
+threshold *enforced* — is false, because nothing is enforced.
+
+**Do not re-escalate D-4 on the strength of this.** The stale framing lives in
+`DECISIONS_REQUIRED.md`'s original *Context* line, not in the plan the owner approved:
+that plan's D-4 recommendation already reads *"advisory PLUS mandatory acknowledgement
+— only the advisory half exists; the QA verdict goes to a server log and the approving
+lead never sees it."* So the decision on record is already the narrow one. What this
+finding changes is the SIZE of the job, not its scope: the score does not need plumbing
+to the review surface, because it is already computed, stored at `needs_review` and
+fetchable — the acknowledgement is a schema addition plus a gate, not a pipeline
+change.
+
+### What changed
+
+Documentation only. **No behaviour was altered** and the QA scorecard still computes
+`passed` exactly as before (70 / 85 / hard-gate floor, all PROVISIONAL).
+
+- `backend/CLAUDE.md` #12 — title and body corrected, with the grep result and the
+  file:line evidence inline so the next reader does not have to re-derive it.
+- `backend/docs/CONTENT-MODULE.md` — section retitled "The QA score (ADVISORY — there
+  is no automated publish gate)" with a dated correction note, and rewritten to state
+  what actually happens: the score is stored at `needs_review` and fetchable at
+  `GET /content/jobs/{code}/qa`, it is NOT in the 15-key `ContentJobResponse` the
+  review endpoint returns, and publish only logs it.
+- `app/services/content_qa.py` — both stale comments corrected; `passed` is labelled a
+  verdict, not an enforcement.
+
+`PublishBlocked` and its two catch sites are **kept**, per WU-6: they are the seam a
+calibrated gate re-enables through.
+
+### Deliberately NOT changed
+
+- **The recovery specification, CN-1, Q-4 and D-4 are untouched.** They are Phase 1
+  deliverables and a historical record of what that pass found; revising a P1 finding
+  and re-scoping an escalated decision is an owner call, not a side effect of a
+  documentation fix. Recorded here instead, and flagged to the owner.
+- **The gate itself.** Making QA enforceable is P0-4 / D-4 and belongs to that work.
+
+### The lesson worth keeping
+
+The claim was believed because it was in `CLAUDE.md` — a file re-read every turn, by
+every session. An always-loaded document is the highest-trust surface in the repo, so
+a false statement in it is not one bug, it is a premise. This one propagated into a
+P1 audit finding and an escalated owner decision **within one phase**, and the audit
+even cited the doc back as its own evidence.
+
+`ruff` clean; `tests/test_content_qa.py` 24 passed.
+
+---
+
+## WU-10 · P0-4 — a publish that reached nothing reported as `done`  ✅
+
+**Workstream:** WS-1 (Truth) · **Plan item:** Phase 2 item 2, "stop faking success".
+**Depends on:** WU-8's vocabulary (`app/jobs/status.py`) for the terminal word; the
+`app/jobs/` *integration* is deliberately NOT in this unit — see "what this did not do".
+
+### The defect
+
+`publish_content_job` tries four transports to get a page onto the client's WordPress
+site. When none is available — usually because no per-site credential is sealed in the
+vault — it renders a PDF/Markdown artifact locally and wrote:
+
+```python
+store.update(code, {"status": "done", "stage": "Published (artifact-only — WordPress credentials pending)"})
+```
+
+The caveat lived **only in the free-text `stage`**. Every consumer keys off `status`:
+the pipeline board, `/content/stats`, the `content_status` report series, the monthly
+client report. So a job that put nothing on the client's website was indistinguishable
+from one that did.
+
+**It reached a human.** The same branch called `_emit_content_deliverable`
+unconditionally, which emails the client *"a new piece of content has been published…
+Sign in to your client portal to view it."* A client could therefore be told their page
+was live, follow the notification, and find nothing — while the operator's board showed
+the job green. That is worse than a wrong tile: it spends the client's trust, and it is
+Danyal's relationship being spent, not ours.
+
+The audit recorded the `status` half. The email was not in the record.
+
+### What changed
+
+| | |
+|---|---|
+| `db/migrations/0081_content_degraded_label.sql` | Adds `degraded` to `content_status`. Its own migration because Postgres refuses to USE a new enum label in the transaction that ADDS it (55P04) — the house pattern established by `0009_app_role_client.sql` and repeated at `0078`/`0079`. |
+| `db/migrations/0082_content_degraded_transitions.sql` | Re-states `content_jobs_guard_update` with **one** added worker transition, `publishing -> degraded`. The lifecycle is enforced at the trigger, not in FastAPI (`service_role` bypasses policies but not triggers), so the label alone would have left every attempt raising `illegal system content transition`. |
+| `workers/tasks/content.py` | `_publish_artifact` writes `degraded` instead of `done`. `_emit_content_deliverable` gained `live: bool`. |
+| `app/schemas/content.py`, `frontend/lib/content.ts` | `degraded` added to both `JobStatus` definitions (contract-locked pair). |
+| `frontend/lib/content.ts` | **New "Not Live" column** on the pipeline board. |
+
+Two judgement calls worth recording:
+
+**The deliverable is still emitted; only the email is suppressed.** The rendered
+artifact is real work and the client should be able to open it. The *announcement* is
+the falsehood. Suppressed rather than reworded, deliberately: whether to tell a client
+about a degraded delivery, and in what words, is an operator's decision about their own
+client relationship — not one for a worker to invent silently.
+
+**The board needed a column, not just a tone.** `PipelineBoard` filters strictly by
+`status`, so a status with no column matches nothing and **disappears**. Without it,
+fixing the status would have moved the lie rather than removed it: the job would have
+stopped claiming success by vanishing from the operator's board entirely. Labelled
+"Not Live" rather than "Degraded" — the key keeps the platform vocabulary, the label
+gives the operator the consequence.
+
+`drafting -> degraded` was deliberately **not** added. A research or spend degradation
+during drafting already HOLDS at `drafting` and is designed to resume when keys or
+budget arrive; that is a pause, not an outcome.
+
+### What proves it
+
+**The trigger was exercised against a real built schema**, not asserted:
+
+| transition (worker path) | result | expected |
+|---|---|---|
+| `publishing -> degraded` | ALLOWED | ALLOWED |
+| `publishing -> done` | ALLOWED | ALLOWED |
+| `drafting -> needs_review` | ALLOWED | ALLOWED |
+| `queued -> degraded` | BLOCKED | BLOCKED |
+| `drafting -> degraded` | BLOCKED | BLOCKED |
+| `degraded -> done` | BLOCKED | BLOCKED |
+
+Six for six — the guard was **widened by exactly one transition, not loosened**, and
+`degraded` is terminal for the worker (only a lead can move it, which is the intended
+recovery path once a credential lands).
+
+`verify_fresh_apply` against a throwaway PG16: **84 migrations apply in order from
+zero, RLS gate green, 78 tables all FORCE.** Run on port 55433, deliberately not the
+`aios-migration-verify` instance owned by the parallel session; removed afterwards.
+
+**Three existing tests asserted the defect** and were corrected:
+`test_publish_degraded_no_wp_creds_is_artifact_only`,
+`test_publish_degrades_cleanly_when_no_connection`, and
+`test_plugin_push_failure_is_swallowed_and_job_advances` — the last being the clearest
+case, since the plugin push actually *raised* and the job was still recorded `done`.
+New: `test_a_degraded_publish_does_not_tell_the_client_their_content_is_live`, which
+asserts the email is suppressed **and** the deliverable is still emitted.
+
+`ruff` clean; `mypy --strict` clean; frontend `tsc --noEmit` clean.
+
+### What this did NOT fix
+
+- **No `app/jobs/` integration yet.** `JobOutcome.degraded(reason_code, reason)` and
+  `is_success()` live in WU-8, which is **uncommitted** at the time of writing. Building
+  against a file that exists only in the working tree would be building on sand — the
+  parallel session amended that exact signature mid-flight, which is the hazard
+  demonstrating the point. Deferred until WU-8 is committed; `reason_code` will adopt
+  R3B's closed vocabulary (`no_transport`, `credential_invalid`) rather than inventing
+  two words.
+- **The second degraded exit** ("no artifact store configured") still holds at
+  `publishing` with a stage marker. It is already honest at the DB level — it never
+  claimed `done` — but it should route through the same vocabulary rather than remain a
+  special case.
+- **`DOMAIN_TERMINAL_MAP["content_status"]["degraded"]`** is owned by WU-8 and was added
+  there, not here, to avoid mixing this work into that commit.
+- **D-4's acknowledgement half** is untouched. `qa_score` is computed and stored at
+  `needs_review` and fetchable via the artifact endpoint, but is not among
+  `ContentJobResponse`'s 15 keys, so the approving lead still never sees it.

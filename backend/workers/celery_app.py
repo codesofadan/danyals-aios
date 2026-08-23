@@ -14,6 +14,8 @@ from celery.schedules import crontab
 from celery.signals import worker_process_init
 
 from app.config import get_settings
+from app.jobs.celery_task import route_task
+from app.jobs.status import BROKER_VISIBILITY_TIMEOUT
 
 settings = get_settings()
 
@@ -117,6 +119,10 @@ celery_app = Celery(
         # records its run in the scheduled_job_runs ledger so the Reports tab can show
         # last-run / last-status, and none re-raises into beat.
         "workers.tasks.reports",
+        # The job contract's own maintenance: the stuck-run reaper. It repairs the
+        # ledger, so it deliberately does NOT run under @aios_job - see the module
+        # docstring.
+        "workers.tasks.job_maintenance",
     ],
 )
 
@@ -130,15 +136,51 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     broker_connection_retry_on_startup=True,
+    # The DEFAULT limits, for the tasks that predate the job contract. A task
+    # registered with @aios_job overrides both from its queue's duration class
+    # (app/jobs/status.py TIME_LIMITS), so the two never have to be kept in step
+    # by hand.
     task_time_limit=1800,
     task_soft_time_limit=1740,
     result_expires=3600,
-    # INVARIANT: with task_acks_late=True on a Redis broker, visibility_timeout
-    # MUST be >= the longest hard task_time_limit. Otherwise a job that runs
-    # longer than the visibility window is re-delivered to a SECOND worker and
-    # RUNS TWICE (double API spend). When real long jobs land later, raise
-    # visibility_timeout and task_time_limit together, keeping this invariant.
-    broker_transport_options={"visibility_timeout": 3600},
+    # --- QUEUES BY DURATION CLASS (job contract) --------------------------- #
+    # Four queues, split by how long a job runs rather than by which module it
+    # belongs to. Splitting by module puts a 2-second webhook behind a 40-minute
+    # crawl on the same queue - and with worker_prefetch_multiplier=1 that webhook
+    # waits for the crawl. Splitting by duration means a slow class can only ever
+    # starve itself.
+    #
+    # `browser` is separate from `long` for a second reason: it is the only class
+    # that needs Chromium + Playwright in its image, so it runs on its own worker
+    # with its own memory envelope. That is what keeps an audit from taking the API
+    # host down with it.
+    #
+    # Start the workers with explicit queues, e.g.
+    #   celery -A workers.celery_app worker -Q celery,interactive,standard -c 8
+    #   celery -A workers.celery_app worker -Q long -c 2
+    #   celery -A workers.celery_app worker -Q browser -c 1   (browser image only)
+    #
+    # task_default_queue is DELIBERATELY left at Celery's own default ("celery").
+    # Setting it to "standard" looked tidier and was a live-deploy hazard: the 39
+    # tasks that predate the contract publish to the default queue, so changing its
+    # NAME strands every message already sitting on `celery` at the moment of a
+    # deploy, and a worker started without -Q would stop consuming them entirely.
+    # Legacy tasks keep their queue until each is migrated to @aios_job; only tasks
+    # that explicitly declare a duration class are routed away from it.
+    task_routes=(route_task,),
+    # INVARIANT (unchanged in meaning, updated in value): with task_acks_late=True on
+    # a Redis broker, visibility_timeout MUST be >= the longest hard task_time_limit.
+    # Otherwise a job that runs longer than the visibility window is re-delivered to a
+    # SECOND worker and RUNS TWICE (double API spend). The browser class now allows
+    # 7200s, so the window is derived from the duration classes rather than hardcoded:
+    # BROKER_VISIBILITY_TIMEOUT = max(TIME_LIMITS) + 300. tests/test_job_queues.py
+    # asserts the two cannot drift apart.
+    #
+    # The cost of the larger window: a message genuinely lost to a dead worker is not
+    # redelivered for ~2 hours. That is why the job contract does not rely on
+    # redelivery to notice a dead job - the heartbeat reaper (reap_stale_job_runs)
+    # does, within one queue time-limit.
+    broker_transport_options={"visibility_timeout": BROKER_VISIBILITY_TIMEOUT},
 )
 
 # Beat schedule (P6B-7): the context-compaction dispatcher runs every debounce

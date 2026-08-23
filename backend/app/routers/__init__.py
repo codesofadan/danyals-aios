@@ -22,6 +22,7 @@ from app.routers.content import router as content_router
 from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.integrations import router as integrations_router
+from app.routers.jobs import router as jobs_router
 from app.routers.me import router as me_router
 from app.routers.milestones import router as milestones_router
 from app.routers.notifications import router as notifications_router
@@ -51,6 +52,7 @@ api_v1.include_router(vault_router)
 api_v1.include_router(activity_router)
 api_v1.include_router(cost_router)
 api_v1.include_router(integrations_router)
+api_v1.include_router(jobs_router)
 api_v1.include_router(tiers_router)
 api_v1.include_router(audits_router)
 api_v1.include_router(content_router)
