@@ -50,6 +50,8 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import psycopg
+
 from app.config import Settings, get_settings
 from app.logging_setup import get_logger
 from app.modules.rank_tracker.provider import (
@@ -340,85 +342,135 @@ def execute_rollup(store: ServiceRankStore, settings: Settings, *, today: date |
 # --------------------------------------------------------------------------- #
 # Celery entry points (thin; the app is imported after the pure core).
 # --------------------------------------------------------------------------- #
-from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
+from app.jobs import JobBlocked, JobContext, JobOutcome, JobTarget  # noqa: E402
+from app.jobs.celery_task import aios_job, enqueue_child  # noqa: E402
+from app.jobs.status import JobQueue  # noqa: E402
+from workers.celery_app import celery_app  # noqa: E402,F401 - keeps the app importable here
 
 
-@celery_app.task(name="check_keyword_rank")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def check_keyword_rank(keyword_id: str, force: bool = False) -> dict[str, Any]:
-    """Entry point: run ONE cost-gated rank check and record it.
+def _rank_check_target(keyword_id: str, force: bool = False) -> JobTarget:
+    """One PAID check per keyword per UTC day - unless an operator forced a re-check.
 
-    Wraps the pure core in a guard so the task NEVER re-raises (a redelivery would
-    re-run a PAID check and double-bill the client); a failure comes back as an
-    ``error`` result dict.
+    This is the task the whole idempotency mechanism exists for: it spends money on
+    every invocation, and with an at-least-once broker a redelivered message used to be
+    guarded only by the task promising never to re-raise. Now a redelivery finds the
+    terminal run under `rank.check:<keyword>:<date>` and does nothing.
+
+    `force` drops the key because a manual re-check is, by definition, a request to
+    spend again.
+    """
+    if force:
+        return JobTarget(scope_id=keyword_id)
+    return JobTarget(
+        idempotency_key=f"rank.check:{keyword_id}:{datetime.now(UTC).date().isoformat()}",
+        scope_id=keyword_id,
+    )
+
+
+@aios_job(
+    name="check_keyword_rank",
+    job_name="rank.check",
+    queue=JobQueue.STANDARD,
+    # ONE attempt. Every run is a paid SERP read, so a retry is a second bill for the
+    # same position. The idempotency key makes a redelivery free; a retry would not be.
+    max_attempts=1,
+    scope_type="tracked_keyword",
+    target=_rank_check_target,
+)
+def check_keyword_rank(ctx: JobContext, keyword_id: str, force: bool = False) -> JobOutcome:
+    """Run ONE cost-gated rank check and record it.
+
+    NOTE - no per-client concurrency cap, and that is a gap rather than a decision.
+    The cap needs a `client_id` at claim time, and `dispatch_due` returns keyword ids
+    only; resolving the client would mean a database read inside `target`, which runs
+    before the run row exists. Fixing it properly means `dispatch_due` returning
+    (keyword_id, client_id) - a change to the core, recorded in KNOWN_LIMITATIONS
+    rather than bodged here.
     """
     settings = get_settings()
-    try:
-        if not rank_pricing_from_settings(settings).live:
-            # Refuse rather than persist. A keyless deploy resolves to FakeRankProvider,
-            # whose positions are synthetic; written to the ranking ledger they become
-            # fabricated rank history shown to the client as measured performance.
-            logger.info(
-                "rank_check_degraded", keyword_id=keyword_id, reason="no_live_rank_provider"
-            )
-            return {
-                "state": "degraded",
-                "reason": "no live rank provider configured",
-                "keyword_id": keyword_id,
-            }
-        return execute_rank_check(
-            service_rank_store(),
-            rank_provider_from_settings(settings),
-            _gate(),
-            settings,
-            keyword_id=keyword_id,
-            force=force,
+    if not rank_pricing_from_settings(settings).live:
+        raise JobBlocked(
+            "no_live_rank_provider",
+            "no live rank provider is configured; refusing to write synthetic positions "
+            "that would become fabricated rank history shown to the client as measured "
+            "performance",
         )
-    except Exception:
-        logger.exception("check_keyword_rank_task_failed", keyword_id=keyword_id)
-        return {"state": "error", "reason": "task failed", "keyword_id": keyword_id}
-
-
-@celery_app.task(name="dispatch_rank_checks")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def dispatch_rank_checks() -> dict[str, Any]:
-    """BEAT task (nightly): claim every due subscription and fan out one check each.
-
-    Takes the R6 beat-overlap lock inside the claim, so a tick that lands while the
-    previous night is still draining is a clean no-op rather than a second fan-out (=
-    a second bill). Never re-raises.
-    """
-    settings = get_settings()
-    try:
-        if not rank_pricing_from_settings(settings).live:
-            # Do not even claim the due rows: claiming marks them checked for the day, so
-            # a degraded fan-out would silently burn the nightly slot AND fill the ledger
-            # with synthetic positions.
-            logger.info("dispatch_rank_checks_degraded", reason="no_live_rank_provider")
-            return {
-                "state": "degraded",
-                "reason": "no live rank provider configured",
-                "claimed": 0,
-            }
-        dispatched = dispatch_due(
-            service_rank_store(),
-            batch=int(settings.rank_tracker_dispatch_batch),
-            enqueue=lambda kid: check_keyword_rank.delay(kid),
+    result = execute_rank_check(
+        service_rank_store(),
+        rank_provider_from_settings(settings),
+        _gate(),
+        settings,
+        keyword_id=keyword_id,
+        force=force,
+    )
+    state = str(result.get("state", "ok"))
+    if state not in {"ok", "done", "recorded"}:
+        return JobOutcome.degraded(
+            "check_not_recorded",
+            f"the check finished as '{state}': {result.get('reason', 'no reason given')}",
+            result=result,
         )
-    except Exception:
-        logger.exception("dispatch_rank_checks_task_failed")
-        return {"state": "error", "claimed": 0}
-    return {"state": "ok", "claimed": len(dispatched)}
+    return JobOutcome.completed(
+        f"recorded a rank check for keyword {keyword_id}", result=result
+    )
 
 
-@celery_app.task(name="rollup_rank_history")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def rollup_rank_history() -> dict[str, Any]:
-    """BEAT task: roll up + purge old ranking history per the retention settings.
+@aios_job(
+    name="dispatch_rank_checks",
+    job_name="rank.dispatch",
+    queue=JobQueue.STANDARD,
+    max_attempts=2,
+    retry_backoff=300.0,
+    scope_type="workspace",
+)
+def dispatch_rank_checks(ctx: JobContext) -> JobOutcome:
+    """BEAT job (nightly): claim every due subscription and fan out one check each.
 
-    Never re-raises; a redelivery is harmless (both passes are idempotent deletes -
-    re-running them simply matches nothing the second time).
+    THE REFUSAL COMES BEFORE THE CLAIM, deliberately. Claiming marks rows checked for
+    the day, so a fan-out without a live provider would silently burn the nightly slot
+    AND fill the ledger with synthetic positions. Refusing first leaves the rows due.
+
+    Correlation IS propagated: `check_keyword_rank` is migrated, so `enqueue_child` is
+    safe and one nightly dispatch plus its N checks are a single indexed query - which
+    is how "what did last night cost" becomes answerable per sweep rather than per row.
     """
     settings = get_settings()
-    try:
-        return execute_rollup(service_rank_store(), settings)
-    except Exception:
-        logger.exception("rollup_rank_history_task_failed")
-        return {"state": "error", "rolled_up": 0, "purged": 0}
+    if not rank_pricing_from_settings(settings).live:
+        raise JobBlocked(
+            "no_live_rank_provider",
+            "no live rank provider is configured; not claiming due rows, which would "
+            "burn the nightly slot and record synthetic positions",
+        )
+    dispatched = dispatch_due(
+        service_rank_store(),
+        batch=int(settings.rank_tracker_dispatch_batch),
+        enqueue=lambda kid: enqueue_child(ctx, "check_keyword_rank", kid),
+    )
+    claimed = len(dispatched)
+    return JobOutcome.completed(
+        f"claimed {claimed} due keyword(s)", result={"claimed": claimed}
+    )
+
+
+@aios_job(
+    name="rollup_rank_history",
+    job_name="rank.history_rollup",
+    queue=JobQueue.LONG,
+    max_attempts=3,
+    retry_backoff=300.0,
+    retry_on=(psycopg.OperationalError,),
+    scope_type="workspace",
+)
+def rollup_rank_history(ctx: JobContext) -> JobOutcome:
+    """BEAT job: roll up and purge old ranking history per the retention settings.
+
+    Un-keyed and safely retryable: both passes are idempotent deletes, so a re-run
+    simply matches nothing the second time. LONG because it walks the whole history
+    table, which grows with every client and every tracked keyword.
+    """
+    result = execute_rollup(service_rank_store(), get_settings())
+    rolled = int(result.get("rolled_up", 0) or 0)
+    purged = int(result.get("purged", 0) or 0)
+    return JobOutcome.completed(
+        f"rolled up {rolled} row(s), purged {purged}", result=result
+    )

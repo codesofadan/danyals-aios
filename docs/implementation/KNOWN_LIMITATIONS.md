@@ -163,3 +163,28 @@ along on a task migration.
 `result`, and `tests/test_reports_jobs.py::test_a_sweep_that_skipped_everything_still_says_so`
 pins that, so the number is visible on the operator surface even while its meaning is
 ambiguous.
+
+---
+
+## `check_keyword_rank` has no per-client concurrency cap
+
+*Found 2026-08-23 while migrating the rank tracker onto the job contract.*
+
+Every other client-scoped job under `@aios_job` carries a `client_concurrency` cap, so
+one client's bulk run cannot starve the others. The paid rank check does not, and it is
+the job where the cap would matter most — it is the platform's largest line item.
+
+**Why:** the cap needs a `client_id` at CLAIM time, and the job's `target` callable
+receives only `keyword_id`. `dispatch_due` returns keyword ids, so resolving the client
+would mean a database read inside `target`, which runs before the run row exists and on
+whatever process enqueued the work.
+
+**The fix, when someone takes it:** have `dispatch_due` return `(keyword_id, client_id)`
+and pass the client through to `check_keyword_rank`. That is a change to the module's
+core and its own tests, which is why it is recorded here rather than bodged into a task
+migration.
+
+**What holds meanwhile:** the daily idempotency key (`rank.check:<keyword>:<date>`)
+bounds the spend per keyword per day regardless of how many times it is enqueued, and
+`dispatch_rank_checks` claims in bounded batches (`rank_tracker_dispatch_batch`). So the
+exposure is fairness between clients within a nightly sweep, not unbounded spend.

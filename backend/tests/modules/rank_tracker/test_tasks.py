@@ -78,9 +78,12 @@ def test_the_check_task_refuses_rather_than_persisting_synthetic_positions(
     called: list[str] = []
     monkeypatch.setattr(wk, "execute_rank_check", lambda *a, **k: called.append("ran"))
 
-    result = check_keyword_rank("kw-1")
+    disposition = check_keyword_rank.run("kw-1")
 
-    assert result["state"] == "degraded"
+    assert disposition["status"] == "blocked", (
+        "refusing to write synthetic positions is a REFUSAL - nothing was spent and "
+        "nothing was written"
+    )
     assert called == [], "the check ran despite there being no live vendor"
 
 
@@ -98,9 +101,9 @@ def test_the_dispatch_task_refuses_rather_than_burning_the_nightly_slot(
     claimed: list[str] = []
     monkeypatch.setattr(wk, "dispatch_due", lambda *a, **k: claimed.append("claimed") or [])
 
-    result = dispatch_rank_checks()
+    disposition = dispatch_rank_checks.run()
 
-    assert result["state"] == "degraded"
+    assert disposition["status"] == "blocked"
     assert claimed == [], "due rows were claimed despite there being no live vendor"
 
 _TODAY = date(2026, 7, 17)
@@ -752,8 +755,8 @@ def test_the_check_task_returns_a_result_dict_instead_of_raising(
         raise RuntimeError("provider construction failed")
 
     monkeypatch.setattr(wk, "rank_provider_from_settings", _boom)
-    result = check_keyword_rank("kw-1")  # called directly - no broker
-    assert result == {"state": "error", "reason": "task failed", "keyword_id": "kw-1"}
+    disposition = check_keyword_rank.run("kw-1")  # called directly - no broker
+    assert disposition["status"] == "failed", "recorded, not raised out of the task"
 
 
 def test_the_check_task_never_re_raises_a_provider_that_breaks_its_contract(
@@ -764,7 +767,7 @@ def test_the_check_task_never_re_raises_a_provider_that_breaks_its_contract(
     monkeypatch.setattr(wk, "service_rank_store", lambda: store)
     monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
     monkeypatch.setattr(wk, "rank_provider_from_settings", lambda _s: ExplodingProvider())
-    assert check_keyword_rank("kw-1")["state"] == "error"  # not a raise
+    assert check_keyword_rank.run("kw-1")["status"] == "failed"  # not a raise
     assert store.rankings == {}  # and still nothing fabricated
 
 
@@ -778,7 +781,7 @@ def test_the_check_task_never_re_raises_a_store_failure(
     monkeypatch.setattr(wk, "service_rank_store", _BrokenStore)
     monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
     monkeypatch.setattr(wk, "rank_provider_from_settings", lambda _s: FakeRankProvider())
-    assert check_keyword_rank("kw-1")["state"] == "error"
+    assert check_keyword_rank.run("kw-1")["status"] == "failed"
 
 
 def test_the_dispatch_task_never_re_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -787,7 +790,7 @@ def test_the_dispatch_task_never_re_raises(monkeypatch: pytest.MonkeyPatch) -> N
             raise RuntimeError("db down")
 
     monkeypatch.setattr(wk, "service_rank_store", _BrokenStore)
-    assert dispatch_rank_checks() == {"state": "error", "claimed": 0}
+    assert dispatch_rank_checks.run()["status"] == "failed"
 
 
 def test_the_rollup_task_never_re_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -796,7 +799,7 @@ def test_the_rollup_task_never_re_raises(monkeypatch: pytest.MonkeyPatch) -> Non
             raise RuntimeError("db down")
 
     monkeypatch.setattr(wk, "service_rank_store", _BrokenStore)
-    assert rollup_rank_history() == {"state": "error", "rolled_up": 0, "purged": 0}
+    assert rollup_rank_history.run()["status"] == "failed"
 
 
 def test_the_dispatch_task_reports_what_it_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -804,10 +807,10 @@ def test_the_dispatch_task_reports_what_it_claimed(monkeypatch: pytest.MonkeyPat
     store.claimed = [{"id": "kw-1"}, {"id": "kw-2"}]
     sent: list[str] = []
     monkeypatch.setattr(wk, "service_rank_store", lambda: store)
-    monkeypatch.setattr(
-        wk.check_keyword_rank, "delay", lambda kid: sent.append(kid)  # type: ignore[attr-defined]
-    )
-    assert dispatch_rank_checks() == {"state": "ok", "claimed": 2}
+    monkeypatch.setattr(wk, "enqueue_child", lambda ctx, task, kid: sent.append(kid))
+    disposition = dispatch_rank_checks.run()
+    assert disposition["status"] == "completed"
+    assert disposition["result"] == {"claimed": 2}
     assert sent == ["kw-1", "kw-2"]
 
 
@@ -894,3 +897,72 @@ def test_a_degraded_check_is_logged_as_costing_nothing() -> None:
     cost = FakeCostStore()
     _run(cost=cost, provider=FakeRankProvider(domain=_DOMAIN))
     assert cost.recorded == [("rank_tracker", 0.0, "cl-1")]
+
+
+# --------------------------------------------------------------------------- #
+# The idempotency key - the reason the contract exists, on the task that pays
+# --------------------------------------------------------------------------- #
+def test_a_redelivered_check_does_not_bill_twice(
+    monkeypatch: pytest.MonkeyPatch, _job_ledger: Any
+) -> None:
+    """The double-spend this whole mechanism was built to stop.
+
+    Every run of this task is a paid SERP read. With an at-least-once broker a
+    redelivered message used to be guarded only by the task promising never to
+    re-raise - which prevents a CRASH loop, not a second bill. Now the redelivery
+    finds the terminal run under `rank.check:<keyword>:<date>` and does nothing.
+    """
+    store = FakeRankStore()
+    calls: list[str] = []
+    monkeypatch.setattr(wk, "service_rank_store", lambda: store)
+    monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
+    monkeypatch.setattr(wk, "rank_provider_from_settings", lambda _s: FakeRankProvider())
+    monkeypatch.setattr(
+        wk,
+        "execute_rank_check",
+        lambda *a, **k: (calls.append("paid"), {"state": "ok"})[1],
+    )
+
+    first = check_keyword_rank.run("kw-1")
+    second = check_keyword_rank.run("kw-1")
+
+    assert first["status"] == "completed"
+    assert second["action"] == "skipped", "a redelivery must not re-run a PAID check"
+    assert calls == ["paid"], f"the provider was called {len(calls)} times, expected once"
+
+
+def test_a_forced_recheck_is_deliberately_not_deduplicated(
+    monkeypatch: pytest.MonkeyPatch, _job_ledger: Any
+) -> None:
+    """An operator asking for a re-check is asking to spend again, and must not be
+    silently refused by yesterday's key."""
+    calls: list[str] = []
+    monkeypatch.setattr(wk, "service_rank_store", lambda: FakeRankStore())
+    monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
+    monkeypatch.setattr(wk, "rank_provider_from_settings", lambda _s: FakeRankProvider())
+    monkeypatch.setattr(
+        wk,
+        "execute_rank_check",
+        lambda *a, **k: (calls.append("paid"), {"state": "ok"})[1],
+    )
+
+    check_keyword_rank.run("kw-1", force=True)
+    check_keyword_rank.run("kw-1", force=True)
+    assert calls == ["paid", "paid"], "a forced re-check must actually re-check"
+
+
+def test_the_nightly_dispatch_propagates_its_correlation_id(
+    monkeypatch: pytest.MonkeyPatch, _job_ledger: Any
+) -> None:
+    """So "what did last night cost" is one indexed query over the sweep and its N
+    children, rather than a timestamp-range guess."""
+    store = FakeRankStore()
+    store.claimed = [{"id": "kw-1"}, {"id": "kw-2"}]
+    seen: list[str] = []
+    monkeypatch.setattr(wk, "service_rank_store", lambda: store)
+    monkeypatch.setattr(
+        wk, "enqueue_child", lambda ctx, task, kid: seen.append(ctx.correlation_id)
+    )
+
+    disposition = dispatch_rank_checks.run()
+    assert set(seen) == {disposition["correlation_id"]}
