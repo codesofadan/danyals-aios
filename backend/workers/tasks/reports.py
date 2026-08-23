@@ -283,56 +283,118 @@ def _safe_record(store: ReportStore, *, job_name: str, task: str, status: str, d
 # --------------------------------------------------------------------------- #
 # Celery entry points (thin; the app is imported after the pure core).
 # --------------------------------------------------------------------------- #
-from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
+import psycopg  # noqa: E402
+
+from app.jobs import JobContext, JobOutcome  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402 - after the pure core, per the worker template
+from app.jobs.status import JobQueue  # noqa: E402
+
+# WHY THESE FAN OUT WITH `.delay()` AND NOT `enqueue_child()`.
+#
+# `enqueue_child` propagates the correlation id so one sweep and the N per-client jobs
+# it spawns are a single indexed query in `job_runs`. It does that by injecting a
+# reserved `_aios_correlation_id` kwarg, which `@aios_job` strips before calling the
+# body - so it is only safe to send to a task that is ITSELF migrated. `run_audit_job`
+# and `monitor_offpage_job` are not yet, and would receive an unexpected keyword
+# argument and fail at the worker.
+#
+# So the fan-out stays `.delay()` until the children migrate, and the parent's own run
+# is still recorded honestly. Wiring the correlation is a one-line change per call site
+# AFTER the child moves - and the child must move first, which is the general ordering
+# rule for migrating a fan-out.
 
 
-@celery_app.task(name=_AUDIT_TASK)  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def refresh_client_audits() -> dict[str, Any]:
-    """BEAT task (weekly): re-run the audit engine per active client and store the report.
+# WHICH FAILURES ARE TRANSIENT, declared once.
+#
+# These three cores talk to exactly one thing: Postgres. `OperationalError` is the
+# availability class - connection refused, server restarting, a dropped socket - and is
+# worth retrying. Everything else that psycopg can raise (ProgrammingError, a bad
+# column, a violated constraint) is a BUG: it will fail identically on every attempt,
+# so burning the budget on it only delays an operator seeing it.
+#
+# Declaring this via the contract's `retry_on` rather than translating exceptions by
+# hand keeps the conservative default intact - anything not named here is permanent.
+_TRANSIENT: tuple[type[BaseException], ...] = (psycopg.OperationalError,)
 
-    Enqueues the EXISTING audit worker (imported lazily) so a re-audit stores its PDF/JSON
-    and appears in the Reports library exactly like a hand-run audit. Never re-raises."""
-    settings = get_settings()
 
+@aios_job(
+    name=_AUDIT_TASK,
+    job_name="reports.audit_refresh",
+    queue=JobQueue.STANDARD,
+    max_attempts=3,
+    retry_backoff=120.0,
+    retry_on=_TRANSIENT,
+    scope_type="workspace",
+)
+def refresh_client_audits(ctx: JobContext) -> JobOutcome:
+    """BEAT job (weekly): re-run the audit engine per active client and store the report.
+
+    Un-keyed: the set of clients due a refresh changes through the week, so a per-week
+    key would suppress a legitimate later run. The core already dedupes on a recent
+    audit, which is the idempotency that matters.
+    """
     def _enqueue(audit_id: str) -> None:
         from workers.tasks.audit import run_audit_job
 
         run_audit_job.delay(audit_id)
 
-    try:
-        return dispatch_audit_refresh(service_reports_store(), settings, enqueue=_enqueue)
-    except Exception:
-        logger.exception("refresh_client_audits_task_failed")
-        return {"state": "error", "queued": 0}
+    result = dispatch_audit_refresh(service_reports_store(), get_settings(), enqueue=_enqueue)
+    queued = int(result.get("queued", 0))
+    skipped = int(result.get("skipped", 0))
+    return JobOutcome.completed(
+        f"queued {queued} audit(s), skipped {skipped} with a recent run", result=result
+    )
 
 
-@celery_app.task(name=_MONTHLY_TASK)  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def generate_monthly_reports() -> dict[str, Any]:
-    """BEAT task (monthly): produce + store one downloadable SEO report per active client.
+@aios_job(
+    name=_MONTHLY_TASK,
+    job_name="reports.monthly",
+    queue=JobQueue.LONG,
+    max_attempts=3,
+    retry_backoff=300.0,
+    retry_on=_TRANSIENT,
+    scope_type="workspace",
+)
+def generate_monthly_reports(ctx: JobContext) -> JobOutcome:
+    """BEAT job (monthly): one stored, downloadable SEO report per active client.
 
-    Idempotent per client x month; never re-raises (a redelivery re-skips what exists)."""
-    settings = get_settings()
-    try:
-        return execute_monthly_reports(service_reports_store(), settings)
-    except Exception:
-        logger.exception("generate_monthly_reports_task_failed")
-        return {"state": "error", "produced": 0}
+    LONG rather than STANDARD: unlike its two siblings this one does the work itself
+    rather than fanning out, and it builds a report per client - at 100 clients that is
+    not a five-minute job.
+
+    Un-keyed for the same reason as the others: the core is idempotent per client x
+    month, so a re-run produces only what is genuinely missing. A per-month key would
+    instead suppress the re-run that catches a client onboarded mid-month.
+    """
+    result = execute_monthly_reports(service_reports_store(), get_settings())
+    produced = int(result.get("produced", 0))
+    skipped = int(result.get("skipped", 0))
+    return JobOutcome.completed(
+        f"produced {produced} report(s) for {result.get('period', '')}, "
+        f"skipped {skipped} already present",
+        result=result,
+    )
 
 
-@celery_app.task(name=_SWEEP_TASK)  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def sweep_offpage_monitors() -> dict[str, Any]:
-    """BEAT task (weekly): fan out the backlink/citation monitor per active client.
-
-    Enqueues the EXISTING monitor_offpage worker (imported lazily); never re-raises."""
-    settings = get_settings()
-
+@aios_job(
+    name=_SWEEP_TASK,
+    job_name="offpage.monitor_sweep",
+    queue=JobQueue.STANDARD,
+    max_attempts=3,
+    retry_backoff=120.0,
+    retry_on=_TRANSIENT,
+    scope_type="workspace",
+)
+def sweep_offpage_monitors(ctx: JobContext) -> JobOutcome:
+    """BEAT job (weekly): fan out the backlink/citation monitor per active client."""
     def _enqueue(client_id: str, domain: str) -> None:
         from workers.tasks.offpage import monitor_offpage_job
 
         monitor_offpage_job.delay(client_id, domain)
 
-    try:
-        return dispatch_offpage_sweep(service_reports_store(), settings, enqueue=_enqueue)
-    except Exception:
-        logger.exception("sweep_offpage_monitors_task_failed")
-        return {"state": "error", "dispatched": 0}
+    result = dispatch_offpage_sweep(service_reports_store(), get_settings(), enqueue=_enqueue)
+    dispatched = int(result.get("dispatched", 0))
+    skipped = int(result.get("skipped", 0))
+    return JobOutcome.completed(
+        f"dispatched {dispatched} monitor(s), skipped {skipped} without a domain", result=result
+    )

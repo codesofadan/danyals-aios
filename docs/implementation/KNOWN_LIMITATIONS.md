@@ -132,3 +132,34 @@ have been met for a whole capability. In particular **Gate 1 (Outcome)**, **Gate
 and **Gate 9 (Acceptance)** have not been exercised for anything in this session — no business
 outcome was produced end to end on real data, nothing was measured at volume, and the owner has run
 none of it.
+
+---
+
+## `dispatch_audit_refresh` and `dispatch_offpage_sweep` conflate two kinds of skip
+
+*Found 2026-08-23 while migrating the report sweeps onto the job contract.*
+
+Both cores count two different outcomes as `skipped`:
+
+* a client **legitimately** passed over — audited recently, or with no domain to sweep;
+* a client the sweep **could not process** — the per-client `try/except Exception`
+  (`workers/tasks/reports.py`) swallows a failure, logs a warning, and increments the
+  same counter.
+
+So a systematic failure in which every client fails reports
+`{"state": "ok", "queued": 0, "skipped": N}` — a run that reads as **successful and
+did nothing**. Under the job contract that is precisely the shape that should be
+`degraded` with a reason, and it cannot be, because the information does not survive
+the core's return value.
+
+**Not fixed here, deliberately.** Inventing a `degraded` signal the core cannot
+substantiate would be the same class of defect the contract exists to remove — a
+status asserting more than the data supports. The fix is to split the counter in the
+CORE (`skipped_recent` vs `skipped_failed`, or a list of failures), which changes its
+return shape and its own tests, and belongs with the reports module rather than riding
+along on a task migration.
+
+**Mitigated meanwhile:** the skip count is always surfaced in the run's `detail` and
+`result`, and `tests/test_reports_jobs.py::test_a_sweep_that_skipped_everything_still_says_so`
+pins that, so the number is visible on the operator surface even while its meaning is
+ambiguous.
