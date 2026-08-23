@@ -63,6 +63,7 @@ from datetime import UTC, datetime
 from html import escape as html_escape
 from typing import Any, Protocol
 
+import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
@@ -2397,6 +2398,9 @@ def _emit_content_deliverable(
 # --------------------------------------------------------------------------- #
 # Celery entry points (thin; import the app after the pure core, per the template)
 # --------------------------------------------------------------------------- #
+from app.jobs import JobContext, JobOutcome  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402
+from app.jobs.status import JobQueue  # noqa: E402
 from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
 
 
@@ -2478,14 +2482,59 @@ def _claim_due_scheduled_codes() -> list[str]:
         return [str(row["code"]) for row in cur.fetchall()]
 
 
-@celery_app.task(name="dispatch_scheduled_content_publishes")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def dispatch_scheduled_content_publishes() -> dict[str, Any]:
-    """Entry point: claim + dispatch every due scheduled publish. Never re-raises."""
-    try:
-        codes = _claim_due_scheduled_codes()
-        return execute_dispatch_scheduled_publishes(
-            codes, store=PrivilegedContentStore(), enqueue=lambda code: publish_content_job_task.delay(code)
+@aios_job(
+    name="dispatch_scheduled_content_publishes",
+    job_name="content.publish_dispatch",
+    queue=JobQueue.STANDARD,
+    max_attempts=3,
+    retry_backoff=120.0,
+    retry_on=(psycopg.OperationalError,),
+    scope_type="workspace",
+)
+def dispatch_scheduled_content_publishes(ctx: JobContext) -> JobOutcome:
+    """BEAT job: claim and dispatch every due scheduled publish.
+
+    A PARTIAL DISPATCH IS DEGRADED, NOT DONE. The core returns `claimed` and the
+    `dispatched` list separately, so when fewer publishes were dispatched than rows
+    were claimed, some client's approved content is sitting claimed and unsent. That is
+    exactly the shape P0-4 removed from `_publish_artifact` - a job reporting success
+    for work that did not reach anybody - and it would have been reintroduced here by
+    returning `completed` unconditionally.
+
+    AND A SKIP IS GENUINELY ANOMALOUS, which is what makes `degraded` the right call
+    rather than alert fatigue. `PrivilegedContentStore.update` swallows nothing: a DB
+    error raises and a trigger rejection raises, and its WHERE matches on `code` alone.
+    So the only way a code is claimed and not dispatched is that the row was DELETED
+    between the claim and the clear. Content jobs are not routinely deleted, so this
+    fires on a real event rather than on churn - and a false degradation would be the
+    same dishonesty as a false success, merely pointing the other way.
+
+    The fan-out stays on `.delay()`: `publish_content_job_task` is not yet migrated and
+    would receive an unexpected reserved kwarg from `enqueue_child`. Children before
+    parents. Wiring the correlation is a one-line change once that task moves.
+
+    Un-keyed: the set of due publishes changes minute to minute (the pacing scheduler
+    is the point), so a period key would suppress the tick that catches the next slot.
+    The claim itself is the mutex, at the database, which is the right place for it.
+    """
+    codes = _claim_due_scheduled_codes()
+    result = execute_dispatch_scheduled_publishes(
+        codes,
+        store=PrivilegedContentStore(),
+        enqueue=lambda code: publish_content_job_task.delay(code),
+    )
+    claimed = int(result.get("claimed", 0) or 0)
+    dispatched = list(result.get("dispatched", []) or [])
+
+    if claimed and len(dispatched) < claimed:
+        stuck = claimed - len(dispatched)
+        return JobOutcome.degraded(
+            "partial_dispatch",
+            f"claimed {claimed} due publish(es) but dispatched only {len(dispatched)}; "
+            f"{stuck} approved item(s) are claimed and unsent",
+            result=result,
         )
-    except Exception:
-        logger.exception("dispatch_scheduled_content_publishes_failed")
-        return {"claimed": 0, "dispatched": [], "reason": "task failed"}
+    return JobOutcome.completed(
+        f"dispatched {len(dispatched)} due publish(es)" if dispatched else "nothing was due",
+        result=result,
+    )
