@@ -970,3 +970,122 @@ def test_ordinary_connective_phrasing_is_not_reported_as_stuffing() -> None:
 def test_sources_are_counted_on_raw_markdown_not_stripped_text() -> None:
     """Stripping markdown removes the links, which would zero the Cite Sources lever."""
     assert analyse_geo("## A\n\nSee [the board](https://example.com/x). $5.\n").source_count >= 1
+
+
+# =========================================================================== #
+# schema_validator - JSON-LD structured data
+# =========================================================================== #
+import json  # noqa: E402
+
+from app.services.content_lint import validate_schema, walk_nodes  # noqa: E402
+
+_SCHEMA_PROBES = [
+    {},
+    {"@type": "LocalBusiness"},
+    {"@type": "Plumber", "name": "X", "telephone": "1", "address": {}},
+    {"@graph": [{"@type": "Person", "name": "Jane"}, {"@type": "Organization"}]},
+    {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Q?"}]},
+    {"@type": "BreadcrumbList", "itemListElement": [{"position": 1}]},
+    {"@type": "SomethingUnknown", "whatever": 1},
+]
+
+
+@pytest.fixture(scope="module")
+def original_schema():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import schema_validator
+
+        return schema_validator
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("data", _SCHEMA_PROBES)
+def test_schema_port_matches_the_original(data, original_schema) -> None:
+    theirs, their_count = original_schema.validate(data)
+    mine = validate_schema(data)
+    assert mine.node_count == their_count
+    assert [(i.path, i.message) for i in mine.issues] == list(theirs)
+
+
+def test_schema_port_matches_on_the_corpus_samples(original_schema) -> None:
+    for name in ("sample-dental/dental-implants", "sample-storage/climate-controlled-storage-round-rock"):
+        data = json.loads((_FIXTURES / name / "schema.json").read_text())
+        theirs, count = original_schema.validate(data)
+        mine = validate_schema(data)
+        assert mine.node_count == count
+        assert [(i.path, i.message) for i in mine.issues] == list(theirs)
+
+
+# --- the cross-check that makes this port worth having --------------------- #
+def test_the_backends_own_json_ld_passes_the_corpus_validator() -> None:
+    """Two independently written implementations agreeing is real evidence.
+
+    `content_schema.build_json_ld` was written for this repo; the validator came from
+    the corpus. Neither was built against the other, so a clean pass here is a genuine
+    cross-check rather than a rule grading itself.
+    """
+    from app.services import content_schema as cs
+
+    biz = cs.Business(
+        name="Valley Air", url="https://valleyair.example", telephone="+1-555-123-4567",
+        business_type="HVACBusiness",
+        address=cs.PostalAddress(
+            street_address="12 Main St", address_locality="San Jose",
+            address_region="CA", postal_code="95112", address_country="US",
+        ),
+    )
+    page = cs.Page(
+        url="https://valleyair.example/ac-repair", title="AC Repair San Jose",
+        description="Emergency AC repair.", service_type="AC Repair",
+        area_served=("San Jose",),
+        faqs=(cs.FaqItem(question="How much?", answer="A flat $89 diagnostic."),),
+    )
+    doc = cs.build_json_ld(
+        "service", biz, page,
+        breadcrumbs=(cs.Breadcrumb("Home", "https://valleyair.example"), cs.Breadcrumb("AC Repair")),
+    )
+    report = validate_schema(doc)
+    assert report.node_count > 0
+    assert report.passed, report.messages()
+
+
+# --- the two checks that are not shape validation -------------------------- #
+def test_self_serving_review_markup_is_flagged() -> None:
+    """Compliance spine D3, and the corpus names it the most common local
+    manual-action cause. The markup that looks like it earns stars is exactly what
+    makes the page ineligible for them."""
+    doc = {"@type": "Plumber", "name": "X", "telephone": "1",
+           "address": {"streetAddress": "1", "addressLocality": "a", "addressRegion": "b",
+                       "postalCode": "c", "addressCountry": "d"},
+           "aggregateRating": {"ratingValue": 4.9}}
+    assert any("D3" in i.message for i in validate_schema(doc).issues)
+
+
+def test_a_monthly_rental_offer_must_declare_lease_out() -> None:
+    """A storage unit is leased, not sold (SS-SCHEMA2)."""
+    offer = {"@type": "Offer",
+             "priceSpecification": {"@type": "UnitPriceSpecification", "unitCode": "MON"}}
+    assert any("LeaseOut" in i.message for i in validate_schema(offer).issues)
+
+    leased = dict(offer, businessFunction="http://purl.org/goodrelations/v1#LeaseOut")
+    assert not any("LeaseOut" in i.message for i in validate_schema(leased).issues)
+
+
+def test_an_ordinary_offer_is_not_forced_to_declare_lease_out() -> None:
+    """Scoped to monthly price specs so it never fires on a normal discount Offer -
+    a validator that cried wolf on every Offer would be switched off."""
+    assert not any("LeaseOut" in i.message
+                   for i in validate_schema({"@type": "Offer", "price": "20"}).issues)
+
+
+def test_an_unrecognised_type_is_not_an_error() -> None:
+    """No rule to apply is not the same as a violation. Treating unknown types as
+    failures makes a validator hostile to legitimate schema it was not taught."""
+    assert validate_schema({"@type": "SomethingUnknown", "x": 1}).passed
+
+
+def test_nested_and_graph_nodes_are_walked() -> None:
+    doc = {"@graph": [{"@type": "A", "inner": {"@type": "Person", "name": "n"}}]}
+    assert len(list(walk_nodes(doc))) == 2

@@ -111,10 +111,19 @@ from app.services.content_lint.readability import (
     strip_markdown,
     words_of,
 )
+from app.services.content_lint.schema import (
+    LOCAL_BUSINESS_TYPES,
+    REQUIRED_FIELDS,
+    SchemaIssue,
+    SchemaReport,
+    validate_schema,
+    walk_nodes,
+)
 
 __all__ = [
     "DUPLICATE_THRESHOLD",
     "ITEM_CATEGORIES",
+    "LOCAL_BUSINESS_TYPES",
     "LONG_SENTENCE_WORDS",
     "MARKER_KINDS",
     "MAX_DENSITY",
@@ -127,6 +136,7 @@ __all__ = [
     "MIN_SOURCES",
     "MIN_STAT_DENSITY",
     "OVER_LINK_CAP",
+    "REQUIRED_FIELDS",
     "SHINGLE_SIZE",
     "BlockedTerm",
     "BlocklistHit",
@@ -148,6 +158,8 @@ __all__ = [
     "LinkPage",
     "PairSimilarity",
     "ReadabilityReport",
+    "SchemaIssue",
+    "SchemaReport",
     "analyse_density",
     "analyse_geo",
     "analyse_readability",
@@ -183,5 +195,7 @@ __all__ = [
     "term_to_regex",
     "tokenize",
     "top_repeated_phrase",
+    "validate_schema",
+    "walk_nodes",
     "words_of",
 ]
