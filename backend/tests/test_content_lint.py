@@ -503,3 +503,108 @@ def test_the_entity_token_hides_template_duplication_and_must_be_masked() -> Non
             f"{masked.similarity:.0%}"
         )
         assert masked.duplicate
+
+
+# =========================================================================== #
+# information_gain_scorer - Law 15: gain over coverage
+# =========================================================================== #
+from app.services.content_lint import (  # noqa: E402
+    MIN_GAIN,
+    extract_items,
+    residual_ratio,
+    score_information_gain,
+)
+
+_CONSENSUS = (
+    "Dental implants replace missing teeth. A titanium post is placed in the jaw "
+    "and a crown is attached. The process takes several months."
+)
+_GAIN_PROBES = [
+    ("rehash", _CONSENSUS, _CONSENSUS),
+    ("disjoint", "Round Rock crews charge $189 for the after-hours call in 78664.", _CONSENSUS),
+    ("empty-draft", "", _CONSENSUS),
+    ("quotes", 'Our tech said "we found the leak in twenty minutes" on site.', _CONSENSUS),
+    ("entities", "Sunbridge Dental Group serves Santa Monica and Glendale.", _CONSENSUS),
+    ("numbers", "We charge $89 and arrive in 47 minutes, since 2011, across 1,284 calls.", _CONSENSUS),
+]
+
+
+@pytest.fixture(scope="module")
+def original_gain():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import information_gain_scorer
+
+        return information_gain_scorer
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("label,draft,consensus", _GAIN_PROBES, ids=[p[0] for p in _GAIN_PROBES])
+def test_gain_port_matches_the_original(label, draft, consensus, original_gain) -> None:
+    theirs = original_gain.score(draft, consensus)
+    mine = score_information_gain(draft, consensus)
+
+    assert mine.residual == pytest.approx(theirs["residual"])
+    assert mine.matched_tokens == theirs["matched_tokens"]
+    assert mine.total_tokens == theirs["total_tokens"]
+    assert mine.item_count == theirs["item_count"]
+    assert mine.net_new_count == theirs["net_new_count"]
+    for cat in ("NUMBERS", "QUOTES", "ENTITIES"):
+        assert list(mine.items[cat]) == list(theirs["items"][cat])
+        assert list(mine.net_new[cat]) == list(theirs["net_new"][cat])
+
+
+@pytest.mark.parametrize("label,draft,_c", _GAIN_PROBES, ids=[p[0] for p in _GAIN_PROBES])
+def test_gain_port_matches_the_original_without_a_baseline(label, draft, _c, original_gain) -> None:
+    theirs = original_gain.score(draft, None)
+    mine = score_information_gain(draft, None)
+    assert mine.residual is theirs["residual"] is None
+    assert mine.item_count == theirs["item_count"]
+    assert mine.has_consensus is theirs["has_consensus"] is False
+
+
+def test_a_verbatim_rehash_scores_zero_gain() -> None:
+    """The defining case. A page that says exactly what the consensus already says
+    adds nothing, however fluent it is."""
+    r = score_information_gain(_CONSENSUS, _CONSENSUS)
+    assert r.residual == pytest.approx(0.0)
+    assert not r.passed
+    assert "rehash" in r.issues()[0]
+
+
+def test_first_party_specifics_are_what_creates_gain() -> None:
+    """Gain lives in numbers, quotes and local entities - the SME-sourced material -
+    not in more paragraphs about the same thing."""
+    r = score_information_gain(
+        "Our crew charges $189 in 78664. Jane Doe said \"we sealed it in an hour\".",
+        _CONSENSUS,
+    )
+    assert r.residual > MIN_GAIN and r.passed
+    assert r.net_new["NUMBERS"] and r.net_new["QUOTES"]
+
+
+def test_it_abstains_rather_than_passing_when_there_is_no_baseline() -> None:
+    """A residual against nothing is meaningless. Reporting `pass` for an unmeasurable
+    page would be worse than reporting nothing, so callers must check has_consensus."""
+    r = score_information_gain("anything at all", None)
+    assert r.residual is None and r.has_consensus is False
+    assert r.issues() == []
+
+
+def test_sentence_initial_stopwords_are_not_read_as_entities() -> None:
+    """A capitalisation-based finder would otherwise report "The Round Rock" and
+    inflate the local-specificity inventory with grammar."""
+    items = extract_items("The Round Rock crew arrived. Our Santa Monica office called.")
+    assert "The Round Rock crew" not in items["ENTITIES"]
+    assert any("Round Rock" in e for e in items["ENTITIES"])
+
+
+def test_alignment_does_not_discard_common_words() -> None:
+    """`difflib`'s autojunk heuristic drops tokens appearing in >1% of a long
+    sequence - on prose that is the common words, which would inflate the apparent
+    residual exactly where it must not. The port pins autojunk=False."""
+    base = "the quick brown fox jumps over the lazy dog " * 40
+    residual, matched, total = residual_ratio(base, base)
+    assert residual == pytest.approx(0.0)
+    assert matched == total
