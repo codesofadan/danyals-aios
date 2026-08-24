@@ -778,3 +778,99 @@ def test_fenced_code_is_not_linted_for_voice() -> None:
 def test_client_banned_phrases_layer_on_top_of_doctrine() -> None:
     r = lint_blocklist("We are better than Competitor Corp.", extra_banned=["Competitor Corp"])
     assert any(h.tier == "Client" for h in r.hits)
+
+
+# =========================================================================== #
+# link_graph - hub-and-spoke equity routing across the whole client site
+# =========================================================================== #
+from app.services.content_lint import (  # noqa: E402
+    analyze_links,
+    build_graph,
+    build_page,
+)
+
+_GRAPH_FIXTURE = [
+    ("/hvac", "hub", "hvac", ["/hvac/ac-repair", "/hvac/furnace"]),
+    ("/hvac/ac-repair", "spoke", "hvac", ["/hvac"]),
+    ("/hvac/furnace", "spoke", "hvac", ["/plumbing/leak"]),
+    ("/plumbing/leak", "spoke", "plumbing", ["/gone"]),
+]
+
+
+@pytest.fixture(scope="module")
+def original_links():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import link_graph
+
+        return link_graph
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+def test_link_graph_port_matches_the_original(original_links) -> None:
+    theirs_graph = original_links.new_graph("acme")
+    for url, role, silo, links in _GRAPH_FIXTURE:
+        original_links.add_page(theirs_graph, url, role, silo, links=links)
+    theirs, theirs_total, theirs_inbound = original_links.analyze(theirs_graph)
+
+    mine = analyze_links(build_graph(
+        [build_page(u, r, s, links=ls) for u, r, s, ls in _GRAPH_FIXTURE], client="acme"
+    ))
+
+    assert mine.total_issues == theirs_total
+    assert dict(mine.inbound) == theirs_inbound
+    assert list(mine.orphans) == theirs["orphans"]
+    assert [list(x) for x in mine.over_linked] == [list(x) for x in theirs["over_linked"]]
+    assert [list(x) for x in mine.missing_spoke_to_hub] == [list(x) for x in theirs["missing_spoke_to_hub"]]
+    assert [list(x) for x in mine.cross_silo_spoke] == [list(x) for x in theirs["cross_silo_spoke"]]
+    assert [list(x) for x in mine.dangling] == [list(x) for x in theirs["dangling"]]
+    assert list(mine.silo_no_hub) == theirs["silo_no_hub"]
+
+
+def test_an_orphan_is_invisible_however_good_the_page_is() -> None:
+    """Zero inbound internal links means the page cannot accrue or pass equity. No
+    per-page check can see this, which is why content_qa's stub cannot."""
+    g = build_graph([
+        build_page("/hub", "hub", "s", links=["/a"]),
+        build_page("/a", "spoke", "s", links=["/hub"]),
+        build_page("/lonely", "spoke", "s", links=["/hub"]),
+    ])
+    assert "/lonely" in analyze_links(g).orphans
+
+
+def test_every_spoke_must_link_up_to_its_hub() -> None:
+    """Equity landing on a spoke has to flow back to the hub or the cluster never
+    lifts. A spoke that does not link up is a dead end for authority."""
+    g = build_graph([
+        build_page("/hub", "hub", "s", links=["/a"]),
+        build_page("/a", "spoke", "s", links=[]),
+    ])
+    assert [u for u, _ in analyze_links(g).missing_spoke_to_hub] == ["/a"]
+
+
+def test_the_spoke_to_hub_rule_is_only_enforced_when_a_hub_exists() -> None:
+    """Otherwise a silo mid-build would report a violation for every page in it, for
+    a structural reason the writer cannot fix from the page."""
+    g = build_graph([build_page("/a", "spoke", "s", links=[])])
+    r = analyze_links(g)
+    assert r.missing_spoke_to_hub == ()
+    assert r.silo_no_hub == ("s",)   # the real problem is reported instead
+
+
+def test_two_hubs_in_one_silo_split_the_authority() -> None:
+    g = build_graph([
+        build_page("/h1", "hub", "s", links=["/h2"]),
+        build_page("/h2", "hub", "s", links=["/h1"]),
+    ])
+    assert analyze_links(g).silo_multi_hub == (("s", ("/h1", "/h2")),)
+
+
+def test_self_links_and_duplicates_are_dropped_at_build_time() -> None:
+    page = build_page("/a", "spoke", "s", links=["/a", "/b", "/b", "  /c  ", ""])
+    assert page.links == ("/b", "/c")
+
+
+def test_role_is_validated_rather_than_silently_accepted() -> None:
+    with pytest.raises(ValueError, match="role must be"):
+        build_page("/a", "pillar", "s")
