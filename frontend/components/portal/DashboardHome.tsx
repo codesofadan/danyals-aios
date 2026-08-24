@@ -46,7 +46,7 @@ export default function DashboardHome() {
           {upNext.length === 0 ? (
             <div className="pt-empty sm">
               <span className="material-symbols-rounded">celebration</span>
-              <div className="pt-empty-t">You're all caught up</div>
+              <div className="pt-empty-t">You&apos;re all caught up</div>
               <div className="pt-empty-s">Nothing open right now — new assignments will appear here.</div>
             </div>
           ) : (

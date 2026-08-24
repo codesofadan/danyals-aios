@@ -40,7 +40,6 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     setPhase(!granted ? "locked" : unlockedNow ? "unlocked" : "unlockable");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [granted, unlockedNow, report.key]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 

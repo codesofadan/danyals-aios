@@ -79,7 +79,6 @@ function EditModal({
   const [apiKey, setApiKey] = useState("");
   const [password, setPassword] = useState("");
 
-  const isLogin = authMethod === "xmlrpc" || authMethod === "app_password";
 
   const onSave = () => {
     const input: WpConnectionInput = { siteUrl: siteUrl.trim(), authMethod };

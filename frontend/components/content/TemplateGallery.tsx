@@ -65,7 +65,6 @@ function Block({ b, theme }: { b: PreviewBlock; theme: TemplateTheme }) {
   const p = theme.primary;
   const tint = mix(p, "white", 0.88);
   const dark = mix(p, "black", 0.4);
-  const hf = `'${theme.heading}', system-ui, sans-serif`;
   const n = b.n ?? 3;
   const card = { flex: 1, background: "#fff", border: "1px solid #eceff3", borderRadius: 6, padding: 8 } as const;
 

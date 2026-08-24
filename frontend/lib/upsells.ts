@@ -3,7 +3,6 @@
 // internal services) to keep the agency's Fiverr-centered public brand front
 // and center inside the client portal. Admin curates them here; the active
 // ones render as clickable gig cards for every client.
-import { SERIES } from "@/lib/data";
 
 export type Upsell = {
   id: string;

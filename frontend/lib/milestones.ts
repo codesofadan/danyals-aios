@@ -78,8 +78,6 @@ export function currentStage(p: ClientProject): Stage {
     ?? p.stages[p.stages.length - 1];
 }
 
-// --- Seed: 6 client projects with varied stage progress --------------------
-const done = (auto_source: string, updated_at: string): Omit<Stage, "key"> => ({ status: "completed", auto_source, updated_at });
 
 // --- Recently auto-advanced feed -------------------------------------------
 // Each entry is a milestone the system moved on its own when a job/audit

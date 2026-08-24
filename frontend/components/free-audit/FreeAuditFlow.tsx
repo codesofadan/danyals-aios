@@ -221,7 +221,7 @@ export default function FreeAuditFlow() {
 
             <div className="fa-note">
               <span className="material-symbols-rounded">info</span>
-              One free audit per email. Your report opens at a private link the moment it's ready.
+              One free audit per email. Your report opens at a private link the moment it&apos;s ready.
             </div>
           </div>
         </main>

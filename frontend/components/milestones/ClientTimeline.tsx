@@ -15,7 +15,6 @@ export default function ClientTimeline({
   const pct = projectProgress(project);
   const cur = currentStage(project);
   const health = HEALTH_META[project.health];
-  const curMeta = STAGE_STATUS_META[cur.status];
   const blocked = cur.status === "blocked";
 
   const byKey = new Map(project.stages.map((s) => [s.key, s] as const));

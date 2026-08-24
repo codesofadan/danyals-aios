@@ -48,6 +48,21 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Lint runs BEFORE the typecheck because it is the cheaper gate and it catches a
+      # different class: the App Router server/client boundary, hook dependency arrays,
+      # and dead code that compiles perfectly well. Until 2026-08-24 this step could not
+      # exist — `npm run lint` ran the deprecated `next lint`, which with no config
+      # present drops into an INTERACTIVE PROMPT and would hang this job rather than
+      # fail it. `frontend/eslint.config.mjs` replaces that.
+      #
+      # `--max-warnings` is deliberately NOT zero. The dashboard is ~27k lines written
+      # without a linter and carries 18 known warnings, each a real finding recorded in
+      # the commit that introduced this step. Failing on them today would mean
+      # suppressing them wholesale, which looks like coverage and is not. The number is
+      # a RATCHET: it may go down, never up.
+      - name: Lint
+        run: npx eslint . --max-warnings 18
+
       - name: Typecheck
         run: npx tsc --noEmit
 

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Verified } from "@/lib/offpage";
-import { useApproveWeb2, useWeb2, useWeb2Status } from "@/lib/hooks/offpage";
+import { useApproveWeb2, useWeb2 } from "@/lib/hooks/offpage";
 import Web2PlanModal from "./Web2PlanModal";
 import Web2StatusBoard from "./Web2StatusBoard";
 import ReadMore from "@/components/ui/ReadMore";

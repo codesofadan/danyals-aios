@@ -94,7 +94,7 @@ export default function ClientReports() {
           <div className="pt-empty sm">
             <span className="material-symbols-rounded">summarize</span>
             <div className="pt-empty-t">No reports yet</div>
-            <div className="pt-empty-s">Your first report will appear here once it's generated.</div>
+            <div className="pt-empty-s">Your first report will appear here once it&apos;s generated.</div>
           </div>
         ) : (
           <div className="cl-rp-list">
