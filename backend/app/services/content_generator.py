@@ -414,14 +414,63 @@ def _clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
+# A sentence-boundary cut is only worth taking if it keeps most of the budgeted
+# prose. Below this fraction the section would lose too much to be worth publishing,
+# so the hard bound is taken instead (and terminated cleanly - see `_terminate`).
+_SENTENCE_CUT_FLOOR = 0.5
+
+# Trailing connectors a bounded passage must not END on. Cutting at the budget
+# routinely lands on one of these ("... and", "... because"), and appending a full
+# stop after a dangling connector reads worse than the fragment did.
+_DANGLING_TAIL: frozenset[str] = frozenset({
+    "and", "or", "but", "so", "because", "which", "that", "who", "when", "while",
+    "if", "then", "than", "as", "to", "of", "for", "with", "from", "in", "on", "at",
+    "by", "a", "an", "the", "is", "are", "was", "were", "be", "been", "its", "their",
+})
+
+_TERMINATORS = ".!?"
+
+
+def _terminate(text: str) -> str:
+    """End ``text`` on a complete thought: drop any dangling connector tail, then
+    ensure terminal punctuation. Never ADDS a word, so a word bound survives it."""
+    tokens = text.split()
+    while tokens and tokens[-1].strip(_TERMINATORS + ',;:"\'').lower() in _DANGLING_TAIL:
+        tokens.pop()
+    if not tokens:
+        return ""
+    out = " ".join(tokens).rstrip(",;: \t")
+    if out and out[-1] not in _TERMINATORS:
+        out += "."
+    return out
+
+
 def _bound_words(text: str, max_words: int) -> str:
-    """Hard-bound ``text`` to ``max_words`` words (truncate). The per-section budget
-    guarantee that mirrors the compactor's ``_enforce_budget`` - a runaway provider
-    can never exceed the doctrine word budget (§10)."""
+    """Bound ``text`` to ``max_words`` words WITHOUT ending mid-sentence.
+
+    The bound itself is still a hard guarantee (doctrine §10): a runaway provider can
+    never exceed the word budget, and nothing here adds a word. What changed is where
+    the cut lands.
+
+    Prevented defect: this used to be `" ".join(tokens[:max_words])` with no sentence
+    logic at all. The per-section budget (~133 words for a 1200-word target) sits well
+    under what `max_tokens = max_words * 2` lets the model produce, so the truncation
+    was not a rare safety net against a runaway provider - it fired on ordinary output
+    and shipped half-sentences to the client's live page.
+
+    Order of preference: cut at the last sentence end inside the budget; else take the
+    hard bound and terminate it cleanly.
+    """
     tokens = text.split()
     if len(tokens) <= max_words:
         return text.strip()
-    return " ".join(tokens[:max_words])
+    head = " ".join(tokens[:max_words]).strip()
+    cut = max(head.rfind(t) for t in _TERMINATORS)
+    if cut > 0:
+        kept = head[: cut + 1]
+        if len(kept.split()) >= max(1, int(max_words * _SENTENCE_CUT_FLOOR)):
+            return kept.strip()
+    return _terminate(head)
 
 
 # Anti-stuffing density weights the HEAD of the primary phrase, not its full length.
@@ -553,6 +602,9 @@ def _write(
     lines = [
         f"Write the '{heading}' section of a {intent} web page about '{primary}'.",
         f"Copywriting move: {role}. Write helpful, people-first prose - no headings, no lists.",
+        # State the budget. Without this the model was never told a length at all, so
+        # it wrote to `max_tokens` and every section was cut back by `_bound_words`.
+        f"Length: about {max_words} words. Finish your final sentence before that limit.",
     ]
     if grounded:
         lines.append("Use ONLY these verified facts; invent nothing else:")

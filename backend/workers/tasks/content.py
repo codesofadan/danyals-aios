@@ -919,7 +919,22 @@ def _run_pipeline(
         keyword,
         researcher=researcher,
         geo=geo,
-        client_da=None,  # un-audited by default -> neutral DA, brief flags low_confidence
+        # DELIBERATELY None, not an oversight. Traced 2026-08-24: a real DA exists
+        # only as audit finding `OFF-001`, whose `evidence_json.domain_authority` is
+        # populated ONLY when MOZ_ACCESS_ID + MOZ_SECRET_KEY are configured on the
+        # audit engine - otherwise `check_domain_authority` returns `n_a` with no
+        # number at all (danyals-audit-system/audit_engine/analyzers/offpage.py:33-51).
+        # So for an un-audited or Moz-less client - the common case - there is nothing
+        # to read, and wiring the lookup would couple the content worker to the audit
+        # artifact store to retrieve a value that is usually absent.
+        #
+        # The brief is HONEST about the gap rather than hiding it: `neutral_da_assumed`
+        # is set and `low_confidence` flips, so no consumer mistakes the neutral value
+        # for a measurement. Superseded by the P3 research rebuild, which derives
+        # winnability from the SERP already fetched (top-10 domain diversity,
+        # directory/aggregator share, local-vs-national mix) instead of a DA proxy -
+        # more relevant to local SEO, and free.
+        client_da=None,
         max_teardown=settings.content_teardown_max_pages,
         neutral_da=settings.content_research_neutral_da,
         winnable_stretch=settings.content_research_winnable_stretch,

@@ -39,7 +39,10 @@ import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from app.services.content_generator import CONTENT_SYSTEM_PROMPT
+# `_bound_words` is imported rather than re-implemented: it carries the sentence-boundary
+# rule that keeps a bounded passage from ending mid-sentence, and two copies of that
+# rule is how one of them silently goes stale.
+from app.services.content_generator import CONTENT_SYSTEM_PROMPT, _bound_words
 from integrations.llm import SystemSummarizer
 
 if TYPE_CHECKING:  # only for the GeneratedContent adapter's typing (no runtime cycle)
@@ -372,13 +375,6 @@ _REWRITE_SYSTEM = (
     "use short sentences, commas, or the word 'to' for ranges. Avoid AI-cliche "
     "phrases. Do not add headings or lists. Return ONLY the rewritten passage.\n\n"
 )
-
-
-def _bound_words(text: str, max_words: int) -> str:
-    tokens = text.split()
-    if len(tokens) <= max_words:
-        return text.strip()
-    return " ".join(tokens[:max_words]).strip()
 
 
 def _rewrite_block(
