@@ -14,21 +14,29 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SERIES, TEMPLATE_COLOR, roleTemplates } from "./data";
+import { SERIES, TEMPLATE_COLOR } from "./data";
 
 // The default `provisioning.py` writes when the wizard sends nothing. If a template
 // ever resolves to this, the split has silently failed.
 const PROVISIONING_DEFAULT = "#7B69EE";
 
 describe("TEMPLATE_COLOR", () => {
-  it("covers every role template", () => {
-    // The failure this catches: someone adds a fifth template, forgets the colour,
-    // and `TEMPLATE_COLOR[tpl.key]` is `undefined` → `avatar_color` omitted →
-    // provisioning stamps legacy violet.
-    for (const tpl of roleTemplates) {
-      expect(TEMPLATE_COLOR[tpl.key], `no colour for template "${tpl.key}"`).toBeTruthy();
-    }
-  });
+  // WHERE THE COVERAGE GUARD WENT, and why it is not here.
+  //
+  // This file used to assert "every role template has a colour" by looping over
+  // `roleTemplates` — the frontend's own copy of the catalogue. That copy is now
+  // deleted: templates come from `GET /rbac/templates`, owned by `matrix.py`.
+  //
+  // So the guard cannot live on this side any more, and the tempting rewrite is a
+  // TRAP: looping over `Object.keys(TEMPLATE_COLOR)` asserts "every key I have, I
+  // have" — vacuously green, and blind to the exact slip it existed to catch (a
+  // template added with no colour, which now originates in the BACKEND and which this
+  // side cannot see at all).
+  //
+  // A guard needs a template-key source independent of `TEMPLATE_COLOR`, and only the
+  // backend has one. It belongs in the suite that already reads this file and compares
+  // it to `matrix.py` by value. Stated here rather than faked here, because a
+  // frontend-side version could only ever be theatre.
 
   it("never resolves to the provisioning fallback", () => {
     for (const [key, color] of Object.entries(TEMPLATE_COLOR)) {
