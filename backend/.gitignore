@@ -21,5 +21,17 @@ venv/
 htmlcov/
 coverage.xml
 
-# A separate SEO-content product dropped in locally; not part of the AIOS backend.
-seo-content-os/
+# seo-content-os/ WAS ignored here as "a separate SEO-content product dropped in
+# locally; not part of the AIOS backend". That judgement is what produced the module's
+# longest-lived defect.
+#
+# The corpus was present on the machine where `content_generator.py` and
+# `content_qa.py` were written, so those modules cite
+# `backend/seo-content-os/knowledge/` as "the CANONICAL doctrine" behind their word
+# budgets, density ceilings and the 14 QA dimensions. Ignored by git, it never existed
+# for anyone else - the citation resolved for one developer and for no one since, and
+# no test could tell "the constants match the doctrine" from "the doctrine is absent".
+#
+# It is now committed (R6-1), hashed by MANIFEST.json, and force-included into the
+# wheel. It IS part of the backend: the content pipeline reads it at runtime. Do not
+# re-add this rule.

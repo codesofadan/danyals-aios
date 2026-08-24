@@ -80,6 +80,19 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["app", "workers", "integrations"]
 
+# The SEO-CONTENT-OS doctrine corpus (R6-1). NOT a Python package, so `packages`
+# cannot carry it - force-include puts it beside app/ in site-packages, which is what
+# lets `Path(app.__file__).parents[1] / "seo-content-os"` resolve BOTH from a source
+# checkout and from the installed wheel in the Docker image.
+#
+# This matters more than it looks: the app runs from the venv (see backend/Dockerfile -
+# only db/migrations and the audit engine are COPYied into the runtime stage), so a
+# corpus left out of the wheel is present in every test run and absent in production.
+# The failure would surface only inside the Celery worker, as a FileNotFoundError on a
+# real client's content job.
+[tool.hatch.build.targets.wheel.force-include]
+"seo-content-os" = "seo-content-os"
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"

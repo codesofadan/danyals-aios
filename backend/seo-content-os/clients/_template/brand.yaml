@@ -1,0 +1,168 @@
+# Client brand profile - copy this folder to clients/<client-slug>/ and fill every field.
+# The writer loads this before any page. Missing facts are asked, never invented.
+# Run /new-client to have the system build this interactively.
+
+client:
+  slug: ""                      # kebab-case, e.g. "austin-roofing-co"
+  legal_name: ""                # exact legal/registered business name
+  brand_name: ""                # name used in copy and on the site
+  founded_year: ""              # real year, for E-E-A-T. Blank if unknown - do not guess.
+  primary_url: ""
+
+# --- NAP: must be byte-identical to Google Business Profile and every citation. ---
+nap:
+  name: ""                      # must match GBP exactly
+  phone: ""                     # single canonical format, match GBP
+  street: ""
+  city: ""
+  state_region: ""
+  postal_code: ""
+  country: ""
+  geo:
+    lat: ""
+    lng: ""
+
+# --- Multi-location: OPTIONAL. Fill only if the business has 2+ staffed offices, each with its own GBP. ---
+# Single-location clients leave this empty and use the nap block above. Read by topical-map-architect:
+# each real staffed office earns a location-page node (its own NAP/GBP is the un-copyable evidence).
+locations: []                   # e.g. [{name, phone, street, city, state_region, postal_code, geo: {lat, lng}}]
+
+# --- Schema: drives JSON-LD. Pick the most specific LocalBusiness subtype. ---
+schema:
+  local_business_type: ""       # e.g. Plumber, RoofingContractor, Dentist, HVACBusiness, LawFirm, Electrician
+  price_range: ""               # e.g. "$$"
+  opening_hours: []             # e.g. ["Mo-Fr 08:00-18:00", "Sa 09:00-14:00"]
+  same_as: []                   # authoritative profile URLs: GBP, Facebook, LinkedIn, BBB, Yelp
+
+# --- Google Business Profile: the ranking-relevant GBP fields. ---
+# Read by keyword-research-method.md (seed discovery) and topical-map-protocol.md (the central-entity anchor).
+# The GBP CATEGORY is a real ranking lever (Sterling Sky); GBP POSTS are not, and are never a map node.
+# Note: the GBP category taxonomy is DIFFERENT from schema.local_business_type (schema.org). Fill both.
+gbp:
+  primary_category: ""          # the single GBP primary category, e.g. "Dentist", "Garage door supplier" - the head-term anchor
+  secondary_categories: []      # additional GBP categories; each can seed a secondary service hub
+  services: []                  # the service items listed on the GBP itself (customer-language, pre-vetted seeds)
+
+brand_terms: []                 # business name, common misspellings, owner name, phone - seed the navigational cluster
+
+# --- Services + coverage (the raw material for service and location pages). ---
+services: []                    # list each service the business sells, exact naming
+service_areas: []               # real cities/neighborhoods actually served. No inflating coverage.
+primary_city: ""                # the anchor city the business is based in / ranks for. MUST also appear in service_areas (it is the anchor, not an exception - otherwise the highest-demand city query is un-nodeable).
+
+# --- Self-storage specifics (fill ONLY if vertical == self-storage; leave blank otherwise). ---
+# Consumed by knowledge/verticals/self-storage.md (the compliance overlay), knowledge/playbooks/unit-size-page.md,
+# knowledge/foundations/schema-library.md, and scripts/ (storage_lint.py, schema_validator.py,
+# storage_cluster_seed.py). Every number is a REAL operating fact from the SME interview. A fabricated camera
+# count, temperature range, or insurance-license number is a REGULATORY liability, not just an SEO risk
+# (research/self-storage-2026-07/00-MASTER-self-storage-intelligence.md, the iron law). Empty = a missing-evidence
+# flag, never a guessed value. For a multi-facility operator, per-facility hours/security/climate live in
+# locations[] entries; the fields below are the brand-wide defaults + the single-facility case.
+storage:
+  operator_type: ""             # single_facility | multi_facility. Single-facility: the homepage IS the facility page (do not spin thin axis pages).
+  unit_sizes: []                # sizes actually rented, e.g. ["5x5","5x10","10x10","10x15","10x20","10x30"] - each a candidate unit-size node
+  storage_types: []             # types actually offered: climate-controlled | drive-up | indoor | outdoor | vehicle | rv | boat | car | business | wine | document
+  audiences: []                 # audience facets genuinely served: student | military | business (student/military localize on a real campus/base)
+  live_inventory: false         # true ONLY if the site feeds live per-unit price + availability from the PMS. Governs scarcity claims (overlay CV1) and Product/Offer schema.
+  access_hours: ""              # gate/access hours - when a tenant can reach their unit, e.g. "6am-10pm daily"
+  office_hours: ""              # leasing/office hours - staff present. A DISTINCT clock from access_hours (the #1 renter grievance vector; never conflate).
+  gate_access_24h: false        # true ONLY if the gate genuinely grants 24-hour access
+  climate_control:
+    offered: false
+    temp_range_f: ""            # the REAL held range from the thermostat, e.g. "55-80". Blank if unknown; never a guessed range.
+    humidity_control: false     # true ONLY if the facility actively controls HUMIDITY, not just temperature. Gates overlay C5 (moisture/mold claims).
+  security_features: []         # {feature, spec, source} concrete specs, NOT adjectives. e.g. {feature: cameras, spec: "24 HD cameras, recorded 24/7, footage stored 90 days", source: SME}. Marker 2.
+  break_in_free_since: ""       # real start date of a tracked break-in-free record, or blank. NEVER invented (overlay C4: a fabricated clean history is the Dilbeck fraud pattern).
+  move_in_special:              # the CURRENT, real, live offer, or leave blank. Copy must mirror what is actually running (overlay C6, Law 20).
+    offer: ""                   # e.g. "first month free" | "$1 first month" | "50% off first month"
+    admin_fee: ""               # the one-time admin fee still due at move-in (what "free" does NOT waive), e.g. "$29"
+    required_add_ons: ""        # other still-payable items: required protection plan, autopay, minimum term
+    end_date: ""                # a real, enforced end date, or blank. Never a rolling "ends soon" / "today only" that is not literally true.
+  admin_fee: ""                 # the one-time administrative fee, real amount (disclose in-copy near any "free" claim)
+  deposit_required: false
+  month_to_month: true
+  tenant_protection_type: ""    # protection_plan | licensed_insurance | none. Gates overlay C1/C2: a self-indemnity PROTECTION PLAN may NEVER be called "insurance / coverage / insured / policy / premium".
+  insurance_license: {}         # {number, state} - the state Self-Service Storage insurance/agent license, IF held. The printable "license number" (overlay C2, Experience marker). Blank if not held.
+  rate_guarantee: ""            # "" = standard month-to-month (ECRI applies, so NO "rate locked" claim). OR the REAL contractual guarantee, e.g. "no rate increase for the first 12 months" (gates overlay C8).
+  advertised_late_fee: ""       # any late fee that appears in copy - checked against the state statutory cap (overlay C10)
+  lien_statute: ""              # the client's state Self-Service Storage Facility Act citation, e.g. "CA Bus. & Prof. Code 21700-21716" (overlay C11). Any auction/lien-timeline copy must trace here.
+  ada_verified: false           # true ONLY if office + path of travel are verified accessible. Gates overlay C12 (accessibility claims).
+  manager: {}                   # {name, title, cssm: bool, cssm_date, detail} - the named on-site/facility manager (Experience marker 6). CSSM = Certified Self Storage Manager (SSA), the printable credential.
+
+# --- Entity: the disambiguation layer and the root of the topical map. ---
+# Consumed by /build-topical-map (knowledge/foundations/topical-map-protocol.md).
+# This is the source-of-truth entity Google keys on; keep it factual, not marketing copy.
+entity:
+  central_entity: ""            # the one thing on every page: business + primary service, e.g. "Desert Door Pros garage door repair". Anchor to the GBP primary category.
+  source_context: ""            # what the business is + how it monetizes, one line, e.g. "Single-location garage-door repair company; revenue from booked repair jobs and installs"
+  canonical_description: ""     # 1-2 FACTUAL sentences describing the entity (not ad copy). Feeds citation descriptions + schema.
+  same_as: []                   # entity-relationship registry: GBP, Wikidata, LinkedIn company, BBB, Chamber, Yelp. Keep in sync with schema.same_as.
+  kgmid: ""                     # Knowledge Graph MID if a panel already exists. Blank if none - never guess.
+  parent_org: ""                # franchise/holding company if applicable. Blank if independent.
+  memberships: []               # {org, type: trade_association|chamber|network, verify_url} - real, verifiable affiliations
+
+# --- Competitive set: the real local competitors, for information-gain decisions. ---
+# Drives the map's info_gain_thesis per node and the audit's quality bar. Never strawman.
+competitive_set: []             # {name, url, strength (what they genuinely do well), gap_we_fill (the specific fact/depth they lack that this business has)}
+
+# --- E-E-A-T assets: the specifics that prove experience. Fill from the SME interview. ---
+eeat:
+  credentials: []               # licenses, certifications, insurance, memberships (with numbers if public)
+  team: []                      # real people: name, role, years, one specific detail each
+  proof: []                     # review counts + platforms, awards, guarantees, notable projects
+  differentiators: []           # what is genuinely true and different vs local competitors
+  # --- Structured Experience artifacts (Law 16; certified by scripts/experience_gate.py). ---
+  media: []                     # {url, caption, geotag, date} - original photos of THIS crew's real jobs
+  reviews: []                   # {platform, count, rating, profile_url} - real, from real profiles
+  # --- Vertical-specific fields (consumed by knowledge/verticals/<vertical>.md; fill only the client's vertical). ---
+  # Field shapes match exactly what each overlay's "Required brand.yaml fields" line reads; the overlay fails closed if empty.
+  # LEGAL (vertical: legal)
+  attorneys: []                 # {name, bar_number, bar_jurisdiction, admission_year, practice_areas[]}
+  bar_jurisdictions: []         # every bar the firm is admitted in
+  case_results: []              # {matter, outcome, facts} - real SME-sourced matters only (bar-advertising-rules aware)
+  fee_structure: ""             # e.g. "contingency: no fee unless we win" | "flat fee" | "hourly"
+  certified_specialties: []     # state-board or ABA-accredited certifications only
+  # MEDICAL-DENTAL (vertical: medical-dental)
+  providers: []                 # {name, credential (MD/DO/DDS/DMD), license_number, license_state, board_certifications[], npi}
+  reviewer: ""                  # the clinician who reviews clinical content: name + credential + license
+  consents: []                  # keyed HIPAA marketing authorizations for any testimonial / before-after used
+  health_claims: []             # {claim, substantiation} - every clinical claim with its cited source
+  # FINANCIAL (vertical: financial)
+  registration_type: ""         # ria | broker_dealer | dual_registrant | cfp | cpa_accounting | insurance_agent | mortgage_lender | other
+  registrations: []             # firm CRD/IARD, state registrations
+  figures: []                   # {figure, source, as_of} - any performance/fee/rate figure with its source + as-of date
+  # (financial: eeat.credentials[] entries should be objects {name, designation, crd_or_license, regulator})
+  # HOME-SERVICES (vertical: home-services)
+  license: {}                   # {number, state_or_authority, classification (e.g. C-10 Electrical), expiry} - real
+  bond: {}                      # {amount, surety}
+  insurance: {}                 # {general_liability_amount, workers_comp}
+  certifications: []            # {name, issuer} - real certs (NATE, EPA 608, manufacturer-authorized)
+  permits_note: ""              # the local permit / authority facts the SME provided
+  # SHARED (any regulated vertical)
+  required_disclaimers: []      # the disclaimers each page must carry (financial / legal / medical)
+  warranties: []                # {scope, duration, terms} - real, Magnuson-Moss-aware
+
+# --- Vertical routing: switches on the overlay in knowledge/verticals/. ---
+vertical: ""                    # one of: legal | medical-dental | financial | home-services | self-storage | (blank = none)
+                                # self-storage is NOT YMYL, but its overlay is mandatory: it enforces the consumer-protection
+                                # + lien-law + honest-security/pricing spine (protection-plan-is-not-insurance, no absolute
+                                # security claim, FTC "free" disclosure, per-state lien timeline). See knowledge/verticals/self-storage.md.
+trade_is_ymyl: false            # true for regulated/safety trades; raises the E-E-A-T + compliance bar. Leave false for self-storage.
+
+# --- Voice: the per-client layer on top of universal humanization. ---
+voice:
+  one_line_direction: ""        # e.g. "Straight-talking, no jargon, sounds like the owner on the phone"
+  reading_level: ""             # e.g. "Grade 7-8"
+  tone_by_context: {}           # e.g. {emergency: "calm + fast", pricing: "transparent + plain"}
+  banned_phrases: []            # words/phrases this brand never uses
+  good_examples: []             # 2-3 real sentences that sound right
+  off_brand_examples: []        # 2-3 sentences that sound wrong for this brand
+
+# --- Guardrails ---
+guardrails:
+  banned_competitor_mentions: []
+  compliance_notes: ""          # e.g. licensed-trade claims that require a real license number
+  review_pii_rule: "Never publish a reviewer's full name or identifying detail without consent."
+
+# --- Compounding memory: appended after every engagement (Law 10). ---
+case_log: []                    # {date, page, what_worked, client_quirk, outcome}

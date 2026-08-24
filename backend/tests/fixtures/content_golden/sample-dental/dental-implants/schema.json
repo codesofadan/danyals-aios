@@ -1,0 +1,104 @@
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Dentist",
+      "@id": "https://www.sunbridgedental.example/#dentist",
+      "name": "Sunbridge Dental",
+      "telephone": "(310) 555-0140",
+      "url": "https://www.sunbridgedental.example",
+      "priceRange": "$$$",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "1234 Wilshire Blvd, Suite 300",
+        "addressLocality": "Santa Monica",
+        "addressRegion": "CA",
+        "postalCode": "90403",
+        "addressCountry": "US"
+      },
+      "geo": {
+        "@type": "GeoCoordinates",
+        "latitude": "34.0195",
+        "longitude": "-118.4912"
+      },
+      "openingHours": ["Mo-Fr 08:00-17:00", "Sa 09:00-14:00"],
+      "areaServed": ["Santa Monica", "Pasadena", "Glendale", "Los Angeles"],
+      "sameAs": [
+        "https://www.google.com/maps/sunbridgedental-santamonica.example",
+        "https://www.facebook.com/sunbridgedental.example"
+      ]
+    },
+    {
+      "@type": "Service",
+      "@id": "https://www.sunbridgedental.example/dental-implants/#service",
+      "name": "Dental Implants",
+      "serviceType": "Dental implant placement and restoration",
+      "provider": { "@id": "https://www.sunbridgedental.example/#dentist" },
+      "areaServed": ["Santa Monica", "Pasadena", "Glendale", "Los Angeles"],
+      "url": "https://www.sunbridgedental.example/dental-implants"
+    },
+    {
+      "@type": "Person",
+      "@id": "https://www.sunbridgedental.example/#dr-marquez",
+      "name": "Dr. Elena Marquez",
+      "jobTitle": "Board-Certified Periodontist",
+      "hasCredential": "DDS",
+      "worksFor": { "@id": "https://www.sunbridgedental.example/#dentist" }
+    },
+    {
+      "@type": "Person",
+      "@id": "https://www.sunbridgedental.example/#dr-chen",
+      "name": "Dr. David Chen",
+      "jobTitle": "Prosthodontist",
+      "hasCredential": "DMD",
+      "worksFor": { "@id": "https://www.sunbridgedental.example/#dentist" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://www.sunbridgedental.example/dental-implants/#breadcrumb",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.sunbridgedental.example" },
+        { "@type": "ListItem", "position": 2, "name": "Services", "item": "https://www.sunbridgedental.example/services" },
+        { "@type": "ListItem", "position": 3, "name": "Dental Implants", "item": "https://www.sunbridgedental.example/dental-implants" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://www.sunbridgedental.example/dental-implants/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Do dental implants hurt?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The placement is done under local anesthesia, with sedation available, so you should not feel pain during it. Afterward, most patients manage the soreness with over-the-counter pain relief and describe it as milder than the tooth problem that brought them in."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How long do dental implants last?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The implant post is designed to be a long-term replacement, and survival rates in the dental research are high over many years. The crown on top can wear over time and may need replacement down the road. Good home care and regular checkups protect the investment."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Am I too old, or do I have too little bone, for implants?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Age itself is rarely the barrier; health and bone are what matter. If your jawbone is thin, a bone graft or a sinus lift often makes implants possible. The only way to know your situation is the 3D scan at a consult."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I get all my teeth replaced in one day?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "For a full arch, an All-on-4 approach can give you a fixed temporary set of teeth on the day of surgery in many cases. The final, permanent teeth are fitted after your implants have healed."
+          }
+        }
+      ]
+    }
+  ]
+}

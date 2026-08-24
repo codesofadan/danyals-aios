@@ -1,0 +1,770 @@
+{
+  "_comment": "Integrity record for the SEO-CONTENT-OS doctrine corpus, extracted from SEO-CONTENT-OS.zip (repo root) on 2026-08-24. `content_qa.py` and `content_generator.py` cite this corpus to justify their numeric constants, and until now cited a path that had never existed in git history. test_doctrine_corpus.py asserts the tree still matches these hashes, so a silent edit to the doctrine cannot drift away from the code that claims to enforce it. Regenerate ONLY with a deliberate doctrine change.",
+  "extracted": "2026-08-24",
+  "file_count": 157,
+  "files": {
+    "CLAUDE.md": {
+      "bytes": 16262,
+      "headings": 12,
+      "sha256": "e5d9b3ff16edce97375d6c6dc37b7dfb4261ca7b9d4f7ffd69979cc520a2cd8c"
+    },
+    "README.md": {
+      "bytes": 2199,
+      "headings": 5,
+      "sha256": "e795a4f602e2b053ba93e423a2e95c0053a42b81b8f4ca172ee7abf8257ef615"
+    },
+    "SYSTEM-MAP.md": {
+      "bytes": 61540,
+      "headings": 39,
+      "sha256": "52ed3c09aa8ba05a8c452182fc00bb3d390ca132e7690a5f6c43d4f6d1e4ee1a"
+    },
+    "agents/compliance-auditor.md": {
+      "bytes": 17116,
+      "headings": 14,
+      "sha256": "eb32f6305f2a857b442cb6df2a02c00685acfed6ebafcb59d5148ef7022b2628"
+    },
+    "agents/conversion-optimizer.md": {
+      "bytes": 16186,
+      "headings": 16,
+      "sha256": "ec8ee82d463151b31fee8cfc84814c979c7458866c81005a7cd33777ba4da7aa"
+    },
+    "agents/critical-editor.md": {
+      "bytes": 16164,
+      "headings": 18,
+      "sha256": "68b1fa2caf58bf980e53912596d9a2c958b2090651372aff86ac4aa2f68be887"
+    },
+    "agents/keyword-intent-researcher.md": {
+      "bytes": 16167,
+      "headings": 19,
+      "sha256": "e9fe0a16d6fcbc573d86d8e079140c7916f351696b8fc11a0f070c5c0dfa685e"
+    },
+    "agents/link-architect.md": {
+      "bytes": 13492,
+      "headings": 9,
+      "sha256": "a989277d1d45d0c1c6a17470ca32eee63880bd1887124af37795780600db3da6"
+    },
+    "agents/outline-architect.md": {
+      "bytes": 15631,
+      "headings": 26,
+      "sha256": "e8f98e0afb3d8f3761fa12f187d00a58920a8531e5fbb35080a97b08ef5c52ad"
+    },
+    "agents/schema-linking-finisher.md": {
+      "bytes": 16751,
+      "headings": 21,
+      "sha256": "e056239e85d91f269475433d2a8580da6392e090846f20f5fbeaea0f32784459"
+    },
+    "agents/sme-interviewer.md": {
+      "bytes": 18178,
+      "headings": 23,
+      "sha256": "30ed51fac6f0585233dd87520c37372ae2f5ae674cae6d426bc166b5164b83c0"
+    },
+    "agents/topical-map-architect.md": {
+      "bytes": 15832,
+      "headings": 10,
+      "sha256": "70c0428e520b14356c5ddf8a83c111591f69864ee465312b67301dfd6079086b"
+    },
+    "agents/voice-writer.md": {
+      "bytes": 15759,
+      "headings": 19,
+      "sha256": "44e4e8416de7eff7a59680e7443637466e5c4ed197a1d8a54ad311964bdd7066"
+    },
+    "clients/_template/brand.yaml": {
+      "bytes": 14297,
+      "sha256": "7eb8ccc591337ae11e276298ee0c322627f5ba0c3c7977c0a6c1707fa9372f52"
+    },
+    "commands/brief.md": {
+      "bytes": 3162,
+      "headings": 2,
+      "sha256": "d1dba8eef4f93717e638a64590008026c5821ec66ae3b73c26b73b6037dd3b2a"
+    },
+    "commands/build-topical-map.md": {
+      "bytes": 4794,
+      "headings": 2,
+      "sha256": "adc61f9e480840a273f968d73bebb9e54d7514c1779776d774b38021ae3c2e44"
+    },
+    "commands/new-client.md": {
+      "bytes": 5299,
+      "headings": 2,
+      "sha256": "8c985c9e93bfd17dddfc8e0e07a03e318c131e876de6bfa5c21705a08164f891"
+    },
+    "commands/qa.md": {
+      "bytes": 3247,
+      "headings": 2,
+      "sha256": "d77e6a50dd3b9b410f7d44679f9046e415878cc8af693a9d0a371ff38f2ac0a7"
+    },
+    "commands/refresh.md": {
+      "bytes": 6576,
+      "headings": 2,
+      "sha256": "7aa23f9594ca0d43de73acf2849d6967d89ed955f1a2497b732b143f4778f62b"
+    },
+    "commands/report.md": {
+      "bytes": 5006,
+      "headings": 2,
+      "sha256": "99eae37d88975d13d128cdbc938365b85961301358d9cfdc273e74f582442204"
+    },
+    "commands/write-about-page.md": {
+      "bytes": 5274,
+      "headings": 2,
+      "sha256": "1dc704fc523268145d0df66f05ac476481f6db2c5eb7bf11d58c247a9245899e"
+    },
+    "commands/write-faq-page.md": {
+      "bytes": 8519,
+      "headings": 2,
+      "sha256": "2d9dce2e2aee7834a30b36b3be424e08e68ab2288d7bf7becf44382894b111d1"
+    },
+    "commands/write-gbp-posts.md": {
+      "bytes": 2731,
+      "headings": 2,
+      "sha256": "25fea9e500da28ff81bef2f4e43612cb3f0757f033b6d1580216ed052be2d018"
+    },
+    "commands/write-homepage.md": {
+      "bytes": 4968,
+      "headings": 2,
+      "sha256": "7909c49e318b13c89a8726f6262dab4efd85aa9c1463310891c501754bbab258"
+    },
+    "commands/write-local-asset.md": {
+      "bytes": 8395,
+      "headings": 2,
+      "sha256": "f7db9a6d4fb1ff81120ca8ac37eb3266f74720f9e1ff080e33420972e5ed0956"
+    },
+    "commands/write-location-page.md": {
+      "bytes": 5153,
+      "headings": 2,
+      "sha256": "7744e0333fda6d99e7f95693aa4f0f9340e1a4d1eac85e39703f2509c4c73b46"
+    },
+    "commands/write-review-requests.md": {
+      "bytes": 3067,
+      "headings": 2,
+      "sha256": "b386644ab23d1932da87831858a08e647e9f79d21f3ad59c8780ac7ef83547eb"
+    },
+    "commands/write-review-responses.md": {
+      "bytes": 3522,
+      "headings": 2,
+      "sha256": "124d5f7d930d3ddb7f061894875a57b815c64229c020c06d8b12e37868c0cc00"
+    },
+    "commands/write-service-area-page.md": {
+      "bytes": 5489,
+      "headings": 2,
+      "sha256": "30b9682725f8422f3ba43cec2d84eebe8821b9420fa3c43c79f7131249299396"
+    },
+    "commands/write-service-city-page.md": {
+      "bytes": 5431,
+      "headings": 2,
+      "sha256": "cdc5c16d554fbb69de26d0368c63152f0444d9043eb35610d13bb1730ee7e145"
+    },
+    "commands/write-service-page.md": {
+      "bytes": 4770,
+      "headings": 2,
+      "sha256": "203f5158cbec0605927dc1ea7b8d39cee428ecd1a4d2b9790b03cfc2c5a1fbe1"
+    },
+    "commands/write-unit-size-page.md": {
+      "bytes": 7782,
+      "headings": 2,
+      "sha256": "63c666442c46f7bf672c54e8bca10307aaa7e13d299e8163e0eac1e96ac5db26"
+    },
+    "knowledge/doctrine/ai-search-reality-2026.md": {
+      "bytes": 16162,
+      "headings": 12,
+      "sha256": "be3c0492deed6706b96759edd996571312f7a98354378b8786c2eb6d4dbe2a58"
+    },
+    "knowledge/doctrine/google-compliance-spine.md": {
+      "bytes": 31404,
+      "headings": 40,
+      "sha256": "57381953e671a135a17559a32ceb6aa75c567d3da183cae469d3f33439520ceb"
+    },
+    "knowledge/doctrine/llms-txt-verdict.md": {
+      "bytes": 3443,
+      "headings": 3,
+      "sha256": "819a0eac07bc09c03a9a9221ff91968a23b0dc34b1c926fb790bb47bf7bc3e51"
+    },
+    "knowledge/doctrine/local-content-laws.md": {
+      "bytes": 6597,
+      "headings": 7,
+      "sha256": "7d56b2280fa4b94e7b099491d3aac040dea45b7cd6c8469ae923604f539d5bbf"
+    },
+    "knowledge/doctrine/penalty-casebook.md": {
+      "bytes": 12497,
+      "headings": 7,
+      "sha256": "aa9fb2cf7c3470d52c0e38ab9731be1fad2eef45b82eba1c00b335217f17966a"
+    },
+    "knowledge/doctrine/seo-system-doctrine.md": {
+      "bytes": 22205,
+      "headings": 20,
+      "sha256": "ff47e2f3763ef8257efbebdf41971ce9a32aa251c30a04bff55d7661cb32615f"
+    },
+    "knowledge/doctrine/seo-system-spine.md": {
+      "bytes": 13036,
+      "headings": 9,
+      "sha256": "2cf41f9da561be8feb8583a93bfb328348dcecd1851646bf69e54d0b41ecf1cd"
+    },
+    "knowledge/foundations/citation-description-library.md": {
+      "bytes": 11778,
+      "headings": 8,
+      "sha256": "c64f90a88d7d3a1839e24c431df07c8ad8628cf1bab74b6a2691ee0b008b009c"
+    },
+    "knowledge/foundations/cluster-graph-protocol.md": {
+      "bytes": 14669,
+      "headings": 11,
+      "sha256": "9de2f6ebb97d59ce72b3459b6cb9f7dbe63b9c7b5b9d34ff1c2f8d0b940cde65"
+    },
+    "knowledge/foundations/eeat-framework.md": {
+      "bytes": 21266,
+      "headings": 17,
+      "sha256": "2c4c2c60ca58198899fa3393bd88d45c291c1badd1a45c5aff6dc30cb2906f37"
+    },
+    "knowledge/foundations/experience-signals.md": {
+      "bytes": 20135,
+      "headings": 14,
+      "sha256": "42ab8a643dc744588a6aa53e560ad00ee44a1bad297456c64cd489bd078a251e"
+    },
+    "knowledge/foundations/geo-ai-citation.md": {
+      "bytes": 16197,
+      "headings": 8,
+      "sha256": "c71b1eb8da8e49949dc6dfd96f8e38e0c8856d15f2bd1f49a54db686a242892d"
+    },
+    "knowledge/foundations/internal-linking.md": {
+      "bytes": 18179,
+      "headings": 16,
+      "sha256": "98132bc5f3816705a07c3e5e9c7eee0e531a9f6d8a3a1bd4723e91707bdb86e3"
+    },
+    "knowledge/foundations/keyword-research-method.md": {
+      "bytes": 29297,
+      "headings": 20,
+      "sha256": "2d4a91d96da92d4d62f1f7937e69fd463d0edb12dec2a18cb1165a101d789073"
+    },
+    "knowledge/foundations/local-gbp-signals.md": {
+      "bytes": 14662,
+      "headings": 8,
+      "sha256": "ac82b89308c79c844074775a40e33a8956e212f46790124a2c6ded2b08c51bfb"
+    },
+    "knowledge/foundations/local-link-assets.md": {
+      "bytes": 12229,
+      "headings": 7,
+      "sha256": "f862bd8af667f40eff4e19ee51c612409dd61dbe4e6c2286c559c84a023c6304"
+    },
+    "knowledge/foundations/meta-and-headings.md": {
+      "bytes": 16089,
+      "headings": 16,
+      "sha256": "1d1d4b60142f4c381d09c0381445ae50d9fdcb2a050736b69bc41ed87508641a"
+    },
+    "knowledge/foundations/nap-consistency.md": {
+      "bytes": 12057,
+      "headings": 8,
+      "sha256": "d2bc165a27bc2e564d1c04589a8f394db95fea6bc67ce6a6bc163f3cd9b7b539"
+    },
+    "knowledge/foundations/passage-block-protocol.md": {
+      "bytes": 16863,
+      "headings": 14,
+      "sha256": "352206586267daa6a8c0856676b44df2f2b029fcbda6c521c9667079530f84ba"
+    },
+    "knowledge/foundations/research-input-protocol.md": {
+      "bytes": 8335,
+      "headings": 7,
+      "sha256": "63a5f621404cd9b11fa4ef0e04dd2f59c7b703f9606e0917379623895918e13f"
+    },
+    "knowledge/foundations/review-content-strategy.md": {
+      "bytes": 11331,
+      "headings": 8,
+      "sha256": "20c1368a8869d54fcdca3606ac0f696986ae380abe691576b32537494a65621d"
+    },
+    "knowledge/foundations/schema-library.md": {
+      "bytes": 33838,
+      "headings": 19,
+      "sha256": "f1c98d6e55b096b2fdd046160d2951300c2dc8997f8e0193dc291cd0365734cc"
+    },
+    "knowledge/foundations/search-intent-taxonomy.md": {
+      "bytes": 15198,
+      "headings": 8,
+      "sha256": "fc3e259c802e0dbb8332b3bb78d2a88b74560c2debc2ca90ec884fc81bc901b7"
+    },
+    "knowledge/foundations/storage-topical-map.md": {
+      "bytes": 17041,
+      "headings": 13,
+      "sha256": "ab63a341b2e128aba684e71fbfb25be39a77c394a4b813b09185907fdcebe52e"
+    },
+    "knowledge/foundations/topical-map-protocol.md": {
+      "bytes": 24749,
+      "headings": 14,
+      "sha256": "9aaa537aad486afa90287ae3c5580fca904889217df306ab5676fbc2dcd07fc2"
+    },
+    "knowledge/frameworks/README.md": {
+      "bytes": 7033,
+      "headings": 8,
+      "sha256": "cb5038125298466e8150989a316a8ef61f39731ff708cb0193ad0df97d504edd"
+    },
+    "knowledge/frameworks/aida-and-4ps.md": {
+      "bytes": 2607,
+      "headings": 7,
+      "sha256": "184c9eed5b1a9dbb9e2113e624612ff6b09f5f6d665bea752b2c0e86b8f89a21"
+    },
+    "knowledge/frameworks/cialdini-7-principles.md": {
+      "bytes": 3365,
+      "headings": 8,
+      "sha256": "e974b5fc9dad5563210019680ad4922864890f889c7ddfbf4c12e51dc6db0325"
+    },
+    "knowledge/frameworks/copyhackers-hero-and-belief.md": {
+      "bytes": 2959,
+      "headings": 7,
+      "sha256": "e18a001f55b0e8e0c02cd9be65fa598fd2af26c64a722d2ca37edde9451669e2"
+    },
+    "knowledge/frameworks/objection-handling.md": {
+      "bytes": 2965,
+      "headings": 7,
+      "sha256": "281dd86fad04456141c786c30ace3ca1e5098fb68a3f96b30a850b3a9e5329be"
+    },
+    "knowledge/frameworks/pas-and-pastor.md": {
+      "bytes": 3097,
+      "headings": 7,
+      "sha256": "240c5699071e7452c19d25b1242c0e80519983d34afc184c53c4714e4fa27742"
+    },
+    "knowledge/frameworks/scan-layer-formatting.md": {
+      "bytes": 3431,
+      "headings": 7,
+      "sha256": "c76adad16b8dd61d5a50fc3b83e55383c167ae7cac053749b22c85c61ff8aa09"
+    },
+    "knowledge/frameworks/schwartz-awareness-sophistication.md": {
+      "bytes": 2821,
+      "headings": 7,
+      "sha256": "b3a947ff66b409ebc2d7670fc81385969568a00688378b6463e82d271ceee911"
+    },
+    "knowledge/frameworks/storybrand-sb7.md": {
+      "bytes": 2694,
+      "headings": 7,
+      "sha256": "4a4a232868b57cb17c49438b6720745b49b8c0366f2a3ba637d18080b4ab2bc3"
+    },
+    "knowledge/frameworks/value-equation-and-risk-reversal.md": {
+      "bytes": 3258,
+      "headings": 7,
+      "sha256": "a10681d81250064edb78dda1feb12daad473cff35669b45514d1056aa0919b36"
+    },
+    "knowledge/frameworks/voice-of-customer-mining.md": {
+      "bytes": 3593,
+      "headings": 7,
+      "sha256": "1c8d04f9175a2c2de6050411a5fec65dc2fbd087e3a4ce01b17bbd1ab6822432"
+    },
+    "knowledge/lifecycle/content-decay-refresh-protocol.md": {
+      "bytes": 15247,
+      "headings": 20,
+      "sha256": "89c5e7d8eec97fbbd82c4f59997ce176e4b285d99eccb2fc99563175a280563d"
+    },
+    "knowledge/lifecycle/editorial-scorecard.md": {
+      "bytes": 9867,
+      "headings": 14,
+      "sha256": "663ea3eb983185a24b485f8dae622bd648759edfdf7ec962cd70ed353f29eced"
+    },
+    "knowledge/lifecycle/measurement-loop.md": {
+      "bytes": 2882,
+      "headings": 4,
+      "sha256": "6a93a8cf8867a4442a80224583b6aaad61152dd30613d509d87322c0cc3cc2ed"
+    },
+    "knowledge/playbooks/about-team-page.md": {
+      "bytes": 50622,
+      "headings": 21,
+      "sha256": "c26375d61ae48232c0e29b89f6a7561ab2c55bd5434dae4366442a3d12841dcd"
+    },
+    "knowledge/playbooks/examples/auto-repair.md": {
+      "bytes": 24445,
+      "headings": 21,
+      "sha256": "35512b36f7ae97c7db0ce786acdc3c9165bd5fdeab7a7ee6f90344ac10f71548"
+    },
+    "knowledge/playbooks/examples/dental.md": {
+      "bytes": 27010,
+      "headings": 25,
+      "sha256": "497a62460410e00404ef8cdb75a746661f36560348ab159273f060cc8017df59"
+    },
+    "knowledge/playbooks/examples/electrical.md": {
+      "bytes": 20294,
+      "headings": 22,
+      "sha256": "8a110a39596ff426b04737974f0d6859abebee24b990ca12ca0b43fd34f9fe4d"
+    },
+    "knowledge/playbooks/examples/hvac.md": {
+      "bytes": 27218,
+      "headings": 23,
+      "sha256": "718476009accc455ca3ecc26828cde93820d012be3c633d12f5218280ce702d0"
+    },
+    "knowledge/playbooks/examples/landscaping.md": {
+      "bytes": 24092,
+      "headings": 22,
+      "sha256": "a8f13f933aacd60eea8e6c9c744aab52297d1b250b44e4938198f5361d285ddb"
+    },
+    "knowledge/playbooks/examples/med-spa.md": {
+      "bytes": 26885,
+      "headings": 22,
+      "sha256": "937891c1a5349529e113b50aa19ba32f29da4b8df0f2dae68a07390667378e99"
+    },
+    "knowledge/playbooks/examples/personal-injury-law.md": {
+      "bytes": 27439,
+      "headings": 22,
+      "sha256": "3bffc4cffaaf23c823e6e350a6d3021790d81a86b284d7822b51a2a451034c0e"
+    },
+    "knowledge/playbooks/examples/pest-control.md": {
+      "bytes": 25529,
+      "headings": 22,
+      "sha256": "e5ff44dd49bb83de72fb3e5f406932856df3988c680339659617a00be86906d3"
+    },
+    "knowledge/playbooks/examples/plumbing.md": {
+      "bytes": 29332,
+      "headings": 22,
+      "sha256": "a559474f7dc31b551e7b9fa1b3a531dad600462a6eb5e430546533b02a8a750f"
+    },
+    "knowledge/playbooks/examples/roofing.md": {
+      "bytes": 31958,
+      "headings": 22,
+      "sha256": "2ce158288a2f6361109192502177fb1aa8301b79bff7aead66d485939125e448"
+    },
+    "knowledge/playbooks/examples/self-storage.md": {
+      "bytes": 28648,
+      "headings": 25,
+      "sha256": "0986c5f86d3ffc15b629379823fb062e0199948461a518aa84688085cf28c827"
+    },
+    "knowledge/playbooks/faq-page.md": {
+      "bytes": 22086,
+      "headings": 18,
+      "sha256": "4aed54ff62630a3cdc2dd0671a66c3a8c1a4ce6ce2e89e0f4b77cad00c6132fe"
+    },
+    "knowledge/playbooks/gbp-posts.md": {
+      "bytes": 7613,
+      "headings": 8,
+      "sha256": "f61351ec93b006f4eb74cfd87488b3ac28bd0b42cc00bb25a1a598c9ae80482d"
+    },
+    "knowledge/playbooks/homepage.md": {
+      "bytes": 57380,
+      "headings": 28,
+      "sha256": "8fd8670102cb6dd4d576d031b433d85f2159b77c16a3de4a5152b0483717d188"
+    },
+    "knowledge/playbooks/local-asset.md": {
+      "bytes": 30110,
+      "headings": 20,
+      "sha256": "8e916764d79d167918746e04095c7571c914b7076da1ac945a3016389aab7983"
+    },
+    "knowledge/playbooks/location-page.md": {
+      "bytes": 60598,
+      "headings": 47,
+      "sha256": "af48746eb79da01ea2acecff5223c96ab9a2b953641c6c57d4dd4a0ac442216f"
+    },
+    "knowledge/playbooks/review-requests.md": {
+      "bytes": 12133,
+      "headings": 14,
+      "sha256": "dea20bf09579a20b216d830bc0417eb7b4494c0c79979f276f341dbf41c39d19"
+    },
+    "knowledge/playbooks/review-responses.md": {
+      "bytes": 15154,
+      "headings": 14,
+      "sha256": "32ff59ff50d62a4812900c9f72c52e700cfb2e7f5bf54c074c2f7eaed58ea660"
+    },
+    "knowledge/playbooks/service-area-page.md": {
+      "bytes": 57648,
+      "headings": 38,
+      "sha256": "a1b97da346aa04249f225f9800a213bc7ce253c8a8669ab10797c0581a4f3e2a"
+    },
+    "knowledge/playbooks/service-city-page.md": {
+      "bytes": 57989,
+      "headings": 45,
+      "sha256": "9cbd3502b16549674d0884a36b4311edac38d2002e4c77b7f74dc51136c5ee8d"
+    },
+    "knowledge/playbooks/service-page.md": {
+      "bytes": 55104,
+      "headings": 31,
+      "sha256": "06a0ed5a1165d9616a9264a2665568f3336f1eb3405442c85273ab66306a373f"
+    },
+    "knowledge/playbooks/unit-size-page.md": {
+      "bytes": 23650,
+      "headings": 21,
+      "sha256": "96a6c02b8c34cc5cd1539f4078ceedc9b2982fb630e8f30b00b94ee54e677c39"
+    },
+    "knowledge/quality-gates/README.md": {
+      "bytes": 3989,
+      "headings": 5,
+      "sha256": "73976290b929965d8d5d623cfaa84984f64ddaaef1d745d3fae37f349beb3c12"
+    },
+    "knowledge/quality-gates/gates.md": {
+      "bytes": 29703,
+      "headings": 18,
+      "sha256": "246ce1e1318b5d68408f2804ef96af855a2145a7bcfc09a29bd49a907eff9a6f"
+    },
+    "knowledge/verticals/financial.md": {
+      "bytes": 13432,
+      "headings": 7,
+      "sha256": "829c01bde9c71fe7a7405d272b6681a7cb1b8e739d10cc7065c5dfb70232b5c3"
+    },
+    "knowledge/verticals/home-services.md": {
+      "bytes": 13411,
+      "headings": 7,
+      "sha256": "058a2c41506e26565e13d199c47db3b69019b6841cba8c627c928254dd07e7cc"
+    },
+    "knowledge/verticals/legal.md": {
+      "bytes": 14019,
+      "headings": 7,
+      "sha256": "1394e75f92cec5b242f462d2ca5c1ddff920c609876e67738aa71dfc239b22f1"
+    },
+    "knowledge/verticals/medical-dental.md": {
+      "bytes": 12218,
+      "headings": 7,
+      "sha256": "4e494cef1a1036ebe42c7e6c3b4b87f90098674c8c42a2ecc0a7b2713414582f"
+    },
+    "knowledge/verticals/self-storage.md": {
+      "bytes": 31996,
+      "headings": 17,
+      "sha256": "9b54de21558d4dc4d7d32bfca253358b38f900668b62a9bdb2276c001bc48adb"
+    },
+    "knowledge/voice/brand-voice-template.md": {
+      "bytes": 6888,
+      "headings": 11,
+      "sha256": "b8746f624d115a8318a2401f632a06fcf68985d09ca05d994d27a081857b225e"
+    },
+    "knowledge/voice/hooks-and-titles.md": {
+      "bytes": 7188,
+      "headings": 9,
+      "sha256": "def1b860f505d29792305044d8d9f70a7048d6e4f441595ad5e0cac741630027"
+    },
+    "knowledge/voice/humanization-layer.md": {
+      "bytes": 7774,
+      "headings": 8,
+      "sha256": "560746e6a239acda9dd4054d695846a9515be58f7a41b6d546ac0d3e30d0c0c5"
+    },
+    "knowledge/voice/natural-voice-engineering.md": {
+      "bytes": 24835,
+      "headings": 17,
+      "sha256": "8b420c28f96e03a19689afa72df894f532763aa49c54870b01a88f6820a0c288"
+    },
+    "knowledge/voice/self-storage-voice.md": {
+      "bytes": 11105,
+      "headings": 14,
+      "sha256": "d0afd42bfd925ebd58b52b19304d6b923616de6792949bc2fe4d824d64a51f5b"
+    },
+    "knowledge/voice/sentence-patterns.md": {
+      "bytes": 5469,
+      "headings": 15,
+      "sha256": "fe7dc97cfe4234544789d42f309431eaceb70dd2cd669ff763a7093d55ac3480"
+    },
+    "knowledge/voice/sentence-rhythm.md": {
+      "bytes": 8093,
+      "headings": 13,
+      "sha256": "340dcc8912833033ba598d77e1e5d2e374cb3d1937608e479e6d7e5094817289"
+    },
+    "knowledge/voice/vocabulary-blocklist.md": {
+      "bytes": 11155,
+      "headings": 23,
+      "sha256": "a0b202bd576813fb94ce8a1fa7dbce3fcb8cc36a99a37678907719fbfdac1cb4"
+    },
+    "research/expansion-2026-07/00-MASTER-BLUEPRINT.md": {
+      "bytes": 12354,
+      "headings": 13,
+      "sha256": "203c0fa0c9583d078aa9e5d3135d84822fbd2d9c45de1fcae60e2f804391c630"
+    },
+    "research/expansion-2026-07/01-topical-authority-tooling.md": {
+      "bytes": 25025,
+      "headings": 28,
+      "sha256": "a115229a52e2ac17074a9f44c997669573243d639741566cdcf45b4412db71d7"
+    },
+    "research/expansion-2026-07/02-local-seo-authorities.md": {
+      "bytes": 26528,
+      "headings": 21,
+      "sha256": "01ff402505b9a13e00a04f1278337f49f0a702f65f0f9bd14cfbe7208802baec"
+    },
+    "research/expansion-2026-07/03-copywriting-conversion.md": {
+      "bytes": 25370,
+      "headings": 25,
+      "sha256": "b7e0cdf22f88de83c2709b13b0f03b5472cefbc4554d4461d6726fd7ec5335c0"
+    },
+    "research/expansion-2026-07/04-geo-ai-search.md": {
+      "bytes": 23917,
+      "headings": 24,
+      "sha256": "4b949adca0a654f74732eb9c380a073148988414456c8d98c768bbae52b223a2"
+    },
+    "research/expansion-2026-07/05-competitive-eeat-teardown.md": {
+      "bytes": 28400,
+      "headings": 31,
+      "sha256": "0fa2c84e18b15564c409472643af2beee5f126d2687d52b26f59f58103837ef8"
+    },
+    "research/expansion-2026-07/06-process-measurement.md": {
+      "bytes": 23949,
+      "headings": 35,
+      "sha256": "89fab0f89d0760d7f00803329f34340f4a457a3bc0a770ce18486d822969a68c"
+    },
+    "research/expansion-2026-07/07-internal-audit.md": {
+      "bytes": 19202,
+      "headings": 17,
+      "sha256": "638a020c5d7391c2a695052cd146371f0d3aa23c284ae5790592b8d564c14b8f"
+    },
+    "research/expansion-2026-07/08-above-the-page-architecture.md": {
+      "bytes": 29196,
+      "headings": 14,
+      "sha256": "f73fbd20eb42916154d0a7e8e88b63f50b3a19fff62318dfb081a7cdda8119dd"
+    },
+    "research/self-storage-2026-07/00-MASTER-self-storage-intelligence.md": {
+      "bytes": 34619,
+      "headings": 12,
+      "sha256": "b9fc96758496f8844e954a18d77e94f6791449ee4446bfef810d477380cdbab4"
+    },
+    "research/self-storage-2026-07/01-site-architecture.md": {
+      "bytes": 29368,
+      "headings": 24,
+      "sha256": "806d2c228ded13b53e0a96fb0a5f844f8c1347cdf63876c4a5410112c885ecf2"
+    },
+    "research/self-storage-2026-07/02-keyword-clusters.md": {
+      "bytes": 29094,
+      "headings": 18,
+      "sha256": "a23853e908c8662c07af304344b8c7809262ee47a8f8672a1ee462ccc744bb5f"
+    },
+    "research/self-storage-2026-07/03-schema-structured-data.md": {
+      "bytes": 28589,
+      "headings": 18,
+      "sha256": "787e9a68270dde7c68dead758c03de775cab9f2268c62ce844b79533d8f94409"
+    },
+    "research/self-storage-2026-07/04-conversion-cro.md": {
+      "bytes": 27349,
+      "headings": 19,
+      "sha256": "538dc45e3d75af07eb66cf21e205785c15c84bda2804cad7d2e29418fedd1719"
+    },
+    "research/self-storage-2026-07/05-voice-language.md": {
+      "bytes": 29399,
+      "headings": 20,
+      "sha256": "9ab816a024462151d86ebe2b07e116e0cae9d5a64195443d1bbe6f0cd5fce779"
+    },
+    "research/self-storage-2026-07/06-eeat-experience.md": {
+      "bytes": 27315,
+      "headings": 17,
+      "sha256": "91f60eb6463cb6a3979fef7ef12ea52ed7820796dff0f4fd12ee44fb5ddba07b"
+    },
+    "research/self-storage-2026-07/07-compliance-legal.md": {
+      "bytes": 36896,
+      "headings": 14,
+      "sha256": "3b0f7bbd2f1352beee96e351503f468fdea29275b43e60530cb5698b67744cb0"
+    },
+    "research/self-storage-2026-07/08-example-teardowns.md": {
+      "bytes": 35803,
+      "headings": 59,
+      "sha256": "8b371ba714ea8ab476354b590e7ecf3270c7d85a79cf2cd8b0d39095e216ec6e"
+    },
+    "scripts/blocklist_lint.py": {
+      "bytes": 15166,
+      "sha256": "8a88c62c0693bf3ea9f9a78df4687f66017b3491a9a489d50f016e9bc5946f74"
+    },
+    "scripts/compliance_lint.py": {
+      "bytes": 20449,
+      "sha256": "deb0f4ff5901b29d446e1c326955d0ff2c32b27470701cc2a64c0540e300eb74"
+    },
+    "scripts/conversion_linter.py": {
+      "bytes": 15381,
+      "sha256": "f4f6612773ab6a414b3d4b098032e4ba79297c7f4ea65befb149dd6702d715bb"
+    },
+    "scripts/decay_monitor.py": {
+      "bytes": 11041,
+      "sha256": "147908aec8d53aaa0cc4b45d6a9bc756d3ac09733ef134172c398572113e8ee8"
+    },
+    "scripts/duplication_gate.py": {
+      "bytes": 8484,
+      "sha256": "1f15014e40f4157f48e9473acbbdde3e8983817ed4c8a875fb0fe53877703a0c"
+    },
+    "scripts/enroll.py": {
+      "bytes": 10626,
+      "sha256": "14abfd6be93b1d38130b04d61032acb664fedc41330f2621a4c08aea3a1de2da"
+    },
+    "scripts/experience_gate.py": {
+      "bytes": 12501,
+      "sha256": "b475eafe06830d390ab355911256dfacdae6456e8fe50e41b808eb393ac3e008"
+    },
+    "scripts/geo_page_linter.py": {
+      "bytes": 16978,
+      "sha256": "78f8a9cda04d43d43d593354f495a7ebfb473c0c16fc8d31036a2fcb1baea475"
+    },
+    "scripts/information_gain_scorer.py": {
+      "bytes": 12475,
+      "sha256": "44b5ad08b218004b7a7a6d4af007dc8b4f12b608f63faf3f678388cd511bb10c"
+    },
+    "scripts/keyword_density.py": {
+      "bytes": 7713,
+      "sha256": "f34c422cc3cbbd848f01f2b778c91eb8d4ca0d40f824be3f938172338c299417"
+    },
+    "scripts/link_graph.py": {
+      "bytes": 12119,
+      "sha256": "d00f08a91cde72d4695fb4323f3f0b41c49a8ab436513217691cb31aaffa34bd"
+    },
+    "scripts/nap_checker.py": {
+      "bytes": 10942,
+      "sha256": "e43b6957687890fa651dc961089c096b53a68131e0483e8f26a9e34d01079f32"
+    },
+    "scripts/qa_scorecard.py": {
+      "bytes": 13492,
+      "sha256": "d9a5ef986194675be91d4cda9e2ccc35ab28133973280214235c556a2076e2af"
+    },
+    "scripts/readability_scorer.py": {
+      "bytes": 8109,
+      "sha256": "b435851569532889d608ff6b0378dd2c8057de4df6157de4ba7903ca88f0273a"
+    },
+    "scripts/report_builder.py": {
+      "bytes": 14144,
+      "sha256": "0e2edad7e5a8db11834a4f2d3640a8187b7f1a2f30a9d6e78dfd1363efd67e3d"
+    },
+    "scripts/review_response_lint.py": {
+      "bytes": 15666,
+      "sha256": "71eebd20d9cfe037811f397fbd3339f9350d8c2e2f24e51974d24d171590459c"
+    },
+    "scripts/schema_validator.py": {
+      "bytes": 18723,
+      "sha256": "f5ebd9bc0ab70304b1c0c0801941b9674d02576866562510b2ad3304c26d04a5"
+    },
+    "scripts/share_of_answer_tracker.py": {
+      "bytes": 16027,
+      "sha256": "c7129cd66de8448246633c12a096b69a5e20e53a109bb9fcf16b78673bd07b87"
+    },
+    "scripts/storage_cluster_seed.py": {
+      "bytes": 12995,
+      "sha256": "98d87979aa8286750ef0675bf7de64e6546640e6b4661fc360568186a11e805e"
+    },
+    "scripts/storage_lint.py": {
+      "bytes": 22157,
+      "sha256": "4cf88f04eda2f0658a1e0893fa03f4f74c718140832276f471c3a2bb83f094ff"
+    },
+    "scripts/topical_map_lint.py": {
+      "bytes": 15545,
+      "sha256": "d48ff5e9f3f5566e5605c144875106f887be9bbe104c7f1e115fc2b7eda3ac2d"
+    },
+    "scripts/voice_fingerprint.py": {
+      "bytes": 18998,
+      "sha256": "a2d0d74adc70c625e49517f573eb12e970322aab0ccd26cf08fba108bea263d2"
+    },
+    "skills/corpus-voice-ingest/SKILL.md": {
+      "bytes": 11716,
+      "headings": 13,
+      "sha256": "2ee76dd4da6bd1f07af12a2f764494e1e15aba4be49c19982be3a6e380fd4181"
+    },
+    "skills/geo-optimize/SKILL.md": {
+      "bytes": 5630,
+      "headings": 8,
+      "sha256": "91bb3c731de74bf0188ccae0d6e92a386b12721af7a91a657f7c2f8849d51b78"
+    },
+    "templates/content-brief.md": {
+      "bytes": 6559,
+      "headings": 14,
+      "sha256": "dc3a5e10c5189f1cc93b2ced03617cfd949e96c24a3e5ca7499cce3c557bcb4e"
+    },
+    "templates/measurement-log.csv": {
+      "bytes": 394,
+      "sha256": "eb92a1bce36765286d93533f5675235c0c5c608ec486b85c5ce0b14fc1e4b6ba"
+    },
+    "templates/outline-templates.md": {
+      "bytes": 12204,
+      "headings": 8,
+      "sha256": "d9c6a1334698c8f16da6b95d69e2e706658562d02dcdf63c5e91c9cfc13c0f6e"
+    },
+    "templates/research-input.md": {
+      "bytes": 2398,
+      "headings": 6,
+      "sha256": "5a9ad7acc3909e658470c8d02595a2e7d4007d48d91220980ccf295135b197a5"
+    },
+    "templates/share-of-answer-prompt-set.md": {
+      "bytes": 4800,
+      "headings": 8,
+      "sha256": "240b454eb39b5a0229ad5cda9e628236cf667b4236c63f157051e7879204e027"
+    },
+    "templates/topical-map.md": {
+      "bytes": 5803,
+      "headings": 7,
+      "sha256": "1cba832fce72c5e298931bb40bd49eb5795935b1a59d62b1afb383d34f9d056a"
+    }
+  },
+  "source": "SEO-CONTENT-OS.zip",
+  "total_bytes": 2629655
+}

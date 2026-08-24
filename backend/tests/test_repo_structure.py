@@ -96,12 +96,16 @@ _BINARY_OK_PREFIXES: tuple[str, ...] = (
     "danyals-audit-system/",       # the vendored engine's own fixtures
 )
 
-# Grandfathered, with the reason. SEO-CONTENT-OS.zip is the ONLY copy of the canonical
-# content doctrine that `content_qa.py` and `content_generator.py` cite to justify their
-# numeric constants (`backend/seo-content-os/knowledge/`, a path that has never existed
-# in git history). It must be EXTRACTED, not deleted - owned by research item R6-1.
-# Until then it stays, and this exemption is the record of why.
-_BINARY_GRANDFATHERED: frozenset[str] = frozenset({"SEO-CONTENT-OS.zip"})
+# EMPTY, and it should stay that way. SEO-CONTENT-OS.zip used to sit here: it was the
+# ONLY copy of the content doctrine that `content_qa.py` and `content_generator.py`
+# cite to justify their numeric constants, and they cited
+# `backend/seo-content-os/knowledge/` - a path that had never existed in git history.
+# R6-1 extracted it (157 files, ~2.6MB) to exactly that path, so the citation now
+# resolves and `test_doctrine_corpus.py` hashes the tree against MANIFEST.json.
+#
+# With the zip gone this frozenset is what keeps it gone: a re-added archive fails the
+# check below instead of quietly becoming the second, undiffable copy of the doctrine.
+_BINARY_GRANDFATHERED: frozenset[str] = frozenset()
 
 
 def _tracked_files() -> list[str]:
