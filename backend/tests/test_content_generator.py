@@ -65,7 +65,10 @@ class FakeWriter:
         self._words = words
         self.calls = 0
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        self.systems = [*getattr(self, "systems", []), system]
         self.calls += 1
         digest = hashlib.sha256(prompt.encode()).hexdigest()
         base = [digest[i : i + 6] for i in range(0, len(digest), 6)]
@@ -429,7 +432,10 @@ class _SceneWriter:
         self._scenes = scenes
         self.brief_calls = 0
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        self.systems = [*getattr(self, "systems", []), system]
         if "photo director" in prompt:  # the photo-brief instruction
             self.brief_calls += 1
             return LLMResult(text=json.dumps(self._scenes), input_tokens=10, output_tokens=10)
@@ -463,7 +469,10 @@ def test_image_prompts_fall_back_to_concrete_templates_when_writer_raises() -> N
     class _RaisingBriefWriter:
         """Body prose succeeds; the photo-brief call fails (a provider error)."""
 
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             if "photo director" in prompt:
                 raise RuntimeError("image-brief provider down")
             return LLMResult(text="Plain prose.", input_tokens=4, output_tokens=4)
@@ -487,7 +496,10 @@ def test_image_prompts_fall_back_to_concrete_templates_when_writer_raises() -> N
 )
 def test_image_prompts_fall_back_on_empty_or_junk_writer_output(brief_text: str) -> None:
     class _JunkBriefWriter:
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             if "photo director" in prompt:
                 return LLMResult(text=brief_text, input_tokens=1, output_tokens=1)
             return LLMResult(text="Plain prose.", input_tokens=4, output_tokens=4)

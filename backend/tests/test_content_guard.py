@@ -47,7 +47,10 @@ class _CleanWriter:
         self.calls = 0
         self.prompts: list[str] = []
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        self.systems = [*getattr(self, "systems", []), system]
         self.calls += 1
         self.prompts.append(prompt)
         return LLMResult(text=self.reply, input_tokens=10, output_tokens=8)
@@ -57,14 +60,20 @@ class _DashInjectingWriter:
     """An adversarial writer that ALWAYS emits an em dash in its reply. The hard
     strip must still guarantee a dash-free final draft."""
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        self.systems = [*getattr(self, "systems", []), system]
         return LLMResult(text=f"We open early{EM_DASH}very early{EN_DASH}for brunch.", input_tokens=5, output_tokens=5)
 
 
 class _ExplodingWriter:
     """Raises on every call; the guard must fall back to a plain strip, never raise."""
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        self.systems = [*getattr(self, "systems", []), system]
         raise RuntimeError("provider down")
 
 

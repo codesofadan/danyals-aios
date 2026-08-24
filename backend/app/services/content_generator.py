@@ -8,7 +8,7 @@ constants (each citing its section) and builds every draft to be *checkable* by 
 later QA gate against the 14 QA dimensions (doctrine §11).
 
 Design (mirrors ``context_compactor.py``'s purity): the core is PURE - no DB, no
-network, no hidden globals. The ONLY external touch is the injected ``Summarizer``
+network, no hidden globals. The ONLY external touch is the injected ``SystemSummarizer``
 writer seam (in the worker a cost-gated one, so the core can never reach a raw
 provider). Given a deterministic ``FakeSummarizer``/``FakeWriter`` the whole
 ``generate`` call is deterministic, so unit tests run with ZERO network.
@@ -45,10 +45,60 @@ from typing import TYPE_CHECKING, Any
 
 from app.schemas.content import Framework, auto_framework
 from app.services.content_research import ResearchBrief
-from integrations.llm import Summarizer
+from integrations.llm import SystemSummarizer
 
 if TYPE_CHECKING:  # a pure pydantic model; imported only for the adapter's typing
     from app.schemas.context import ContextView
+
+# --------------------------------------------------------------------------- #
+# The writer's system contract.
+# --------------------------------------------------------------------------- #
+# EVERY writer call in this module MUST pass this as ``system=``. Omitting it does
+# not fall back to "no system prompt" - it falls back to the inner summarizer's
+# default, which is the Part-6B context-COMPACTION contract
+# (``integrations.llm._COMPACTION_SYSTEM_PROMPT``: "You maintain a bounded, factual
+# living summary of one entity's activity..."). That is what actually happened until
+# 2026-08-24: every article section ever drafted was written by a model that had been
+# told it was a summarisation service. If you add a ``writer.summarize`` call here,
+# pass ``system=CONTENT_SYSTEM_PROMPT``; ``test_content_system_prompt.py`` enforces it.
+#
+# PROVISIONAL (P0-1). This is a hand-authored stand-in. Phase 1 replaces it with the
+# assembled SEO-CONTENT-OS doctrine blocks (constitution + stage role + page pack),
+# cached as a stable prefix. Keep it factual and keep it short until then.
+CONTENT_SYSTEM_PROMPT = (
+    "You are a senior local-SEO copywriter with ten years writing for service "
+    "businesses. You write web copy that ranks, converts, and would survive a manual "
+    "reviewer reading it against Google's spam policies.\n"
+    "\n"
+    "Grounding, which overrides everything else. Write ONLY from the facts you are "
+    "given in the user turn. Never invent a figure, price, date, name, credential, "
+    "certification, award, guarantee, review, or case result. If a claim would need a "
+    "fact you were not given, cut the claim; do not soften it into a vague version of "
+    "itself. Vague invention is still invention.\n"
+    "\n"
+    "First-hand experience is the one thing that cannot be faked here. Do not write "
+    "in the voice of someone who has done the work unless you were given specifics "
+    "showing they did. No 'our team has seen', no 'in our experience', no invented "
+    "job counts or years in business.\n"
+    "\n"
+    "How to write. Lead with the answer, then support it. Be concrete and specific "
+    "over general and impressive. Prefer plain words and active voice. Vary sentence "
+    "length so the rhythm sounds human. Address the reader as 'you'. Write for "
+    "someone deciding whether to call, not for a search engine.\n"
+    "\n"
+    "What to avoid. No em dashes or en dashes; use a comma, a full stop, or a "
+    "parenthesis. No throat-clearing openers ('In today's fast-paced world', 'When it "
+    "comes to'). No filler intensifiers ('truly', 'incredibly', 'seamlessly'). No "
+    "restating the heading as the first sentence. No summarising what you are about "
+    "to say. No keyword stuffing: use the topic naturally and never force an exact "
+    "phrase that reads badly.\n"
+    "\n"
+    "Output. Prose only, unless the user turn explicitly asks for another shape. No "
+    "preamble, no sign-off, no headings, no bullet lists, no markdown. Finish inside "
+    "the length you are given: write complete sentences and stop early rather than "
+    "running to the limit and breaking off mid-thought."
+)
+
 
 # --------------------------------------------------------------------------- #
 # Doctrine constants. The CANONICAL doctrine is the SEO-CONTENT-OS knowledge base
@@ -487,7 +537,7 @@ class _Builder:
 # Writer-driven prose (the ONLY external touch; bounded + grounded)
 # --------------------------------------------------------------------------- #
 def _write(
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     heading: str,
@@ -512,12 +562,15 @@ def _write(
     if entities:
         lines.append("Naturally cover these topics: " + ", ".join(entities))
     prompt = "\n".join(lines)
-    result = writer.summarize(prompt, model=model, max_tokens=max(1, max_words * 2))
+    result = writer.summarize(
+        prompt, model=model, max_tokens=max(1, max_words * 2),
+        system=CONTENT_SYSTEM_PROMPT,
+    )
     return _bound_words(result.text, max_words)
 
 
 def _answer_block(
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     primary: str,
@@ -535,7 +588,10 @@ def _answer_block(
     ]
     if grounded:
         lines.append("Ground it in: " + "; ".join(value for _label, value in grounded))
-    result = writer.summarize("\n".join(lines), model=model, max_tokens=tuning.answer_max_words * 2)
+    result = writer.summarize(
+        "\n".join(lines), model=model, max_tokens=tuning.answer_max_words * 2,
+        system=CONTENT_SYSTEM_PROMPT,
+    )
     answer = _bound_words(result.text, tuning.answer_max_words)
     if primary.lower() not in answer.lower():
         lead = primary[:1].upper() + primary[1:]
@@ -619,7 +675,7 @@ def _emit_context_grounding(builder: _Builder, context: GenerationContext | None
 
 def _experience_block(
     builder: _Builder,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     source_pack: SourcePack,
@@ -660,7 +716,7 @@ def _experience_block(
 
 def _local_anatomy(
     builder: _Builder,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     brief: ResearchBrief,
@@ -735,7 +791,7 @@ def _local_anatomy(
 
 def _faq_block(
     builder: _Builder,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     brief: ResearchBrief,
@@ -909,7 +965,7 @@ def _parse_photo_briefs(text: str, count: int) -> list[str]:
 
 
 def _photo_briefs(
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     primary: str,
@@ -931,6 +987,7 @@ def _photo_briefs(
             _photo_brief_prompt(primary=primary, intent=intent, headings=headings),
             model=model,
             max_tokens=max(_PHOTO_BRIEF_MIN_TOKENS, n * _PHOTO_BRIEF_TOKENS_PER_SCENE),
+            system=CONTENT_SYSTEM_PROMPT,
         )
         scenes = _parse_photo_briefs(result.text, n)
     except Exception:  # spend block / provider error / junk -> concrete fallback, never crash
@@ -942,7 +999,7 @@ def _photo_briefs(
 
 def _plan_images(
     builder: _Builder,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     primary: str,
@@ -1005,7 +1062,7 @@ def generate(
     page_type: str,
     framework: str = "Auto",
     target: str = "WordPress",
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str = _DEFAULT_MODEL,
     tuning: GeneratorTuning = DEFAULT_TUNING,
 ) -> GeneratedContent:

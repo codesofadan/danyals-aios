@@ -14,7 +14,7 @@ It is split into three layers, in strictly increasing trust cost:
    exhaustively against hand-built strings.
 2. **Section rewrite (writer-injected).** :func:`deai_draft` splits the markdown
    into blocks, and for each FLAGGED prose block (a block that carries a forbidden
-   dash or crosses the AI-phrase trigger) it asks the injected ``Summarizer`` to
+   dash or crosses the AI-phrase trigger) it asks the injected ``SystemSummarizer`` to
    rewrite that ONE block in plain, direct, client-friendly local-SEO copy - no
    em dashes, no AI cliches, and (critically) inventing NO new facts. Headings,
    list/table blocks, ``[NEEDS:]`` placeholders, and the protected answer block are
@@ -39,7 +39,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from integrations.llm import Summarizer
+from app.services.content_generator import CONTENT_SYSTEM_PROMPT
+from integrations.llm import SystemSummarizer
 
 if TYPE_CHECKING:  # only for the GeneratedContent adapter's typing (no runtime cycle)
     from app.services.content_generator import GeneratedContent
@@ -382,7 +383,7 @@ def _bound_words(text: str, max_words: int) -> str:
 
 def _rewrite_block(
     block: Block,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     thresholds: GuardThresholds,
 ) -> tuple[str, bool]:
@@ -396,6 +397,7 @@ def _rewrite_block(
             _REWRITE_SYSTEM + block.text.strip(),
             model=model,
             max_tokens=max(64, ceiling * 2),
+            system=CONTENT_SYSTEM_PROMPT,
         )
     except Exception:  # a spend block or a provider error -> plain strip fallback
         return strip_dashes(block.text), False
@@ -420,7 +422,7 @@ def _block_needs_rewrite(block: Block, thresholds: GuardThresholds) -> bool:
 def deai_draft(
     draft_md: str,
     *,
-    writer: Summarizer | None = None,
+    writer: SystemSummarizer | None = None,
     model: str = "content-writer",
     thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
     protect: frozenset[str] = frozenset(),
@@ -507,7 +509,7 @@ def _word_count(text: str) -> int:
 def guard_generated(
     content: GeneratedContent,
     *,
-    writer: Summarizer | None,
+    writer: SystemSummarizer | None,
     model: str = "content-writer",
     thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
     max_rewrites: int | None = None,
@@ -591,7 +593,7 @@ class RevisionResult:
 
 def _revise_block(
     block: Block,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str,
     *,
     instruction: str,
@@ -607,7 +609,10 @@ def _revise_block(
     ceiling = min(thresholds.rewrite_word_ceiling * 2, original_words * 3 + 60)
     prompt = f"{_EDIT_SYSTEM}REVIEWER INSTRUCTION: {instruction.strip()}\n\nPASSAGE:\n{block.text.strip()}"
     try:
-        result = writer.summarize(prompt, model=model, max_tokens=max(96, ceiling * 2))
+        result = writer.summarize(
+            prompt, model=model, max_tokens=max(96, ceiling * 2),
+            system=CONTENT_SYSTEM_PROMPT,
+        )
     except Exception:  # a spend block or a provider error -> plain strip fallback
         return strip_dashes(block.text), False
     revised = result.text.strip()
@@ -620,7 +625,7 @@ def revise_draft(
     draft_md: str,
     *,
     instruction: str,
-    writer: Summarizer | None = None,
+    writer: SystemSummarizer | None = None,
     model: str = "content-writer",
     thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
     protect: frozenset[str] = frozenset(),
@@ -692,7 +697,7 @@ def guided_rewrite(
     content: GeneratedContent,
     *,
     instruction: str,
-    writer: Summarizer | None,
+    writer: SystemSummarizer | None,
     model: str = "content-writer",
     thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
     max_rewrites: int | None = None,
@@ -733,7 +738,7 @@ def apply_edit_instruction(
     content: GeneratedContent,
     *,
     instruction: str,
-    writer: Summarizer | None,
+    writer: SystemSummarizer | None,
     model: str = "content-writer",
     thresholds: GuardThresholds = DEFAULT_THRESHOLDS,
     max_rewrites: int | None = None,

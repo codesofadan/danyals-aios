@@ -32,9 +32,22 @@ logger = get_logger("integrations.llm")
 # The message every keyless/SDK-less construction surfaces - names the exact fix.
 _INSTALL_HINT = "install the AI extra (pip install -e '.[ai]') and set ANTHROPIC_API_KEY"
 
-# Frozen, factual system prompt. Stable prefix => prompt-cache-friendly (P6B-5's
-# fold history rides in the user turn, after this cached preamble).
-_SYSTEM_PROMPT = (
+# Frozen, factual system prompt for CONTEXT COMPACTION ONLY. Stable prefix =>
+# prompt-cache-friendly (P6B-5's fold history rides in the user turn, after this
+# cached preamble).
+#
+# THIS IS NOT A GENERAL-PURPOSE DEFAULT. It is the Part-6B living-summary contract,
+# and it is actively WRONG for any caller that wants prose written rather than an
+# entity summary compacted.
+#
+# Incident (found 2026-08-24): the whole content generator reached `summarize()`
+# without a `system=`, so EVERY article section ever drafted was written under this
+# compaction contract - Claude was told it was a summarisation service and then asked
+# for marketing copy. The gated wrapper in `workers/tasks/content.py` did not even
+# ACCEPT a `system` param, so the generator had no way to pass one. Renamed from the
+# neutral-sounding `_SYSTEM_PROMPT` so the next caller who lands on the `system or ...`
+# fallback below can see what they are silently opting into.
+_COMPACTION_SYSTEM_PROMPT = (
     "You maintain a bounded, factual living summary of one entity's activity. "
     "Given the current summary and recent events, produce an updated summary that "
     "drops contradicted or expired facts and keeps only what remains true. Never "
@@ -117,7 +130,7 @@ class AnthropicSummarizer:
             model=model,
             max_tokens=max_tokens,
             system=[
-                {"type": "text", "text": system or _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+                {"type": "text", "text": system or _COMPACTION_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
             ],
             messages=[{"role": "user", "content": prompt}],
         )

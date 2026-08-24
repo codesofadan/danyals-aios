@@ -59,7 +59,10 @@ class FakeWriter:
         self._words = words
         self.calls = 0
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        self.systems = [*getattr(self, "systems", []), system]
         self.calls += 1
         digest = hashlib.sha256(prompt.encode()).hexdigest()
         base = [digest[i : i + 6] for i in range(0, len(digest), 6)]

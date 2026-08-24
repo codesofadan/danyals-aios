@@ -40,7 +40,7 @@ from app.logging_setup import get_logger
 from app.services.content_images import content_image_store_from_settings
 from integrations.content_research import FakeSerpResearcher, SerperResearcher, SerpResearcher
 from integrations.images import FakeImageGenerator, ImageGenerator, OpenAIImageGenerator
-from integrations.llm import AnthropicSummarizer, FakeSummarizer, Summarizer
+from integrations.llm import AnthropicSummarizer, FakeSummarizer, SystemSummarizer
 from integrations.wordpress import FakeWordPressPublisher, WordPressPublisher
 
 logger = get_logger("integrations.content_providers")
@@ -52,13 +52,17 @@ class ContentProviders:
     pipeline reads.
 
     ``writer`` is the EXISTING ``integrations.llm`` summarizer seam (reused, not
-    re-created); ``model_writer`` / ``model_heavy`` are the Claude tiers the drafter
+    re-created), typed as ``SystemSummarizer`` because the content generator MUST be
+    able to state its own system contract - falling through to the inner default lands
+    on the context-COMPACTION prompt, which is how every draft was written until
+    2026-08-24. Both ``AnthropicSummarizer`` and ``FakeSummarizer`` already satisfy it.
+    ``model_writer`` / ``model_heavy`` are the Claude tiers the drafter
     routes between. ``research_cost_estimate`` / ``generate_cost_estimate`` feed the
     money-dial when a later chunk wires the cost path.
     """
 
     serp: SerpResearcher
-    writer: Summarizer
+    writer: SystemSummarizer
     images: ImageGenerator
     wordpress: WordPressPublisher
     model_writer: str

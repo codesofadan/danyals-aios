@@ -119,7 +119,7 @@ from app.services.page_model import model_to_html, page_model_for_job, page_mode
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import FakeImageGenerator, GeneratedImage, ImageGenerator
-from integrations.llm import LLMResult, Summarizer
+from integrations.llm import LLMResult, SystemSummarizer
 from integrations.wordpress import (
     PostDraft,
     PublishResult,
@@ -273,17 +273,17 @@ class _NullCostCache:
 
 
 class _ContentGatedWriter:
-    """A ``Summarizer`` that meters every draft call through the cost gate.
+    """A ``SystemSummarizer`` that meters every draft call through the cost gate.
 
-    Satisfies the ``Summarizer`` Protocol so the pure generator can never reach the
-    raw writer. A gate block raises :class:`ContentSpendBlocked`, which the worker
+    Satisfies the ``SystemSummarizer`` Protocol (and therefore the base ``Summarizer``,
+    since ``system`` is optional) so the pure generator can never reach the raw writer. A gate block raises :class:`ContentSpendBlocked`, which the worker
     catches to DEGRADE (hold at ``drafting``) rather than crash. Bills the "content"
     dial (Anthropic) per call.
     """
 
     def __init__(
         self,
-        inner: Summarizer,
+        inner: SystemSummarizer,
         gate: CostGate,
         *,
         settings: Settings,
@@ -308,13 +308,24 @@ class _ContentGatedWriter:
             cache_key=None,
         )
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        """Meter, then delegate - FORWARDING ``system`` to the inner writer.
+
+        The ``system`` parameter is load-bearing, not cosmetic. Until 2026-08-24 this
+        signature omitted it, so the content generator had no way to state its own
+        contract and every section fell through to the inner writer's default - which
+        is the Part-6B CONTEXT-COMPACTION prompt (``llm._COMPACTION_SYSTEM_PROMPT``).
+        Claude was instructed to maintain a bounded factual entity summary and then
+        asked to write marketing copy. Keep this parameter.
+        """
         self.calls += 1
         ctx = self._ctx()
         decision = self._gate.evaluate(ctx)
         if not decision.allowed:
             raise ContentSpendBlocked(decision.outcome)
-        result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens)
+        result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens, system=system)
         # Commit the ACTUAL draft spend from the call's real token usage x the
         # model's unit price (pricing.py), not the flat per-call estimate.
         actual = pricing.anthropic_cost(

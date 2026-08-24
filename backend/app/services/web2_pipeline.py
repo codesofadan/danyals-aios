@@ -8,7 +8,7 @@ article is NEVER auto-published: a lead must APPROVE it at the ``needs_review`` 
 
 The pipeline mirrors the content module's purity (``content_generator`` /
 ``context_compactor``): the core stages are pure of Celery + DB + network, taking
-injected seams (a ``Summarizer`` writer, a ``Web2Publisher``, a ``CostGate``, a
+injected seams (a ``SystemSummarizer`` writer, a ``Web2Publisher``, a ``CostGate``, a
 ``Web2Store``). Given the deterministic fakes the whole flow runs live with zero keys.
 
 Stages:
@@ -66,7 +66,7 @@ from app.services.content_research import (
     build_registry,
 )
 from app.services.cost_gate import CostGate, GateContext, GateDecision
-from integrations.llm import LLMResult, Summarizer
+from integrations.llm import LLMResult, SystemSummarizer
 from integrations.web2_publishers import (
     DRAFT_ONLY_PLATFORMS,
     WEB2_PLATFORMS,
@@ -257,7 +257,7 @@ def _seed_brief(keyword: str, geo: str | None, da: float | None) -> ResearchBrie
 
 
 class _Web2GatedWriter:
-    """A ``Summarizer`` that meters every draft call through the cost gate, mirroring
+    """A ``SystemSummarizer`` that meters every draft call through the cost gate, mirroring
     ``workers.tasks.content._ContentGatedWriter`` (duplicated locally rather than
     imported so this module stays free of that module's Celery/DB import chain -
     ``web2_pipeline`` is deliberately pure of Celery + DB + network).
@@ -273,7 +273,7 @@ class _Web2GatedWriter:
 
     def __init__(
         self,
-        inner: Summarizer,
+        inner: SystemSummarizer,
         gate: CostGate,
         *,
         settings: Settings,
@@ -301,13 +301,22 @@ class _Web2GatedWriter:
             client_name=self._client_name,
         )
 
-    def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+    def summarize(
+        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+    ) -> LLMResult:
+        """Meter, then delegate - FORWARDING ``system`` to the inner writer.
+
+        Mirrors ``_ContentGatedWriter``. The ``system`` parameter is load-bearing:
+        ``content_generator`` states its own contract with it, and dropping it here
+        would land every web2 article back on the context-COMPACTION default (see
+        ``integrations.llm._COMPACTION_SYSTEM_PROMPT``). Keep it.
+        """
         self.calls += 1
         ctx = self._ctx()
         decision = self._gate.evaluate(ctx)
         if not decision.allowed:
             raise ContentSpendBlocked(decision.outcome)
-        result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens)
+        result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens, system=system)
         # Commit the ACTUAL draft spend from the call's real token usage x the
         # model's unit price (pricing.py), not the flat per-call estimate.
         actual = pricing.anthropic_cost(
@@ -327,7 +336,7 @@ class _Web2GatedWriter:
 def write(
     plan: Web2Plan,
     *,
-    writer: Summarizer,
+    writer: SystemSummarizer,
     model: str = "content-writer",
     source_pack: SourcePack | None = None,
     context: GenerationContext | None = None,
@@ -479,7 +488,7 @@ def run_write(
     web2_id: str,
     *,
     client: Web2Client,
-    writer: Summarizer | None,
+    writer: SystemSummarizer | None,
     gate: CostGate,
     settings: Settings,
     model: str = "content-writer",

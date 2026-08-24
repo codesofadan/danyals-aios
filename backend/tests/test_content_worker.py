@@ -225,7 +225,10 @@ def test_pipeline_output_is_em_dash_free_even_when_writer_emits_dashes() -> None
     class _DashWriter:
         """Every section the writer phrases comes back stuffed with em/en dashes."""
 
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             em, en = chr(0x2014), chr(0x2013)
             body = f"Fresh brunch{em}served daily{en}book 9{en}11 weekends, world-class and cutting-edge."
             return LLMResult(text=body, input_tokens=8, output_tokens=8)
@@ -258,7 +261,10 @@ def test_guided_edit_redraft_applies_instruction_and_clears_it() -> None:
         def __init__(self) -> None:
             self.prompts: list[str] = []
 
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             self.prompts.append(prompt)
             return LLMResult(text="Fresh, direct brunch copy for weekend diners.", input_tokens=6, output_tokens=6)
 
@@ -368,7 +374,10 @@ def test_qa_loop_cost_blocked_mid_loop_advances_with_best_never_spins() -> None:
         blocks a QA-loop rewrite (its prompt carries the guided-rewrite marker) ->
         that pass does ZERO writer work, so the loop must stop, not spin."""
 
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             if "REVIEWER INSTRUCTION" in prompt:
                 raise ContentSpendBlocked("blocked_halt")
             return LLMResult(text="Grounded, clean brunch copy for weekend diners.", input_tokens=6, output_tokens=6)
@@ -450,7 +459,10 @@ def test_research_spend_block_degrades_before_generation() -> None:
     gate = _gate(cost_store)
 
     class _BoomWriter:
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             raise AssertionError("the writer must never be reached when research is blocked")
 
     providers = replace(content_providers_for_tests(), writer=_BoomWriter())
@@ -471,7 +483,10 @@ def test_unexpected_error_fails_and_never_reraises() -> None:
     store = FakeContentStore(_job_row())
 
     class _ExplodingWriter:
-        def summarize(self, prompt: str, *, model: str, max_tokens: int) -> LLMResult:
+        def summarize(
+            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        ) -> LLMResult:
+            self.systems = [*getattr(self, "systems", []), system]
             raise RuntimeError("writer exploded")
 
     providers = replace(content_providers_for_tests(), writer=_ExplodingWriter())
