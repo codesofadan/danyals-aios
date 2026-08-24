@@ -608,3 +608,85 @@ def test_alignment_does_not_discard_common_words() -> None:
     residual, matched, total = residual_ratio(base, base)
     assert residual == pytest.approx(0.0)
     assert matched == total
+
+
+# =========================================================================== #
+# conversion_linter - the deterministic half of quality gate G13
+# =========================================================================== #
+from app.services.content_lint import is_strong_cta, lint_conversion  # noqa: E402
+
+_CTA_PROBES = [
+    ("bare-prose", "Just some prose about air conditioning with no ask at all."),
+    ("full", "## Reviews\nGreat work.\n\n[Call us now](tel:+15551234567) - $89 flat, satisfaction guaranteed.\n"),
+    ("mechanical-only", "[Submit your details](https://x.com/form) and we will be in touch."),
+    ("no-cta-after-proof", "[Call us now](tel:+15551234567)\n\n## Frequently asked questions\nQ and A here.\n"),
+    ("off-goal", "[Call us today](tel:+15551234567)\n\nSubscribe to our newsletter and download our guide.\n"),
+    ("priced", "[Book your estimate](tel:+15551234567) starting at $199 with a money-back guarantee."),
+    ("empty", ""),
+]
+
+
+@pytest.fixture(scope="module")
+def original_conversion():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import conversion_linter
+
+        return conversion_linter
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("label,text", _CTA_PROBES, ids=[p[0] for p in _CTA_PROBES])
+def test_conversion_port_matches_the_original(label, text, original_conversion) -> None:
+    theirs = original_conversion.lint(text)
+    mine = lint_conversion(text)
+    assert [(i.severity, i.code, i.line) for i in mine.issues] == [
+        (sev, code, line) for sev, code, line, _msg in theirs
+    ]
+
+
+@pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.parent.name)
+def test_conversion_port_matches_on_the_corpus_samples(page, original_conversion) -> None:
+    text = page.read_text()
+    theirs = original_conversion.lint(text)
+    mine = lint_conversion(text)
+    assert [(i.severity, i.code, i.line) for i in mine.issues] == [
+        (sev, code, line) for sev, code, line, _m in theirs
+    ]
+
+
+def test_the_reader_who_finished_the_faq_must_meet_an_ask() -> None:
+    """The most under-appreciated check. Someone who read the reviews AND the FAQ is
+    the most qualified visitor on the page, and they reach the bottom with nothing to
+    do. A CTA at the top does not serve them."""
+    text = "[Call us now](tel:+15551234567)\n\n## Frequently asked questions\nQ and A.\n"
+    r = lint_conversion(text)
+    assert not r.passed
+    assert any(i.code == "NO_CTA_AFTER_PROOF_FAQ" for i in r.errors)
+
+    fixed = text + "\n[Call us today](tel:+15551234567)\n"
+    assert lint_conversion(fixed).passed
+
+
+def test_a_call_and_form_pair_is_not_treated_as_a_competing_cta() -> None:
+    """Deliberate: those two serve URGENT vs CONSIDERED intent and belong together. A
+    newsletter or a download is what actually splits the goal."""
+    pair = "[Call us now](tel:+15551234567) or [book your estimate](https://x.com/book)."
+    assert not any(i.code == "OFF_GOAL_CTA" for i in lint_conversion(pair).issues)
+
+    split = pair + "\n\nSubscribe to our newsletter."
+    assert any(i.code == "OFF_GOAL_CTA" for i in lint_conversion(split).warnings)
+
+
+def test_severity_is_load_bearing_warnings_do_not_block() -> None:
+    """Unlike the earlier gates, ERROR and WARN mean different things here: ERROR fails
+    G13, WARN asks a human to look. A page missing only a price signal still passes."""
+    r = lint_conversion("[Call us now](tel:+15551234567) - satisfaction guaranteed.")
+    assert r.warnings and not r.errors and r.passed
+
+
+def test_a_direct_call_action_counts_as_a_strong_cta() -> None:
+    assert is_strong_cta("Call us now on 555-1234")
+    assert is_strong_cta("Get my free estimate")
+    assert not is_strong_cta("Submit the form below")

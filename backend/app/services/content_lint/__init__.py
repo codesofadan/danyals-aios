@@ -22,6 +22,15 @@ dependency set. These are stdlib-only pure functions called many times per page;
 process spawn per call would be strictly worse and untestable.
 """
 
+from app.services.content_lint.conversion import (
+    ConversionIssue,
+    ConversionReport,
+    find_headings,
+    is_lead_cta,
+    is_mechanical_cta,
+    is_strong_cta,
+    lint_conversion,
+)
 from app.services.content_lint.duplication import (
     DUPLICATE_THRESHOLD,
     SHINGLE_SIZE,
@@ -85,6 +94,8 @@ __all__ = [
     "MIN_GAIN",
     "MIN_GRADE",
     "SHINGLE_SIZE",
+    "ConversionIssue",
+    "ConversionReport",
     "DensityReport",
     "DuplicationReport",
     "ExperienceClaim",
@@ -104,8 +115,13 @@ __all__ = [
     "evaluate_experience",
     "extract_items",
     "find_claims",
+    "find_headings",
     "find_markers",
+    "is_lead_cta",
+    "is_mechanical_cta",
+    "is_strong_cta",
     "jaccard",
+    "lint_conversion",
     "net_new",
     "residual_ratio",
     "score_information_gain",
