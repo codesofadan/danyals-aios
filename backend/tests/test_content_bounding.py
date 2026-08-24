@@ -108,3 +108,47 @@ def test_write_states_the_word_budget_to_the_model() -> None:
     )
     assert spy.prompts, "the writer was never called"
     assert "133 words" in spy.prompts[0], spy.prompts[0]
+
+
+# =========================================================================== #
+# P1B: the API's OWN truncation, which is a different bug from _bound_words
+# =========================================================================== #
+def test_max_tokens_leaves_room_for_the_model_to_land_its_sentence() -> None:
+    """Prevented defect, MEASURED against the live API rather than reasoned about.
+
+    `_bound_words` fixes a response that came back too long. This is the opposite
+    failure: the API stopping the model before it can finish. At the old
+    `max_words * 2` ceiling, local service copy - which runs 1.8-2.0 tokens per word
+    because licence codes ("C-20"), prices ("$89") and counts ("1,284") tokenise
+    heavily - left roughly 20 tokens of headroom, and THREE live calls out of three
+    came back cut mid-sentence with `stop_reason: max_tokens`.
+
+    Raising the multiplier to 3.0 produced `stop_reason: end_turn` at 229 of 330
+    tokens. The prompt's stated word budget is what should bind; `max_tokens` is a
+    runaway guard and must sit clear of the target, not on top of it.
+    """
+    from app.services.content_generator import _MAX_TOKENS_PER_WORD
+
+    worst_case_tokens_per_word = 2.0  # measured on real local-SEO copy
+    assert worst_case_tokens_per_word < _MAX_TOKENS_PER_WORD, (
+        "max_tokens must exceed the worst measured tokens-per-word, or the API cuts "
+        "the model off before it can finish a sentence"
+    )
+
+
+def test_the_writer_is_given_a_ceiling_above_its_word_budget() -> None:
+    from app.services.content_generator import _write
+
+    seen: dict[str, int] = {}
+
+    class _Spy:
+        def summarize(self, prompt, *, model, max_tokens, system=None, cache=None):
+            from integrations.llm import LLMResult
+
+            seen["max_tokens"] = max_tokens
+            return LLMResult(text="Fine.", input_tokens=1, output_tokens=1)
+
+    _write(_Spy(), "m", heading="H", primary="p", intent="transactional", role="body",
+           grounded=(), entities=(), max_words=110)
+    # 110 words of dense local copy is ~220 tokens; the ceiling must clear that.
+    assert seen["max_tokens"] >= 110 * 2.5

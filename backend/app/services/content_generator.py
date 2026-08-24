@@ -50,6 +50,20 @@ from integrations.llm import SystemSummarizer
 if TYPE_CHECKING:  # a pure pydantic model; imported only for the adapter's typing
     from app.schemas.context import ContextView
 
+# Output-token headroom over the word budget.
+#
+# MEASURED against the live API 2026-08-24, not guessed. Local service copy runs
+# 1.8-2.0 tokens per word - licence codes ("C-20"), prices ("$89"), counts ("1,284")
+# and hyphenates all tokenise heavily. At the previous `max_words * 2` ceiling a
+# 110-word target left the model roughly 20 tokens to land its final sentence, and
+# THREE real calls out of three were cut off mid-sentence by the API.
+#
+# That is a different truncation from the one `_bound_words` fixes: ours cuts a
+# response that came back too long, this one stops the model before it can finish. The
+# prompt's stated word budget is what should bind; `max_tokens` is a runaway guard and
+# needs to sit clear of the target, not on top of it.
+_MAX_TOKENS_PER_WORD = 3.0
+
 # --------------------------------------------------------------------------- #
 # The writer's system contract.
 # --------------------------------------------------------------------------- #
@@ -615,7 +629,7 @@ def _write(
         lines.append("Naturally cover these topics: " + ", ".join(entities))
     prompt = "\n".join(lines)
     result = writer.summarize(
-        prompt, model=model, max_tokens=max(1, max_words * 2),
+        prompt, model=model, max_tokens=max(1, round(max_words * _MAX_TOKENS_PER_WORD)),
         system=CONTENT_SYSTEM_PROMPT,
     )
     return _bound_words(result.text, max_words)
@@ -641,7 +655,8 @@ def _answer_block(
     if grounded:
         lines.append("Ground it in: " + "; ".join(value for _label, value in grounded))
     result = writer.summarize(
-        "\n".join(lines), model=model, max_tokens=tuning.answer_max_words * 2,
+        "\n".join(lines), model=model,
+        max_tokens=max(1, round(tuning.answer_max_words * _MAX_TOKENS_PER_WORD)),
         system=CONTENT_SYSTEM_PROMPT,
     )
     answer = _bound_words(result.text, tuning.answer_max_words)
