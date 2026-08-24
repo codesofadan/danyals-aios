@@ -66,6 +66,13 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # Until 2026-08-24 the dashboard had NO test runner at all — this job ran a
+      # typecheck and a build, which prove the code COMPILES and nothing more. Neither
+      # can tell you whether a component renders what it claims to, or whether it
+      # renders something it must not.
+      - name: Test
+        run: npx vitest run
+
       # The build is a real gate, not a duplicate of the typecheck: it catches
       # what `tsc` cannot — a bad `next.config.mjs`, a server/client boundary
       # violation, a missing font or static asset, a prerender-time crash.

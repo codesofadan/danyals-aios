@@ -373,6 +373,25 @@ export type RoleTemplate = {
 
 const ALL_KEYS = accessFeatures.map((f) => f.key);
 
+// The avatar accent each role template stamps on a newly provisioned member.
+//
+// KEYED BY TEMPLATE KEY, and deliberately NOT carried on the template itself. The
+// template catalogue (keys, labels, grants) is moving to the backend as the single
+// source of truth — `GET /rbac/templates` — and that response has no `color`, because
+// colour is a THEME token with no server-side reader.
+//
+// Without this map the swap is a silent data defect rather than a crash:
+// `AddMemberWizard` sends `avatar_color` on to provisioning, which defaults it to
+// `#7B69EE` — the pre-Avant-Garde violet — and writes it to `public.users`. Every new
+// member would be stamped legacy violet, discovered months later as "why is everyone
+// purple". Values below are exactly what the dashboard renders today.
+export const TEMPLATE_COLOR: Record<string, string> = {
+  seo: SERIES.c4,
+  content: SERIES.c3,
+  va: SERIES.c1,
+  super: SERIES.c1,
+};
+
 // Grants transcribed from the Full Access Matrix (§07). "Off" cells are omitted.
 export const roleTemplates: RoleTemplate[] = [
   {
