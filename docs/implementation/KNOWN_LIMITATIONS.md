@@ -188,3 +188,56 @@ migration.
 bounds the spend per keyword per day regardless of how many times it is enqueued, and
 `dispatch_rank_checks` claims in bounded batches (`rank_tracker_dispatch_batch`). So the
 exposure is fairness between clients within a nightly sweep, not unbounded spend.
+
+---
+
+## `cost_log` is called "append-only" twice and is not — and the money is the reason it matters
+
+**Found 2026-08-24, verified at source and measured by a parallel session against a built
+database. Not fixed: the fix is a decision, not a correction.**
+
+`db/migrations/0006_cost.sql` describes the per-call cost ledger as append-only in two places:
+
+```
+:6   -- Budget/daily writes flow through the service_role gate; cost_log is append-only.
+:49  -- --- Per-call cost log (append-only) ----------------------------------------
+```
+
+Its only policy is `cost_log_select` (`:104`). There is **no update policy, no delete policy and
+no trigger**. That reads as immutability, and it is not: the ledger's only writer runs on
+`service_role`, which is `create role service_role login bypassrls`
+(`0000_local_platform.sql:35`) and is granted `update, delete` (`:50`). **Policies are never
+consulted for a `BYPASSRLS` connection**, so the absent policy constrains every principal except
+the one that writes. Measured as `service_role`: a `cost_log` row was rewritten
+(`cost=12.345678 → 0.000000`) and then deleted.
+
+**Why this one is worse than the audit log.** `backend/CLAUDE.md` item 10 made the same claim
+about `activity_log` and was corrected in `6b959df`. But `cost_log` is what the platform bills
+against — it is the source for per-client actual spend, the daily stop, and the monthly
+modelled-vs-actual reconciliation. "Append-only" on a money ledger implies a guarantee an auditor
+would rely on, and the guarantee is app-tier convention only.
+
+**Why it is not fixed here.** Three reasons, in order of weight:
+
+1. **It is a decision, not a defect.** A `before update or delete` trigger — the pattern WU-16
+   used for `evidence`, which fires for `BYPASSRLS` roles — would make it real. It would also
+   block legitimate correction, and cost corrections demonstrably happen in this system
+   (`de40d27` stopped a paid check being billed twice for one day; `0044` widened the money
+   columns after sub-cent charges recorded as `$0.00`). Whether a billing ledger should be
+   correctable, or corrected only by compensating entries, is an owner call with accounting
+   consequences.
+2. **The claims live in an applied migration.** Editing `0006`'s comments would make the file
+   differ from what was applied. There is no checksum gate today, so it is possible — but the
+   correction belongs where people look for current truth, which is here.
+3. **It is not the module this session owns.** WU-14 locked the cost *read* surface; the ledger's
+   durability model is a different question.
+
+**What a fix looks like, for whoever takes it:** a trigger on `cost_log` mirroring
+`evidence`'s, plus a decision recorded in `DECISIONS_LOG.md` about how a mis-billed row is
+corrected — a compensating entry is the accounting-conventional answer and needs no exception to
+immutability. Then correct the two comments, or supersede them in a later migration.
+
+**The general rule, which has now produced four instances in one day:** *"no UPDATE policy" is
+not immutability when the writer is `BYPASSRLS`.* The absent policy protects the table from
+everyone except its only writer. Discovered by the evidence-primitive unit on
+`keyword_rankings`, generalised to `activity_log`, and found again here.
