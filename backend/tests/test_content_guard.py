@@ -10,6 +10,8 @@ the block-level rewrite routing.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
 from app.services.content_generator import (
@@ -48,7 +50,13 @@ class _CleanWriter:
         self.prompts: list[str] = []
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
         self.systems = [*getattr(self, "systems", []), system]
         self.calls += 1
@@ -61,7 +69,13 @@ class _DashInjectingWriter:
     strip must still guarantee a dash-free final draft."""
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
         self.systems = [*getattr(self, "systems", []), system]
         return LLMResult(text=f"We open early{EM_DASH}very early{EN_DASH}for brunch.", input_tokens=5, output_tokens=5)
@@ -71,7 +85,13 @@ class _ExplodingWriter:
     """Raises on every call; the guard must fall back to a plain strip, never raise."""
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
         self.systems = [*getattr(self, "systems", []), system]
         raise RuntimeError("provider down")

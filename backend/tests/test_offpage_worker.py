@@ -10,6 +10,7 @@ and notify seam are all fakes/monkeypatched.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
@@ -114,7 +115,13 @@ class FakeWriter:
         self.calls = 0
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
         self.systems = [*getattr(self, "systems", []), system]
         self.calls += 1

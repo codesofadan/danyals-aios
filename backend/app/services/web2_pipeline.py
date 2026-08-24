@@ -40,6 +40,7 @@ the (paid) stage, so they always mark a terminal state and return a small outcom
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Literal, Protocol
@@ -302,7 +303,13 @@ class _Web2GatedWriter:
         )
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
         """Meter, then delegate - FORWARDING ``system`` to the inner writer.
 
@@ -316,7 +323,9 @@ class _Web2GatedWriter:
         decision = self._gate.evaluate(ctx)
         if not decision.allowed:
             raise ContentSpendBlocked(decision.outcome)
-        result = self._inner.summarize(prompt, model=model, max_tokens=max_tokens, system=system)
+        result = self._inner.summarize(
+            prompt, model=model, max_tokens=max_tokens, system=system, cache=cache
+        )
         # Commit the ACTUAL draft spend from the call's real token usage x the
         # model's unit price (pricing.py), not the flat per-call estimate.
         actual = pricing.anthropic_cost(

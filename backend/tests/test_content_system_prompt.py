@@ -96,8 +96,9 @@ def test_gated_writer_forwards_system_to_the_inner_writer() -> None:
     seen: dict[str, object] = {}
 
     class _Inner:
-        def summarize(self, prompt, *, model, max_tokens, system=None):
+        def summarize(self, prompt, *, model, max_tokens, system=None, cache=None):
             seen["system"] = system
+            seen["cache"] = cache
             from integrations.llm import LLMResult
 
             return LLMResult(text="ok", input_tokens=1, output_tokens=1)
@@ -114,8 +115,13 @@ def test_gated_writer_forwards_system_to_the_inner_writer() -> None:
     gated = _ContentGatedWriter(
         _Inner(), _AllowGate(), settings=Settings(), client_id=None, job_id="CJ-TEST"
     )
-    gated.summarize("hello", model="m", max_tokens=10, system=CONTENT_SYSTEM_PROMPT)
+    gated.summarize(
+        "hello", model="m", max_tokens=10, system=CONTENT_SYSTEM_PROMPT, cache=[True]
+    )
     assert seen["system"] == CONTENT_SYSTEM_PROMPT
+    # P1B widened the seam to carry per-block cache flags. The wrapper must forward
+    # BOTH, or the doctrine blocks arrive uncached and cost 10x to read.
+    assert seen["cache"] == [True]
 
 
 # --------------------------------------------------------------------------- #

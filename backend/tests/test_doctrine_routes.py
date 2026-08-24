@@ -8,6 +8,8 @@ CACHE-PREFIX ORDER that makes sending 50k tokens per call affordable.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from app.services.doctrine import (
@@ -207,3 +209,70 @@ def test_token_estimate_is_monotonic_and_positive() -> None:
     """It only ever bounds a block; exactness comes from the API's own usage numbers."""
     assert estimate_tokens("") >= 1
     assert estimate_tokens("a" * 4000) > estimate_tokens("a" * 400)
+
+
+# --------------------------------------------------------------------------- #
+# 4 - the writer actually sends the blocks as separate cache breakpoints
+# --------------------------------------------------------------------------- #
+def test_the_writer_accepts_ordered_blocks_and_marks_breakpoints() -> None:
+    """The assembly is worthless if the transport flattens it back into one block."""
+    from integrations.llm import _MAX_CACHE_BREAKPOINTS, AnthropicSummarizer
+
+    captured: dict[str, object] = {}
+
+    class _Messages:
+        def create(self, **kw):
+            captured.update(kw)
+
+            class _R:
+                content: ClassVar[list] = []
+                usage = type("U", (), {"input_tokens": 1, "output_tokens": 1})()
+
+            return _R()
+
+    writer = AnthropicSummarizer.__new__(AnthropicSummarizer)
+    writer._client = type("C", (), {"messages": _Messages()})()
+    blocks = assemble("draft", page_type="service")
+
+    writer.summarize(
+        "hello", model="m", max_tokens=10,
+        system=blocks.as_system(), cache=blocks.cache_flags(expected_calls=6),
+    )
+    sent = captured["system"]
+    assert isinstance(sent, list) and len(sent) == 3, "blocks were flattened"
+    assert sent[0]["text"] == blocks.constitution, "most-stable block must come first"
+    assert all("cache_control" in b for b in sent)
+    assert sum("cache_control" in b for b in sent) <= _MAX_CACHE_BREAKPOINTS
+
+
+def test_a_single_call_stage_sends_its_variable_blocks_uncached() -> None:
+    from integrations.llm import AnthropicSummarizer
+
+    captured: dict[str, object] = {}
+
+    class _Messages:
+        def create(self, **kw):
+            captured.update(kw)
+
+            class _R:
+                content: ClassVar[list] = []
+                usage = type("U", (), {"input_tokens": 1, "output_tokens": 1})()
+
+            return _R()
+
+    writer = AnthropicSummarizer.__new__(AnthropicSummarizer)
+    writer._client = type("C", (), {"messages": _Messages()})()
+    blocks = assemble("convert", page_type="service")
+    writer.summarize("hi", model="m", max_tokens=10,
+                     system=blocks.as_system(), cache=blocks.cache_flags(expected_calls=1))
+    sent = captured["system"]
+    assert "cache_control" in sent[0], "the constitution always pays"
+    assert not any("cache_control" in b for b in sent[1:]), "B/C cached for a one-shot stage"
+
+
+def test_a_plain_string_system_still_works() -> None:
+    """Every existing caller passes a single string; widening must not break them."""
+    from integrations.llm import FakeSummarizer
+
+    result = FakeSummarizer().summarize("x", model="m", max_tokens=5, system="one block")
+    assert result.text

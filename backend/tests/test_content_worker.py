@@ -27,6 +27,7 @@ Publish (P7A-8) proves:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -226,7 +227,13 @@ def test_pipeline_output_is_em_dash_free_even_when_writer_emits_dashes() -> None
         """Every section the writer phrases comes back stuffed with em/en dashes."""
 
         def summarize(
-            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+            self,
+            prompt: str,
+            *,
+            model: str,
+            max_tokens: int,
+            system: str | Sequence[str] | None = None,
+            cache: Sequence[bool] | None = None,
         ) -> LLMResult:
             self.systems = [*getattr(self, "systems", []), system]
             em, en = chr(0x2014), chr(0x2013)
@@ -262,7 +269,13 @@ def test_guided_edit_redraft_applies_instruction_and_clears_it() -> None:
             self.prompts: list[str] = []
 
         def summarize(
-            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+            self,
+            prompt: str,
+            *,
+            model: str,
+            max_tokens: int,
+            system: str | Sequence[str] | None = None,
+            cache: Sequence[bool] | None = None,
         ) -> LLMResult:
             self.systems = [*getattr(self, "systems", []), system]
             self.prompts.append(prompt)
@@ -375,7 +388,13 @@ def test_qa_loop_cost_blocked_mid_loop_advances_with_best_never_spins() -> None:
         that pass does ZERO writer work, so the loop must stop, not spin."""
 
         def summarize(
-            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+            self,
+            prompt: str,
+            *,
+            model: str,
+            max_tokens: int,
+            system: str | Sequence[str] | None = None,
+            cache: Sequence[bool] | None = None,
         ) -> LLMResult:
             self.systems = [*getattr(self, "systems", []), system]
             if "REVIEWER INSTRUCTION" in prompt:
@@ -460,7 +479,13 @@ def test_research_spend_block_degrades_before_generation() -> None:
 
     class _BoomWriter:
         def summarize(
-            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+            self,
+            prompt: str,
+            *,
+            model: str,
+            max_tokens: int,
+            system: str | Sequence[str] | None = None,
+            cache: Sequence[bool] | None = None,
         ) -> LLMResult:
             self.systems = [*getattr(self, "systems", []), system]
             raise AssertionError("the writer must never be reached when research is blocked")
@@ -484,7 +509,13 @@ def test_unexpected_error_fails_and_never_reraises() -> None:
 
     class _ExplodingWriter:
         def summarize(
-            self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+            self,
+            prompt: str,
+            *,
+            model: str,
+            max_tokens: int,
+            system: str | Sequence[str] | None = None,
+            cache: Sequence[bool] | None = None,
         ) -> LLMResult:
             self.systems = [*getattr(self, "systems", []), system]
             raise RuntimeError("writer exploded")

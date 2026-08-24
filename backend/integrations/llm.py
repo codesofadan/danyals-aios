@@ -21,6 +21,7 @@ Anthropic has NO embeddings API - embeddings live in ``integrations.embeddings``
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -30,6 +31,9 @@ from integrations.errors import ProviderNotConfiguredError
 logger = get_logger("integrations.llm")
 
 # The message every keyless/SDK-less construction surfaces - names the exact fix.
+# Anthropic allows at most four cache breakpoints per request.
+_MAX_CACHE_BREAKPOINTS = 4
+
 _INSTALL_HINT = "install the AI extra (pip install -e '.[ai]') and set ANTHROPIC_API_KEY"
 
 # Frozen, factual system prompt for CONTEXT COMPACTION ONLY. Stable prefix =>
@@ -92,7 +96,13 @@ class SystemSummarizer(Protocol):
     """
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult: ...
 
 
@@ -124,14 +134,56 @@ class AnthropicSummarizer:
         self.model_heavy = model_heavy
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
+        """One completion. ``system`` may be a single prompt or an ORDERED SEQUENCE of
+        blocks, each becoming its own cache breakpoint.
+
+        The sequence form is what makes the doctrine prompt affordable. The API caches
+        on a PREFIX, so blocks must run most-stable-first (constitution, then stage
+        role, then page pack) - the assembly in ``doctrine_routes`` guarantees that
+        order, and reversing it would invalidate the whole prefix on every new page
+        type.
+
+        ``cache`` marks which blocks carry a breakpoint, defaulting to all of them.
+        It is worth passing: a write costs 1.25x and a read 0.1x, so a block used ONCE
+        is 25% more expensive cached than sent plain, and the caller knows how many
+        calls a stage will make.
+
+        Anthropic allows at most 4 breakpoints. Excess markers are dropped from the
+        TAIL - the earliest blocks are the most reused, so they are the ones worth
+        keeping cached.
+        """
+        blocks = [system] if isinstance(system, str) else list(system or [])
+        if not blocks:
+            blocks = [_COMPACTION_SYSTEM_PROMPT]
+        flags = list(cache) if cache is not None else [True] * len(blocks)
+        flags += [True] * (len(blocks) - len(flags))
+
+        # Typed as Any because the SDK's TextBlockParam is a TypedDict whose
+        # cache_control key is conditionally present; building it incrementally is
+        # clearer than a branch per shape.
+        system_param: list[Any] = []
+        breakpoints = 0
+        for text, wanted in zip(blocks, flags, strict=False):
+            if not text:
+                continue
+            entry: dict[str, Any] = {"type": "text", "text": text}
+            if wanted and breakpoints < _MAX_CACHE_BREAKPOINTS:
+                entry["cache_control"] = {"type": "ephemeral"}
+                breakpoints += 1
+            system_param.append(entry)
+
         message = self._client.messages.create(
             model=model,
             max_tokens=max_tokens,
-            system=[
-                {"type": "text", "text": system or _COMPACTION_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
-            ],
+            system=system_param,
             messages=[{"role": "user", "content": prompt}],
         )
         # The SDK's content-block union has grown many non-text variants (thinking,
@@ -358,7 +410,13 @@ class FakeSummarizer:
         self._max_chars = max_chars
 
     def summarize(
-        self, prompt: str, *, model: str, max_tokens: int, system: str | None = None
+        self,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        system: str | Sequence[str] | None = None,
+        cache: Sequence[bool] | None = None,
     ) -> LLMResult:
         normalized = " ".join(prompt.split())
         digest = normalized[: self._max_chars]
