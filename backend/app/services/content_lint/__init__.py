@@ -1,0 +1,49 @@
+"""Deterministic, offline content validators ported from the SEO-CONTENT-OS corpus.
+
+These are the "build it, don't buy it" half of the content system. Every check here is
+stdlib-only and network-free, so it costs nothing per page and can run as many times
+as the QA loop needs. What a vendor would sell as a readability API, a keyword-density
+tool or an originality score is computed in-process instead.
+
+PROVENANCE. Each module ports one script from ``backend/seo-content-os/scripts/``,
+which `test_doctrine_corpus.py` hashes against MANIFEST.json. The port keeps the
+arithmetic verbatim and drops the CLI shell - the corpus scripts are command-line
+tools that print, and 8 of the 22 WRITE FILES as a side effect. Nothing in this
+package touches the filesystem, the network, the clock, or a global.
+
+PORT ORDER IS TOPOLOGICAL, not arbitrary. The corpus scripts import each other, with
+``readability_scorer`` as the shared primitive that four others depend on, so it is
+ported first and the rest build on its tokenizer. Porting them one at a time in
+dimension order would have duplicated that tokenizer four ways.
+
+WHY IN-PROCESS RATHER THAN SUBPROCESS. ``danyals-audit-system`` is invoked as a
+subprocess because it is a separate product with its own heavy, incompatible
+dependency set. These are stdlib-only pure functions called many times per page; a
+process spawn per call would be strictly worse and untestable.
+"""
+
+from app.services.content_lint.readability import (
+    LONG_SENTENCE_WORDS,
+    MAX_GRADE,
+    MAX_LONG_RATIO,
+    MIN_GRADE,
+    ReadabilityReport,
+    analyse_readability,
+    count_syllables,
+    split_sentences,
+    strip_markdown,
+    words_of,
+)
+
+__all__ = [
+    "LONG_SENTENCE_WORDS",
+    "MAX_GRADE",
+    "MAX_LONG_RATIO",
+    "MIN_GRADE",
+    "ReadabilityReport",
+    "analyse_readability",
+    "count_syllables",
+    "split_sentences",
+    "strip_markdown",
+    "words_of",
+]
