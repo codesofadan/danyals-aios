@@ -48,7 +48,9 @@ const REPORT: DashboardReport = {
     kind: "stat",
     headline: "82",
     caption: "Site health across four categories",
-    stats: [{ label: "Overall", value: "82" }],
+    // A DIFFERENT value from the headline on purpose: identical numbers make a
+    // `getByText` ambiguous, and that ambiguity reads as a component bug.
+    stats: [{ label: "Overall", value: "76" }],
   },
 };
 
@@ -88,5 +90,60 @@ describe("LockableChart — the Live/Preview badge", () => {
     renderChart({ placeholder: true });
 
     expect(clientState.isPlaceholder).toHaveBeenCalledWith("audit_scores");
+  });
+});
+
+describe("LockableChart — the grant boundary on the client surface", () => {
+  // The backend enforces grants twice: the security-barrier view filters
+  // `requires in (granted)`, and `report_viz.py` iterates only granted keys, so an
+  // ungranted series is never queried and never serialized. This is the third layer —
+  // the one on the client's own screen.
+  //
+  // What matters is that a locked card renders the figure NOWHERE IN THE DOM, rather
+  // than drawing it and covering it with a padlock. A CSS-hidden value is still a
+  // value: "inspect element" reads it straight out, and a client would be looking at a
+  // report they were never granted.
+
+  it("does not put the figure in the DOM when the report is not granted", () => {
+    clientState.isGranted.mockReturnValue(false);
+    clientState.isUnlocked.mockReturnValue(false);
+    clientState.isPlaceholder.mockReturnValue(false);
+    render(<LockableChart report={REPORT} />);
+
+    // "Locked" appears on both the badge and the padlock overlay — assert it is
+    // present, not that it is unique.
+    expect(screen.getAllByText("Locked").length).toBeGreaterThan(0);
+    // The headline value, the caption, and the stat label — none may be present.
+    expect(screen.queryByText("82")).toBeNull();
+    expect(screen.queryByText(/site health across four categories/i)).toBeNull();
+  });
+
+  it("still withholds the figure when granted but not yet opened", () => {
+    // "Ready" is a granted report the client has not clicked to reveal. The reveal is
+    // a deliberate act, so the data must not already be sitting in the markup.
+    clientState.isGranted.mockReturnValue(true);
+    clientState.isUnlocked.mockReturnValue(false);
+    clientState.isPlaceholder.mockReturnValue(false);
+    render(<LockableChart report={REPORT} />);
+
+    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+    expect(screen.queryByText("82")).toBeNull();
+  });
+
+  it("renders the figure only once unlocked", () => {
+    renderChart({ placeholder: false });
+
+    expect(screen.getByText("82")).toBeInTheDocument();
+    expect(screen.getByText(/site health across four categories/i)).toBeInTheDocument();
+  });
+
+  it("always names the report, so a locked card is still identifiable", () => {
+    // Withholding the DATA is the point; withholding the TITLE would leave the client
+    // unable to ask for what they cannot see.
+    clientState.isGranted.mockReturnValue(false);
+    clientState.isUnlocked.mockReturnValue(false);
+    render(<LockableChart report={REPORT} />);
+
+    expect(screen.getByLabelText("Audit Scores")).toBeInTheDocument();
   });
 });
