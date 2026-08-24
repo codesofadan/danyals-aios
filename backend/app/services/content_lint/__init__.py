@@ -33,6 +33,14 @@ from app.services.content_lint.experience import (
     find_markers,
     signals_from_manifest_text,
 )
+from app.services.content_lint.keywords import (
+    MAX_DENSITY,
+    DensityReport,
+    KeywordDensity,
+    analyse_density,
+    count_phrase,
+    tokenize,
+)
 from app.services.content_lint.readability import (
     LONG_SENTENCE_WORDS,
     MAX_GRADE,
@@ -49,15 +57,20 @@ from app.services.content_lint.readability import (
 __all__ = [
     "LONG_SENTENCE_WORDS",
     "MARKER_KINDS",
+    "MAX_DENSITY",
     "MAX_GRADE",
     "MAX_LONG_RATIO",
     "MIN_GRADE",
+    "DensityReport",
     "ExperienceClaim",
     "ExperienceIssue",
     "ExperienceMarker",
     "ExperienceReport",
+    "KeywordDensity",
     "ReadabilityReport",
+    "analyse_density",
     "analyse_readability",
+    "count_phrase",
     "count_syllables",
     "evaluate_experience",
     "find_claims",
@@ -65,5 +78,6 @@ __all__ = [
     "signals_from_manifest_text",
     "split_sentences",
     "strip_markdown",
+    "tokenize",
     "words_of",
 ]

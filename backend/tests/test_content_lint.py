@@ -287,3 +287,84 @@ def test_an_http_image_url_also_registers_as_a_cited_source() -> None:
     r = evaluate_experience("Since 2009. ![crew](https://cdn.example.com/c.jpg)")
     assert "cited_source" in r.signals
     assert r.passed
+
+
+# =========================================================================== #
+# keyword_density - anti-stuffing by page COVERAGE, not by tally
+# =========================================================================== #
+from app.services.content_lint import analyse_density, count_phrase, tokenize  # noqa: E402
+
+_DENSITY_PROBES = [
+    ("", ["ac repair"]),
+    ("ac repair " * 50, ["ac repair"]),
+    ("A page about heating and cooling in San Jose.", ["ac repair"]),
+    ("emergency ac repair san jose " * 3 + "filler " * 200, ["emergency ac repair san jose", "ac"]),
+    ("24 hour plumber near me", ["24 hour plumber"]),          # numerals belong in keywords
+    ("## Heading\n[anchor](https://x.com) ac repair", ["ac repair"]),
+]
+
+
+@pytest.fixture(scope="module")
+def original_density():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import keyword_density
+
+        return keyword_density
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("text,keywords", _DENSITY_PROBES)
+def test_density_port_matches_the_original(text, keywords, original_density) -> None:
+    theirs = original_density.analyse(text, keywords)
+    mine = analyse_density(text, keywords)
+
+    assert mine.total_words == theirs["total_words"]
+    assert len(mine.rows) == len(theirs["rows"])
+    for row, ref in zip(mine.rows, theirs["rows"], strict=True):
+        assert row.keyword == ref["keyword"]
+        assert row.occurrences == ref["occurrences"]
+        assert row.words_in_phrase == ref["words_in_phrase"]
+        assert row.density == pytest.approx(ref["density"])
+        assert row.over == ref["over"]
+
+
+def test_density_measures_page_COVERAGE_not_occurrence_count() -> None:
+    """The distinction the whole check rests on. A five-word phrase occupies five
+    times the page a one-word term does at the same occurrence count, and saturation
+    is what the stuffing systems react to."""
+    text = "one two three four five " * 20                       # 100 tokens
+    short = analyse_density(text, ["one"]).rows[0]
+    longer = analyse_density(text, ["one two three four five"]).rows[0]
+    assert short.occurrences == longer.occurrences == 20
+    assert longer.density == pytest.approx(short.density * 5)
+
+
+def test_phrase_matching_is_contiguous_not_bag_of_words() -> None:
+    """"ac repair" must not be credited to a page that merely contains "ac" and
+    "repair" in unrelated sentences."""
+    assert analyse_density("The ac unit needed a repair.", ["ac repair"]).rows[0].occurrences == 0
+    assert analyse_density("Book an ac repair today.", ["ac repair"]).rows[0].occurrences == 1
+
+
+def test_numerals_are_kept_here_unlike_the_readability_tokenizer() -> None:
+    """Not an inconsistency: a keyword can legitimately contain a number ("24 hour
+    plumber"), whereas a zip code is not a readability word."""
+    assert tokenize("24 hour plumber") == ["24", "hour", "plumber"]
+    assert count_phrase(tokenize("call a 24 hour plumber"), tokenize("24 hour plumber")) == 1
+
+
+def test_markdown_is_stripped_before_counting() -> None:
+    """Shares the readability tokenizer's strip step, so a URL cannot inflate the
+    denominator and dilute a real stuffing signal."""
+    plain = analyse_density("ac repair " * 10, ["ac repair"]).rows[0].density
+    marked = analyse_density(
+        "## H\n[a](https://example.com/very/long/path) " + "ac repair " * 10, ["ac repair"]
+    ).rows[0].density
+    assert marked == pytest.approx(plain, rel=0.15)
+
+
+def test_empty_and_blank_keywords_are_skipped_not_counted_as_zero() -> None:
+    r = analyse_density("some prose here", ["", "   ", "prose"])
+    assert [row.keyword for row in r.rows] == ["prose"]
