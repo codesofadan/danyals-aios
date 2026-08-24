@@ -520,3 +520,125 @@ def test_the_pinned_contract_sizes_are_not_stale() -> None:
         "Coverage grew - raise the pin so the new entries are protected too:\n  "
         + "\n  ".join(f"{n}: pinned {was}, actual {now}" for n, (was, now) in sorted(grown.items()))
     )
+
+
+# --------------------------------------------------------------------------- #
+# 6 · A new route may not ship with authentication as its only guard
+# --------------------------------------------------------------------------- #
+# Prevented defect, found 2026-08-24: specification invariant PM-3 read *"a client can
+# never reach a staff route; staff routes require a permission no client holds"*, marked
+# **CONFIRMED - enforced + tested**. The second clause was false. A staff route did not
+# require a permission; it required only AUTHENTICATION. `/rbac/{features,permissions,
+# roles,templates}` and `/cost/pricing` carried `CurrentUserDep` and nothing else, so a
+# portal client could read the agency's entire role and permission matrix, every
+# template's grants, and the per-provider unit prices the agency pays its suppliers -
+# served from in-process constants, so no RLS policy stood behind them either.
+#
+# THE PART THAT MATTERS FOR THIS FILE: the contract test PINNED it.
+# `test_route_contracts.py` asserted `c("rbac.features.client", "client", ..., 200)`
+# under a header reading `# --- rbac reference (CurrentUserDep) ---`. **The contract
+# recorded the guard that EXISTED rather than the guard that was WANTED**, and thereby
+# laundered the status quo into an intention. Anyone auditing the boundary found a test
+# apparently asserting that a client SHOULD get 200.
+#
+# That is the species this file already chases, in a third costume. Guard 4 catches a
+# test whose NAME overclaims. This is a test whose EXPECTATION under-claims - it is
+# perfectly honest about what the code does, and silent about whether that is right.
+# No structural check distinguishes those two, because they are identical in shape; the
+# only defence is that a boundary's expected value must be justified, not observed.
+#
+# WHAT THIS GUARD DOES AND DELIBERATELY DOES NOT DO. It pins the population. A new
+# handler whose only dependency is `CurrentUserDep` fails the build and must be
+# classified. It does NOT assert the fourteen below are safe - they are not uniformly
+# safe, and three different things are true of them:
+#
+#   OPEN BY DESIGN     `auth.logout` - a caller must be able to end its own session.
+#   OPEN BY DECISION   `tiers.*` - client-readable per written decision D-19.
+#   RLS-BOUNDED        `clients.*`, `cost.*`, `activity.*` - these return zero rows to a
+#                      client because a policy says so (`clients_select` is
+#                      `using (public.is_staff())`), NOT because the app layer refused.
+#
+# The third class is the one to be careful about, and it is why this guard does not try
+# to be cleverer. "There is an RLS policy somewhere" is NOT equivalent to "this route is
+# guarded", and proving the former per handler needs a BUILT DATABASE, not source. A
+# guard that conflated them would manufacture exactly the false comfort PM-3 already
+# demonstrated - which is the whole reason it is worth writing this limit down instead
+# of quietly widening the allow-list later.
+_AUTH_ONLY_HANDLERS: frozenset[str] = frozenset({
+    # open by design
+    "app/routers/auth.py::logout",
+    # open by decision D-19 (client-readable service tiers)
+    "app/routers/tiers.py::list_tiers",
+    "app/routers/tiers.py::list_feature_areas",
+    "app/routers/tiers.py::list_tier_clients",
+    # RLS-bounded: safe only because a database policy filters the rows, which this
+    # guard cannot and does not verify
+    "app/routers/activity.py::list_activity",
+    "app/routers/clients.py::list_clients",
+    "app/routers/clients.py::get_client",
+    "app/routers/clients.py::get_client_business_profile",
+    "app/routers/clients.py::get_report_grants",
+    "app/routers/clients.py::list_sites",
+    "app/routers/cost.py::list_budgets",
+    "app/routers/cost.py::get_dial",
+    "app/routers/cost.py::list_cost_log",
+    "app/routers/cost.py::get_spend_stop",
+})
+
+_GUARD_MARKERS: tuple[str, ...] = (
+    "require_perm", "require_role", "require_owner", "require_feature",
+    "require_module_perm", "require_staff", "CurrentClientDep", "get_current_client",
+    "Staff", "Lead", "Owner",
+)
+
+_APP_DIR = _REPO_ROOT / "backend" / "app"
+
+
+def _auth_only_handlers() -> list[str]:
+    """Route handlers whose only principal dependency is `CurrentUserDep`."""
+    out: list[str] = []
+    for path in sorted(_APP_DIR.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        src = path.read_text(encoding="utf-8")
+        if "@router." not in src:
+            continue
+        rel = path.relative_to(_REPO_ROOT / "backend").as_posix()
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            decorators = [ast.unparse(d) for d in node.decorator_list]
+            if not any(d.startswith("router.") for d in decorators):
+                continue
+            signature = ast.unparse(node.args)
+            guarded = any(
+                marker in signature or any(marker in d for d in decorators)
+                for marker in _GUARD_MARKERS
+            )
+            if "CurrentUserDep" in signature and not guarded:
+                out.append(f"{rel}::{node.name}")
+    return out
+
+
+def test_no_new_route_ships_with_authentication_as_its_only_guard() -> None:
+    new = sorted(set(_auth_only_handlers()) - _AUTH_ONLY_HANDLERS)
+    assert not new, (
+        "Route handler(s) whose only principal dependency is CurrentUserDep:\n  "
+        + "\n  ".join(new)
+        + "\n\nAuthentication is not authorization. A portal client is a signed-in "
+        "principal, so `CurrentUserDep` alone admits one. Add an explicit guard "
+        "(`require_perm`, `require_staff`, ...), or - if the route is genuinely meant "
+        "to be reachable by any signed-in caller - add it above WITH ITS CLASS and the "
+        "decision that permits it. Do not add it as 'RLS covers this' unless a built "
+        "database proves the policy does so for this handler."
+    )
+
+
+def test_the_auth_only_population_only_shrinks() -> None:
+    """Guarding one of these is progress and must be recorded, so the list cannot keep
+    naming routes that no longer need the exemption."""
+    fixed = sorted(_AUTH_ONLY_HANDLERS - set(_auth_only_handlers()))
+    assert not fixed, (
+        "These now carry a real guard - remove them from _AUTH_ONLY_HANDLERS in the "
+        f"same commit that guarded them: {fixed}"
+    )
