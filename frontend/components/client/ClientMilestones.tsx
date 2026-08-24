@@ -22,7 +22,11 @@ export default function ClientMilestones() {
             <span className="cl-focus-v">{project ? HEALTH_META[project.health].label : "—"}</span>
             <span className="cl-focus-note">
               <span className="material-symbols-rounded">flag</span>
-              {project ? `${projectProgress(project)}% complete` : "No active project"}
+              {project
+                ? `${projectProgress(project)}% complete`
+                : projectQ.isError
+                  ? "Couldn't load"
+                  : "No active project"}
             </span>
           </>
         }
@@ -32,6 +36,30 @@ export default function ClientMilestones() {
         <div className="pt-empty">
           <span className="material-symbols-rounded spin">progress_activity</span>
           <div className="pt-empty-t">Loading your timeline…</div>
+        </div>
+      ) : projectQ.isError ? (
+        // A FAILED FETCH IS NOT AN EMPTY TIMELINE. `!project` alone covered both the
+        // 404 ("no project yet", which is true and expected) and a 500 or a network
+        // drop ("we do not know") — and told the client, in both cases, that their
+        // onboarding had not begun. That is a false statement about their engagement,
+        // produced by a server problem they cannot see. The requests surface already
+        // draws this distinction (`requestsError`); this one did not.
+        <div className="pt-empty">
+          <span className="material-symbols-rounded">error</span>
+          <div className="pt-empty-t">Couldn&apos;t load your timeline</div>
+          <div className="pt-empty-s">There was a problem reaching the server.</div>
+          <button
+            className="primary-btn sm"
+            type="button"
+            onClick={() => void projectQ.refetch()}
+            disabled={projectQ.isFetching}
+            style={{ marginTop: 12 }}
+          >
+            <span className={`material-symbols-rounded${projectQ.isFetching ? " spin" : ""}`}>
+              {projectQ.isFetching ? "progress_activity" : "refresh"}
+            </span>
+            {projectQ.isFetching ? "Retrying…" : "Retry"}
+          </button>
         </div>
       ) : !project ? (
         <div className="pt-empty">
