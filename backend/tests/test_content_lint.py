@@ -874,3 +874,99 @@ def test_self_links_and_duplicates_are_dropped_at_build_time() -> None:
 def test_role_is_validated_rather_than_silently_accepted() -> None:
     with pytest.raises(ValueError, match="role must be"):
         build_page("/a", "pillar", "s")
+
+
+# =========================================================================== #
+# geo_page_linter - AI-search citability (Law 17 / the Local AI-Citation Stack)
+# =========================================================================== #
+from app.services.content_lint import (  # noqa: E402
+    analyse_geo,
+    opens_with_direct_answer,
+    split_h2_sections,
+)
+
+_GEO_PROBES = [
+    "",
+    "## How much does it cost?\n\n$1,400 on average in Tempe.\n",
+    "## How much does it cost?\n\nWhen it comes to pricing, every home is different.\n",
+    "## Is it worth it?\n\nYes. A new unit pays back in 4 years.\n",
+    "## Overview\n\nWe understand that you have questions.\n\n## Cost\n\n$99 flat.\n",
+    "Intro prose with no heading at all, which should not be scored as an answer block.",
+    ("## A\n\nac repair phoenix is the best ac repair phoenix option because ac repair "
+     "phoenix works. ac repair phoenix again and ac repair phoenix once more.\n"),
+    "## Q\n\nPer the state board, 42% of units fail. Last updated: 2026-01-02\n",
+]
+
+
+@pytest.fixture(scope="module")
+def original_geo():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import geo_page_linter
+
+        return geo_page_linter
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("text", _GEO_PROBES)
+def test_geo_port_matches_the_original(text: str, original_geo) -> None:
+    theirs = original_geo.analyse(text)
+    mine = analyse_geo(text)
+
+    assert mine.total_words == theirs["total_words"]
+    assert mine.n_h2 == theirs["n_h2"] and mine.n_h2_ok == theirs["n_h2_ok"]
+    assert mine.stat_count == theirs["stat_count"]
+    assert mine.stat_density == pytest.approx(theirs["stat_density"])
+    assert mine.source_count == theirs["source_count"]
+    assert mine.quote_count == theirs["quote_count"]
+    assert mine.stuffed == theirs["stuffed"]
+    assert mine.stuff_phrase == theirs["stuff_phrase"]
+    assert mine.has_freshness == theirs["has_freshness"]
+    assert mine.issues() == original_geo.evaluate(theirs)
+
+
+@pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.parent.name)
+def test_geo_port_matches_on_the_corpus_samples(page, original_geo) -> None:
+    text = page.read_text()
+    assert analyse_geo(text).issues() == original_geo.evaluate(original_geo.analyse(text))
+
+
+def test_a_filler_opener_makes_a_block_unextractable() -> None:
+    """An answer engine extracts passages. A block that opens with "When it comes
+    to..." has no answer to lift, however good the paragraph below it is."""
+    ok, _ = opens_with_direct_answer("When it comes to pricing, every home is different.")
+    assert not ok
+    ok, _ = opens_with_direct_answer("$1,400 on average in Tempe.")
+    assert ok
+
+
+def test_a_yes_no_opener_counts_as_a_direct_answer() -> None:
+    assert opens_with_direct_answer("Yes. A new unit pays back in about 4 years.")[0]
+
+
+def test_the_intro_is_not_scored_as_an_answer_block() -> None:
+    """Content before the first H2 is the page opening, not a passage. Scoring it
+    would penalise every normally-written page."""
+    sections = split_h2_sections("Intro prose here.\n\n## Real block\n\n$5 flat.\n")
+    assert [h for h, _ in sections] == ["Real block"]
+    assert "Intro prose" not in sections[0][1]
+
+
+def test_stuffing_is_detected_without_being_told_the_keyword() -> None:
+    """Self-contained: it finds the most-repeated meaningful phrase, so it catches
+    stuffing of a term nobody declared as a target. Keyword stuffing was the ONLY
+    tactic in the GEO study that made citation LESS likely."""
+    r = analyse_geo("## A\n\n" + "ac repair phoenix is great. " * 8)
+    assert r.stuffed and r.stuff_phrase and "ac repair" in r.stuff_phrase
+
+
+def test_ordinary_connective_phrasing_is_not_reported_as_stuffing() -> None:
+    """Needs 3+ occurrences AND a non-stopword, so "of the" repeated does not fire."""
+    r = analyse_geo("## A\n\n" + "One of the things. Some of the others. Most of the rest. " * 3)
+    assert not r.stuffed or (r.stuff_phrase and r.stuff_phrase not in ("of the", "the"))
+
+
+def test_sources_are_counted_on_raw_markdown_not_stripped_text() -> None:
+    """Stripping markdown removes the links, which would zero the Cite Sources lever."""
+    assert analyse_geo("## A\n\nSee [the board](https://example.com/x). $5.\n").source_count >= 1
