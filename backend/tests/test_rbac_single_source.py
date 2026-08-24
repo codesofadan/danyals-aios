@@ -817,7 +817,7 @@ async def test_the_access_model_still_requires_authentication(
 
 
 @pytest.mark.unit
-async def test_a_portal_client_cannot_read_what_the_agency_pays_its_suppliers(
+async def test_a_portal_client_cannot_read_the_agency_cost_surface(
     app: FastAPI, client: httpx.AsyncClient
 ) -> None:
     """``GET /cost/pricing`` is the same shape of hole as ``/rbac/*``, found the same way.
@@ -829,7 +829,8 @@ async def test_a_portal_client_cannot_read_what_the_agency_pays_its_suppliers(
     is, not because the file is.
     """
     _as(app, "client")
-    assert (await client.get("/api/v1/cost/pricing")).status_code == 403
+    for path in ("pricing", "dial", "spend-stop", "budgets", "log"):
+        assert (await client.get(f"/api/v1/cost/{path}")).status_code == 403, f"/cost/{path}"
     _as(app, "viewer")
     assert (await client.get("/api/v1/cost/pricing")).status_code == 200
 

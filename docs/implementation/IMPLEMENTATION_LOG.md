@@ -1462,3 +1462,92 @@ rather than grepping earned itself again inside a single unit.
   features."** The measured count is 11 (WU-11). That acceptance test cannot be passed as written.
 - **`client_report_grants` (`0031`) has no requirement ID** — it shipped sourced to a frontend seed
   array. It needs a retro-ID before it is cited as evidence for anything.
+
+---
+
+## WU-14 · The limit WU-13 declared, closed by building the database  ✅
+
+**Workstream:** WS-3 (Identity & Security) · **Follows:** WU-13, which recorded two limits rather
+than working around them. A parallel session closed the first by standing up a Postgres and
+running the integration lane — **`test_route_contracts.py`: 11 passed**, so WU-13's 200 → 403
+flips execute. This unit closes the second.
+
+### The limit
+
+WU-13 said: *"14 handlers still carry `CurrentUserDep` alone… bounded by RLS rather than by the
+app layer, and **that has not been measured handler by handler against a built database**.
+Claiming they are safe without building the schema would repeat the mistake this unit exists to
+correct."*
+
+The parallel session's structural guard (`b237afb`) drew the same line in its own comment:
+*"'There is an RLS policy somewhere' is NOT equivalent to 'this route is guarded', and proving
+the former per handler needs a **BUILT DATABASE**, not source."*
+
+Both were right to stop there. Neither had built one. So this unit did.
+
+### The measurement
+
+PostgreSQL 16 in a throwaway container on a port owned by no other session, **all 85 migrations
+applied in order**, two client tenants seeded, and the application's own identity mechanism
+reproduced rather than approximated — role `authenticated`, then
+`select set_config('app.user_id', <uuid>, true)`, which is exactly what `rls_connection` does
+(`app/db/database.py:235`) and what `auth.uid()` reads (`0000_local_platform.sql:90`).
+
+| table | as a portal client | as staff |
+|---|---|---|
+| `clients` · `sites` · `client_business_profiles` · `client_report_grants` | **0** | 2 each |
+| `client_budgets` · `cost_dial` · `cost_log` · `cost_settings` | **0** | 1–2 each |
+| `activity_log` | **0** | 2 |
+
+**Nine tables, zero rows to a client, every row to staff.** The RLS layer holds, and now on
+evidence rather than on a reading of policy text.
+
+Worth recording *how* the reading could have gone wrong: `is_staff()` is defined **twice**. At
+`0002_identity_rbac.sql:64` it is `exists (select 1 from public.users where id = auth.uid())` —
+which is **true for a client**. `0010_client_portal.sql:48` redefines it as
+`role <> 'client'`. Anyone confirming `clients_select using (public.is_staff())` from the
+creating migration alone would have concluded the exact opposite of the truth. The house rule —
+*the `CREATE TABLE` is not the schema; a fact is the creating migration plus every later
+`ALTER`* — earned itself again.
+
+### What the measurement found that reading had not
+
+**`cost.py::get_dial` was never RLS-bounded, and had been classified as such by both of us.**
+
+It reads an RLS-protected table and then merges the result with an in-process catalogue. With the
+policy returning zero rows, `merge_dial({})` still returns **18 items** — every metered feature
+the platform has, each naming the **provider** behind it (DataForSEO and the rest). The table was
+protected. The response was not.
+
+> **A route that serves constants is never RLS-bounded, whatever its table does.**
+
+That is the same lesson as `/rbac/*` in WU-13, found a second time — and found by measurement,
+after two careful readings had put this handler in the safe class. It appeared inside a comment
+warning against exactly that false comfort, which is the most useful place for it to appear.
+
+### What changed
+
+| | |
+|---|---|
+| `app/routers/cost.py` | The whole cost **read** surface is `require_staff()` — `get_dial`, `get_spend_stop`, `list_budgets`, `list_cost_log`, alongside `get_pricing` from WU-13. Three of the five were genuinely RLS-bounded; locking them costs nothing, removes the need to re-derive that, and no client-portal surface consumes any of them. **A second extension of D-19, flagged rather than folded in.** |
+| `tests/test_rbac_single_source.py` | The boundary test now sweeps all five cost routes for a client 403. |
+| `tests/test_repo_structure.py` | The four guarded handlers removed from the parallel session's `_AUTH_ONLY_HANDLERS`, as its own contract requires *"in the same commit that guarded them"*. Its RLS-BOUNDED class is upgraded from asserted to **measured**, and corrected: `cost.*` is removed from that class, with the reason stated. |
+| `docs/recovery/DECISIONS_LOG.md` · `…SPECIFICATION.md` | D-19 and PM-3 carry the measurement, the date, and the corrected population **14 → 10**. |
+
+### What proves it
+
+The measurement above, plus: `ruff check .` clean · `mypy app workers` clean (277 files) ·
+`test_repo_structure` + `test_rbac_single_source` **46 passed** · `test_cost_endpoints` +
+`test_cost_gate` **45 passed**. The parallel session's population guard is green again, having
+correctly failed first and named the four handlers I had guarded without recording.
+
+### What this did NOT fix
+
+- **Ten handlers still carry `CurrentUserDep` alone**, now each classified on evidence: seven
+  RLS-bounded (measured), two client-readable by decision, one open by design. RLS-bounded still
+  means *the database refuses, not the app layer* — a real guarantee, but one an app-layer change
+  cannot weaken and an app-layer reading cannot confirm.
+- **The `/tiers` constants remain client-readable by decision**, and unlike the cost dial that is
+  deliberate: the portal sells upsells.
+- **Nothing was measured about WRITE paths.** This unit measured reads. The write guards were
+  already explicit and were not part of the population in question.

@@ -549,14 +549,15 @@ def test_the_pinned_contract_sizes_are_not_stale() -> None:
 #
 # WHAT THIS GUARD DOES AND DELIBERATELY DOES NOT DO. It pins the population. A new
 # handler whose only dependency is `CurrentUserDep` fails the build and must be
-# classified. It does NOT assert the fourteen below are safe - they are not uniformly
+# classified. It does NOT assert the ten below are safe - they are not uniformly
 # safe, and three different things are true of them:
 #
 #   OPEN BY DESIGN     `auth.logout` - a caller must be able to end its own session.
 #   OPEN BY DECISION   `tiers.*` - client-readable per written decision D-19.
-#   RLS-BOUNDED        `clients.*`, `cost.*`, `activity.*` - these return zero rows to a
-#                      client because a policy says so (`clients_select` is
+#   RLS-BOUNDED        `clients.*`, `activity.*` - these return zero rows to a client
+#                      because a policy says so (`clients_select` is
 #                      `using (public.is_staff())`), NOT because the app layer refused.
+#                      MEASURED against a built database on 2026-08-24, not inferred.
 #
 # The third class is the one to be careful about, and it is why this guard does not try
 # to be cleverer. "There is an RLS policy somewhere" is NOT equivalent to "this route is
@@ -571,18 +572,27 @@ _AUTH_ONLY_HANDLERS: frozenset[str] = frozenset({
     "app/routers/tiers.py::list_tiers",
     "app/routers/tiers.py::list_feature_areas",
     "app/routers/tiers.py::list_tier_clients",
-    # RLS-bounded: safe only because a database policy filters the rows, which this
-    # guard cannot and does not verify
+    # RLS-bounded, and no longer only asserted: MEASURED 2026-08-24 against a built
+    # PostgreSQL 16 with all 85 migrations applied, two client tenants seeded, and the
+    # app's own identity mechanism reproduced (role `authenticated`,
+    # `select set_config('app.user_id', <uuid>, true)`, exactly as `rls_connection`
+    # does). Every table these handlers read returned ZERO rows to a portal client and
+    # all rows to staff: clients, sites, client_business_profiles,
+    # client_report_grants, activity_log. Evidence in WU-14.
     "app/routers/activity.py::list_activity",
     "app/routers/clients.py::list_clients",
     "app/routers/clients.py::get_client",
     "app/routers/clients.py::get_client_business_profile",
     "app/routers/clients.py::get_report_grants",
     "app/routers/clients.py::list_sites",
-    "app/routers/cost.py::list_budgets",
-    "app/routers/cost.py::get_dial",
-    "app/routers/cost.py::list_cost_log",
-    "app/routers/cost.py::get_spend_stop",
+    # The four `cost.py` handlers that were listed here are GONE - they now carry
+    # `require_staff()`. Three were RLS-bounded as classified. `get_dial` was NOT, and
+    # that is the finding: it merges DB rows with an in-process catalogue, so with the
+    # policy returning zero rows it still returned **18 items** - every metered feature
+    # the platform has, each with the PROVIDER backing it. The classification above was
+    # right about the class and wrong about one member, which is precisely the
+    # false comfort this comment warns against, occurring inside the warning.
+    # A route that serves constants is never RLS-bounded, whatever its table does.
 })
 
 _GUARD_MARKERS: tuple[str, ...] = (

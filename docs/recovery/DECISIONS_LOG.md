@@ -221,22 +221,39 @@ under this decision's own reasoning** — what the agency *pays a supplier* has 
 purpose, unlike the tier prices a client is *charged*. Flagged as an extension rather than folded
 in silently, because the decision as put to the owner named five routes and this is a sixth.
 
-### What is NOT closed, measured rather than assumed
+### Measured 2026-08-24, and one classification was wrong
 
-**14 route handlers still carry `CurrentUserDep` alone** — any signed-in principal reaches them:
+The 14 handlers carrying `CurrentUserDep` alone were recorded here as *"bounded by RLS, not
+measured."* They have now been measured, against a built PostgreSQL 16: all 85 migrations
+applied, two client tenants seeded, and the app's own identity mechanism reproduced exactly —
+role `authenticated`, `select set_config('app.user_id', <uuid>, true)`, which is what
+`rls_connection` does.
 
-| module | handlers |
-|---|---|
-| `clients.py` | `list_clients`, `get_client`, `get_client_business_profile`, `get_report_grants`, `list_sites` |
-| `cost.py` | `list_budgets`, `get_dial`, `list_cost_log`, `get_spend_stop` |
-| `tiers.py` | `list_tiers`, `list_feature_areas`, `list_tier_clients` |
-| `activity.py` | `list_activity` |
-| `auth.py` | `logout` (correctly open to any authenticated caller) |
+**Every table those handlers read returned ZERO rows to a portal client, and all rows to staff:**
+`clients`, `sites`, `client_business_profiles`, `client_report_grants`, `client_budgets`,
+`cost_dial`, `cost_log`, `cost_settings`, `activity_log`.
 
-Three of those (`tiers.py`) are client-readable **by this decision**. The rest are DB-backed and
-therefore bounded by RLS — `/clients` demonstrably returns zero rows to a client — but **that has
-not been measured handler by handler against a built database**, and this project's own rule is
-that a schema or policy fact needs a built database, not a reading of migrations. Two are worth
-that measurement soonest: `cost.py::get_dial` merges DB rows with an in-process catalogue and may
-return the constant half regardless of RLS, and `get_spend_stop` mixes settings with spend totals.
-That is a discrete follow-up unit, not a claim being made here.
+**And one handler was not bounded at all.** `cost.py::get_dial` reads an RLS-protected table but
+merges the result with an **in-process catalogue**: with the policy returning zero rows,
+`merge_dial({})` still returns **18 items** — every metered feature the platform has, each naming
+the **provider** behind it. The table was protected; the response was not. *A route that serves
+constants is never RLS-bounded, whatever its table does* — the same lesson as `/rbac/*`, found a
+second time by measurement rather than by reading.
+
+**Consequently the whole `cost.*` read surface is now `require_staff()`** — `get_dial`,
+`get_spend_stop`, `list_budgets`, `list_cost_log`, alongside `get_pricing`. Three of the five were
+genuinely RLS-bounded; locking them costs nothing and none has a client-portal consumer (every
+caller is the operator cost screen). **This extends the decision a second time and is flagged,
+not folded in.**
+
+**Population: 14 → 10.** What remains, each on evidence:
+
+| class | handlers | basis |
+|---|---|---|
+| RLS-bounded (**measured**) | `clients.list_clients`, `get_client`, `get_client_business_profile`, `get_report_grants`, `list_sites`; `activity.list_activity`; `tiers.list_tier_clients` | zero rows to a client against a built database |
+| open by decision | `tiers.list_tiers`, `tiers.list_feature_areas` | D-19 — the portal sells upsells |
+| open by design | `auth.logout` | a caller must be able to end its own session |
+
+RLS-bounded still means *the database refuses, not the app layer*. That is a real guarantee — it
+held throughout — but it is one an app-layer reading cannot confirm, so it is recorded here as
+measured, with the date, rather than left to be re-derived or taken on trust.

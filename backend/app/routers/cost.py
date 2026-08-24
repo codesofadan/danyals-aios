@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.auth import CurrentUser, CurrentUserDep, require_perm, require_role, require_staff
+from app.core.auth import CurrentUser, require_perm, require_role, require_staff
 from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
 from app.db.cost_repo import CostRepoDep
@@ -48,7 +48,7 @@ OrgAdmin = Annotated[CurrentUser, Depends(require_role("admin"))]  # owner passe
 # --- budgets -----------------------------------------------------------------
 @router.get("/budgets", response_model=list[ClientBudgetResponse])
 async def list_budgets(
-    repo: CostRepoDep, page: PageDep, _user: CurrentUserDep
+    repo: CostRepoDep, page: PageDep, _user: Staff
 ) -> list[ClientBudgetResponse]:
     rows = await asyncio.to_thread(repo.list_budgets, limit=page.limit, offset=page.offset)
     return [ClientBudgetResponse(**r) for r in rows]
@@ -70,7 +70,7 @@ async def set_budget(
 
 # --- dial --------------------------------------------------------------------
 @router.get("/dial", response_model=list[DialFeatureResponse])
-async def get_dial(repo: CostRepoDep, _user: CurrentUserDep) -> list[DialFeatureResponse]:
+async def get_dial(repo: CostRepoDep, _user: Staff) -> list[DialFeatureResponse]:
     modes = await asyncio.to_thread(repo.dial_modes)
     return merge_dial(modes)
 
@@ -95,7 +95,7 @@ async def set_dial(
 async def list_cost_log(
     repo: CostRepoDep,
     page: PageDep,
-    _user: CurrentUserDep,
+    _user: Staff,
 ) -> list[CostEntryResponse]:
     rows = await asyncio.to_thread(repo.list_cost_log, page.limit, page.offset)
     return [CostEntryResponse.from_row(r) for r in rows]
@@ -116,7 +116,7 @@ async def get_pricing(settings: SettingsDep, _user: Staff) -> list[ProviderPrici
 
 # --- spend halt (the global API-spend kill-switch) ---------------------------
 @router.get("/spend-stop", response_model=SpendStopResponse)
-async def get_spend_stop(repo: CostRepoDep, _user: CurrentUserDep) -> SpendStopResponse:
+async def get_spend_stop(repo: CostRepoDep, _user: Staff) -> SpendStopResponse:
     """Read the global API-spend HALT state (+ today's/this month's informational
     real paid spend, summed live from ``cost_log`` - never the all-time
     ``client_budgets.spent`` counter)."""
