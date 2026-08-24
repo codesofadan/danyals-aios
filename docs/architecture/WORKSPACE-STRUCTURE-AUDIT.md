@@ -396,6 +396,33 @@ Structure decays silently unless something refuses the decay. These are cheap an
 mechanical, and this repository already uses the pattern (`test_dial_registration.py`,
 `test_backlinks_own_profile.py`, `test_no_synthetic_providers_in_production.py`).
 
+### First, the order of remedies — a guard is the weakest of the three
+
+> **Eliminate the duplicate · then generate it · then guard it.**
+
+Added 2026-08-24, from the RBAC single-source work, and it is a correction to how the
+rest of this section was originally framed. Faced with the backend RBAC matrix and its
+hand-mirrored copy in `frontend/lib/data.ts`, the obvious fix is codegen — emit the
+TypeScript from the Python so the two cannot drift. That was **rejected in favour of
+something better**: have the dashboard read `GET /rbac/*` and delete its copies outright.
+
+The reasoning generalises, so it belongs here rather than in that module's notes:
+
+| Remedy | What is left on disk | What keeps it true |
+|---|---|---|
+| **Eliminate** | one copy | nothing needs to — there is nothing to diverge |
+| **Generate** | two copies | a build step, plus a guard that it was re-run |
+| **Guard** | two copies | a test, and whoever reads its failure |
+
+A guard is a **detector**, not a cure: it announces drift that has already happened, and
+it only works while someone believes its output. That is not hypothetical here — the
+species of defect catalogued in §2.4 is precisely a guard (`test_rbac_matrix.py`) whose
+name claimed a comparison its body never performed, sitting green for months.
+
+So every guard below should be read as *"the best available remedy given that the
+duplicate is staying"*. Where the duplicate can be **removed instead**, remove it, and
+the guard becomes unnecessary rather than merely satisfied.
+
 | Guard | Refuses |
 |---|---|
 | **Migration ordinal uniqueness** | a third `0070`. Applied files are never renamed, so prevention is the only fix available. |
