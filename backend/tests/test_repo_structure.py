@@ -195,3 +195,103 @@ def test_the_portal_guard_actually_scans_something() -> None:
         if (_REPO_ROOT / "frontend" / "app" / portal).exists()
     )
     assert scanned >= 5, f"expected to scan the portal pages, found {scanned} files"
+
+
+# --------------------------------------------------------------------------- #
+# 4 · A test may not claim a cross-artifact guarantee it does not check
+# --------------------------------------------------------------------------- #
+# Prevented defect, found 2026-08-24 while fixing the RBAC hand-mirror:
+#
+#   tests/test_rbac_matrix.py::test_default_role_perms_match_frontend
+#   docstring: "These assertions pin the reference data to frontend/lib/data.ts"
+#
+# It never opens that file. It re-types the expected values as Python literals and
+# compares Python to Python. `frontend/lib/data.ts` could drift arbitrarily and the test
+# stays green - and it HAD drifted: 14 fields differed between `matrix.py` and `data.ts`
+# (nine colours, an icon, four descriptions). Authority data still agreed, so nothing was
+# broken, but the guarantee the test's name advertises had not held for some time.
+#
+# THIS IS A SPECIES, NOT AN INCIDENT. It is the third occurrence in this repository:
+#   1. `backend/CLAUDE.md` invariant #12 described a hard publish gate raising
+#      `PublishBlocked`. It is raised nowhere.
+#   2. The recovery specification cited that invariant as `[CONFIRMED — [CODE]]`
+#      evidence, so the audit cited documentation as if it were code.
+#   3. This: a test whose NAME asserts a guarantee its BODY does not implement.
+#
+# All three are the same failure: a confident artefact that nobody re-derived from
+# source. A missing test is visible - `pytest` reports nothing and the gap is obvious in
+# coverage. A test like this is INVISIBLE, because it is green, and its name is exactly
+# what a reviewer greps for when asking "is this covered?".
+#
+# The rule: if a test's name or docstring claims parity with a NAMED EXTERNAL ARTEFACT
+# (a `.ts` file, a migration, another module's source), its module must actually READ
+# something. Comparing hand-copied literals is not pinning; it is a second copy of the
+# thing that drifts, wearing the name of a guard.
+_SYNC_CLAIM_RE = re.compile(r"match|mirror|in_sync|sync|pins?\b|parity|agree", re.I)
+_NAMED_ARTIFACT_RE = re.compile(
+    r"frontend|_ts\b|\.ts\b|migration|portal\.ts|tools\.ts|data\.ts|db_enums?", re.I
+)
+_READS_SOMETHING_RE = re.compile(
+    r"read_text|read_bytes|\bopen\(|iterdir|rglob|\bglob\(|subprocess|importlib"
+)
+
+# The seven that existed when this guard was written. Each is REAL - every one compares
+# hand-copied literals while its name advertises parity with a file it never opens. They
+# are listed rather than fixed because fixing them means writing seven real cross-artifact
+# readers, which is its own piece of work with its own review.
+#
+# THIS LIST MAY ONLY SHRINK. A new entry fails the build; removing one means the test now
+# genuinely reads what it claims to. A guard introduced already-failing teaches people to
+# ignore it, so it is introduced passing, with the debt named.
+_UNCHECKED_SYNC_CLAIMS: frozenset[str] = frozenset({
+    "tests/modules/client_onboarding/test_schemas.py::test_status_tuples_match_the_migration_enums",
+    "tests/modules/rank_tracker/test_service.py::test_workspace_primary_and_bullets_match_tools_ts",
+    "tests/test_rbac_matrix.py::test_default_role_perms_match_frontend",
+    "tests/test_rbac_matrix.py::test_templates_match_frontend_and_super_is_all_features",
+    "tests/test_reports.py::test_report_types_mirror_the_frontend_catalogue",
+    "tests/test_tasks_schema.py::test_next_status_mirrors_portal_ts",
+    "tests/test_vault.py::test_mask_secret_matches_frontend",
+})
+
+_TESTS_DIR = Path(__file__).resolve().parent
+
+
+def _unchecked_sync_claims() -> list[str]:
+    import ast
+
+    out: list[str] = []
+    for path in sorted(_TESTS_DIR.rglob("test_*.py")):
+        src = path.read_text(encoding="utf-8")
+        if _READS_SOMETHING_RE.search(src):
+            continue  # the module reads SOMETHING; give it the benefit of the doubt
+        rel = path.relative_to(_TESTS_DIR.parent).as_posix()
+        for node in ast.walk(ast.parse(src)):
+            if not (isinstance(node, ast.FunctionDef) and node.name.startswith("test_")):
+                continue
+            blob = f"{node.name} {ast.get_docstring(node) or ''}"
+            if _SYNC_CLAIM_RE.search(blob) and _NAMED_ARTIFACT_RE.search(blob):
+                out.append(f"{rel}::{node.name}")
+    return out
+
+
+def test_no_new_test_claims_a_sync_it_does_not_check() -> None:
+    new = sorted(set(_unchecked_sync_claims()) - _UNCHECKED_SYNC_CLAIMS)
+    assert not new, (
+        "Test(s) whose name or docstring claims parity with a named external artefact, "
+        "in a module that never reads a file:\n  "
+        + "\n  ".join(new)
+        + "\n\nHand-copied literals are not a pin - they are a second copy of the thing "
+        "that drifts, wearing the name of a guard. Either READ the artefact and compare, "
+        "or rename the test so it does not promise what it does not do."
+    )
+
+
+def test_the_unchecked_sync_debt_only_shrinks() -> None:
+    """A listed test that now reads its artefact must be removed from the list, so the
+    debt cannot quietly stay 'paid' on paper while the entry lingers."""
+    still_unchecked = set(_unchecked_sync_claims())
+    fixed = sorted(_UNCHECKED_SYNC_CLAIMS - still_unchecked)
+    assert not fixed, (
+        "These now genuinely check what they claim - delete them from "
+        f"_UNCHECKED_SYNC_CLAIMS: {fixed}"
+    )
