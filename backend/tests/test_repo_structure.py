@@ -565,6 +565,54 @@ def test_the_pinned_contract_sizes_are_not_stale() -> None:
 # guard that conflated them would manufacture exactly the false comfort PM-3 already
 # demonstrated - which is the whole reason it is worth writing this limit down instead
 # of quietly widening the allow-list later.
+#
+# ---------------------------------------------------------------------------
+# TWO THINGS A READER MUST CHECK BEFORE PUTTING A HANDLER IN THE RLS-BOUNDED CLASS.
+# Both were learned by getting this list wrong, in this file, after writing the warning
+# directly above.
+#
+# (a) A ROUTE THAT SERVES CONSTANTS IS NEVER RLS-BOUNDED, WHATEVER ITS TABLE DOES.
+#
+#     `cost.py::get_dial` sat in this class until 2026-08-24. Its table IS protected and
+#     DOES return zero rows to a client - and the handler then merged that empty result
+#     with an in-process catalogue, so `merge_dial({})` returned EIGHTEEN items, each
+#     naming the provider behind a metered feature (DataForSEO, Anthropic, PageSpeed,
+#     AuditEngine). The table was protected. The response was not.
+#
+#     So "RLS-bounded" must be qualified TWICE, and the second question is the one
+#     nobody thought to ask: is there a policy, AND does the response derive SOLELY from
+#     the rows that policy returned? A row-derived handler (`rows -> from_row(...)`)
+#     inherits the policy. Anything merged, defaulted or catalogued alongside it does
+#     not. The remaining members of this class were re-checked for that shape when
+#     `get_dial` was found - all six are purely row-derived - so this rule is a measured
+#     exception, not a suspicion about the rest.
+#
+# (b) `public.is_staff()` IS DEFINED TWICE, AND THE FIRST DEFINITION SAYS THE OPPOSITE.
+#
+#     This comment cites `clients_select using (public.is_staff())` by name, two
+#     paragraphs up, as the reason those handlers are safe. Follow that pointer to the
+#     creating migration and you will conclude the exact reverse:
+#
+#       0002_identity_rbac.sql:64   exists (select 1 from users where id = auth.uid())
+#                                   -> TRUE for a portal client: a client IS a
+#                                      provisioned user
+#       0010_client_portal.sql:48   ... and role <> 'client'
+#                                   -> FALSE for a portal client
+#
+#     Only the second is live - CONFIRMED against a built database rather than asserted
+#     from the migrations, which is the point of the rule. `pg_proc` holds exactly ONE
+#     `is_staff`, and its body is
+#     `exists (select 1 from public.users where id = auth.uid() and role <> 'client')`;
+#     `pg_policy` shows `clients_select` qualified simply as `is_staff()`. So the policy
+#     is sound and the citation above is correct - but only the built function proves it,
+#     and the first `create or replace` in the tree proves the opposite.
+#
+#     This is the house rule with a security consequence: THE
+#     CREATE IS NOT THE SCHEMA - a fact is its creating migration plus every later
+#     redefinition (see db/migrations/README.md). Two sessions already got a column type
+#     wrong the same way on the same day. Verifying a policy predicate means reading the
+#     BUILT function, not the first `create or replace` that grep returns.
+# ---------------------------------------------------------------------------
 _AUTH_ONLY_HANDLERS: frozenset[str] = frozenset({
     # open by design
     "app/routers/auth.py::logout",
