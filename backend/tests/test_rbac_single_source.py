@@ -688,3 +688,48 @@ async def test_the_endpoints_serve_exactly_what_the_matrix_holds(
         }
         for t in m.TEMPLATES
     ]
+
+
+# --------------------------------------------------------------------------- #
+# The one assertion the frontend can no longer make about itself.
+#
+# `frontend/lib/TEMPLATE_COLOR` supplies the avatar accent the Add-Member wizard
+# submits, which `services/provisioning.py` writes to `public.users.avatar_color`.
+# A template with no entry there is provisioned with the legacy violet `#7B69EE` -
+# the very hex this unit deleted from `TEMPLATES`.
+#
+# Until `3155bc1` the dashboard could check this itself, by looping over its own
+# `roleTemplates` copy. Deleting that copy - the goal - removed the frontend's only
+# independent source of template keys, so a frontend version of this check could now
+# only iterate `Object.keys(TEMPLATE_COLOR)` and assert that every key it has, it has.
+# Vacuous, and green forever. The assertion did not disappear; it moved to the only
+# side that can still make it non-vacuously.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.unit
+def test_every_backend_template_has_a_dashboard_colour() -> None:
+    """One direction only: every ``TEMPLATES`` key must appear in ``TEMPLATE_COLOR``.
+
+    The reverse - a colour left behind for a template that no longer exists - is
+    harmless dead data and is deliberately NOT asserted here, so that a failure says
+    unambiguously which of the two happened.
+
+    Unlike the catalogue checks above, this one does **not** pass when its subject is
+    missing. A duplicated catalogue disappearing is the goal; the theme map
+    disappearing is a regression or a relocation, and either needs a person to look.
+    """
+    src = _DATA_TS.read_text(encoding="utf-8") if _DATA_TS.exists() else ""
+    assert _declared(src, "TEMPLATE_COLOR"), (
+        "frontend/lib/data.ts no longer declares TEMPLATE_COLOR, which is where the "
+        "Add-Member wizard gets the avatar accent it submits. If the map moved, move "
+        "this assertion with it deliberately - do not let it lapse into passing."
+    )
+    colours = _extract(src, ("SERIES", "TEMPLATE_COLOR"))["TEMPLATE_COLOR"]
+    missing = sorted(t.key for t in m.TEMPLATES if t.key not in colours)
+    assert not missing, (
+        f"template(s) {missing} exist in app/rbac/matrix.py with no entry in "
+        "TEMPLATE_COLOR. A member provisioned from one of them is written to "
+        "public.users.avatar_color with the legacy violet #7B69EE fallback "
+        "(app/services/provisioning.py). Add the accent to frontend/lib/data.ts."
+    )

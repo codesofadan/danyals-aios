@@ -1315,3 +1315,28 @@ disbelieved those test names; they just never had cause to open them.
   session loads unprompted. `REQUIREMENTS_TRACEABILITY.md`'s ADM-030 in particular is
   marked CONFIRMED against it and is now confirmed against a corrected claim — the
   requirement corpus is the recovery track's to re-baseline, not this unit's to rewrite.
+
+#### WU-11 addendum · the assertion that had to change sides
+
+`3155bc1` (frontend session) deleted `roleTemplates` from `frontend/lib/data.ts` — the first
+catalogue symbol to reach the goal state, and the truth guard's
+`test_no_unreferenced_seed_array_remains_in_lib` was what surfaced it once `7993847` repointed
+the Add-Member wizard at `GET /rbac/templates`.
+
+That deletion **removed the frontend's only independent source of template keys**, and with it
+the one check standing between a new template and the `avatar_color` defect recorded above.
+`templateColor.test.ts` had been looping over `roleTemplates` to assert every template has an
+accent; the obvious rewrite — iterating `Object.keys(TEMPLATE_COLOR)` — asserts *"every key I
+have, I have"*. Vacuous, and green forever, while reading as coverage.
+
+So the assertion moved to the only side that can still make it non-vacuously:
+`test_every_backend_template_has_a_dashboard_colour`, in this suite. **It is stronger than the
+one it replaces** — it catches a template added *backend-side* with no frontend colour, which the
+`roleTemplates` loop never could, because that loop's key source was the copy being deleted.
+
+One direction only, deliberately: a colour left behind for a template that no longer exists is
+harmless dead data, so a failure says unambiguously which of the two happened. And unlike the
+catalogue checks, it does **not** pass when its subject is missing — a duplicated catalogue
+disappearing is the goal; the theme map disappearing is a regression or a relocation, and either
+needs a person. Proven on all three: a fifth template with no colour, the map deleted, and
+`data.ts` absent entirely all fail; the real tree passes.
