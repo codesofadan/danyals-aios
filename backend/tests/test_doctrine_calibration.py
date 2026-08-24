@@ -31,9 +31,15 @@ Findings recorded here (2026-08-24):
      page whose true Flesch sits near a band edge (~75). This is a real defect with a
      narrow blast radius - not a reason to distrust every score already emitted.
 
-Not fixed here on purpose: P1B replaces this scorer with the ported corpus
-implementation, so patching `content_qa`'s tokenizer now would be thrown away. The
-deltas are pinned instead, so the port has a target and a silent drift has a tripwire.
+RESOLVED 2026-08-24 (P1B). The scoring path now calls the ported corpus scorer, so
+the disagreement no longer reaches an emitted score. `content_qa.flesch_reading_ease`
+survives as a DEPRECATED published name that nothing in the scoring path calls, and
+`on_page` was switched over with it - its module docstring claims "exactly ONE content
+rubric", and leaving two divergent implementations would have made that false.
+
+These tests are kept rather than deleted: they still pin the legacy function's
+behaviour, so if anyone routes scoring back through it the delta reappears here with
+an explanation attached rather than as an unexplained score shift.
 """
 
 from __future__ import annotations
@@ -75,8 +81,12 @@ def _body(path: pathlib.Path) -> str:
 def test_flesch_delta_between_the_two_implementations_is_known(
     name: str, corpus_readability
 ) -> None:
-    """Pin the disagreement. When P1B ports the corpus scorer in-process this
-    tightens to ~0 - that is the acceptance criterion for the port."""
+    """Pin the LEGACY function's disagreement with the corpus.
+
+    The scoring path no longer uses it (see the module docstring). This remains as a
+    tripwire: if scoring is ever routed back through `flesch_reading_ease`, the delta
+    returns and this test explains why.
+    """
     from app.services import content_qa as cq
 
     body = _body(_SAMPLES[name])
@@ -139,3 +149,32 @@ def test_backend_splits_sentences_inside_numbers() -> None:
         "if this now reads 1 sentence the bug is FIXED - delete this test and tighten "
         "the delta bound in test_flesch_delta_between_the_two_implementations_is_known"
     )
+
+
+def test_the_scoring_path_now_agrees_with_the_corpus(corpus_readability) -> None:
+    """The acceptance criterion for the port, now met.
+
+    `_score_structure_readability` calls the ported scorer, so the number the reviewer
+    sees is the corpus's number - not the legacy tokenizer's, which read every page
+    with a phone number or a price as easier than it is.
+    """
+    from app.services.content_lint import analyse_readability
+
+    for path in _SAMPLES.values():
+        body = _body(path)
+        assert analyse_readability(body).flesch_reading_ease == pytest.approx(
+            corpus_readability.analyse(body)["flesch_reading_ease"]
+        )
+
+
+def test_one_readability_rubric_across_the_platform() -> None:
+    """on_page and content QA must not diverge. on_page's docstring claims "exactly
+    ONE content rubric in this system"; P1B briefly made that false by switching only
+    content_qa, so this pins both onto the same function."""
+    import inspect
+
+    from app.modules.on_page import service as onpage
+
+    source = inspect.getsource(onpage)
+    assert "analyse_readability(page.body_text)" in source
+    assert "flesch_reading_ease(page.body_text)" not in source

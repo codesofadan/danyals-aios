@@ -271,7 +271,8 @@ def test_density_bands_fire_high_over_the_ceiling_and_low_under_the_target() -> 
 
 
 def test_readability_fires_below_the_flesch_floor() -> None:
-    from app.modules.on_page.service import detect_content, flesch_reading_ease
+    from app.modules.on_page.service import detect_content
+    from app.services.content_lint import analyse_readability
 
     dense = _page(
         body_text=(
@@ -280,7 +281,9 @@ def test_readability_fires_below_the_flesch_floor() -> None:
             "utilizing sophisticated quantitative instrumentation throughout."
         )
     )
-    assert flesch_reading_ease(dense.body_text) < READABILITY_MIN_FLESCH
+    # P1B: on-page and content QA now share ONE readability rubric (the ported
+    # corpus scorer), which is what this module's docstring has always claimed.
+    assert analyse_readability(dense.body_text).flesch_reading_ease < READABILITY_MIN_FLESCH
     assert "readability_low" in _codes(detect_content(dense, ""))
 
 

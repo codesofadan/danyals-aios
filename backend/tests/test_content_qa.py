@@ -78,6 +78,16 @@ _ANSWER = (
     "done in a day and come with a clear price."
 )
 
+# A draft that is well-formed BY THE DOCTRINE'S STANDARD, not merely by the old
+# proxies'. It carries a tappable tel: link (local intent converts by phone, and its
+# absence is a G13 ERROR), a licence NUMBER and a dated photo (proving artifacts, so the
+# "40 roofs" and "licensed" claims are not unproven assertions), and a closing ask after
+# the FAQ block.
+#
+# It did NOT carry those until P1B wired the real validators in. It passed anyway,
+# because `_proxy_cta_ux` counted artifacts ("has a CTA, has images") and `_proxy_eeat`
+# scored the SOURCE PACK rather than the draft. A fixture named "well formed" that would
+# fail the doctrine is exactly the kind of thing that makes a green suite meaningless.
 _GOOD_DRAFT = f"""# Roof repair | Acme Roofing
 
 Acme Roofing has helped homeowners keep their roofs sound for years. We fix leaks and replace \
@@ -96,7 +106,10 @@ and the price before we start.
 ## Why choose Acme Roofing
 
 We rebuilt 40 storm-damaged roofs in 2025. Our crew brings 18 years of hands-on work to your \
-home. Clients say we save their homes when storms hit.
+home. Clients say we save their homes when storms hit. Licensed roofing contractor, \
+license #RC-104382.
+
+![Our crew replacing storm-damaged decking in 2025](/img/acme-crew-2025.jpg)
 
 - Rebuilt 40 storm-damaged roofs in 2025
 
@@ -117,6 +130,8 @@ Most repairs are small and quick. We share a clear price before any work begins.
 - [shingle types](/shingle-types)
 
 ## Ready to move forward with roof repair?
+
+[Call us now](tel:+15125550100) for a free estimate, or book your inspection online.
 
 Call us today and we will start with a free look at your roof.
 """
@@ -264,7 +279,15 @@ def _source_pack(
         client_name="Acme Roofing",
         facts={"years_experience": "18", "warranty": "25-year workmanship warranty"},
         services=["Roof repair", "Roof replacement", "Gutter installation"],
-        proof_points=proof if proof is not None else ["Rebuilt 40 storm-damaged roofs in 2025"],
+        # The licence number and the phone are PROOF POINTS the client supplied, not
+        # decoration. They are in the draft, so `fact_grounding` audits them against
+        # this pack - and correctly tanked the dimension when they were added to the
+        # draft alone. A proving artifact still has to be a sourced fact.
+        proof_points=proof if proof is not None else [
+            "Rebuilt 40 storm-damaged roofs in 2025",
+            "Licensed roofing contractor, license #RC-104382",
+            "Dispatch line +15125550100",
+        ],
         testimonials=testimonials if testimonials is not None else ["'They saved our home' - J. Doe"],
         unique_data=unique_data
         if unique_data is not None
@@ -551,3 +574,61 @@ def test_rewrite_guidance_caps_the_number_of_focus_dims() -> None:
     # At most `max_dims` remediation bullets in the "Focus on" block.
     focus_block = guidance.split("Specific issues", 1)[0]
     assert focus_block.count("\n- ") == 4
+
+
+# =========================================================================== #
+# P1B: the dimensions now use REAL validators, not proxies
+# =========================================================================== #
+def test_cta_ux_catches_what_the_proxy_structurally_could_not() -> None:
+    """`_proxy_cta_ux` counted artifacts - has a CTA, has images, has links - so a
+    page whose only ask sits above the reviews and the FAQ scored full marks. The
+    reader who got all the way down is the most qualified visitor on the page, and
+    they arrived at nothing."""
+    top_only = _GOOD_DRAFT.replace(
+        "[Call us now](tel:+15125550100) for a free estimate, or book your inspection online.",
+        "",
+    )
+    top_only = "[Call us now](tel:+15125550100)\n\n" + top_only
+    result = score(_content(draft_md=top_only), _brief(), None, _source_pack())
+    assert result.dimensions["cta_ux"] < 100
+
+
+def test_eeat_now_reads_the_draft_not_just_the_source_pack() -> None:
+    """`_proxy_eeat` scored the SOURCE PACK - "the client supplied proof points, award
+    20 points" - which says nothing about whether the DRAFT shows them. A page can be
+    handed real proof and print none of it."""
+    stripped = _GOOD_DRAFT.replace("Licensed roofing contractor, \\\nlicense #RC-104382.", "")
+    stripped = stripped.replace(
+        "![Our crew replacing storm-damaged decking in 2025](/img/acme-crew-2025.jpg)", ""
+    )
+    with_proof = score(_content(), _brief(), None, _source_pack())
+    without = score(_content(draft_md=stripped), _brief(), None, _source_pack())
+    # Same source pack in both. Only the DRAFT changed.
+    assert without.dimensions["eeat_experience"] <= with_proof.dimensions["eeat_experience"]
+
+
+def test_readability_uses_the_corrected_tokenizer() -> None:
+    """The scoring path must not go back through the legacy `flesch_reading_ease`,
+    which counts bare numerals as one-syllable words and splits sentences inside
+    numbers - on a local page that is every page."""
+    import inspect
+
+    from app.services import content_qa
+
+    body = inspect.getsource(content_qa._score_structure_readability)
+    assert "analyse_readability(" in body
+    assert "flesch_reading_ease(_prose(" not in body
+
+
+def test_the_experience_gate_names_what_the_sme_interview_must_collect() -> None:
+    """The hard-halt payoff: the notes tell the operator which artifacts are missing,
+    so they ask three specific questions instead of running a generic intake."""
+    bare = "# T\n\nWe are licensed and insured, serving Austin since 2009.\n"
+    result = score(
+        _content(draft_md=bare),
+        _brief(),
+        None,
+        _source_pack(proof=[], testimonials=[]),
+    )
+    joined = " ".join(result.notes)
+    assert "SME interview should collect" in joined

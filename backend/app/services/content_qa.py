@@ -62,6 +62,13 @@ from app.services.content_generator import (
     GeneratedContent,
     SourcePack,
 )
+from app.services.content_lint import (
+    LONG_SENTENCE_WORDS,
+    MAX_LONG_RATIO,
+    analyse_readability,
+    evaluate_experience,
+    lint_conversion,
+)
 from app.services.content_research import ResearchBrief
 from app.services.content_schema import ValidationResult
 
@@ -249,7 +256,15 @@ def _syllables(word: str) -> int:
 
 
 def flesch_reading_ease(prose: str) -> float:
-    """The Flesch Reading Ease of ``prose`` (doctrine §11.11 targets ~60-70).
+    """DEPRECATED. Use ``content_lint.analyse_readability`` instead.
+
+    Kept only because it is a published name; nothing in the QA scoring path calls it
+    any more. Its tokenizer counts bare numerals as one-syllable words and splits
+    sentences inside numbers ("555.1234"), both of which make a page read EASIER than
+    it is - which on a local page (NAP data, prices, dimensions) is every page. The
+    corpus implementation is correct on both counts and is now what scores drafts.
+
+    The Flesch Reading Ease of ``prose`` (doctrine §11.11 targets ~60-70).
 
     Higher is easier; ~60-70 is plain, people-first English. Deterministic: word
     tokens, sentence terminators, and vowel-group syllables only - no dependency.
@@ -401,7 +416,13 @@ def _score_structure_readability(content: GeneratedContent) -> tuple[int, list[s
             break
         prev_level = heading.level
 
-    flesch = flesch_reading_ease(_prose(content.draft_md))
+    # P1B: measured by the PORTED corpus scorer, not the local `flesch_reading_ease`.
+    # Same formula, correct tokenizer: the local one counted bare numerals as
+    # one-syllable words (555, 90403, 2026) and split sentences inside numbers
+    # ("555.1234"), both of which make a page read EASIER than it is. On a local page -
+    # NAP data, prices, dimensions - that is every page.
+    measured = analyse_readability(content.draft_md)
+    flesch = measured.flesch_reading_ease
     if 55 <= flesch <= 75:
         readability = 100
     elif 45 <= flesch <= 85:
@@ -412,7 +433,16 @@ def _score_structure_readability(content: GeneratedContent) -> tuple[int, list[s
         readability = 55
         notes.append(f"Flesch reading ease {flesch:.0f} is far from the 60-70 target")
 
-    score = _clamp_score(0.5 * _clamp_score(structure) + 0.5 * readability)
+    # A good Flesch can still hide a wall of long sentences, which is the readability
+    # failure a single average cannot see.
+    if not measured.long_sentences_ok:
+        readability -= 12
+        notes.append(
+            f"{measured.long_ratio:.0%} of sentences run over {LONG_SENTENCE_WORDS} words "
+            f"(cap {MAX_LONG_RATIO:.0%})"
+        )
+
+    score = _clamp_score(0.5 * _clamp_score(structure) + 0.5 * _clamp_score(readability))
     return score, notes
 
 
@@ -587,30 +617,56 @@ def _proxy_intent_match(content: GeneratedContent, brief: ResearchBrief) -> int:
     return _clamp_score(score)
 
 
-def _proxy_eeat(content: GeneratedContent, source_pack: SourcePack) -> int:
-    """Conservative proxy for §11.4: first-hand proof + testimonials + a dedicated
-    Experience block are the E-E-A-T signals; zero first-hand is a hard drop."""
-    score = 60
+def _score_experience(content: GeneratedContent, source_pack: SourcePack) -> tuple[int, list[str]]:
+    """§11.4 measured by the PORTED Experience gate (Law 16).
+
+    Replaces a proxy that scored the SOURCE PACK - "the client supplied proof points,
+    so award 20" - which says nothing about whether the DRAFT shows them. This reads
+    the draft: it separates falsifiable claims ("serving since 2009", "licensed") from
+    proving artifacts (a licence NUMBER, a dated photo, a named person, a citation),
+    and refuses circular proof - a bare prose number is the claim, never its own
+    evidence.
+
+    Signals the CLIENT can back but the page does not print inline are passed in from
+    the source pack, so a legitimate claim is not failed for lack of an inline artifact.
+    """
+    signals: set[str] = set()
     if source_pack.proof_points:
-        score += 20
+        signals.add("count_source")
+        signals.add("founding_date")
     if source_pack.testimonials:
-        score += 10
-    if "why choose" in content.draft_md.lower():
-        score += 10
-    return _clamp_score(score)
+        signals.add("review_source")
+
+    report = evaluate_experience(content.draft_md, proof_signals=frozenset(signals))
+    if report.passed:
+        return 100, []
+
+    score = 100 - 20 * len(report.unproven)
+    notes: list[str] = []
+    if not report.markers:
+        score -= 20
+        notes.append("no proving artifact on the page: Experience is asserted, never shown")
+    for claim in report.unproven[:3]:
+        notes.append(f"unproven {claim.kind.lower().replace('_', ' ')}: {claim.snippet!r}")
+    missing = report.missing_proof_categories()
+    if missing:
+        notes.append("SME interview should collect: " + ", ".join(sorted(missing)))
+    return _clamp_score(score), notes
 
 
-def _proxy_cta_ux(content: GeneratedContent) -> int:
-    """Conservative proxy for §11 people-first UX: a clear CTA + planned media +
-    internal links + a CTA-bearing meta description."""
-    score = 60
-    if _has_cta(content):
-        score += 20
-    if content.images_plan:
-        score += 10
-    if content.internal_links:
-        score += 10
-    return _clamp_score(score)
+def _score_cta_ux(content: GeneratedContent) -> tuple[int, list[str]]:
+    """§11 people-first UX, measured by the PORTED conversion linter (gate G13).
+
+    Replaces a proxy that could only count artifacts - "has a CTA, has images, has
+    links" - and so could not see the failure that actually loses the lead: a reader
+    who got through the reviews AND the FAQ arriving at the bottom of the page with
+    nothing to do. `NO_CTA_AFTER_PROOF_FAQ` catches exactly that, and no count of
+    page elements can.
+    """
+    report = lint_conversion(content.draft_md)
+    score = 100 - 25 * len(report.errors) - 6 * len(report.warnings)
+    notes = [f"{i.code.lower().replace('_', ' ')}" for i in report.errors]
+    return _clamp_score(score), notes
 
 
 def _internal_dup_originality(content: GeneratedContent) -> int:
@@ -664,7 +720,8 @@ def _score_eeat(content: GeneratedContent, source_pack: SourcePack, judge: Judge
     capped low even if a judge is generous."""
     notes: list[str] = []
     if judge is None:
-        score = _proxy_eeat(content, source_pack)
+        score, proxy_notes = _score_experience(content, source_pack)
+        notes.extend(proxy_notes)
     else:
         score = _judge_score(
             judge,
@@ -757,7 +814,7 @@ def score(
     dimensions["intent_match"] = _score_intent_match(content, brief, judge)
     record("eeat_experience", _score_eeat(content, source_pack, judge))
     record("information_gain", _score_information_gain(content, judge))
-    dimensions["cta_ux"] = _proxy_cta_ux(content) if judge is None else _judge_score(
+    dimensions["cta_ux"] = _score_cta_ux(content)[0] if judge is None else _judge_score(
         judge,
         "cta_ux",
         draft=content.draft_md,

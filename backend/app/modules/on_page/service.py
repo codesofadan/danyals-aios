@@ -53,7 +53,8 @@ from app.services.content_generator import (
     PRIMARY_DENSITY_TARGET_MAX,
     PRIMARY_DENSITY_TARGET_MIN,
 )
-from app.services.content_qa import _covered_entities, flesch_reading_ease
+from app.services.content_lint import analyse_readability
+from app.services.content_qa import _covered_entities
 
 # --------------------------------------------------------------------------- #
 # The 2026 thresholds. Every number below is stated ONCE, here.
@@ -735,7 +736,7 @@ def detect_content(
                 )
             )
     if words:
-        flesch = flesch_reading_ease(page.body_text)
+        flesch = analyse_readability(page.body_text).flesch_reading_ease
         if flesch < READABILITY_MIN_FLESCH:
             out.append(
                 _rec(
@@ -965,7 +966,7 @@ def score_page_content(
         structure -= 30.0
     if _first_hierarchy_skip(page.headings) is not None:
         structure -= 15.0
-    flesch = flesch_reading_ease(page.body_text) if page.body_text else 0.0
+    flesch = analyse_readability(page.body_text).flesch_reading_ease if page.body_text else 0.0
     readability = _band(
         flesch, [(55.0, 75.0, 100.0), (45.0, 85.0, 85.0), (35.0, 95.0, 70.0)], 50.0
     )
