@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { roleTemplates, GROUP_COLOR } from "@/lib/data";
+import { roleTemplates, GROUP_COLOR, TEMPLATE_COLOR } from "@/lib/data";
 import type { NewMember } from "./TeamRoster";
 
 const ADJ = ["Solar", "Rapid", "Cobalt", "Lunar", "Amber", "Quartz", "Nimbus", "Vivid", "Onyx", "Cedar", "Zephyr", "Crimson"];
@@ -81,7 +81,11 @@ export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => voi
       email: email.trim(),
       title: tpl ? tpl.label : "Team Member",
       role: tpl ? tpl.role : "Specialist",
-      color: tpl ? tpl.color : GROUP_COLOR.Analytics,
+      // From TEMPLATE_COLOR, not `tpl.color`: the template catalogue is moving to
+      // `GET /rbac/templates`, whose response carries no colour. Reading it here
+      // keeps the avatar accent correct across that swap instead of falling through
+      // to provisioning's legacy-violet default.
+      color: (tpl && TEMPLATE_COLOR[tpl.key]) || GROUP_COLOR.Analytics,
       template: tpl ? tpl.label : "Custom",
       features: tpl ? [...tpl.grants] : [],
       username, // one-time credentials so they can sign into the portal
@@ -156,7 +160,7 @@ export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => voi
           {step === 2 && (
             <div className="wiz-body">
               <div className="cred-hero">
-                <span className="av" style={{ background: tpl ? tpl.color : GROUP_COLOR.Analytics }}>
+                <span className="av" style={{ background: (tpl && TEMPLATE_COLOR[tpl.key]) || GROUP_COLOR.Analytics }}>
                   {name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
                 </span>
                 <div>

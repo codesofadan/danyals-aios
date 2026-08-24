@@ -74,7 +74,12 @@ export function useActivity() {
 // exposes no endpoint to persist a change (Owner is all-on and locked; the matrix is
 // versioned platform code, not per-tenant state). We fold it into the
 // Record<TeamRole, PermKey[]> shape the AccessControl grid renders from.
-type RoleView = { role: TeamRole; desc: string; color: string; permissions: PermKey[] };
+// Mirrors GET /rbac/roles. `color` was REMOVED from the backend contract: it is a
+// theme token with no server-side reader, and it was the field that had actually
+// drifted (9 of 10 role colours differed from the dashboard's palette). Declaring
+// it here would be a false written claim about the contract — and `api.get<T>` is an
+// unchecked cast, so nothing would have caught it.
+type RoleView = { role: TeamRole; desc: string; permissions: PermKey[] };
 
 export function useRbac() {
   return useQuery({
