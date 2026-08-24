@@ -228,6 +228,29 @@ def test_the_portal_guard_actually_scans_something() -> None:
 # (a `.ts` file, a migration, another module's source), its module must actually READ
 # something. Comparing hand-copied literals is not pinning; it is a second copy of the
 # thing that drifts, wearing the name of a guard.
+# TWO LIMITS OF THIS DETECTOR, STATED RATHER THAN GLOSSED. Both came from a sibling
+# session's mutation run, where nine agents were told to refute its equivalent guard.
+#
+# LIMIT A - IT IS KEYED ON A NAME, AND NAMES ARE THE CHEAPEST THING TO EDIT. A test that
+# stops *claiming* parity stops being detected, whether or not it stops *needing* to
+# claim it. Renaming `test_mask_secret_matches_frontend` to
+# `test_mask_secret_is_documented_behaviour`, body untouched, removes it from this sweep
+# entirely. The staleness test below now refuses to read that as a discharge, which is
+# the containment; the detection gap itself is real and remains. The sibling's answer to
+# the same problem in its own guard was to key on CONTENT rather than name - flagging any
+# constant holding >= 3 known feature keys under any identifier. There is no equally
+# clean content signature for "compares hand-copied literals", so this stays name-keyed
+# and honest about it.
+#
+# LIMIT B - A CONSISTENCY GATE IS NOT A CORRECTNESS GATE. Every entry discharged by
+# writing a real cross-artifact reader answers "do the two copies agree?" and NOT "are
+# they right?". The sibling proved this is not academic: an adversary granted the Content
+# Creator template `key_vault` - the feature whose own description reads "Super Admin
+# only" - in BOTH files at once, keeping the count at five. Forty-seven tests passed,
+# including its single-source gate, which is *supposed* to pass, because the copies
+# agreed. So when one of these entries is discharged, ask the second question too: what
+# anchors this value to something independent of both copies?
+
 _SYNC_CLAIM_RE = re.compile(r"match|mirror|in_sync|sync|pins?\b|parity|agree", re.I)
 _NAMED_ARTIFACT_RE = re.compile(
     r"frontend|_ts\b|\.ts\b|migration|portal\.ts|tools\.ts|data\.ts|db_enums?", re.I
@@ -347,14 +370,62 @@ def test_no_new_test_claims_a_sync_it_does_not_check() -> None:
     )
 
 
+def _test_still_exists(entry: str) -> bool:
+    """Does the exact test named by a debt entry still exist under that name?"""
+    rel, _, name = entry.partition("::")
+    path = _TESTS_DIR.parent / rel
+    if not path.exists():
+        return False
+    return any(
+        isinstance(n, ast.FunctionDef) and n.name == name
+        for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+    )
+
+
 def test_the_unchecked_sync_debt_only_shrinks() -> None:
-    """A listed test that now reads its artefact must be removed from the list, so the
-    debt cannot quietly stay 'paid' on paper while the entry lingers."""
-    still_unchecked = set(_unchecked_sync_claims())
-    fixed = sorted(_UNCHECKED_SYNC_CLAIMS - still_unchecked)
-    assert not fixed, (
-        "These now genuinely check what they claim - delete them from "
-        f"_UNCHECKED_SYNC_CLAIMS: {fixed}"
+    """An entry may leave this list for exactly ONE reason: the test now reads what it
+    claims. Any other reason is the list being edited to make a build green.
+
+    THIS TEST WAS WRONG UNTIL 2026-08-24, and its wrongness was the species it exists to
+    catch. It computed `listed - still_detected` and reported the difference as *"these
+    now genuinely check what they claim"*. But a test drops out of detection for TWO
+    reasons, and it could not tell them apart:
+
+      * it now reaches a read                  -> genuinely discharged
+      * it was RENAMED out of the name regex   -> claim hidden, body untouched
+
+    Renaming `test_mask_secret_matches_frontend` to
+    `test_mask_secret_is_documented_behaviour`, changing nothing else, made this test
+    announce the debt was discharged AND instruct the engineer to delete the entry. A
+    guard asserting a guarantee it had not verified - exactly what guard 4 was written
+    to find, living inside guard 4.
+
+    Prompted by a sibling session's mutation run, which found the same shape in its own
+    non-vacuity proof: *a guard anchored to the artefact it guards decays as that
+    artefact changes, and the pressure is always to edit the anchor.* The anchor here is
+    a list of test NAMES, and names are the cheapest thing in the file to edit.
+    """
+    still_detected = set(_unchecked_sync_claims())
+    left_the_list = _UNCHECKED_SYNC_CLAIMS - still_detected
+
+    discharged = sorted(e for e in left_the_list if _test_still_exists(e))
+    vanished = sorted(e for e in left_the_list if not _test_still_exists(e))
+
+    assert not vanished, (
+        "Debt entr(ies) no longer detected because the test was RENAMED OR DELETED, not "
+        "because it was fixed:\n  "
+        + "\n  ".join(vanished)
+        + "\n\nA rename discharges nothing - the hand-copied comparison is still there, "
+        "just no longer advertising itself. If the claim was genuinely dropped (the test "
+        "no longer promises parity) say so in the entry and remove it deliberately. If "
+        "the test was rewritten to read the artefact, confirm that and remove it. Do NOT "
+        "delete the entry merely to make this green: THAT is the failure mode this guard "
+        "exists to prevent, and it would be the third time this repository has shipped a "
+        "guarantee nobody checked."
+    )
+    assert not discharged, (
+        "These now reach a real read and are genuinely discharged - delete them from "
+        f"_UNCHECKED_SYNC_CLAIMS in the same commit that fixed them: {discharged}"
     )
 
 
