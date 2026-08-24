@@ -1089,3 +1089,108 @@ def test_an_unrecognised_type_is_not_an_error() -> None:
 def test_nested_and_graph_nodes_are_walked() -> None:
     doc = {"@graph": [{"@type": "A", "inner": {"@type": "Person", "name": "n"}}]}
     assert len(list(walk_nodes(doc))) == 2
+
+
+# =========================================================================== #
+# compliance_lint - over-optimisation, thin content, NAP consistency
+# =========================================================================== #
+from app.services.content_lint import extract_schema_nap, lint_compliance  # noqa: E402
+
+_COMPLIANCE_PROBES = [
+    ("empty", "", []),
+    ("no-h1", "## Section\n\n" + "word " * 60, []),
+    ("two-h1", "# One\n\ntext\n\n# Two\n\ntext", []),
+    ("dupe-heading", "# T\n\n## A\n\nx\n\n## A\n\ny", []),
+    ("thin-section", "# T\n\n## Short\n\nonly three words\n", []),
+    ("em-dash", "# T\n\nA sentence — with a dash.\n", []),
+    ("stuffed", "# T\n\n" + "roof repair austin " * 30, ["roof repair austin"]),
+    ("over-exact-heading",
+     "# roof repair austin\n\n## roof repair austin cost\n\nx\n\n## roof repair austin time\n\ny",
+     ["roof repair austin"]),
+    ("missing-target", "# T\n\nUnrelated prose entirely.\n", ["roof repair austin"]),
+]
+
+
+@pytest.fixture(scope="module")
+def original_compliance():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import compliance_lint
+
+        return compliance_lint
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize(
+    "label,text,keywords", _COMPLIANCE_PROBES, ids=[p[0] for p in _COMPLIANCE_PROBES]
+)
+def test_compliance_port_matches_the_original(label, text, keywords, original_compliance) -> None:
+    theirs = original_compliance.lint(text, keywords=keywords)
+    mine = lint_compliance(text, keywords=keywords)
+    assert [(i.severity, i.code, i.line) for i in mine.issues] == [
+        (sev, code, line) for sev, code, line, _msg in theirs
+    ]
+
+
+@pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.parent.name)
+def test_compliance_port_matches_on_the_corpus_samples(page, original_compliance) -> None:
+    text = page.read_text()
+    theirs = original_compliance.lint(text)
+    mine = lint_compliance(text)
+    assert [(i.severity, i.code, i.line) for i in mine.issues] == [
+        (sev, code, line) for sev, code, line, _m in theirs
+    ]
+
+
+def test_schema_nap_check_matches_the_original(tmp_path, original_compliance) -> None:
+    """The port takes PARSED schema; the original reads a path. Same verdicts."""
+    schema = {
+        "@type": "Plumber", "name": "Valley Air", "telephone": "(555) 123-4567",
+        "address": {"streetAddress": "12 Main St", "addressLocality": "San Jose",
+                    "addressRegion": "CA", "postalCode": "95112"},
+    }
+    page = "# T\n\nmeta title: x\ndescription: y\n\nValley Air, 12 Main St, San Jose CA 95112.\n"
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(schema))
+
+    theirs: list = []
+    original_compliance.check_schema_nap(page, str(path), theirs)
+    mine = lint_compliance(page, schema=schema)
+    nap_issues = [i for i in mine.issues if i.code.startswith("SCHEMA_")]
+    assert [(i.severity, i.code) for i in nap_issues] == [(sev, code) for sev, code, _l, _m in theirs]
+
+
+def test_schema_that_disagrees_with_the_page_is_an_error() -> None:
+    """Schema contradicting the visible copy is worse than absent schema: it asserts a
+    second, competing identity for the same business."""
+    schema = {"@type": "Plumber", "name": "Valley Air", "telephone": "555-000-0000",
+              "address": {"addressLocality": "Oakland"}}
+    page = "# T\n\ntitle: a\ndescription: b\n\nValley Air in San Jose.\n"
+    codes = {i.code for i in lint_compliance(page, schema=schema).errors}
+    assert "SCHEMA_NAP_MISMATCH" in codes
+
+
+def test_a_phone_formatting_difference_is_a_warning_not_an_error() -> None:
+    """"(555) 123-4567" vs "+1-555-123-4567" is a display choice, not a different
+    business. Treating it as a hard failure trains operators to ignore the check."""
+    schema = {"@type": "Plumber", "name": "Valley Air", "telephone": "(555) 123-4567"}
+    page = "# T\n\ntitle: a\ndescription: b\n\nValley Air on +1-555-123-4567.\n"
+    r = lint_compliance(page, schema=schema)
+    assert any(i.code == "SCHEMA_NAP_FORMAT" for i in r.warnings)
+    assert not any(i.code == "SCHEMA_NAP_MISMATCH" for i in r.errors)
+
+
+def test_a_page_of_stubs_is_flagged_even_when_the_total_word_count_looks_fine() -> None:
+    """Thin SECTIONS are the scaled-low-value signature; a healthy total hides it."""
+    text = "# T\n\ntitle: a\ndescription: b\n\n" + "".join(
+        f"## Section {i}\n\nonly a handful of words here\n\n" for i in range(8)
+    )
+    assert len(text.split()) > 60
+    assert sum(1 for i in lint_compliance(text).issues if i.code == "THIN_SECTION") == 8
+
+
+def test_extract_schema_nap_picks_the_business_node() -> None:
+    doc = {"@graph": [{"@type": "WebPage", "name": "A page"},
+                      {"@type": "Plumber", "name": "Valley Air", "telephone": "1"}]}
+    assert extract_schema_nap(doc)["name"] == "Valley Air"
