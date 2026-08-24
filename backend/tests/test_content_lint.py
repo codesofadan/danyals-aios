@@ -1272,3 +1272,91 @@ def test_a_blank_canonical_field_is_skipped_not_failed() -> None:
     page for a field they deliberately do not publish."""
     partial = CanonicalNap(name="Valley Air", phone="+1-512-555-0100")
     assert check_nap("Valley Air on +1-512-555-0100.", partial).exact
+
+
+# =========================================================================== #
+# voice_fingerprint - measurable idiolect, with a slop guardrail
+# =========================================================================== #
+from app.services.content_lint import fingerprint_voice, is_imperative  # noqa: E402
+
+_VOICE_CORPUS_PROBES = [
+    "",
+    "Short. A somewhat longer sentence follows it here. Then another short one.",
+    "Call us today. Book your estimate. Get my free inspection now.",
+    "Is this worth it? Do you need a permit? What does it cost?",
+    ("We are your trusted partner offering seamless solutions and peace of mind. "
+     "Our dedicated professionals are committed to providing world class quality. "
+     "We pride ourselves on customer satisfaction and exceed your expectations."),
+    "We'll be there. You're covered. Don't wait, it's simple.",
+]
+
+
+@pytest.fixture(scope="module")
+def original_voice():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import voice_fingerprint
+
+        return voice_fingerprint
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("text", _VOICE_CORPUS_PROBES)
+def test_voice_port_matches_the_original(text: str, original_voice) -> None:
+    theirs = original_voice.analyse(text)
+    mine = fingerprint_voice(text)
+
+    for field in (
+        "sentences", "words", "avg_sentence_len", "sentence_len_variance",
+        "sentence_len_stdev", "min_sentence_len", "max_sentence_len",
+        "short_sentences", "medium_sentences", "long_sentences",
+        "syllables_per_word", "contraction_rate_per_100w", "question_rate",
+        "imperative_rate", "filler_ratio", "filler_word_hits", "filler_phrase_hits",
+    ):
+        assert getattr(mine, field) == pytest.approx(theirs[field]), field
+    for n, attr in ((1, "distinctive_unigrams"), (2, "distinctive_bigrams"), (3, "distinctive_trigrams")):
+        assert [list(g) for g in getattr(mine, attr)] == [list(g) for g in theirs[f"distinctive_{['uni','bi','tri'][n-1]}grams"]]
+
+
+@pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.parent.name)
+def test_voice_port_matches_on_the_corpus_samples(page, original_voice) -> None:
+    text = page.read_text()
+    theirs, mine = original_voice.analyse(text), fingerprint_voice(text)
+    assert mine.filler_ratio == pytest.approx(theirs["filler_ratio"])
+    assert mine.sentence_len_stdev == pytest.approx(theirs["sentence_len_stdev"])
+    assert [list(g) for g in mine.distinctive_bigrams] == [list(g) for g in theirs["distinctive_bigrams"]]
+
+
+# --- the guardrail: refuse to learn a voice from slop ----------------------- #
+def test_a_generic_source_is_flagged_as_unlearnable() -> None:
+    """The clever part. A client site can itself be generic, and a naive tool would
+    faithfully learn "trusted partner" and reproduce it forever. A high filler ratio
+    means the source must not be learned from at all."""
+    slop = fingerprint_voice(_VOICE_CORPUS_PROBES[4])
+    assert slop.filler_ratio > slop.max_filler_ratio
+    assert not slop.learnable
+
+
+def test_filler_never_surfaces_as_a_characteristic_phrase() -> None:
+    """Belt and braces: even below the ratio threshold, a filler gram is excluded from
+    the distinctive ranking, so slop cannot be adopted as "how this client sounds"."""
+    f = fingerprint_voice(
+        "We fix roofs in Round Rock. We fix roofs in Round Rock fast. "
+        "Peace of mind matters. Peace of mind matters here. We fix roofs in Round Rock."
+    )
+    phrases = {g[0] for g in f.distinctive_bigrams + f.distinctive_trigrams}
+    assert "peace of mind" not in phrases
+    assert any("round rock" in p for p in phrases)
+
+
+def test_flat_sentence_variance_is_the_machine_tell() -> None:
+    """Human writing is bursty. This quantifies it rather than asserting it."""
+    flat = fingerprint_voice("We fix roofs today. We fix pipes today. We fix vents today. " * 4)
+    assert not flat.is_bursty
+
+
+def test_imperative_detection_ignores_questions() -> None:
+    assert is_imperative("Call us before 4pm.")
+    assert not is_imperative("Call us before 4pm?")
+    assert not is_imperative("The roof was replaced.")
