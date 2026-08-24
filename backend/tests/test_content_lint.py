@@ -1360,3 +1360,95 @@ def test_imperative_detection_ignores_questions() -> None:
     assert is_imperative("Call us before 4pm.")
     assert not is_imperative("Call us before 4pm?")
     assert not is_imperative("The roof was replaced.")
+
+
+# =========================================================================== #
+# topical_map_lint - the evidence gate on node promotion
+# =========================================================================== #
+from app.services.content_lint import (  # noqa: E402
+    MapNode,
+    lint_topical_map,
+    normalize_status,
+)
+from app.services.content_lint.topical_map import is_placeholder  # noqa: E402
+
+_PLACEHOLDER_PROBES = [
+    "", "  ", "-", "--", "TBD", "n/a", "None", "todo", "...", "xxx", "?",
+    "<the un-copyable specific>", "<a> , <b>", "`TBD`",
+    "index-only | page", "page (page only if evidence is real)",
+    "1,284 emergency calls logged in 2025",       # real
+    "our 47-minute average arrival",              # real
+]
+
+_STATUS_PROBES = ["page", "index-only", "index only", "Page", "<index-only | page>", "", "weird"]
+
+
+@pytest.fixture(scope="module")
+def original_map():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import topical_map_lint
+
+        return topical_map_lint
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("value", _PLACEHOLDER_PROBES)
+def test_placeholder_detection_matches_the_original(value: str, original_map) -> None:
+    """Carried over verbatim: its exact behaviour is the difference between catching
+    an unbacked promotion and waving through "TBD"."""
+    assert is_placeholder(value) == original_map.is_placeholder(value)
+
+
+@pytest.mark.parametrize("value", _STATUS_PROBES)
+def test_status_normalisation_matches_the_original(value: str, original_map) -> None:
+    assert normalize_status(value) == original_map.normalize_status(value)
+
+
+def test_a_page_node_without_real_evidence_is_an_unbacked_promotion() -> None:
+    """The rule the whole map rests on: a node becomes a PAGE only when it carries a
+    first-party specific that makes it un-copyable."""
+    r = lint_topical_map([MapNode("n1", "page", "<the un-copyable specific>", "TBD")])
+    codes = {i.code for i in r.errors}
+    assert codes == {"UNBACKED_PROMOTION", "MISSING_THESIS"}
+
+
+def test_an_index_only_node_is_exempt_by_definition() -> None:
+    """It is coverage the site has deliberately not spent a page on. Gating it would
+    force either a fabricated specific or a shrunken map."""
+    assert lint_topical_map([MapNode("n1", "index-only")]).passed
+
+
+def test_evidence_that_matches_nothing_the_client_has_is_warned_not_failed() -> None:
+    """How invented specifics enter a map and look rigorous. A WARN rather than an
+    ERROR because a real fact can legitimately be phrased in words the fact list does
+    not contain - so this prompts a check, it does not overrule the operator."""
+    r = lint_topical_map(
+        [MapNode("n1", "page", "certified by the Martian Standards Board", "a real thesis here")],
+        client_facts=["1,284 emergency calls in 2025", "47 minutes average arrival"],
+    )
+    assert r.passed                                   # not an error
+    assert [i.code for i in r.warnings] == ["EVIDENCE_UNGROUNDED"]
+
+
+def test_grounded_evidence_passes_cleanly() -> None:
+    r = lint_topical_map(
+        [MapNode("n1", "page", "1,284 emergency calls logged in 2025", "our 47-minute arrival")],
+        client_facts=["1,284 emergency calls in 2025", "47 minutes average arrival"],
+    )
+    assert r.passed and not r.warnings
+
+
+def test_it_reports_no_score_only_presence() -> None:
+    """Protocol trap #2 forbids scoring the map. A score invites optimising toward the
+    score, which is how a map ends up with 200 thin pages and a healthy number."""
+    r = lint_topical_map([MapNode("n1", "page", "real evidence here", "real thesis here")])
+    assert not hasattr(r, "score")
+    assert not hasattr(r, "coverage")
+    assert set(vars(r)) == {"issues", "page_nodes", "index_nodes"}
+
+
+def test_duplicate_node_ids_are_caught() -> None:
+    r = lint_topical_map([MapNode("n1", "index-only"), MapNode("n1", "index-only")])
+    assert [i.code for i in r.errors] == ["DUPLICATE_NODE"]
