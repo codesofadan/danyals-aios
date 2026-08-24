@@ -280,6 +280,35 @@ _READ_CALLS: frozenset[str] = frozenset({
 # THIS LIST MAY ONLY SHRINK. A new entry fails the build; removing one means the test now
 # genuinely reads what it claims to. A guard introduced already-failing teaches people to
 # ignore it, so it is introduced passing, with the debt named.
+# DISCHARGED 2026-08-24, and the reasoning is here rather than in a merge commit
+# because a list whose entries can leave silently is not a debt register:
+#
+#   tests/test_rbac_matrix.py::test_default_role_perms_match_frontend
+#   tests/test_rbac_matrix.py::test_templates_match_frontend_and_super_is_all_features
+#
+# Both were RENAMED (to `..._are_the_documented_grants` and `..._are_well_formed_...`),
+# and a rename alone discharges nothing - it hides the claim, leaving the hand-copied
+# comparison in place. That is precisely why the staleness test below refuses to read a
+# rename as a fix. These two were removed only after checking the discharge directly:
+#
+#   * both old names are gone, and neither replacement claims parity with anything;
+#   * `tests/test_rbac_single_source.py` now does what the old names promised - it reads
+#     `frontend/lib/data.ts` through a recursive-descent reader that RAISES on anything
+#     it cannot parse rather than degrading to a skip, and compares BY VALUE
+#     (`test_the_dashboard_holds_no_catalogue_that_disagrees_with_the_backend`), with a
+#     parametrised proof that the comparison catches every drift it is shown;
+#   * it also closes the rename dodge on its own side, keying on CONTENT rather than
+#     identifier (`test_no_catalogue_copy_hides_under_another_name`,
+#     `test_the_structural_check_catches_a_renamed_copy`).
+#
+# That is a stronger discharge than this list required - the list only asks that a false
+# claim stop being made, which the rename alone would have satisfied.
+#
+# THE RULE THIS LEAVES BEHIND, from the session that found it: a guard that goes red and
+# annoys someone is recoverable; A GUARD THAT GOES GREEN AND THANKS THEM IS NOT, because
+# it removes the only signal that would have prompted a look. This file shipped that
+# second failure once (see the staleness test's docstring) and it is the thing to watch
+# for here first.
 _UNCHECKED_SYNC_CLAIMS: frozenset[str] = frozenset({
     "tests/modules/client_onboarding/test_schemas.py::test_status_tuples_match_the_migration_enums",
     # The two below became visible only when reachability moved from per-module to
@@ -287,8 +316,6 @@ _UNCHECKED_SYNC_CLAIMS: frozenset[str] = frozenset({
     "tests/modules/client_onboarding/test_vault.py::test_the_masked_list_response_shape_is_unchanged_by_kind",
     "tests/test_policy.py::test_python_literal_unions_match_policy_ts",
     "tests/modules/rank_tracker/test_service.py::test_workspace_primary_and_bullets_match_tools_ts",
-    "tests/test_rbac_matrix.py::test_default_role_perms_match_frontend",
-    "tests/test_rbac_matrix.py::test_templates_match_frontend_and_super_is_all_features",
     "tests/test_reports.py::test_report_types_mirror_the_frontend_catalogue",
     "tests/test_tasks_schema.py::test_next_status_mirrors_portal_ts",
     "tests/test_vault.py::test_mask_secret_matches_frontend",
