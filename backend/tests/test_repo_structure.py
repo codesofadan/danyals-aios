@@ -16,6 +16,7 @@ been forgotten is the first one somebody deletes to make a build go green.
 
 from __future__ import annotations
 
+import ast
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -231,9 +232,22 @@ _SYNC_CLAIM_RE = re.compile(r"match|mirror|in_sync|sync|pins?\b|parity|agree", r
 _NAMED_ARTIFACT_RE = re.compile(
     r"frontend|_ts\b|\.ts\b|migration|portal\.ts|tools\.ts|data\.ts|db_enums?", re.I
 )
-_READS_SOMETHING_RE = re.compile(
-    r"read_text|read_bytes|\bopen\(|iterdir|rglob|\bglob\(|subprocess|importlib"
-)
+# Reachability is computed PER TEST, not per module, and this is the second version.
+#
+# The first cleared a whole module the moment that module read any file. A sibling
+# session named the blind spot immediately: a module holding one real reader AND one
+# hand-copied claim passes on the reader's account. That is not hypothetical - it hid
+# `test_policy.py::test_python_literal_unions_match_policy_ts`, whose name claims parity
+# with `policy.ts` while it compares against `_EXPECTED_ENUMS`, a hand-typed Python
+# constant, in a module that reads a file exactly once somewhere else.
+#
+# The question that matters is not "does this FILE read the artefact" but "does THIS
+# ASSERTION read it" - and those come apart at exactly the granularity this list works
+# at. So: walk the call graph from each test, through the module's own helpers, and ask
+# whether any node performs a read.
+_READ_CALLS: frozenset[str] = frozenset({
+    "read_text", "read_bytes", "open", "iterdir", "rglob", "glob", "run", "check_output",
+})
 
 # The seven that existed when this guard was written. Each is REAL - every one compares
 # hand-copied literals while its name advertises parity with a file it never opens. They
@@ -245,6 +259,10 @@ _READS_SOMETHING_RE = re.compile(
 # ignore it, so it is introduced passing, with the debt named.
 _UNCHECKED_SYNC_CLAIMS: frozenset[str] = frozenset({
     "tests/modules/client_onboarding/test_schemas.py::test_status_tuples_match_the_migration_enums",
+    # The two below became visible only when reachability moved from per-module to
+    # per-test; both sit in modules that read a file somewhere else.
+    "tests/modules/client_onboarding/test_vault.py::test_the_masked_list_response_shape_is_unchanged_by_kind",
+    "tests/test_policy.py::test_python_literal_unions_match_policy_ts",
     "tests/modules/rank_tracker/test_service.py::test_workspace_primary_and_bullets_match_tools_ts",
     "tests/test_rbac_matrix.py::test_default_role_perms_match_frontend",
     "tests/test_rbac_matrix.py::test_templates_match_frontend_and_super_is_all_features",
@@ -256,21 +274,63 @@ _UNCHECKED_SYNC_CLAIMS: frozenset[str] = frozenset({
 _TESTS_DIR = Path(__file__).resolve().parent
 
 
-def _unchecked_sync_claims() -> list[str]:
-    import ast
+def _called_names(fn: ast.FunctionDef) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            f = node.func
+            names.add(f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", ""))
+    return names
 
+
+def _reads_directly(fn: ast.FunctionDef) -> bool:
+    return bool(_called_names(fn) & _READ_CALLS)
+
+
+def _reaches_a_read(
+    fns: dict[str, ast.FunctionDef], name: str, seen: frozenset[str] = frozenset()
+) -> bool:
+    """Does ``name``, or anything it calls within its own module, perform a read?
+
+    Takes ``fns`` as a parameter rather than closing over it: a nested function that
+    captured the enclosing loop's variable would resolve it at CALL time, not at
+    definition time, so every module would be analysed against the last one scanned.
+    """
+    if name in seen or name not in fns:
+        return False
+    if _reads_directly(fns[name]):
+        return True
+    seen = seen | {name}
+    return any(_reaches_a_read(fns, c, seen) for c in _called_names(fns[name]))
+
+
+def _unchecked_sync_claims() -> list[str]:
     out: list[str] = []
     for path in sorted(_TESTS_DIR.rglob("test_*.py")):
-        src = path.read_text(encoding="utf-8")
-        if _READS_SOMETHING_RE.search(src):
-            continue  # the module reads SOMETHING; give it the benefit of the doubt
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        fns = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+
+        # A read at import time (a module constant built from a file) covers every test
+        # in the module, because the artefact genuinely was consulted.
+        module_level_read = any(
+            isinstance(c, ast.Call)
+            and (getattr(c.func, "attr", None) in _READ_CALLS
+                 or getattr(c.func, "id", None) in _READ_CALLS)
+            for stmt in tree.body
+            if not isinstance(stmt, ast.FunctionDef | ast.ClassDef)
+            for c in ast.walk(stmt)
+        )
+
         rel = path.relative_to(_TESTS_DIR.parent).as_posix()
-        for node in ast.walk(ast.parse(src)):
-            if not (isinstance(node, ast.FunctionDef) and node.name.startswith("test_")):
+        for name, fn in fns.items():
+            if not name.startswith("test_"):
                 continue
-            blob = f"{node.name} {ast.get_docstring(node) or ''}"
-            if _SYNC_CLAIM_RE.search(blob) and _NAMED_ARTIFACT_RE.search(blob):
-                out.append(f"{rel}::{node.name}")
+            blob = f"{name} {ast.get_docstring(fn) or ''}"
+            if not (_SYNC_CLAIM_RE.search(blob) and _NAMED_ARTIFACT_RE.search(blob)):
+                continue
+            if module_level_read or _reaches_a_read(fns, name):
+                continue
+            out.append(f"{rel}::{name}")
     return out
 
 
@@ -278,7 +338,8 @@ def test_no_new_test_claims_a_sync_it_does_not_check() -> None:
     new = sorted(set(_unchecked_sync_claims()) - _UNCHECKED_SYNC_CLAIMS)
     assert not new, (
         "Test(s) whose name or docstring claims parity with a named external artefact, "
-        "in a module that never reads a file:\n  "
+        "but which never reach a file read - not directly, and not through any helper "
+        "they call:\n  "
         + "\n  ".join(new)
         + "\n\nHand-copied literals are not a pin - they are a second copy of the thing "
         "that drifts, wearing the name of a guard. Either READ the artefact and compare, "
@@ -294,4 +355,70 @@ def test_the_unchecked_sync_debt_only_shrinks() -> None:
     assert not fixed, (
         "These now genuinely check what they claim - delete them from "
         f"_UNCHECKED_SYNC_CLAIMS: {fixed}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 5 · A coverage list may not shrink behind a floor
+# --------------------------------------------------------------------------- #
+# Prevented defect, and the honest limit of guard 4.
+#
+# `tests/test_contract_lock.py` is the shape guard 4 CANNOT see. It genuinely reads
+# `frontend/lib/*.ts` - `_ts_field_names()` opens the file and parses it - so every test
+# in it reaches a real read and guard 4 clears them all, correctly by its own rule. The
+# problem is elsewhere, in two places:
+#
+#   1. `_model_emitted_keys()` returns a set of FIELD NAMES. So the lock compares names,
+#      never values. A `RoleView` whose `desc` differs completely from the TypeScript
+#      passes. This is exactly how nine colour drifts and an icon drift survived in
+#      `matrix.py` vs `data.ts`: even had `RoleView` been listed, it would not have been
+#      caught. (`_ENUM_CONTRACT` is the honest half - it exists because "names matching
+#      isn't enough" and does compare `Literal` values against TS unions.)
+#   2. `test_contract_lock_covers_the_core_response_models` guards the list with
+#      `assert len(_CONTRACT) >= 10`, and `_CONTRACT` holds 33. **Twenty-three models
+#      could be deleted from the list and the floor would still pass.**
+#
+# (1) is a semantic gap no structural guard closes - a name-lock is a legitimate check,
+# and "compares the wrong thing" is not detectable from shape. (2) IS mechanical, and it
+# is the half that makes (1) dangerous: a low floor means coverage can quietly retreat,
+# so a reader who greps the file concludes far more protection than exists.
+#
+# This pins the sizes. Growing a list is fine and expected; SHRINKING one must be
+# deliberate and visible in a diff, not absorbed by slack.
+_CONTRACT_SIZES: dict[str, int] = {
+    "_CONTRACT": 33,       # model <-> TS type pairs, field NAMES only
+    "_ENUM_CONTRACT": 28,  # Literal <-> TS union pairs, compared BY VALUE
+}
+
+
+def test_the_contract_lock_coverage_lists_do_not_shrink() -> None:
+    import tests.test_contract_lock as lock
+
+    shrunk = {
+        name: (expected, len(getattr(lock, name)))
+        for name, expected in _CONTRACT_SIZES.items()
+        if len(getattr(lock, name)) < expected
+    }
+    assert not shrunk, (
+        "A contract-lock coverage list has shrunk:\n  "
+        + "\n  ".join(f"{n}: was {was}, now {now}" for n, (was, now) in sorted(shrunk.items()))
+        + "\n\nThe list's own floor is `>= 10`, which 33 entries clear with 23 to spare - "
+        "so dropping a model is invisible there. If the removal is intended, lower the "
+        "number here in the same commit so it appears in the diff."
+    )
+
+
+def test_the_pinned_contract_sizes_are_not_stale() -> None:
+    """If a list has GROWN, raise the pin - otherwise the guard silently protects an
+    old, smaller floor and the newest models are unguarded."""
+    import tests.test_contract_lock as lock
+
+    grown = {
+        name: (expected, len(getattr(lock, name)))
+        for name, expected in _CONTRACT_SIZES.items()
+        if len(getattr(lock, name)) > expected
+    }
+    assert not grown, (
+        "Coverage grew - raise the pin so the new entries are protected too:\n  "
+        + "\n  ".join(f"{n}: pinned {was}, actual {now}" for n, (was, now) in sorted(grown.items()))
     )
