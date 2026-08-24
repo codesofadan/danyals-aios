@@ -160,7 +160,9 @@ def _validate_geo(node: dict[str, Any], out: list[SchemaIssue], path: str) -> No
                 out.append(SchemaIssue(path, f"geo missing {coord}"))
                 continue
             try:
-                num = float(val)
+                # `_is_empty` above rules out None, but mypy cannot narrow through it,
+                # and the except already covers a non-numeric value.
+                num = float(val)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 out.append(SchemaIssue(path, f"geo.{coord} is not numeric: {val!r}"))
                 continue
