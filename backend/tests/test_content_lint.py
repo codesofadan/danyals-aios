@@ -1194,3 +1194,81 @@ def test_extract_schema_nap_picks_the_business_node() -> None:
     doc = {"@graph": [{"@type": "WebPage", "name": "A page"},
                       {"@type": "Plumber", "name": "Valley Air", "telephone": "1"}]}
     assert extract_schema_nap(doc)["name"] == "Valley Air"
+
+
+# =========================================================================== #
+# nap_checker - Name / Address / Phone consistency
+# =========================================================================== #
+from app.services.content_lint import (  # noqa: E402
+    CanonicalNap,
+    check_nap,
+    normalise_tokens,
+    same_number,
+)
+
+_NAP = CanonicalNap(name="Valley Air", phone="+1-512-555-0100", street="12 Main Street",
+                    city="San Jose", region="CA", postal="95112")
+_NAP_DICT = {"name": "Valley Air", "phone": "+1-512-555-0100", "street": "12 Main Street",
+             "city": "San Jose", "region": "CA", "postal": "95112"}
+
+_NAP_PROBES = [
+    ("exact", "Valley Air, 12 Main Street, San Jose, CA 95112. Call +1-512-555-0100."),
+    ("abbreviated", "Valley Air, 12 Main St, San Jose, CA 95112. Call (512) 555-0100."),
+    ("wrong-phone", "Valley Air, 12 Main Street, San Jose, CA 95112. Call 999-999-9999."),
+    ("case-variant", "valley air, 12 main street, san jose, ca 95112. +1-512-555-0100"),
+    ("absent", "A page about air conditioning with no business details at all."),
+]
+
+
+@pytest.fixture(scope="module")
+def original_nap():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import nap_checker
+
+        return nap_checker
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("label,text", _NAP_PROBES, ids=[p[0] for p in _NAP_PROBES])
+def test_nap_port_matches_the_original(label, text, original_nap) -> None:
+    theirs = (original_nap.check_name(text, _NAP_DICT["name"])
+              + original_nap.check_phone(text, _NAP_DICT["phone"])
+              + original_nap.check_address(text, _NAP_DICT))
+    mine = check_nap(text, _NAP)
+    assert [(i.field, i.kind) for i in mine.issues] == [(f, k) for f, k, _m in theirs]
+
+
+def test_a_variant_is_not_a_miss() -> None:
+    """The distinction the whole check rests on. "12 Main St" is the right address in
+    a different shape; a miss is the wrong address. Conflating them either buries real
+    misses in noise or lets genuine inconsistencies pass as cosmetic."""
+    r = check_nap("Valley Air, 12 Main St, San Jose, CA 95112. Call (512) 555-0100.", _NAP)
+    assert r.passed          # no misses -> not a failure
+    assert not r.exact       # but not byte-perfect either
+    assert {i.field for i in r.variants} == {"PHONE", "ADDRESS.street"}
+
+
+def test_a_wrong_number_is_a_miss_not_a_variant() -> None:
+    r = check_nap("Valley Air, 12 Main Street, San Jose, CA 95112. Call 999-999-9999.", _NAP)
+    assert not r.passed
+    assert [i.field for i in r.misses] == ["PHONE"]
+
+
+def test_a_country_code_prefix_is_the_same_number() -> None:
+    assert same_number("+1 512 555 0100", "5125550100")
+    assert same_number("(512) 555-0100", "512-555-0100")
+    assert not same_number("5125550100", "5125550101")
+
+
+def test_street_abbreviations_normalise_in_both_directions() -> None:
+    assert normalise_tokens("12 Main St.") == normalise_tokens("12 Main Street")
+    assert normalise_tokens("400 N Ave") == normalise_tokens("400 North Avenue")
+
+
+def test_a_blank_canonical_field_is_skipped_not_failed() -> None:
+    """A client without a public address (a service-area business) must not fail every
+    page for a field they deliberately do not publish."""
+    partial = CanonicalNap(name="Valley Air", phone="+1-512-555-0100")
+    assert check_nap("Valley Air on +1-512-555-0100.", partial).exact
