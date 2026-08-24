@@ -368,3 +368,138 @@ def test_markdown_is_stripped_before_counting() -> None:
 def test_empty_and_blank_keywords_are_skipped_not_counted_as_zero() -> None:
     r = analyse_density("some prose here", ["", "   ", "prose"])
     assert [row.keyword for row in r.rows] == ["prose"]
+
+
+# =========================================================================== #
+# duplication_gate - the anti-doorway / scaled-content gate
+# =========================================================================== #
+import re  # noqa: E402
+
+from app.services.content_lint import (  # noqa: E402
+    compare_documents,
+    jaccard,
+    shingle_hashes,
+    shingle_set,
+)
+
+_DUP_PROBES = [
+    ("identical", "the same words repeated here", "the same words repeated here"),
+    ("disjoint", "alpha beta gamma delta epsilon", "one two three four five six"),
+    ("templated", "We fix roofs in Austin fast and well.", "We fix roofs in Dallas fast and well."),
+    ("short", "tiny", "tiny"),
+    ("empty-one-side", "", "some words here at all"),
+]
+
+
+@pytest.fixture(scope="module")
+def original_duplication():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import duplication_gate
+
+        return duplication_gate
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("label,a,b", _DUP_PROBES, ids=[p[0] for p in _DUP_PROBES])
+def test_duplication_port_matches_the_original(label, a, b, original_duplication) -> None:
+    theirs = original_duplication.jaccard(
+        original_duplication.shingles(original_duplication.tokenize(a), 5),
+        original_duplication.shingles(original_duplication.tokenize(b), 5),
+    )
+    mine = compare_documents({"a": a, "b": b}).pairs[0].similarity
+    assert mine == pytest.approx(theirs)
+
+
+def test_a_single_document_passes_rather_than_erroring() -> None:
+    """The CLI refuses fewer than two files. On the QA path a lone page genuinely has
+    no sibling to duplicate, so it must pass, not raise."""
+    r = compare_documents({"only": "some prose"})
+    assert r.pairs == () and r.passed
+
+
+def test_shingling_is_order_sensitive_unlike_bag_of_words() -> None:
+    """The reason shingles are used at all: reordered text is not duplicate text."""
+    a, b = "alpha beta gamma delta epsilon", "epsilon delta gamma beta alpha"
+    assert jaccard(shingle_set(a), shingle_set(b)) == 0.0
+
+
+def test_hashes_are_stable_across_processes() -> None:
+    """`content_outline_shingles` (P2) indexes these, so they must not depend on
+    PYTHONHASHSEED - the builtin hash() would differ between workers and the index
+    would silently stop matching."""
+    import subprocess
+
+    text = "a stable phrase used to check the digest is reproducible everywhere"
+    code = (
+        "import sys; sys.path.insert(0, '.');"
+        "from app.services.content_lint import shingle_hashes;"
+        f"print(sorted(shingle_hashes({text!r}))[:3])"
+    )
+    runs = {
+        subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True,
+            cwd=str(_BACKEND), env={"PYTHONHASHSEED": seed, "PATH": ""},
+        ).stdout.strip()
+        for seed in ("0", "1", "12345")
+    }
+    assert len(runs) == 1, f"hashes vary with PYTHONHASHSEED: {runs}"
+    assert runs != {""}, "subprocess produced no output"
+
+
+def test_hashes_fit_a_postgres_bigint() -> None:
+    for h in shingle_hashes("some prose to hash into the signed 64 bit range"):
+        assert -(2**63) <= h < 2**63
+
+
+# --- THE FINDING: raw shingling misses the template this platform produces --- #
+def test_the_entity_token_hides_template_duplication_and_must_be_masked() -> None:
+    """P3 DESIGN CONSTRAINT, measured rather than assumed.
+
+    `content_generator._FRAMEWORK_MOVES` is a fixed heading table, so two competing
+    clients in two cities get heading skeletons identical except for the city token.
+    That is the scaled-content fingerprint the platform itself manufactures.
+
+    But shingling those headings RAW does not catch it: the city appears in most
+    headings, so most shingles differ. Measured on real generator output, Austin vs
+    Round Rock scores 58% at w=3 and only 28% at w=5 - both UNDER the 70% ceiling, and
+    getting WORSE as the window grows, which is the opposite of the intuition.
+
+    Masking the target entity first exposes it completely: 100% at both widths.
+
+    So the P3 uniqueness gate must normalise the target query out of the text before
+    shingling. Without this the gate would have shipped, passed its own tests, and
+    silently approved every templated page.
+    """
+    from app.services.content_generator import generate
+    from tests.test_content_generator import FakeWriter, _brief, _context, _source_pack
+
+    def headings_for(city: str) -> tuple[str, str]:
+        result = generate(
+            _brief(keyword=f"roof repair {city}"), _source_pack(), _context(),
+            page_type="service", framework="AIDA", writer=FakeWriter(),
+        )
+        return "\n".join(h.text for h in result.headings), f"roof repair {city}"
+
+    def mask(text: str, primary: str) -> str:
+        out = re.sub(re.escape(primary), "<TARGET>", text, flags=re.I)
+        city = primary.split("repair", 1)[-1].strip()
+        return re.sub(re.escape(city), "<CITY>", out, flags=re.I)
+
+    (head_a, key_a), (head_b, key_b) = headings_for("austin"), headings_for("round rock")
+
+    for width in (3, 5):
+        raw = compare_documents({"a": head_a, "b": head_b}, size=width).pairs[0]
+        assert not raw.duplicate, (
+            f"w={width}: raw shingling scored {raw.similarity:.0%} and DID flag the "
+            "template. If this now passes, the finding is obsolete - delete this test."
+        )
+        masked = compare_documents(
+            {"a": mask(head_a, key_a), "b": mask(head_b, key_b)}, size=width
+        ).pairs[0]
+        assert masked.similarity == pytest.approx(1.0), (
+            f"w={width}: entity-masked skeletons should be identical, got "
+            f"{masked.similarity:.0%}"
+        )
+        assert masked.duplicate
