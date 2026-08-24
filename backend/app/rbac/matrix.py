@@ -1,7 +1,34 @@
-"""Canonical RBAC reference data + enforcement helpers.
+"""The canonical RBAC access model - reference data + enforcement helpers.
 
-Mirrored VERBATIM from ``frontend/lib/data.ts`` so the API and the dashboard
-agree byte-for-byte. Two authoritative datasets are reconciled here:
+**This module is the single source of truth**, and the ONLY copy that any code
+consults. Two things about the dashboard are true today and should not be overstated,
+because overstating them is the exact defect this file was rewritten to remove:
+
+* ``frontend/lib/data.ts`` **still declares its own copy.** It is held identical to
+  this one by ``tests/test_rbac_single_source.py`` until the dashboard is moved onto
+  ``GET /rbac/*``. That move is a separate piece of work.
+* **No caller of ``GET /rbac/*`` exists yet.** All four endpoints are served,
+  authorised and contract-tested with no product consumer: the single HTTP call site,
+  ``useRbac()`` in ``frontend/lib/hooks/team.ts``, is never invoked, and
+  ``AccessControl`` - the component it feeds - is never rendered.
+
+It used to say it was "mirrored VERBATIM from ``frontend/lib/data.ts``". That was
+false, and had been for some time: on 2026-08-24 a field-by-field comparison of the
+two files found **14 differences** - nine colours (this file still carried the
+pre-Avant-Garde palette), one feature icon (``client_setup``), and four descriptions
+where an em dash had been transcribed as a hyphen. None of it reached enforcement,
+because the drift landed entirely in presentation; the permission keys, the 8x6
+grant matrix, the feature keys and the template grants all still agreed. That is the
+warning, not the reassurance - the half that bites was one edit away.
+
+The drift survived because nothing compared the two files. ``test_rbac_matrix.py``
+claimed to "pin the reference data to ``frontend/lib/data.ts``" while re-typing the
+expected values as Python literals, so it tested Python against Python;
+``test_contract_lock.py`` reads the TS but compares field NAMES only, and listed
+none of the RBAC models. Three hand-written copies, no comparison between any two.
+``tests/test_rbac_single_source.py`` is the gate that now does the comparison.
+
+Two authoritative datasets live here:
 
 * **8 permissions x 6 governance roles** (``DEFAULT_ROLE_PERMS``) - the coarse
   matrix the Team screen renders and the vocabulary shared-base routes enforce
@@ -15,6 +42,23 @@ agree byte-for-byte. Two authoritative datasets are reconciled here:
 
 Owner (agency super-admin) is implicitly all-on and locked: every ``role_has_*``
 and ``*_allows`` check short-circuits to allow for ``owner``.
+
+**Colour is deliberately absent.** A role's and a template's accent colour is a theme
+token owned by ``frontend/lib/data.ts`` (``SERIES``), and no Python here ever read one
+- the only reader was ``routers/rbac.py`` copying it onto a response field the
+dashboard discards. Nine of the fourteen drifts above were that field. It is not
+reconciled; it is removed, so *this catalogue's* drift surface goes with it. What this
+module owns is anything with product meaning - keys, groups, grants, labels,
+descriptions, icons.
+
+Note the narrow scope of that claim. The pre-Avant-Garde palette is **not** gone from
+the backend: the same hex literals remain hardcoded in roughly a dozen places under
+``app/`` (``schemas/identity.py``, ``schemas/clients.py``, ``schemas/tiers.py``,
+``services/provisioning.py`` and others), several of which are served to the dashboard.
+``#7B69EE`` - the value deleted from ``ROLE_META.owner`` here - is still the
+``avatar_color`` default a newly provisioned member is written to the database with.
+Removing colour from THIS catalogue does not make the backend palette-free, and the
+guard in ``tests/test_rbac_single_source.py`` will report green over all of it.
 """
 
 from __future__ import annotations
@@ -28,8 +72,15 @@ from pydantic import BaseModel
 AppRole = Literal["owner", "admin", "manager", "specialist", "analyst", "viewer"]
 # The client-portal login is a 7th role that sits OUTSIDE the governance matrix:
 # it holds NONE of the staff permissions, is scoped to a single clients row, and
-# reads only through the portal_* views. ``AppRole`` stays the 6 staff roles (the
-# frontend mirror); ``UserRole`` is the full set a ``public.users`` row may carry.
+# reads only through the portal_* views. ``AppRole`` stays the 6 staff roles;
+# ``UserRole`` is the full set a ``public.users`` row may carry.
+#
+# This is the CURRENT state, not a finished design. Phase 3.1 specifies client
+# capability tiers - "See / Tell / Ask on, Decide-and-approve off by default" - and
+# NONE of that is modelled anywhere yet: a client is binary (every check early-returns
+# empty or ``off``), so "Decide-and-approve off" holds by accident rather than by
+# design. When those tiers land they belong in THIS file, beside the staff vocabulary,
+# not in a second access model somewhere else.
 UserRole = Literal["owner", "admin", "manager", "specialist", "analyst", "viewer", "client"]
 PermKey = Literal[
     "run_audits",
@@ -67,19 +118,21 @@ def is_staff_role(role: str) -> bool:
 _LEVEL_RANK: dict[AccessLevel, int] = {"off": 0, "view": 1, "full": 2}
 
 
-# --- Reference models (field names mirror the frontend shapes) ----------------
+# --- Reference models --------------------------------------------------------
+# Field names are the shapes the dashboard renders, because it renders THESE - the
+# models are served directly as the ``/rbac/*`` response bodies. Colour is absent by
+# design (see the module docstring).
 
 
 class RoleMetaDef(BaseModel):
-    """Governance-role metadata (mirrors ``ROLE_META``)."""
+    """Governance-role metadata: served as part of ``GET /rbac/roles``."""
 
     role: AppRole
     desc: str
-    color: str  # frontend ``c``
 
 
 class PermissionDef(BaseModel):
-    """A single toggleable permission (mirrors ``permissions[]``)."""
+    """A single toggleable permission: served by ``GET /rbac/permissions``."""
 
     key: PermKey
     label: str
@@ -88,7 +141,7 @@ class PermissionDef(BaseModel):
 
 
 class FeatureDef(BaseModel):
-    """One of the 11 access features (mirrors ``accessFeatures[]``)."""
+    """One of the 11 access features: served by ``GET /rbac/features``."""
 
     key: str
     label: str
@@ -99,29 +152,28 @@ class FeatureDef(BaseModel):
 
 
 class RoleTemplateDef(BaseModel):
-    """A ready-made access template (mirrors ``roleTemplates[]``)."""
+    """A ready-made access template: served by ``GET /rbac/templates``."""
 
     key: str
     label: str
     tagline: str
     icon: str
     role: AppRole
-    color: str
     grants: tuple[str, ...]
 
 
 # --- Governance roles ---------------------------------------------------------
 
 ROLE_META: tuple[RoleMetaDef, ...] = (
-    RoleMetaDef(role="owner", desc="Full control across the platform - billing, access & data.", color="#7B69EE"),
-    RoleMetaDef(role="admin", desc="Manage team, clients & delivery. No access-control changes.", color="#4D8DF0"),
-    RoleMetaDef(role="manager", desc="Assign work, run audits & publish across a client book.", color="#1FA890"),
-    RoleMetaDef(role="specialist", desc="Deliver audits & content on assigned jobs.", color="#C77E14"),
-    RoleMetaDef(role="analyst", desc="Run audits and read reports - no publishing.", color="#D4568A"),
-    RoleMetaDef(role="viewer", desc="Read-only access to reports and dashboards.", color="var(--muted)"),
+    RoleMetaDef(role="owner", desc="Full control across the platform — billing, access & data."),
+    RoleMetaDef(role="admin", desc="Manage team, clients & delivery. No access-control changes."),
+    RoleMetaDef(role="manager", desc="Assign work, run audits & publish across a client book."),
+    RoleMetaDef(role="specialist", desc="Deliver audits & content on assigned jobs."),
+    RoleMetaDef(role="analyst", desc="Run audits and read reports — no publishing."),
+    RoleMetaDef(role="viewer", desc="Read-only access to reports and dashboards."),
 )
 
-# --- The 8 permissions (verbatim from ``permissions``) ------------------------
+# --- The 8 permissions --------------------------------------------------------
 
 PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef(key="run_audits", label="Run audits", desc="Trigger free & paid audits", icon="fact_check"),
@@ -134,8 +186,8 @@ PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef(key="view_reports", label="View reports", desc="Open audits, dashboards & metrics", icon="summarize"),
 )
 
-# Default permission grants per role (verbatim ``defaultRolePerms``). Owner is
-# stored all-on for display; enforcement additionally hard-locks owner to all-on.
+# Default permission grants per role. Owner is stored all-on for display;
+# enforcement additionally hard-locks owner to all-on.
 DEFAULT_ROLE_PERMS: dict[AppRole, frozenset[PermKey]] = {
     "owner": frozenset(PERM_KEYS),
     "admin": frozenset(
@@ -148,8 +200,9 @@ DEFAULT_ROLE_PERMS: dict[AppRole, frozenset[PermKey]] = {
 }
 
 # Holder roles per MODULE permission (see ``ModulePermKey``). Kept SEPARATE from
-# ``DEFAULT_ROLE_PERMS`` so the frontend-mirrored 8x6 matrix stays byte-for-byte in
-# sync with ``data.ts``. Owner is all-on and locked (enforced in
+# ``DEFAULT_ROLE_PERMS`` so the 8x6 matrix the Team screen renders stays exactly the
+# eight governance permissions - a backend-only gate must not silently appear as a
+# ninth column in the operator's access grid. Owner is all-on and locked (enforced in
 # ``role_has_module_perm``), so it need not be listed.
 #
 # ``run_research`` = the LEADS (owner/admin/manager). This MIRRORS the keyword-bank
@@ -161,7 +214,7 @@ MODULE_PERM_ROLES: dict[ModulePermKey, frozenset[AppRole]] = {
     "run_research": frozenset({"owner", "admin", "manager"}),
 }
 
-# --- The 11 features (verbatim from ``accessFeatures``) ------------------------
+# --- The 11 features ----------------------------------------------------------
 
 FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef(key="technical_audit", label="Technical Audit", short="Tech Audit", icon="troubleshoot", group="Analytics", desc="Run site audits, review & mark issues fixed"),
@@ -170,9 +223,9 @@ FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef(key="reporting", label="Reporting", short="Reporting", icon="summarize", group="Delivery", desc="Build, schedule & send client reports"),
     FeatureDef(key="task_board", label="Task / Workflow Board", short="Task Board", icon="checklist", group="Delivery", desc="Create, assign & track team tasks"),
     FeatureDef(key="client_onboarding", label="Client Onboarding", short="Onboarding", icon="person_add", group="Delivery", desc="Run the onboarding wizard & collect access"),
-    FeatureDef(key="client_setup", label="Client & Website Setup", short="Client Setup", icon="language", group="Delivery", desc="Add & edit clients and their websites"),
+    FeatureDef(key="client_setup", label="Client & Website Setup", short="Client Setup", icon="add_business", group="Delivery", desc="Add & edit clients and their websites"),
     FeatureDef(key="data_import", label="Data Import", short="Imports", icon="upload_file", group="Delivery", desc="Upload & map CSV/Excel exports"),
-    FeatureDef(key="key_vault", label="Integrations & Key Vault", short="Key Vault", icon="key", group="Admin", desc="API keys & integrations - Super Admin only"),
+    FeatureDef(key="key_vault", label="Integrations & Key Vault", short="Key Vault", icon="key", group="Admin", desc="API keys & integrations — Super Admin only"),
     FeatureDef(key="billing", label="Billing", short="Billing", icon="payments", group="Admin", desc="Plans, invoices & payment settings"),
     FeatureDef(key="team_access", label="Team & Access", short="Team & Access", icon="admin_panel_settings", group="Admin", desc="Manage members, roles & permissions"),
 )
@@ -182,27 +235,27 @@ FEATURE_KEYS: tuple[str, ...] = tuple(f.key for f in FEATURES)
 # All 11 feature keys, used by the Super Admin template.
 _ALL_FEATURE_KEYS: tuple[str, ...] = FEATURE_KEYS
 
-# --- The 4 role templates (verbatim from ``roleTemplates``) -------------------
+# --- The 4 role templates -----------------------------------------------------
 
 TEMPLATES: tuple[RoleTemplateDef, ...] = (
     RoleTemplateDef(
         key="seo", label="SEO Specialist", tagline="Analytics & optimization", icon="query_stats",
-        role="specialist", color="#4D8DF0",
+        role="specialist",
         grants=("technical_audit", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
     ),
     RoleTemplateDef(
         key="content", label="Content Creator", tagline="Copywriting & publishing", icon="edit_note",
-        role="specialist", color="#C77E14",
+        role="specialist",
         grants=("content_pipeline", "publishing", "reporting", "task_board", "client_setup"),
     ),
     RoleTemplateDef(
         key="va", label="Virtual Assistant", tagline="Coordination & admin", icon="support_agent",
-        role="manager", color="#7B69EE",
+        role="manager",
         grants=("content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
     ),
     RoleTemplateDef(
-        key="super", label="Super Admin", tagline="Full access - everything on", icon="shield_person",
-        role="owner", color="#7B69EE",
+        key="super", label="Super Admin", tagline="Full access — everything on", icon="shield_person",
+        role="owner",
         grants=_ALL_FEATURE_KEYS,
     ),
 )
@@ -240,9 +293,9 @@ def role_has_module_perm(role: UserRole, perm: ModulePermKey) -> bool:
     client holds none.
 
     Deliberately separate from :func:`role_has_perm`: a module perm is NOT in
-    ``DEFAULT_ROLE_PERMS`` (that map mirrors ``data.ts`` verbatim), so routing a
-    module perm through ``role_has_perm`` would resolve it to owner-only for every
-    other role - silently locking out the leads the RLS policies do permit.
+    ``DEFAULT_ROLE_PERMS`` (that map is exactly the eight governance permissions), so
+    routing a module perm through ``role_has_perm`` would resolve it to owner-only for
+    every other role - silently locking out the leads the RLS policies do permit.
     """
     if role == "client":
         return False

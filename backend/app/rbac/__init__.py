@@ -1,10 +1,14 @@
 """RBAC reference data + enforcement helpers.
 
 The canonical access model lives in :mod:`app.rbac.matrix` as versioned Python
-reference data (mirrored from ``frontend/lib/data.ts``), not in database tables:
-roles, permissions, features, and role/template defaults are static and change
-with a code deploy, so keeping them in code lets ``require_perm`` decide without
-a database round-trip and keeps a single source of truth.
+reference data - **the single source of truth**, not a mirror of the dashboard - and
+not in database tables: roles, permissions, features and role/template defaults are
+static and change with a code deploy, so keeping them in code lets ``require_perm``
+decide without a database round-trip.
+
+The dashboard reads this model over ``GET /rbac/*`` rather than keeping a copy. See
+:mod:`app.rbac.matrix` for what happened the last time it kept one, and
+``tests/test_rbac_single_source.py`` for the gate that now prevents it.
 """
 
 from __future__ import annotations

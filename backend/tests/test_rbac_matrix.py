@@ -1,7 +1,19 @@
-"""P2-2 gate: the RBAC matrix mirrors the frontend and enforces correctly.
+"""P2-2 gate: the RBAC model is well formed and enforces correctly.
 
-These assertions pin the reference data to ``frontend/lib/data.ts`` - if the
-product model changes, both must change together.
+**These tests never open ``frontend/lib/data.ts``, and no longer claim to.** They
+assert the model's SHAPE and its enforcement semantics - six roles, eight unique
+permissions, eleven grouped features, owner hard-locked all-on, client outside the
+matrix, access levels ordered - by comparing Python against Python.
+
+Two of them used to be called ``..._match_frontend`` and the docstring above used to
+say they "pin the reference data to ``frontend/lib/data.ts``". That was not true: the
+expected values were re-typed here as Python literals, so this file was a THIRD
+hand-written copy of the access matrix rather than a reconciliation of the other two.
+It could not have failed on any frontend drift, and on 2026-08-24 fourteen fields had
+drifted while every test here stayed green.
+
+The cross-file comparison it implied is now real, and lives in
+``test_rbac_single_source.py``. What remains here is what this file can honestly do.
 """
 
 from __future__ import annotations
@@ -33,8 +45,9 @@ def test_eleven_features_unique_and_grouped() -> None:
 
 
 @pytest.mark.unit
-def test_default_role_perms_match_frontend() -> None:
-    # Verbatim from frontend defaultRolePerms.
+def test_default_role_perms_are_the_documented_grants() -> None:
+    # The eight governance permissions each role holds by default. Compared against
+    # the dashboard's copy in test_rbac_single_source.py, not here.
     assert m.DEFAULT_ROLE_PERMS["owner"] == frozenset(m.PERM_KEYS)
     assert m.DEFAULT_ROLE_PERMS["admin"] == frozenset(
         {"run_audits", "publish_content", "manage_clients", "assign_tasks", "manage_team", "manage_vault", "view_reports"}
@@ -89,7 +102,7 @@ def test_client_role_is_outside_the_governance_matrix() -> None:
 
 
 @pytest.mark.unit
-def test_templates_match_frontend_and_super_is_all_features() -> None:
+def test_templates_are_well_formed_and_super_is_all_features() -> None:
     by_key = {t.key: t for t in m.TEMPLATES}
     assert set(by_key) == {"seo", "content", "va", "super"}
     assert set(by_key["super"].grants) == set(m.FEATURE_KEYS)
@@ -131,3 +144,60 @@ def test_effective_feature_level() -> None:
     assert m.effective_feature_level("owner", {}, "anything") == "full"
     assert m.effective_feature_level("viewer", {}, "billing") == "off"
     assert m.effective_feature_level("viewer", {"billing": "view"}, "billing") == "view"
+
+
+# --------------------------------------------------------------------------- #
+# Correctness anchors, as distinct from consistency.
+#
+# `test_rbac_single_source.py` proves the backend and the dashboard hold the SAME
+# access matrix. It cannot prove they hold the RIGHT one: a coordinated edit to both
+# copies passes it, by construction. Verified 2026-08-24 by granting the Content
+# Creator template `key_vault` in matrix.py AND data.ts simultaneously - 47 tests
+# passed, including the single-source gate. A consistency gate is not a correctness
+# gate, and the templates were anchored to nothing independent.
+#
+# These anchor the security-relevant shape of the matrix to a stated rule instead.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.unit
+def test_only_the_super_template_grants_an_admin_group_feature() -> None:
+    """The Admin group is the sensitive one, and only Super Admin may template it in.
+
+    `key_vault`'s own description reads "API keys & integrations - Super Admin only".
+    Without this, a template could be handed the key vault by an edit to two files
+    that agree with each other, and every existing test would stay green.
+    """
+    admin_features = {f.key for f in m.FEATURES if f.group == "Admin"}
+    assert admin_features == {"key_vault", "billing", "team_access"}, (
+        "the Admin feature group changed; confirm the new membership is intended "
+        "before widening this anchor"
+    )
+    for t in m.TEMPLATES:
+        granted = set(t.grants) & admin_features
+        if t.key == "super":
+            assert granted == admin_features, "Super Admin must template in every Admin feature"
+        else:
+            assert not granted, (
+                f"template {t.key!r} grants Admin-group feature(s) {sorted(granted)}. "
+                "Only 'super' may. If this is deliberate, it is a product decision that "
+                "needs a written record, not a test edit."
+            )
+
+
+@pytest.mark.unit
+def test_no_template_out_grants_the_governance_role_it_stamps() -> None:
+    """A template must not hand a member a feature their stamped role cannot support.
+
+    `super` stamps `owner` (all-on and locked). Every other template stamps a role that
+    holds neither `access_control` nor `manage_vault`, so no such template may grant the
+    features those permissions gate.
+    """
+    gated = {"key_vault": "manage_vault", "team_access": "access_control"}
+    for t in m.TEMPLATES:
+        for feature, perm in gated.items():
+            if feature in t.grants:
+                assert m.role_has_perm(t.role, perm), (  # type: ignore[arg-type]
+                    f"template {t.key!r} stamps role {t.role!r} and grants {feature!r}, "
+                    f"but {t.role!r} does not hold {perm!r} - the grant could never be exercised"
+                )

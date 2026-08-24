@@ -1071,3 +1071,247 @@ asserts the email is suppressed **and** the deliverable is still emitted.
 - **D-4's acknowledgement half** is untouched. `qa_score` is computed and stored at
   `needs_review` and fetchable via the artifact endpoint, but is not among
   `ContentJobResponse`'s 15 keys, so the approving lead still never sees it.
+
+---
+
+## WU-11 · Phase 3.1 (Portal) — the access matrix had three copies and no comparison  ✅
+
+**Workstream:** WS-1 (Truth) · **Plan item:** Phase 3.1, "one source of truth
+(`app/rbac/matrix.py` ↔ `frontend/lib/data.ts` is hand-mirrored today — a drift bug
+waiting to happen)." · **Seam:** backend half only. The frontend half — moving
+`AddMemberWizard` and `AccessControl` onto `/rbac/*` and deleting the local copies —
+is a parallel session's, by agreement.
+
+### The defect
+
+The plan called the hand-mirror "a drift bug waiting to happen." It had already
+happened.
+
+`app/rbac/matrix.py` opened with *"Mirrored VERBATIM from `frontend/lib/data.ts` so
+the API and the dashboard agree byte-for-byte."* Parsing both files and comparing them
+field by field on 2026-08-24 found **fourteen differences**:
+
+| Kind | Count | What |
+|---|---|---|
+| Colour | 9 | Every `ROLE_META` accent except `viewer`, and all four `TEMPLATES` colours. The backend still carried the **pre-Avant-Garde palette** — `owner #7B69EE` against the frontend's `SERIES.c1 #C6FF3C`, and so on. (`viewer` is the exception only because its value is the CSS token `var(--muted)` rather than a hex literal) |
+| Icon | 1 | `client_setup` was `language` in Python, `add_business` in TypeScript |
+| Copy | 4 | Three `desc`s and one `tagline` where an em dash had been transcribed as a hyphen |
+
+**Nothing was broken by it**, and that is the finding rather than the reassurance: the
+drift landed entirely in presentation. The eight permission keys, the 8×6 grant
+matrix, the eleven feature keys and the four template grant sets all still agreed —
+so enforcement was never wrong. The half that bites was one edit away from the half
+that had already moved.
+
+**Why it survived is worse than the drift.** Nothing compared the two files:
+
+- `tests/test_rbac_matrix.py` was named for the job — `test_default_role_perms_match_frontend`,
+  `test_templates_match_frontend_and_super_is_all_features` — and its docstring said
+  *"These assertions pin the reference data to `frontend/lib/data.ts`."* **It never
+  opened `data.ts`.** It imports only `pytest` and `app.rbac.matrix`; a runtime audit
+  hook over its 12-test run recorded no file opened whose path contains `frontend`. It
+  re-typed the expected values as Python literals, so it tested Python against Python.
+- `tests/test_contract_lock.py` *does* read the TS. Its `_CONTRACT` (33 pairs) compares
+  field **names** only; its `_ENUM_CONTRACT` (28 pairs) genuinely compares `Literal`
+  value sets against TS unions, and exists precisely because *"field NAMES matching
+  isn't enough"*. **Neither list contains any of the four RBAC models.** So the file
+  knew the difference and the access matrix was in neither half.
+
+So there were **three** hand-written copies of one access matrix — `data.ts`,
+`matrix.py`, and the test that claimed to reconcile them — and **zero** comparisons
+between any two. This is WU-9's species again: a claim in an always-loaded module,
+believed because it was written down, with a test whose name asserted a guarantee its
+body did not implement. A parallel session (WU-12) turned this into a detector and
+found **nine** instances across the suite.
+
+**Proven, not assumed.** Six catalogue values were drifted in `data.ts` and the whole
+5,106-test unit gate run: **zero checks fired.**
+
+**A second finding, from the same read — and it is stronger than first recorded.**
+All four `/rbac/*` endpoints are served, authorised and contract-tested with **no
+product consumer whatsoever**. The single HTTP call site in the repository is
+`useRbac()` (`frontend/lib/hooks/team.ts:79-89`); `grep -rInw useRbac` across the
+frontend returns only its own declaration. The component it exists to feed,
+`AccessControl`, is never imported — the Team screen renders TopBar + TeamStats +
+TeamWorkspace with a roster | assign | activity tab set and no access-control panel.
+`AddMemberWizard` imports `roleTemplates` straight from `data.ts`. So the single source
+of truth was not half-built; the endpoints existed and **nothing has ever called them**.
+
+### What changed
+
+| | |
+|---|---|
+| `app/rbac/matrix.py` | Is now **the source**, and says so. The false "mirrored VERBATIM" paragraph is replaced by what actually happened, so the next reader inherits the finding rather than the claim. |
+| `app/rbac/matrix.py` | **`color` deleted** from `RoleMetaDef` and `RoleTemplateDef`. Nine of the fourteen drifts were that field, and it had no Python reader — `routers/rbac.py` copied it onto a response nothing has ever read. Removed rather than reconciled: syncing it would have kept the drift surface, deleting it takes the surface away. Colour is a theme token and belongs to `SERIES`. |
+| `app/rbac/matrix.py` | The five remaining drifts reconciled **toward the frontend's values, not the backend's** — `client_setup` → `add_business`, and the four em dashes restored. The dashboard is what operators actually see; a "fix" that silently changed the UI copy would have been a regression wearing a correction's clothes. (Checked first that no source-level em-dash ban exists — including that `ruff`'s `RUF001-003` ambiguous-Unicode rules, which are enabled, do not flag U+2014. Invariant #9 is `content_guard` over generated output, whose only two call sites are `gmb/service.py` and `workers/tasks/content.py`.) |
+| **`backend/CLAUDE.md` item 9** | **The propagation source, and the most consequential fix in this unit.** It read: *"The **17-feature matrix + 6 roles + 4 templates** live as versioned reference data in `app/rbac/matrix.py` (**mirrored from `frontend/lib/data.ts`**)."* One always-loaded sentence carrying **both** false claims — a count nobody counted, and the exact authority direction this unit inverts. The real count is **11**, and the code is self-consistent at 11. Nine documents propagated the "17", and `REQUIREMENTS_TRACEABILITY.md`'s **ADM-030 cites this line as its `[CODE]` evidence** and is marked CONFIRMED on it. Corrected in place, with the correction stated rather than silently applied. |
+| `app/rbac/__init__.py`, `app/schemas/rbac.py`, `app/routers/rbac.py` | The same false claim appeared in two more docstrings; both corrected. `color` dropped from `RoleView` and `TemplateView`. |
+| `tests/test_rbac_matrix.py` | The two `..._match_frontend` tests **renamed to what they do**, and the docstring rewritten to say plainly that this file never opens `data.ts`. The tests are worth keeping — they pin shape and enforcement semantics, and they kill real mutants — but not under a name that promises a comparison. **Two correctness anchors added** (below). |
+| `tests/test_rbac_single_source.py` | **New.** The comparison that was always implied, plus a value-level test of what the endpoints actually serve. |
+
+### The gate, and why it is green through a two-sided handover
+
+The frontend still declares its copies today; deleting them is the other session's
+half. A guard that demanded the end state would have to be committed red, and a guard
+that waited for it would leave the tree unprotected in between. So the gate asserts
+the invariant rather than the endpoint:
+
+1. **While** `data.ts` declares a catalogue symbol, every value must equal the
+   backend's, for every field the backend owns.
+2. **Once** the declaration is gone, there is nothing to compare — and a **structural**
+   check takes over: no `const` under *any* name may re-declare something that looks
+   like the access matrix.
+
+**Non-vacuity is the whole point of this unit, so the gate proves it can see:**
+
+- It parses `data.ts` with a strict recursive-descent reader for the JS literal subset
+  the file uses (including `permissions.map((p) => p.key)`, which `defaultRolePerms`
+  depends on, and `\uXXXX` escapes) that **raises on anything it does not understand**.
+  A parser that degrades quietly is how the drift got here.
+- `test_a_symbol_that_cannot_be_read_is_an_error_not_a_skip` pins that behaviour.
+- `test_every_catalogue_symbol_is_either_compared_or_provably_gone` fails if a symbol
+  is present in the TS but missing from the comparison — a symbol leaves the gate by
+  being deleted, never by being unreadable.
+- `test_the_reader_round_trips_the_backend_catalogue` and five parametrised
+  `test_the_comparison_detects_every_drift_it_is_shown` cases inject drifts —
+  including two that would be privilege escalations — against a catalogue the test
+  **synthesises**, never the live file.
+
+### Three defects found in this unit's own guard, by adversarial verification
+
+Before committing, nine independent agents were tasked with **refuting** every claim
+above. Two succeeded, and a completeness critic found a third. All three were in the
+new gate — which is the correct place for a verification pass to find them, and a
+useful demonstration that writing a guard does not make you the right judge of it.
+
+**1. The gate was red in exactly the state the work moves toward.** Its non-vacuity
+self-test anchored on a live literal inside `accessFeatures` (`label: "Technical
+Audit"`). Deleting `accessFeatures` — the goal — turned it red; so did *correctly*
+renaming that label in both files, which would have trained the next engineer to edit
+the anchor until it passed, at which point the proof becomes decoration. Meanwhile
+three unguarded `_DATA_TS.read_text()` calls raised `FileNotFoundError` if `data.ts`
+went away. **The docstring claimed "green before, during and after" and nobody had
+measured it** — this unit's own species, inside the file written to end it.
+*Fixed:* the self-test now runs against a catalogue the file synthesises; the three
+reads are guarded to **pass** when absent; and
+`test_the_gate_is_green_through_every_step_of_the_handover` measures all six deletion
+states instead of asserting them.
+
+**2. There was no structural form.** The comparison keyed on six hard-coded identifier
+names. Renaming `roleTemplates` to `ROLE_TEMPLATE_CATALOGUE` *while granting it
+`key_vault`* passed 6/6 — the same hole the file exists to close, one rename away.
+*Fixed:* `test_no_catalogue_copy_hides_under_another_name` flags any `const`, under any
+name, whose body contains three or more known feature or permission keys.
+
+**3. A consistency gate is not a correctness gate.** The critic granted the Content
+Creator template `key_vault` — the feature whose own description reads *"Super Admin
+only"* — in **both** files at once, keeping the grant count at 5. **47 tests passed**,
+the single-source gate included. Nothing anchored the `seo`/`content`/`va` grant sets
+to anything independent.
+*Fixed:* two anchors in `test_rbac_matrix.py` — only `super` may template in an
+Admin-group feature, and no template may grant a feature its stamped role lacks the
+permission to exercise.
+
+### What proves it
+
+**Run against the pre-fix `matrix.py` (i.e. `git show HEAD:…`), the gate goes red on
+exactly the historical drift** — the five non-colour fields, the nine colours being
+absent because the field no longer exists to disagree:
+
+```
+- ROLE_META[Analyst]: ts='Run audits and read reports — no publishing.'  backend='… - no publishing.'
+- ROLE_META[Owner]:   ts='Full control across the platform — billing…'   backend='… - billing…'
+- accessFeatures[client_setup].icon: ts='add_business' backend='language'
+- accessFeatures[key_vault].desc:    ts='… — Super Admin only' backend='… - Super Admin only'
+- roleTemplates[super].tagline:      ts='Full access — everything on' backend='Full access - everything on'
++ RoleMetaDef reintroduced `color`.
+```
+
+**The three repaired holes, re-attacked after the fix:** deleting `accessFeatures` +
+`ALL_KEYS` + `roleTemplates` from the real `data.ts` → green; deleting all seven
+symbols → green; deleting `data.ts` entirely → all three file-reading tests pass; the
+renamed-and-escalated copy → **caught** by the structural check (`9 feature keys`); the
+**coordinated** two-file escalation, where both copies agree with each other → **caught**
+by both new anchors. Control: the real unmutated file stays green on both halves.
+
+**The endpoint parity test closes the link that was never checked.** The gate proves
+`matrix.py ≡ data.ts` — the copy being *deleted*. Nothing proved `matrix.py ≡ what
+GET /rbac/* emits` — the copy about to become *load-bearing* — and the router does an
+unverified projection on the way out (`to_team_role`, `sorted()`, `list()`). The
+existing HTTP tests assert counts and key names only. `test_the_endpoints_serve_exactly_what_the_matrix_holds`
+now compares all four responses field-for-field, and `_backend_catalogue()` imports
+`to_team_role` rather than reimplementing `.capitalize()`, so the two cannot diverge.
+
+`ruff check .` clean. `mypy app workers` clean — 277 source files. `test_rbac_matrix`
++ `test_rbac_single_source`: **33 passed.** Full unit lane: **5,108 passed, 9 failed,
+4 skipped** — the 9 being the beat-schedule set, byte-identical by test ID to a
+baseline run of `8e0bae3` in a separate detached worktree. They are red because
+`d57a135` (2026-08-19) set `beat_schedule = {}` and the tests were never updated; they
+would be red on any commit from that one onward. **No test regressed.**
+
+Run in a `git worktree` (`scripts/session-worktree.sh recovery/3-1-rbac-one-source`)
+with `PYTHONPATH` pinned to it, and the resolution verified by printing
+`matrix.__file__` before trusting a single result — two other sessions were editing
+the shared checkout throughout.
+
+### A deviation from the v2 harvest ledger, recorded deliberately
+
+The ledger's entry proof for RBAC reads: *"the TypeScript is **generated** from the
+Python, never hand-mirrored."* This unit does **not** generate TypeScript, and the
+reason is that codegen satisfies the letter and misses the point: it leaves a second
+copy on disk, kept in step by a guard. Having the dashboard read `/rbac/*` and delete
+its copies leaves **no second copy to drift at all**. Structural beats guarded. The
+ledger should be amended to the outcome — *one copy, and the dashboard reads it* —
+rather than the mechanism.
+
+The general form, worth carrying: **eliminate → generate → guard.** One copy that
+nothing needs to keep true; two copies plus a build step and a check that it ran; two
+copies plus a test *and whoever reads its failure*. A guard is a detector, not a cure,
+and its output has a reader — the reader is the part that decayed here. Nobody
+disbelieved those test names; they just never had cause to open them.
+
+### What this did NOT fix
+
+- **A `avatar_color` regression is now scheduled, and this unit scheduled it.**
+  `AddMemberWizard.tsx:84` reads `color: tpl.color` from `data.ts`'s `roleTemplates`
+  and `team.ts:131` sends it as `avatar_color`; `schemas/identity.py:190` and
+  `services/provisioning.py:68` default that to `"#7B69EE"` and **write it to
+  `public.users`**. Deleting the server-side template colour removed the only backend
+  source of that datum without providing a replacement. At the very next step — the
+  dashboard deletes `roleTemplates` and reads `/rbac/templates` — the wizard has no
+  colour to send and every new member is silently stamped the legacy violet. **The
+  frontend must map template key → `SERIES` locally before it switches over.** Handed
+  to the frontend session in writing. This is a foreseeable data defect, not a deferral.
+- **The backend is not palette-free, and the colour guard must not be read as saying
+  so.** The removed hexes remain hardcoded in ~16 places across 11 files under `app/`
+  (`schemas/identity.py`, `schemas/clients.py`, `schemas/tiers.py`,
+  `services/provisioning.py`, `core/auth.py` and others), several served to the
+  dashboard. `#4D8DF0`, deleted from `ROLE_META.admin`, survives at `schemas/tiers.py:90`.
+  `test_colour_is_not_reintroduced_to_the_backend` checks four Pydantic models and will
+  report green over all of it. Scoped explicitly in `matrix.py`'s docstring.
+- **The frontend still declares the catalogue.** `AddMemberWizard` and `AccessControl`
+  read `data.ts`; no `/rbac/*` endpoint has a caller. The gate holds the two copies
+  identical until that lands — it does not land it. `frontend/lib/hooks/team.ts:77`
+  also still declares `color: string` as **required** on its local `RoleView`, a now-false
+  type describing a field the API no longer sends (`api.get<T>` is an unchecked cast, so
+  `tsc` will not catch it). Handed over, not fixed here — it is the other session's file.
+- **Client capability tiers are unmodelled.** 3.1 specifies "See / Tell / Ask on,
+  Decide-and-approve off by default"; grepping `backend`, `frontend` and `db` finds
+  nothing. A client is binary today — every check early-returns empty or `off` — so
+  "Decide-and-approve off" holds **by accident, not by design**, and the portal's two
+  writes (`POST /portal/audits`, `POST /portal/requests`) are hard-coded on and gated by
+  no capability. `matrix.py` now records that this is the current state rather than a
+  finished design, and that the tiers belong in that file when they land, so 3.1's client
+  half does not open a second access model.
+- **The rest of Phase 3.1 is untouched**: the orphaned-code deletion (`AccessControl` and
+  `useRbac` are now known-dead and belong in it), the four palettes, and route-guarding
+  middleware.
+- **`ModulePermKey` (`run_research`) is deliberately outside the comparison.** It is a
+  backend-only gate mirroring the RLS policies in `0035_keyword_research.sql`, not a
+  column in the operator's access grid. Folding it in would put a ninth permission on a
+  screen that documents eight.
+- **The eight other documents still say "17 features."** Only the always-loaded
+  `backend/CLAUDE.md` was corrected, because it is the propagation source and the one a
+  session loads unprompted. `REQUIREMENTS_TRACEABILITY.md`'s ADM-030 in particular is
+  marked CONFIRMED against it and is now confirmed against a corrected claim — the
+  requirement corpus is the recovery track's to re-baseline, not this unit's to rewrite.
