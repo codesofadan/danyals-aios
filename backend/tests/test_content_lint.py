@@ -330,7 +330,7 @@ def test_density_port_matches_the_original(text, keywords, original_density) -> 
         assert row.over == ref["over"]
 
 
-def test_density_measures_page_COVERAGE_not_occurrence_count() -> None:
+def test_density_measures_page_coverage_not_occurrence_count() -> None:
     """The distinction the whole check rests on. A five-word phrase occupies five
     times the page a one-word term does at the same occurrence count, and saturation
     is what the stuffing systems react to."""
