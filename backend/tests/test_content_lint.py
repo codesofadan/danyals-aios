@@ -168,3 +168,122 @@ def test_report_exposes_a_verdict_without_baking_one_into_the_numbers() -> None:
     assert isinstance(r.passed, bool)
     assert isinstance(r.issues(), list)
     assert (r.issues() == []) is r.passed
+
+
+# =========================================================================== #
+# experience_gate - Law 16: Experience must be SHOWN, not asserted
+# =========================================================================== #
+from app.services.content_lint import (  # noqa: E402
+    evaluate_experience,
+    find_claims,
+    find_markers,
+    signals_from_manifest_text,
+)
+
+_EXPERIENCE_PROBES = [
+    "",
+    "We are licensed and insured.",                       # claim, no proof
+    "Licensed contractor, license #1043382.",             # claim + its proof
+    "Serving Austin since 2009.",                         # claim, no proof
+    "Serving Austin since 2009. See [our record](https://example.com/about).",
+    "Over 1,200 roofs replaced.",
+    "Rated 4.9 out of 5 across 312 reviews.",
+    "Meet our founder Jane Doe.",
+    "![our crew on a roof](https://cdn.example.com/crew.jpg)",
+    "15 years of experience serving the metro area.",
+    "A page with no experience language at all, purely descriptive prose about a service.",
+]
+
+
+@pytest.fixture(scope="module")
+def original_experience():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import experience_gate
+
+        return experience_gate
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("text", _EXPERIENCE_PROBES)
+@pytest.mark.parametrize("manifest", [None, "year_founded: 2009\nreviews: 312\nlicense_no: X"])
+def test_experience_port_matches_the_original(text, manifest, original_experience) -> None:
+    theirs = original_experience.evaluate(text, manifest)
+    mine = evaluate_experience(text, proof_signals=signals_from_manifest_text(manifest))
+
+    assert mine.signals == theirs["signals"]
+    assert len(mine.claims) == len(theirs["claims"])
+    # Same issue codes on the same lines, in the same order.
+    assert [(i.code, i.line) for i in mine.issues] == [
+        (code, line) for _sev, code, line, _msg in theirs["issues"]
+    ]
+    assert len(mine.markers) == theirs["marker_total"]
+
+
+@pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.parent.name)
+def test_experience_port_matches_on_the_corpus_samples(page, original_experience) -> None:
+    text = page.read_text()
+    theirs = original_experience.evaluate(text, None)
+    mine = evaluate_experience(text)
+    assert [(i.code, i.line) for i in mine.issues] == [
+        (code, line) for _s, code, line, _m in theirs["issues"]
+    ]
+
+
+# --- the distinctions that make this gate real ----------------------------- #
+def test_a_bare_number_never_proves_itself() -> None:
+    """The circularity the gate exists to prevent: if "since 2009" counted as its own
+    evidence, every fabricated claim would self-certify and the gate would be
+    decorative."""
+    r = evaluate_experience("Serving Austin since 2009.")
+    assert not r.passed
+    assert [c.kind for c in r.unproven] == ["YEARS_IN_BUSINESS"]
+
+
+def test_the_word_licensed_is_a_claim_but_a_license_number_is_proof() -> None:
+    assert not evaluate_experience("We are licensed and insured.").passed
+    proved = evaluate_experience("We are licensed and insured. License #1043382.")
+    assert proved.passed, [i.message for i in proved.issues]
+
+
+def test_client_supplied_signals_can_satisfy_a_claim_the_draft_cannot() -> None:
+    """The P2 path: proof lives in `sme_slots`, not inline in the prose. A page may
+    legitimately claim what the client can back without printing the artifact."""
+    # A RELATIVE image path deliberately: an image whose src is an http URL also
+    # registers as `cited_source` (the corpus regex matches any `](https://...)`),
+    # which would satisfy the claim on its own and hide what this test is checking.
+    text = "Serving Austin since 2009. ![crew](/img/crew.jpg)"
+    assert not evaluate_experience(text).passed
+    assert evaluate_experience(text, proof_signals=frozenset({"founding_date"})).passed
+
+
+def test_it_names_exactly_which_artifacts_the_sme_interview_must_collect() -> None:
+    """The hard-halt payoff: ask the operator three specific questions, not hand them
+    a generic intake form."""
+    r = evaluate_experience("Licensed and insured. Serving Austin since 2009. Rated 4.9 out of 5.")
+    assert r.missing_proof_categories() >= {"founding_date", "review_source"}
+    assert "photo" not in r.missing_proof_categories(), "only categories that resolve a CLAIM"
+
+
+def test_a_draft_with_no_experience_markers_fails_even_with_no_claims() -> None:
+    """Asserting nothing is not the same as proving something. A page that shows no
+    first-hand artifact at all has no Experience to rank on."""
+    r = evaluate_experience("Purely descriptive prose about a service, making no claims.")
+    assert [i.code for i in r.issues] == ["NO_EXPERIENCE_MARKERS"]
+
+
+def test_markers_and_claims_are_reported_in_document_order() -> None:
+    text = "Line one.\n![a](b.png)\nSince 2009.\nLicense #1043382."
+    assert [m.line for m in find_markers(text)] == sorted(m.line for m in find_markers(text))
+    assert [c.line for c in find_claims(text)] == sorted(c.line for c in find_claims(text))
+
+
+def test_an_http_image_url_also_registers_as_a_cited_source() -> None:
+    """Faithful to the corpus regex, which matches any `](https://...)` including an
+    image src. Pinned rather than silently inherited: it means an externally hosted
+    photo can satisfy a claim that wanted a citation. Tighten it in the dimension
+    rewrite if that proves too generous - but change it deliberately, not by accident."""
+    r = evaluate_experience("Since 2009. ![crew](https://cdn.example.com/c.jpg)")
+    assert "cited_source" in r.signals
+    assert r.passed
