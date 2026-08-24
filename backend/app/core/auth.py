@@ -39,6 +39,7 @@ from app.rbac import (
     PermKey,
     UserRole,
     feature_allows,
+    is_staff_role,
     role_has_module_perm,
     role_has_perm,
 )
@@ -287,7 +288,7 @@ def require_module_perm(perm: ModulePermKey) -> Any:
 
     The module-perm twin of :func:`require_perm` (a Part-8 tool's finer paid-action
     gate), and DELIBERATELY a separate door. A module perm is NOT in
-    ``DEFAULT_ROLE_PERMS`` (that map mirrors ``data.ts`` verbatim), so routing one
+    ``DEFAULT_ROLE_PERMS`` (that map is exactly the eight governance permissions), so routing one
     through ``role_has_perm`` would resolve it to owner-only for every other role -
     silently locking out the leads the RLS policies do permit. The role set lives in
     ``app.rbac.matrix.MODULE_PERM_ROLES``.
@@ -315,6 +316,34 @@ def require_role(*roles: AppRole) -> Any:
     async def _dep(user: CurrentUserDep) -> CurrentUser:
         if user.role != "owner" and user.role not in allowed:
             raise _forbid("Insufficient role")
+        return user
+
+    return _dep
+
+
+def require_staff() -> Any:
+    """Dependency factory: any staff role, i.e. everyone a portal ``client`` is not.
+
+    The narrowest correct guard for a route that serves the AGENCY's own reference
+    data - the access model, internal catalogues - to a signed-in operator. It is not
+    about permissions: every staff role legitimately sees these, and no client should.
+
+    **Why this exists.** Invariant PM-3 in the recovery specification reads *"A client
+    can never reach a staff route"*, marked CONFIRMED - "enforced + tested". On
+    2026-08-24 that was false: twenty-one routes carried ``CurrentUserDep`` and nothing
+    else, and a portal client could read the agency's whole role/permission model from
+    ``/rbac/*``. Where a database was involved the line held anyway - ``/clients``
+    returns zero rows to a client because ``clients_select`` is
+    ``using (public.is_staff())`` - so the gap was exactly the routes that serve
+    in-process constants and have no RLS policy to save them.
+
+    This is the app-layer twin of that ``is_staff()`` policy. Prefer ``require_perm``
+    where a permission is genuinely the question; use this only for staff-vs-client.
+    """
+
+    async def _dep(user: CurrentUserDep) -> CurrentUser:
+        if not is_staff_role(user.role):
+            raise _forbid("Staff only")
         return user
 
     return _dep

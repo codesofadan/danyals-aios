@@ -546,7 +546,7 @@ This is the single strongest piece of engineering in the current build and **mus
 |---|---|---|
 | PM-1 | Owner is all-on and cannot be reduced | CONFIRMED |
 | PM-2 | Vault reveal is owner-only, always, in every tier | CONFIRMED |
-| PM-3 | A client can never reach a staff route; staff routes require a permission no client holds | CONFIRMED — enforced + tested |
+| PM-3 | A client can never reach a staff route; staff routes require a permission no client holds | **PARTIAL — was marked "CONFIRMED — enforced + tested" and was false (measured 2026-08-24).** The second clause is the one that misled: a staff route did *not* require a permission, it required only authentication. `/rbac/{features,permissions,roles,templates}` and `/cost/pricing` returned the agency's access model and supplier unit prices to any signed-in principal, a portal client included, and served them from **in-process constants** so no RLS policy stood behind them. Closed by `require_staff()` with a negative test per boundary (D-19). **14 route handlers still carry `CurrentUserDep` alone** (AST-measured, listed in D-19): they are bounded by RLS rather than by the app layer — `/clients` returns zero rows to a client via `clients_select using (public.is_staff())` — and that has NOT been measured handler by handler against a built database. `/tiers` is deliberately client-readable (D-19). |
 | PM-4 | Every spend-causing action requires an explicit permission, never merely "logged in" | STRONG INFERENCE |
 | PM-5 | Every live-site or third-party mutation requires a lead-or-above and is attributed to that human | CONFIRMED for on-page (`0038` guard trigger); **PROPOSED** to generalise |
 | PM-6 | Permission is enforced server-side; UI hiding is presentation only | CONFIRMED |

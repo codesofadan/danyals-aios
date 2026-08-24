@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.auth import CurrentUser, CurrentUserDep, require_perm, require_role
+from app.core.auth import CurrentUser, CurrentUserDep, require_perm, require_role, require_staff
 from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
 from app.db.cost_repo import CostRepoDep
@@ -33,6 +33,13 @@ from app.schemas.cost import (
 from app.services.activity import record_activity
 
 router = APIRouter(prefix="/cost", tags=["cost"])
+
+# Provider unit prices are what the AGENCY pays a supplier, not what a client is
+# charged. Served from Settings as in-process constants, so no query runs and RLS
+# never gets a chance to act - the same shape as the /rbac/* exposure closed in D-19,
+# found by the same AST sweep. Consumed only by the operator cost screen
+# (frontend/components/cost/CostDial.tsx); no client-portal surface reads it.
+Staff = Annotated[CurrentUser, Depends(require_staff())]
 
 ManageClients = Annotated[CurrentUser, Depends(require_perm("manage_clients"))]
 OrgAdmin = Annotated[CurrentUser, Depends(require_role("admin"))]  # owner passes too
@@ -96,7 +103,7 @@ async def list_cost_log(
 
 # --- provider unit pricing ---------------------------------------------------
 @router.get("/pricing", response_model=list[ProviderPricingResponse])
-async def get_pricing(settings: SettingsDep, _user: CurrentUserDep) -> list[ProviderPricingResponse]:
+async def get_pricing(settings: SettingsDep, _user: Staff) -> list[ProviderPricingResponse]:
     """The LIVE per-provider unit prices the cost gate bills at.
 
     Reads the same ``Settings`` fields ``app.services.pricing`` uses to compute

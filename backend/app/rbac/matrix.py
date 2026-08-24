@@ -109,6 +109,56 @@ ACCESS_LEVELS: tuple[AccessLevel, ...] = get_args(AccessLevel)
 # The governance (staff) roles - everything a ``client`` is NOT.
 STAFF_ROLES: frozenset[AppRole] = frozenset(get_args(AppRole))
 
+# --- What a portal client CAN do ---------------------------------------------
+# Until now the client existed here only as four early-returns resolving to empty or
+# ``off``. That is accurate but mute: it records that a client holds no STAFF
+# permission and says nothing about what a client legitimately does, so there was
+# nowhere to put a client capability and nothing to consult before adding one.
+#
+# Every entry below traces to a requirement, per the specification's rule that an
+# untraceable capability is a change request. Nothing here is new behaviour - each
+# names something the platform already does, so this is a vocabulary for what exists,
+# not a product proposal.
+
+ClientCapability = Literal[
+    # CLIENT-007 - reports the agency has explicitly granted, per
+    # ``db/migrations/0031_client_report_grants.sql``. Not "all reports".
+    "view_granted_reports",
+    # CLIENT-006 / CLIENT-009 - a client ASKS; staff act. Specification 12.2 is
+    # explicit that a NAP change "is a *request*, not a field edit".
+    "raise_request",
+    # CLIENT-004 / ADM-035 - a client may start an audit on their own site, bounded by
+    # the delivery tier. Enforced in ``app/services/client_audits.py``: a free tier
+    # cannot start a Paid audit.
+    "run_audit_within_tier",
+]
+
+CLIENT_CAPABILITIES: frozenset[ClientCapability] = frozenset(get_args(ClientCapability))
+
+# **A client never approves.** Owner decision, 2026-08-24, closing Q-11 / Q-12 and
+# CLIENT-013 - all three of which the specification had recorded as **UNKNOWN**, not
+# as "off". This constant exists so that the next person to consider a client-facing
+# approval surface meets a decision with a date on it rather than an absence they have
+# to interpret, and so the tests below can hold the portal to it.
+#
+# It is deliberately NOT a ``ClientCapability`` member: an approval right is a
+# different kind of thing from the three above - it would make a client an eligible
+# principal in a human-approval gate, which is the automation ceiling's question, not
+# this matrix's. If it is ever granted, the ceiling should resolve eligibility THROUGH
+# here rather than keeping a second answer.
+CLIENT_MAY_APPROVE: bool = False
+
+
+def client_may(capability: ClientCapability) -> bool:
+    """Whether a portal client holds ``capability``.
+
+    A total function over the closed vocabulary, so a capability added to
+    ``ClientCapability`` without a decision about it fails type-checking rather than
+    silently resolving to False. Approval is deliberately not expressible here - see
+    ``CLIENT_MAY_APPROVE``.
+    """
+    return capability in CLIENT_CAPABILITIES
+
 
 def is_staff_role(role: str) -> bool:
     """Whether ``role`` is a staff (governance) role - i.e. anything but ``client``."""

@@ -464,13 +464,23 @@ def _matrix_cases(env: Any) -> list[dict[str, Any]]:
         c("health.get.unauth", None, "GET", "/health", 200, shape=HealthResponse),
         c("ready.get.owner", "owner", "GET", "/health/ready", (200, 503), shape=ReadyResponse),
         c("ready.get.unauth", None, "GET", "/health/ready", (200, 503), shape=ReadyResponse),
-        # --- rbac reference (CurrentUserDep) ---
+        # --- rbac reference (require_staff) ---
+        # The agency's own access model. Every staff role reads it; a portal client
+        # gets 403. Until 2026-08-24 these carried only CurrentUserDep and
+        # `rbac.features.client` was pinned at 200 - the section header said
+        # "(CurrentUserDep)", i.e. the contract recorded the guard that was there
+        # rather than the guard that was wanted, and PM-3 claimed the opposite.
+        # These serve in-process constants, so no RLS policy stands behind them.
         c("rbac.features.owner", "owner", "GET", f"{v}/rbac/features", 200, shape=FeatureDef, is_list=True),
+        c("rbac.features.viewer", "viewer", "GET", f"{v}/rbac/features", 200, shape=FeatureDef, is_list=True),
         c("rbac.features.unauth", None, "GET", f"{v}/rbac/features", 401),
-        c("rbac.features.client", "client", "GET", f"{v}/rbac/features", 200, shape=FeatureDef, is_list=True),
+        c("rbac.features.client", "client", "GET", f"{v}/rbac/features", 403),
         c("rbac.permissions.owner", "owner", "GET", f"{v}/rbac/permissions", 200, shape=PermissionDef, is_list=True),
+        c("rbac.permissions.client", "client", "GET", f"{v}/rbac/permissions", 403),
         c("rbac.roles.owner", "owner", "GET", f"{v}/rbac/roles", 200, shape=RoleView, is_list=True),
+        c("rbac.roles.client", "client", "GET", f"{v}/rbac/roles", 403),
         c("rbac.templates.owner", "owner", "GET", f"{v}/rbac/templates", 200, shape=TemplateView, is_list=True),
+        c("rbac.templates.client", "client", "GET", f"{v}/rbac/templates", 403),
         # --- admin users (manage_team) ---
         c("admin.users.owner", "owner", "GET", f"{v}/admin/users", 200, shape=MemberResponse, is_list=True),
         c("admin.users.specialist", "specialist", "GET", f"{v}/admin/users", 403),

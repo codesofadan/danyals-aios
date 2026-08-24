@@ -1340,3 +1340,125 @@ catalogue checks, it does **not** pass when its subject is missing — a duplica
 disappearing is the goal; the theme map disappearing is a regression or a relocation, and either
 needs a person. Proven on all three: a fifth template with no colour, the map deleted, and
 `data.ts` absent entirely all fail; the real tree passes.
+
+---
+
+## WU-13 · Phase 3.1 — the plan asked us to decide something and call it a requirement  ✅
+
+**Workstream:** WS-1 (Truth) + WS-3 (Identity & Security) · **Plan item:** Phase 3.1,
+"Client capability tiers: See / Tell / Ask on, Decide-and-approve off by default."
+**WU-12 is the parallel session's** (the unchecked-sync-claim detector).
+
+### What the unit was supposed to be, and why it isn't
+
+The approved work item was the tier ladder. It was not built, and that is the finding.
+
+An eight-agent sweep of the corpus, with both of its negative claims put to adversaries,
+established that **the four-word vocabulary "See / Tell / Ask / Decide-and-approve" exists
+nowhere in this repository** outside the plan file and two artefacts quoting it. A graded client
+model *does* exist under other names — specification §12 is literally "What clients can see /
+edit / approve / must remain private", §9.1 carries a Client column with its own grade vocabulary
+(`own only`, `request only`, `V*`), and there is a `CLIENT-001…015` family. My claim that no such
+concept existed was **refuted**, correctly.
+
+But the load-bearing half survived, and it is the one that mattered:
+
+> **"Decide-and-approve off by default" is not a requirement being implemented. It is a decision
+> being made.**
+
+Specification §12.3 marks client approval of content drafts (`:766`) and of publishing to their
+own site (`:767`) as **UNKNOWN**. `REQUIREMENTS_TRACEABILITY.md:121` classes CLIENT-013 as **UNK**,
+acceptance criteria *"Per owner decision."* `grep -c "Q-11|Q-12" DECISIONS_LOG.md` returned **0**.
+
+So implementing the default would have settled a commercial question by writing code. That is
+WU-9's species one level up: not a wrong number, but **a decision nobody made, appearing as a fact
+everyone inherited**. The specification names client sign-off on production publishing as a
+commercial and legal risk; Q-12 even carried a recommendation (standing authorisation at
+onboarding plus per-page approval as a configurable option) that the plan's phrasing silently
+declined.
+
+**It was put to the owner as one line and decided: D-18.** No client approval. Recorded with the
+attribution stated — `OPEN_QUESTIONS.md` marks Q-11/Q-12 "Answerable by: Danyal", so D-18 is the
+*project owner's* default, not Danyal's answer, and it closes the engineering ambiguity without
+closing the client conversation.
+
+### The finding that came out of the sweep — PM-3 was false
+
+**PM-3**, an invariant in the specification's permission-model table: *"A client can never reach a
+staff route; staff routes require a permission no client holds"* — marked **CONFIRMED — enforced +
+tested**.
+
+Measured 2026-08-24: **false**, and the second clause is what misled. A staff route did not
+require a permission; it required only *authentication*. `GET /rbac/{features,permissions,roles,
+templates}` carried `CurrentUserDep` and nothing else, so any signed-in principal — a portal client
+included — received the agency's complete internal access model: eight permissions across six
+roles, eleven features, and every role template's grants. `tests/integration/test_route_contracts.py`
+**pinned `/rbac/features` at 200 for a client**, under a section header reading
+`# --- rbac reference (CurrentUserDep) ---`: the contract had recorded the guard that existed
+rather than the guard that was wanted, which is how it read as deliberate for months.
+
+**The exposure was bounded, and why is the useful part.** Wherever a database was involved the
+line held anyway — `GET /clients` returns **zero rows** to a client, because `clients_select` is
+`using (public.is_staff())` (`0003_clients_sites.sql:67`) and `0010_client_portal.sql:69` records
+deliberately that no client select policy exists on clients/sites/audits. No client data, and no
+`mrr`, ever leaked.
+
+> **RLS is the guard nobody has to remember. It failed in exactly the places where there was no
+> database to enforce it** — the routes that serve in-process constants.
+
+That is the argument for `require_staff()` being the app-layer twin of the `is_staff()` policy,
+rather than a permission invented per route.
+
+### What changed
+
+| | |
+|---|---|
+| `app/core/auth.py` | **`require_staff()`** — a staff-vs-client door, deliberately not a permission check. Also corrects the third surviving copy of the "that map mirrors `data.ts` verbatim" claim, which WU-11 fixed in `matrix.py` and missed here. |
+| `app/routers/rbac.py` | All four routes staff-only. |
+| `app/routers/cost.py` | **`GET /cost/pricing` staff-only.** A sixth constant-serving route the AST sweep found *after* the owner had approved a list of five: it returns the per-provider unit prices the agency pays its suppliers. Locked under D-19's own reasoning and flagged as an extension rather than folded in silently — what the agency *pays* has no client-facing purpose, unlike the tier prices a client is *charged*. |
+| `app/rbac/matrix.py` | The client is now a **named** zero rather than four early-returns. `ClientCapability` covers only what the corpus confirms — `view_granted_reports` (CLIENT-007), `raise_request` (CLIENT-006/009), `run_audit_within_tier` (CLIENT-004/ADM-035) — plus `CLIENT_MAY_APPROVE = False` citing D-18. Approval is deliberately **not** a `ClientCapability` member: it would make a client an eligible principal in a human-approval gate, which is the automation ceiling's question, and one authority per question is the point. |
+| `docs/recovery/DECISIONS_LOG.md` | **D-18** and **D-19**. |
+| `docs/recovery/OPEN_QUESTIONS.md` | Q-11 and Q-12 annotated as decided, with the attribution and the declined recommendation both stated. |
+| `docs/recovery/…SPECIFICATION.md` | **PM-3 corrected to PARTIAL**, with what remains unmeasured named. |
+| `tests/integration/test_route_contracts.py` | The client pin flipped 200 → 403 on all four routes, plus a `viewer` case so the guard cannot pass by locking everyone out. |
+
+### What proves it
+
+**Negative test per boundary** (SEC-002 asks for exactly this): a client gets 403 from each of the
+four routes and from `/cost/pricing`; **every one of the six staff roles still gets 200** from all
+four; unauthenticated still gets 401, so staff-only did not quietly replace authenticated-only.
+
+**Non-vacuity, measured:** reverting the guard to `get_current_user` turns all four client tests
+red and leaves the other 30 green; restoring it returns 35/35. A deny-only boundary test is
+satisfied by a broken route, which is why the positive half is parametrised over all six roles.
+
+`ruff check .` clean · `mypy app workers` clean (277 files) · `test_rbac_single_source` 35 passed ·
+`test_cost_endpoints` + `test_cost_gate` + `test_auth_endpoints` 54 passed.
+
+**AST-measured, not grepped** — the first two attempts to count guarded routes by grep returned
+3 and then 0, both wrong, before an AST pass over every `@router.*` handler gave 317 handlers and
+a reliable count of those carrying `CurrentUserDep` alone. The repo's own rule about AST-parsing
+rather than grepping earned itself again inside a single unit.
+
+### What this did NOT fix
+
+- **PM-3 is PARTIAL, not restored.** **14 handlers still carry `CurrentUserDep` alone**, listed in
+  D-19. Three (`tiers.py`) are client-readable by decision; `auth.py::logout` is correctly open.
+  The rest are DB-backed and therefore bounded by RLS rather than by the app layer, and **that has
+  not been measured handler by handler against a built database.** Two deserve it soonest:
+  `cost.py::get_dial` merges DB rows with an in-process catalogue and may return the constant half
+  regardless of RLS, and `get_spend_stop` mixes settings with spend totals. Claiming they are safe
+  without building the schema would repeat the mistake this unit exists to correct.
+- **The tier ladder is not built**, and should not be until someone wants it. It needs a
+  requirement ID; `CLIENT-016` is the suggested one, class UNK, no estimate.
+- **The L0–L3 automation ceiling is untouched.** It is a different axis — the ceiling governs *may
+  the machine act unattended* (subject: the system, keyed by task class); capability tiers govern
+  *what this principal may touch*. They meet in one field, `approver_may_be_actor`. The cheap real
+  gap there is not a ceiling table but that **nothing records who approved anything** —
+  `approved_by` / `approved_at` / `reviewed_by` are zero hits repo-wide, against PM-5's "attributed
+  to that human". One migration, a real requirement behind it, and a prerequisite for any future
+  approver-eligibility question.
+- **`ENGINEERING_MASTER_PLAN.md:472` still sets the Portal acceptance bar at "Six roles × 17
+  features."** The measured count is 11 (WU-11). That acceptance test cannot be passed as written.
+- **`client_report_grants` (`0031`) has no requirement ID** — it shipped sourced to a frontend seed
+  array. It needs a retro-ID before it is cited as evidence for anything.

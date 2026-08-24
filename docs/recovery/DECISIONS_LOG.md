@@ -127,3 +127,116 @@ Policy Radar is **not** in the five, but it was delivered to Danyal on 9 July as
 | D-10 / D-11 | Audit-engine seam and ownership | Audit reliability; the "no lock-in" claim | Harden the subprocess contract now; decide ownership explicitly |
 | D-12 | Elementor vs Gutenberg investment priority | Content output | Capability-driven; invest depth in Elementor |
 | D-13 | Free audit as public lead magnet; lead ownership | Lead flow | Ship with abuse controls; confirm lead ownership |
+
+---
+
+# 2026-08-24 · Zain Saeed (project owner)
+
+## ✅ D-18 / Q-11 / Q-12 / CLIENT-013 · The end client does **not** approve — staff approve everything
+
+**Decided:** the end client never approves content drafts, and never approves publishing to
+their own live site. A human still approves everything; that human is always agency staff.
+
+**Read the attribution carefully, because it is not what the register assumes.**
+`OPEN_QUESTIONS.md` marks both Q-11 and Q-12 **"Answerable by: Danyal."** This entry is the
+*project owner's* decision to settle the engineering default, not Danyal's answer. It closes the
+ambiguity that was blocking Phase 3.1 and it makes the behaviour deliberate rather than
+accidental. **It does not close the client conversation**, and it should not be cited later as
+though Danyal had agreed it.
+
+**This decision also declines a standing recommendation**, which is worth recording rather than
+leaving to be rediscovered. Q-12 carried one: *"a one-time standing authorisation captured at
+onboarding, plus per-page approval as a configurable option."* That is not built, and this
+decision defers it. If Danyal wants client sign-off before anything reaches a production site,
+that recommendation is the shape to revisit — it is a change request, with a per-client
+configuration axis, a notification and revision loop, and an approval audit trail attached.
+
+### Why it needed deciding rather than assuming
+
+The Phase 3.1 plan item read *"Client capability tiers: See / Tell / Ask on, **Decide-and-approve
+off by default**."* The specification records the opposite kind of statement: §12.3 marks client
+approval of content drafts (line 766) and of publishing to their own site (line 767) as
+**UNKNOWN**, and `REQUIREMENTS_TRACEABILITY.md` classes CLIENT-013 as **UNK**, acceptance
+criteria *"Per owner decision."* No entry in this log resolved either question
+(`grep -c "Q-11|Q-12"` returned **0**).
+
+So "off by default" was a plan assertion standing over a recorded UNKNOWN. Implementing it would
+have settled a commercial question by writing code — the same failure as the always-loaded
+`backend/CLAUDE.md` claim of a "17-feature matrix" that was really 11, one level up: not a wrong
+number, but a decision nobody made appearing as a fact everyone inherited.
+
+### What is consistent with it (and what is not)
+
+Consistent — this decision matches, and is now the stated reason for, behaviour that already
+existed: specification §9.1 row 7 puts the Client cell for *Content — approve / publish* at
+`—` (no access); the Service Tiers pack of 9 Jul 2026 promises *"a person approves before it
+reaches the client: Yes / Yes / Yes — always, never skipped"*; and the client portal's only two
+writes are `POST /portal/audits` and `POST /portal/requests`, neither an approval.
+
+Not consistent, and now corrected: the client role's inability to approve was enforced **nowhere**
+— it fell out of a client holding no permissions at all. "Off by accident" and "off by design"
+are indistinguishable until someone adds a route. `app/rbac/matrix.py` now carries
+`CLIENT_MAY_APPROVE = False` citing this decision, and
+`tests/test_rbac_single_source.py::test_a_client_never_approves_and_the_portal_offers_no_way_to`
+fails if a client-facing approval or publish route is ever added — which is the moment to
+reopen this entry, not the moment to discover it was never written.
+
+## ✅ D-19 · The agency's access model is staff-only; tier pricing stays client-readable
+
+**Decided:** `GET /rbac/{features,permissions,roles,templates}` return **403** to a portal
+client. `GET /tiers` and `/tiers/feature-areas` remain readable by a client.
+
+**The split is deliberate.** The access model — 8 permissions × 6 roles, 11 features, and every
+role template's grants — is the agency's internal structure and has no client-facing purpose;
+the portal never renders it. Tier and price data does have one: the client portal sells upsells,
+and the delivered access matrix lists *"Click Fiverr upsells"* as a client capability. Locking
+both would have been tidier and would have broken a product surface.
+
+**What this fixes.** Specification invariant **PM-3** — *"A client can never reach a staff
+route"* — is marked **CONFIRMED, "enforced + tested."** On 2026-08-24 it was false: 21 routes
+carried `CurrentUserDep` and nothing else, and `tests/integration/test_route_contracts.py` pinned
+`/rbac/features` at **200 for a client** under a section header reading `# --- rbac reference
+(CurrentUserDep) ---`. The contract had recorded the guard that existed rather than the guard
+that was wanted.
+
+**The finding worth keeping.** The exposure was bounded, and the reason is instructive: wherever
+a database was involved the line held anyway. `GET /clients` returns **zero rows** to a client —
+`clients_select` is `using (public.is_staff())` (`0003_clients_sites.sql:67`), and
+`0010_client_portal.sql:69` records deliberately that no client select policy exists on
+clients/sites/audits. So no MRR or client data ever leaked. The gap was exactly the routes that
+serve **in-process constants**, where no query runs and RLS never gets a chance to act.
+
+**RLS is the guard nobody has to remember. It failed precisely where there was no database** —
+which is the argument for `require_staff()` being the app-layer twin of the `is_staff()` policy,
+rather than a permission check invented per route.
+
+### Extension applied the same day: `/cost/pricing`
+
+The AST sweep that measured the guards found a **sixth** constant-serving route after this
+decision was taken: `GET /cost/pricing` returns `provider_pricing(settings)` — the per-provider
+unit prices the agency pays its suppliers — to any signed-in principal, with no query and so no
+RLS. It is consumed only by the operator cost screen
+(`frontend/components/cost/CostDial.tsx`); no client-portal surface reads it. **Locked to staff
+under this decision's own reasoning** — what the agency *pays a supplier* has no client-facing
+purpose, unlike the tier prices a client is *charged*. Flagged as an extension rather than folded
+in silently, because the decision as put to the owner named five routes and this is a sixth.
+
+### What is NOT closed, measured rather than assumed
+
+**14 route handlers still carry `CurrentUserDep` alone** — any signed-in principal reaches them:
+
+| module | handlers |
+|---|---|
+| `clients.py` | `list_clients`, `get_client`, `get_client_business_profile`, `get_report_grants`, `list_sites` |
+| `cost.py` | `list_budgets`, `get_dial`, `list_cost_log`, `get_spend_stop` |
+| `tiers.py` | `list_tiers`, `list_feature_areas`, `list_tier_clients` |
+| `activity.py` | `list_activity` |
+| `auth.py` | `logout` (correctly open to any authenticated caller) |
+
+Three of those (`tiers.py`) are client-readable **by this decision**. The rest are DB-backed and
+therefore bounded by RLS — `/clients` demonstrably returns zero rows to a client — but **that has
+not been measured handler by handler against a built database**, and this project's own rule is
+that a schema or policy fact needs a built database, not a reading of migrations. Two are worth
+that measurement soonest: `cost.py::get_dial` merges DB rows with an in-process catalogue and may
+return the constant half regardless of RLS, and `get_spend_stop` mixes settings with spend totals.
+That is a discrete follow-up unit, not a claim being made here.

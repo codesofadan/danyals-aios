@@ -139,10 +139,10 @@ The architecture says Manager is optional in v1 and its scope folds into Admin i
 Haseeb's brief includes per-client branding and per-client domains. Danyal's evidence does not mention it. The operator's "hundreds of clients" framing raises the question. This is a substantial engineering item (DNS, TLS, per-tenant theming) and is currently assumed **out**. **Answerable by:** Zain.
 
 ### Q-11 · Does the end client approve content drafts, or only the agency lead?
-Every document says a human approves. It never says *which* human. Client approval is a different workflow (notification, deadline, revision loop, delegated approval) from internal approval. **Answerable by:** Danyal.
+Every document says a human approves. It never says *which* human. Client approval is a different workflow (notification, deadline, revision loop, delegated approval) from internal approval. **Answerable by:** Danyal. **DECIDED 2026-08-24 — see D-18:** no; staff approve everything. Recorded as the *project owner's* default, not as Danyal's answer, so the client conversation remains open.
 
 ### Q-12 · Does the client approve publishing to their own live site?
-Publishing to a client's production website without their sign-off is a commercial and legal risk, even with agency approval. **Recommended:** a one-time standing authorisation captured at onboarding, plus per-page approval as a configurable option. **Answerable by:** Danyal.
+Publishing to a client's production website without their sign-off is a commercial and legal risk, even with agency approval. **Recommended:** a one-time standing authorisation captured at onboarding, plus per-page approval as a configurable option. **Answerable by:** Danyal. **DECIDED 2026-08-24 — see D-18:** no client approval in v1. This recommendation was considered and **declined for v1**; it is the shape to revisit if Danyal wants client sign-off.
 
 ### Q-13 · Are Fiverr upsells in or out?
 The kickoff locked them in as a deliberate brand decision. The overhaul backlog says remove the Upsells section "for now" while simultaneously requiring the free-audit page to use Danyal's real gigs. **Answerable by:** Danyal.

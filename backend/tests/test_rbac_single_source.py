@@ -733,3 +733,156 @@ def test_every_backend_template_has_a_dashboard_colour() -> None:
         "public.users.avatar_color with the legacy violet #7B69EE fallback "
         "(app/services/provisioning.py). Add the accent to frontend/lib/data.ts."
     )
+
+
+# --------------------------------------------------------------------------- #
+# PM-3: "A client can never reach a staff route." Marked CONFIRMED - "enforced +
+# tested" - in the recovery specification, and false on 2026-08-24.
+#
+# Twenty-one routes carried `CurrentUserDep` and nothing else. Where a database was
+# involved the line held anyway: `/clients` returns ZERO rows to a client, because
+# `clients_select` is `using (public.is_staff())` (0003_clients_sites.sql:67) and
+# 0010_client_portal.sql:69 records deliberately that no client select policy exists.
+# So the gap was exactly the routes that serve in-process constants and have no RLS
+# policy to save them - these four, which handed a portal client the agency's whole
+# role/permission matrix, feature catalogue and template grants.
+#
+# RLS is the guard nobody has to remember. It failed precisely where there was no
+# database. These are the negative tests per boundary that SEC-002 asks for.
+# --------------------------------------------------------------------------- #
+
+_RBAC_ROUTES = ("features", "permissions", "roles", "templates")
+
+
+def _as(app: FastAPI, role: str) -> None:
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id="u-1", email="op@x.com", role=role, status="active",  # type: ignore[arg-type]
+        name="Op Erator", title="T", avatar_color="#000000", phone="", two_fa=True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", _RBAC_ROUTES)
+async def test_a_portal_client_cannot_read_the_agency_access_model(
+    app: FastAPI, client: httpx.AsyncClient, path: str
+) -> None:
+    """The negative half of PM-3, per boundary.
+
+    A 403 and not a 404: the route exists, the caller is authenticated, and the answer
+    is that this principal may not have it. Pretending the route is absent would hide
+    a real authorization decision behind a fiction.
+    """
+    _as(app, "client")
+    resp = await client.get(f"/api/v1/rbac/{path}")
+    assert resp.status_code == 403, (
+        f"/rbac/{path} returned {resp.status_code} to a portal client. This endpoint "
+        "serves in-process constants - no query runs, so RLS cannot stop it, and the "
+        "app layer is the only boundary there is."
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("role", ["owner", "admin", "manager", "specialist", "analyst", "viewer"])
+async def test_every_staff_role_still_reads_the_access_model(
+    app: FastAPI, client: httpx.AsyncClient, role: str
+) -> None:
+    """The positive half - so the guard cannot pass by locking everybody out.
+
+    A boundary test that only checks the deny side is satisfied by a broken route.
+    """
+    _as(app, role)
+    for path in _RBAC_ROUTES:
+        resp = await client.get(f"/api/v1/rbac/{path}")
+        assert resp.status_code == 200, f"{role} lost access to /rbac/{path}"
+
+
+@pytest.mark.unit
+async def test_the_access_model_still_requires_authentication(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """Staff-only must not have replaced authenticated-only - both gates stand."""
+    app.dependency_overrides.pop(get_current_user, None)
+    for path in _RBAC_ROUTES:
+        resp = await client.get(f"/api/v1/rbac/{path}")
+        assert resp.status_code == 401, f"/rbac/{path} stopped requiring auth"
+
+
+# --------------------------------------------------------------------------- #
+# The client vocabulary, held to what actually implements it.
+#
+# A vocabulary whose only reader is itself is decoration. Each capability below is
+# asserted against the mechanism that enforces it, so the names cannot drift away
+# from the platform the way the catalogue drifted from the dashboard.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.unit
+async def test_a_portal_client_cannot_read_what_the_agency_pays_its_suppliers(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """``GET /cost/pricing`` is the same shape of hole as ``/rbac/*``, found the same way.
+
+    It returns ``provider_pricing(settings)`` - in-process constants, no query - so RLS
+    never gets a chance to act. Unit prices are what the AGENCY pays a supplier, not
+    what a client is charged. The AST sweep that measured the guards found it; it is
+    not in the same module as the rest of this unit, and it is here because the defect
+    is, not because the file is.
+    """
+    _as(app, "client")
+    assert (await client.get("/api/v1/cost/pricing")).status_code == 403
+    _as(app, "viewer")
+    assert (await client.get("/api/v1/cost/pricing")).status_code == 200
+
+
+@pytest.mark.unit
+def test_the_client_vocabulary_is_exactly_what_the_corpus_confirms() -> None:
+    """Three capabilities, each traceable. A fourth needs a requirement ID first."""
+    traceable = {
+        "view_granted_reports",   # CLIENT-007 / 0031_client_report_grants.sql
+        "raise_request",          # CLIENT-006, CLIENT-009 / spec 12.2
+        "run_audit_within_tier",  # CLIENT-004, ADM-035 / services/client_audits.py
+    }
+    assert traceable == m.CLIENT_CAPABILITIES
+    for cap in m.CLIENT_CAPABILITIES:
+        assert m.client_may(cap)
+
+
+@pytest.mark.unit
+def test_a_client_holds_no_staff_permission_and_no_feature() -> None:
+    """The named zero. Unchanged behaviour - stated rather than implied."""
+    assert m.perms_for_role("client") == frozenset()
+    assert not m.is_staff_role("client")
+    for perm in m.PERM_KEYS:
+        assert not m.role_has_perm("client", perm)
+    for feature in m.FEATURE_KEYS:
+        assert m.effective_feature_level("client", {}, feature) == "off"
+
+
+@pytest.mark.unit
+def test_a_client_never_approves_and_the_portal_offers_no_way_to() -> None:
+    """Owner decision of 2026-08-24, closing Q-11 / Q-12 / CLIENT-013.
+
+    The specification recorded client approval of content drafts and of publishing to
+    their own site as **UNKNOWN** - not as "off". The plan asserted "off by default",
+    which would have settled a commercial question by writing code. It is now off
+    because someone decided it, and this test is what holds the portal to that: adding
+    a client-facing approval route fails here, which is the moment to revisit the
+    decision rather than the moment to discover it was never made.
+    """
+    assert m.CLIENT_MAY_APPROVE is False
+    assert "approve" not in m.CLIENT_CAPABILITIES
+
+    from app.routers.portal import router as portal_router
+
+    writes = [
+        (method, r.path)
+        for r in portal_router.routes
+        for method in getattr(r, "methods", set()) or set()
+        if method in {"POST", "PUT", "PATCH", "DELETE"}
+    ]
+    offending = [w for w in writes if "approv" in w[1].lower() or "publish" in w[1].lower()]
+    assert not offending, (
+        f"the client portal exposes {offending}, but CLIENT_MAY_APPROVE is False. "
+        "Either this is the change request that reopens Q-11/Q-12, or the route is a "
+        "mistake. It is not something to resolve by editing this test."
+    )
