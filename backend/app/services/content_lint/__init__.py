@@ -22,6 +22,14 @@ dependency set. These are stdlib-only pure functions called many times per page;
 process spawn per call would be strictly worse and untestable.
 """
 
+from app.services.content_lint.blocklist import (
+    BlockedTerm,
+    BlocklistHit,
+    BlocklistReport,
+    lint_blocklist,
+    parse_blocklist,
+    term_to_regex,
+)
 from app.services.content_lint.conversion import (
     ConversionIssue,
     ConversionReport,
@@ -94,6 +102,9 @@ __all__ = [
     "MIN_GAIN",
     "MIN_GRADE",
     "SHINGLE_SIZE",
+    "BlockedTerm",
+    "BlocklistHit",
+    "BlocklistReport",
     "ConversionIssue",
     "ConversionReport",
     "DensityReport",
@@ -121,8 +132,10 @@ __all__ = [
     "is_mechanical_cta",
     "is_strong_cta",
     "jaccard",
+    "lint_blocklist",
     "lint_conversion",
     "net_new",
+    "parse_blocklist",
     "residual_ratio",
     "score_information_gain",
     "shingle_hashes",
@@ -130,6 +143,7 @@ __all__ = [
     "signals_from_manifest_text",
     "split_sentences",
     "strip_markdown",
+    "term_to_regex",
     "tokenize",
     "words_of",
 ]

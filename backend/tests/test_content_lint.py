@@ -690,3 +690,91 @@ def test_a_direct_call_action_counts_as_a_strong_cta() -> None:
     assert is_strong_cta("Call us now on 555-1234")
     assert is_strong_cta("Get my free estimate")
     assert not is_strong_cta("Submit the form below")
+
+
+# =========================================================================== #
+# blocklist_lint - quality gate G9, voice fidelity
+# =========================================================================== #
+from app.services.content_lint import lint_blocklist, term_to_regex  # noqa: E402
+from app.services.content_lint.blocklist import _default_terms  # noqa: E402
+
+_VOICE_PROBES = [
+    "",
+    "We pride ourselves on fast, reliable, and affordable service.",
+    "In the ever-evolving landscape of home services, we delve into solutions.",
+    "Our affordable repairs start at $89.",              # conditional + a real specific
+    "Our affordable repairs are competitively priced.",  # conditional, no specific
+    "Reliable service you can trust.",                   # one near-synonym, not stacked
+    "Reliable, dependable, trustworthy service.",        # stacked
+    "```\ndelve into the code fence\n```\nClean prose here.",
+]
+
+
+@pytest.fixture(scope="module")
+def original_blocklist():
+    sys.path.insert(0, str(_SCRIPTS))
+    try:
+        import blocklist_lint
+
+        return blocklist_lint
+    finally:
+        sys.path.remove(str(_SCRIPTS))
+
+
+@pytest.mark.parametrize("text", _VOICE_PROBES)
+def test_blocklist_port_matches_the_original(text: str, original_blocklist) -> None:
+    path = str(_BACKEND / "seo-content-os" / "knowledge" / "voice" / "vocabulary-blocklist.md")
+    terms, groups = original_blocklist.parse_blocklist(path)
+    theirs = original_blocklist.scan(text, terms, groups)
+    mine = lint_blocklist(text)
+
+    assert [(h.line, h.col, h.match) for h in mine.hits] == [
+        (h["line"], h["col"], h["match"]) for h in theirs
+    ]
+
+
+def test_the_corpus_blocklist_is_actually_loaded() -> None:
+    """The terms come from the doctrine file, not from a list re-typed into Python -
+    so editing the doctrine changes the check, which is the point."""
+    terms = _default_terms()
+    assert len(terms) > 100, f"only {len(terms)} terms parsed; the blocklist may have moved"
+    displays = {t.display.lower() for t in terms}
+    assert {"delve", "leverage"} <= displays
+
+
+def test_a_tricolon_is_one_hit_not_three() -> None:
+    """The report should reflect one bad sentence, not three bad words."""
+    hits = lint_blocklist("We offer fast, reliable, and affordable service.").hits
+    assert any(h.match.lower() == "fast, reliable, and affordable" for h in hits)
+
+
+def test_a_lone_near_synonym_is_fine_but_stacking_is_the_tell() -> None:
+    """Any one of these is ordinary English. Three in a row is filler."""
+    lone = lint_blocklist("Reliable service, every time.").hits
+    stacked = lint_blocklist("Reliable, dependable, trustworthy service.").hits
+    assert len(stacked) > len(lone)
+
+
+def test_a_conditional_term_is_allowed_beside_a_real_specific() -> None:
+    """The objection was never the word "affordable" - it was the vagueness. With a
+    price on the line the term carries real information."""
+    vague = lint_blocklist("Our affordable repairs are competitively priced.")
+    specific = lint_blocklist("Our affordable repairs start at $89.")
+    assert any(h.match.lower() == "affordable" for h in vague.hits)
+    assert not any(h.match.lower() == "affordable" for h in specific.hits)
+
+
+def test_a_generic_placeholder_term_is_dropped_rather_than_flooding_the_report() -> None:
+    """"at [Brand]" would wildcard-match "at our practice", "at once", "at the
+    consult". A placeholder term needs 2+ literal anchors of 3+ characters."""
+    assert term_to_regex("at [Brand]") is None
+    assert term_to_regex("here at [Brand] we understand") is not None
+
+
+def test_fenced_code_is_not_linted_for_voice() -> None:
+    assert lint_blocklist("```\ndelve into this\n```").passed
+
+
+def test_client_banned_phrases_layer_on_top_of_doctrine() -> None:
+    r = lint_blocklist("We are better than Competitor Corp.", extra_banned=["Competitor Corp"])
+    assert any(h.tier == "Client" for h in r.hits)
