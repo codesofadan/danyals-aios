@@ -7,12 +7,36 @@
 .co-board-card { margin-top: 16px; }
 
 /* ---- Kanban pipeline board ---- */
+/* SIX columns, matching COLUMNS in lib/content.ts. This said `repeat(5, ...)` while
+   the board rendered six: the `degraded` / "Not Live" column added by migration 0081
+   wrapped onto a second row, so the one column that means "nothing reached the
+   client's site" was the one pushed out of sight. Keep this count in step with
+   COLUMNS - the class-resolution test cannot catch an arithmetic mismatch. */
 .co-board {
   margin-top: 16px;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
 }
+/* Six full-height columns are unusably narrow below ~1400px. */
+@media (max-width: 1400px) {
+  .co-board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .co-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* --- toolset / inline emphasis -------------------------------------------
+   COPIED from app/admin/off-page/offpage.css rather than imported. ContentWizard
+   referenced .op-toolset / .op-strong / .op-muted, which are defined ONLY in that
+   sheet - and /admin/content never imports it. So the wizard toolbar lost its
+   flex layout and gaps on a COLD load, and looked correct only after a client-side
+   nav from /admin/web2 left the other stylesheet in the document. Namespaced to
+   `co-` so the content page owns every class it uses. */
+.co-toolset { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.co-toolset .ghostbtn:disabled { opacity: .4; cursor: not-allowed; }
+.co-strong { font-weight: 700; color: var(--ink); white-space: nowrap; }
+.co-muted { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .co-col {
   background: var(--well);
   border: 1px solid var(--line);
@@ -115,22 +139,12 @@
 .co-target-seg { width: 100%; }
 .co-target-seg button { flex: 1; padding: 8px 10px; }
 
-/* ---- frameworks reference ---- */
-.co-fw-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.co-fw-item { background: var(--well); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
-  transition: border-color .16s, transform .16s; }
-.co-fw-item:hover { border-color: var(--line-2); transform: translateY(-2px); }
-.co-fw-key { font-size: 15px; font-weight: 800; color: var(--fg-strong); letter-spacing: -.01em; }
-.co-fw-exp { font-size: 11px; font-weight: 600; color: var(--violet-soft); margin-top: 3px; letter-spacing: .01em; }
-.co-fw-best { display: flex; align-items: flex-start; gap: 7px; margin-top: 10px; font-size: 12px; color: var(--body); line-height: 1.45; }
-.co-fw-best .material-symbols-rounded { font-size: 16px; color: var(--c2); flex: none; margin-top: 1px; }
-
 /* ---- research-first bulk panel + site-design matcher ---- */
 .co-research-card { margin-top: 16px; }
 .co-research { margin-top: 12px; }
 
 .co-rec-h { display: flex; align-items: center; gap: 12px; margin: 14px 0 8px; }
-.co-rec-h .op-muted { font-size: 12px; color: var(--muted); }
+.co-rec-h .co-muted { font-size: 12px; color: var(--muted); }
 
 .co-rec-list { display: flex; flex-direction: column; gap: 8px; }
 .co-rec-row {

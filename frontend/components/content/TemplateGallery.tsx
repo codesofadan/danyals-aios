@@ -231,7 +231,7 @@ export default function TemplateGallery({
       {/* Customizer — appears when a specific template is selected */}
       {selected && (
         <div className="tpl-customize">
-          <div className="tpl-cz-controls">
+          <div>
             <div className="tpl-cz-h">
               <span className="material-symbols-rounded">tune</span>
               Customize <b>{PAGE_TEMPLATES.find((t) => t.key === selected)?.label}</b>

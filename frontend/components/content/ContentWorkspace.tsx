@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useContentJobs, useReviewContentJob } from "@/lib/hooks/content";
+import { useContentJobs, useContentReviewQueue, useReviewContentJob } from "@/lib/hooks/content";
+import { useMe } from "@/lib/hooks/portal";
 import { useSpendHalted } from "@/lib/hooks/cost";
 import ContentKpis from "./ContentKpis";
 import PipelineBoard from "./PipelineBoard";
@@ -11,10 +12,22 @@ import ContentWizard from "./ContentWizard";
 
 export default function ContentWorkspace() {
   const jobsQ = useContentJobs(); // live: GET /content/jobs, polls while the worker moves a job
+  const reviewQ = useContentReviewQueue(); // the gate, queried server-side (never truncated)
   const reviewJob = useReviewContentJob();
   const { halted } = useSpendHalted(); // global API-spend kill-switch
+  const me = useMe();
 
   const jobs = jobsQ.data ?? [];
+
+  // The review transition is LeadOnly server-side (routers/content.py: owner | admin |
+  // manager). The UI used to render Approve/Reject unconditionally, so a Specialist or
+  // Analyst could click them and get a raw backend 403 string. This is a UX gate only -
+  // the server remains the boundary - but a button that cannot work should not invite
+  // the click. Compared case-insensitively: the API serialises Title-Case roles while
+  // the permission check is lowercase.
+  const canReview = ["owner", "admin", "manager"].includes(
+    (me.data?.role ?? "").toLowerCase(),
+  );
 
   // The job selected for the framed draft preview. Kept by id (not the object) so the
   // preview tracks the SAME job across refetches - e.g. it follows a job from
@@ -30,7 +43,7 @@ export default function ContentWorkspace() {
     reviewJob.mutate({ code: id, action, note });
   }
 
-  const needsReview = jobs.filter((j) => j.status === "needs_review");
+  const needsReview = reviewQ.data ?? [];
   const reviewErr = reviewJob.error instanceof Error ? reviewJob.error.message : null;
 
   // Close the preview modal on Escape (the scrim handles click-outside).
@@ -56,7 +69,7 @@ export default function ContentWorkspace() {
         </div>
       )}
 
-      <ContentKpis jobs={jobs} />
+      <ContentKpis />
 
       {/* THE primary surface — one guided wizard replacing the old research /
           design / new-job entry cards. */}
@@ -76,12 +89,22 @@ export default function ContentWorkspace() {
           onClick={() => setSelectedId(null)}
         >
           <div className="co-preview-modal" onClick={(e) => e.stopPropagation()}>
-            <ReviewPreview job={selected} onAction={handleReview} onClose={() => setSelectedId(null)} />
+            <ReviewPreview
+              job={selected}
+              onAction={handleReview}
+              onClose={() => setSelectedId(null)}
+              canReview={canReview}
+            />
           </div>
         </div>
       )}
 
-      <ReviewGate jobs={needsReview} onAction={handleReview} onPreview={setSelectedId} />
+      <ReviewGate
+        jobs={needsReview}
+        onAction={handleReview}
+        onPreview={setSelectedId}
+        canReview={canReview}
+      />
     </>
   );
 }

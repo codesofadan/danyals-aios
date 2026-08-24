@@ -221,14 +221,19 @@ async def test_stats_math(
     # a done job from a previous month must NOT count toward publishedThisMonth
     old = (datetime.now(UTC) - timedelta(days=60)).isoformat()
     repo.seed(status="done", cost=60, created_at=old)
+    # A `degraded` job is TERMINAL but nothing reached the client's site (0081). It
+    # must never be counted as published - that conflation is the exact defect the
+    # `degraded` status was introduced to end.
+    repo.seed(status="degraded", cost=15)
     wire("viewer")
     body = (await client.get("/api/v1/content/jobs/stats")).json()
-    assert set(body) == {"inPipeline", "awaitingReview", "publishedThisMonth", "avgCost"}
+    assert set(body) == {"inPipeline", "awaitingReview", "publishedThisMonth", "degradedThisMonth", "avgCost"}
     assert body["inPipeline"] == 4       # queued/drafting/needs_review/publishing
     assert body["awaitingReview"] == 1
     assert body["publishedThisMonth"] == 1  # the 60-day-old done excluded
-    # avg of priced (>0) jobs: (10+20+30+40+60)/5 = 32.0
-    assert body["avgCost"] == 32.0
+    assert body["degradedThisMonth"] == 1  # counted, and counted SEPARATELY
+    # avg of priced (>0) jobs: (10+20+30+40+60+15)/6 = 29.17
+    assert body["avgCost"] == 29.17
 
 
 async def test_stats_empty_ledger(
@@ -236,7 +241,13 @@ async def test_stats_empty_ledger(
 ) -> None:
     wire("viewer")
     body = (await client.get("/api/v1/content/jobs/stats")).json()
-    assert body == {"inPipeline": 0, "awaitingReview": 0, "publishedThisMonth": 0, "avgCost": 0.0}
+    assert body == {
+        "inPipeline": 0,
+        "awaitingReview": 0,
+        "publishedThisMonth": 0,
+        "degradedThisMonth": 0,
+        "avgCost": 0.0,
+    }
 
 
 # --- rich retrieval (staff-only) ----------------------------------------------

@@ -34,7 +34,11 @@ const isWorkerActive = (j: ContentJob) =>
 export function useContentJobs() {
   return useQuery({
     queryKey: CONTENT_JOBS_KEY,
-    queryFn: () => api.get<ContentJob[]>("/content/jobs"),
+    // `limit` is EXPLICIT. The backend paginates via PageDep, which defaults to 50 and
+    // hard-caps at 200 (backend/app/core/pagination.py). Calling without a limit did
+    // not return "all jobs" - it silently returned the newest 50, so an older
+    // needs_review job could fall off the board entirely and never be reviewed.
+    queryFn: () => api.get<ContentJob[]>("/content/jobs?limit=200"),
     refetchInterval: (query) => {
       const rows = query.state.data as ContentJob[] | undefined;
       return rows?.some(isWorkerActive) ? 3000 : false;
@@ -43,13 +47,35 @@ export function useContentJobs() {
 }
 
 // Matches ContentStatsResponse (serialized: inPipeline/awaitingReview/
-// publishedThisMonth/avgCost).
+// publishedThisMonth/degradedThisMonth/avgCost).
+//
+// These are computed SERVER-SIDE over the whole ledger. The board's job array is
+// page-capped, so deriving KPIs from it under-counts as soon as a client passes the
+// page size - which is exactly what `ContentKpis` used to do.
 export type ContentStats = {
   inPipeline: number;
   awaitingReview: number;
   publishedThisMonth: number;
+  /** Terminal, but nothing reached the client's site (migration 0081). Never folded
+   *  into publishedThisMonth - a degraded page is not a published page. */
+  degradedThisMonth: number;
   avgCost: number;
 };
+
+export const CONTENT_REVIEW_KEY = ["content", "jobs", "needs_review"] as const;
+
+/** The review queue, fetched INDEPENDENTLY of the board.
+ *
+ * Filtering the (page-capped) board array client-side meant a client with more than
+ * `limit` jobs could have a draft sitting at the human gate that the gate never
+ * displayed. Server-side `?status=needs_review` bounds the query to the rows that
+ * actually need a decision. */
+export function useContentReviewQueue() {
+  return useQuery({
+    queryKey: CONTENT_REVIEW_KEY,
+    queryFn: () => api.get<ContentJob[]>("/content/jobs?status=needs_review&limit=200"),
+  });
+}
 
 export function useContentStats() {
   return useQuery({
@@ -87,6 +113,7 @@ export function useCreateContentJob() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
+      void qc.invalidateQueries({ queryKey: CONTENT_REVIEW_KEY });
     },
   });
 }
@@ -109,6 +136,7 @@ export function useReviewContentJob() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
+      void qc.invalidateQueries({ queryKey: CONTENT_REVIEW_KEY });
     },
   });
 }
@@ -164,6 +192,7 @@ export function useGenerateFromResearch() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
+      void qc.invalidateQueries({ queryKey: CONTENT_REVIEW_KEY });
     },
   });
 }

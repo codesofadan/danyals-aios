@@ -277,12 +277,20 @@ class ContentStatsResponse(BaseModel):
     ``inPipeline`` = jobs still moving through the automated pipeline;
     ``awaitingReview`` = jobs parked at the human review gate; ``publishedThisMonth``
     = jobs completed this calendar month; ``avgCost`` = mean per-page cost over the
-    priced (cost > 0) jobs, in dollars.
+    priced (cost > 0) jobs, in dollars; ``degradedThisMonth`` = jobs that reached a
+    TERMINAL state this month WITHOUT anything reaching the client's site.
+
+    ``degradedThisMonth`` is reported separately and never folded into
+    ``publishedThisMonth``. Migration 0081 introduced `degraded` precisely because a
+    job that rendered an artifact but never pushed to WordPress was previously
+    indistinguishable from a real publish; a KPI that re-merged them would reintroduce
+    the defect at the dashboard.
     """
 
     in_pipeline: int = Field(serialization_alias="inPipeline")
     awaiting_review: int = Field(serialization_alias="awaitingReview")
     published_this_month: int = Field(serialization_alias="publishedThisMonth")
+    degraded_this_month: int = Field(default=0, serialization_alias="degradedThisMonth")
     avg_cost: float = Field(serialization_alias="avgCost")
 
 
@@ -291,12 +299,15 @@ def compute_content_stats(rows: list[dict[str, Any]]) -> ContentStatsResponse:
 
     inPipeline = jobs in {queued, drafting, needs_review, publishing}; awaitingReview
     = jobs in needs_review; publishedThisMonth = ``done`` jobs created this calendar
-    month; avgCost = mean cost of jobs with cost > 0 (0 when none are priced).
+    month; degradedThisMonth = `degraded` jobs this month (terminal, but nothing
+    reached the client's site - never counted as published); avgCost = mean cost of
+    jobs with cost > 0 (0 when none are priced).
     """
     month_prefix = datetime.now(UTC).strftime("%Y-%m")
     in_pipeline = 0
     awaiting = 0
     published = 0
+    degraded = 0
     costs: list[float] = []
     for r in rows:
         status = str(r.get("status") or "")
@@ -304,8 +315,11 @@ def compute_content_stats(rows: list[dict[str, Any]]) -> ContentStatsResponse:
             in_pipeline += 1
         if status == "needs_review":
             awaiting += 1
-        if status == "done" and str(r.get("created_at", ""))[:7] == month_prefix:
+        this_month = str(r.get("created_at", ""))[:7] == month_prefix
+        if status == "done" and this_month:
             published += 1
+        if status == "degraded" and this_month:
+            degraded += 1
         cost = float(r.get("cost", 0) or 0)
         if cost > 0:
             costs.append(cost)
@@ -314,6 +328,7 @@ def compute_content_stats(rows: list[dict[str, Any]]) -> ContentStatsResponse:
         in_pipeline=in_pipeline,
         awaiting_review=awaiting,
         published_this_month=published,
+        degraded_this_month=degraded,
         avg_cost=avg_cost,
     )
 

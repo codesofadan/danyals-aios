@@ -266,13 +266,13 @@ export default function ContentWizard({
               </div>
             </div>
 
-            <div className="op-toolset" style={{ marginBottom: 6 }}>
+            <div className="co-toolset" style={{ marginBottom: 6 }}>
               <button className="primary-btn" type="button" onClick={runResearch}
                 disabled={!site.trim() || halted || research.isPending}>
                 <span className="material-symbols-rounded">{halted ? "block" : "search"}</span>
                 {halted ? "API spend halted" : research.isPending ? "Researching…" : items.length ? "Re-run research" : "Research page set"}
               </button>
-              <span className="op-muted" style={{ alignSelf: "center" }}>— or skip research and add one page —</span>
+              <span className="co-muted" style={{ alignSelf: "center" }}>— or skip research and add one page —</span>
             </div>
 
             {/* Skip research: add a single page by hand (for when you just want one page). */}
@@ -334,7 +334,7 @@ export default function ContentWizard({
                     </span>{" "}
                     {allSelected ? "Clear all" : "Select all"}
                   </button>
-                  <span className="op-muted">{selectedCount} of {items.length} selected</span>
+                  <span className="co-muted">{selectedCount} of {items.length} selected</span>
                 </div>
                 <div className="co-rec-list">
                   {items.map((it) => {
@@ -528,7 +528,7 @@ export default function ContentWizard({
           <>
             <div className="co-codes-wrap" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
               <div className="co-rec-h" style={{ marginTop: 0 }}>
-                <span className="op-strong">
+                <span className="co-strong">
                   <span className="material-symbols-rounded" style={{ verticalAlign: "middle", color: "var(--ok)" }}>task_alt</span>{" "}
                   Queued {generatedJobs.length || codes?.length || 0} content {(codes?.length ?? 0) === 1 ? "job" : "jobs"} — the pipeline is drafting them now.
                 </span>

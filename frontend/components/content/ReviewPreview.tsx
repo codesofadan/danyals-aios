@@ -118,7 +118,7 @@ const QA_FLOOR = 70;
 const prettyDim = (d: string) => d.replace(/_/g, " ");
 
 export default function ReviewPreview({
-  job, onAction, onClose, hideActions = false,
+  job, onAction, onClose, hideActions = false, canReview = true,
 }: {
   job: ContentJob;
   onAction: (id: string, action: ReviewAction, note?: string) => void;
@@ -128,7 +128,14 @@ export default function ReviewPreview({
   // When embedded in a flow that owns the approve step, hide the inline
   // approve / request-edit / reject bar so there is a single approve action.
   hideActions?: boolean;
+  /** The review transition is LeadOnly server-side (routers/content.py). False
+   *  disables the decision buttons instead of letting a non-lead click into a raw
+   *  403. Reading the draft needs no lead role, so only the actions are gated. */
+  canReview?: boolean;
 }) {
+  const reviewGateTitle = canReview
+    ? undefined
+    : "Only a lead (owner, admin or manager) can review";
   const draftQ = useContentDraft(job.id);
   const schemaQ = useContentSchema(job.id);
   const outlineQ = useContentOutline(job.id);
@@ -397,15 +404,36 @@ export default function ReviewPreview({
           embedded in a flow that owns its own approve step. */}
       {inReview && !hideActions && (
         <div className="co-gate-actions" style={{ marginTop: 14 }}>
-          <button className="primary-btn co-approve" onClick={() => onAction(job.id, "approve")}>
+          <button
+            className="primary-btn co-approve"
+            onClick={() => onAction(job.id, "approve")}
+            disabled={!canReview}
+            title={reviewGateTitle}
+          >
             <span className="material-symbols-rounded">check</span>Approve &amp; publish
           </button>
-          <button className="ghostbtn" onClick={() => setEditOpen((v) => !v)} aria-expanded={editOpen}>
+          <button
+            className="ghostbtn"
+            onClick={() => setEditOpen((v) => !v)}
+            aria-expanded={editOpen}
+            disabled={!canReview}
+            title={reviewGateTitle}
+          >
             <span className="material-symbols-rounded">edit</span>Request edit
           </button>
-          <button className="ghostbtn co-reject" onClick={() => onAction(job.id, "reject")}>
+          <button
+            className="ghostbtn co-reject"
+            onClick={() => onAction(job.id, "reject")}
+            disabled={!canReview}
+            title={reviewGateTitle}
+          >
             <span className="material-symbols-rounded">close</span>Reject
           </button>
+        </div>
+      )}
+      {inReview && !hideActions && !canReview && (
+        <div className="cs" style={{ marginTop: 8 }}>
+          Ask a lead (owner, admin or manager) to approve, edit or reject this draft.
         </div>
       )}
 
@@ -518,12 +546,19 @@ function QaTab({ loading, error, qa }: {
     <div>
       {/* Headline verdict */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        {/* ADVISORY, not enforced. `PublishBlocked` is raised nowhere in the worker and
+            `publish_content_job` publishes regardless of this score - the only real
+            boundary is the human gate below. Wording that implied a gate would have
+            told the reviewer a machine was catching what is in fact their job. */}
         <span className={`pill-tag ${qa.passed ? "ok" : "warn"}`}>
           <span className="material-symbols-rounded">{qa.passed ? "check_circle" : "gpp_maybe"}</span>
-          {qa.passed ? "Passes the publish gate" : "Below the publish gate"}
+          {qa.passed ? "Meets the quality bar" : "Below the quality bar"}
         </span>
         <span className="pill-tag"><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</span>
         {qa.provisional && <span className="pill-tag" style={{ opacity: 0.8 }}>provisional weights</span>}
+        <span className="cs" style={{ flexBasis: "100%" }}>
+          Advisory — this score does not block publishing. Your approval does.
+        </span>
       </div>
 
       {qa.blocked_by.length > 0 && (

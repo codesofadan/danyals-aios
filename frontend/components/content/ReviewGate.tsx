@@ -10,12 +10,17 @@ const PAGE_LABEL: Record<ContentJob["pageType"], string> = {
 };
 
 export default function ReviewGate({
-  jobs, onAction, onPreview,
+  jobs, onAction, onPreview, canReview = true,
 }: {
   jobs: ContentJob[];
   onAction: (id: string, action: ReviewAction, note?: string) => void;
   onPreview?: (id: string) => void;
+  /** The review transition is LeadOnly server-side. False disables the decision
+   *  buttons rather than letting a non-lead click into a raw 403. Preview stays
+   *  available - reading a draft needs no lead role. */
+  canReview?: boolean;
 }) {
+  const gateTitle = canReview ? undefined : "Only a lead (owner, admin or manager) can review";
   // "Request edit" needs a free-text instruction, which lives in the full SEO
   // preview. So the row-level edit button OPENS the preview (where the reviewer
   // writes the note) rather than firing a blind, note-less edit; it only falls back
@@ -23,7 +28,7 @@ export default function ReviewGate({
   const requestEdit = (id: string) =>
     onPreview ? onPreview(id) : onAction(id, "edit");
   return (
-    <section className="card co-review-card">
+    <section className="card">
       <div className="card-h">
         <div>
           <div className="ct">Review gate</div>
@@ -73,13 +78,28 @@ export default function ReviewGate({
                       <span className="material-symbols-rounded">visibility</span>Preview
                     </button>
                   )}
-                  <button className="primary-btn co-approve" onClick={() => onAction(j.id, "approve")}>
+                  <button
+                    className="primary-btn co-approve"
+                    onClick={() => onAction(j.id, "approve")}
+                    disabled={!canReview}
+                    title={gateTitle}
+                  >
                     <span className="material-symbols-rounded">check</span>Approve
                   </button>
-                  <button className="ghostbtn" onClick={() => requestEdit(j.id)}>
+                  <button
+                    className="ghostbtn"
+                    onClick={() => requestEdit(j.id)}
+                    disabled={!canReview}
+                    title={gateTitle}
+                  >
                     <span className="material-symbols-rounded">edit</span>Request edit
                   </button>
-                  <button className="ghostbtn co-reject" onClick={() => onAction(j.id, "reject")}>
+                  <button
+                    className="ghostbtn co-reject"
+                    onClick={() => onAction(j.id, "reject")}
+                    disabled={!canReview}
+                    title={gateTitle}
+                  >
                     <span className="material-symbols-rounded">close</span>Reject
                   </button>
                 </div>

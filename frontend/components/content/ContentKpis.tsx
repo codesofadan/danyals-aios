@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import anime from "animejs";
-import type { ContentJob } from "@/lib/content";
+import { useContentStats } from "@/lib/hooks/content";
 
 function useCountUp(target: number, decimals = 0) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -36,49 +36,59 @@ function Val({ value, unit, decimals }: { value: number; unit?: string; decimals
   );
 }
 
-export default function ContentKpis({ jobs }: { jobs: ContentJob[] }) {
-  const inPipeline = jobs.filter((j) =>
-    ["queued", "drafting", "needs_review", "publishing"].includes(j.status)).length;
-  const awaiting = jobs.filter((j) => j.status === "needs_review").length;
-  const published = jobs.filter((j) => j.status === "done").length;
-  const priced = jobs.filter((j) => j.cost > 0);
-  const avgCost = priced.length
-    ? priced.reduce((s, j) => s + j.cost, 0) / priced.length : 0;
+export default function ContentKpis() {
+  // Server-computed over the WHOLE ledger. These used to be derived from the board's
+  // job array, which the API page-caps - so every tile silently under-counted once a
+  // client passed the page size, and "Published this month" counted `done` jobs of
+  // ANY month because the array carried no date filter.
+  const statsQ = useContentStats();
+  const s = statsQ.data;
+
+  if (statsQ.isError) {
+    return (
+      <section className="kpis">
+        <div className="cs" role="alert" style={{ color: "var(--warn)" }}>
+          Couldn&apos;t load content KPIs. {(statsQ.error as Error)?.message ?? "Try again"}.
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="kpis">
       <div className="kpi hero">
         <div className="ic"><span className="material-symbols-rounded">conveyor_belt</span></div>
         <div className="lab">Jobs in pipeline</div>
-        <Val value={inPipeline} />
-        <div className="sub">
-          <span className="delta up"><span className="material-symbols-rounded">trending_up</span>3</span>{" "}
-          queued today
-        </div>
+        <Val value={s?.inPipeline ?? 0} />
+        <div className="sub">queued, drafting or publishing</div>
       </div>
       <div className="kpi">
         <div className="ic"><span className="material-symbols-rounded">rate_review</span></div>
         <div className="lab">Awaiting review</div>
-        <Val value={awaiting} />
+        <Val value={s?.awaitingReview ?? 0} />
         <div className="sub">the human 10% — approve or edit</div>
       </div>
       <div className="kpi">
         <div className="ic"><span className="material-symbols-rounded">task_alt</span></div>
         <div className="lab">Published this month</div>
-        <Val value={published} />
+        <Val value={s?.publishedThisMonth ?? 0} />
+        {/* A degraded job is terminal but never reached the client's site (migration
+            0081). Surfaced next to the published count so the two are never conflated
+            - the sub-line is omitted entirely when there are none. */}
         <div className="sub">
-          <span className="delta up"><span className="material-symbols-rounded">trending_up</span>18%</span>{" "}
-          vs. last month
+          {s?.degradedThisMonth
+            ? <span className="delta down">
+                <span className="material-symbols-rounded">error</span>
+                {s.degradedThisMonth} not live
+              </span>
+            : "live on the client's site"}
         </div>
       </div>
       <div className="kpi">
         <div className="ic"><span className="material-symbols-rounded">payments</span></div>
         <div className="lab">Avg cost / page</div>
-        <Val value={avgCost} unit="$" decimals={2} />
-        <div className="sub">
-          <span className="delta down"><span className="material-symbols-rounded">trending_down</span>6%</span>{" "}
-          within $10–50 band
-        </div>
+        <Val value={s?.avgCost ?? 0} unit="$" decimals={2} />
+        <div className="sub">mean over priced jobs</div>
       </div>
     </section>
   );
