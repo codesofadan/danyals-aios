@@ -361,30 +361,17 @@ export const accessFeatures: AccessFeature[] = [
   { key: "team_access", label: "Team & Access", short: "Team & Access", icon: "admin_panel_settings", group: "Admin", desc: "Manage members, roles & permissions" },
 ];
 
-export type RoleTemplate = {
-  key: string;
-  label: string; // dropdown label
-  tagline: string;
-  icon: string;
-  role: TeamRole; // governance role stamped on the roster record
-  color: string; // avatar accent for the new member
-  grants: string[]; // accessFeatures.key[] switched on by this template
-};
-
-const ALL_KEYS = accessFeatures.map((f) => f.key);
-
 // The avatar accent each role template stamps on a newly provisioned member.
 //
-// KEYED BY TEMPLATE KEY, and deliberately NOT carried on the template itself. The
-// template catalogue (keys, labels, grants) is moving to the backend as the single
-// source of truth — `GET /rbac/templates` — and that response has no `color`, because
-// colour is a THEME token with no server-side reader.
+// KEYED BY TEMPLATE KEY, and deliberately not carried on the template itself. The
+// catalogue is server-owned - `GET /rbac/templates` - and that response has no
+// `color`, because colour is a THEME token with no server-side reader.
 //
-// Without this map the swap is a silent data defect rather than a crash:
-// `AddMemberWizard` sends `avatar_color` on to provisioning, which defaults it to
-// `#7B69EE` — the pre-Avant-Garde violet — and writes it to `public.users`. Every new
-// member would be stamped legacy violet, discovered months later as "why is everyone
-// purple". Values below are exactly what the dashboard renders today.
+// Without this map the migration would have been a silent data defect rather than a
+// crash: `AddMemberWizard` sends `avatar_color` on to provisioning, which defaults it
+// to `#7B69EE` (the pre-Avant-Garde violet) and writes it to `public.users`. Every new
+// member would be stamped legacy violet, found months later as "why is everyone
+// purple". Values below are exactly what the dashboard renders.
 export const TEMPLATE_COLOR: Record<string, string> = {
   seo: SERIES.c4,
   content: SERIES.c3,
@@ -392,29 +379,16 @@ export const TEMPLATE_COLOR: Record<string, string> = {
   super: SERIES.c1,
 };
 
-// Grants transcribed from the Full Access Matrix (§07). "Off" cells are omitted.
-export const roleTemplates: RoleTemplate[] = [
-  {
-    key: "seo", label: "SEO Specialist", tagline: "Analytics & optimization", icon: "query_stats",
-    role: "Specialist", color: SERIES.c4,
-    grants: ["technical_audit", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
-  },
-  {
-    key: "content", label: "Content Creator", tagline: "Copywriting & publishing", icon: "edit_note",
-    role: "Specialist", color: SERIES.c3,
-    grants: ["content_pipeline", "publishing", "reporting", "task_board", "client_setup"],
-  },
-  {
-    key: "va", label: "Virtual Assistant", tagline: "Coordination & admin", icon: "support_agent",
-    role: "Manager", color: SERIES.c1,
-    grants: ["content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"],
-  },
-  {
-    key: "super", label: "Super Admin", tagline: "Full access — everything on", icon: "shield_person",
-    role: "Owner", color: SERIES.c1,
-    grants: ALL_KEYS,
-  },
-];
+// The role-template catalogue used to live here as `roleTemplates`, hand-mirrored
+// from the backend. It is now server-owned: `GET /rbac/templates` via
+// `useRbacTemplates`, pinned by value against `matrix.py`. The copy was deleted rather
+// than kept in step by a guard — a second copy that agrees today is a copy that can
+// disagree tomorrow, and this one already had (nine colours and an icon).
+//
+// What stays on this side is `TEMPLATE_COLOR` above: the avatar accent, keyed by
+// template key. Colour is a theme token with no server-side reader, and it is the
+// field that actually drifted.
+
 
 // ============================================================
 // Settings module — the admin control panel. Credentials,

@@ -27,6 +27,7 @@ export const TEAM_MEMBERS_KEY = ["team", "members"] as const;
 export const TASKS_KEY = ["tasks"] as const;
 export const ACTIVITY_KEY = ["activity"] as const;
 export const RBAC_ROLES_KEY = ["rbac", "roles"] as const;
+export const RBAC_TEMPLATES_KEY = ["rbac", "templates"] as const;
 
 // --- reads --------------------------------------------------------------------
 
@@ -80,6 +81,42 @@ export function useActivity() {
 // it here would be a false written claim about the contract — and `api.get<T>` is an
 // unchecked cast, so nothing would have caught it.
 type RoleView = { role: TeamRole; desc: string; permissions: PermKey[] };
+
+/**
+ * The role-template catalogue (GET /rbac/templates) — server-side REFERENCE data.
+ *
+ * This replaces the hand-mirrored `roleTemplates` in `lib/data.ts`. The backend owns
+ * what a template MEANS — its key, label, tagline, icon, governance role and the
+ * feature grants it switches on — because those are product decisions enforced
+ * server-side by `require_feature`. A second copy on the frontend could only ever
+ * agree by luck, and it did not: the two copies had already drifted on colours and an
+ * icon before this was fixed.
+ *
+ * Note what is NOT here: `color`. The response deliberately carries none, because an
+ * avatar accent is a theme token with no server-side reader. It comes from
+ * `TEMPLATE_COLOR`, keyed by template key — see the comment there for why that split
+ * is load-bearing rather than tidy.
+ *
+ * `role` arrives capitalized ("Specialist"), matching the roster's `TeamRole`.
+ */
+export type RbacTemplate = {
+  key: string;
+  label: string;
+  tagline: string;
+  icon: string;
+  role: TeamRole;
+  grants: string[];
+};
+
+export function useRbacTemplates() {
+  return useQuery({
+    queryKey: RBAC_TEMPLATES_KEY,
+    // Reference data: it changes when the code changes, not when a user acts, so it
+    // does not need refetching on every window focus.
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.get<RbacTemplate[]>("/rbac/templates"),
+  });
+}
 
 export function useRbac() {
   return useQuery({

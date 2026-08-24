@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { roleTemplates, GROUP_COLOR, TEMPLATE_COLOR } from "@/lib/data";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { GROUP_COLOR, TEMPLATE_COLOR } from "@/lib/data";
+import { useRbacTemplates } from "@/lib/hooks/team";
 import type { NewMember } from "./TeamRoster";
 
 const ADJ = ["Solar", "Rapid", "Cobalt", "Lunar", "Amber", "Quartz", "Nimbus", "Vivid", "Onyx", "Cedar", "Zephyr", "Crimson"];
@@ -38,7 +39,11 @@ const STEP_LABELS = ["Details", "Credentials"];
 
 export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => void; onAdd: (m: NewMember) => void }) {
   const [step, setStep] = useState<Step>(1);
-  const [template, setTemplate] = useState<string>(roleTemplates[0]?.key ?? "");
+  // The catalogue is server-owned reference data now (GET /rbac/templates), so it
+  // arrives asynchronously and the selection cannot be seeded synchronously.
+  const templatesQ = useRbacTemplates();
+  const templates = useMemo(() => templatesQ.data ?? [], [templatesQ.data]);
+  const [template, setTemplate] = useState<string>("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -55,7 +60,13 @@ export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => voi
     };
   }, [onClose]);
 
-  const tpl = roleTemplates.find((t) => t.key === template);
+  // Default to the first template ONCE it arrives, and never override a choice the
+  // user has already made — a refetch must not silently reset their selection.
+  useEffect(() => {
+    if (!template && templates.length) setTemplate(templates[0].key);
+  }, [template, templates]);
+
+  const tpl = templates.find((t) => t.key === template);
 
   const emailValid = /\S+@\S+\.\S+/.test(email);
   const nameValid = name.trim().length > 1;
@@ -140,16 +151,33 @@ export default function AddMemberWizard({ onClose, onAdd }: { onClose: () => voi
                 <div className="tpl-select">
                   <span className="material-symbols-rounded tpl-ic">{tpl ? tpl.icon : "category"}</span>
                   <select value={template} onChange={(e) => setTemplate(e.target.value)} aria-label="Role template">
-                    {roleTemplates.map((t) => (
-                      <option key={t.key} value={t.key}>{t.label} — {t.tagline}</option>
-                    ))}
+                    {templatesQ.isPending ? (
+                      <option value="">Loading roles…</option>
+                    ) : templatesQ.isError ? (
+                      // Say so rather than presenting an empty dropdown as "no roles
+                      // exist" — the operator needs to know this is a fetch failure.
+                      <option value="">Couldn&apos;t load roles</option>
+                    ) : (
+                      templates.map((t) => (
+                        <option key={t.key} value={t.key}>{t.label} — {t.tagline}</option>
+                      ))
+                    )}
                   </select>
                 </div>
               </div>
 
               <div className="modal-f">
                 <button type="button" className="ghostbtn" onClick={onClose}>Cancel</button>
-                <button type="submit" className="primary-btn" disabled={!nameValid || !emailValid}>
+                {/* `!tpl` is not belt-and-braces. The catalogue is fetched now, so a
+                    fast operator could type a name and email and press Next before it
+                    arrives — and the submit path falls back to `features: []`, which
+                    provisions a member with NO feature grants. Silent, and only
+                    visible later as "why can't they see anything". */}
+                <button
+                  type="submit"
+                  className="primary-btn"
+                  disabled={!nameValid || !emailValid || !tpl}
+                >
                   Next<span className="material-symbols-rounded">arrow_forward</span>
                 </button>
               </div>
