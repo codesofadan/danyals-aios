@@ -20,6 +20,31 @@ from app.config import Settings, get_settings
 from app.main import create_app
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _ignore_developer_dotenv() -> None:
+    """The unit suite must never read ``backend/.env``.
+
+    Prevented defect (found 2026-08-24, latent since the settings module shipped):
+    the suite passed only because no developer had configured the app locally. The
+    moment a real `.env` existed, 1,626 tests failed at once.
+
+    `_dev_settings` below already pins settings for FastAPI's dependency injection,
+    but that override applies to ROUTE resolution only. `create_app` reads
+    `get_settings()` directly at CONSTRUCTION time (app/main.py:36, :72) and bakes
+    `trusted_hosts_list` into TrustedHostMiddleware (:92), long before any override
+    exists. With a production `TRUSTED_HOSTS` in `.env`, every request in the suite
+    was rejected with 400 by middleware - which surfaces as thousands of unrelated
+    assertion failures and points nowhere near the cause.
+
+    So the file is disabled for the whole session at the class level, which is the
+    only place that reaches every construction path. Integration tests take their
+    real configuration from the environment (DATABASE_URL etc), not from this file,
+    so they are unaffected.
+    """
+    Settings.model_config["env_file"] = None
+    get_settings.cache_clear()
+
+
 def _dev_settings() -> Settings:
     """Deterministic dev settings, independent of the developer's shell env."""
     return Settings(_env_file=None, app_env="dev")
