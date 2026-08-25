@@ -15,8 +15,15 @@ from typing import Any
 
 import pytest
 
+from app.rbac import matrix as m
 from app.services import provisioning
 from app.services.provisioning import provision_user
+
+
+def _template_grants(key: str) -> tuple[str, ...]:
+    """The grants a role template seeds, straight from the catalogue."""
+    return next(t.grants for t in m.TEMPLATES if t.key == key)
+
 
 pytestmark = pytest.mark.unit
 
@@ -80,8 +87,11 @@ def test_provision_writes_argon2_credential_and_identity(cur: _RecordingCursor) 
     assert email == "jane@x.com"
     assert password_hash.startswith("$argon2id$")
     assert "secret12" not in password_hash
-    # Template grants seeded via executemany (SEO Specialist = 7 features).
-    assert len(cur.many[0][1]) == 7
+    # Template grants seeded via executemany. Against the matrix rather than a count:
+    # the contract is "provisioning seeds exactly this template's grants", and a
+    # literal only ever records when the test was last edited.
+    seeded = {row[1] for row in cur.many[0][1]}
+    assert seeded == set(_template_grants("seo"))
 
 
 def test_provision_without_template_seeds_no_grants(cur: _RecordingCursor) -> None:
@@ -97,7 +107,11 @@ def test_provision_super_template_grants_all_features(cur: _RecordingCursor) -> 
         email="boss@x.com", password="secret12", name="The Boss", role="owner",
         username="boss", template_key="super",
     )
-    assert len(cur.many[0][1]) == 11
+    # "Full access - everything on", so the assertion is EVERY feature. A literal here
+    # would pass while silently omitting a newly added tool, which is exactly the
+    # failure that matters: a Super Admin who cannot see a tool.
+    seeded = {row[1] for row in cur.many[0][1]}
+    assert seeded == set(m.FEATURE_KEYS)
 
 
 def test_provision_client_pins_client_id(cur: _RecordingCursor) -> None:

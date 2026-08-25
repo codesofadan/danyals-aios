@@ -19,6 +19,7 @@ from fastapi import FastAPI
 
 from app.core.auth import CurrentUser, get_current_user
 from app.rbac import FEATURE_KEYS
+from app.rbac import matrix as m
 from app.services import provisioning
 from app.services.passwords import verify_password
 
@@ -238,7 +239,11 @@ async def test_invite_generates_credentials_and_argon2_hash(
 
     # The "content" template seeded that template's feature grants.
     assert rec_cursor.many, "expected template feature grants to be seeded"
-    assert len(rec_cursor.many[0][1]) == 5  # Content Creator template = 5 features
+    # Against the catalogue, not a count: the contract is that the "content" template
+    # seeds exactly ITS grants, and a number just records the last edit.
+    seeded = {row[1] for row in rec_cursor.many[0][1]}
+    expected = next(t.grants for t in m.TEMPLATES if t.key == "content")
+    assert seeded == set(expected)
 
 
 async def test_invite_custom_features_seed_explicit_grants(

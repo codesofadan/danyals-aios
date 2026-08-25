@@ -56,8 +56,11 @@ _DECLARED_SAFE: dict[tuple[str, str], tuple[frozenset[str], str]] = {
     # Explicit test-only bundles. Named *_for_tests; never called by app code.
     ("integrations/content_providers.py", "content_providers_for_tests"): (
         frozenset({"FakeSerpResearcher", "FakeSummarizer", "FakeImageGenerator",
-                   "FakeWordPressPublisher"}),
-        "explicit all-fakes bundle for the pipeline suites; not reachable from the app"
+                   "FakeWordPressPublisher", "FakeKeywordDataProvider"}),
+        "explicit all-fakes bundle for the pipeline suites; not reachable from the app. "
+        "The PRODUCTION factory deliberately leaves keyword_data None rather than "
+        "substituting this fake - it synthesises volume from a hash, and nothing "
+        "downstream could tell a hashed 880 from a bought one"
     ),
     ("integrations/context_providers.py", "providers_for_tests"): (
         frozenset({"FakeSummarizer", "FakeEmbedder"}),
