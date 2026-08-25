@@ -858,6 +858,9 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
         if not rows:
             continue
         background = _style(cand).get("backgroundColor", "")
+        if (not background or background in ("rgba(0, 0, 0, 0)", "transparent")) \
+                and cand.get("scrim") and "gradient" not in str(cand.get("scrim")):
+            background = str(cand["scrim"])
         bg_image = ""
         # Look shallowly for the band's real paint: a backdrop image spanning it,
         # and - when the section element itself is unpainted - a full-coverage
@@ -884,6 +887,10 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
                         child_bg = _style(child).get("backgroundColor", "")
                         if child_bg and child_bg not in ("rgba(0, 0, 0, 0)", "transparent"):
                             background = child_bg
+                        elif child.get("scrim") and "gradient" not in child["scrim"]:
+                            # the band's look painted by a ::before overlay the DOM
+                            # walk cannot see - the reference hero's entire charcoal
+                            background = child["scrim"]
                     nxt.append(child)
             frontier = nxt
         sections.append(InferredSection(

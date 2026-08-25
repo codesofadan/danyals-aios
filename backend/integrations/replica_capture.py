@@ -227,6 +227,28 @@ _JS_TEMPLATE = """
     }
     if (!keep && children.length === 0) return null;
 
+    // A band's paint often lives on a ::before/::after scrim the DOM walk cannot
+    // see - the reference hero is a WHITE section whose charcoal look is entirely
+    // a ::before overlay from the site's custom CSS. If a pseudo-element paints
+    // and the node itself does not, the scrim's colour becomes the node's
+    // effective background.
+    let scrim = '';
+    try {
+      for (const pe of ['::before', '::after']) {
+        const ps = getComputedStyle(el, pe);
+        if (!ps || ps.content === 'none') continue;
+        const bg = ps.backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' &&
+            (ps.position === 'absolute' || ps.position === 'fixed')) {
+          scrim = bg; break;
+        }
+        const bgi = ps.backgroundImage;
+        if (bgi && bgi !== 'none' && bgi.indexOf('gradient') !== -1) {
+          scrim = bgi; break;
+        }
+      }
+    } catch (e) { /* pseudo styles are best-effort */ }
+
     count++;
     const cls = classesOf(el);
     const node = {
@@ -236,6 +258,7 @@ _JS_TEMPLATE = """
             Math.round(r.width), Math.round(r.height)],
     };
     if (cls.length) node.cls = cls;
+    if (scrim) node.scrim = scrim;
     if (el.id) node.eid = el.id;
     if (text) node.txt = text;
     if (TAG === 'A' && el.getAttribute('href')) node.href = el.getAttribute('href');
@@ -311,6 +334,7 @@ class ReplicaNode:
     element_id: str = ""
     text: str = ""
     href: str = ""
+    scrim: str = ""
     src: str = ""
     alt: str = ""
     natural: tuple[int, int] | None = None
@@ -379,6 +403,7 @@ def _node_from(raw: dict[str, Any], styles: list[list[str]], props: list[str]) -
         element_id=str(raw.get("eid") or ""),
         text=str(raw.get("txt") or ""),
         href=str(raw.get("href") or ""),
+        scrim=str(raw.get("scrim") or ""),
         src=str(raw.get("src") or ""),
         alt=str(raw.get("alt") or ""),
         natural=(int(nat[0]), int(nat[1])) if nat else None,

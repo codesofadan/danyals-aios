@@ -105,19 +105,31 @@ def _typography(settings: dict[str, Any], prefix: str, family: str, size_px: int
 # --------------------------------------------------------------------------- #
 # Widget builders - one per closed-vocabulary type
 # --------------------------------------------------------------------------- #
-def _w_heading(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
+def _w_heading(w: InferredWidget, ds: DesignSystem,
+               responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     node, style = w.node, w.node.get("s") or {}
     level = node.get("t", "h2")
+    text = node.get("txt") or ""
     out: dict[str, Any] = {
-        "title": node.get("txt") or "",
+        "title": text,
         "header_size": level if level in ("h1", "h2", "h3", "h4", "h5", "h6") else "h2",
     }
     colour = _colour(style.get("color", "")) or ds.palette.get("heading", "")
     if colour:
         out["title_color"] = colour
+    desktop_px = _px(style.get("fontSize", ""))
     _typography(out, "", style.get("fontFamily", "").split(",")[0].strip('"\' ')
-                or ds.fonts.get("heading", ""), _px(style.get("fontSize", "")),
+                or ds.fonts.get("heading", ""), desktop_px,
                 style.get("fontWeight", ""))
+    # RESPONSIVE, FROM MEASUREMENT. The tablet and mobile captures resolve their own
+    # font sizes for the same heading (matched by its text); a variant key is
+    # emitted only where the measured value differs from desktop, because emitting
+    # every variant lights the "overridden" badge on every control and triples the
+    # tree for nothing.
+    for device in ("tablet", "mobile"):
+        measured = (responsive or {}).get(device, {}).get(text)
+        if measured and desktop_px and abs(measured - desktop_px) >= 2:
+            out[f"typography_font_size_{device}"] = {"unit": "px", "size": measured}
     align = style.get("textAlign", "")
     if align in ("center", "right"):
         out["align"] = align
@@ -244,11 +256,13 @@ _BUILDERS = {
 # --------------------------------------------------------------------------- #
 # Assembly
 # --------------------------------------------------------------------------- #
-def _widget(w: InferredWidget, ds: DesignSystem, ids: _IdGen) -> dict[str, Any]:
+def _widget(w: InferredWidget, ds: DesignSystem, ids: _IdGen,
+            responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     builder = _BUILDERS.get(w.type)
     if builder is None:
         raise UnknownSettingError(f"no builder for widget type {w.type!r}")
-    settings = builder(w, ds)
+    settings = (_w_heading(w, ds, responsive) if w.type == "heading"
+                else builder(w, ds))
     if w.classes:
         settings["_css_classes"] = " ".join(w.classes[:4])
     return {
@@ -260,7 +274,8 @@ def _widget(w: InferredWidget, ds: DesignSystem, ids: _IdGen) -> dict[str, Any]:
 
 
 def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
-            container_px: int) -> dict[str, Any]:
+            container_px: int,
+            responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {
         "_column_size": col.width_pct,
         # `_inline_size` is what the editor's drag handle reads; without it the
@@ -276,9 +291,9 @@ def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
     elements: list[dict[str, Any]] = []
     if col.rows:
         for row in col.rows:
-            elements.append(_row_as_inner_section(row, ds, ids, container_px))
+            elements.append(_row_as_inner_section(row, ds, ids, container_px, responsive))
     else:
-        elements = [_widget(w, ds, ids) for w in col.widgets]
+        elements = [_widget(w, ds, ids, responsive) for w in col.widgets]
     return {
         "id": ids.next(f"col:{col.x}:{col.width_pct}"),
         "elType": "column",
@@ -288,7 +303,8 @@ def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
 
 
 def _row_as_inner_section(row: InferredRow, ds: DesignSystem, ids: _IdGen,
-                          container_px: int) -> dict[str, Any]:
+                          container_px: int,
+                          responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {"gap": "default"}
     if row.structure:
         settings["structure"] = row.structure
@@ -297,24 +313,35 @@ def _row_as_inner_section(row: InferredRow, ds: DesignSystem, ids: _IdGen,
         "elType": "section",
         "isInner": True,
         "settings": settings,
-        "elements": [_column(c, ds, ids, container_px) for c in row.columns],
+        "elements": [_column(c, ds, ids, container_px, responsive) for c in row.columns],
     }
 
 
 def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
-             container_px: int) -> dict[str, Any]:
+             container_px: int,
+             responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {}
     first_multi = next((r for r in section.rows if len(r.columns) > 1), None)
     if first_multi and first_multi.structure:
         settings["structure"] = first_multi.structure
     if section.full_bleed:
-        settings["layout"] = "full_width"
+        # `stretch_section` breaks the BAND out of the theme's content box - without
+        # it the whole rebuild rendered inside Astra's narrow blog column (the
+        # owner's own screenshot of that is why this exists). The CONTENT stays
+        # boxed: pairing stretch with layout:"full_width" ran the text edge-to-edge
+        # and off the left viewport - a full-bleed band with boxed content is what
+        # the source page actually is.
+        settings["stretch_section"] = "section-stretched"
     settings["content_width"] = {"unit": "px", "size": container_px}
     bg = _colour(section.background)
     if bg:
         settings["background_background"] = "classic"
         settings["background_color"] = bg
-    if section.background_image:
+    if section.background_image and "elementor/assets/images/placeholder" not in section.background_image:
+        # A real photograph as a band's backdrop is the common custom-site pattern
+        # and cover is right for it. Elementor's own placeholder art blown up to
+        # cover a 600px band is just a giant grey blob - skip it, the colour carries
+        # the band.
         settings["background_background"] = "classic"
         settings["background_image"] = {"url": section.background_image, "id": ""}
         settings["background_size"] = "cover"
@@ -328,12 +355,12 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
     # full-width column of inner sections, which is Elementor's own idiom for
     # stacked bands inside one background.
     if len(section.rows) == 1:
-        elements = [_column(c, ds, ids, container_px)
+        elements = [_column(c, ds, ids, container_px, responsive)
                     for c in section.rows[0].columns]
     else:
-        inner = [_row_as_inner_section(r, ds, ids, container_px)
+        inner = [_row_as_inner_section(r, ds, ids, container_px, responsive)
                  if len(r.columns) > 1 else
-                 _column(r.columns[0], ds, ids, container_px)
+                 _column(r.columns[0], ds, ids, container_px, responsive)
                  for r in section.rows]
         wrapped: list[dict[str, Any]] = []
         for el in inner:
@@ -365,9 +392,34 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
     }
 
 
-def build_tree(page: InferredPage, ds: DesignSystem) -> list[dict[str, Any]]:
+def build_tree(page: InferredPage, ds: DesignSystem,
+               responsive: dict[str, dict[str, int]] | None = None) -> list[dict[str, Any]]:
     ids = _IdGen()
-    return [_section(s, ds, ids, page.container_px) for s in page.sections]
+    return [_section(s, ds, ids, page.container_px, responsive) for s in page.sections]
+
+
+def responsive_heading_sizes(captures: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """{device: {heading text: font px}} from the tablet/mobile captures.
+
+    Matched by TEXT because node identity does not survive across viewports - the
+    prune keeps different wrappers at different widths - while a heading's text is
+    the same page-fact everywhere it renders.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for device, root in captures.items():
+        sizes: dict[str, int] = {}
+
+        def walk(n: dict[str, Any], _sizes: dict[str, int] = sizes) -> None:
+            if n.get("t") in ("h1", "h2", "h3", "h4", "h5", "h6") and n.get("txt"):
+                px = _px((n.get("s") or {}).get("fontSize", ""))
+                if px:
+                    _sizes[n["txt"]] = px
+            for k in n.get("kids") or []:
+                walk(k)
+
+        walk(root)
+        out[device] = sizes
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -404,11 +456,18 @@ def validate_tree(tree: list[dict[str, Any]], oracle: dict[str, Any] | None = No
         else:
             raise UnknownSettingError(f"{path}: unknown elType {el!r}")
         for key in settings:
-            if key not in allowed:
+            # Responsive variants store as `<key>_tablet` / `<key>_mobile`; the
+            # registry lists base control ids. A variant is valid iff its base is.
+            base = key
+            for suffix in ("_tablet", "_mobile", "_laptop", "_widescreen"):
+                if key.endswith(suffix):
+                    base = key[: -len(suffix)]
+                    break
+            if base not in allowed:
                 raise UnknownSettingError(
                     f"{path}: {el}{'/' + node.get('widgetType', '') if el == 'widget' else ''} "
-                    f"settings key {key!r} is not in Elementor 4.7's registry - it would "
-                    "be stored and silently ignored"
+                    f"settings key {key!r} (base {base!r}) is not in Elementor 4.7's "
+                    "registry - it would be stored and silently ignored"
                 )
         if not node.get("id"):
             raise UnknownSettingError(f"{path}: node has no id")
