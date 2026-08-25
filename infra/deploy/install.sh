@@ -110,7 +110,15 @@ log "installing the backend (editable) + deps into the venv"
 "${VENV_DIR}/bin/pip" install --upgrade pip -q
 # Editable install: a `git pull` updates the running code (a restart picks it up)
 # with no reinstall. Add the [ai] extra here if/when the context provider keys land.
-(cd "${BACKEND_DIR}" && "${VENV_DIR}/bin/pip" install -e . -q)
+#
+# [automation] brings Playwright, which the DESIGN CAPTURE path needs - it is the only
+# way to read a page's computed styles and rendered geometry, and without it
+# `build_site_analyzer()` returns None and every capture degrades to
+# "playwright_unconfigured". The Chromium binary itself is already downloaded further
+# down this script into ${STATE_DIR}/ms-playwright for the audit engine; the backend
+# venv reuses that same download via PLAYWRIGHT_BROWSERS_PATH rather than fetching a
+# second ~150MB copy.
+(cd "${BACKEND_DIR}" && "${VENV_DIR}/bin/pip" install -e '.[automation]' -q)
 
 log "setting ownership of ${DEPLOY_ROOT} to ${APP_USER}"
 chown -R "${APP_USER}:${APP_USER}" "${DEPLOY_ROOT}"
