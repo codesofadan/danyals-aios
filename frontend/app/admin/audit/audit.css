@@ -111,3 +111,10 @@
   .au-cov { grid-template-columns: 1fr; }
   .au-chips { margin-left: 0; }
 }
+
+/* The altitudes link sits in the same artifact row as the download buttons, so
+   it has to look identical. `au-art` was written for <button>; an <a> needs the
+   text-decoration and the disabled state spelled out, because aria-disabled
+   does not style itself. */
+a.au-art { text-decoration: none; }
+a.au-art[aria-disabled="true"] { opacity: .32; cursor: not-allowed; pointer-events: none; }

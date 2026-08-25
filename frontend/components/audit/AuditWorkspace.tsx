@@ -19,6 +19,7 @@ import {
 } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
 import { useSpendHalted } from "@/lib/hooks/cost";
+import Link from "next/link";
 import { downloadFile, getReportHtml } from "@/lib/api";
 import ReportViewer from "@/components/report/ReportViewer";
 import AuditStats from "./AuditStats";
@@ -300,6 +301,19 @@ export default function AuditWorkspace() {
                       </td>
                       <td>
                         <div className="au-arts">
+                          {/* The altitudes view. Placed FIRST because it is now the
+                              primary way to read an audit: the PDF beside it is an
+                              833-page document on a large site, and this is the same
+                              data as six numbers you can drill into. */}
+                          <Link
+                            className="au-art"
+                            title="Open findings, plan and evidence"
+                            href={`/admin/audit/${r.id}`}
+                            aria-disabled={r.status !== "done"}
+                            onClick={(e) => { if (r.status !== "done") e.preventDefault(); }}
+                          >
+                            <span className="material-symbols-rounded">layers</span>
+                          </Link>
                           <button
                             className="au-art"
                             title="View report"

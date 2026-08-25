@@ -1,0 +1,217 @@
+/* ============================================================
+   AIOS · Audit altitudes — prefix .alt- (and .rm- for the plan)
+   Reuses global .card/.card-h/.seg and the --ok/--warn/--crit tokens.
+
+   The visual hierarchy carries the argument: a score is never larger or louder
+   than the coverage that qualifies it, and an unmeasured dimension is styled as
+   ABSENT (muted, dashed) rather than as BAD (red) — because "we did not look"
+   and "this is broken" are different messages about a client's site.
+   ============================================================ */
+
+.alt { display: flex; flex-direction: column; gap: 16px; }
+
+/* ---- header ---- */
+.alt-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.alt-back { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700;
+  color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--card); }
+.alt-back:hover { color: var(--violet); border-color: var(--line-2); }
+.alt-back .material-symbols-rounded { font-size: 16px; }
+.alt-head-main h1 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; color: var(--fg-strong); margin: 0; }
+.alt-head-url { font-size: 12.5px; color: var(--muted); margin: 3px 0 0; word-break: break-all; }
+.alt-head-stats { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+
+.alt-hero { min-width: 168px; padding: 12px 14px; border-radius: 13px; background: var(--card);
+  border: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; }
+.alt-hero-lab { font-size: 10.5px; font-weight: 800; letter-spacing: .02em; color: var(--muted); text-transform: uppercase; }
+.alt-hero-val { font-size: 28px; font-weight: 800; letter-spacing: -.03em; color: var(--fg-strong); line-height: 1.05; }
+.alt-hero-sub { font-size: 11px; color: var(--muted); }
+.alt-hero.t-ok .alt-hero-val { color: var(--ok); }
+.alt-hero.t-warn .alt-hero-val { color: var(--warn); }
+.alt-hero.t-crit .alt-hero-val { color: var(--crit); }
+.alt-hero.t-none .alt-hero-val { color: var(--muted-2); font-size: 19px; font-weight: 700; }
+
+/* ---- tabs ---- */
+.alt-tabs { align-self: flex-start; }
+.alt-tabs button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; }
+.alt-tabs .material-symbols-rounded { font-size: 16px; }
+
+/* ---- MACRO: pillar cards ---- */
+.alt-pillars { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); }
+.alt-pillar { text-align: left; font-family: inherit; cursor: pointer; display: flex; flex-direction: column;
+  gap: 8px; padding: 14px; border-radius: 13px; border: 1px solid var(--line);
+  background: linear-gradient(165deg, var(--card), var(--card-2)); transition: border-color .15s, transform .15s; }
+.alt-pillar:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.alt-pillar.on { border-color: var(--violet); box-shadow: 0 0 0 3px var(--ring); }
+.alt-pillar-top { display: flex; align-items: center; gap: 7px; }
+.alt-pillar-top .material-symbols-rounded { font-size: 17px; color: var(--violet-soft); }
+.alt-pillar-name { font-size: 12.5px; font-weight: 800; color: var(--ink); }
+.alt-pillar-score { font-size: 30px; font-weight: 800; letter-spacing: -.03em; line-height: 1; color: var(--fg-strong); }
+.alt-pillar.t-ok .alt-pillar-score { color: var(--ok); }
+.alt-pillar.t-warn .alt-pillar-score { color: var(--warn); }
+.alt-pillar.t-crit .alt-pillar-score { color: var(--crit); }
+.alt-pillar-score.unmeasured { font-size: 15px; font-weight: 700; color: var(--muted-2); letter-spacing: -.01em; }
+.alt-pillar.t-none { border-style: dashed; background: var(--card); }
+
+.alt-pillar-cov { display: flex; flex-direction: column; gap: 4px; }
+.alt-cov-bar { display: block; height: 4px; border-radius: 99px; background: var(--well-2); overflow: hidden; }
+.alt-cov-bar i { display: block; height: 100%; border-radius: 99px; background: var(--violet-soft); }
+.alt-cov-text { font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.alt-pillar-foot { font-size: 11px; color: var(--muted); }
+.alt-pillar-foot.why { font-style: italic; color: var(--muted-2); }
+
+/* ---- tables ---- */
+.alt-tbl-wrap { overflow-x: auto; }
+.alt-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.alt-tbl thead th { text-align: left; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line);
+  white-space: nowrap; }
+.alt-tbl td { padding: 9px 10px; border-bottom: 1px solid var(--line); color: var(--body); vertical-align: top; }
+.alt-tbl tbody tr:hover { background: var(--raise); }
+.alt-tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+.alt-tbl tr.dim td { color: var(--muted-2); }
+.alt-tbl tr.bad td { background: color-mix(in srgb, var(--crit) 4%, transparent); }
+.alt-tbl-sm { font-size: 12px; }
+.alt-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--muted); }
+.alt-url a { color: var(--violet); text-decoration: none; word-break: break-all; }
+.alt-url a:hover { text-decoration: underline; }
+.alt-detail { max-width: 460px; }
+.alt-muted { color: var(--muted-2); }
+.alt-score { font-weight: 800; }
+.alt-score.t-ok { color: var(--ok); } .alt-score.t-warn { color: var(--warn); }
+.alt-score.t-crit { color: var(--crit); } .alt-score.t-none { color: var(--muted-2); font-weight: 600; }
+.alt-cov-cell { font-size: 11.5px; color: var(--muted); }
+.alt-cov-cell em { font-style: italic; color: var(--muted-2); }
+.alt-health { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 999px; }
+.alt-health.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.alt-health.bad { color: var(--crit); background: color-mix(in srgb, var(--crit) 12%, transparent); }
+td.t-crit { color: var(--crit); font-weight: 800; }
+td.t-warn { color: var(--warn); font-weight: 700; }
+
+/* ---- MICRO: finding cards ---- */
+.alt-count { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.alt-findings { display: flex; flex-direction: column; gap: 7px; }
+.alt-finding { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
+.alt-finding.open { border-color: var(--line-2); }
+.alt-finding-head { width: 100%; display: flex; align-items: center; gap: 11px; padding: 11px 13px;
+  background: none; border: none; font-family: inherit; text-align: left; cursor: pointer; }
+.alt-finding-head:hover { background: var(--raise); }
+.alt-sev { font-size: 9.5px; font-weight: 900; letter-spacing: .03em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.alt-sev.t-crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 12%, transparent); }
+.alt-sev.t-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.alt-sev.t-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.alt-sev.t-none { color: var(--muted); background: var(--well); }
+.alt-finding-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.alt-finding-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+.alt-finding-sub { font-size: 11px; color: var(--muted); }
+.alt-finding-radius { font-size: 12px; font-weight: 800; color: var(--violet); white-space: nowrap; }
+.alt-finding-radius em { font-style: normal; font-weight: 600; color: var(--warn); font-size: 11px; }
+.alt-chev { color: var(--muted); font-size: 20px; }
+.alt-finding-body { padding: 0 13px 13px; border-top: 1px solid var(--line); }
+.alt-fix { display: flex; gap: 7px; font-size: 12.5px; color: var(--body); margin: 12px 0; }
+.alt-fix .material-symbols-rounded { font-size: 16px; color: var(--violet-soft); flex-shrink: 0; }
+.alt-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11.5px; color: var(--muted);
+  padding-bottom: 11px; border-bottom: 1px dashed var(--line); margin-bottom: 11px; }
+.alt-meta b { color: var(--ink); font-weight: 700; }
+
+/* ---- NANO ---- */
+.alt-inst-head { font-size: 11.5px; color: var(--muted); margin-bottom: 7px; }
+.alt-inst-more b { color: var(--ink); }
+.alt-inst-note { font-size: 12px; color: var(--muted); padding: 10px 0; }
+.alt-inst-note.err { color: var(--crit); }
+
+/* ---- THE PLAN ---- */
+.rm { display: flex; flex-direction: column; gap: 14px; }
+.rm-basis { display: flex; gap: 9px; padding: 11px 13px; border-radius: 11px; background: var(--well);
+  border: 1px solid var(--line); font-size: 12px; color: var(--body); line-height: 1.5; }
+.rm-basis .material-symbols-rounded { font-size: 17px; color: var(--violet-soft); flex-shrink: 0; }
+.rm-board { display: grid; gap: 11px; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); }
+.rm-col { border: 1px solid var(--line); border-radius: 13px; background: var(--card-2); display: flex;
+  flex-direction: column; min-height: 120px; }
+.rm-col-h { display: flex; align-items: baseline; gap: 7px; padding: 11px 13px; border-bottom: 1px solid var(--line); }
+.rm-col-name { font-size: 13px; font-weight: 800; color: var(--ink); }
+.rm-col-win { font-size: 10.5px; color: var(--muted); }
+.rm-col-n { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--violet);
+  background: var(--hover); padding: 2px 8px; border-radius: 999px; }
+.rm-col-body { padding: 9px; display: flex; flex-direction: column; gap: 7px; }
+.rm-none { font-size: 11.5px; color: var(--muted-2); font-style: italic; margin: 4px; }
+
+.rm-item { border: 1px solid var(--line); border-left: 3px solid var(--muted-2); border-radius: 9px;
+  background: var(--card); padding: 9px 10px; display: flex; flex-direction: column; gap: 5px; }
+.rm-item.t-crit { border-left-color: var(--crit); }
+.rm-item.t-warn { border-left-color: var(--warn); }
+.rm-item.t-ok { border-left-color: var(--ok); }
+.rm-item-top { display: flex; gap: 7px; align-items: baseline; }
+.rm-seq { font-size: 10px; font-weight: 800; color: var(--muted); min-width: 15px; }
+.rm-title { font-size: 12px; font-weight: 700; color: var(--ink); line-height: 1.35; }
+.rm-item-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10.5px; color: var(--muted); }
+.rm-role { font-weight: 800; color: var(--violet-soft); }
+.rm-check { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rm-exit { display: flex; gap: 5px; font-size: 10.5px; color: var(--muted); line-height: 1.4; }
+.rm-exit .material-symbols-rounded { font-size: 13px; color: var(--ok); flex-shrink: 0; }
+
+.rm-backlog { border: 1px dashed var(--line-2); border-radius: 13px; padding: 12px 14px; background: var(--well); }
+.rm-backlog header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink); }
+.rm-backlog header .material-symbols-rounded { font-size: 17px; color: var(--muted); }
+.rm-backlog-note { font-size: 11.5px; color: var(--muted); font-weight: 500; }
+.rm-backlog-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.rm-pill { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--line); color: var(--body); }
+.rm-pill.t-crit { color: var(--crit); } .rm-pill.t-warn { color: var(--warn); }
+.rm-pill.more { color: var(--muted); font-style: italic; }
+
+/* ---- downloads ---- */
+.alt-dl { display: grid; gap: 9px; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); }
+.alt-dl-item { display: flex; align-items: center; gap: 10px; padding: 12px 13px; border-radius: 11px;
+  border: 1px solid var(--line); background: var(--card); font-family: inherit; text-align: left; cursor: pointer; }
+.alt-dl-item:hover { border-color: var(--violet); background: var(--raise); }
+.alt-dl-item .material-symbols-rounded { font-size: 19px; color: var(--violet-soft); }
+.alt-dl-item b { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.alt-dl-item em { display: block; font-size: 11px; font-style: normal; color: var(--muted); margin-top: 2px; }
+
+/* ---- states ---- */
+.alt-loading { padding: 26px; text-align: center; font-size: 12.5px; color: var(--muted); }
+.alt-empty { padding: 26px; text-align: center; color: var(--muted); }
+.alt-empty .material-symbols-rounded { font-size: 30px; color: var(--muted-2); }
+.alt-empty p { font-size: 12.5px; margin: 7px 0 0; }
+.alt-empty.big { padding: 56px 26px; }
+.alt-empty.big h2 { font-size: 17px; color: var(--ink); margin: 10px 0 5px; }
+.alt-empty.big .alt-back { display: inline-flex; margin-top: 14px; }
+.alt-clear { display: inline-flex; align-items: center; gap: 4px; font-family: inherit; font-size: 11px;
+  font-weight: 700; color: var(--violet); background: var(--hover); border: 1px solid var(--line);
+  padding: 4px 9px; border-radius: 999px; cursor: pointer; }
+.alt-clear .material-symbols-rounded { font-size: 14px; }
+.alt-foot { font-size: 11px; color: var(--muted-2); line-height: 1.55; padding: 2px 2px 10px; }
+.alt-foot code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px;
+  background: var(--well); padding: 1px 5px; border-radius: 5px; }
+
+@media (max-width: 860px) {
+  .alt-head-stats { margin-left: 0; width: 100%; }
+  .alt-hero { flex: 1; min-width: 140px; }
+}
+
+/* The subpoint filter bar. The default view hides clean and unmeasured rows, so
+   the count of what is hidden has to be stated - a filtered table that does not
+   say what it filtered is how a dashboard starts lying by omission. */
+.alt-sub-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
+.alt-sub-bar b { color: var(--ink); font-weight: 800; }
+.alt-sub-bar .alt-clear { margin-left: auto; }
+
+/* A column expander. Always states the count it is holding back: a plan that
+   silently shows eight of eighty is a plan the operator will under-resource. */
+.rm-more { display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%;
+  font-family: inherit; font-size: 11px; font-weight: 700; color: var(--violet);
+  background: var(--well); border: 1px dashed var(--line-2); border-radius: 9px;
+  padding: 7px; cursor: pointer; }
+.rm-more:hover { background: var(--hover); border-color: var(--violet); }
+.rm-more .material-symbols-rounded { font-size: 15px; }
+
+/* The findings pager. Same rule as the roadmap columns: state what is held back. */
+.alt-more { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;
+  margin-top: 9px; font-family: inherit; font-size: 12px; font-weight: 700; color: var(--violet);
+  background: var(--well); border: 1px dashed var(--line-2); border-radius: 10px;
+  padding: 10px; cursor: pointer; }
+.alt-more:hover { background: var(--hover); border-color: var(--violet); }
+.alt-more .material-symbols-rounded { font-size: 17px; }
