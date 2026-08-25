@@ -223,6 +223,10 @@ class InferredSection:
     full_bleed: bool
     rows: tuple[InferredRow, ...]
     background: str = ""
+    # A band's imagery usually lives on a child spanning the band, not on the
+    # section element - the reference hero is a white <section> whose dark look IS
+    # its backdrop image. Dropping it turned the hero white with invisible text.
+    background_image: str = ""
     classes: tuple[str, ...] = ()
     element_id: str = ""
 
@@ -335,9 +339,18 @@ def classify(node: dict[str, Any]) -> str | None:
             padded = float((s.get("paddingLeft") or "0").rstrip("px")) >= 8
         except ValueError:
             padded = False
+        if not text:
+            # the label often lives on a child span - an <a> wrapper is judged by
+            # what it contains, not by its own (empty) text node
+            text = _all_text(node).strip()
         if _paints(node) or padded:
             return "button"
-        return None  # a plain link rides inside its parent's text
+        if len(text) >= 12:
+            # A plain link with a sentence of text is CONTENT, not chrome - the
+            # reference page's FAQ questions are bare <a> elements, and dropping
+            # them emptied the whole FAQ band.
+            return "text-editor"
+        return None  # a short plain link rides inside its parent's text
     if tag in ("ul", "ol"):
         # A list whose items each open with an icon is an icon-list; a star row is a
         # rating. Both need the children to say so; a plain list stays with the text.
@@ -844,10 +857,40 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
         rows = _rows_of(cand)
         if not rows:
             continue
+        background = _style(cand).get("backgroundColor", "")
+        bg_image = ""
+        # Look shallowly for the band's real paint: a backdrop image spanning it,
+        # and - when the section element itself is unpainted - a full-coverage
+        # child's background colour (the reference footer's dark lives one level
+        # down; without lifting it the footer rendered white).
+        frontier = [cand]
+        for _ in range(4):
+            nxt: list[dict[str, Any]] = []
+            for node in frontier:
+                for child in _kids(node):
+                    bx, _, bw, bh = _box(child)
+                    covers = bw >= w * 0.85 and bh >= h * 0.6
+                    if covers and not bg_image:
+                        if child.get("t") == "img" and child.get("src"):
+                            bg_image = child["src"]
+                        else:
+                            from_css = _style(child).get("backgroundImage", "")
+                            if from_css and from_css != "none":
+                                m = re.search(r'url\(["\']?([^"\')]+)', from_css)
+                                if m:
+                                    bg_image = m.group(1)
+                    if covers and (not background
+                                   or background in ("rgba(0, 0, 0, 0)", "transparent")):
+                        child_bg = _style(child).get("backgroundColor", "")
+                        if child_bg and child_bg not in ("rgba(0, 0, 0, 0)", "transparent"):
+                            background = child_bg
+                    nxt.append(child)
+            frontier = nxt
         sections.append(InferredSection(
             y=y, height=h, full_bleed=w >= viewport_width * 0.98,
             rows=tuple(rows),
-            background=_style(cand).get("backgroundColor", ""),
+            background=background,
+            background_image=bg_image,
             classes=tuple(_own_classes(cand)),
             element_id=cand.get("eid") or "",
         ))

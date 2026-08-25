@@ -127,8 +127,10 @@ _JS_TEMPLATE = """
     return false;
   };
   const ownText = (el) => {
+    // Joined with spaces: an h1 split across inline spans/breaks concatenated to
+    // "Comfort that feelslike home" - a missing space in a client-facing headline.
     let t = '';
-    for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue;
+    for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue + ' ';
     return t.replace(/\\s+/g, ' ').trim();
   };
   const kids = (el) => Array.from(el.children).filter(c => !SKIP.has(c.tagName.toUpperCase()));
@@ -159,10 +161,14 @@ _JS_TEMPLATE = """
     if (cs.display === 'none' || cs.visibility === 'hidden') return null;
     // Screen-reader-only text is 1x1px with clip/clip-path - it renders to nothing
     // and reproducing it as visible copy puts accessibility scaffolding on the page.
-    if (r.width <= 2 && r.height <= 2) return null;
+    // ONLY for childless nodes: a zero-rect node WITH children is display:contents
+    // (its children render fully), and pruning it here killed the hoist below before
+    // it could run - which is how every icon-box on the page captured EMPTY, because
+    // Elementor 4.x wraps icon-box content in a display:contents div.
+    if (r.width <= 2 && r.height <= 2 && el.children.length === 0) return null;
     if (cs.clipPath && cs.clipPath.indexOf('inset(50%') !== -1) return null;
     if (cs.clip && cs.clip.indexOf('rect(0') === 0) return null;
-    if (r.width < 1 || r.height < 1) {
+    if (r.width < 1 || r.height < 1 || (r.width <= 2 && r.height <= 2)) {
       // display:contents wrappers report a zero rect while their children render
       // fully - dropping the node here dropped whole visible subtrees. Walk the
       // children and hoist them under a synthetic box.
@@ -199,7 +205,10 @@ _JS_TEMPLATE = """
 
     // Collapse: a wrapper that draws nothing and holds one child is noise - but its
     // CLASSES are not, because BEM names sit on wrappers.
-    if (!keep && children.length === 1) {
+    if (!keep && children.length === 1 && TAG !== 'A' && TAG !== 'BUTTON') {
+      // An <a> or <button> wrapper is never collapsed into its label span: the
+      // collapse kept the span and LOST the tag and href, so the hero's own CTA
+      // arrived as a plain piece of text.
       const only = children[0];
       // Collapse ONLY when the wrapper's box coincides with the child's. A
       // flex-centering or min-height wrapper whose geometry differs from its child

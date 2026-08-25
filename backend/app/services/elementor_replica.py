@@ -141,10 +141,17 @@ def _w_image(w: InferredWidget, _ds: DesignSystem) -> dict[str, Any]:
             "image_size": "full"}
 
 
+def _subtree_text(node: dict[str, Any]) -> str:
+    parts = [node.get("txt") or ""]
+    for k in node.get("kids") or []:
+        parts.append(_subtree_text(k))
+    return " ".join(x for x in parts if x).strip()
+
+
 def _w_button(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
     node, style = w.node, w.node.get("s") or {}
     out: dict[str, Any] = {
-        "text": node.get("txt") or "",
+        "text": node.get("txt") or _subtree_text(node),
         "link": {"url": node.get("href") or "", "is_external": "", "nofollow": ""},
     }
     # `background_color`, NOT `button_background_color`: the 4.7 registry knows only
@@ -307,6 +314,11 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
     if bg:
         settings["background_background"] = "classic"
         settings["background_color"] = bg
+    if section.background_image:
+        settings["background_background"] = "classic"
+        settings["background_image"] = {"url": section.background_image, "id": ""}
+        settings["background_size"] = "cover"
+        settings["background_position"] = "center center"
     if section.classes:
         settings["_css_classes"] = " ".join(section.classes[:4])
     if section.element_id:
