@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "iterations": 0,
+  "blockers": [],
+  "warnings": [],
+  "facts": {
+    "sections_present": 7,
+    "index_issue_rows": 22,
+    "inventory_crit_major": 22,
+    "em_dashes": 0,
+    "en_dashes": 0,
+    "cta_email_present": true,
+    "highlighting_present": true
+  },
+  "tier": "free"
+}

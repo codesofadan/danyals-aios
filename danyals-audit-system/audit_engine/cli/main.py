@@ -344,6 +344,7 @@ async def _emit_google_nl_snapshot(
     *,
     artifact_dir: Path,
     crawl_result: Any,
+    permit_billable: bool = False,
 ) -> NLAnalysis | None:
     """Run Google Cloud NL on the homepage body text (+ top 2 deep pages).
 
@@ -352,6 +353,18 @@ async def _emit_google_nl_snapshot(
     when no key is configured. The data is also consumed inline by the
     semantic-SEO entity-coverage analyzer when available.
     """
+    # Google Cloud NL is a BILLABLE provider: metered per unit beyond a ~5k
+    # unit/month allowance, and classified `billable` by the audit tiering
+    # spec. It was previously gated on KEY PRESENCE alone, so `--mode free`
+    # could not switch it off - the free, UNAUTHENTICATED public funnel called
+    # it on every run and committed $0.00 against it, because the call was also
+    # never written to `api_calls`. Observed live on run
+    # e834b06c-3133-4ef9-87b2-d86fc09f42ac (2026-08-24).
+    #
+    # This parameter defaults to False so the guard FAILS CLOSED: a future call
+    # site that forgets to pass it spends nothing rather than silently billing.
+    if not permit_billable:
+        return None
     keys = get_keys()
     if not keys.google_nl:
         return None
@@ -848,7 +861,9 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
     # Free for the first ~5k units/month. Skipped silently when no key.
     try:
-        await _emit_google_nl_snapshot(artifact_dir=artifact_dir, crawl_result=crawl_result)
+        await _emit_google_nl_snapshot(
+            artifact_dir=artifact_dir, crawl_result=crawl_result, permit_billable=True
+        )
     except Exception as e:  # noqa: BLE001
         console.print(f"  [yellow]Google NL snapshot failed: {type(e).__name__}: {e}[/yellow]")
 
@@ -1508,7 +1523,11 @@ async def _run_full(
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
     # Free for the first ~5k units/month. Skipped silently when no key.
     try:
-        await _emit_google_nl_snapshot(artifact_dir=artifact_dir, crawl_result=crawl_result)
+        await _emit_google_nl_snapshot(
+            artifact_dir=artifact_dir,
+            crawl_result=crawl_result,
+            permit_billable=(str(mode).lower() != "free"),
+        )
     except Exception as e:  # noqa: BLE001
         console.print(f"  [yellow]Google NL snapshot failed: {type(e).__name__}: {e}[/yellow]")
 
@@ -1879,7 +1898,9 @@ async def _run_local(
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
     # Free for the first ~5k units/month. Skipped silently when no key.
     try:
-        await _emit_google_nl_snapshot(artifact_dir=artifact_dir, crawl_result=crawl_result)
+        await _emit_google_nl_snapshot(
+            artifact_dir=artifact_dir, crawl_result=crawl_result, permit_billable=True
+        )
     except Exception as e:  # noqa: BLE001
         console.print(f"  [yellow]Google NL snapshot failed: {type(e).__name__}: {e}[/yellow]")
 

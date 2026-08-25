@@ -1,0 +1,155 @@
+{
+  "run_uuid": "837b75d6-4786-4188-b1b4-6b2472795e1f",
+  "total_findings": 15617,
+  "by_category": {
+    "on-page": 15156,
+    "local-seo": 19,
+    "off-page": 24,
+    "technical": 418
+  },
+  "by_status": {
+    "fail": 2558,
+    "n_a": 498,
+    "pass": 7042,
+    "warn": 5519
+  },
+  "by_severity": {
+    "critical": 7,
+    "info": 6573,
+    "major": 3228,
+    "minor": 5809
+  },
+  "distinct_check_ids": 160,
+  "field_population": {
+    "subcategory": 5964,
+    "owner_agent": 15617,
+    "references_json": 0,
+    "remediation": 7826,
+    "page_id": 15542,
+    "impact_usd": 0
+  },
+  "issue_rows_fail_or_warn": 8077,
+  "distinct_causes_among_issues": 81,
+  "top_causes": [
+    {
+      "check_id": "ON-048",
+      "check_name": "AI overview optimization",
+      "severity": "major",
+      "instances": 394
+    },
+    {
+      "check_id": "ON-049",
+      "check_name": "Direct answer optimization",
+      "severity": "major",
+      "instances": 394
+    },
+    {
+      "check_id": "ON-142",
+      "check_name": "Author expertise signals rollup",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-119",
+      "check_name": "Central entity coherence (title / H1 / Organization schema)",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-067",
+      "check_name": "Image alt text optimization",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-051",
+      "check_name": "Content readability analysis",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-123",
+      "check_name": "Organization schema entity completeness",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-122",
+      "check_name": "sameAs / external entity link presence",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-136",
+      "check_name": "Macro context connection (opening references parent topic)",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-028",
+      "check_name": "Trust signal analysis",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-029",
+      "check_name": "Author credibility analysis",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-026",
+      "check_name": "EEAT optimization analysis",
+      "severity": "major",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-138",
+      "check_name": "Authoritative source citations (external links)",
+      "severity": "minor",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-056",
+      "check_name": "Intro optimization",
+      "severity": "minor",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-073",
+      "check_name": "Schema markup validation",
+      "severity": "minor",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-076",
+      "check_name": "Service schema optimization",
+      "severity": "minor",
+      "instances": 197
+    },
+    {
+      "check_id": "ON-128",
+      "check_name": "Heading-to-paragraph topical proximity",
+      "severity": "info",
+      "instances": 196
+    },
+    {
+      "check_id": "ON-140",
+      "check_name": "Information density (facts and numbers per 100 words)",
+      "severity": "info",
+      "instances": 196
+    },
+    {
+      "check_id": "ON-011",
+      "check_name": "Keyword stuffing detection",
+      "severity": "info",
+      "instances": 196
+    },
+    {
+      "check_id": "ON-053",
+      "check_name": "Paragraph length analysis",
+      "severity": "info",
+      "instances": 196
+    }
+  ]
+}

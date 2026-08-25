@@ -1,0 +1,22 @@
+{
+  "run_uuid": "837b75d6-4786-4188-b1b4-6b2472795e1f",
+  "domain": "https://smileon.pk",
+  "profile": "local",
+  "started_at": "2026-08-24T23:05:50+05:00",
+  "duration_sec": 235.9840577080031,
+  "pages_crawled": 197,
+  "scores": {
+    "on_page": 57.5,
+    "technical": 97.2,
+    "off_page": 56.7,
+    "local": 44.2,
+    "overall": 63.3
+  },
+  "mode": "paid",
+  "usage": {
+    "agent_calls": 15,
+    "input_tokens": 515508,
+    "output_tokens": 27329,
+    "model": "claude-haiku-4-5"
+  }
+}

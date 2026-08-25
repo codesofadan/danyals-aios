@@ -1,0 +1,22 @@
+{
+  "run_uuid": "3055416d-5137-446c-a495-7ef4462ede37",
+  "domain": "https://example.com",
+  "profile": "general",
+  "started_at": "2026-08-24T22:00:20+05:00",
+  "duration_sec": 7.0760451660025865,
+  "pages_crawled": 1,
+  "scores": {
+    "on_page": 44.2,
+    "technical": 71.8,
+    "off_page": null,
+    "local": null,
+    "overall": 58.0
+  },
+  "mode": "free",
+  "usage": {
+    "agent_calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "model": "claude-haiku-4-5"
+  }
+}
