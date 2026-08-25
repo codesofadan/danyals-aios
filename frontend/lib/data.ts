@@ -346,9 +346,18 @@ export type AccessFeature = {
   desc: string; // what it unlocks
 };
 
-// The 11 features you switch on or off (doc §01 / §07).
+// The features you switch on or off (doc §01 / §07). MIRRORS app/rbac/matrix.py:FEATURES
+// exactly - the backend owns this catalogue and test_rbac_single_source.py parses this
+// file to prove it. `tools.ts` builds its tool list from here, so a tool missing from
+// this array has no slug and renders "No such tool" however complete its backend is.
 export const accessFeatures: AccessFeature[] = [
   { key: "technical_audit", label: "Technical Audit", short: "Tech Audit", icon: "troubleshoot", group: "Analytics", desc: "Run site audits, review & mark issues fixed" },
+  { key: "keyword_research", label: "Keyword Research", short: "Keywords", icon: "search", group: "Analytics", desc: "Find & group keyword opportunities, assign to clients" },
+  { key: "rank_tracker", label: "Rank Tracker", short: "Ranks", icon: "trending_up", group: "Analytics", desc: "Track keyword positions daily & see ranking history" },
+  { key: "competitor_intel", label: "Competitor Intelligence", short: "Competitors", icon: "groups", group: "Analytics", desc: "Compare competitor visibility, keywords & content" },
+  { key: "backlink_manager", label: "Backlink Manager", short: "Backlinks", icon: "link", group: "Analytics", desc: "Monitor referring domains, anchors & lost links" },
+  { key: "local_seo", label: "Local SEO", short: "Local SEO", icon: "storefront", group: "Analytics", desc: "Google Business Profile, citations & local rankings" },
+  { key: "on_page", label: "On-Page Optimization", short: "On-Page", icon: "tune", group: "Content", desc: "Review & apply title, meta and heading fixes" },
   { key: "content_pipeline", label: "Content Pipeline", short: "Content", icon: "article", group: "Content", desc: "Briefs, AI drafting, edit & review" },
   { key: "publishing", label: "Publishing", short: "Publishing", icon: "rocket_launch", group: "Content", desc: "Send approved content live to the CMS" },
   { key: "reporting", label: "Reporting", short: "Reporting", icon: "summarize", group: "Delivery", desc: "Build, schedule & send client reports" },

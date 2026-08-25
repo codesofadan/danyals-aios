@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI
 
 from app.core.auth import CurrentUser, get_current_user
+from app.rbac import matrix as m
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +53,9 @@ async def test_features_shape(client: httpx.AsyncClient, as_role: Callable[[str]
     resp = await client.get("/api/v1/rbac/features")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body) == 11
+    # Against the matrix, not a literal: the endpoint's contract is "serve every
+    # feature", and a literal here only ever records when it was last edited.
+    assert [f["key"] for f in body] == list(m.FEATURE_KEYS)
     assert {"key", "label", "short", "icon", "group", "desc"} <= body[0].keys()
     assert {f["group"] for f in body} == {"Analytics", "Content", "Delivery", "Admin"}
 
@@ -80,7 +83,11 @@ async def test_templates_shape(client: httpx.AsyncClient, as_role: Callable[[str
     assert resp.status_code == 200
     tpls = {t["key"]: t for t in resp.json()}
     assert set(tpls) == {"seo", "content", "va", "super"}
-    assert len(tpls["super"]["grants"]) == 11
+    # Super Admin is "full access - everything on", so the assertion is that it holds
+    # EVERY feature - not that it holds some number of them. A literal here would pass
+    # while silently omitting a newly added tool, which is the failure mode that
+    # matters: a Super Admin who cannot see a tool.
+    assert set(tpls["super"]["grants"]) == set(m.FEATURE_KEYS)
     assert tpls["super"]["role"] == "Owner"
 
 

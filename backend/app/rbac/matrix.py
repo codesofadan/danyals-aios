@@ -268,6 +268,19 @@ MODULE_PERM_ROLES: dict[ModulePermKey, frozenset[AppRole]] = {
 
 FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef(key="technical_audit", label="Technical Audit", short="Tech Audit", icon="troubleshoot", group="Analytics", desc="Run site audits, review & mark issues fixed"),
+    # The six SEO tools. Each had a working backend module and a workspace adapter
+    # before it had a feature, so `tools.ts` - which builds its catalogue from THIS
+    # list - resolved none of their slugs and every one rendered "No such tool".
+    #
+    # Adding a feature grants nobody anything: `effective_feature_level` returns "off"
+    # with no override, and existing users keep the grant rows they already have. Only
+    # a NEW provisioning from a template picks these up, and owner was always all-on.
+    FeatureDef(key="keyword_research", label="Keyword Research", short="Keywords", icon="search", group="Analytics", desc="Find & group keyword opportunities, assign to clients"),
+    FeatureDef(key="rank_tracker", label="Rank Tracker", short="Ranks", icon="trending_up", group="Analytics", desc="Track keyword positions daily & see ranking history"),
+    FeatureDef(key="competitor_intel", label="Competitor Intelligence", short="Competitors", icon="groups", group="Analytics", desc="Compare competitor visibility, keywords & content"),
+    FeatureDef(key="backlink_manager", label="Backlink Manager", short="Backlinks", icon="link", group="Analytics", desc="Monitor referring domains, anchors & lost links"),
+    FeatureDef(key="local_seo", label="Local SEO", short="Local SEO", icon="storefront", group="Analytics", desc="Google Business Profile, citations & local rankings"),
+    FeatureDef(key="on_page", label="On-Page Optimization", short="On-Page", icon="tune", group="Content", desc="Review & apply title, meta and heading fixes"),
     FeatureDef(key="content_pipeline", label="Content Pipeline", short="Content", icon="article", group="Content", desc="Briefs, AI drafting, edit & review"),
     FeatureDef(key="publishing", label="Publishing", short="Publishing", icon="rocket_launch", group="Content", desc="Send approved content live to the CMS"),
     FeatureDef(key="reporting", label="Reporting", short="Reporting", icon="summarize", group="Delivery", desc="Build, schedule & send client reports"),
@@ -282,7 +295,9 @@ FEATURES: tuple[FeatureDef, ...] = (
 
 FEATURE_KEYS: tuple[str, ...] = tuple(f.key for f in FEATURES)
 
-# All 11 feature keys, used by the Super Admin template.
+# Every feature key, used by the Super Admin template. Derived, never hand-listed:
+# a hand-written copy would drift the moment a feature was added, and the drift
+# would present as "Super Admin cannot see the new tool".
 _ALL_FEATURE_KEYS: tuple[str, ...] = FEATURE_KEYS
 
 # --- The 4 role templates -----------------------------------------------------
@@ -291,17 +306,23 @@ TEMPLATES: tuple[RoleTemplateDef, ...] = (
     RoleTemplateDef(
         key="seo", label="SEO Specialist", tagline="Analytics & optimization", icon="query_stats",
         role="specialist",
-        grants=("technical_audit", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
+        # An SEO specialist gets the analysis tools; that is the job the template names.
+        grants=("technical_audit", "keyword_research", "rank_tracker", "competitor_intel", "backlink_manager", "local_seo", "on_page", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
     ),
     RoleTemplateDef(
         key="content", label="Content Creator", tagline="Copywriting & publishing", icon="edit_note",
         role="specialist",
-        grants=("content_pipeline", "publishing", "reporting", "task_board", "client_setup"),
+        # A content creator needs keyword data to brief from and on-page to act on.
+        # Not the link/local tools: those are not their work, and a template that
+        # grants everything is not a template.
+        grants=("keyword_research", "on_page", "content_pipeline", "publishing", "reporting", "task_board", "client_setup"),
     ),
     RoleTemplateDef(
         key="va", label="Virtual Assistant", tagline="Coordination & admin", icon="support_agent",
         role="manager",
-        grants=("content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
+        # A VA coordinates and reports; rank data is what they report ON. The rest of
+        # the analysis tools are not theirs to run.
+        grants=("rank_tracker", "content_pipeline", "reporting", "task_board", "client_onboarding", "client_setup", "data_import"),
     ),
     RoleTemplateDef(
         key="super", label="Super Admin", tagline="Full access — everything on", icon="shield_person",

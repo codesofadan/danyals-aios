@@ -467,7 +467,13 @@ def test_the_reader_round_trips_the_backend_catalogue() -> None:
         ("a feature icon", 'icon: "add_business"', 'icon: "language"'),
         ("a role description", '"Read-only access to reports and dashboards."', '"Anything at all."'),
         # The two that would be a privilege escalation rather than a cosmetic slip.
-        ("a template's grants", '"content_pipeline", "publishing"', '"content_pipeline", "key_vault"'),
+        # Adjacent in the CONTENT template's sorted grants, so the swap lands on a
+        # non-super template and is a genuine escalation (key_vault is Super-Admin
+        # only). The pair has to stay adjacent after sorting - the previous fixture
+        # went stale the moment keyword_research and on_page were inserted between
+        # content_pipeline and publishing, which is exactly what the assertion above
+        # this parametrisation exists to catch.
+        ("a template's grants", '"on_page", "publishing"', '"on_page", "key_vault"'),
         ("a role's permissions", '"run_audits", "view_reports"', '"run_audits", "manage_vault"'),
     ],
 )

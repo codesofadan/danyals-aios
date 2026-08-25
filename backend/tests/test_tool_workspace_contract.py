@@ -1346,3 +1346,58 @@ async def test_competitor_intel_overlap_tones_match_the_demo_semantics(
     strong, marginal = body["table"]["rows"]
     assert strong[3] == {"v": "38%", "tone": "info"}
     assert marginal[3] == {"v": "22%", "tone": "mut"}
+
+
+# --------------------------------------------------------------------------- #
+# Every EXTRAS entry must be reachable
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_every_extras_entry_has_a_feature_so_its_slug_resolves() -> None:
+    """`tools.ts` builds its catalogue by mapping over `accessFeatures`, so an EXTRAS
+    entry whose key is not a feature has NO tool and no slug - `/team/tools/<slug>`
+    renders "No such tool".
+
+    MEASURED 2026-08-25: six entries were in that state - rank_tracker, on_page,
+    keyword_research, backlink_manager, competitor_intel, local_seo - every one of them
+    backed by a working module and a workspace adapter whose literals are pinned by
+    the tests above. The UI simply had no way to reach any of them.
+
+    The failure is silent in both directions: the backend serves an endpoint nobody
+    can call, and the frontend ships copy for a page that cannot render. Only holding
+    the two lists against each other shows it.
+    """
+    features = set(_read_access_feature_keys())
+    extras = set(_read_extras_keys())
+    orphaned = extras - features
+    assert not orphaned, (
+        f"EXTRAS entries with no matching accessFeatures entry: {sorted(orphaned)}. "
+        "Each renders 'No such tool'. Add the feature to app/rbac/matrix.py:FEATURES "
+        "(and mirror it into frontend/lib/data.ts), or remove the EXTRAS entry."
+    )
+
+
+@pytest.mark.unit
+def test_every_feature_has_extras_so_its_workspace_has_content() -> None:
+    """The other direction: a feature with no EXTRAS entry renders an empty shell -
+    `EXTRAS[f.key] ?? { kpis: [], bullets: [] }` - which looks like a broken page
+    rather than an absent one."""
+    features = set(_read_access_feature_keys())
+    extras = set(_read_extras_keys())
+    assert not features - extras, (
+        f"features with no EXTRAS content: {sorted(features - extras)}"
+    )
+
+
+def _read_extras_keys() -> list[str]:
+    src = _TOOLS_TS.read_text(encoding="utf-8")
+    block = re.search(r"const EXTRAS:[^=]*=\s*\{(.*?)\n\};", src, re.S)
+    assert block, f"EXTRAS block not found in {_TOOLS_TS}"
+    return re.findall(r"^  ([a-z_]+):\s*\{", block.group(1), re.M)
+
+
+def _read_access_feature_keys() -> list[str]:
+    data_ts = _REPO_ROOT / "frontend" / "lib" / "data.ts"
+    src = data_ts.read_text(encoding="utf-8")
+    block = re.search(r"accessFeatures: AccessFeature\[\]\s*=\s*\[(.*?)\n\];", src, re.S)
+    assert block, f"accessFeatures not found in {data_ts}"
+    return re.findall(r'key:\s*"([a-z_]+)"', block.group(1))

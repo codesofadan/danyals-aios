@@ -38,9 +38,16 @@ def test_eight_permissions_unique() -> None:
 
 
 @pytest.mark.unit
-def test_eleven_features_unique_and_grouped() -> None:
-    assert len(m.FEATURES) == 11
-    assert len(set(m.FEATURE_KEYS)) == 11
+def test_features_are_unique_and_grouped() -> None:
+    """17 since the six SEO tools were made reachable (2026-08-25); 11 before that.
+
+    The count stays an explicit literal so an ACCIDENTAL addition still trips a test.
+    It is not the real guard, though - `test_rbac_single_source.py` parses the
+    dashboard's own copy and compares it field by field, which is what catches a
+    feature added on one side only.
+    """
+    assert len(m.FEATURES) == 17
+    assert len(set(m.FEATURE_KEYS)) == 17, "a duplicate key would silently shadow a tool"
     assert {f.group for f in m.FEATURES} == {"Analytics", "Content", "Delivery", "Admin"}
 
 
