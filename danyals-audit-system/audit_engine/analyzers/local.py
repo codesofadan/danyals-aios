@@ -20,8 +20,9 @@ def check_gbp_completeness(place: Place) -> Verdict:
     if place.error:
         return Verdict(
             "n_a", 0.0, "info", 0.3,
-            {"reason": place.error},
-            "Configure GOOGLE_API_KEY (Places API enabled) to evaluate GBP.",
+            {"reason": place.error,
+             "operator_note": "Places API unavailable. Check GOOGLE_PLACES_API_KEY "
+                              "and that the Places API is enabled for the project."},
         )
     missing: list[str] = []
     if not place.formatted_address:
@@ -211,8 +212,9 @@ def check_citation_consistency(summary: CitationSummary) -> Verdict:
     surfaces in Google's index, not necessarily the source-of-truth listing.
     """
     if summary.error:
-        return Verdict("n_a", 0.0, "info", 0.3, {"reason": summary.error},
-                       "Configure SERPER_API_KEY to evaluate citation discovery via SERP.")
+        return Verdict("n_a", 0.0, "info", 0.3,
+                       {"reason": summary.error,
+                        "operator_note": "Citation discovery needs SERPER_API_KEY."})
     if summary.total_checked == 0:
         return Verdict("n_a", 0.0, "info", 0.4, {"reason": "no citations data"})
     inconsistent = summary.inconsistent_count

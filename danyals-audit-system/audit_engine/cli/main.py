@@ -37,6 +37,9 @@ from audit_engine.agents.dispatcher import (
 )
 from audit_engine.analyzers.ai_search import iter_per_page_ai_search
 from audit_engine.analyzers.common import Verdict
+from audit_engine.analyzers.context import build_context
+from audit_engine.analyzers.dispatch import run_rollups, run_scope
+from audit_engine.analyzers import registry
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
@@ -319,6 +322,62 @@ def _emit_extras(*, run_id: int, page_id_by_url: dict[str, int], crawl_result: A
         out.append(_finding(run_id=run_id, page_id=page_id_by_url.get(home.url), check_id="TECH-097", owner="B5", verdict=check_http_version(home)))
     # AI bot crawlability is emitted by _emit_ai_crawl_readiness (ON-106), together
     # with the llms.txt slice, so the two halves of one check score as one finding.
+    return out
+
+
+def _emit_registered(
+    *,
+    run_id: int,
+    page_id_by_url: dict[str, int],
+    crawl_result: Any,
+    parsed_pages: list,
+    permitted_check_ids: set[str] | None = None,
+) -> list[Finding]:
+    """Run every check bound through ``@check`` and turn it into findings.
+
+    This runs ALONGSIDE the legacy ``iter_*`` generators, not instead of them.
+    The registry refuses a duplicate registration at import, so a check can
+    never be emitted by both paths - which is what makes the migration safe to
+    do one analyzer at a time instead of as a big bang.
+
+    Every call is isolated by the dispatcher: an analyzer that raises costs its
+    own check and nothing else.
+    """
+    out: list[Finding] = []
+    if not registry.registered():
+        return out
+
+    ctx = build_context(crawl_result)
+
+    def _add(check_id: str, verdict: Any, page_id: int | None) -> None:
+        out.append(_finding(run_id=run_id, page_id=page_id, check_id=check_id,
+                            owner=_OWNER_BY_CHECK.get(check_id, ""), verdict=verdict))
+
+    # per-page scopes
+    for cp in getattr(crawl_result, "pages", []) or []:
+        pid = page_id_by_url.get(getattr(cp, "url", ""))
+        parsed = getattr(cp, "parsed", None)
+        if parsed is not None:
+            for cid, v in run_scope("page", parsed, only=permitted_check_ids).verdicts:
+                _add(cid, v, pid)
+        for cid, v in run_scope("page_http", cp, only=permitted_check_ids).verdicts:
+            _add(cid, v, pid)
+
+    # site-wide scopes
+    if parsed_pages:
+        for cid, v in run_scope("site_parsed", parsed_pages, only=permitted_check_ids).verdicts:
+            _add(cid, v, None)
+    for cid, v in run_scope("site_crawled", ctx, only=permitted_check_ids).verdicts:
+        _add(cid, v, None)
+
+    # Rollups last, gated on which checks actually produced a verdict in THIS
+    # run. `ran` deliberately counts registered checks only; a rollup over the
+    # legacy generators cannot know what they emitted, which is exactly why
+    # Wave 5 waits for the migration.
+    ran = {f.check_id for f in out}
+    if ran:
+        for cid, v in run_rollups(ran, ctx).verdicts:
+            _add(cid, v, None)
     return out
 
 
@@ -939,6 +998,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
     # ----- Free extras (URL slug, image filenames, readability, etc) -----
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
+    findings.extend(_emit_registered(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
@@ -1058,6 +1118,8 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
 
 
 # ----- Check name + category lookup -----
+_OWNER_BY_CHECK: dict[str, str] = {s.id: s.owner_agent for s in load_check_specs()}
+
 _CHECKLIST_META: dict[str, tuple[str, str, str | None]] = {
     spec.id: (spec.name, spec.category, spec.subcategory)
     for spec in load_check_specs()
@@ -1601,6 +1663,7 @@ async def _run_full(
     # ----- Free extras (URL slug, image filenames, readability, etc) -----
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
+    findings.extend(_emit_registered(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
@@ -1994,6 +2057,7 @@ async def _run_local(
     # ----- Free extras (URL slug, image filenames, readability, etc) -----
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
+    findings.extend(_emit_registered(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001

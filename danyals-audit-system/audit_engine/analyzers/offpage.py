@@ -35,8 +35,10 @@ def check_domain_authority(da: DomainAuthority) -> Verdict:
     if da.error:
         return Verdict(
             "n_a", 0.0, "info", 0.4,
-            {"reason": da.error, "target": da.target},
-            "Configure MOZ_ACCESS_ID + MOZ_SECRET_KEY in .env to enable backlink/DA analysis.",
+            {"reason": da.error, "target": da.target,
+             "operator_note": "No backlink provider is configured. Moz was never "
+                              "reachable; DataForSEO backlinks/summary is priced at "
+                              "$0.024 per request and would supply this (O-6)."},
         )
     if da.domain_authority is None:
         return Verdict("n_a", 0.0, "info", 0.5, {"target": da.target, "reason": "no data"})

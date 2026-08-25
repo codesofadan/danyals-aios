@@ -198,3 +198,96 @@ These were masked while an agent produced a second opinion. **They should be
 fixed as Wave 3 quality work**, and the fix for `ON-027` is to count cited
 statistics rather than digit characters. Flagged here because Wave A is what
 made them load-bearing.
+
+---
+
+# Wave 1 — the registry, the graph, and the ledger
+
+**2026-08-25.** Five new modules, no new checks. This is the foundation Waves
+2–5 register into; it adds nothing a client sees except three bug fixes found
+along the way.
+
+## O-2 · URL normalisation — RESOLVED as engineering
+
+`audit_engine/analyzers/urls.py` is now the single definition of "the same
+page". Each rule carries its reason in the source; the summary:
+
+| Question | Answer | Why |
+|---|---|---|
+| `/about` vs `/about/` | same page | Servers serve both and every CMS canonicalises one. Treating them as two invents duplicate-title and orphan findings. |
+| `/` vs `/index.html` | same page | Same resource, same bytes. |
+| `?utm_source=x` | same page | Identifies a traffic source, not content. Also gclid, fbclid, msclkid, mc_*, utm_*, pk_*. |
+| `?page=2`, `?id=7` | **different** pages | Real, distinct resources. Collapsing them would hide genuine duplicate content. |
+| `?b=2&a=1` vs `?a=1&b=2` | same page | Order is not meaning. |
+| Host case | insensitive | RFC 3986. |
+| **Path** case | **sensitive** | Unix servers serve `/About` and `/about` as different files. |
+| `#fragment` | stripped | Never sent to the server. |
+| `www` vs bare | **different** | This is TECH-013's finding. Collapsing it here would hide the very defect the audit reports. |
+| `http` vs `https` | **different** | Same reasoning. |
+
+Credentials in a URL are discarded, because a `userinfo` blob would otherwise
+reach `evidence_json` and then a client PDF.
+
+The policy is a dataclass, so any of these can be flipped — but 48 tests pin
+the current behaviour, so a change breaks a test rather than quietly redefining
+what "duplicate" means to a client.
+
+## What the registry makes impossible
+
+Registration is validated at **import** time, so these become unmergeable
+rather than merely tested for: an id no checklist row defines; the same id
+registered twice; **Python computing a check the checklist marks `ai-assisted`**
+(the Wave A defect, now structurally prevented); a rollup with no declared
+inputs. Taxonomy is never passed to the decorator — it comes from the checklist,
+so an analyzer cannot contradict its own definition.
+
+## Three defects found while building
+
+1. **`ON-101` returned `n_a` with a remediation.** The scoring model drops
+   `n_a` as "not measured", but a remediation renders as an action item, so a
+   client saw a fix for a check that reported nothing. Moved to evidence as an
+   `opportunity`.
+2. **Three checks told a client to edit `.env`** — verbatim: *"Configure
+   MOZ_ACCESS_ID + MOZ_SECRET_KEY in .env to enable backlink/DA analysis."*
+   That text renders in the client report. Moved to `operator_note` in
+   evidence. A static test now fails on any client-facing string naming an
+   environment variable.
+3. **Click depth was reported as 0 for a homepage that was never crawled** — a
+   measurement over a page we never fetched. Now returns "unreachable".
+
+---
+
+## O-6 · ANSWERED — DataForSEO replaces Moz, and Moz was never reachable
+
+`MOZ_ACCESS_ID` and `MOZ_SECRET_KEY` are empty in the engine's `.env`, so all
+39 Moz-blocked checks were never going to run. **`DATAFORSEO_LOGIN` and
+`DATAFORSEO_PASSWORD` exist in `backend/.env` and authenticate successfully.**
+
+| Endpoint | Price | Buys |
+|---|---|---|
+| `backlinks/summary` | $0.024/request | domain rank, referring domains, backlink counts |
+| `backlinks/backlinks` | $0.024/request | the link list |
+| `backlinks/anchors` | $0.024/request | anchor text distribution |
+| `on_page/instant_pages` | **$0.00015/result** | rendered page data |
+| `on_page/content_parsing` | **free** | structured content extraction |
+| `on_page/lighthouse` | $0.005 | Lighthouse without PSI quota |
+
+**Current balance is $0.94864** — about 39 backlink requests. Enough to build
+and test against, not enough to run production audits. **This needs topping up
+before Wave 8 ships.**
+
+## Two more waves are cheaper than the plan assumed
+
+- **Wave 6 (rendered DOM, 9 checks) was deferred** because shipping Chromium
+  beside the API is a real operational risk (R4-22). `FIRECRAWL_API_KEY` is
+  live with **1016 credits** (1000/month, renewing 2026-09-16), and
+  `on_page/instant_pages` costs $0.00015. Either removes the Chromium problem
+  entirely. **Recommend un-deferring Wave 6.**
+- **Wave 9 (Search Console, 5 checks)** — `GOOGLE_OAUTH_CLIENT_ID`,
+  `_SECRET` and `_REDIRECT_URI` are all present. Still blocked on the
+  per-client grant, which is a conversation with the client, not an engineering
+  task.
+
+`FOURSQUARE_API_KEY` returns **401 Invalid request token** and should be
+treated as dead until replaced. `APIFY_API_TOKEN` authenticates and has a
+citation actor configured.

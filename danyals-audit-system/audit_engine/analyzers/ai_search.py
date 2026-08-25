@@ -191,10 +191,16 @@ def check_table_snippet_fitness(p: ParsedHTML) -> Verdict:
     """
     table_count = p.table_count or 0
     if table_count == 0:
+        # n_a with a remediation is a contradiction: the scoring model drops
+        # n_a as "not measured", but a remediation renders as an action item.
+        # The suggestion is a genuine OPPORTUNITY, not a fix for a defect, so
+        # it lives in evidence where a report can surface it as one.
         return Verdict(
             "n_a", 0.0, "info", 0.6,
-            {"table_count": 0},
-            "Comparison tables (pricing, feature matrix, service tiers) earn featured-snippet and AI Overview citations. Add one if the page topic supports it.",
+            {"table_count": 0,
+             "opportunity": "Comparison tables (pricing, feature matrix, service tiers) "
+                            "earn featured-snippet and AI Overview citations. Add one if "
+                            "the page topic supports it."},
         )
     # We have at least one. Heuristic: any real <table> with at least 2 rows
     # is good. Parser doesn't expose <th> counts directly, so we don't
