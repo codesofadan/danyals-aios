@@ -12,11 +12,13 @@ string-formatted; table and column names are static literals.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
+from fastapi import Depends
 from psycopg.types.json import Jsonb
 
-from app.db.database import privileged_connection
+from app.core.auth import CurrentUserDep
+from app.db.database import privileged_connection, rls_connection
 from app.modules.content_planning.schemas import (
     Engagement,
     KeywordTerm,
@@ -384,3 +386,95 @@ class ContentPlanningStore:
                  dropped_chunk_ids or [], input_tokens, output_tokens,
                  cache_write_tokens, cache_read_tokens, cost),
             )
+
+
+# --------------------------------------------------------------------------- #
+# The RLS-scoped half: what an HTTP caller may see
+# --------------------------------------------------------------------------- #
+class ContentPlanningRepo:
+    """Read/write bound to ONE verified user, through ``rls_connection``.
+
+    Deliberately NOT `ContentPlanningStore`. That store runs on `privileged_connection`
+    (service_role, BYPASSRLS) because the pipeline is a Celery worker with no user JWT -
+    a real and necessary privilege, and exactly the wrong thing to hand an HTTP route.
+    Reusing it here would mean every request read every client's engagements while the
+    policies on these tables sat there looking correct.
+
+    So the router gets its own door. Same tables, same SQL rules - every value bound,
+    every identifier a static literal - and the database decides what this caller can
+    see rather than the route remembering to filter.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
+
+    def list_engagements(self, *, status: str | None = None, limit: int = 100) -> list[_Row]:
+        with rls_connection(self._user_id) as cur:
+            if status:
+                cur.execute(
+                    "select * from public.content_engagements where status = %s "
+                    "order by created_at desc limit %s",
+                    (status, limit),
+                )
+            else:
+                cur.execute(
+                    "select * from public.content_engagements "
+                    "order by created_at desc limit %s",
+                    (limit,),
+                )
+            return list(cur.fetchall())
+
+    def get_engagement(self, engagement_id: str) -> _Row | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.content_engagements where id = %s limit 1",
+                (engagement_id,),
+            )
+            return cur.fetchone()
+
+    def map_nodes(self, engagement_id: str) -> list[_Row]:
+        """Nodes for an engagement's newest map.
+
+        The engagement id is bound and the join runs under RLS, so a caller who cannot
+        see the engagement cannot see its nodes either - the filter is the database's,
+        not this method's.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select n.* from public.topical_map_nodes n
+                   join public.topical_maps m on m.id = n.map_id
+                   where m.engagement_id = %s
+                   order by n.priority desc, n.primary_keyword""",
+                (engagement_id,),
+            )
+            return list(cur.fetchall())
+
+    def keyword_terms(self, engagement_id: str, *, limit: int = 2000) -> list[_Row]:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select t.* from public.keyword_plan_terms t
+                   join public.keyword_plans p on p.id = t.plan_id
+                   where p.engagement_id = %s
+                   order by t.opportunity desc nulls last limit %s""",
+                (engagement_id, limit),
+            )
+            return list(cur.fetchall())
+
+    def has_brand_kit(self, client_id: str | None) -> bool:
+        if not client_id:
+            return False
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select 1 from public.brand_kits "
+                "where client_id = %s and active limit 1",
+                (client_id,),
+            )
+            return cur.fetchone() is not None
+
+
+def get_content_planning_repo(user: CurrentUserDep) -> ContentPlanningRepo:
+    """Dependency: a repo bound to the caller's verified user id (RLS-scoped)."""
+    return ContentPlanningRepo(user.id)
+
+
+ContentPlanningRepoDep = Annotated[ContentPlanningRepo, Depends(get_content_planning_repo)]

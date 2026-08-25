@@ -4,6 +4,11 @@ Engagements, keyword plans, topical maps, SME dossiers, versions, brand kits and
 provenance ledger - the decisions around a page, which `content_jobs` has never had
 anywhere to record.
 
-No router yet: the pipeline (P3) is the first consumer, and exposing an API before the
-shape has been exercised by a real caller would freeze a contract that is still moving.
+The router is READ-ONLY. Every write path runs in the pipeline, where the SME halt, the
+uniqueness gate and the engagement budget live; an endpoint that enqueued production
+would sit in FRONT of those checks rather than behind them.
 """
+
+from app.modules.content_planning.router import router
+
+__all__ = ["router"]
