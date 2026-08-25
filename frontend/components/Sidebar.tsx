@@ -44,6 +44,9 @@ const SECTIONS: Section[] = [
   {
     title: "Platform",
     items: [
+      // First in the group: Operations is the health surface. Every other item here
+      // configures the platform; this one says whether it is actually working.
+      { icon: "monitor_heart", label: "Operations", href: "/admin/operations" },
       { icon: "savings", label: "Cost Controls", href: "/admin/cost" },
       { icon: "key", label: "Key Vault", href: "/admin/vault" },
       { icon: "settings", label: "Settings", href: "/admin/settings" },

@@ -1,0 +1,214 @@
+/* ============================================================
+   OPERATIONS module — the job board. What ran, what failed,
+   what it cost, in the ONE status vocabulary the backend emits.
+   Built on the shared design tokens only; every class is
+   ops- namespaced (mirrors the cst- convention next door).
+   ============================================================ */
+.ops { margin-top: 4px; }
+.ops .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- window switcher above the headline row ---- */
+.ops-winbar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-bottom: 12px; }
+.ops-winbar-t { font-size: 12px; font-weight: 700; color: var(--muted); }
+.ops-winbar-t b { color: var(--fg-strong); font-weight: 800; }
+
+/* ---- the headline tiles: five, not four ---- */
+.ops-kpis { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1440px) { .ops-kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px) { .ops-kpis { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .ops-kpis { grid-template-columns: 1fr; } }
+
+/* SUCCEEDED is completed-only (server-computed). It never borrows a warn/crit tone. */
+.ops-kpi-ok .ic { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.ops-kpi-ok .val { color: var(--ok); }
+
+/* NEEDS ATTENTION = degraded + blocked + failed. Amber only when there is work to do. */
+.ops-kpi-att.hot { border-color: color-mix(in srgb, var(--warn) 42%, transparent);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--warn) 14%, var(--card)), color-mix(in srgb, var(--warn) 5%, var(--card-2))); }
+.ops-kpi-att.hot .ic { color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }
+.ops-kpi-att.hot .val { color: var(--warn); }
+
+/* OPEN DEAD LETTERS — accepted work the platform did not deliver. Any number above
+   zero is an outage the operator is carrying, so the tile reads as urgent, not as a
+   statistic. */
+.ops-kpi-dl.urgent { border-color: color-mix(in srgb, var(--crit) 48%, transparent);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--crit) 18%, var(--card)), color-mix(in srgb, var(--crit) 6%, var(--card-2)));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--crit) 12%, transparent) inset; }
+.ops-kpi-dl.urgent .ic { color: var(--crit); background: color-mix(in srgb, var(--crit) 18%, transparent); }
+.ops-kpi-dl.urgent .val { color: var(--crit); }
+.ops-kpi-dl.urgent .sub { color: var(--crit); }
+.ops-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--crit);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--crit) 20%, transparent); animation: ops-pulse 1.1s ease-in-out infinite; }
+@keyframes ops-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ---- per-status breakdown strip under the tiles ---- */
+.ops-break { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 16px; }
+.ops-break-i { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); font-size: 12px; color: var(--muted); font-weight: 600; }
+.ops-break-i b { font-size: 13px; font-weight: 800; color: var(--fg-strong); font-variant-numeric: tabular-nums; }
+.ops-break-i .ops-break-c { color: var(--muted-2); font-variant-numeric: tabular-nums; }
+
+/* ---- IN FLIGHT strip: the concurrency cap made visible ---- */
+.ops-flight { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.ops-flight-i { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 13px;
+  border: 1px solid var(--line); background: var(--well); min-width: 210px; }
+.ops-flight-n { display: block; font-size: 13px; font-weight: 800; color: var(--fg-strong); }
+.ops-flight-q { display: inline-flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.ops-flight-run { margin-left: auto; display: inline-flex; align-items: baseline; gap: 4px; }
+.ops-flight-run b { font-size: 20px; font-weight: 800; color: var(--violet-soft); font-variant-numeric: tabular-nums; }
+.ops-flight-run span { font-size: 10.5px; font-weight: 700; color: var(--muted); }
+
+.ops-q { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
+  color: var(--c4); background: color-mix(in srgb, var(--c4) 12%, transparent); padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+
+/* ---- honest empty states ---- */
+.ops-empty { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+  padding: 26px 12px; color: var(--muted); }
+.ops-empty .material-symbols-rounded { font-size: 30px; color: var(--muted-2); margin-bottom: 2px; }
+.ops-empty-t { font-size: 13.5px; font-weight: 800; color: var(--ink); }
+.ops-empty-s { font-size: 12px; color: var(--muted); max-width: 460px; line-height: 1.5; }
+
+/* ---- the runs log ---- */
+.ops-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.ops-select { font-family: inherit; font-size: 11.5px; font-weight: 700; color: var(--ink); cursor: pointer;
+  background: var(--well-2); border: 1px solid var(--line); border-radius: 9px; padding: 6px 9px; outline: none; max-width: 220px; }
+.ops-select:focus { border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); }
+
+.ops-tbl { min-width: 1020px; }
+.ops-tbl tbody td { font-size: 13px; }
+.ops-row { cursor: pointer; }
+.ops-row:focus-visible { outline: 2px solid var(--violet-2); outline-offset: -2px; }
+.ops-job { font-size: 12.5px; font-weight: 800; color: var(--violet-soft); }
+.ops-task { font-size: 10.5px; font-weight: 600; color: var(--muted-2); margin-top: 2px;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-cli { color: var(--body); font-weight: 600; }
+.ops-cli.plat { color: var(--muted-2); font-weight: 600; font-style: italic; }
+.ops-att { color: var(--body); font-weight: 700; }
+.ops-att.retried { color: var(--warn); }
+.ops-dur { color: var(--body); font-variant-numeric: tabular-nums; }
+.ops-cost { color: var(--fg-strong); font-weight: 800; }
+.ops-cost.zero { color: var(--muted-2); font-weight: 700; }
+.ops-when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+/* The reason line. A degraded or blocked run ALWAYS carries one (a DB CHECK refuses
+   to store one that does not), so the log explains itself instead of being a wall of
+   red the operator has to open row by row. */
+.ops-why-row > td { border-top: none !important; padding-top: 0 !important; }
+.ops-why { display: flex; align-items: flex-start; gap: 9px; padding: 9px 12px; border-radius: 11px;
+  font-size: 12px; line-height: 1.45; }
+.ops-why .material-symbols-rounded { font-size: 17px; flex: none; margin-top: 1px; }
+.ops-why.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 24%, transparent); }
+.ops-why.crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crit) 24%, transparent); }
+.ops-why b { font-weight: 800; }
+.ops-code { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
+  padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.ops-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.ops-foot b { color: var(--fg-strong); font-weight: 800; }
+.ops-pager { display: inline-flex; align-items: center; gap: 8px; }
+.ops-pager-pos { font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ops-pager-btn { display: inline-flex; align-items: center; gap: 2px; font-family: inherit; font-size: 12px; font-weight: 700;
+  color: var(--ink); background: var(--well-2); border: 1px solid var(--line); border-radius: 9px; padding: 5px 10px;
+  cursor: pointer; transition: background .15s, transform .15s; }
+.ops-pager-btn .material-symbols-rounded { font-size: 16px; }
+.ops-pager-btn:hover:not(:disabled) { background: var(--well); transform: translateY(-1px); }
+.ops-pager-btn:disabled { opacity: .4; cursor: default; }
+
+/* ---- DEAD LETTER QUEUE ---- */
+.ops-dlq.hot { border-color: color-mix(in srgb, var(--crit) 34%, transparent);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--crit) 7%, var(--card)), color-mix(in srgb, var(--crit) 3%, var(--card-2))); }
+.ops-dl-group { margin-top: 16px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.ops-dl-gh { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--well);
+  border-bottom: 1px solid var(--line); }
+.ops-dl-gh .material-symbols-rounded { font-size: 18px; color: var(--crit); flex: none; }
+.ops-dl-cause { font-size: 12px; font-weight: 800; color: var(--fg-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ops-dl-gc { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--muted); }
+
+.ops-dl-i { padding: 13px 14px; border-top: 1px solid var(--line); }
+.ops-dl-i:first-child { border-top: none; }
+.ops-dl-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ops-dl-name { font-size: 13.5px; font-weight: 800; color: var(--fg-strong); }
+.ops-dl-meta { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-top: 5px;
+  font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.ops-dl-meta b { color: var(--body); font-weight: 800; }
+.ops-dl-err { margin-top: 9px; padding: 9px 12px; border-radius: 11px; font-size: 12px; line-height: 1.45;
+  color: var(--crit); background: color-mix(in srgb, var(--crit) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crit) 22%, transparent); word-break: break-word; }
+.ops-dl-err b { font-weight: 800; }
+.ops-dl-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.ops-dl-resolved { margin-top: 9px; font-size: 12px; color: var(--ok); font-weight: 600; }
+.ops-dl-replayed { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 9px;
+  padding: 9px 12px; border-radius: 11px; font-size: 12px; font-weight: 600;
+  color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 24%, transparent); }
+.ops-dl-resolve { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.ops-dl-resolve input { flex: 1; min-width: 240px; font-family: inherit; font-size: 12.5px; color: var(--ink);
+  background: var(--well-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; outline: none; }
+.ops-dl-resolve input:focus { border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); }
+
+.ops-detail { margin-top: 10px; }
+.ops-detail > summary { cursor: pointer; font-size: 11.5px; font-weight: 800; color: var(--muted); list-style: none; }
+.ops-detail > summary::-webkit-details-marker { display: none; }
+.ops-detail > summary:hover { color: var(--lilac); }
+.ops-pre { margin-top: 8px; max-height: 260px; overflow: auto; padding: 11px 13px; border-radius: 11px;
+  background: var(--well); border: 1px solid var(--line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; line-height: 1.55; color: var(--body); white-space: pre-wrap; word-break: break-word; }
+
+/* ---- buttons shared by every act surface ---- */
+.ops-btn { display: inline-flex; align-items: center; gap: 5px; font-family: inherit; font-size: 12px; font-weight: 800;
+  color: var(--ink); background: var(--well-2); border: 1px solid var(--line); border-radius: 9px;
+  padding: 7px 12px; cursor: pointer; transition: .16s; }
+.ops-btn .material-symbols-rounded { font-size: 16px; }
+.ops-btn:hover:not(:disabled) { background: var(--hover); border-color: var(--line-2); transform: translateY(-1px); }
+.ops-btn:disabled { opacity: .45; cursor: default; }
+.ops-btn.primary { color: var(--on-accent); background: var(--violet); border-color: var(--violet); }
+.ops-btn.primary:hover:not(:disabled) { background: var(--violet-2); }
+.ops-btn.crit { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 38%, transparent);
+  background: color-mix(in srgb, var(--crit) 10%, transparent); }
+.ops-btn.crit:hover:not(:disabled) { background: color-mix(in srgb, var(--crit) 18%, transparent); }
+
+/* A muted line that names who may act. Not a gate — the backend is the boundary. */
+.ops-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 10px 13px;
+  border-radius: 11px; background: var(--well); border: 1px solid var(--line);
+  font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.ops-note .material-symbols-rounded { font-size: 16px; flex: none; color: var(--muted-2); }
+.ops-err { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 10px 13px; border-radius: 11px;
+  font-size: 12px; line-height: 1.45; color: var(--crit); background: color-mix(in srgb, var(--crit) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crit) 26%, transparent); }
+.ops-err .material-symbols-rounded { font-size: 17px; flex: none; }
+
+/* ---- the run drawer (one run in full) ---- */
+.modal-panel.ops-drawer { max-width: 880px; }
+.ops-drawer .modal-body { padding-top: 18px; }
+.ops-verdict { display: flex; align-items: flex-start; gap: 12px; padding: 13px 15px; border-radius: 13px;
+  border: 1px solid var(--line); background: var(--well); }
+.ops-verdict-t { font-size: 13.5px; font-weight: 800; color: var(--fg-strong); }
+.ops-verdict-s { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.ops-verdict-s b { color: var(--body); font-weight: 800; }
+
+.ops-sec { margin-top: 18px; }
+.ops-sec-h { font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 9px; }
+.ops-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 16px; }
+.ops-fact-k { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-2); }
+.ops-fact-v { font-size: 13px; font-weight: 700; color: var(--ink); margin-top: 3px; word-break: break-word; }
+.ops-fact-v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; font-weight: 600; color: var(--body); }
+.ops-fact-v a { color: var(--violet-soft); font-weight: 800; text-decoration: none; }
+.ops-fact-v a:hover { text-decoration: underline; }
+
+.ops-cancel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
+.ops-cancel input { flex: 1; min-width: 220px; font-family: inherit; font-size: 12.5px; color: var(--ink);
+  background: var(--well-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; outline: none; }
+.ops-cancel input:focus { border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); }
+.ops-foot-note { font-size: 11.5px; color: var(--muted); }
+
+@media (max-width: 780px) {
+  .ops-flight-i { min-width: 0; flex: 1 1 100%; }
+  .ops-dl-acts { margin-left: 0; width: 100%; }
+}
