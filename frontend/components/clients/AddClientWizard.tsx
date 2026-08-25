@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { SubTier } from "@/lib/data";
+import { reportBundles, type SubTier } from "@/lib/data";
+import CopyButton from "@/components/CopyButton";
 import type { NewClientInput } from "@/lib/hooks/clients";
 import type { BusinessMarket } from "@/lib/offpage";
 import nap from "@/components/offpage/Wave4.module.css";
@@ -73,6 +74,12 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
     };
   }, [onClose]);
 
+  // Generated ONCE per open, not inside finish(): the operator has to be able to read
+  // and hand over the password, and a value regenerated on every render could not be
+  // trusted to match what was actually sent. The server hashes exactly this string.
+  const [adminPass] = useState(genPassword);
+  const [bundleKey, setBundleKey] = useState<string>(reportBundles[0]?.key ?? "");
+
   const emailValid = /\S+@\S+\.\S+/.test(contactEmail);
   const nameValid = cn.trim().length > 1;
   const contactValid = contactName.trim().length > 1;
@@ -82,10 +89,7 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
 
   function finish() {
     if (!nameValid || !contactValid || !emailValid) return;
-    // Portal credentials are still generated silently so POST /clients (which provisions
-    // a portal login) succeeds — they are never shown in the UI.
     const adminLogin = genLogin(contactName, cn);
-    const adminPass = genPassword();
     onAdd({
       cn: cn.trim(),
       industry: industry.trim() || "General",
@@ -95,8 +99,11 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
       contactEmail: contactEmail.trim(),
       adminLogin,
       adminPass,
-      bundle: "Custom",
-      reports: [],
+      bundle: reportBundles.find((b) => b.key === bundleKey)?.label ?? "Custom",
+      // A client created with no grants signs in to a dashboard of padlocks and
+      // nothing else. Defaulting to a real bundle is why this picker exists; it can
+      // be changed any time from the directory's Reports action.
+      reports: reportBundles.find((b) => b.key === bundleKey)?.grants ?? [],
       // Only send a NAP when the operator actually entered one; the backend also
       // ignores a wholly empty profile, so this is belt-and-braces.
       nap: napFilled
@@ -217,6 +224,43 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
               <div className="fld">
                 <label>Description</label>
                 <input value={napDescription} onChange={(e) => setNapDescription(e.target.value)} placeholder="Family &amp; cosmetic dentistry in Bellevue, WA" />
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Report access</label>
+              <select value={bundleKey} onChange={(e) => setBundleKey(e.target.value)}>
+                {reportBundles.map((b) => (
+                  <option key={b.key} value={b.key}>{b.label} — {b.tagline}</option>
+                ))}
+                <option value="">No reports yet — grant them later</option>
+              </select>
+              <div className="wiz-hint">
+                What this client sees when they sign in. Change it any time from the
+                directory&apos;s <b>Reports</b> action.
+              </div>
+            </div>
+
+            <div className="wiz-creds">
+              <div className="wiz-creds-h">
+                <span className="material-symbols-rounded">key</span>
+                <div>
+                  <div className="wiz-creds-t">Portal login</div>
+                  <div className="wiz-creds-s">
+                    Copy these now and send them to the client — the password is generated
+                    here and stored only as a hash, so it cannot be shown again.
+                  </div>
+                </div>
+              </div>
+              <div className="wiz-cred-row">
+                <span className="wiz-cred-k">Username</span>
+                <code className="wiz-cred-v">{genLogin(contactName, cn)}</code>
+                <CopyButton value={genLogin(contactName, cn)} label="portal username" />
+              </div>
+              <div className="wiz-cred-row">
+                <span className="wiz-cred-k">Password</span>
+                <code className="wiz-cred-v">{adminPass}</code>
+                <CopyButton value={adminPass} label="portal password" />
               </div>
             </div>
 

@@ -105,3 +105,15 @@
 @media (max-width: 640px) {
   .rp-tbl { min-width: 680px; }
 }
+
+/* Section tabs. Reporting answers three different questions - what runs on its own,
+   what has been produced for clients, and whether the Sheets plumbing is healthy - so
+   the page is tabbed rather than one long scroll. Sits on the shared `.seg` chrome and
+   only adds the spacing and the icon. */
+.rp-tabs { width: fit-content; max-width: 100%; margin: 0 0 16px; overflow-x: auto; }
+.rp-tabs button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; white-space: nowrap; }
+.rp-tabs button .material-symbols-rounded { font-size: 16px; }
+
+/* An "open in Sheets" affordance with no sheet id behind it. Rendered flat and
+   non-interactive rather than as a link to nowhere (both of these were `href="#"`). */
+.rp-sheet-btn.off, .rp-sheet-link.off { opacity: .45; cursor: default; pointer-events: none; }

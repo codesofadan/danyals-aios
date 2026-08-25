@@ -14,10 +14,12 @@ The channel/priority/status ``Literal`` unions are pinned verbatim to the TS typ
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.tasks import TaskPriority, TaskType
 from app.util.timefmt import relative_ago
 
 # Unions verbatim from lib/data.ts (Ticket). All three are already canonical
@@ -92,3 +94,19 @@ class TicketResponse(BaseModel):
 def to_response(row: dict[str, Any]) -> TicketResponse:
     """Map a ``support_tickets`` row to the frontend ``Ticket`` shape."""
     return TicketResponse.from_row(row)
+
+
+class TicketToTaskRequest(BaseModel):
+    """POST /tickets/{code}/convert-to-task body.
+
+    ``title`` defaults to the ticket's own subject - the request already says what is
+    needed, and retyping it is how the task and the request drift apart. ``client_id``
+    is NOT a field: it is resolved from the ticket server-side, because a ticket
+    deliberately never exposes its tenant to the wire.
+    """
+
+    assignee_id: str = Field(min_length=1)
+    type: TaskType = "Technical Audit"
+    priority: TaskPriority = "med"
+    due: date | None = None
+    title: str | None = Field(default=None, max_length=300)

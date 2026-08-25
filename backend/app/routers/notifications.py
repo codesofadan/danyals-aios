@@ -26,10 +26,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.auth import CurrentUser, get_current_user, require_perm, require_role
 from app.core.pagination import PageDep
 from app.db.notifications_repo import NotificationsRepoDep
-from app.schemas.notifications import AlertResponse, NotificationResponse
+from app.schemas.notifications import (
+    AlertResponse,
+    NotificationResponse,
+    UnreadCountResponse,
+)
 from app.services.activity import record_activity
 
 router = APIRouter(tags=["notifications"])
@@ -37,6 +41,13 @@ router = APIRouter(tags=["notifications"])
 # All six staff roles hold view_reports; a portal client does NOT (clients are
 # confined out of the staff alert namespace, mirroring tasks.py / tickets.py).
 ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
+# The two per-user notification routes take this EXPLICITLY. They were authenticated
+# only transitively, through NotificationsRepoDep's own dependency on the current user -
+# correct, but invisible in the signature and one refactor away from an open endpoint:
+# swap the repo for a fake or a non-user-bound dep and the authentication disappears
+# with no test failing. Any authenticated caller may read their own rows (a portal
+# client included - they simply have none), so this is deliberately not a permission.
+AnyUser = Annotated[CurrentUser, Depends(get_current_user)]
 # Acknowledging an alert is lead-only (owner/admin/manager) - the RLS update set.
 Lead = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))]
 
@@ -53,6 +64,7 @@ _ALERT_NOT_FOUND = HTTPException(
 async def list_notifications(
     repo: NotificationsRepoDep,
     page: PageDep,
+    _user: AnyUser,
     unread: Annotated[bool, Query()] = False,
 ) -> list[NotificationResponse]:
     """List the caller's own notifications (newest first). ``unread=true`` scopes to
@@ -63,9 +75,39 @@ async def list_notifications(
     return [NotificationResponse.from_row(r) for r in rows]
 
 
+@router.get("/notifications/unread-count", response_model=UnreadCountResponse)
+async def notifications_unread_count(repo: NotificationsRepoDep, _user: AnyUser) -> UnreadCountResponse:
+    """How many unread notifications the caller has.
+
+    Its own endpoint rather than a client-side ``length`` over the list: the bell sits
+    in the shared top bar, so it renders on every page of all three portals and polls
+    for new arrivals. Counting server-side keeps the most-frequent call in the product
+    from shipping every unread body over the wire to render one integer.
+
+    DECLARED BEFORE ``/notifications/{notification_id}``-style paths would matter -
+    ``unread-count`` is a literal segment and Starlette matches in declaration order,
+    so a future ``GET /notifications/{id}`` cannot swallow it.
+    """
+    return UnreadCountResponse(unread=await asyncio.to_thread(repo.unread_count))
+
+
+@router.post("/notifications/read-all", response_model=UnreadCountResponse)
+async def mark_all_notifications_read(
+    repo: NotificationsRepoDep, _user: AnyUser
+) -> UnreadCountResponse:
+    """Clear the caller's whole inbox. Returns the new (zero) unread count.
+
+    Without this, an inbox that has accumulated while nobody was reading it can only
+    be cleared one row at a time, which is how a notification surface becomes
+    permanently badged and then ignored.
+    """
+    await asyncio.to_thread(repo.mark_all_read)
+    return UnreadCountResponse(unread=await asyncio.to_thread(repo.unread_count))
+
+
 @router.post("/notifications/{notification_id}/read", response_model=NotificationResponse)
 async def mark_notification_read(
-    notification_id: UUID, repo: NotificationsRepoDep
+    notification_id: UUID, repo: NotificationsRepoDep, _user: AnyUser
 ) -> NotificationResponse:
     """Mark one of the caller's notifications read. 404 if it is unknown or not the
     caller's (RLS scopes the update to the caller)."""

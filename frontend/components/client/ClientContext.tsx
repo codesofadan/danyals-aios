@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { SERIES } from "@/lib/data";
+import { initialsOf } from "@/lib/initials";
 import { type ClientRequest, type ReportViz, type RequestKind } from "@/lib/client";
 import {
   useClientDashboard,
@@ -65,12 +66,6 @@ const EMPTY_REQUESTS: ClientRequest[] = [];
 const ACCENTS = [SERIES.c1, SERIES.c2, SERIES.c3, SERIES.c4, SERIES.c5] as const;
 
 // Initials from the company name: "NorthPeak Dental" → "ND", "Verde" → "VE".
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "–";
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
-}
 
 // A stable accent picked deterministically from the name (display only).
 function accentOf(name: string): string {

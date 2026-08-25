@@ -5,9 +5,15 @@ import anime from "animejs";
 import { projectProgress } from "@/lib/milestones";
 import { useMilestones } from "@/lib/hooks/milestones";
 
+// No `delta` field, deliberately. These tiles used to carry hard-coded ones -
+// `"1"`, `"6"`, `"5%"`, every one of them pointing up, beside a note reading
+// "this month, auto-advanced". The VALUES were derived live and honest; the
+// movement next to them was invented, and it is the movement an operator reads
+// first. `GET /milestones` returns current state with no history, so there is
+// nothing to compute a real delta from - so none is shown.
 type Tile = {
   icon: string; label: string; value: number; unit?: string; suffix?: string;
-  delta: string; deltaDir: "up" | "down"; note: string; hero?: boolean;
+  note: string; hero?: boolean;
 };
 
 function useCountUp(target: number) {
@@ -53,10 +59,10 @@ export default function MilestoneStats() {
     : 0;
 
   const TILES: Tile[] = [
-    { icon: "flag", label: "Active projects", value: active, delta: "1", deltaDir: "up", note: `of ${projects.length} tracked`, hero: true },
-    { icon: "task_alt", label: "Milestones completed", value: completedStages, delta: "6", deltaDir: "up", note: "this month, auto-advanced" },
-    { icon: "monitoring", label: "On-track vs at-risk", value: onTrack, suffix: ` / ${atRisk}`, delta: `${atRisk}`, deltaDir: atRisk > 1 ? "down" : "up", note: "at-risk need attention" },
-    { icon: "donut_large", label: "Avg. completion", value: avgPct, unit: "%", delta: "5%", deltaDir: "up", note: "across all projects" },
+    { icon: "flag", label: "Active projects", value: active, note: `of ${projects.length} tracked`, hero: true },
+    { icon: "task_alt", label: "Stages completed", value: completedStages, note: "across all projects" },
+    { icon: "monitoring", label: "On-track vs at-risk", value: onTrack, suffix: ` / ${atRisk}`, note: atRisk === 1 ? "1 at-risk needs attention" : `${atRisk} at-risk need attention` },
+    { icon: "donut_large", label: "Avg. completion", value: avgPct, unit: "%", note: "across all projects" },
   ];
 
   return (
@@ -66,15 +72,7 @@ export default function MilestoneStats() {
           <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
           <div className="lab">{t.label}</div>
           <Value value={t.value} unit={t.unit} suffix={t.suffix} />
-          <div className="sub">
-            <span className={`delta ${t.deltaDir}`}>
-              <span className="material-symbols-rounded">
-                {t.deltaDir === "up" ? "trending_up" : "trending_down"}
-              </span>
-              {t.delta}
-            </span>{" "}
-            {t.note}
-          </div>
+          <div className="sub">{t.note}</div>
         </div>
       ))}
     </section>

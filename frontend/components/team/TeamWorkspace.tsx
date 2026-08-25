@@ -3,13 +3,15 @@
 import { useState } from "react";
 import type { TaskStatus } from "@/lib/data";
 import {
-  useMembers, useTeamMembers, useTasks, useActivity,
+  useMembers, useTeamMembers, useTasks, useActivity, useRbac,
   useAddMember, useAssignTask, useAdvanceTask, useReviewTask,
 } from "@/lib/hooks/team";
 import { useClients } from "@/lib/hooks/clients";
 import TeamRoster, { type NewMember } from "./TeamRoster";
 import AssignTasks, { type NewTask } from "./AssignTasks";
 import ActivityLog from "./ActivityLog";
+import TeamPerformance from "./TeamPerformance";
+import AccessControl from "./AccessControl";
 
 // Centred muted state for a tab panel (loading / error). Self-styled so it never
 // depends on a class that might not exist.
@@ -23,12 +25,17 @@ function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }
   return null;
 }
 
-type TabKey = "roster" | "assign" | "activity";
+type TabKey = "roster" | "assign" | "performance" | "activity" | "access";
 
+// Performance and Access were dropped when this workspace was cut to three tabs, and
+// the page header kept promising "role-based access" that had nowhere to live. Both
+// panels were already written and correct; only the tab was missing.
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "roster", label: "Team Members", icon: "badge" },
   { key: "assign", label: "Assign Tasks", icon: "assignment_ind" },
+  { key: "performance", label: "Performance", icon: "monitoring" },
   { key: "activity", label: "Activity Log", icon: "history" },
+  { key: "access", label: "Roles & Access", icon: "admin_panel_settings" },
 ];
 
 export default function TeamWorkspace() {
@@ -38,6 +45,9 @@ export default function TeamWorkspace() {
   const teamMembersQ = useTeamMembers();
   const tasksQ = useTasks();
   const activityQ = useActivity();
+  // Role -> permission reference data (GET /rbac/roles). Read-only by design: the
+  // matrix is versioned platform code and no endpoint persists a change to it.
+  const rbacQ = useRbac();
   const clientsQ = useClients();
 
   const members = membersQ.data ?? [];
@@ -143,7 +153,11 @@ export default function TeamWorkspace() {
             />
           </>
         ))}
+        {tab === "performance" && (panelGuard(membersQ) ?? <TeamPerformance members={members} />)}
         {tab === "activity" && (panelGuard(activityQ) ?? <ActivityLog log={activity} />)}
+        {tab === "access" && (panelGuard(rbacQ) ?? (
+          rbacQ.data ? <AccessControl rolePerms={rbacQ.data} /> : null
+        ))}
       </div>
     </section>
   );

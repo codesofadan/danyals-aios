@@ -51,6 +51,31 @@ class NotificationsRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
+    def unread_count(self) -> int:
+        """How many unread notifications the caller has.
+
+        A dedicated count, not ``len(list_notifications(...))``: the bell renders on
+        every page in all three portals and polls, so fetching whole rows - bodies
+        included - to display one integer would be the most-called query in the app
+        doing the most unnecessary work. RLS scopes it to the caller either way.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select count(*) as n from public.notifications where read = false")
+            row = cur.fetchone()
+            return int(row["n"]) if row else 0
+
+    def mark_all_read(self) -> int:
+        """Flip every one of the caller's unread notifications. Returns how many.
+
+        RLS pins the update to the caller, so this cannot reach another user's rows
+        even though the statement carries no user predicate of its own.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.notifications set read = true where read = false returning id"
+            )
+            return len(cur.fetchall())
+
     def mark_read(self, notification_id: str) -> dict[str, Any] | None:
         """Flip one of the caller's notifications to read. RLS pins it to the caller,
         so this can only ever touch the caller's own rows. Returns the updated row or

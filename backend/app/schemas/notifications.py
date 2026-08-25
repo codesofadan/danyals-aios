@@ -42,6 +42,12 @@ class NotificationResponse(BaseModel):
         )
 
 
+class UnreadCountResponse(BaseModel):
+    """The badge number for the notification bell."""
+
+    unread: int
+
+
 class AlertResponse(BaseModel):
     """One staff alert (rank-drop / lost-link / budget). Staff-only, so the internal
     ``client_id`` is surfaced here (a trusted staff audience), unlike the client-facing

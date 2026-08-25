@@ -36,10 +36,10 @@ from app.schemas.tasks import (
     needs_review,
     next_status,
     type_from_db,
-    type_to_db,
 )
 from app.services.activity import record_activity
 from app.services.notifications import notify, notify_leads
+from app.services.task_assignment import assign_task, require_staff_assignee
 
 # The assignee may request a due-date change only within this window of the
 # task's start (or, if not yet started, its assignment). Server-enforced here;
@@ -65,19 +65,10 @@ def _is_lead(user: CurrentUser) -> bool:
     return user.role in _LEAD_ROLES
 
 
-async def _require_staff_assignee(repo: TasksRepoDep, assignee_id: str) -> None:
-    """Reject an assignee that is missing (404) or a portal client (400).
-
-    Mirrors the DB guard (tasks_guard_insert/update): a task is never pointed at
-    a client uid. Enforced here for a clean error and at the DB as the boundary.
-    """
-    row = await asyncio.to_thread(repo.get_user, assignee_id)
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
-    if row.get("role") == "client":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Assignee must be a staff member"
-        )
+# Moved to `services.task_assignment` so the ticket-conversion path enforces the same
+# rule; re-exported under the original private name because three call sites below use
+# it. The 404-vs-400 split is preserved exactly.
+_require_staff_assignee = require_staff_assignee
 
 
 def _task_entity(task: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -124,43 +115,23 @@ async def create_task(
     clients: ClientsRepoDep,
     actor: AssignTasks,
 ) -> TaskResponse:
-    """Assign a new work item (status=todo). Validates the client + a staff
-    assignee, snapshots the client name, and records activity."""
-    client = await asyncio.to_thread(clients.get_client, body.client_id)
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
-    await _require_staff_assignee(repo, body.assignee_id)
+    """Assign a new work item (status=todo).
 
-    row = await asyncio.to_thread(
-        repo.insert_task,
-        {
-            "title": body.title,
-            "client_id": body.client_id,
-            "client_name": client.get("name", ""),
-            "type": type_to_db(body.type),
-            "assignee_id": body.assignee_id,
-            "priority": body.priority,
-            "status": "todo",
-            "due_date": body.due.isoformat() if body.due else None,
-            "created_by": actor.id,
-        },
-    )
-    await record_activity(
-        actor, kind="task", action="assigned a task", target=client.get("name", ""),
-        entity_type="client", entity_id=body.client_id,
-    )
-    # Email + in-app the assignee that work landed in their queue (best-effort;
-    # honours their notification_prefs, never blocks the create).
-    await notify(
-        body.assignee_id,
-        kind="task_assigned",
-        title=f"New task assigned: {body.title}",
-        body=(
-            f'You have been assigned "{body.title}" for {client.get("name", "a client")}. '
-            f"Priority: {body.priority}."
-            + (f" Due {body.due.isoformat()}." if body.due else "")
-            + " Open your portal queue to get started."
-        ),
+    The work is done by `services.task_assignment.assign_task`, shared with
+    `POST /tickets/{code}/convert-to-task` so the two ways a task can come into being
+    validate, snapshot, log and notify identically. Two copies of an assignment path
+    is how one of them quietly stops notifying its assignee.
+    """
+    row = await assign_task(
+        repo=repo,
+        clients=clients,
+        actor=actor,
+        title=body.title,
+        client_id=body.client_id,
+        task_type=body.type,
+        assignee_id=body.assignee_id,
+        priority=body.priority,
+        due=body.due,
     )
     return TaskResponse.from_row(row)
 

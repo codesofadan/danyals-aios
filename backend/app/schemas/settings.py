@@ -193,6 +193,12 @@ NOTIF_EVENTS: tuple[dict[str, Any], ...] = (
      "desc": "A non-review task (technical/actionable/backlink audit, local SEO, "
              "publishing) is delivered straight to done",
      "icon": "task_alt", "email": True, "in_app": True},
+    {"key": "task_comment", "label": "Comment on your task",
+     "desc": "Someone comments on a task assigned to you",
+     # In-app only by default. A comment thread is conversational - one exchange can
+     # be several messages - and defaulting it to email would turn a discussion into
+     # an inbox flood, which is how a notification channel gets muted entirely.
+     "icon": "forum", "email": False, "in_app": True},
     {"key": "deadline_requested", "label": "Deadline change requested",
      "desc": "An assignee requests a new due date for their task",
      "icon": "event_upcoming", "email": True, "in_app": True},

@@ -11,6 +11,7 @@ import {
   type NewClient,
   type SubStatus,
   type SubTier,
+  type Task,
   type Ticket,
 } from "@/lib/data";
 import type { ClientBusinessProfile, ClientBusinessProfileInput } from "@/lib/offpage";
@@ -50,21 +51,42 @@ export function useUpdateTicketStatus() {
   });
 }
 
-/**
- * Send a real, free-text reply on a ticket (POST /tickets/{code}/reply). Lead-only.
- * When the ticket is client-linked, the backend emails the actual reply text to the
- * client (not a canned status label) — see `_email_client_ticket_reply`.
+// `useReplyToTicket` (POST /tickets/{code}/reply) used to live here. `ThreadPanel`
+// replaced it: a reply is now a message on the ticket's thread, which keeps a history
+// instead of overwriting one field, and can be an internal note instead. The ENDPOINT
+// is deliberately retained server-side so a reply sent before threads existed is still
+// readable and an application rollback loses nothing - but nothing in the dashboard
+// calls it any more, so the hook is gone rather than left as a caller-less export.
+/** Turn a client's request into an assigned task (POST /tickets/{code}/convert-to-task).
+ *
+ * Lead-only (`assign_tasks`). The tenant is resolved from the TICKET server-side - a
+ * ticket never exposes its client id on the wire, and accepting one from here would
+ * let a request become work billed against a different client.
+ *
+ * Invalidates tickets (the thread gains an internal note recording the task) and tasks
+ * (a new row is on the board).
  */
-export function useReplyToTicket() {
+export function useConvertTicketToTask() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ code, message }: { code: string; message: string }) =>
-      api.post<Ticket>(`/tickets/${code}/reply`, { message }),
+    mutationFn: (input: {
+      code: string;
+      assignee_id: string;
+      type?: string;
+      priority?: string;
+      title?: string;
+    }) => {
+      const { code, ...body } = input;
+      return api.post<Task>(`/tickets/${code}/convert-to-task`, body);
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: TICKETS_KEY });
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      void qc.invalidateQueries({ queryKey: ["threads"] });
     },
   });
 }
+
 export const reportGrantsKey = (clientId: string) =>
   ["clients", clientId, "report-grants"] as const;
 
@@ -75,14 +97,12 @@ export function useClients() {
   });
 }
 
-/** A single client's granted report keys (GET /clients/{id}/report-grants). */
-export function useReportGrants(clientId: string | null) {
-  return useQuery({
-    queryKey: reportGrantsKey(clientId ?? ""),
-    queryFn: () => api.get<string[]>(`/clients/${clientId}/report-grants`),
-    enabled: !!clientId,
-  });
-}
+// `useReportGrants(clientId)` — a single client's grants — used to live here with no
+// caller. The Client Directory needs the whole table's grants at once (to show the
+// per-client count), so it uses `useAllReportGrants`, which caches under the SAME
+// per-client key. A one-client hook is a re-add away if a single-client view ever
+// wants one; leaving it exported with nothing calling it is the debt this pass exists
+// to remove.
 
 /**
  * Report grants for MANY clients, folded into the `{ [clientId]: keys[] }` shape the

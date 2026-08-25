@@ -54,6 +54,27 @@ def emit_deliverable(
     while ``generating``. ``client_id`` is server-pinned by the caller (the producing
     worker already owns the tenant); ``requires`` is the grant key that gates its
     visibility."""
+    # A "ready" deliverable is an OFFER OF A FILE. The client's Reports library renders
+    # View and Download for it, and `GET /portal/deliverables/{id}/download` resolves
+    # `artifact_key` -> a path; with no key it raises 404. So a ready row without an
+    # artifact is a download button that cannot work, shown to a paying client.
+    #
+    # Two producers did exactly that: the Google-Sheets workbook sync ("Monthly SEO
+    # Report") and the off-page worker ("Backlink Profile") both emitted with the
+    # default `artifact_key=None` and the default `status="ready"`. Neither renders a
+    # PDF at all, so `generating` would be no more honest - it reads "In progress"
+    # forever for a file nobody is producing.
+    #
+    # Refusing the write is the honest outcome and matches the portal rule that it must
+    # never offer an artefact it has not verified exists. Best-effort like the rest of
+    # this function: it logs and returns rather than raising into the producing job.
+    if status == "ready" and not artifact_key:
+        logger.warning(
+            "emit_deliverable_skipped_no_artifact",
+            title=title, kind=kind, requires=requires, client=client_name,
+        )
+        return
+
     issued_at = datetime.now(UTC) if status == "ready" else None
     row: dict[str, Any] = {
         "client_id": client_id,

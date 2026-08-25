@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.auth import CurrentUser, CurrentUserDep, require_perm
+from app.core.auth import CurrentUser, require_perm, require_staff
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
 from app.db.database import DatabaseNotConfiguredError
@@ -37,13 +37,19 @@ router = APIRouter(tags=["clients"])
 logger = get_logger("app.clients")
 
 ManageClients = Annotated[CurrentUser, Depends(require_perm("manage_clients"))]
+# The five client READS below carried CurrentUserDep alone. The outcome was already
+# correct - `clients_select` is `using (is_staff())`, so a portal client got zero rows
+# or a 404 - but the app tier granted nothing of its own, leaving one RLS policy as the
+# only thing between a client and the agency's book of business. Every sibling WRITE
+# already required a permission. Same completion as the /rbac/* and /cost/* sweep.
+Staff = Annotated[CurrentUser, Depends(require_staff())]
 
 _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
 
 @router.get("/clients", response_model=list[ClientResponse])
 async def list_clients(
-    repo: ClientsRepoDep, page: PageDep, _user: CurrentUserDep
+    repo: ClientsRepoDep, page: PageDep, _user: Staff
 ) -> list[ClientResponse]:
     rows = await asyncio.to_thread(repo.list_clients, limit=page.limit, offset=page.offset)
     counts = await asyncio.to_thread(repo.site_counts)
@@ -85,7 +91,7 @@ async def create_client(body: ClientCreate, repo: ClientsRepoDep, actor: ManageC
 
 
 @router.get("/clients/{client_id}", response_model=ClientResponse)
-async def get_client(client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep) -> ClientResponse:
+async def get_client(client_id: str, repo: ClientsRepoDep, _user: Staff) -> ClientResponse:
     row = await asyncio.to_thread(repo.get_client, client_id)
     if row is None:
         raise _CLIENT_NOT_FOUND
@@ -95,7 +101,7 @@ async def get_client(client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep
 
 @router.get("/clients/{client_id}/business-profile", response_model=ClientBusinessProfileResponse)
 async def get_client_business_profile(
-    client_id: str, repo: ClientsRepoDep, _user: CurrentUserDep
+    client_id: str, repo: ClientsRepoDep, _user: Staff
 ) -> ClientBusinessProfileResponse:
     """The client's stored NAP (name/address/phone/categories/hours). 404s if the
     client is unknown/invisible OR if no NAP was ever captured for it (the caller then
@@ -166,7 +172,7 @@ async def delete_client(client_id: str, repo: ClientsRepoDep, actor: ManageClien
 
 @router.get("/clients/{client_id}/report-grants", response_model=list[str])
 async def get_report_grants(
-    client_id: str, repo: ClientsRepoDep, grants: ReportGrantsRepoDep, _user: CurrentUserDep
+    client_id: str, repo: ClientsRepoDep, grants: ReportGrantsRepoDep, _user: Staff
 ) -> list[str]:
     """The report keys a client is granted to see in its portal (sorted)."""
     client = await asyncio.to_thread(repo.get_client, client_id)
@@ -199,7 +205,7 @@ async def put_report_grants(
 
 @router.get("/clients/{client_id}/sites", response_model=list[SiteResponse])
 async def list_sites(
-    client_id: str, repo: ClientsRepoDep, page: PageDep, _user: CurrentUserDep
+    client_id: str, repo: ClientsRepoDep, page: PageDep, _user: Staff
 ) -> list[SiteResponse]:
     rows = await asyncio.to_thread(repo.list_sites, client_id, limit=page.limit, offset=page.offset)
     return [SiteResponse.from_row(r) for r in rows]

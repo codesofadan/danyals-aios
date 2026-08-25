@@ -37,6 +37,7 @@ from app.routers.settings import router as settings_router
 from app.routers.skills import router as skills_router
 from app.routers.tasks import router as tasks_router
 from app.routers.team import router as team_router
+from app.routers.threads import router as threads_router
 from app.routers.tickets import router as tickets_router
 from app.routers.tiers import router as tiers_router
 from app.routers.upsells import router as upsells_router
@@ -67,6 +68,9 @@ api_v1.include_router(policy_router)
 api_v1.include_router(command_center_router)
 api_v1.include_router(upsells_router)
 api_v1.include_router(tickets_router)
+# Threaded discussion on tasks and requests (0098). No prefix: the routes carry
+# their own /threads/... path, matching tickets/tasks.
+api_v1.include_router(threads_router)
 api_v1.include_router(notifications_router)
 api_v1.include_router(settings_router)
 api_v1.include_router(skills_router)

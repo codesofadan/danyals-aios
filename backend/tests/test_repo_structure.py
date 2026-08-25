@@ -477,7 +477,7 @@ def test_the_unchecked_sync_debt_only_shrinks() -> None:
 #      caught. (`_ENUM_CONTRACT` is the honest half - it exists because "names matching
 #      isn't enough" and does compare `Literal` values against TS unions.)
 #   2. `test_contract_lock_covers_the_core_response_models` guards the list with
-#      `assert len(_CONTRACT) >= 10`, and `_CONTRACT` holds 33. **Twenty-three models
+#      `assert len(_CONTRACT) >= 10`, and `_CONTRACT` holds 35. **Twenty-five models
 #      could be deleted from the list and the floor would still pass.**
 #
 # (1) is a semantic gap no structural guard closes - a name-lock is a legitimate check,
@@ -488,7 +488,7 @@ def test_the_unchecked_sync_debt_only_shrinks() -> None:
 # This pins the sizes. Growing a list is fine and expected; SHRINKING one must be
 # deliberate and visible in a diff, not absorbed by slack.
 _CONTRACT_SIZES: dict[str, int] = {
-    "_CONTRACT": 33,       # model <-> TS type pairs, field NAMES only
+    "_CONTRACT": 35,       # model <-> TS type pairs, field NAMES only
     "_ENUM_CONTRACT": 28,  # Literal <-> TS union pairs, compared BY VALUE
 }
 
@@ -620,23 +620,26 @@ def test_the_pinned_contract_sizes_are_not_stale() -> None:
 _AUTH_ONLY_HANDLERS: frozenset[str] = frozenset({
     # open by design
     "app/routers/auth.py::logout",
-    # open by decision D-19 (client-readable service tiers)
+    # open by decision D-19 (client-readable service tiers - the portal sells upsells)
     "app/routers/tiers.py::list_tiers",
     "app/routers/tiers.py::list_feature_areas",
-    "app/routers/tiers.py::list_tier_clients",
-    # RLS-bounded, and no longer only asserted: MEASURED 2026-08-24 against a built
-    # PostgreSQL 16 with all 85 migrations applied, two client tenants seeded, and the
-    # app's own identity mechanism reproduced (role `authenticated`,
-    # `select set_config('app.user_id', <uuid>, true)`, exactly as `rls_connection`
-    # does). Every table these handlers read returned ZERO rows to a portal client and
-    # all rows to staff: clients, sites, client_business_profiles,
-    # client_report_grants, activity_log. Evidence in WU-14.
-    "app/routers/activity.py::list_activity",
-    "app/routers/clients.py::list_clients",
-    "app/routers/clients.py::get_client",
-    "app/routers/clients.py::get_client_business_profile",
-    "app/routers/clients.py::get_report_grants",
-    "app/routers/clients.py::list_sites",
+    # The RLS-BOUNDED class is now EMPTY, and that is the point. It held seven handlers
+    # - five `clients.*`, `activity.list_activity` and `tiers.list_tier_clients` - each
+    # correctly classified and MEASURED 2026-08-24 against a built PostgreSQL 16 (every
+    # table they read returned zero rows to a portal client and all rows to staff;
+    # evidence in WU-14). They have all been given `require_staff()` on 2026-08-25.
+    #
+    # Nothing about the measurement was wrong. The reason for closing the class anyway
+    # is the one this file already argues two comments above: "there is an RLS policy
+    # somewhere" is not equivalent to "this route is guarded". The measurement proved
+    # the database refuses; it could never prove the app layer grants anything, and the
+    # `cost.get_dial` finding below is what that gap looks like when it bites - a
+    # handler sitting in this class, reading an RLS-protected table, and returning 18
+    # rows to a client anyway because it merged in a constant.
+    #
+    # An empty class is therefore a stronger invariant than a well-measured one: it
+    # cannot acquire a member whose table is protected but whose handler is not. A new
+    # entry here needs a written decision, not a measurement.
     # The four `cost.py` handlers that were listed here are GONE - they now carry
     # `require_staff()`. Three were RLS-bounded as classified. `get_dial` was NOT, and
     # that is the finding: it merges DB rows with an in-process catalogue, so with the

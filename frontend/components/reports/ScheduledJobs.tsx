@@ -136,9 +136,22 @@ export default function ScheduledJobs() {
           Couldn&apos;t load scheduled jobs — {(q.error as Error)?.message ?? "try again"}.
         </div>
       ) : jobs.length === 0 ? (
-        <div className="rp-conn-foot">
-          <span className="material-symbols-rounded">schedule</span>
-          No scheduled jobs are configured.
+        // An empty list here is the CURRENT, DELIBERATE state, not a fault: the Celery
+        // beat schedule is `{}` while the job contract (retry/backoff/DLQ) is finished,
+        // under the rule that a schedule is never restored for tasks that cannot retry
+        // and have nowhere to fail to. Nine tests assert the populated schedule and are
+        // intentionally red until it is switched back on.
+        //
+        // Saying only "no scheduled jobs are configured" reads as a broken deployment,
+        // which is the wrong thing for an operator to conclude and act on.
+        <div className="rp-conn-foot" data-testid="jobs-parked">
+          <span className="material-symbols-rounded">pause_circle</span>
+          <span>
+            <b>Background jobs are paused.</b> No cron schedule is active — reporting,
+            rank checks and the autonomous sweeps run only when triggered by hand. This
+            is deliberate while the job-retry contract is completed; nothing here has
+            failed.
+          </span>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 2px" }}>

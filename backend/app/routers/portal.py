@@ -31,10 +31,12 @@ from app.schemas.portal import ClientDashboard
 from app.schemas.portal_deliverables import ClientDeliverableResponse
 from app.schemas.portal_reports import PortalReportResponse
 from app.schemas.portal_requests import ClientRequestResponse, PortalRequestCreate
+from app.schemas.threads import MessageCreate, PortalMessageResponse
 from app.services.audit_artifacts import REPORT_HTML_VIEW_HEADERS, LocalArtifactStore
 from app.services.audit_sheets import SHEET_FILES, sheet_media_type
 from app.services.client_audits import AuditInserter, create_client_audit, insert_audit_row
 from app.services.client_requests import RequestInserter, create_client_request, insert_request_row
+from app.services.portal_threads import list_own_messages, post_client_message
 from app.services.report_viz import build_report_viz
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -409,3 +411,60 @@ async def create_portal_request(
         insert_request=insert_request, reader=reader, scoped=client, body=body
     )
     return ClientRequestResponse.from_row(row)
+
+
+# --- The conversation on a request (0098) ------------------------------------
+# A client raises a request and the agency replies. Until now that was a single
+# `support_tickets.reply` column: one reply, and the conversation had nowhere to go.
+#
+# Both routes address the request by its public T-#### code and resolve it through
+# `portal_requests` FIRST, so a code belonging to another tenant is a 404 - the same
+# answer as a code that does not exist.
+_REQUEST_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="No such request"
+)
+
+
+@router.get("/requests/{code}/messages", response_model=list[PortalMessageResponse])
+async def list_portal_request_messages(
+    code: str, client: CurrentClientDep
+) -> list[PortalMessageResponse]:
+    """The client-visible conversation on the caller's own request, oldest first.
+
+    Reads `portal_thread_messages`, which filters out `visibility = 'internal'` in
+    the view itself - an internal note is never selected, not merely omitted from the
+    response model.
+    """
+    rows = await asyncio.to_thread(list_own_messages, user_id=client.user.id, code=code)
+    if rows is None:
+        raise _REQUEST_NOT_FOUND
+    return [PortalMessageResponse.from_row(r) for r in rows]
+
+
+@router.post(
+    "/requests/{code}/messages",
+    response_model=PortalMessageResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("portal_message_create", 60))],
+)
+async def post_portal_request_message(
+    code: str,
+    body: MessageCreate,
+    reader: PortalRepoDep,
+    client: CurrentClientDep,
+) -> PortalMessageResponse:
+    """Add the client's own message to their request.
+
+    `body.visibility` is IGNORED here. The service pins `client_visible` and
+    `author_kind='client'` as literals, and the DB refuses the other combination
+    (`thread_messages_client_is_visible_ck`), so a client cannot file an internal
+    note however the request is shaped.
+    """
+    client_row = await asyncio.to_thread(reader.get_client)
+    author = str((client_row or {}).get("name") or "Client")
+    posted = await post_client_message(
+        scoped=client, code=code, body=body.body, author_name=author
+    )
+    if posted is None:
+        raise _REQUEST_NOT_FOUND
+    return PortalMessageResponse.from_row(posted)

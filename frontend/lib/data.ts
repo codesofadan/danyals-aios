@@ -109,22 +109,22 @@ export type ClientReport = {
   desc: string; // what the client sees when it's granted
 };
 
-// The reports & graphs an admin can expose to a client. Each maps
-// to a dashboard surface the client portal would render.
+// The reports & graphs an admin can expose to a client. Each maps to a dashboard
+// surface the client portal renders from REAL tenant data.
+//
+// This list was thirteen until 2026-08-25. Ten of them - rankings, organic traffic,
+// Core Web Vitals, the backlink profile, the competitor benchmark, local pack, keyword
+// coverage, the progress dashboard, the monthly report and ROI - had no provider feed
+// behind them, and the backend served hard-coded demo figures for each, flagged as
+// sample data. Removed rather than re-labelled: a client portal showing three true
+// things beats one showing thirteen of which ten are invented.
+//
+// MIRRORS the server: `_REPORT_ORDER` in backend/app/services/report_viz.py. A key
+// added here without a real series there renders an empty card.
 export const clientReports: ClientReport[] = [
   { key: "audit_scores", label: "Audit Scores", short: "Audit Scores", icon: "fact_check", group: "Performance", desc: "Site-health scores per category, trended over time" },
-  { key: "rank_tracker", label: "Keyword Rankings", short: "Rankings", icon: "trending_up", group: "Performance", desc: "Tracked keyword positions & ranking history" },
-  { key: "traffic", label: "Organic Traffic", short: "Traffic", icon: "show_chart", group: "Performance", desc: "Organic sessions & clicks month over month" },
-  { key: "core_web_vitals", label: "Core Web Vitals", short: "Web Vitals", icon: "speed", group: "Performance", desc: "LCP / INP / CLS field data per page" },
-  { key: "backlinks", label: "Backlink Profile", short: "Backlinks", icon: "hub", group: "Off-Page", desc: "Referring domains, new & lost links, toxicity" },
-  { key: "competitor", label: "Competitor Benchmark", short: "Competitors", icon: "insights", group: "Off-Page", desc: "Share-of-voice & gap analysis vs rivals" },
-  { key: "local_seo", label: "Local & Map Pack", short: "Local SEO", icon: "storefront", group: "Off-Page", desc: "Local grid rankings & map-pack visibility" },
   { key: "content_status", label: "Content Status", short: "Content", icon: "article", group: "Content", desc: "Content pipeline — drafts, review & published" },
-  { key: "keyword_map", label: "Keyword Coverage", short: "Keywords", icon: "search", group: "Content", desc: "Target keywords mapped to pages & intent" },
   { key: "milestones", label: "Milestones & Delivery", short: "Milestones", icon: "flag", group: "Delivery", desc: "Onboarding & delivery milestone timeline" },
-  { key: "progress_dashboard", label: "Progress Dashboard", short: "Progress", icon: "donut_large", group: "Delivery", desc: "At-a-glance engagement progress rings" },
-  { key: "monthly_report", label: "Monthly SEO Report", short: "Monthly Report", icon: "summarize", group: "Delivery", desc: "The branded monthly performance report" },
-  { key: "roi_summary", label: "ROI & Growth Summary", short: "ROI Summary", icon: "payments", group: "Delivery", desc: "Revenue-attributed growth & ROI headline" },
 ];
 
 const ALL_REPORT_KEYS = clientReports.map((r) => r.key);
@@ -142,22 +142,19 @@ export type ReportBundle = {
 
 export const reportBundles: ReportBundle[] = [
   {
-    key: "full", label: "Full Dashboard", tagline: "Every chart & report", icon: "dashboard",
+    key: "full", label: "Everything we can show", tagline: "All three live reports", icon: "dashboard",
     color: SERIES.c1, grants: ALL_REPORT_KEYS,
   },
   {
-    key: "performance", label: "Performance Only", tagline: "Rankings, traffic & audits", icon: "monitoring",
-    color: SERIES.c4, grants: ["audit_scores", "rank_tracker", "traffic", "core_web_vitals", "local_seo"],
+    key: "delivery", label: "Delivery only", tagline: "Milestones & content progress", icon: "flag",
+    color: SERIES.c3, grants: ["milestones", "content_status"],
   },
   {
-    key: "exec", label: "Executive Summary", tagline: "Headline progress & ROI", icon: "summarize",
-    color: SERIES.c1, grants: ["progress_dashboard", "monthly_report", "roi_summary", "milestones"],
-  },
-  {
-    key: "content", label: "Content Client", tagline: "Content pipeline & keywords", icon: "edit_note",
-    color: SERIES.c3, grants: ["content_status", "keyword_map", "rank_tracker", "monthly_report"],
+    key: "audit", label: "Audit only", tagline: "Site-health scores", icon: "fact_check",
+    color: SERIES.c4, grants: ["audit_scores"],
   },
 ];
+
 
 // The payload the Add-Client wizard emits back to the directory.
 export type NewClient = {
@@ -211,15 +208,11 @@ export const permissions: { key: PermKey; label: string; desc: string; icon: str
   { key: "view_reports", label: "View reports", desc: "Open audits, dashboards & metrics", icon: "summarize" },
 ];
 
-// Default capability grants per role. Owner is implicitly all-on and locked.
-export const defaultRolePerms: Record<TeamRole, PermKey[]> = {
-  Owner: permissions.map((p) => p.key),
-  Admin: ["run_audits", "publish_content", "manage_clients", "assign_tasks", "manage_team", "manage_vault", "view_reports"],
-  Manager: ["run_audits", "publish_content", "manage_clients", "assign_tasks", "view_reports"],
-  Specialist: ["run_audits", "publish_content", "view_reports"],
-  Analyst: ["run_audits", "view_reports"],
-  Viewer: ["view_reports"],
-};
+// `defaultRolePerms` used to live here: a build-time copy of the role -> permission
+// matrix. It is gone. The matrix is server-owned reference data (GET /rbac/roles,
+// sourced from app/rbac/matrix.py), and `AccessControl` reads it live through
+// `useRbac()`. A second, hand-maintained copy in the bundle could only ever drift from
+// the real thing and then misdescribe, in the UI, who is allowed to do what.
 
 // --- Members ----------------------------------------------------------------
 export type MemberStatus = "active" | "away" | "invited" | "offline";

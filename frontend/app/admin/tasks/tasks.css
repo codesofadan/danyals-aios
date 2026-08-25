@@ -154,3 +154,8 @@
   color: var(--muted);
   font-size: 13.5px;
 }
+
+/* The expanded discussion under a task row. Spans the table so the transcript has a
+   readable measure instead of being squeezed into the last column. */
+.tm-thread-row > td { padding: 0 0 12px; background: var(--well); }
+.tm-thread-row .th-panel { margin: 0 12px; }

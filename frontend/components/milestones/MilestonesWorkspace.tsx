@@ -43,7 +43,7 @@ export default function MilestonesWorkspace() {
         <div className="card-h">
           <div>
             <div className="ct">Client project timelines</div>
-            <div className="cs">Onboarding → Baseline → Content → Off-page → Reporting. Stages auto-advance from job &amp; audit status.</div>
+            <div className="cs">Onboarding → Baseline → Content → Off-page → Reporting.</div>
           </div>
           <div className="tools">
             <div className="seg" role="tablist" aria-label="Filter projects by health">
@@ -61,8 +61,9 @@ export default function MilestonesWorkspace() {
           <span><b>{shown.length}</b> {shown.length === 1 ? "project" : "projects"}</span>
           <span className="ms-dot">·</span>
           <span><b>{avg}%</b> avg completion</span>
-          <span className="ms-summary-hint">
-            <span className="material-symbols-rounded">bolt</span>Advances are automatic — no manual edits
+          <span className="ms-summary-hint warn">
+            <span className="material-symbols-rounded">info</span>
+            Only the onboarding stage advances automatically today
           </span>
         </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
+import ThreadPanel from "@/components/threads/ThreadPanel";
 import { useAllTasks, useSetTaskProof } from "@/lib/hooks/tasks";
 import { useTeamMembers } from "@/lib/hooks/team";
 import {
@@ -158,6 +159,7 @@ function AssigneeCell({ member, id }: { member: TeamMemberRecord | undefined; id
 }
 
 export default function TaskManager() {
+  const [discussId, setDiscussId] = useState<string | null>(null);
   const tasksQ = useAllTasks();
   const membersQ = useTeamMembers();
 
@@ -246,11 +248,13 @@ export default function TaskManager() {
                 <th>Progress</th>
                 <th>Due</th>
                 <th>Proof</th>
+                <th aria-label="Discussion" />
               </tr>
             </thead>
             <tbody>
               {filtered.map((t) => (
-                <tr key={t.id}>
+                <Fragment key={t.id}>
+                <tr>
                   <td><strong>{t.id}</strong></td>
                   <td>{t.title}</td>
                   <td>{t.client || "—"}</td>
@@ -260,7 +264,30 @@ export default function TaskManager() {
                   <td><LifecycleBar status={t.status} /></td>
                   <td>{t.due || "—"}</td>
                   <td><ProofCell task={t} /></td>
+                  <td>
+                    <button
+                      type="button"
+                      className="tm-iconbtn"
+                      onClick={() => setDiscussId((cur) => (cur === t.id ? null : t.id))}
+                      title={discussId === t.id ? "Hide discussion" : `Discuss ${t.id}`}
+                      aria-label={discussId === t.id ? "Hide discussion" : `Discuss ${t.id}`}
+                      aria-expanded={discussId === t.id}
+                    >
+                      <span className="material-symbols-rounded">forum</span>
+                    </button>
+                  </td>
                 </tr>
+                {discussId === t.id && (
+                  <tr className="tm-thread-row">
+                    <td colSpan={10}>
+                      {/* Where a lead SEES what the team asked. Without this the queue
+                          side of the conversation would have no counterpart and a
+                          specialist's question would go nowhere. */}
+                      <ThreadPanel entity="task" code={t.id} clientLinked={!!t.client} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

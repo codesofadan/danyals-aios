@@ -1,6 +1,7 @@
 "use client";
 
 import { useConnection } from "@/lib/hooks/reports";
+import { sheetUrl } from "@/lib/reports";
 
 export default function SheetsConnection() {
   const connQ = useConnection();
@@ -62,9 +63,21 @@ export default function SheetsConnection() {
           <div className="rp-conn-val">{c.master.name}</div>
           <div className="rp-conn-meta rp-mono">{c.master.sheet || "—"} · {c.master.tabs} tabs</div>
         </div>
-        <a className="rp-sheet-btn" href="#" aria-label="Open master workbook">
-          <span className="material-symbols-rounded">open_in_new</span>
-        </a>
+        {sheetUrl(c.master.sheet) ? (
+          <a
+            className="rp-sheet-btn"
+            href={sheetUrl(c.master.sheet) as string}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open master workbook in Google Sheets"
+          >
+            <span className="material-symbols-rounded">open_in_new</span>
+          </a>
+        ) : (
+          <span className="rp-sheet-btn off" title="No master workbook configured yet" aria-hidden>
+            <span className="material-symbols-rounded">open_in_new</span>
+          </span>
+        )}
       </div>
 
       {/* redis write-buffer */}

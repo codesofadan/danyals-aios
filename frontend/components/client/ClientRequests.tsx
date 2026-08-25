@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { REQUEST_KINDS, REQUEST_STATUS_META, type RequestKind } from "@/lib/client";
+import PortalThread from "@/components/threads/PortalThread";
 import { useClient } from "./ClientContext";
 import ClientHeader from "./ClientHeader";
 
@@ -165,12 +166,17 @@ export default function ClientRequests() {
                       <span>{r.kind}</span><span className="dot-sep">·</span><span>{r.ago}</span>
                     </div>
                     {r.detail && <div className="cl-req-detail">{r.detail}</div>}
+                    {/* The pre-0098 one-shot reply. Kept while the column is still
+                        written, so an answer sent before threads existed is not lost
+                        from the client's view; migration 0099 also copied it into the
+                        thread, so this renders only until the column is retired. */}
                     {r.reply && (
                       <div className="cl-req-reply">
                         <span className="material-symbols-rounded">support_agent</span>
                         <span>{r.reply}</span>
                       </div>
                     )}
+                    <PortalThread code={r.id} />
                   </div>
                 </div>
               );

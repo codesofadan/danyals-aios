@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ThreadPanel from "@/components/threads/ThreadPanel";
 import {
   TASK_STATUS_META, dueInfo,
   type Task, type TaskStatus,
@@ -117,6 +118,7 @@ function Card({ t, onAdvance }: { t: Task; onAdvance: (id: string) => void }) {
           </div>
         )}
         <DeadlineRequestAction t={t} />
+        <TaskDiscussion t={t} />
       </div>
     </div>
   );
@@ -167,6 +169,32 @@ export default function MyQueue({ tasks, onAdvance }: { tasks: Task[]; onAdvance
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// A specialist working a task had no way to ask a question about it: they could
+// advance its status or request a later deadline, and nothing else. This is that
+// missing channel - the same thread a lead sees on the admin board.
+//
+// Collapsed by default: a queue where every card is an open transcript stops being a
+// queue. Internal by default too, because a task is agency-internal work.
+function TaskDiscussion({ t }: { t: Task }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button type="button" className="pq-discuss" onClick={() => setOpen(true)}>
+        <span className="material-symbols-rounded">forum</span>Discuss
+      </button>
+    );
+  }
+  return (
+    <div className="pq-thread">
+      <ThreadPanel entity="task" code={t.id} />
+      <button type="button" className="pq-discuss" onClick={() => setOpen(false)}>
+        <span className="material-symbols-rounded">expand_less</span>Hide discussion
+      </button>
     </div>
   );
 }

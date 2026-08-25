@@ -4,8 +4,12 @@
 // one workbook per client + a master rollup workbook. The
 // audit / content / milestone modules push here through a
 // Redis write-buffer; the engine applies agency branding.
-// Mock values are demo-only — swap for the FastAPI service +
-// Sheets API (googleapis) queries when the backend is wired.
+//
+// This module holds TYPES and pure display helpers only. It used to also export a
+// `sheetsConnection` const carrying a fabricated service-account address, project id,
+// `connected: true`, and buffer counters (`queued: 3`, `flushedToday: 2174`). Nothing
+// imported it - GET /reports/connection had already replaced it - so it shipped
+// invented infrastructure state to every browser that loaded the bundle. Removed.
 // ============================================================
 
 import { SERIES } from "@/lib/data";
@@ -39,26 +43,18 @@ export type Workbook = {
   status: SyncStatus;
 };
 
-// --- Service account + master workbook (the Sheets connection) --------------
-export const sheetsConnection = {
-  account: "aios-sheets@aios-prod.iam.gserviceaccount.com",
-  accountShort: "aios-sheets@…iam.gserviceaccount.com",
-  project: "aios-prod",
-  scope: "spreadsheets · drive.file",
-  connected: true,
-  master: {
-    name: "AIOS · Master Rollup",
-    sheet: "1M4st…RollupX",
-    tabs: 5, // Clients · Audits · Content · Milestones · Health
-  },
-  buffer: {
-    // Redis acts as the write-buffer in front of the Sheets API.
-    label: "Redis write-buffer",
-    ok: true,
-    queued: 3, // rows waiting to flush
-    flushedToday: 2174,
-  },
-};
+// --- Opening a workbook in Google Sheets ------------------------------------
+// The "open sheet" affordances used to be `href="#"` - a link that looked live,
+// took the operator nowhere, and gave no hint that the id beside it was real.
+// A sheet id IS the URL, so there is nothing to fetch.
+//
+// Returns null when there is no id (an unconfigured master, a workbook that has
+// never synced). Callers must render a non-interactive state for null rather than
+// a link to nowhere.
+export function sheetUrl(sheetId: string | null | undefined): string | null {
+  const id = (sheetId ?? "").trim();
+  return id ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}` : null;
+}
 
 // --- What each report type writes to the sheet ------------------------------
 export type ReportType = {

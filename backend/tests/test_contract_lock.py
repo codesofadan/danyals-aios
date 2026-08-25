@@ -51,6 +51,7 @@ from app.schemas.reports import (
 )
 from app.schemas.settings import SecurityPolicyResponse, WorkspaceSettingsResponse
 from app.schemas.tasks import TaskResponse
+from app.schemas.threads import PortalMessageResponse, ThreadMessageResponse
 from app.schemas.tickets import TicketResponse
 from app.schemas.tiers import TierClientResponse
 from app.schemas.upsells import UpsellResponse
@@ -70,6 +71,11 @@ _CONTRACT: list[tuple[type[BaseModel], str, str]] = [
     (ClientBudgetResponse, "frontend/lib/cost.ts", "ClientBudget"),
     (DialFeatureResponse, "frontend/lib/cost.ts", "DialFeature"),
     (ActivityResponse, "frontend/lib/data.ts", "Activity"),
+    # Threads (0098). Both shapes are locked, and locking the CLIENT one is the point:
+    # if `visibility` were ever added to PortalMessage, this fails - the field's
+    # ABSENCE is part of the boundary, not an oversight.
+    (ThreadMessageResponse, "frontend/lib/threads.ts", "ThreadMessage"),
+    (PortalMessageResponse, "frontend/lib/threads.ts", "PortalMessage"),
     (TierClientResponse, "frontend/lib/tiers.ts", "TierClient"),
     (ContentJobResponse, "frontend/lib/content.ts", "ContentJob"),
     (ClientProjectResponse, "frontend/lib/milestones.ts", "ClientProject"),

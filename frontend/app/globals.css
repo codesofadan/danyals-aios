@@ -462,6 +462,30 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 .cd-rowactions { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .cd-manage.danger { color: var(--danger, #E5484D); }
 .cd-manage.danger:hover { color: #fff; border-color: var(--danger, #E5484D); background: var(--danger, #E5484D); }
+/* How many reports a client can actually see. Rendered on the Reports row action so
+   the count is legible without opening anything - a client on 0 sees a dashboard of
+   padlocks, which is worth spotting from the directory. */
+.cd-grantcount { display: inline-flex; align-items: center; justify-content: center; min-width: 18px;
+  height: 18px; padding: 0 5px; border-radius: 999px; font-size: 10.5px; font-weight: 800;
+  color: var(--fg-strong); background: var(--hover); border: 1px solid var(--line-2); }
+.cd-manage:hover .cd-grantcount { border-color: var(--violet-soft); }
+
+/* Add-client wizard: the portal credentials block. The password is generated in the
+   browser and stored server-side only as a hash, so this is the ONE moment it can be
+   read. It used to be generated, POSTed and discarded without ever being displayed,
+   which left the operator with no way to tell the client how to sign in. */
+.wiz-creds { margin-top: 14px; padding: 13px 14px; border-radius: 12px;
+  border: 1px solid var(--line-2); background: var(--raise); }
+.wiz-creds-h { display: flex; gap: 10px; align-items: flex-start; }
+.wiz-creds-h .material-symbols-rounded { font-size: 19px; color: var(--warn); margin-top: 1px; }
+.wiz-creds-t { font-size: 12.5px; font-weight: 800; color: var(--fg-strong); }
+.wiz-creds-s { margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.wiz-cred-row { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+.wiz-cred-k { flex: none; width: 74px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.wiz-cred-v { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 12.5px;
+  font-weight: 700; color: var(--fg-strong); background: var(--hover);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+.wiz-hint { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--muted); }
 
 /* ---- Support Activity ---- */
 .ticket-list { margin-top: 12px; display: flex; flex-direction: column; }
@@ -1776,3 +1800,187 @@ td.ta-r, th.ta-r { text-align: right; } td.ta-c, th.ta-c { text-align: center; }
   .tpl-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .tpl-thumb, .tpl-thumb-auto { height: 150px; }
 }
+
+/* ---- Discussion threads (0098) ------------------------------------------- */
+/* The staff composer changes appearance with its target. Writing to a client is the
+   consequential action - `thread_messages` is append-only at the database, so a
+   misdirected reply cannot be recalled - and the surface should not look identical
+   whichever it is about to do. */
+.th-panel { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--well); overflow: hidden; transition: border-color .18s; }
+.th-panel.to-client { border-color: color-mix(in srgb, var(--ok, #16A34A) 45%, var(--line)); }
+
+.th-head { display: flex; align-items: center; gap: 8px; padding: 10px 13px;
+  border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 800; color: var(--fg-strong); }
+.th-head .material-symbols-rounded { font-size: 17px; color: var(--muted); }
+.th-title { flex: 1; }
+.th-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--hover); border: 1px solid var(--line-2); font-size: 11px; }
+
+.th-list { max-height: 340px; overflow-y: auto; padding: 4px 0; }
+.th-state { padding: 14px 13px; font-size: 12px; color: var(--muted); display: flex;
+  align-items: center; gap: 10px; }
+.th-state.err { color: var(--danger, #E5484D); }
+
+.th-msg { padding: 10px 13px; border-bottom: 1px solid var(--line); }
+.th-msg:last-child { border-bottom: none; }
+/* An internal note is visually distinct from a client-facing one in the transcript
+   too, not only in the composer: reading back, "who saw this" is the first question. */
+.th-msg.internal { background: color-mix(in srgb, var(--muted) 5%, transparent); }
+.th-msg-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; }
+.th-author { font-weight: 800; color: var(--fg-strong); font-size: 12px; }
+.th-who { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--violet-soft); background: var(--hover); border: 1px solid var(--line);
+  padding: 1px 6px; border-radius: 999px; }
+.th-vis-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px;
+  font-weight: 700; color: var(--muted); }
+.th-vis-tag .material-symbols-rounded { font-size: 13px; }
+.th-vis-tag.ok { color: var(--ok, #16A34A); }
+.th-when { margin-left: auto; color: var(--muted); }
+.th-body { margin-top: 5px; font-size: 13px; line-height: 1.5; color: var(--ink);
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.th-composer { padding: 11px 13px; border-top: 1px solid var(--line); background: var(--card); }
+.th-composer textarea { width: 100%; font-family: inherit; font-size: 13px; line-height: 1.5;
+  color: var(--ink); background: var(--well); border: 1px solid var(--line-2);
+  border-radius: 10px; padding: 9px 11px; resize: vertical; min-height: 62px; }
+.th-composer textarea:focus { outline: none; border-color: var(--violet-soft); }
+.th-actions { display: flex; align-items: center; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
+.th-vis button { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.th-vis button .material-symbols-rounded { font-size: 14px; }
+.th-actions .primary-btn { margin-left: auto; }
+.th-hint { margin-top: 7px; font-size: 10.5px; color: var(--muted); }
+
+/* The client's own conversation, in the portal. There is no visibility control here:
+   a client's message is always visible to the agency, and the messages they can read
+   are filtered by the database view, never by this component. */
+.th-panel.portal .th-msg.internal { background: none; }
+/* Opening a thread from a queue card / a client request row. Collapsed by default -
+   a list where every row is an open transcript stops being a list. */
+.pq-discuss, .cl-req-thread-open { margin-top: 9px; font-family: inherit; font-size: 11.5px;
+  font-weight: 700; color: var(--muted); cursor: pointer; display: inline-flex;
+  align-items: center; gap: 6px; background: none; border: 1px solid var(--line);
+  padding: 6px 11px; border-radius: 9px; transition: .16s; }
+.pq-discuss:hover, .cl-req-thread-open:hover { color: var(--lilac); border-color: var(--line-2); }
+.pq-discuss .material-symbols-rounded, .cl-req-thread-open .material-symbols-rounded { font-size: 15px; }
+.pq-thread { margin-top: 9px; }
+/* The client's own messages, so a transcript is scannable by author at a glance. */
+.th-msg.mine { background: color-mix(in srgb, var(--violet-soft) 8%, transparent); }
+/* Ticket triage, on the expanded support row. `PATCH /tickets/{code}/status` and its
+   hook both existed with no caller: a request could be answered but never marked
+   dealt with, and the client saw "open" forever. */
+.tk-triage { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 10px 0 0 1.4rem; }
+.tk-triage-lab { font-size: 11px; font-weight: 700; color: var(--muted); }
+.tk-triage-err { font-size: 11px; color: var(--danger, #E5484D); }
+
+/* ---- Notification bell (the shared top bar, all three portals) ------------ */
+/* The delivery layer has written notification rows since Part 7 and nothing rendered
+   one. This is the surface that reads them. Mounted in TopBar, so a single mount
+   covers all 26 pages across admin, team and client. */
+.nb { position: relative; flex: none; }
+.nb-btn { position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+  background: var(--raise); border: 1px solid var(--line); color: var(--muted); transition: .16s; }
+.nb-btn:hover { color: var(--lilac); border-color: var(--line-2); }
+.nb-btn.has { color: var(--fg-strong); }
+.nb-btn .material-symbols-rounded { font-size: 21px; }
+.nb-badge { position: absolute; top: 5px; right: 5px; min-width: 17px; height: 17px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 999px;
+  background: var(--crit, #E5484D); color: #fff; font-size: 10px; font-weight: 800;
+  border: 2px solid var(--raise); }
+
+.nb-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 70; width: 380px;
+  max-width: calc(100vw - 32px); background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: 0 18px 44px rgba(20, 8, 30, .18); overflow: hidden; }
+.nb-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-bottom: 1px solid var(--line); }
+.nb-title { font-size: 12.5px; font-weight: 800; color: var(--fg-strong); }
+.nb-tabs { flex: 1; }
+.nb-head .mini-btn { margin-left: auto; }
+
+.nb-list { max-height: 400px; overflow-y: auto; }
+.nb-state { padding: 22px 14px; text-align: center; font-size: 12px; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.nb-state.err { color: var(--danger, #E5484D); }
+
+.nb-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left;
+  padding: 11px 12px; border: none; border-bottom: 1px solid var(--line); background: none;
+  font-family: inherit; cursor: pointer; transition: background .14s; }
+.nb-item:last-child { border-bottom: none; }
+.nb-item:hover { background: var(--hover); }
+.nb-item.unread { background: color-mix(in srgb, var(--violet-soft) 7%, transparent); }
+.nb-item.alert { cursor: default; align-items: center; }
+.nb-ic { font-size: 19px; color: var(--muted); margin-top: 1px; flex: none; }
+.nb-sev { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--muted); }
+.nb-sev.crit { background: var(--crit, #E5484D); }
+.nb-sev.warn { background: var(--warn); }
+.nb-sev.info { background: var(--c4); }
+.nb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nb-t { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.nb-b { font-size: 11.5px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+.nb-when { font-size: 10.5px; color: var(--muted-2, var(--muted)); }
+.nb-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--violet); margin-top: 5px; }
+
+@media (max-width: 560px) { .nb-panel { width: calc(100vw - 32px); right: -8px; } }
+/* Convert a request into work. The action that finally joins a client's request to
+   the team's queue - before this there was no path between them at all. */
+.tk-convert { margin: 8px 0 0 1.4rem; font-family: inherit; font-size: 11.5px; font-weight: 700;
+  color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 1px solid var(--line); padding: 6px 11px; border-radius: 9px; transition: .16s; }
+.tk-convert:hover { color: var(--lilac); border-color: var(--line-2); }
+.tk-convert .material-symbols-rounded { font-size: 15px; }
+.tk-convert-form { margin: 9px 0 0 1.4rem; padding: 11px 12px; border: 1px solid var(--line-2);
+  border-radius: 11px; background: var(--well); display: flex; flex-direction: column; gap: 9px; }
+.tk-convert-fld { display: flex; align-items: center; gap: 9px; font-size: 11.5px; font-weight: 700; color: var(--muted); }
+.tk-convert-fld > span { flex: none; width: 68px; }
+.tk-convert-fld select { flex: 1; min-width: 0; font-family: inherit; font-size: 12.5px;
+  color: var(--ink); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 9px; }
+.tk-convert-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.tk-convert-hint { font-size: 10.5px; line-height: 1.45; color: var(--muted); }
+/* Recommendation actions. The queue rendered four status pills and offered no way to
+   reach any of them, under a subtitle reading "Closed-loop recommendations". */
+.pr-rec-actions { display: flex; align-items: center; gap: 8px; margin-top: 11px;
+  padding-top: 11px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.pr-rec-actions .primary-btn { margin-left: auto; }
+.pr-rec-settled { display: flex; align-items: center; gap: 7px; margin-top: 11px;
+  padding-top: 11px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.pr-rec-settled .material-symbols-rounded { font-size: 15px; }
+/* Watched sources. `GET /policy/sources` had no caller, so an operator could read the
+   radar's output with no way to see what it was reading - a missing source looked
+   exactly like a quiet week. */
+.pr-src-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; }
+.pr-src { display: flex; align-items: center; gap: 11px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.pr-src:last-child { border-bottom: none; }
+.pr-src > .material-symbols-rounded { font-size: 18px; color: var(--muted); flex: none; }
+.pr-src-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pr-src-name { font-size: 13px; font-weight: 700; color: var(--ink); text-decoration: none; }
+a.pr-src-name:hover { color: var(--lilac); text-decoration: underline; }
+.pr-src-meta { font-size: 11px; color: var(--muted); }
+.pr-note { display: flex; align-items: center; gap: 8px; margin-top: 11px; padding: 9px 11px;
+  border-radius: 9px; background: var(--well); font-size: 11.5px; color: var(--muted); }
+.pr-note.err { color: var(--danger, #E5484D); }
+.pr-note.ok { color: var(--ok, #16A34A); }
+.pr-note .material-symbols-rounded { font-size: 16px; }
+/* Key rotation. The vault table has always rendered a "Last rotated" column while
+   `useRotateVaultKey` sat with zero call sites - a column reporting a date for an
+   action the product did not offer. */
+.kv-rotate-row > td { padding: 0 0 10px; background: var(--well); }
+.kv-rotate { margin: 0 12px; padding: 11px 13px; border: 1px solid var(--line-2);
+  border-radius: 11px; background: var(--card); }
+.kv-rotate-h { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px;
+  line-height: 1.5; color: var(--muted); }
+.kv-rotate-h .material-symbols-rounded { font-size: 16px; color: var(--warn); margin-top: 1px; }
+.kv-rotate-h b { color: var(--fg-strong); }
+.kv-rotate-row-in { display: flex; align-items: center; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+.kv-rotate-row-in input { flex: 1; min-width: 180px; font-family: inherit; font-size: 12.5px;
+  color: var(--ink); background: var(--well); border: 1px solid var(--line-2);
+  border-radius: 8px; padding: 7px 10px; }
+.kv-rotate-row-in input:focus { outline: none; border-color: var(--violet-soft); }
+.kv-rotate-err { margin-top: 7px; font-size: 11px; color: var(--danger, #E5484D); }
+/* Inline validation / error text in a settings group. */
+.set-hint { margin-top: 8px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.set-hint.warn { color: var(--warn); }
+.set-hint.err { color: var(--danger, #E5484D); }

@@ -3,6 +3,7 @@
 import AskBox from "./AskBox";
 import ChangeFeed from "./ChangeFeed";
 import Recommendations from "./Recommendations";
+import WatchedSources from "./WatchedSources";
 
 export default function PolicyWorkspace() {
   return (
@@ -17,6 +18,10 @@ export default function PolicyWorkspace() {
 
       <div className="row-single">
         <ChangeFeed />
+      </div>
+
+      <div className="row-single">
+        <WatchedSources />
       </div>
     </div>
   );

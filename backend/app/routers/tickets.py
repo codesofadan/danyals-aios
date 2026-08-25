@@ -21,16 +21,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.auth import CurrentUser, require_perm
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
+from app.db.tasks_repo import TasksRepoDep
+from app.db.threads_repo import ThreadsRepoDep
 from app.db.tickets_repo import TicketsRepoDep
+from app.schemas.tasks import TaskResponse
 from app.schemas.tickets import (
     TicketCreate,
     TicketReplyRequest,
     TicketResponse,
     TicketStatus,
     TicketStatusUpdate,
+    TicketToTaskRequest,
 )
 from app.services.activity import record_activity
 from app.services.notifications import email_client
+from app.services.task_assignment import assign_task
 
 router = APIRouter(tags=["tickets"])
 
@@ -208,3 +213,87 @@ async def _email_client_ticket_update(client_id: str, subject: str, status_: str
         "<p>Sign in to your client portal to see the details.</p>"
     )
     await email_client(client_id, subj, html, text)
+
+
+# --- Turning a client's request into work -------------------------------------
+AssignTasks = Annotated[CurrentUser, Depends(require_perm("assign_tasks"))]
+
+_TICKET_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+)
+_NO_CLIENT = HTTPException(
+    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    detail="This request is not linked to a client, so it cannot become client work",
+)
+
+
+@router.post(
+    "/tickets/{code}/convert-to-task",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def convert_ticket_to_task(
+    code: str,
+    body: TicketToTaskRequest,
+    tickets: TicketsRepoDep,
+    tasks: TasksRepoDep,
+    clients: ClientsRepoDep,
+    threads: ThreadsRepoDep,
+    actor: AssignTasks,
+) -> TaskResponse:
+    """Create a task from a client's request, and record the link on both sides.
+
+    THE LOOP THIS CLOSES. A client raised a request; it became a `support_tickets`
+    row, an email to the operator inbox, and a truncated six-row widget on the Clients
+    page. Nothing ever turned it into work that somebody was assigned - there was no
+    path at all from a request to the team's queue, so the only thing connecting them
+    was an operator remembering.
+
+    `client_id` is resolved from the TICKET, never from the body: a ticket deliberately
+    never exposes its tenant on the wire, and taking it from the caller would let a
+    request be converted into work billed against a different client.
+
+    The link is recorded as an INTERNAL message on the request's own thread. The client
+    does not need to see a job code, but the next person to open the request does -
+    otherwise the same request gets converted twice.
+    """
+    ticket = await asyncio.to_thread(tickets.get_ticket_by_code, code)
+    if ticket is None:
+        raise _TICKET_NOT_FOUND
+    client_id = ticket.get("client_id")
+    if not client_id:
+        raise _NO_CLIENT
+
+    title = (body.title or "").strip() or str(ticket.get("subject") or "Client request")
+    row = await assign_task(
+        repo=tasks,
+        clients=clients,
+        actor=actor,
+        title=title,
+        client_id=str(client_id),
+        task_type=body.type,
+        assignee_id=body.assignee_id,
+        priority=body.priority,
+        due=body.due,
+        origin=code,
+    )
+
+    task_code = str(row.get("code") or "")
+    thread = await asyncio.to_thread(
+        threads.create_thread,
+        entity_type="ticket",
+        entity_id=str(ticket["id"]),
+        client_id=str(client_id),
+    )
+    if thread is not None:
+        await asyncio.to_thread(
+            threads.add_message,
+            thread_id=str(thread["id"]),
+            author_id=actor.id,
+            author_name=actor.name or actor.email,
+            body=f"Converted to task {task_code} — \"{title}\".",
+            # Internal: the job code is agency bookkeeping. The client is told the work
+            # is happening by a reply somebody writes, not by a task id appearing.
+            visibility="internal",
+        )
+    return TaskResponse.from_row(row)

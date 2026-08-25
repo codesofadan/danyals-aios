@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { useAuth, ROLE_META } from "@/lib/auth";
+import { isNavLocked } from "@/lib/lockedInProd";
+import { initialsOf } from "@/lib/initials";
 
 type Item = { icon: string; label: string; href: string; badge?: string };
 type Section = { title: string; items: Item[] };
@@ -24,15 +26,16 @@ const SECTIONS: Section[] = [
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads" },
       { icon: "article", label: "Content", href: "/admin/content" },
       { icon: "language", label: "WordPress", href: "/admin/wordpress" },
-      { icon: "storefront", label: "Citations", href: "/admin/citations", badge: "test" },
+      { icon: "storefront", label: "Citations", href: "/admin/citations", badge: "off" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", badge: "test" },
-      { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", badge: "3" },
+      { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar" },
     ],
   },
   {
     title: "Delivery",
     items: [
       { icon: "diversity_3", label: "Clients", href: "/admin/clients" },
+      { icon: "flag", label: "Milestones", href: "/admin/milestones" },
       { icon: "groups", label: "Team Management", href: "/admin/team" },
       { icon: "task_alt", label: "Task Manager", href: "/admin/tasks" },
       { icon: "summarize", label: "Reports", href: "/admin/reports" },
@@ -48,17 +51,12 @@ const SECTIONS: Section[] = [
   },
 ];
 
-// Tabs LOCKED in PRODUCTION until the module is fully built. They stay visible in
-// `next dev` (NODE_ENV !== 'production') so the team keeps building them; the prod
-// bundle hides them. To relaunch a tab, remove its href from this set.
-// Citations + Web 2.0 are now shipped (verified live end-to-end: a real Web 2.0
-// publish + the citation submit pipeline), so both are unlocked for production.
-const LOCKED_IN_PROD = new Set<string>([]);
-const HIDE_LOCKED = process.env.NODE_ENV === "production";
+// The production lock list lives in ONE place — lib/lockedInProd.ts. Do not
+// reintroduce a local copy here; lib/nav.test.ts fails if a second one appears.
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { logout } = useAuth();
+  const { session, logout } = useAuth();
   // At rest the nav is a thin docked handle; hovering floats it out (pure CSS).
   // `pinned` holds the floated/expanded state open and reflows the page content.
   const [pinned, setPinned] = useState(false);
@@ -95,7 +93,7 @@ export default function Sidebar() {
           <div key={sec.title}>
             <div className="sec">{sec.title}</div>
             {sec.items
-              .filter((it) => !(HIDE_LOCKED && LOCKED_IN_PROD.has(it.href)))
+              .filter((it) => !isNavLocked(it.href))
               .map((it) => {
               const active =
                 it.href !== "#" &&
@@ -114,10 +112,10 @@ export default function Sidebar() {
 
       <div className="side-foot">
         <div className="userchip">
-          <div className="av">DA</div>
+          <div className="av">{session ? initialsOf(session.name) : "\u2026"}</div>
           <div className="who">
-            <div className="nm">Danyal</div>
-            <div className="rl">Super&nbsp;Admin</div>
+            <div className="nm">{session?.name ?? "Signed in"}</div>
+            <div className="rl">{session ? ROLE_META[session.role].label : "\u00a0"}</div>
           </div>
           <button type="button" onClick={logout} className="ts-logout" title="Sign out" aria-label="Sign out">
             <span className="material-symbols-rounded">logout</span>

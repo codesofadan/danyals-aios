@@ -2,6 +2,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { isNavLocked } from "@/lib/lockedInProd";
+import NotificationBell from "@/components/notifications/NotificationBell";
 
 type Props = { eyebrow?: string; title: string; searchPlaceholder?: string; hideSearch?: boolean };
 
@@ -21,6 +23,7 @@ const ADMIN_DESTS: Dest[] = [
   { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "backlinks properties" },
   { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", keywords: "google updates algorithm" },
   { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
+  { icon: "flag", label: "Milestones", href: "/admin/milestones", keywords: "projects delivery timeline stages roadmap" },
   { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff" },
   { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board" },
   { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "cron jobs pdf downloads" },
@@ -44,13 +47,13 @@ const CLIENT_DESTS: Dest[] = [
   { icon: "flag", label: "Milestones", href: "/client/milestones", keywords: "roadmap progress" },
 ];
 
-const HIDE_LOCKED = process.env.NODE_ENV === "production";
-const LOCKED_IN_PROD = new Set<string>(["/admin/citations", "/admin/web2"]);
+// The production lock list lives in ONE place — lib/lockedInProd.ts. This file
+// used to carry its own, and the two drifted.
 
 function destsForPath(pathname: string): Dest[] {
   if (pathname.startsWith("/team")) return TEAM_DESTS;
   if (pathname.startsWith("/client")) return CLIENT_DESTS;
-  return ADMIN_DESTS.filter((d) => !(HIDE_LOCKED && LOCKED_IN_PROD.has(d.href)));
+  return ADMIN_DESTS.filter((d) => !isNavLocked(d.href));
 }
 
 export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…", hideSearch = false }: Props) {
@@ -99,8 +102,8 @@ export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…"
         {eyebrow && <div className="ey">{eyebrow}</div>}
         <h1>{title}</h1>
       </div>
-      {!hideSearch && (
-        <div className="topbar-actions">
+      <div className="topbar-actions">
+        {!hideSearch && (
           <div style={{ position: "relative" }}>
             <label className="search">
               <span className="material-symbols-rounded" style={{ fontSize: 20 }}>search</span>
@@ -171,8 +174,11 @@ export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…"
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+        {/* Outside the `hideSearch` guard on purpose: seven admin pages hide the
+            search box, and notifications must not vanish along with it. */}
+        <NotificationBell />
+      </div>
     </div>
   );
 }

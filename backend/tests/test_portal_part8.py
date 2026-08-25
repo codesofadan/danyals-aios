@@ -106,18 +106,37 @@ def test_portal_request_create_has_no_client_id() -> None:
 def test_report_viz_returns_only_granted_keys_in_canonical_order() -> None:
     # A DB is not configured in the unit gate -> real series degrade to empty; the
     # KEY SET returned must still be exactly the granted keys (ungranted never leaks).
-    reports = build_report_viz("cl-1", ["backlinks", "milestones", "audit_scores"])
+    reports = build_report_viz("cl-1", ["milestones", "content_status", "audit_scores"])
     keys = [r.key for r in reports]
-    assert keys == ["audit_scores", "backlinks", "milestones"]  # canonical order
-    assert "traffic" not in keys and "rank_tracker" not in keys
+    assert keys == ["audit_scores", "content_status", "milestones"]  # canonical order
 
 
-def test_report_viz_flags_placeholder_vs_real() -> None:
-    by_key = {r.key: r for r in build_report_viz("cl-1", ["audit_scores", "backlinks"])}
-    assert by_key["backlinks"].placeholder is True  # sample data
-    assert by_key["audit_scores"].placeholder is False  # real (empty) series
+def test_a_granted_key_with_no_real_feed_is_served_as_nothing() -> None:
+    """Grant-enforcement is not the only reason a key may be absent.
+
+    Until 2026-08-25 ten of the thirteen report keys returned hard-coded demo figures
+    (`backlinks`, `traffic`, `rank_tracker`, ...) behind `placeholder=True` and a
+    "sample data" caption. They are gone: the catalogue is now exactly the three
+    surfaces computed from the tenant's own rows.
+
+    A stale grant for a removed key is therefore inert rather than a lie - which is
+    the property this pins. The previous version of this test asserted
+    `by_key["backlinks"].placeholder is True`, faithfully recording the behaviour that
+    existed rather than the behaviour wanted.
+    """
+    reports = build_report_viz("cl-1", ["backlinks", "traffic", "rank_tracker"])
+    assert reports == []
+
+
+def test_every_served_report_is_real() -> None:
+    every = build_report_viz("cl-1", ["audit_scores", "content_status", "milestones"])
+    assert [r.key for r in every] == ["audit_scores", "content_status", "milestones"]
+    assert all(r.placeholder is False for r in every), (
+        "no report may be served as sample data - a key earns a place in the catalogue "
+        "only once a real provider feed sits behind it"
+    )
     # a real-but-empty client gets an honest zero series, never an exception
-    assert by_key["audit_scores"].viz.headline == "—"
+    assert {r.key: r for r in every}["audit_scores"].viz.headline == "—"
 
 
 def test_report_viz_empty_grant_is_empty_list() -> None:
@@ -202,13 +221,13 @@ def wire(app: FastAPI, repo: FakePortalRepo) -> Any:
 async def test_reports_endpoint_returns_only_granted(
     client: httpx.AsyncClient, repo: FakePortalRepo, wire: Any
 ) -> None:
-    repo.granted = ["audit_scores", "backlinks"]
+    repo.granted = ["audit_scores", "milestones"]
     wire(_client_user())
     resp = await client.get("/api/v1/portal/reports")
     assert resp.status_code == 200, resp.text
     keys = [r["key"] for r in resp.json()]
-    assert keys == ["audit_scores", "backlinks"]
-    assert "traffic" not in keys  # ungranted never surfaced
+    assert keys == ["audit_scores", "milestones"]
+    assert "content_status" not in keys  # ungranted never surfaced
 
 
 async def test_deliverables_endpoint_shape_and_hidden_columns(

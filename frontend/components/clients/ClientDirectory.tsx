@@ -7,10 +7,12 @@ import {
 } from "@/lib/data";
 import {
   useClients, useCreateClient,
-  useUpdateClient, useDeleteClient, type ClientUpdate, type NewClientInput,
+  useUpdateClient, useDeleteClient, useAllReportGrants, useSaveGrants,
+  type ClientUpdate, type NewClientInput,
 } from "@/lib/hooks/clients";
 import AddClientWizard from "./AddClientWizard";
 import EditClientModal from "./EditClientModal";
+import ClientAccessEditor from "./ClientAccessEditor";
 
 // Centred muted state message (loading / error / empty), self-styled so it never
 // depends on a class that might not exist.
@@ -45,8 +47,18 @@ export default function ClientDirectory() {
   const deleteClient = useDeleteClient();
   const [addOpen, setAddOpen] = useState(false);
   const [infoEditId, setInfoEditId] = useState<string | null>(null);
+  const [accessId, setAccessId] = useState<string | null>(null);
+  const [portalWarning, setPortalWarning] = useState<string | null>(null);
+
+  // Which reports each client may see. Read for the whole table so the count is
+  // visible per row: before this screen existed, EVERY client sat at 0 and nothing
+  // in the product said so - the client dashboard just rendered as locked forever.
+  const clientIds = useMemo(() => clients.map((c) => c.id), [clients]);
+  const grantsQ = useAllReportGrants(clientIds);
+  const saveGrants = useSaveGrants();
 
   const infoEditClient = useMemo(() => clients.find((c) => c.id === infoEditId) ?? null, [clients, infoEditId]);
+  const accessClient = useMemo(() => clients.find((c) => c.id === accessId) ?? null, [clients, accessId]);
 
   function handleUpdateClient(changes: ClientUpdate) {
     if (!infoEditId) return;
@@ -61,10 +73,23 @@ export default function ClientDirectory() {
 
   function handleAddClient(input: NewClientInput) {
     createClient.mutate(input, {
-      onSuccess: () => {
+      onSuccess: (created) => {
         setAddOpen(false);
+        // The client row is created even when provisioning its portal LOGIN fails
+        // (a duplicate email, most often). That used to be swallowed: the mutation
+        // returned a portalWarning and this callback ignored it, so the operator saw
+        // an unqualified success for an account nobody could sign in to.
+        setPortalWarning(created.portalWarning ?? null);
       },
     });
+  }
+
+  function handleSaveGrants(reports: string[]) {
+    if (!accessClient) return;
+    saveGrants.mutate(
+      { clientId: accessClient.id, reports },
+      { onSuccess: () => setAccessId(null) },
+    );
   }
 
   const subtitle = "Account details, primary contact & subscription";
@@ -87,6 +112,25 @@ export default function ClientDirectory() {
         <div className="login-error" role="alert">
           <span className="material-symbols-rounded">error</span>
           Couldn&apos;t create the client — {createClient.error.message}
+        </div>
+      )}
+      {portalWarning && (
+        <div className="login-error" role="alert">
+          <span className="material-symbols-rounded">warning</span>
+          {portalWarning}
+          <button type="button" className="ghostbtn" onClick={() => setPortalWarning(null)}>Dismiss</button>
+        </div>
+      )}
+      {saveGrants.error instanceof Error && (
+        <div className="login-error" role="alert">
+          <span className="material-symbols-rounded">error</span>
+          Couldn&apos;t save report access — {saveGrants.error.message}
+        </div>
+      )}
+      {grantsQ.isError && (
+        <div className="login-error" role="alert">
+          <span className="material-symbols-rounded">error</span>
+          Couldn&apos;t load report access — the per-client counts below may be wrong.
         </div>
       )}
       {deleteClient.error instanceof Error && (
@@ -140,6 +184,18 @@ export default function ClientDirectory() {
                           <span className="material-symbols-rounded">edit</span>Edit
                         </button>
                         <button
+                          className="cd-manage"
+                          onClick={() => setAccessId(c.id)}
+                          // Opening before the grants land would show an empty set as
+                          // the client's CURRENT access, and saving would wipe it.
+                          disabled={grantsQ.isLoading}
+                          title={`Choose which reports ${c.cn} can see`}
+                        >
+                          <span className="material-symbols-rounded">visibility</span>
+                          Reports
+                          <span className="cd-grantcount">{(grantsQ.grants[c.id] ?? []).length}</span>
+                        </button>
+                        <button
                           className="cd-manage danger"
                           onClick={() => handleDeleteClient(c.id, c.cn)}
                           disabled={deleteClient.isPending}
@@ -170,6 +226,14 @@ export default function ClientDirectory() {
           error={updateClient.error instanceof Error ? updateClient.error.message : null}
           onClose={() => setInfoEditId(null)}
           onSave={handleUpdateClient}
+        />
+      )}
+      {accessClient && (
+        <ClientAccessEditor
+          client={accessClient}
+          current={grantsQ.grants[accessClient.id] ?? []}
+          onClose={() => setAccessId(null)}
+          onSave={handleSaveGrants}
         />
       )}
     </section>

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { DATASET_META, STATUS_META, type Workbook } from "@/lib/reports";
+import { DATASET_META, STATUS_META, type Workbook, sheetUrl } from "@/lib/reports";
 
 const RP_EMPTY: CSSProperties = { padding: "20px", textAlign: "center", color: "var(--muted)" };
 
@@ -59,9 +59,15 @@ export default function WorkbooksTable({ workbooks, syncing, onSync, onSyncAll, 
                 <tr key={w.id}>
                   <td className="rp-client">{w.client}</td>
                   <td>
-                    <a className="rp-sheet-link" href="#" aria-label={`Open ${w.client} workbook`}>
+                    <a
+                      className={`rp-sheet-link${sheetUrl(w.sheet) ? "" : " off"}`}
+                      href={sheetUrl(w.sheet) ?? undefined}
+                      target={sheetUrl(w.sheet) ? "_blank" : undefined}
+                      rel={sheetUrl(w.sheet) ? "noopener noreferrer" : undefined}
+                      aria-label={sheetUrl(w.sheet) ? `Open ${w.client} workbook in Google Sheets` : `${w.client} has no workbook yet`}
+                    >
                       <span className="material-symbols-rounded">table_view</span>
-                      <span className="rp-mono rp-sheet-id">{w.sheet}</span>
+                      <span className="rp-mono rp-sheet-id">{w.sheet || "—"}</span>
                       <span className="material-symbols-rounded rp-ext">open_in_new</span>
                     </a>
                   </td>

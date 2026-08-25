@@ -1,7 +1,7 @@
 "use client";
 
 import { MODULE_META, type RecStatus } from "@/lib/policy";
-import { useRecommendations } from "@/lib/hooks/policy";
+import { useRecommendations, useTransitionRecommendation, type RecAction } from "@/lib/hooks/policy";
 import ReadMore from "@/components/ui/ReadMore";
 
 const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string }> = {
@@ -11,8 +11,20 @@ const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string 
   dismissed: { label: "Dismissed", cls: "mut", icon: "cancel" },
 };
 
+// The recommendation queue.
+//
+// It rendered four status pills - New / Acknowledged / Applied / Dismissed - under a
+// subtitle reading "Closed-loop recommendations", and offered NO WAY TO REACH ANY OF
+// THEM. `useTransitionRecommendation` existed with zero call sites, and
+// `POST /policy/recommendations/{id}/{action}` had no caller, so every recommendation
+// the radar produced stayed "New" forever however many times an operator read it.
+//
+// `apply` is the consequential one: server-side it also writes the closed-loop
+// `audit_overlay` row, which is the change the presentation layer lays on top of the
+// untouched engine. So it is separated from the other two and asks first.
 export default function Recommendations() {
   const recsQ = useRecommendations();
+  const transition = useTransitionRecommendation();
   const rows = recsQ.data ?? [];
 
   return (
@@ -69,6 +81,23 @@ export default function Recommendations() {
                     <span className="material-symbols-rounded">arrow_forward</span>
                     <span><span className="pr-rec-k">Recommended action</span>{r.action}</span>
                   </div>
+
+                  {settled ? (
+                    // Applied and dismissed are terminal. Re-offering the controls
+                    // would invite a second `apply`, and a second overlay row.
+                    <div className="pr-rec-settled">
+                      <span className="material-symbols-rounded">{st.icon}</span>
+                      {st.label} — no further action needed.
+                    </div>
+                  ) : (
+                    <RecActions
+                      id={r.id}
+                      status={r.status}
+                      title={r.title}
+                      busy={transition.isPending}
+                      onAct={(action) => transition.mutate({ id: r.id, action })}
+                    />
+                  )}
                 </article>
               );
             }}
@@ -79,5 +108,44 @@ export default function Recommendations() {
         )}
       </div>
     </section>
+  );
+}
+
+
+function RecActions({
+  id, status, title, busy, onAct,
+}: {
+  id: string;
+  status: RecStatus;
+  title: string;
+  busy: boolean;
+  onAct: (action: RecAction) => void;
+}) {
+  return (
+    <div className="pr-rec-actions">
+      {status === "new" && (
+        <button type="button" className="mini-btn" disabled={busy} onClick={() => onAct("acknowledge")}>
+          <span className="material-symbols-rounded">visibility</span>Acknowledge
+        </button>
+      )}
+      <button type="button" className="mini-btn" disabled={busy} onClick={() => onAct("dismiss")}>
+        <span className="material-symbols-rounded">cancel</span>Dismiss
+      </button>
+      <button
+        type="button"
+        className="primary-btn sm"
+        disabled={busy}
+        onClick={() => {
+          // `apply` writes an audit overlay that changes what every client's report
+          // says. It is not undoable from here, so it asks.
+          if (window.confirm(`Apply "${title}"? This writes an overlay onto affected audits.`)) {
+            onAct("apply");
+          }
+        }}
+        data-rec-id={id}
+      >
+        <span className="material-symbols-rounded">check_circle</span>Apply
+      </button>
+    </div>
   );
 }

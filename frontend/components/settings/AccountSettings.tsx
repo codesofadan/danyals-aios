@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMe, useNotifPrefs, useUpdateMe, useUpdateNotifPrefs } from "@/lib/hooks/settings";
+import { useChangePassword } from "@/lib/hooks/portal";
 import type { NotifPref } from "@/lib/data";
 import { SettingGroup, SettingRow, Switch, SavedFlash } from "./controls";
 
@@ -118,6 +119,8 @@ export default function AccountSettings() {
         </div>
       </SettingGroup>
 
+      <ChangePassword />
+
       <SettingGroup title="Notification preferences" icon="notifications">
         {notifQ.isLoading ? (
           <div style={muted}>Loading preferences…</div>
@@ -153,5 +156,80 @@ export default function AccountSettings() {
         )}
       </SettingGroup>
     </div>
+  );
+}
+
+
+// Changing your own password.
+//
+// `POST /me/password` and `useChangePassword` both existed and NOTHING called them:
+// there was no way, anywhere in the product, for a signed-in person to change their
+// own password. A team member's only route was to ask an admin to reset it — which
+// hands their credential to someone else, and is the opposite of what a self-service
+// password change is for.
+function ChangePassword() {
+  const change = useChangePassword();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [done, setDone] = useState(false);
+
+  // Checked here only to spare a round trip on an obvious slip. The password's real
+  // rules — and the verification of `current` — are the server's, not this form's.
+  const mismatch = confirm.length > 0 && next !== confirm;
+  const tooShort = next.length > 0 && next.length < 12;
+  const ready = current.length > 0 && next.length >= 12 && next === confirm && !change.isPending;
+
+  function submit() {
+    if (!ready) return;
+    setDone(false);
+    change.mutate(
+      { current_password: current, new_password: next },
+      {
+        onSuccess: () => {
+          setCurrent(""); setNext(""); setConfirm(""); setDone(true);
+        },
+      },
+    );
+  }
+
+  return (
+    <SettingGroup title="Password" icon="key">
+      <div className="fld-grid">
+        <div className="fld">
+          <label htmlFor="pw-cur">Current password</label>
+          <input id="pw-cur" type="password" autoComplete="current-password"
+            value={current} onChange={(e) => { setCurrent(e.target.value); setDone(false); }} />
+        </div>
+        <div className="fld">
+          <label htmlFor="pw-new">New password</label>
+          <input id="pw-new" type="password" autoComplete="new-password"
+            value={next} onChange={(e) => { setNext(e.target.value); setDone(false); }} />
+        </div>
+        <div className="fld">
+          <label htmlFor="pw-confirm">Confirm new password</label>
+          <input id="pw-confirm" type="password" autoComplete="new-password"
+            value={confirm} onChange={(e) => { setConfirm(e.target.value); setDone(false); }} />
+        </div>
+      </div>
+
+      {tooShort && <div className="set-hint warn">Use at least 12 characters.</div>}
+      {mismatch && <div className="set-hint warn">The two new passwords do not match.</div>}
+      {change.error instanceof Error && (
+        <div className="set-hint err" role="alert">
+          Couldn&apos;t change your password — {change.error.message}
+        </div>
+      )}
+
+      <div className="set-actions">
+        {/* Same flash the profile and preference saves use, so a success reads the
+            same way everywhere in this panel. */}
+        <SavedFlash show={done} label="Password changed" />
+        <button className="primary-btn" onClick={submit} disabled={!ready}>
+          <span className="material-symbols-rounded">key</span>
+          {change.isPending ? "Changing…" : "Change password"}
+        </button>
+      </div>
+    </SettingGroup>
   );
 }

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import ThreadPanel from "@/components/threads/ThreadPanel";
+import { useTeamMembers } from "@/lib/hooks/team";
+import { TASK_TYPES, type TaskType } from "@/lib/data";
 import EmptyState from "@/components/ui/EmptyState";
 import type { Ticket } from "@/lib/data";
-import { useReplyToTicket, useTickets } from "@/lib/hooks/clients";
+import { useTickets, useUpdateTicketStatus, useConvertTicketToTask } from "@/lib/hooks/clients";
 
 const PRIORITY_COLOR: Record<Ticket["priority"], string> = {
   urgent: "#D64545",
@@ -68,7 +71,13 @@ export default function SupportActivity() {
                   {STATUS_LABEL[t.status] ?? t.status}
                 </span>
               </div>
-              {openId === t.id ? <ReplyBox ticket={t} onDone={() => setOpenId(null)} /> : null}
+              {openId === t.id ? (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <TicketTriage ticket={t} />
+                  <ConvertToTask ticket={t} />
+                  <ThreadPanel entity="ticket" code={t.id} />
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -77,47 +86,124 @@ export default function SupportActivity() {
   );
 }
 
-// Inline free-text reply (POST /tickets/{code}/reply) — the first UI to ever write
-// support_tickets.reply. Emails the real message to the client when it's linked.
-function ReplyBox({ ticket, onDone }: { ticket: Ticket; onDone: () => void }) {
-  const [message, setMessage] = useState("");
-  const replyM = useReplyToTicket();
+// `ReplyBox` used to live here: a single free-text box writing
+// `support_tickets.reply`, the one and only answer a ticket could ever hold.
+// `ThreadPanel` replaces it with the full conversation, and carries the two things
+// the old box could not: an INTERNAL note the client never sees, and a history
+// rather than a single overwritable field.
+//
+// It keeps the behaviour that mattered - a client-visible message still emails the
+// client (app/routers/threads.py `_email_client_reply`), which is what
+// `POST /tickets/{code}/reply` did. That endpoint and the column remain, so a reply
+// sent before threads existed is still readable; migration 0099 copied every one of
+// them into its thread.
 
-  const send = () => {
-    const text = message.trim();
-    if (!text) return;
-    replyM.mutate(
-      { code: ticket.id, message: text },
-      { onSuccess: () => { setMessage(""); onDone(); } },
-    );
-  };
+
+// Move a request through open -> pending -> resolved.
+//
+// `PATCH /tickets/{code}/status` and its hook both existed and NOTHING called them:
+// an admin could read a client's request and answer it, and had no way to mark it
+// dealt with. The client sees the status in their portal, so it stayed "open"
+// forever however much work had been done on it.
+function TicketTriage({ ticket }: { ticket: Ticket }) {
+  const update = useUpdateTicketStatus();
+  const options: Ticket["status"][] = ["open", "pending", "resolved"];
 
   return (
-    <div
-      style={{ marginTop: "0.5rem", marginLeft: "1.4rem", display: "grid", gap: "0.4rem" }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        placeholder={`Reply to ${ticket.client}…`}
-        rows={3}
-        style={{
-          width: "100%", fontSize: "0.85rem", padding: "0.5rem 0.6rem", borderRadius: 8,
-          border: "1px solid var(--line, #33333322)", resize: "vertical", fontFamily: "inherit",
-        }}
-      />
-      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
-        <button type="button" className="ghostbtn" onClick={onDone} disabled={replyM.isPending}>
-          Cancel
-        </button>
-        <button type="button" className="primary-btn" onClick={send} disabled={replyM.isPending || !message.trim()}>
-          {replyM.isPending ? "Sending…" : "Send reply"}
+    <div className="tk-triage">
+      <span className="tk-triage-lab">Status</span>
+      <div className="seg" role="tablist" aria-label={`Status for ${ticket.id}`}>
+        {options.map((s) => (
+          <button
+            key={s}
+            type="button"
+            role="tab"
+            aria-selected={ticket.status === s}
+            className={ticket.status === s ? "on" : ""}
+            disabled={update.isPending || ticket.status === s}
+            onClick={() => update.mutate({ code: ticket.id, status: s })}
+          >
+            {STATUS_LABEL[s] ?? s}
+          </button>
+        ))}
+      </div>
+      {update.isError && (
+        <span className="tk-triage-err" role="alert">
+          Couldn&apos;t update the status.
+        </span>
+      )}
+    </div>
+  );
+}
+
+
+// Turn a request into work somebody is assigned.
+//
+// THE LOOP THIS CLOSES. A client raised a request and it stopped here: a row, an
+// email to the operator inbox, and this widget. There was no path from a request to
+// the team's queue at all, so whether it became work depended on somebody
+// remembering. Now it is one action, and the request records which task it became.
+function ConvertToTask({ ticket }: { ticket: Ticket }) {
+  const [open, setOpen] = useState(false);
+  const [assignee, setAssignee] = useState("");
+  const [type, setType] = useState<TaskType>("Technical Audit");
+  const membersQ = useTeamMembers();
+  const convert = useConvertTicketToTask();
+
+  const members = membersQ.data ?? [];
+  const chosen = assignee || members[0]?.id || "";
+
+  if (!open) {
+    return (
+      <button type="button" className="tk-convert" onClick={() => setOpen(true)}>
+        <span className="material-symbols-rounded">add_task</span>Create task from this request
+      </button>
+    );
+  }
+
+  return (
+    <div className="tk-convert-form">
+      <label className="tk-convert-fld">
+        <span>Assign to</span>
+        <select value={chosen} onChange={(e) => setAssignee(e.target.value)} disabled={membersQ.isLoading}>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </label>
+      <label className="tk-convert-fld">
+        <span>Type</span>
+        <select value={type} onChange={(e) => setType(e.target.value as TaskType)}>
+          {TASK_TYPES.map((tt) => (
+            <option key={tt} value={tt}>{tt}</option>
+          ))}
+        </select>
+      </label>
+      <div className="tk-convert-actions">
+        <button type="button" className="ghostbtn" onClick={() => setOpen(false)}>Cancel</button>
+        <button
+          type="button"
+          className="primary-btn"
+          disabled={!chosen || convert.isPending}
+          onClick={() =>
+            convert.mutate(
+              { code: ticket.id, assignee_id: chosen, type, priority: ticket.priority },
+              { onSuccess: () => setOpen(false) },
+            )
+          }
+        >
+          <span className="material-symbols-rounded">add_task</span>
+          {convert.isPending ? "Creating…" : "Create task"}
         </button>
       </div>
-      {replyM.isError ? (
-        <div style={{ color: "#D64545", fontSize: "0.78rem" }}>Couldn&apos;t send the reply. Try again.</div>
-      ) : null}
+      {/* The title is intentionally not editable here: it defaults to the request's own
+          subject server-side, and retyping it is how a task and its request drift apart. */}
+      <div className="tk-convert-hint">
+        Titled &ldquo;{ticket.subject}&rdquo;, for {ticket.client}. The request will record which task it became.
+      </div>
+      {convert.error instanceof Error && (
+        <div className="tk-triage-err" role="alert">Couldn&apos;t create the task — {convert.error.message}</div>
+      )}
     </div>
   );
 }
