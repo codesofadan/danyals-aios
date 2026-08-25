@@ -37,10 +37,11 @@ class Reason(StrEnum):
     NEEDS_NETWORK_PROBE = "needs_network_probe"
     #: Needs Search Console or server logs, both client-granted.
     NEEDS_SEARCH_CONSOLE = "needs_search_console"
-    #: Aggregates other checks; blocked on the inputs_ran gate and O-1.
-    ROLLUP_PENDING = "rollup_pending"
     #: Every input is already available. This is simply not written yet.
     NOT_YET_BUILT = "not_yet_built"
+    #: Buildable, but WHAT it should measure is a product decision. Picking a
+    #: plausible-looking definition would produce a number nobody can trace.
+    OWNER_DECISION = "owner_decision"
 
 
 #: Sources that justify each reason. A check ledgered under a reason must
@@ -61,10 +62,10 @@ REASON_REQUIRES: dict[Reason, frozenset[str]] = {
     Reason.NEEDS_SEARCH_CONSOLE: frozenset({
         "gsc_coverage", "gsc_ctr", "gsc_queries", "server_logs", "crawl_log",
     }),
-    Reason.ROLLUP_PENDING: frozenset({"computed"}),
-    # NOT_YET_BUILT is the only reason with no required source: it asserts the
-    # opposite, that every input is already free. test_ledger.py checks that.
+    # These two assert nothing about data sources. NOT_YET_BUILT asserts the
+    # opposite - that every input is already free - and test_ledger.py checks it.
     Reason.NOT_YET_BUILT: frozenset(),
+    Reason.OWNER_DECISION: frozenset(),
 }
 
 
@@ -98,9 +99,9 @@ NOTES: dict[Reason, str] = {
     Reason.NEEDS_SEARCH_CONSOLE:
         "Needs data only the site owner can grant. Google OAuth credentials exist; "
         "the per-client grant does not.",
-    Reason.ROLLUP_PENDING:
-        "Aggregates other checks. Blocked on the inputs_ran gate and on O-1, the "
-        "rollup weightings, which are SEO judgement and not an engineering call.",
+    Reason.OWNER_DECISION:
+        "The inputs and the gate exist; what this should MEASURE does not follow "
+        "from the checklist taxonomy and is a product decision.",
     Reason.NOT_YET_BUILT:
         "Every input this needs is already crawled and free. Simply not written yet.",
 }
@@ -142,14 +143,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_PROVIDER]),  # Map pack ranking by geo grid (1, 3, 5, 10 mile rings)
     _e("LOC-030", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
        NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Geo targeted keyword optimization
-    _e("LOC-037", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Local prominence score (rollup)
-    _e("LOC-038", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # GBP health score
-    _e("LOC-039", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Citation strength score
-    _e("LOC-040", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Overall local SEO score
     _e("OFF-002", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
        NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Domain rating analysis
     _e("OFF-004", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
@@ -230,26 +223,12 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Trust flow analysis
     _e("OFF-071", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
        NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Citation flow analysis
-    _e("OFF-072", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Link trust score
-    _e("OFF-073", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Brand trust score
-    _e("OFF-074", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Authority score (composite)
-    _e("OFF-075", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Off page SEO score (sub-rollup)
-    _e("OFF-076", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Toxicity risk score
-    _e("OFF-077", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Link quality score
-    _e("OFF-078", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Backlink relevance score
-    _e("OFF-079", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Brand popularity score
-    _e("OFF-080", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Overall off page SEO score
-    _e("ON-004", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Search intent alignment score
+    _e("OFF-072", Reason.OWNER_DECISION, "O-1 follow-up",
+       "Indistinguishable from OFF-074 Authority given the current subpoints. Needs a definition that separates the two."),
+    _e("OFF-073", Reason.OWNER_DECISION, "O-1 follow-up",
+       "Indistinguishable from OFF-079 Brand popularity given the current subpoints."),
+    _e("OFF-075", Reason.OWNER_DECISION, "O-1 follow-up",
+       "A sub-rollup of what? OFF-080 already covers the whole off-page pillar."),
     _e("ON-010", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # NLP keyword coverage
     _e("ON-020", Reason.NOT_YET_BUILT, "Wave 3",
@@ -260,20 +239,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # Mobile content parity analysis
     _e("ON-108", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Hidden content detection
-    _e("ON-112", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # User value score
-    _e("ON-113", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Topical relevance score
-    _e("ON-114", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Semantic SEO score
-    _e("ON-115", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Content quality scoring (overall)
-    _e("ON-116", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Title tag overall score (rollup)
-    _e("ON-117", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Meta tag overall score (rollup)
-    _e("ON-118", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Overall on page SEO score
+    _e("ON-112", Reason.OWNER_DECISION, "O-1 follow-up",
+       "No matching subpoint in the checklist. Which checks constitute user value is a product decision, not a taxonomy lookup."),
     _e("TECH-005", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawlability analysis
     _e("TECH-007", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
@@ -324,16 +291,14 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # XML errors analysis
     _e("TECH-100", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
        NOTES[Reason.NEEDS_NETWORK_PROBE]),  # Hosting performance analysis
-    _e("TECH-101", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
-       NOTES[Reason.ROLLUP_PENDING]),  # Overall technical SEO score
 ])
 
 
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 110
-LEDGER_FLOOR = 110
+LEDGER_CEILING = 92
+LEDGER_FLOOR = 92
 
 
 def ledgered() -> dict[str, LedgerEntry]:

@@ -540,3 +540,69 @@ upgrade. Each constant is now the list of ids that have carried that
 measurement, and the mobile checks **name the audits this Lighthouse version
 does not have** rather than reporting "no failures found" over nothing
 measured.
+
+---
+
+# Wave 5 — the rollups, and what O-1 actually needed
+
+**2026-08-25.** Twenty-two declared checks are scores over other checks. Left
+ungated they are the most dangerous rows in the system: `OFF-074` "Authority
+score" declares `data_sources: [computed]`, which classes as zero-cost, so it
+ran on a **free** tier while all 33 backlink checks it aggregates were skipped
+— publishing an authority score computed over no link data.
+
+## O-1 turned out not to need judgement
+
+The plan flagged "rollup weightings" as SEO judgement an engineer must not
+invent alone. On inspection the question splits in two, and only one half was
+ever open:
+
+**The weighting was already decided.** `scorers.aggregator.SEVERITY_WEIGHT`
+(critical 3, major 2, minor 1, info 0.5) is applied at every other level of the
+system. Reusing it means a rollup **cannot disagree with the pillar score above
+it**. Inventing a second scheme is what would have needed defending.
+
+**The input sets come from the checklist taxonomy**, not from a hand-written
+list. "Title tag overall score" is the `titles` subpoint; "Overall technical SEO
+score" is the technical pillar minus its rollups. Eighteen of twenty-two are
+derivable this way.
+
+## Four were NOT built
+
+| Check | Why not |
+|---|---|
+| `ON-112` User value score | No matching subpoint. What constitutes "user value" is a product decision, not a taxonomy lookup. |
+| `OFF-072` Link trust score | Indistinguishable from `OFF-074` Authority given the current subpoints. |
+| `OFF-073` Brand trust score | Indistinguishable from `OFF-079` Brand popularity. |
+| `OFF-075` Off-page sub-rollup | A sub-rollup of *what*? `OFF-080` already covers the pillar. |
+
+Building these by picking a plausible-looking subpoint would produce a number a
+client could not trace back to anything. They are ledgered under a new
+`owner_decision` reason.
+
+## Two bugs the tests caught
+
+**`ON-004` aggregated itself.** "Search intent alignment score" is a rollup that
+does *not* live in the `scoring` subpoint — it sits in `search-intent` alongside
+the checks it aggregates. Excluding only the scoring subpoint made `ON-004`
+include itself, and made `ON-118` fold `ON-004`'s output back into the on-page
+score. Every input set now excludes **every** rollup, wherever it lives.
+
+**An `n_a` input does not count as having run.** A page full of "not applicable"
+is not evidence. `RollupContext.ran` counts only measured verdicts, so a rollup
+gated on "did this run" cannot be satisfied by silence.
+
+## Rollups see the legacy findings too
+
+Most on-page checks still come from the `iter_*` generators. A rollup seeing
+only registry-dispatched findings would compute an on-page score over a tenth of
+the on-page checks and never say so, so `RollupContext` accepts anything
+carrying `status`, `score` and `severity` — a `Verdict` and a persisted
+`Finding` both qualify.
+
+Every rollup is **informational severity at most `major`, never `critical`**: it
+restates checks that already reported their own severity, and raising a second
+alarm would double-count them.
+
+Ledger: **110 → 92**. `rollup_pending` is retired — the third reason a wave has
+closed out entirely.

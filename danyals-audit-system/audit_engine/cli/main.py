@@ -39,6 +39,7 @@ from audit_engine.analyzers.ai_search import iter_per_page_ai_search
 from audit_engine.analyzers.common import Verdict
 from audit_engine.analyzers.context import build_context
 from audit_engine.analyzers.dispatch import run_rollups, run_scope
+from audit_engine.analyzers.rollups import RollupContext
 from audit_engine.analyzers import registry
 from audit_engine.checklist import load_registry as load_registry_specs
 # Importing an analyzer module is what registers its checks. Keep this beside
@@ -47,6 +48,7 @@ from audit_engine.analyzers import headers as _headers_checks  # noqa: F401
 from audit_engine.analyzers import crawl_graph as _crawl_graph_checks  # noqa: F401
 from audit_engine.analyzers import page_tech as _page_tech_checks  # noqa: F401
 from audit_engine.analyzers import psi_detail as _psi_detail_checks  # noqa: F401
+from audit_engine.analyzers import rollups as _rollup_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
@@ -339,6 +341,7 @@ def _emit_registered(
     crawl_result: Any,
     parsed_pages: list,
     permitted_check_ids: set[str] | None = None,
+    prior_findings: list[Finding] | None = None,
 ) -> list[Finding]:
     """Run every check bound through ``@check`` and turn it into findings.
 
@@ -377,13 +380,14 @@ def _emit_registered(
     for cid, v in run_scope("site_crawled", ctx, only=permitted_check_ids).verdicts:
         _add(cid, v, None)
 
-    # Rollups last, gated on which checks actually produced a verdict in THIS
-    # run. `ran` deliberately counts registered checks only; a rollup over the
-    # legacy generators cannot know what they emitted, which is exactly why
-    # Wave 5 waits for the migration.
-    ran = {f.check_id for f in out}
+    # Rollups last, over EVERY finding this run produced - the legacy
+    # generators included. A rollup seeing only registry-dispatched findings
+    # would compute an on-page score over a tenth of the on-page checks and
+    # never say so.
+    rollup_ctx = RollupContext.from_findings(list(prior_findings or ()) + out)
+    ran = rollup_ctx.ran
     if ran:
-        for cid, v in run_rollups(ran, ctx).verdicts:
+        for cid, v in run_rollups(ran, rollup_ctx).verdicts:
             _add(cid, v, None)
     return out
 
@@ -1071,6 +1075,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result,
         parsed_pages=parsed_pages,
         permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
+        prior_findings=findings,
     ))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
@@ -1748,6 +1753,7 @@ async def _run_full(
         run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result,
         parsed_pages=parsed_pages,
         permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
+        prior_findings=findings,
     ))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
@@ -2147,6 +2153,7 @@ async def _run_local(
         run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result,
         parsed_pages=parsed_pages,
         permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
+        prior_findings=findings,
     ))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
