@@ -1452,3 +1452,71 @@ def test_it_reports_no_score_only_presence() -> None:
 def test_duplicate_node_ids_are_caught() -> None:
     r = lint_topical_map([MapNode("n1", "index-only"), MapNode("n1", "index-only")])
     assert [i.code for i in r.errors] == ["DUPLICATE_NODE"]
+
+
+# --------------------------------------------------------------------------- #
+# Experience markers: proof written the way people actually write it
+# --------------------------------------------------------------------------- #
+class TestProofIsRecognisedInNaturalProse:
+    """MEASURED on a real draft carrying a genuine CSLB licence number and a named
+    founder: the flush-only patterns scored it as having NO proof at all - 6 of 10
+    natural phrasings were invisible.
+
+    The direction of that failure is what makes it serious. This gate caps
+    `eeat_experience` at 40 against a floor of 70, so a miss does not leak a bad page;
+    it BLOCKS an honest one, and a gate that blocks honest work is a gate the operator
+    learns to route around."""
+
+    @pytest.mark.parametrize(
+        "prose",
+        [
+            "Our CSLB contractor license is #1043327, active since 2019.",
+            "CSLB contractor license #1043327, active since 2019.",
+            "License number 1043327.",
+            "We are licensed under CSLB #1043327.",
+            "Our license: 1043327.",
+            "Licensed and bonded (CSLB 1043327).",
+            "Delaney Plumbing was founded by Mike Delaney in 2011.",
+            "Our founder Mike Delaney started it in 2011.",
+            "Founded in 2011 by owner Mike Delaney.",
+            "Started by Mike Delaney in 2011.",
+        ],
+    )
+    def test_real_proof_is_seen(self, prose: str) -> None:
+        assert find_markers(prose), f"proof present but unseen: {prose!r}"
+
+    @pytest.mark.parametrize(
+        ("prose", "why"),
+        [
+            ("We are fully licensed and insured.", "the adjective is the CLAIM"),
+            ("Licensed since 2019.", "a bare year is a DATE, not a licence number"),
+            ("Serving the area since 1998.", "same trap, no licence word adjacent"),
+            ("San Jose started requiring permits.", "a CITY is not a named founder"),
+            ("Founded by our team of experts.", "no person is actually named"),
+        ],
+    )
+    def test_a_claim_without_proof_stays_unproven(self, prose: str, why: str) -> None:
+        """Widening the patterns must not buy recall with false positives. Here a
+        false POSITIVE is the worse error: it credits Experience nobody proved, which
+        is the exact thing Law 16 exists to prevent."""
+        assert not find_markers(prose), f"{why}: {prose!r}"
+
+
+def test_every_sme_slot_key_is_a_proof_category_the_gate_understands() -> None:
+    """The dossier hands `proof_signals()` straight to `evaluate_experience`, and the
+    two sides share no import - the alignment is a CONVENTION. A slot key outside the
+    gate's vocabulary would prove nothing: the client answers the questionnaire, the
+    evidence sits in `sme_slots`, and every claim still reads as unproven. Silent, and
+    only visible as "the gate rejects pages that have evidence"."""
+    from app.services.content_lint.experience import _CLAIM_PATTERNS
+    from app.services.content_pipeline.sme import BASE_SLOTS, PAGE_TYPE_SLOTS
+
+    categories = {"photo", "named_team", "license_permit", "cited_source"}
+    for _kind, _pattern, accepted in _CLAIM_PATTERNS:
+        categories |= set(accepted)
+
+    slots = set(BASE_SLOTS)
+    for extra in PAGE_TYPE_SLOTS.values():
+        slots |= set(extra)
+
+    assert not slots - categories, f"slot keys that prove nothing: {slots - categories}"

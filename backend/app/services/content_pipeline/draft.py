@@ -114,9 +114,12 @@ def _batch_prompt(
     lines += [
         "",
         "How the prose must read:",
-        "  - Reading grade 6-9. Most sentences under 25 words; a few short ones on "
-        "purpose. Vary the rhythm - a run of long sentences is the single thing that "
-        "pushed the first draft of this page to grade 12.6.",
+        "  - Reading grade 6-9 - a BAND, not a floor to dive under. Aim for about 15 "
+        "words per sentence on average. Keep most under 25, and let a few run to 20-25 "
+        "where the thought needs the room; a page of nothing but short declaratives "
+        "reads as a checklist and lands BELOW grade 6. Both misses are measured: a run "
+        "of long sentences put the first draft at grade 12.6, and correcting it "
+        "without a floor put the next one at 5.0.",
         f"  - Name '{ctx.geo or 'the city'}' AT MOST ONCE per section, and not at all "
         f"in a heading unless the heading is meaningless without it. Measured: the "
         f"first two drafts of this page put it in most headings and hit 3.4% density "

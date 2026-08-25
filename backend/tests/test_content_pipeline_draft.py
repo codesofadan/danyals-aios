@@ -138,3 +138,15 @@ def test_the_prose_constraints_are_specific_not_general() -> None:
     assert "grade 6-9" in prompt
     assert "2.5% stuffing ceiling" in prompt
     assert "AT MOST ONCE per section" in prompt
+
+
+def test_the_readability_constraint_has_a_floor_as_well_as_a_ceiling() -> None:
+    """A one-sided instruction over-corrects. Told only "most sentences under 25
+    words", a draft came back at grade 5.0 - out of the 6-9 band on the OTHER side,
+    reading as a checklist rather than prose. Both misses are now named in the prompt
+    with the number each one produced."""
+    writer = _Writer()
+    run_draft(_ctx(sections=3), writer=writer)
+    prompt = writer.prompts[0][0]
+    assert "BAND, not a floor" in prompt
+    assert "5.0" in prompt, "the over-correction needs its measured number too"

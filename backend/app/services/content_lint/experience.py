@@ -40,16 +40,56 @@ from dataclasses import dataclass, field
 # --- proving artifacts found IN THE DRAFT ----------------------------------- #
 _IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)|<img\b[^>]*>", re.I)
 # A license NUMBER, not the bare adjective "licensed" - that is the claim, not proof.
+#
+# The number does not always sit flush against the word. Real prose writes "our license
+# IS #1043327", "licensed UNDER CSLB #1043327", "licensed and bonded (CSLB 1043327)" -
+# none of which a flush-only pattern sees. Measured on a real draft carrying a genuine
+# CSLB number: 6 of 10 natural phrasings scored as NO proof at all. That fails in the
+# dangerous direction. This gate caps `eeat_experience` at 40 against a floor of 70, so
+# a miss does not leak a bad page - it BLOCKS a good one, and a gate that blocks honest
+# work is a gate the operator learns to route around.
+#
+# So allow a short gap, then reject what the gap lets in (see _is_license_number).
 _LICENSE_NUM_RE = re.compile(
-    r"\b(?:license|licence|lic\.?|permit|reg(?:istration)?\.?|cert(?:ificate)?\.?)\s*"
-    r"(?:no\.?|number|#)?\s*[:#]?\s*([A-Za-z]{0,4}-?\d{3,}[A-Za-z0-9-]*)",
+    r"\b(?:licen[sc]e[sd]?|lic\.?|permit(?:ted)?|reg(?:istration)?\.?|cert(?:ificate)?\.?)"
+    r"[^.\n]{0,24}?"
+    r"(?:(?P<prefix>no\.?|number|#|:)\s*)?"
+    r"\b(?P<num>[A-Za-z]{0,4}-?\d{3,}[A-Za-z0-9-]*)",
     re.I,
 )
+
+# The cost of the gap above: "licensed since 2019" now reaches the number. A bare
+# four-digit year is a DATE, not a licence, and counting it as proof would be worse than
+# the miss it fixes - it would let "licensed since 2019" ALONE satisfy the gate.
+_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
+
+
+def _is_license_number(match: re.Match[str]) -> bool:
+    """True when the captured digits are a licence number rather than a year."""
+    if match.group("prefix"):
+        return True  # "#2019" / "no. 2019" is explicit: the writer meant an ID
+    return not _YEAR_RE.match(match.group("num"))
 _CITED_SOURCE_RE = re.compile(r"\]\(\s*https?://[^)]+\)|(?<!\()\bhttps?://\S+", re.I)
 _NAMED_TEAM_RE = re.compile(
     r"\b(?:[Oo]ur|[Tt]he|[Mm]eet)\s+"
     r"(?:founder|owner|co-owner|president|principal|lead|master|senior|head|"
     r"technician|electrician|plumber|roofer|contractor|manager)\s+"
+    r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
+)
+
+# "Our founder Mike Delaney" was covered; "founded BY Mike Delaney" - the commoner
+# phrasing by far - was not. The word "by" is required deliberately: without it,
+# "<Two Capitalised Words> started ..." also matches a CITY ("San Jose started ...")
+# and credits Experience nobody proved. Here a false POSITIVE is worse than a miss.
+_FOUNDER_RE = re.compile(
+    # Both cases spelled out rather than re.I: the flag would also relax the
+    # [A-Z][a-z]+ name capture, and "founded by mike" is not a proving artifact.
+    r"\b(?:[Ff]ounded|[Ss]tarted|[Ee]stablished|[Ll]aunched|[Oo]wned|[Oo]perated"
+    r"|[Rr]un|[Ll]ed)\b"
+    r"[^.\n]{0,20}?\bby\s+"
+    r"(?:(?:our|the)\s+)?"
+    r"(?:(?:founder|owner|co-owner|president|principal|lead|master|senior|head|"
+    r"technician|electrician|plumber|roofer|contractor|manager)\s+)?"
     r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
 )
 
@@ -186,11 +226,18 @@ def find_markers(text: str) -> tuple[ExperienceMarker, ...]:
         for m in _IMAGE_RE.finditer(line):
             out.append(ExperienceMarker("PHOTO", lineno, m.group(0)[:_SNIPPET_MAX]))
         for m in _LICENSE_NUM_RE.finditer(line):
-            out.append(ExperienceMarker("LICENSE_NUM", lineno, m.group(0).strip()[:_SNIPPET_MAX]))
+            if not _is_license_number(m):
+                continue
+            out.append(
+                ExperienceMarker("LICENSE_NUM", lineno, m.group(0).strip()[:_SNIPPET_MAX])
+            )
         for m in _CITED_SOURCE_RE.finditer(line):
             out.append(ExperienceMarker("CITED_SOURCE", lineno, m.group(0)[:_SNIPPET_MAX]))
-        for m in _NAMED_TEAM_RE.finditer(line):
-            out.append(ExperienceMarker("NAMED_TEAM", lineno, m.group(0).strip()[:_SNIPPET_MAX]))
+        for pattern in (_NAMED_TEAM_RE, _FOUNDER_RE):
+            for m in pattern.finditer(line):
+                out.append(
+                    ExperienceMarker("NAMED_TEAM", lineno, m.group(0).strip()[:_SNIPPET_MAX])
+                )
     return tuple(out)
 
 
