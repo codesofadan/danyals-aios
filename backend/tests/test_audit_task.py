@@ -76,6 +76,7 @@ def _ok_runner(score: int) -> Any:
         tier: str,
         comprehensive: bool = False,
         types: list[str] | None = None,
+        max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=score,
@@ -116,6 +117,7 @@ def test_engine_failure_marks_failed_never_running() -> None:
         tier: str,
         comprehensive: bool = False,
         types: list[str] | None = None,
+        max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(ok=False, run_uuid="u-9", runtime_seconds=5, error="engine timed out after 1500s")
 
@@ -179,6 +181,7 @@ def _tracking_runner(ran: list[bool], score: int = 90) -> Any:
         tier: str,
         comprehensive: bool = False,
         types: list[str] | None = None,
+        max_pages: int | None = None,
     ) -> AuditRunResult:
         ran.append(True)  # records that the (paid) engine actually executed
         return _ok_runner(score)(cfg, url=url, tier=tier)
@@ -249,6 +252,7 @@ def _pdf_runner(score: int) -> Any:
     def _run(
         cfg: AuditEngineConfig, *, url: str, tier: str,
         comprehensive: bool = False, types: list[str] | None = None,
+        max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=score,
