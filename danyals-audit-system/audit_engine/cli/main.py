@@ -560,15 +560,29 @@ async def _maybe_dispatch_ai_search_agents(
     crawl_result: Any,
     findings: list[Finding],
     include_brand_authority: bool,
+    permit_billable: bool = False,
 ) -> list[Finding]:
-    """Always-on AI-search fallback dispatch.
+    """AI-search fallback dispatch: A5 (GEO) and optionally C4 (Brand authority).
 
-    When the user said NO to the full agents pass but ANTHROPIC_API_KEY is
-    set, run only A5 (GEO/AI Search) and optionally C4 (Brand/AI Authority)
-    so Section 04 of the report never falls back to canned placeholders.
+    When the operator declines the full 21-agent pass, these one or two calls keep
+    Section 04 of the report populated with real analysis instead of canned text.
 
-    Total cost: ~$0.10-0.30 per audit on Sonnet 4.6 (one or two agent calls).
+    A MODEL CALL IS BILLABLE, so this is NOT "always-on". It was, and it was gated
+    on KEY PRESENCE alone - the same shape as the google_nl defect. Measured on
+    three real runs invoked with `--mode free --agents off`:
+
+        7a96fa0e   2 agent calls   25,908 in /  5,903 out   $0.0554
+        03b412ce   2 agent calls   75,245 in /  7,501 out   $0.1128
+        48d4e1b9   2 agent calls   37,820 in /  6,052 out   $0.0681
+
+    Every one of those was a FREE-tier run that committed $0.00 to the ledger.
+    The public funnel is unauthenticated, so that is spend anyone can trigger.
+
+    `permit_billable` defaults to False so the guard FAILS CLOSED: a future call
+    site that forgets it spends nothing rather than silently billing.
     """
+    if not permit_billable:
+        return []
     keys = get_keys()
     if not keys.anthropic:
         return []
@@ -948,6 +962,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
                 crawl_result=crawl_result,
                 findings=findings,
                 include_brand_authority=False,
+                permit_billable=True,
             )
         )
 
@@ -1623,6 +1638,7 @@ async def _run_full(
                 crawl_result=crawl_result,
                 findings=findings,
                 include_brand_authority=True,
+                permit_billable=(str(mode).lower() != "free"),
             )
         )
 
@@ -2007,6 +2023,7 @@ async def _run_local(
                 crawl_result=crawl_result,
                 findings=findings,
                 include_brand_authority=True,
+                permit_billable=True,
             )
         )
 
