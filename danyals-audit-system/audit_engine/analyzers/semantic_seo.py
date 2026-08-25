@@ -297,9 +297,16 @@ def check_sameas_presence(p: ParsedHTML) -> Verdict:
     }
     if score >= 8:
         return Verdict("pass", round(score, 1), "info", 0.95, ev)
+    # `(Wikidata: False)` interpolated a Python boolean straight into
+    # client-facing remediation. It survived every evidence-rendering fix
+    # because it lives in the REMEDIATION string rather than in evidence, and a
+    # reader sees a field name and a repr where a sentence should be.
     rem = (
-        f"`sameAs` has {n} entries (Wikidata: {has_wikidata}). Target: 3+ links including "
-        "a Wikidata entity, LinkedIn company page, and an official social profile."
+        f"The organisation declares {n} sameAs "
+        f"{'link' if n == 1 else 'links'}"
+        + ("" if has_wikidata else ", and none of them is a Wikidata entity")
+        + ". Aim for at least three, including a Wikidata entity, a LinkedIn "
+        "company page and an official social profile."
     )
     return Verdict(
         status_from_score(score), round(score, 1),

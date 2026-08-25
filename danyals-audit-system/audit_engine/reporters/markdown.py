@@ -6,8 +6,10 @@ narrative; this file is what the Python pipeline produces before agents run.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta, timezone
 from pathlib import Path
+
+from audit_engine.evidence_text import humanise_evidence
 
 PKT = timezone(timedelta(hours=5), name="PKT")
 
@@ -44,9 +46,8 @@ def render_findings_table(findings: list[dict], *, limit: int | None = None) -> 
     ]
     for f in rows:
         ev = json.loads(f["evidence_json"]) if f.get("evidence_json") else {}
-        ev_summary = ", ".join(f"{k}={v}" for k, v in list(ev.items())[:3])
-        if len(ev_summary) > 120:
-            ev_summary = ev_summary[:117] + "..."
+        # Through the shared spec, not f"{k}={v}" over raw keys.
+        ev_summary = humanise_evidence(ev)[:120]
         score = "-" if f.get("score") is None else f"{f['score']:.1f}"
         lines.append(
             f"| {_badge(f['severity'], f['status'])} | `{f['check_id']}` {f['check_name']} | "

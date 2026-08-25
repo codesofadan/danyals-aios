@@ -16,6 +16,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from audit_engine.config import TEMPLATES_DIR, get_branding
+from audit_engine.evidence_text import humanise_evidence
 
 SEVERITY_RANK = {"critical": 0, "major": 1, "minor": 2, "info": 3}
 
@@ -45,11 +46,9 @@ def _evidence_summary(evidence_json: str | None) -> str | None:
         return evidence_json[:200]
     if not isinstance(data, dict):
         return str(data)[:200]
-    parts: list[str] = []
-    for k, v in list(data.items())[:5]:
-        sv = v if isinstance(v, (str, int, float, bool, type(None))) else json.dumps(v, default=str)[:80]
-        parts.append(f"{k}={sv}")
-    return ", ".join(parts)
+    # Through the shared spec: the old f"{k}={sv}" flatten put raw field names
+    # and bare True/False/None in front of a reader.
+    return humanise_evidence(data, limit=5) or None
 
 
 def _shape_finding(f: dict[str, Any]) -> dict[str, Any]:

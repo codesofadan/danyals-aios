@@ -69,7 +69,7 @@ def test_no_issue_description_says_not_captured(pdf):
 
 
 @pytest.mark.skipif(not RUNS, reason="no recorded runs on disk")
-def test_no_composite_appears_as_an_issue_to_fix(pdf):  # noqa: D401
+def test_no_composite_appears_as_an_issue_to_fix(pdf):
     """A composite restates checks that already reported their own severity.
     Listing it again double-counts the defect and pads the issue count with
     rows nobody can action - "Overall on-page SEO score" is not a task."""
@@ -106,3 +106,126 @@ def test_a_pass_over_a_partial_crawl_is_not_sold_as_working(pdf):
         shown = {n for names in passes.values() for n in names}
         leaked = partial_names & shown
         assert not leaked, f"{findings.parent.name}: partial-crawl passes shown as working: {leaked}"
+
+
+# --------------------------------------------------------------------------
+# EVERY renderer, not just the ones someone listed.
+#
+# The unit tests proved the renderer correct and the PDF fallback clean, and a
+# real run still shipped 1,110 leaks - because three MORE reporters
+# (consolidated, html, markdown) each had their own `f"{k}={v}"` flatten. A
+# report carried `inputs_declared=15, verdicts_counted=54,
+# status_breakdown={"pass": 27, ...}` verbatim.
+#
+# This sweep finds a renderer nobody remembered to fix.
+# --------------------------------------------------------------------------
+
+def _real_evidence_blobs(limit: int = 400) -> list[dict]:
+    import json
+
+    out: list[dict] = []
+    for findings in RUNS:
+        try:
+            rows = json.loads(findings.read_text())
+        except (ValueError, OSError):  # pragma: no cover
+            continue
+        rows = rows if isinstance(rows, list) else rows.get("findings", [])
+        for row in rows:
+            raw = row.get("evidence_json")
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            try:
+                blob = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(blob, dict) and blob:
+                out.append(blob)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+@pytest.mark.skipif(not RUNS, reason="no recorded runs on disk")
+def test_every_human_facing_reporter_renders_safely():
+    """Each reporter that renders evidence FOR A PERSON, over real evidence."""
+    import json
+
+    from audit_engine.reporters import consolidated, html, markdown
+
+    blobs = _real_evidence_blobs()
+    assert len(blobs) > 50, f"only {len(blobs)} blobs found; the sweep is too thin"
+
+    renderers = [
+        ("consolidated", lambda b: consolidated._evidence_inline(json.dumps(b))),
+        ("html", lambda b: html._evidence_summary(json.dumps(b)) or ""),
+        # The markdown table is rendered whole, so the assertion covers the row
+        # builder rather than a helper it happens to call.
+        ("markdown", lambda b: markdown.render_findings_table([{
+            "severity": "major", "status": "fail", "check_id": "X-001",
+            "check_name": "Example", "score": 3.0, "evidence_json": json.dumps(b),
+        }])),
+    ]
+    for name, render in renderers:
+        for blob in blobs:
+            out = render(blob) or ""
+            assert evidence_is_client_safe(out), f"{name} leaked: {out!r} from {blob!r}"
+
+
+def test_the_narrative_reporter_is_deliberately_exempt():
+    """narrative.py feeds a MODEL, not a client. Raw evidence is correct there,
+    and routing it through the client-safe renderer would starve the model of
+    the detail it needs to write about the finding."""
+    from audit_engine.reporters import narrative
+
+    assert "humanise_evidence" not in narrative.__dict__
+
+
+# --------------------------------------------------------------------------
+# REMEDIATION strings, not just evidence.
+#
+# `sameAs has 4 entries (Wikidata: False)` shipped in six client artifacts and
+# survived every evidence-rendering fix, because it lives in an analyzer's
+# remediation text rather than in its evidence dict. A reader sees a field name
+# and a Python repr where a sentence should be.
+# --------------------------------------------------------------------------
+
+def test_no_analyzer_produces_a_remediation_containing_a_python_repr():
+    """Guards the CODE, not the archive.
+
+    An earlier version of this test swept recorded runs, which meant a fixed
+    bug could never clear: the artifacts on disk still carry whatever the
+    engine emitted the day they were written. Running the analyzers over the
+    fixtures asserts what the engine does NOW.
+    """
+    from audit_engine.analyzers.ai_search import iter_per_page_ai_search
+    from audit_engine.analyzers.extras import iter_per_page_extras
+    from audit_engine.analyzers.onpage import iter_per_page_checks
+    from audit_engine.analyzers.page_tech import check_slug  # noqa: F401 - registers
+    from audit_engine.analyzers.semantic_seo import iter_per_page_semantic_seo
+    from audit_engine.parsers import html as html_parser
+
+    fixtures = ROOT / "tests" / "fixtures"
+    pages = [
+        html_parser.parse(f.read_text(), "https://example.com/page")
+        for f in sorted(fixtures.glob("*.html"))
+    ]
+    assert pages, "no HTML fixtures to run the analyzers over"
+
+    offenders: set[str] = set()
+    checked = 0
+    for page in pages:
+        for it in (iter_per_page_checks, iter_per_page_ai_search,
+                   iter_per_page_extras, iter_per_page_semantic_seo):
+            for cid, *rest in it(page):
+                verdict = rest[-1]
+                text = (getattr(verdict, "remediation", None) or "").strip()
+                if not text:
+                    continue
+                checked += 1
+                if not evidence_is_client_safe(text):
+                    offenders.add(f"{cid}: {text[:110]}")
+    assert checked > 40, f"only {checked} remediations produced; the sweep is too thin"
+    assert not offenders, (
+        f"{len(offenders)} analyzers interpolate a repr into client-facing "
+        f"remediation: {sorted(offenders)[:5]}"
+    )

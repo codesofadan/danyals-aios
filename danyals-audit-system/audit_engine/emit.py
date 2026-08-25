@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,13 @@ from audit_engine import checklist as cl
 SKIP_NOT_SELECTED = "not_in_selected_dimensions"
 SKIP_SOURCE_NOT_PERMITTED = "source_not_permitted"
 SKIP_NO_OUTPUT = "no_finding_emitted"
+#: The check is dispatched to an AI agent, and no agent output reached this run
+#: - no key, agents disabled, or the agent returned nothing for it.
+SKIP_AI_NOT_RUN = "ai_assisted_not_run"
+#: The check IS implemented and its inputs were permitted, but this command did
+#: not dispatch it. A third state that no reason enum could previously express,
+#: and the honest answer for a check the `quick` pipeline does not reach.
+SKIP_NOT_DISPATCHED = "not_dispatched_by_this_command"
 #: The check produced nothing AND its declared `analyzer:` path does not import.
 #:
 #: READ THIS AS A DIAGNOSTIC, NOT A VERDICT. The `analyzer:` field is demonstrably
@@ -53,14 +60,29 @@ SKIP_NO_OUTPUT = "no_finding_emitted"
 SKIP_UNRESOLVED_ANALYZER = "analyzer_path_unresolved"
 
 
-@lru_cache(maxsize=None)
-def analyzer_path_resolves(dotted_path: str) -> bool:
-    """Does the check's declared ``analyzer:`` path actually import?
+@cache
+def analyzer_path_resolves(dotted_path: str, check_id: str = "") -> bool:
+    """Is there real code behind this check?
 
-    NOT a test of whether the check is implemented - see SKIP_UNRESOLVED_ANALYZER.
-    Many checks that run have stale declarations. Resolved by import rather than
-    a hand-kept list, and cached because it is asked once per check per run.
+    Answers the REGISTRY first when a ``check_id`` is given. A check bound with
+    ``@check`` records the true dotted path of its function, so for those the
+    answer is a fact rather than an inference about a metadata field.
+
+    Falls back to importing the checklist's ``analyzer:`` declaration. That
+    field is stale for most legacy checks - on a real run 160 checks ran while
+    only 31 declared paths resolved - so a False from this fallback means "the
+    declaration does not import", NOT "the check is unimplemented". The two
+    were being conflated, which told a client their site was checked when it
+    may not have been.
     """
+    if check_id:
+        try:
+            from audit_engine.analyzers import registry as _registry
+
+            if check_id in _registry.registered():
+                return True
+        except Exception:
+            pass
     if not dotted_path:
         return False
     module_path, _, attr = dotted_path.rpartition(".")
@@ -68,7 +90,7 @@ def analyzer_path_resolves(dotted_path: str) -> bool:
         return False
     try:
         module = importlib.import_module(module_path)
-    except Exception:  # noqa: BLE001 - any import failure means it cannot run
+    except Exception:
         return False
     return hasattr(module, attr)
 
@@ -137,6 +159,55 @@ def build_pages(page_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return pages
 
 
+def _counts_by_reason(skipped: list[dict[str, str]]) -> dict[str, int]:
+    """How many checks each reason accounts for.
+
+    The old shape exposed two hand-picked totals, one of which
+    (`analyzer_path_unresolved`) was the untrustworthy diagnostic. A count per
+    reason lets a report name the real blocker and its size.
+    """
+    out: dict[str, int] = {}
+    for row in skipped:
+        key = str(row.get("reason") or "unknown")
+        out[key] = out.get(key, 0) + 1
+    return dict(sorted(out.items()))
+
+
+def _why_no_output(check_id: str, spec: cl.CheckSpec) -> dict[str, str]:
+    """The honest reason a permitted check emitted nothing.
+
+    Order matters. The ledger is consulted FIRST because "we have not built
+    this" outranks any observation about the run.
+    """
+    from audit_engine.analyzers import ledger as _ledger
+
+    entry = _ledger.reason_for(check_id)
+    if entry is not None:
+        return {
+            "check_id": check_id,
+            "reason": entry.reason.value,
+            "blocked_on": entry.blocked_on,
+            "note": entry.note,
+        }
+    if spec.automation != "full":
+        return {
+            "check_id": check_id,
+            "reason": SKIP_AI_NOT_RUN,
+            "blocked_on": "AI agent dispatch",
+            "note": "This check is answered by an AI specialist rather than a "
+                    "deterministic analyzer, and no agent output reached this run.",
+        }
+    # Every `full` check is either registered or ledgered - a test enforces it -
+    # so reaching here means it IS built and this command simply did not run it.
+    return {
+        "check_id": check_id,
+        "reason": SKIP_NOT_DISPATCHED,
+        "blocked_on": "this audit command",
+        "note": "The check is implemented and its data sources were permitted, "
+                "but this pipeline does not dispatch it.",
+    }
+
+
 def build_coverage(
     findings: list[dict[str, Any]],
     *,
@@ -166,28 +237,39 @@ def build_coverage(
     skipped: list[dict[str, str]] = []
     for cid, spec in registry.items():
         if cid not in selected:
-            skipped.append({"check_id": cid, "reason": SKIP_NOT_SELECTED})
+            skipped.append({
+                "check_id": cid, "reason": SKIP_NOT_SELECTED,
+                "blocked_on": "dimension selection",
+                "note": "This audit was scoped to a subset of dimensions and "
+                        "this check is outside it.",
+            })
             continue
         if not spec.runs_under(permitted_cost_classes):
-            skipped.append({"check_id": cid, "reason": SKIP_SOURCE_NOT_PERMITTED})
+            skipped.append({
+                "check_id": cid, "reason": SKIP_SOURCE_NOT_PERMITTED,
+                "blocked_on": "run tier",
+                "note": "This check needs data this run was not permitted to "
+                        f"buy: {', '.join(sorted(spec.cost_classes))}.",
+            })
             continue
         planned.append(cid)
 
     ran = sorted(c for c in planned if c in emitted)
-    # Separate "ran and found nothing" from "its analyzer declaration does not
-    # even import". Both previously read as `no_finding_emitted`, which implies a
-    # clean bill of health for a check that may never have executed.
-    no_output: list[dict[str, str]] = []
-    unresolved: list[dict[str, str]] = []
+    # Why a PLANNED check produced nothing.
+    #
+    # This used to ask whether the checklist's `analyzer:` field imports, and
+    # reported `analyzer_path_unresolved` when it did not - a reason this
+    # module's own docstring describes as untrustworthy, and which was 100% of
+    # skips on a fully-permitted paid run. The field is stale metadata for most
+    # checks, so it answered a question nobody asked.
+    #
+    # The ledger knows the real answer for every unimplemented check: a typed
+    # reason, what it is blocked on, and a note written for a person. Two states
+    # the ledger cannot express are derived here instead.
     for c in planned:
         if c in emitted:
             continue
-        if analyzer_path_resolves(registry[c].analyzer):
-            no_output.append({"check_id": c, "reason": SKIP_NO_OUTPUT})
-        else:
-            unresolved.append({"check_id": c, "reason": SKIP_UNRESOLVED_ANALYZER})
-    skipped.extend(no_output)
-    skipped.extend(unresolved)
+        skipped.append(_why_no_output(c, registry[c]))
 
     # Rollups by the two axes the report is organised around. `applicable` is what
     # the FULL registry holds for that key, so a section can always say "3 of 71"
@@ -249,12 +331,13 @@ def build_coverage(
         "subpoint_labels": dict(sorted(subpoint_labels.items())),
         "selected_dimensions": sorted(dimensions) if dimensions else [],
         "permitted_cost_classes": sorted(permitted_cost_classes),
+        # A count per reason, so a report can say "22 checks need backlink data
+        # you have not purchased" instead of one opaque `skipped` total.
         "counts": {
             "planned": len(planned),
             "ran": len(ran),
             "skipped": len(skipped),
-            "no_output": len(no_output),
-            "analyzer_path_unresolved": len(unresolved),
+            **_counts_by_reason(skipped),
         },
         "ran": ran,
         "skipped": sorted(skipped, key=lambda d: d["check_id"]),

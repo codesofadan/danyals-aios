@@ -152,7 +152,11 @@ def test_the_coverage_sheet_lists_checks_that_did_NOT_run():
     """This is the sheet that stops a skipped check reading like a passing one."""
     coverage = {
         "ran": ["A"],
-        "skipped": [{"check_id": "B", "reason": "source_not_permitted"}],
+        "skipped": [{
+            "check_id": "B", "reason": "needs_backlink_provider",
+            "blocked_on": "O-6",
+            "note": "No backlink data is purchased, so this check has nothing to read.",
+        }],
         "checks": {
             "A": {"name": "a", "pillar": "on-page", "subcategory": "x",
                   "dimension": "onpage", "owner_agent": "A1", "automation": "full",
@@ -168,9 +172,37 @@ def test_the_coverage_sheet_lists_checks_that_did_NOT_run():
     assert len(rows) == 2
     by_id = {r[0]: r for r in rows}
     assert by_id["A"][10] == "yes" and by_id["A"][11] == ""
-    assert by_id["B"][10] == "no" and by_id["B"][11] == "source_not_permitted"
+    assert by_id["B"][10] == "no"
+    # A SENTENCE, not a slug. "source_not_permitted" is not an explanation a
+    # client can act on; "no backlink data is purchased" is.
+    assert by_id["B"][11] == "No backlink data is purchased, so this check has nothing to read."
+    assert by_id["B"][12] == "O-6"
     # the cost of each check is legible, which is what makes tiering explicable
     assert by_id["B"][8] == "billable"
+
+
+def test_the_coverage_sheet_falls_back_to_the_slug_for_an_older_artifact():
+    """Runs recorded before the ledger was wired carry only a reason string.
+    An empty cell would read as "no reason given"."""
+    coverage = {
+        "ran": [],
+        "skipped": [{"check_id": "B", "reason": "source_not_permitted"}],
+        "checks": {"B": {"name": "b", "pillar": "off-page", "subcategory": "y",
+                         "dimension": "offpage", "owner_agent": "C1",
+                         "automation": "full", "severity_default": "major",
+                         "cost_classes": ["billable"], "data_sources": ["moz_links"]}},
+    }
+    row = W._coverage_rows(coverage)[0]
+    assert row[11] == "source_not_permitted"
+    assert row[12] == ""
+
+
+def test_the_misleading_analyzer_path_column_is_gone():
+    """It reported whether a STALE metadata field imports, which was "no" for
+    143 of 363 rows including every check that had just run. A client saw
+    "Ran? yes / Analyzer Path Resolves? no" on one row."""
+    assert "Analyzer Path Resolves" not in W.COVERAGE_HEADERS
+    assert "Why Not" in W.COVERAGE_HEADERS and "Blocked On" in W.COVERAGE_HEADERS
 
 
 def test_evidence_renders_deterministically():

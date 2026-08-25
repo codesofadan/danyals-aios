@@ -18,6 +18,7 @@ from collections import Counter
 from typing import Any
 
 from audit_engine.config import get_branding
+from audit_engine.evidence_text import humanise_evidence
 
 SEVERITY_RANK = {"critical": 0, "major": 1, "minor": 2, "info": 3}
 
@@ -104,21 +105,20 @@ def _color_band(score: float | None) -> str:
 
 
 def _evidence_inline(ev_json: str | None, *, max_kv: int = 3, max_len: int = 140) -> str:
+    """Client-facing evidence, through the shared spec.
+
+    This used to emit `f"{k}={v}"` over the first three keys, json-dumping any
+    nested value. A real consolidated report carried
+    `inputs_declared=15, verdicts_counted=54, status_breakdown={"pass": 27, ...}`
+    - engine provenance, in a client deliverable.
+    """
     if not ev_json:
         return ""
     try:
         ev = json.loads(ev_json)
     except json.JSONDecodeError:
         return ev_json[:max_len]
-    if not isinstance(ev, dict):
-        return str(ev)[:max_len]
-    parts = []
-    for k, v in list(ev.items())[:max_kv]:
-        if isinstance(v, (list, dict)):
-            v = json.dumps(v, default=str)[:60]
-        parts.append(f"{k}={v}")
-    out = ", ".join(parts)
-    return out if len(out) <= max_len else out[: max_len - 3] + "..."
+    return humanise_evidence(ev, limit=max_kv)[:max_len]
 
 
 def _sort_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:

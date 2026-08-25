@@ -209,10 +209,16 @@ ROADMAP_HEADERS = (
     "Owner Role", "Severity", "Instances", "Pages", "Impact", "Effort Pts",
     "Priority", "Exit Criterion", "Verify With",
 )
+#: "Analyzer Path Resolves" is gone. It reported whether the checklist's stale
+#: `analyzer:` metadata field imports, which was "no" for 143 of 363 rows -
+#: INCLUDING every check that had just run. A client reading a deliverable saw
+#: "Ran? yes / Analyzer Path Resolves? no" on the same row and could only
+#: conclude something was broken. The honest columns are what did not run, and
+#: why, in words.
 COVERAGE_HEADERS = (
     "Check ID", "Check Name", "Pillar", "Subpoint", "Dimension", "Owner Agent",
     "Automation", "Severity Default", "Cost Classes", "Data Sources", "Ran?",
-    "Skip Reason", "Analyzer Path Resolves",
+    "Why Not", "Blocked On",
 )
 
 
@@ -318,17 +324,22 @@ def _coverage_rows(coverage: dict) -> list[list[Any]]:
     is also where the cost of each check is legible."""
     checks = coverage.get("checks") or {}
     ran = set(coverage.get("ran") or [])
-    skip = {s["check_id"]: s.get("reason", "") for s in coverage.get("skipped") or []}
+    skip = {s["check_id"]: s for s in coverage.get("skipped") or []}
     rows = []
     for cid in sorted(checks):
         c = checks[cid]
+        s = skip.get(cid) or {}
+        # The engine's ledger writes a sentence for every check it has not
+        # built; older artifacts carry only a slug, so fall back to that rather
+        # than leaving the cell blank.
+        why = str(s.get("note") or s.get("reason") or "")
         rows.append([
             cid, c.get("name", ""), c.get("pillar", ""), c.get("subcategory", ""),
             c.get("dimension", ""), c.get("owner_agent", ""), c.get("automation", ""),
             c.get("severity_default", ""), ", ".join(c.get("cost_classes") or []),
             ", ".join(c.get("data_sources") or []),
-            "yes" if cid in ran else "no", skip.get(cid, ""),
-            "yes" if c.get("analyzer_path_resolves") else "no",
+            "yes" if cid in ran else "no", _cap(why),
+            str(s.get("blocked_on") or ""),
         ])
     return rows
 

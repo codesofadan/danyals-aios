@@ -155,11 +155,17 @@ def test_planned_but_silent_is_its_own_reason(registry):
     )
     local_ids = {c for c, sp in registry.items() if sp.dimension == "local"}
     reasons = {s["reason"] for s in cov["skipped"] if s["check_id"] in local_ids}
-    # A planned check that emitted nothing is reported either as "ran and found
-    # nothing" or as "its analyzer declaration does not import" - never as a
-    # provider or selection problem, which are different remedies.
-    assert reasons <= {emit.SKIP_NO_OUTPUT, emit.SKIP_UNRESOLVED_ANALYZER}
-    silent = cov["counts"]["no_output"] + cov["counts"]["analyzer_path_unresolved"]
+    # A planned check that emitted nothing is never reported as a provider or a
+    # selection problem - those are different remedies. It carries either a
+    # LEDGER reason (we have not built it, and here is what it needs) or one of
+    # the two states the ledger cannot express.
+    assert emit.SKIP_NOT_SELECTED not in reasons
+    assert emit.SKIP_SOURCE_NOT_PERMITTED not in reasons
+    silent = sum(
+        n for r, n in cov["counts"].items()
+        if r not in ("planned", "ran", "skipped", emit.SKIP_NOT_SELECTED,
+                     emit.SKIP_SOURCE_NOT_PERMITTED)
+    )
     assert silent == 36
     # and the M2 checks that live in local.yaml are excluded by SELECTION
     m2_in_local = {
@@ -238,23 +244,58 @@ def test_artifacts_are_byte_stable_for_the_same_input(tmp_path):
 
 # ------------------------------------------------- analyzer path diagnostics
 
-def test_an_unimportable_analyzer_path_is_reported_separately(registry):
-    """"Ran and found nothing" and "there is no code behind this declaration" are
-    different facts. Collapsing them tells a client their site was checked when
-    it may not have been."""
+def test_a_skipped_check_carries_the_ledgers_real_reason(registry):
+    """Coverage used to report `analyzer_path_unresolved` - a diagnostic this
+    module's own docstring calls untrustworthy, and 100% of skips on a fully
+    permitted paid run. The ledger knows the actual answer for every
+    unimplemented check, so a report can say "39 checks need backlink data you
+    have not purchased" instead of naming an import failure."""
+    from audit_engine.analyzers import ledger as led
+
     cov = emit.build_coverage([], dimensions=None, permitted_cost_classes=ALL_CLASSES)
-    reasons = {s["check_id"]: s["reason"] for s in cov["skipped"]}
-    unresolved = [c for c, r in reasons.items() if r == emit.SKIP_UNRESOLVED_ANALYZER]
-    assert unresolved, "the engine has checks whose analyzer path does not import"
-    for cid in unresolved[:5]:
-        assert not emit.analyzer_path_resolves(registry[cid].analyzer)
+    by_id = {s["check_id"]: s for s in cov["skipped"]}
+    ledgered = [c for c in led.LEDGER if c in by_id]
+    assert len(ledgered) > 50, "the ledger should account for most silent checks"
+    for cid in ledgered[:10]:
+        entry = led.LEDGER[cid]
+        assert by_id[cid]["reason"] == entry.reason.value
+        assert by_id[cid]["blocked_on"] == entry.blocked_on
+        assert by_id[cid]["note"] == entry.note
+
+
+def test_every_skipped_record_can_be_read_by_a_person(registry):
+    """A slug is not an explanation. Each row carries what it is blocked on and
+    a sentence, so a report renders prose rather than `analyzer_path_unresolved`."""
+    cov = emit.build_coverage([], dimensions=None, permitted_cost_classes=ALL_CLASSES)
+    for row in cov["skipped"]:
+        assert row["reason"] and row["blocked_on"], row
+        assert len(row["note"]) > 30, row
+
+
+def test_the_two_states_the_ledger_cannot_express_are_derived(registry):
+    """An ai-assisted check with no agent output, and an implemented check this
+    command does not dispatch, are both silent for reasons the ledger has no
+    entry for."""
+    cov = emit.build_coverage([], dimensions=None, permitted_cost_classes=ALL_CLASSES)
+    reasons = {s["reason"] for s in cov["skipped"]}
+    assert emit.SKIP_AI_NOT_RUN in reasons
+    assert emit.SKIP_NOT_DISPATCHED in reasons
+
+
+def test_the_registry_answers_whether_code_exists_before_the_stale_field(registry):
+    """A check bound with @check records the REAL dotted path of its function,
+    so for those the answer is a fact rather than an inference about a metadata
+    field that is stale for most legacy checks."""
+    import audit_engine.cli.main  # noqa: F401 - importing registers the analyzers
+
+    assert emit.analyzer_path_resolves(registry["TECH-050"].analyzer, "TECH-050") is True
 
 
 def test_the_path_check_is_not_treated_as_proof_of_implementation():
     """Guard against re-introducing the over-claim: on a real run 160 checks ran
     while only 31 declared paths resolved, so a resolving path is neither
-    necessary nor sufficient for a check to work. The reason string must say
-    'path unresolved', not 'not implemented'."""
+    necessary nor sufficient. The constant must say 'path unresolved', not
+    'not implemented' - it survives for the workbook's diagnostic column."""
     assert emit.SKIP_UNRESOLVED_ANALYZER == "analyzer_path_unresolved"
     assert "not_implemented" not in emit.SKIP_UNRESOLVED_ANALYZER
 
