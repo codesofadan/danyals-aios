@@ -564,7 +564,10 @@ def _cwv_verdict(metric_id: str, value: float | None, *, unit_override: str | No
 def iter_cwv_findings(psi_result: Any) -> Iterable[tuple[str, str, Verdict]]:
     """Yield per-metric findings from a PSI result. Tries field metrics first,
     falls back to lab metrics. Maps to:
-      TECH-070 LCP, TECH-071 CLS, TECH-072 INP, TECH-073 TTFB, TECH-074 FCP
+      TECH-040 LCP, TECH-041 CLS, TECH-042 INP, TECH-043 TTFB
+    First Contentful Paint is measured but NOT emitted: the checklist has no
+    FCP row, and the id it used to borrow (TECH-074) is 'Semantic HTML
+    structure analysis'. Owner decision O-4 - add a row or leave it unreported.
     """
     by_id_field: dict[str, float] = {}
     for m in getattr(psi_result, "field_metrics", []) or []:
@@ -580,17 +583,16 @@ def iter_cwv_findings(psi_result: Any) -> Iterable[tuple[str, str, Verdict]]:
     def _pick(metric_id: str) -> float | None:
         return by_id_field.get(metric_id, by_id_lab.get(metric_id))
 
-    yield ("TECH-070", "B2", _cwv_verdict("largest_contentful_paint", _pick("largest_contentful_paint")))
-    yield ("TECH-071", "B2", _cwv_verdict("cumulative_layout_shift", _pick("cumulative_layout_shift")))
+    yield ("TECH-040", "B2", _cwv_verdict("largest_contentful_paint", _pick("largest_contentful_paint")))
+    yield ("TECH-041", "B2", _cwv_verdict("cumulative_layout_shift", _pick("cumulative_layout_shift")))
     # INP may live under interaction_to_next_paint OR experimental_interaction_to_next_paint
     inp = _pick("interaction_to_next_paint") or by_id_field.get("experimental_interaction_to_next_paint")
-    yield ("TECH-072", "B2", _cwv_verdict("interaction_to_next_paint", inp))
+    yield ("TECH-042", "B2", _cwv_verdict("interaction_to_next_paint", inp))
     ttfb = (
         by_id_field.get("experimental_time_to_first_byte")
         or by_id_lab.get("server_response_time")
     )
-    yield ("TECH-073", "B2", _cwv_verdict("experimental_time_to_first_byte", ttfb))
-    yield ("TECH-074", "B2", _cwv_verdict("first_contentful_paint", _pick("first_contentful_paint")))
+    yield ("TECH-043", "B2", _cwv_verdict("experimental_time_to_first_byte", ttfb))
 
 
 def check_lighthouse_category(name: str, score: float | None, *, severity_below: str = "major") -> Verdict:
@@ -612,11 +614,19 @@ def check_lighthouse_category(name: str, score: float | None, *, severity_below:
 
 
 def iter_psi_quality_findings(psi_result: Any) -> Iterable[tuple[str, str, Verdict]]:
-    """Yield findings for Lighthouse a11y / best-practices / seo scores."""
+    """Yield findings for the Lighthouse accessibility score.
+
+    Only accessibility is emitted. TECH-092 "Accessibility analysis" declares
+    data_sources [rendered_html, axe_results], which is precisely what the
+    Lighthouse accessibility category is - a rendered page scored by axe-core.
+
+    The other two categories are withheld pending owner decision O-3: the
+    checklist has no row for a Lighthouse best-practices or SEO score. They
+    previously shipped as TECH-082 "Malware detection" and ON-106 "AI crawl
+    readiness analysis", both of which told the client something untrue.
+    """
     scores = getattr(psi_result, "lighthouse_scores", {}) or {}
-    yield ("ON-105", "A3", check_lighthouse_category("accessibility", scores.get("accessibility")))
-    yield ("TECH-082", "B5", check_lighthouse_category("best-practices", scores.get("best-practices")))
-    yield ("ON-106", "A3", check_lighthouse_category("seo", scores.get("seo"), severity_below="minor"))
+    yield ("TECH-092", "B5", check_lighthouse_category("accessibility", scores.get("accessibility")))
 
 
 # ---------- Aggregator ----------

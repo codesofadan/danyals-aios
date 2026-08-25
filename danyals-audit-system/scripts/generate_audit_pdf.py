@@ -2292,14 +2292,14 @@ def _section_categorize(check_id: str, category: str, subcategory: str | None) -
     if cid in STRATEGY_IDS:
         return "strategy"
     # GEO (AI search) - dedicated section
-    if any(x in (cid + sub) for x in ("ON-048", "ON-049", "ON-100", "ON-101", "ON-102", "ON-103", "ON-104", "ON-105", "ON-106", "ON-107", "ON-139", "TECH-040", "TECH-041", "OFF-067", "OFF-068", "OFF-069")):
+    if any(x in (cid + sub) for x in ("ON-048", "ON-049", "ON-100", "ON-101", "ON-102", "ON-103", "ON-104", "ON-105", "ON-106", "ON-107", "ON-139", "OFF-067", "OFF-068", "OFF-069")):
         return "geo"
     if "ai-search" in sub or "geo-ai" in sub:
         return "geo"
     # Content (E-E-A-T, content quality, semantic)
     CONTENT_IDS = {
         "ON-001", "ON-002", "ON-023", "ON-024", "ON-025", "ON-028", "ON-029",
-        "ON-032", "ON-051", "ON-090", "ON-107", "ON-111",
+        "ON-032", "ON-051", "ON-090", "ON-095", "ON-107", "ON-111",
         "ON-119", "ON-120", "ON-121", "ON-122", "ON-123", "ON-124", "ON-125",
         "ON-127", "ON-130", "ON-131", "ON-132", "ON-133", "ON-134", "ON-135",
         "ON-136", "ON-137", "ON-138", "ON-140", "ON-141", "ON-142",
@@ -2789,8 +2789,8 @@ _ISSUE_TEMPLATES: dict[str, str] = {
     "TECH-020": "Canonical chain detected (page A points at B which points at C). Google does not follow chains; the target URL drops out of the index.",
     "TECH-031": "Title and H1 are written in by JavaScript after the page loads. Google's first pass sees nothing, which suppresses indexation across the site.",
     "TECH-034": "Above-the-fold images carry loading=lazy. The Largest Contentful Paint metric ticks late, lowering the page speed score Google sees.",
-    "TECH-041": "/llms.txt does not return a plain-text manifest. AI assistants that look for it cannot read the site map you intended.",
-    "TECH-073": "Server takes {value} ms to send the first byte against a 800 ms target. Lab page speed drops 12 to 20 points until this is fixed.",
+    "ON-106": "The site does not signal AI crawlers clearly: robots.txt carries no explicit rules for GPTBot, ClaudeBot, PerplexityBot or Google-Extended, and /llms.txt returns no plain-text manifest.",
+    "TECH-043": "Server takes {value} ms to send the first byte against a 800 ms target. Lab page speed drops 12 to 20 points until this is fixed.",
     "TECH-085": "Security header capture was not run this audit. HSTS, CSP, X-Frame-Options, and Referrer-Policy presence is unverified.",
     # LOC family
     "LOC-032": "{pages_with_local_business_schema} of {pages_checked} pages carry LocalBusiness or Dentist schema. Without it, Google cannot connect the site to a Google Business Profile.",
@@ -2838,8 +2838,8 @@ _IMPACT_TEMPLATES: dict[str, str] = {
     "TECH-020": "A canonical chain tells Google to drop the page entirely. You lose every backlink and every ranking signal that pointed at the original URL.",
     "TECH-031": "Title and H1 only after JavaScript means Googlebot's first pass sees a blank page. The site cannot rank competitively until this is fixed.",
     "TECH-034": "Above-the-fold lazy loading makes your Largest Contentful Paint metric tick late. Lab page speed scores drop, which Google factors into Core Web Vitals.",
-    "TECH-041": "An invalid llms.txt means AI assistants that DO look for it (Anthropic and some Perplexity flows) discard it. Citation opportunity gone.",
-    "TECH-073": "A slow first byte is the largest contributor to a low lab page speed score. Even GOOD field data does not save the lab number search consoles surface.",
+    "ON-106": "AI assistants that look for explicit crawl permission and an llms.txt manifest (Anthropic and some Perplexity flows) find neither. Citation opportunity gone.",
+    "TECH-043": "A slow first byte is the largest contributor to a low lab page speed score. Even GOOD field data does not save the lab number search consoles surface.",
     "TECH-085": "Missing security headers (HSTS, CSP, X-Frame-Options) cost you trust signals and expose you to clickjacking. Google factors security posture into ranking on YMYL sites.",
     "LOC-032": "Without LocalBusiness schema you forfeit local pack enhancements (hours, phone, directions in SERP). Map pack ranking is depressed across every local query.",
     "LOC-001": "Without a verified GBP, you cannot appear in the local pack or Google Maps for any nearby search. The local pack is usually the single largest lead source for a dental practice.",

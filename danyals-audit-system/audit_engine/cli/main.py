@@ -36,12 +36,12 @@ from audit_engine.agents.dispatcher import (
     run_usage_snapshot,
 )
 from audit_engine.analyzers.ai_search import iter_per_page_ai_search
+from audit_engine.analyzers.common import Verdict
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
 )
 from audit_engine.analyzers.extras import (
-    check_about_contact_pages,
     check_ai_bot_crawlability,
     check_click_depth,
     check_duplicate_content,
@@ -301,28 +301,24 @@ def _emit_extras(*, run_id: int, page_id_by_url: dict[str, int], crawl_result: A
     # Site-wide
     if parsed_pages:
         v_dup = check_duplicate_content(parsed_pages)
-        out.append(_finding(run_id=run_id, page_id=None, check_id="ON-090", owner="A1", verdict=v_dup))
-        v_ac = check_about_contact_pages(parsed_pages)
-        out.append(_finding(run_id=run_id, page_id=None, check_id="ON-107", owner="A1", verdict=v_ac))
+        out.append(_finding(run_id=run_id, page_id=None, check_id="ON-095", owner="A2", verdict=v_dup))
+        # check_about_contact_pages is NOT emitted: the checklist has no About/Contact
+        # row. It used to ship as ON-107 "Semantic HTML structure analysis", which
+        # ai_search.py already emits correctly. Owner decision O-8.
         v_meta = check_meta_description_uniqueness(parsed_pages)
         for url, verdict in v_meta.items():
             out.append(_finding(run_id=run_id, page_id=page_id_by_url.get(url), check_id="ON-040", owner="A3", verdict=verdict))
     v_equity = check_link_equity_distribution(crawl_result.pages)
     out.append(_finding(run_id=run_id, page_id=None, check_id="ON-062", owner="A4", verdict=v_equity))
     v_depth = check_click_depth(crawl_result.pages, crawl_result.site_url)
-    out.append(_finding(run_id=run_id, page_id=None, check_id="TECH-090", owner="B1", verdict=v_depth))
+    out.append(_finding(run_id=run_id, page_id=None, check_id="TECH-008", owner="B1", verdict=v_depth))
     out.append(_finding(run_id=run_id, page_id=None, check_id="ON-060", owner="A4", verdict=v_depth))
     # HTTP version (use homepage CrawledPage)
     home = next((cp for cp in crawl_result.pages if cp.url == crawl_result.site_url), None) or (crawl_result.pages[0] if crawl_result.pages else None)
     if home is not None:
-        out.append(_finding(run_id=run_id, page_id=page_id_by_url.get(home.url), check_id="TECH-069", owner="B5", verdict=check_http_version(home)))
-    # AI bot crawlability (from robots.txt raw body)
-    robots_raw = None
-    robots = getattr(crawl_result, "robots", None)
-    if robots is not None:
-        robots_raw = getattr(robots, "raw", None)
-    v_ai = check_ai_bot_crawlability(robots_raw)
-    out.append(_finding(run_id=run_id, page_id=None, check_id="TECH-040", owner="A5", verdict=v_ai))
+        out.append(_finding(run_id=run_id, page_id=page_id_by_url.get(home.url), check_id="TECH-097", owner="B5", verdict=check_http_version(home)))
+    # AI bot crawlability is emitted by _emit_ai_crawl_readiness (ON-106), together
+    # with the llms.txt slice, so the two halves of one check score as one finding.
     return out
 
 
@@ -336,9 +332,39 @@ def _emit_psi_findings(*, run_id: int, page_id: int | None, psi_result: Any) -> 
     return out
 
 
-async def _emit_llms_txt(*, run_id: int, site_url: str) -> Finding:
-    v = await check_llms_txt(site_url)
-    return _finding(run_id=run_id, page_id=None, check_id="TECH-041", owner="A5", verdict=v)
+_SEVERITY_RANK = {"info": 0, "minor": 1, "major": 2, "critical": 3}
+
+
+async def _emit_ai_crawl_readiness(*, run_id: int, crawl_result: Any) -> Finding:
+    """ON-106 AI crawl readiness = robots.txt AI directives + /llms.txt.
+
+    These previously shipped as two findings on TECH-040 and TECH-041, which the
+    checklist defines as Largest Contentful Paint and Cumulative Layout Shift.
+    They are two slices of one check; the worse slice sets the verdict.
+    """
+    robots = getattr(crawl_result, "robots", None)
+    robots_raw = getattr(robots, "raw", None) if robots is not None else None
+    v_bots = check_ai_bot_crawlability(robots_raw)
+    v_llms = await check_llms_txt(crawl_result.site_url)
+
+    scored = [v for v in (v_bots, v_llms) if v.status != "n_a"]
+    if not scored:
+        merged = Verdict("n_a", 0.0, "info", 0.0,
+                         {"robots_directives": v_bots.evidence, "llms_txt": v_llms.evidence})
+    else:
+        worst = min(scored, key=lambda v: v.score)
+        remediation = " ".join(
+            v.remediation for v in (v_bots, v_llms) if v.remediation
+        ) or None
+        merged = Verdict(
+            worst.status,
+            min(v.score for v in scored),
+            max((v.severity for v in scored), key=lambda sv: _SEVERITY_RANK.get(sv, 0)),
+            min(v.confidence for v in scored),
+            {"robots_directives": v_bots.evidence, "llms_txt": v_llms.evidence},
+            remediation,
+        )
+    return _finding(run_id=run_id, page_id=None, check_id="ON-106", owner="A5", verdict=merged)
 
 
 def _permitted_cost_classes(
@@ -808,7 +834,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
                     run_id=run_id,
                     page_id=pid,
                     check_id="ON-099",
-                    check_name="HTTPS validation",
+                    check_name="HTTPS validation (on-page)",
                     category="on-page",
                     subcategory="security",
                     owner_agent="B5",
@@ -914,9 +940,9 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
     try:
-        findings.append(await _emit_llms_txt(run_id=run_id, site_url=crawl_result.site_url))
+        findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
-        console.print(f"  [yellow]llms.txt check failed: {type(e).__name__}: {e}[/yellow]")
+        console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
     # Free for the first ~5k units/month. Skipped silently when no key.
@@ -1035,16 +1061,6 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
 _CHECKLIST_META: dict[str, tuple[str, str, str | None]] = {
     spec.id: (spec.name, spec.category, spec.subcategory)
     for spec in load_check_specs()
-}
-
-_CHECK_META_OVERRIDES = {
-    "TECH-040": ("AI bot crawlability (robots.txt scan)", "technical", "geo-ai"),
-    "TECH-041": ("llms.txt presence check", "technical", "geo-ai"),
-    "TECH-069": ("HTTP version (HTTP/2 or HTTP/3)", "technical", "performance"),
-    "TECH-090": ("Click-depth distribution", "technical", "site-structure"),
-    "ON-090": ("Duplicate content detection (Jaccard)", "on-page", "content-quality"),
-    "ON-107": ("About + Contact page presence (E-E-A-T trust)", "on-page", "content-quality"),
-    "ON-099": ("HTTPS validation", "on-page", "security"),
 }
 
 
@@ -1586,9 +1602,9 @@ async def _run_full(
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
     try:
-        findings.append(await _emit_llms_txt(run_id=run_id, site_url=crawl_result.site_url))
+        findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
-        console.print(f"  [yellow]llms.txt check failed: {type(e).__name__}: {e}[/yellow]")
+        console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
     # Free for the first ~5k units/month. Skipped silently when no key.
@@ -1707,8 +1723,13 @@ async def _run_full(
 
 
 def _meta_for(check_id: str) -> tuple[str, str, str | None]:
-    if check_id in _CHECK_META_OVERRIDES:
-        return _CHECK_META_OVERRIDES[check_id]
+    """Name/pillar/subcategory for a check, from the checklist and nowhere else.
+
+    There used to be a _CHECK_META_OVERRIDES table here. Six of its seven rows
+    renamed checklist rows that other analyzers were squatting - which is how
+    Core Web Vitals shipped as "Server response analysis" without looking wrong.
+    The overrides are gone; tests/test_check_id_bindings.py keeps them gone.
+    """
     return _CHECKLIST_META.get(check_id, (check_id, "on-page", None))
 
 
@@ -1974,9 +1995,9 @@ async def _run_local(
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
     try:
-        findings.append(await _emit_llms_txt(run_id=run_id, site_url=crawl_result.site_url))
+        findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
-        console.print(f"  [yellow]llms.txt check failed: {type(e).__name__}: {e}[/yellow]")
+        console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
     # Free for the first ~5k units/month. Skipped silently when no key.
