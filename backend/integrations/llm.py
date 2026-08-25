@@ -65,11 +65,20 @@ class LLMResult:
 
     ``input_tokens`` / ``output_tokens`` feed the Part-2 cost path (P6B-4) so a
     summarize call is metered like every other provider spend.
+
+    ``cache_write_tokens`` / ``cache_read_tokens`` are the API's OWN prompt-cache
+    accounting, defaulted to 0 so every existing construction still works. They are
+    carried because a cached prefix is billed at 1.25x on write and 0.1x on read, so
+    a cost computed from `input_tokens` alone is wrong in both directions - and
+    because measuring them is how the doctrine cost model got corrected once already
+    (an estimate that was 30% low).
     """
 
     text: str
     input_tokens: int
     output_tokens: int
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 @runtime_checkable
@@ -200,6 +209,8 @@ class AnthropicSummarizer:
             text=text,
             input_tokens=int(usage.input_tokens),
             output_tokens=int(usage.output_tokens),
+            cache_write_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+            cache_read_tokens=int(getattr(usage, "cache_read_input_tokens", 0) or 0),
         )
 
 
