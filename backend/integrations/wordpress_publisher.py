@@ -84,6 +84,8 @@ class PluginPublisher(Protocol):
 
     def publish(self, payload: dict[str, Any]) -> PluginPublishResult: ...
 
+    def deliver_site(self, plan: dict[str, Any]) -> dict[str, Any]: ...
+
 
 @dataclass(frozen=True)
 class WpPluginTarget:
@@ -208,6 +210,35 @@ class WordPressPluginPublisher(HttpProviderClient):
             preview_url=str(data.get("preview_url") or ""),
         )
 
+    def deliver_site(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Deliver a WHOLE SITE plan - pages, hierarchy, menu, front page - in one call.
+
+        Requires plugin 1.9.0. An older plugin has no `/site` route and answers 404,
+        which surfaces as a `WordPressPluginError` naming the version rather than as an
+        opaque transport failure: "the site was not delivered" is not actionable, and
+        "this site is running a plugin without /site" is.
+
+        Returns the plugin's manifest verbatim. Deliberately NOT reduced to a single
+        boolean: a delivery can partly succeed - one page failing to write while
+        forty-nine land - and collapsing that to False would throw away the only record
+        of which one, while collapsing it to True would hide it entirely.
+        """
+        body: dict[str, Any] = dict(plan)
+        body["api_key"] = self._api_key  # primary auth: in the body (never stripped)
+        try:
+            data = self.request_json("POST", self._endpoint("site"), json_body=body)
+        except ProviderCallError as exc:
+            text = str(exc)
+            if "404" in text:
+                raise WordPressPluginError(
+                    "this site's AIOS Publisher has no /site route; whole-site delivery "
+                    "needs plugin 1.9.0 or newer"
+                ) from exc
+            raise WordPressPluginError(f"AIOS Publisher site delivery failed: {exc}") from exc
+        if data.get("ok") is not True:
+            raise WordPressPluginError("AIOS Publisher site delivery returned a non-ok response")
+        return data
+
 
 class FakeWordPressPluginPublisher:
     """Deterministic, offline ``PluginPublisher`` for unit tests + degraded runs.
@@ -222,9 +253,58 @@ class FakeWordPressPluginPublisher:
         self._site_url = site_url.rstrip("/")
         self._healthy = healthy
         self.published: list[dict[str, Any]] = []
+        self.delivered: list[dict[str, Any]] = []
 
     def ping(self) -> bool:
         return self._healthy
+
+    def deliver_site(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Mirror the plugin's own manifest shape, including its refusals.
+
+        Written to behave like the REAL assembler rather than to succeed: a page with
+        no slug is dropped exactly as `aios_publisher_upsert_page` drops it, and the
+        front page only "changes" when the plan named one. A fake that always succeeds
+        would let a caller ship code that never handles a partial delivery.
+        """
+        self.delivered.append(plan)
+        pages = [p for p in (plan.get("pages") or []) if isinstance(p, dict)]
+        rows: list[dict[str, Any]] = []
+        ids: dict[str, int] = {}
+        for page in pages:
+            slug = str(page.get("slug") or "").strip()
+            if not slug:
+                continue
+            post_id = 1 + int(
+                hashlib.sha256(f"{self._site_url}/{slug}".encode()).hexdigest()[:8], 16
+            ) % 100_000
+            ids[slug] = post_id
+            rows.append({
+                "slug": slug, "ok": True, "id": post_id, "created": True,
+                "elementor": bool(str(page.get("elementor_data") or "").strip()),
+                "url": f"{self._site_url}/{slug}/",
+            })
+        menu = plan.get("menu") or {}
+        front = str(plan.get("front_page_slug") or "")
+        return {
+            "ok": True,
+            "pages": rows,
+            "parents": sum(
+                1 for p in pages
+                if str(p.get("parent_slug") or "") and str(p.get("parent_slug")) in ids
+            ),
+            "menu": {
+                "built": bool(menu.get("name")),
+                "menu_id": 7,
+                "items": sum(1 for p in pages if p.get("in_menu", True) and p.get("slug")),
+                "assigned": bool(menu.get("location")),
+                "held": "",
+            },
+            "front_page": (
+                {"changed": True, "page_id": ids[front]}
+                if front in ids
+                else {"changed": False, "reason": "not requested"}
+            ),
+        }
 
     def publish(self, payload: dict[str, Any]) -> PluginPublishResult:
         self.published.append(dict(payload))

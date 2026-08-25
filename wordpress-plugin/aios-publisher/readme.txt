@@ -3,7 +3,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.8.0
+Stable tag: 1.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -79,6 +79,27 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.9.0 =
+* New `POST /site`: deliver a WHOLE SITE in one request - pages, their parent/child
+  hierarchy, a navigation menu, and (only when explicitly asked) the front page.
+* Why: until now the plugin received ONE page per request, and nothing on either side
+  created a menu, set a front page or nested a page. A fifty-page build arrived as fifty
+  unlinked drafts - each individually correct and individually Elementor-editable, with
+  the client left to assemble the actual website by hand.
+* Every page still carries its own Elementor widget tree, so the delivered site is
+  editable page-by-page in Elementor exactly as a single push already was.
+* IT NEVER DELETES. There is no path here that trashes, removes or unpublishes a post.
+* Idempotent by slug: re-sending a plan updates the same pages instead of creating a
+  second set of them.
+* The client's existing navigation is theirs: a menu location that already holds a
+  different menu is left alone unless the plan explicitly says to replace it.
+* A page that already exists keeps its status - a re-run cannot pull a page the client
+  published back to draft. The one exception is a page named as the front page, which
+  is published because a draft front page shows visitors a 404.
+* No change to publishing, sanitizing or meta writing on the existing single-page path.
+  The 1.3.0 `<style>`/`<script>` strip and the 1.6.0 block-comment JSON fix are
+  untouched.
 
 = 1.8.0 =
 * `GET /ping` now reports what the site can actually DO, under a new `capabilities`

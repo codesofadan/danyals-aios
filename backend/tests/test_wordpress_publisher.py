@@ -217,3 +217,93 @@ def test_fake_publisher_records_payload_and_returns_urls() -> None:
 def test_fake_publisher_ping_flag() -> None:
     assert FakeWordPressPluginPublisher(healthy=True).ping() is True
     assert FakeWordPressPluginPublisher(healthy=False).ping() is False
+
+
+# --------------------------------------------------------------------------- #
+# deliver_site: whole-site delivery (plugin 1.9.0)
+# --------------------------------------------------------------------------- #
+_MANIFEST: dict[str, Any] = {
+    "ok": True,
+    "pages": [{"slug": "home", "ok": True, "id": 11, "created": True,
+               "elementor": True, "url": "https://site.test/home/"}],
+    "parents": 1,
+    "menu": {"built": True, "menu_id": 7, "items": 1, "assigned": True, "held": ""},
+    "front_page": {"changed": True, "page_id": 11},
+}
+
+
+def test_deliver_site_posts_the_plan_to_the_site_route() -> None:
+    pub, fake = _publisher(_FakeResponse(200, _MANIFEST))
+    pub.deliver_site({"pages": [{"slug": "home"}], "status": "draft"})
+    call = fake.calls[-1]
+    assert call["url"] == "https://site.test/wp-json/aios/v1/site"
+    assert call["json"]["api_key"] == "SECRET-KEY", "key rides the BODY, never stripped"
+    assert call["json"]["pages"][0]["slug"] == "home"
+
+
+def test_deliver_site_returns_the_manifest_verbatim() -> None:
+    """NOT reduced to a boolean. A delivery can partly succeed - one page failing while
+    forty-nine land - and collapsing that to False throws away which one, while
+    collapsing it to True hides it entirely."""
+    pub, _fake = _publisher(_FakeResponse(200, _MANIFEST))
+    out = pub.deliver_site({"pages": [{"slug": "home"}]})
+    assert out["parents"] == 1
+    assert out["menu"]["items"] == 1
+    assert out["front_page"]["page_id"] == 11
+
+
+def test_an_older_plugin_is_named_rather_than_reported_as_a_transport_failure() -> None:
+    """"the site was not delivered" is not actionable; "this site runs a plugin without
+    /site" tells the operator exactly what to do."""
+    pub, _fake = _publisher(_FakeResponse(404, {"code": "rest_no_route"}))
+    with pytest.raises(WordPressPluginError, match=r"1\.9\.0 or newer"):
+        pub.deliver_site({"pages": [{"slug": "home"}]})
+
+
+def test_a_non_ok_manifest_raises() -> None:
+    pub, _fake = _publisher(_FakeResponse(200, {"ok": False}))
+    with pytest.raises(WordPressPluginError):
+        pub.deliver_site({"pages": [{"slug": "home"}]})
+
+
+def test_the_error_never_echoes_the_key() -> None:
+    pub, _fake = _publisher(_FakeResponse(500, {"error": "boom"}), api_key="SUPER-SECRET")
+    with pytest.raises(WordPressPluginError) as exc:
+        pub.deliver_site({"pages": [{"slug": "home"}]})
+    assert "SUPER-SECRET" not in str(exc.value)
+
+
+class TestTheFakeBehavesLikeTheRealAssembler:
+    """A fake that always succeeds lets a caller ship code that never handles a partial
+    delivery."""
+
+    def _fake(self) -> Any:
+        from integrations.wordpress_publisher import FakeWordPressPluginPublisher
+
+        return FakeWordPressPluginPublisher(site_url="https://site.test")
+
+    def test_a_page_with_no_slug_is_dropped_exactly_as_the_plugin_drops_it(self) -> None:
+        out = self._fake().deliver_site(
+            {"pages": [{"slug": "home"}, {"title": "no slug"}]}
+        )
+        assert len(out["pages"]) == 1
+
+    def test_the_front_page_only_changes_when_the_plan_names_one(self) -> None:
+        out = self._fake().deliver_site({"pages": [{"slug": "home"}]})
+        assert out["front_page"]["changed"] is False
+
+    def test_a_named_front_page_changes(self) -> None:
+        out = self._fake().deliver_site(
+            {"pages": [{"slug": "home"}], "front_page_slug": "home"}
+        )
+        assert out["front_page"]["changed"] is True
+
+    def test_ids_are_stable_across_runs(self) -> None:
+        a = self._fake().deliver_site({"pages": [{"slug": "home"}]})
+        b = self._fake().deliver_site({"pages": [{"slug": "home"}]})
+        assert a["pages"][0]["id"] == b["pages"][0]["id"]
+
+    def test_it_records_what_it_was_asked_to_deliver(self) -> None:
+        fake = self._fake()
+        fake.deliver_site({"pages": [{"slug": "home"}]})
+        assert fake.delivered and fake.delivered[0]["pages"][0]["slug"] == "home"
