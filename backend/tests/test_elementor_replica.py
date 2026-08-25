@@ -44,7 +44,19 @@ def tree() -> list[dict[str, Any]]:
 
     walk(raw)
     page = infer_layout(raw, viewport_width=1440)
-    return build_tree(page, extract(nodes))
+    from app.services.elementor_replica import (
+        mobile_text_positions,
+        responsive_heading_sizes,
+    )
+
+    captures = {}
+    for dev in ("tablet", "mobile"):
+        f = _FIXTURE.parent / f"spotino_{dev}.json"
+        if f.exists():
+            captures[dev] = json.loads(f.read_text())
+    return build_tree(page, extract(nodes),
+                      responsive_heading_sizes(captures),
+                      mobile_text_positions(captures))
 
 
 def _walk(nodes: list[dict[str, Any]]):
@@ -158,3 +170,72 @@ class TestTheRebuiltTree:
             if n["elType"] == "column":
                 for child in n.get("elements") or []:
                     assert child["elType"] in ("widget", "section"), child["elType"]
+
+
+class TestIterationThreeRegressions:
+    """Each pinned from a screenshot-verified failure on the live rebuild."""
+
+    def test_split_inline_text_stays_one_widget(self, tree: list[dict[str, Any]]) -> None:
+        """"4.9" wrapping a small "/5" emitted the child as its own stacked widget and
+        the stats card rendered "/5" alone. text-editor owns its subtree now, joined
+        punctuation-aware so it reads 4.9/5, not 4.9 /5."""
+        blob = to_json(tree)
+        assert "4.9/5" in blob
+        assert "<p>/5</p>" not in blob
+
+    def test_stretched_sections_keep_boxed_content(self, tree: list[dict[str, Any]]) -> None:
+        """stretch + layout:"full_width" ran the text edge-to-edge and off the left
+        viewport. A full-bleed BAND with BOXED content is what the source is."""
+        for n in _walk(tree):
+            st = n.get("settings") or {}
+            if st.get("stretch_section"):
+                assert st.get("layout") == "boxed"
+
+    def test_measured_radius_reaches_the_column(self, tree: list[dict[str, Any]]) -> None:
+        """The hero card's 16px rounding is measured off the page, not styled on."""
+        radii = [n["settings"]["border_radius"]["top"] for n in _walk(tree)
+                 if n["elType"] == "column" and "border_radius" in (n.get("settings") or {})]
+        assert "16" in radii
+
+    def test_a_measured_scrim_becomes_a_real_gradient(self, tree: list[dict[str, Any]]) -> None:
+        blob = to_json(tree)
+        assert '"background_background":"gradient"' in blob
+
+    def test_rows_that_stay_inline_on_mobile_keep_their_columns(
+        self, tree: list[dict[str, Any]]
+    ) -> None:
+        """Elementor stacks columns on mobile by default - right for most rows, wrong
+        for the stats trio, which measurably stays side by side at 390px. The first
+        threading missed NESTED rows (the trio lives inside the hero's column) and
+        only top-level testimonials got the keys."""
+        keyed = [n for n in _walk(tree)
+                 if "_inline_size_mobile" in (n.get("settings") or {})]
+        assert len(keyed) >= 7, "trio (3) + testimonial strip (4)"
+        texts = to_json(keyed)
+        assert "6 yrs" in texts, "the stats trio must be among them"
+
+
+def test_mobile_position_facts_are_measured(tmp_path: pathlib.Path) -> None:
+    from app.services.elementor_replica import (
+        _row_stays_inline_on_mobile,
+        mobile_text_positions,
+    )
+
+    captures = {"mobile": {"t": "div", "box": [0, 0, 390, 800], "kids": [
+        {"t": "span", "box": [10, 100, 80, 20], "txt": "A", "kids": []},
+        {"t": "span", "box": [140, 102, 80, 20], "txt": "B", "kids": []},
+        {"t": "span", "box": [10, 300, 80, 20], "txt": "C", "kids": []},
+    ]}}
+    pos = mobile_text_positions(captures)
+    assert pos["A"][1] == 100 and pos["B"][1] == 102
+
+    from app.services.layout_infer import InferredColumn, InferredRow, InferredWidget
+
+    def col(text: str) -> InferredColumn:
+        return InferredColumn(width_pct=33, x=0, width_px=100, widgets=(
+            InferredWidget(type="text-editor", node={"txt": text, "box": [0, 0, 10, 10]}),))
+
+    inline = InferredRow(columns=(col("A"), col("B")), y=0)
+    stacked = InferredRow(columns=(col("A"), col("C")), y=0)
+    assert _row_stays_inline_on_mobile(inline, pos) is True
+    assert _row_stays_inline_on_mobile(stacked, pos) is False

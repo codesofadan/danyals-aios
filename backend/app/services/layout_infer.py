@@ -134,6 +134,22 @@ def _own_classes(n: dict[str, Any]) -> list[str]:
     return out
 
 
+def _decoration(item: dict[str, Any]) -> tuple[int, str]:
+    """(border-radius px, scrim) for a column - read from the item or its first
+    covering child, where wrapper collapse tends to leave them."""
+    for node in (item, *(_kids(item)[:1])):
+        s_ = _style(node)
+        raw = (s_.get("borderRadius") or "0").split(" ")[0]
+        try:
+            radius = round(float(raw.rstrip("px"))) if raw.endswith("px") else 0
+        except ValueError:
+            radius = 0
+        scrim = str(node.get("scrim") or "")
+        if radius or scrim:
+            return (min(radius, 100), scrim)
+    return (0, "")
+
+
 def _gather_classes(item: dict[str, Any], *, max_depth: int = 3) -> tuple[str, ...]:
     """Own-classes across the item's subtree, shallow-first, deduplicated.
 
@@ -183,6 +199,8 @@ class InferredColumn:
     width_pct: int
     x: int
     width_px: int
+    radius_px: int = 0
+    scrim: str = ""
     widgets: tuple[InferredWidget, ...] = ()
     # A column may hold ROWS instead of widgets - Elementor's one legal nesting level
     # (section > column > inner section > column). The reference hero keeps a 50/50
@@ -366,7 +384,12 @@ def classify(node: dict[str, Any]) -> str | None:
         stars = text.count("★") + text.count("⭐")
         if stars >= 3 and len(text) <= 24:
             return "star-rating"
-        if tag == "p" or not kids:
+        if tag in ("p", "span"):
+            # a span with children is still ONE inline group now that text-editor
+            # owns its subtree - "4.9" wrapping a small "/5" emitted the child alone
+            # and lost the number when only childless spans qualified
+            return "text-editor"
+        if not kids or all(not _kids(k) for k in kids):
             return "text-editor"
     if tag in ("i", "svg") and not text:
         return "icon"
@@ -392,8 +415,12 @@ def _collect_widgets(node: dict[str, Any], out: list[InferredWidget]) -> None:
         out.append(InferredWidget(
             type=kind, node=node, classes=tuple(_own_classes(node))))
         if kind in ("icon-list", "star-rating", "testimonial", "accordion", "button",
-                    "image", "google_maps"):
-            return  # composite widgets own their subtree
+                    "image", "google_maps", "text-editor"):
+            # composite widgets own their subtree. text-editor is here because a
+            # styled fragment ("4.9" with a nested small "/5") is ONE piece of text;
+            # recursing emitted the child as a second stacked widget and the stats
+            # card rendered "/5" on its own line with the 4.9 lost above it.
+            return
     for k in _kids(node):
         _collect_widgets(k, out)
 
@@ -746,8 +773,10 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
                 continue
             widgets = []
             _collect_widgets(item, widgets)
+            rad, scr = _decoration(item)
             columns.append(InferredColumn(
                 width_pct=pct, x=_box(item)[0], width_px=_box(item)[2],
+                radius_px=rad, scrim=scr,
                 widgets=tuple(widgets), classes=_gather_classes(item),
                 background=_style(item).get("backgroundColor", ""),
             ))
@@ -847,11 +876,25 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
     candidates = _kids(root) or [root]
 
     sections: list[InferredSection] = []
+    # The width filter drops floating fragments - but a site whose ENTIRE layout is
+    # a narrow centred column (wikipedia.org's portal, example.com) would yield zero
+    # sections under it. Measured on both: 64 and 5 captured nodes, nothing emitted.
+    # If no candidate reaches the fraction, the filter is describing the page style,
+    # not noise, and it turns off.
+    widest = max((_box(c)[2] for c in candidates), default=0)
+    min_width = viewport_width * MIN_SECTION_WIDTH_FRACTION
+    if widest < min_width:
+        min_width = max(200, widest * 0.5)
+        notes.append(
+            f"the page's widest band is {widest}px in a {viewport_width}px viewport; "
+            "treating its centred column as the layout rather than as a fragment"
+        )
+
     for cand in sorted(candidates, key=lambda c: _box(c)[1]):
         _x0, y, w, h = _box(cand)
         if h < MIN_SECTION_HEIGHT:
             continue
-        if w < viewport_width * MIN_SECTION_WIDTH_FRACTION:
+        if w < min_width:
             notes.append(f"skipped a {w}px-wide fragment at y={y}: not a band")
             continue
         rows = _rows_of(cand)
@@ -901,6 +944,23 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
             classes=tuple(_own_classes(cand)),
             element_id=cand.get("eid") or "",
         ))
+
+    if not sections:
+        # A tiny or single-column page: the candidates were LEAVES (a heading, a
+        # paragraph), and a leaf holds no rows. The page still has a layout - the
+        # ROOT is it. One full-width section from the root's own rows, rather than
+        # an empty result for a page a person can plainly see.
+        root_rows = _rows_of(root)
+        if root_rows:
+            rx, ry, rw, rh = _box(root)
+            sections.append(InferredSection(
+                y=ry, height=max(rh, MIN_SECTION_HEIGHT), full_bleed=False,
+                rows=tuple(root_rows),
+                background=_style(root).get("backgroundColor", ""),
+                classes=tuple(_own_classes(root)),
+                element_id=root.get("eid") or "",
+            ))
+            notes.append("no full-width bands found; the whole page is one section")
 
     # Container width: the MODE of the sections' content-node widths. Summing row
     # column widths under-measured it badly (684px against a real 1236px), because a

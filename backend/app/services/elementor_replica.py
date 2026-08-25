@@ -83,6 +83,35 @@ def _bg_image_url(style: dict[str, str]) -> str:
     return m.group(1) if m else ""
 
 
+_GRAD_RE = re.compile(
+    r"linear-gradient\(\s*(?:(-?[\d.]+)deg\s*,)?\s*(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8})"
+    r".*?(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8})[^(]*\)$"
+)
+
+
+def _gradient(scrim: str) -> dict[str, Any] | None:
+    """A measured ::before gradient as Elementor's own gradient controls.
+
+    Only the first and last stops carry over - Elementor's control is two-stop. A
+    scrim with more stops degrades to its endpoints, which reads correctly for the
+    fade-over-image pattern this exists for.
+    """
+    if not scrim or "gradient" not in scrim:
+        return None
+    m = _GRAD_RE.search(scrim.strip())
+    if not m:
+        return None
+    angle, start, end = m.groups()
+    return {
+        "background_background": "gradient",
+        "background_color": start,
+        "background_color_b": end,
+        "background_gradient_type": "linear",
+        "background_gradient_angle": {"unit": "deg",
+                                      "size": round(float(angle)) if angle else 180},
+    }
+
+
 def _typography(settings: dict[str, Any], prefix: str, family: str, size_px: int | None,
                 weight: str = "") -> None:
     """The `custom` switch plus the group keys, under the given prefix.
@@ -136,9 +165,31 @@ def _w_heading(w: InferredWidget, ds: DesignSystem,
     return out
 
 
+def _inline_text(node: dict[str, Any]) -> str:
+    """The node's whole inline text, children merged in document order.
+
+    "4.9" with a nested small "/5" is one piece of text; no space is inserted before
+    leading punctuation so it reads 4.9/5, not 4.9 /5.
+    """
+    parts: list[str] = []
+
+    def visit(n: dict[str, Any]) -> None:
+        t = (n.get("txt") or "").strip()
+        if t:
+            if parts and t[0] in "/.,;:!?%)":
+                parts[-1] = parts[-1] + t
+            else:
+                parts.append(t)
+        for k in n.get("kids") or []:
+            visit(k)
+
+    visit(node)
+    return " ".join(parts)
+
+
 def _w_text(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
     style = w.node.get("s") or {}
-    out: dict[str, Any] = {"editor": f"<p>{w.node.get('txt') or ''}</p>"}
+    out: dict[str, Any] = {"editor": f"<p>{_inline_text(w.node)}</p>"}
     colour = _colour(style.get("color", "")) or ds.palette.get("text", "")
     if colour:
         out["text_color"] = colour
@@ -275,7 +326,8 @@ def _widget(w: InferredWidget, ds: DesignSystem, ids: _IdGen,
 
 def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
             container_px: int,
-            responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
+            responsive: dict[str, dict[str, int]] | None = None,
+            mobile_pos: dict[str, tuple[int, int]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {
         "_column_size": col.width_pct,
         # `_inline_size` is what the editor's drag handle reads; without it the
@@ -288,10 +340,17 @@ def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
     if bg and bg != ds.palette.get("background"):
         settings["background_background"] = "classic"
         settings["background_color"] = bg
+    if col.radius_px:
+        r = str(col.radius_px)
+        settings["border_radius"] = {"unit": "px", "top": r, "right": r,
+                                     "bottom": r, "left": r, "isLinked": True}
+    grad = _gradient(col.scrim)
+    if grad:
+        settings.update(grad)
     elements: list[dict[str, Any]] = []
     if col.rows:
         for row in col.rows:
-            elements.append(_row_as_inner_section(row, ds, ids, container_px, responsive))
+            elements.append(_row_as_inner_section(row, ds, ids, container_px, responsive, mobile_pos))
     else:
         elements = [_widget(w, ds, ids, responsive) for w in col.widgets]
     return {
@@ -304,22 +363,30 @@ def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
 
 def _row_as_inner_section(row: InferredRow, ds: DesignSystem, ids: _IdGen,
                           container_px: int,
-                          responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
+                          responsive: dict[str, dict[str, int]] | None = None,
+                          mobile_pos: dict[str, tuple[int, int]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {"gap": "default"}
     if row.structure:
         settings["structure"] = row.structure
+    columns = [_column(c, ds, ids, container_px, responsive, mobile_pos)
+               for c in row.columns]
+    if mobile_pos and _row_stays_inline_on_mobile(row, mobile_pos):
+        share = max(1, 100 // len(columns))
+        for el in columns:
+            el["settings"]["_inline_size_mobile"] = share
     return {
         "id": ids.next(f"inner:{row.y}"),
         "elType": "section",
         "isInner": True,
         "settings": settings,
-        "elements": [_column(c, ds, ids, container_px, responsive) for c in row.columns],
+        "elements": columns,
     }
 
 
 def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
              container_px: int,
-             responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
+             responsive: dict[str, dict[str, int]] | None = None,
+             mobile_pos: dict[str, tuple[int, int]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {}
     first_multi = next((r for r in section.rows if len(r.columns) > 1), None)
     if first_multi and first_multi.structure:
@@ -332,6 +399,7 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
         # and off the left viewport - a full-bleed band with boxed content is what
         # the source page actually is.
         settings["stretch_section"] = "section-stretched"
+        settings["layout"] = "boxed"
     settings["content_width"] = {"unit": "px", "size": container_px}
     bg = _colour(section.background)
     if bg:
@@ -355,12 +423,16 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
     # full-width column of inner sections, which is Elementor's own idiom for
     # stacked bands inside one background.
     if len(section.rows) == 1:
-        elements = [_column(c, ds, ids, container_px, responsive)
+        elements = [_column(c, ds, ids, container_px, responsive, mobile_pos)
                     for c in section.rows[0].columns]
+        if mobile_pos and _row_stays_inline_on_mobile(section.rows[0], mobile_pos):
+            share = max(1, 100 // len(elements))
+            for el in elements:
+                el["settings"]["_inline_size_mobile"] = share
     else:
-        inner = [_row_as_inner_section(r, ds, ids, container_px, responsive)
+        inner = [_row_as_inner_section(r, ds, ids, container_px, responsive, mobile_pos)
                  if len(r.columns) > 1 else
-                 _column(r.columns[0], ds, ids, container_px, responsive)
+                 _column(r.columns[0], ds, ids, container_px, responsive, mobile_pos)
                  for r in section.rows]
         wrapped: list[dict[str, Any]] = []
         for el in inner:
@@ -393,9 +465,53 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
 
 
 def build_tree(page: InferredPage, ds: DesignSystem,
-               responsive: dict[str, dict[str, int]] | None = None) -> list[dict[str, Any]]:
+               responsive: dict[str, dict[str, int]] | None = None,
+               mobile_pos: dict[str, tuple[int, int]] | None = None) -> list[dict[str, Any]]:
     ids = _IdGen()
-    return [_section(s, ds, ids, page.container_px, responsive) for s in page.sections]
+    return [_section(s, ds, ids, page.container_px, responsive, mobile_pos)
+            for s in page.sections]
+
+
+def mobile_text_positions(captures: dict[str, dict[str, Any]]) -> dict[str, tuple[int, int]]:
+    """{text: (x, y)} from the mobile capture - the facts behind keep-inline-on-mobile.
+
+    Elementor stacks columns on mobile by default, which is right for most rows. The
+    reference stats trio measurably STAYS inline at 390px, and stacking it breaks the
+    card. Whether a row keeps its columns side by side is decided by whether its
+    columns' texts still share a y-band in the mobile capture - measured, never
+    assumed.
+    """
+    mobile = captures.get("mobile")
+    out: dict[str, tuple[int, int]] = {}
+    if not mobile:
+        return out
+
+    def walk(n: dict[str, Any]) -> None:
+        t = (n.get("txt") or "").strip()
+        if t and t not in out:
+            out[t] = (int(n["box"][0]), int(n["box"][1]))
+        for k in n.get("kids") or []:
+            walk(k)
+
+    walk(mobile)
+    return out
+
+
+def _row_stays_inline_on_mobile(row: InferredRow,
+                                positions: dict[str, tuple[int, int]]) -> bool:
+    if len(row.columns) < 2:
+        return False
+    ys: list[int] = []
+    for col in row.columns:
+        first = next((w for w in col.widgets
+                      if (w.node.get("txt") or "").strip()), None)
+        if first is None:
+            return False
+        pos = positions.get((first.node.get("txt") or "").strip())
+        if pos is None:
+            return False
+        ys.append(pos[1])
+    return max(ys) - min(ys) <= 30
 
 
 def responsive_heading_sizes(captures: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:
