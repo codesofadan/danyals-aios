@@ -56,6 +56,12 @@ _DOWNLOADS: dict[str, tuple[str, str]] = {
     "pillars.csv": ("pillars.csv", "text/csv"),
     "subpoints.csv": ("subpoints.csv", "text/csv"),
     "roadmap.csv": ("roadmap.csv", "text/csv"),
+    # Per-pillar issue exports. Enumerated rather than pattern-matched: the
+    # allow-list is the traversal guard, and a pattern is how a guard grows a hole.
+    **{
+        f"issues-{d}.csv": (f"issues-{d}.csv", "text/csv")
+        for d in ("onpage", "technical", "offpage", "local", "geo", "strategy")
+    },
 }
 
 

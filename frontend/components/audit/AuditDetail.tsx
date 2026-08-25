@@ -217,11 +217,14 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
                   <button
                     type="button"
                     className="alt-dlmini"
-                    title={`Download the ${dimension} issues as CSV`}
-                    onClick={() => onDownload("findings.csv")}
+                    title={`Download only the ${dimension} issues`}
+                    // The per-pillar file, not the whole 461-row export: the
+                    // specialist who receives it should not be handed everyone
+                    // else's work.
+                    onClick={() => onDownload(`issues-${dimension}.csv`)}
                   >
                     <span className="material-symbols-rounded">download</span>
-                    CSV
+                    {dimension} CSV
                   </button>
                   <button type="button" className="alt-clear" onClick={() => setDimension(null)}>
                     <span className="material-symbols-rounded">close</span>

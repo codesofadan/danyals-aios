@@ -521,6 +521,19 @@ def build(
         # ---------------- CSVs first: they are the complete record -----------
         res.csvs.append(out / "findings.csv")
         _write_csv(res.csvs[-1], FINDING_HEADERS, _finding_rows(findings))
+
+        # One issues CSV per dimension. An operator working the technical backlog
+        # wants the technical rows, not a 461-row file they have to filter - and
+        # the specialist who receives it should not be handed everyone else's work.
+        # Only dimensions that actually HAVE issues get a file: an empty CSV reads
+        # as "nothing wrong here" when it may mean "we never looked".
+        by_dimension: dict[str, list[dict[str, Any]]] = {}
+        for f in findings:
+            by_dimension.setdefault(f.get("dimension") or "other", []).append(f)
+        for dim, rows_for in sorted(by_dimension.items()):
+            path = out / f"issues-{dim}.csv"
+            _write_csv(path, FINDING_HEADERS, _finding_rows(rows_for))
+            res.csvs.append(path)
         res.csvs.append(out / "pages.csv")
         _write_csv(res.csvs[-1], PAGE_HEADERS, _page_rows(pages))
         res.csvs.append(out / "pillars.csv")
