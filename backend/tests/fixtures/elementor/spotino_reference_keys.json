@@ -1,0 +1,119 @@
+{
+ "source": "spotino.org post 99 _elementor_data (Elementor 4.7.0), captured 2026-08-25",
+ "section_keys": [
+  "_css_classes",
+  "_element_id",
+  "background_background",
+  "background_image",
+  "background_overlay_background",
+  "background_overlay_color",
+  "background_position",
+  "background_size",
+  "gap",
+  "hide_desktop",
+  "hide_mobile",
+  "hide_tablet",
+  "layout",
+  "structure"
+ ],
+ "column_keys": [
+  "_column_size",
+  "_css_classes",
+  "_inline_size"
+ ],
+ "widget_keys": {
+  "accordion": [
+   "_css_classes",
+   "faq_schema",
+   "tabs",
+   "title_html_tag"
+  ],
+  "button": [
+   "_css_classes",
+   "icon_align",
+   "link",
+   "selected_icon",
+   "text"
+  ],
+  "divider": [
+   "_css_classes",
+   "text"
+  ],
+  "form": [
+   "__should_import",
+   "_css_classes",
+   "button_size",
+   "button_text",
+   "button_width",
+   "email_content",
+   "email_from_name",
+   "email_reply_to",
+   "email_subject",
+   "email_to",
+   "form_fields",
+   "form_name",
+   "mark_required",
+   "show_labels",
+   "submit_actions",
+   "success_message"
+  ],
+  "google_maps": [
+   "_css_classes",
+   "address",
+   "height",
+   "zoom"
+  ],
+  "heading": [
+   "_css_classes",
+   "header_size",
+   "link",
+   "title"
+  ],
+  "icon": [
+   "_css_classes",
+   "_element_custom_width",
+   "_element_width",
+   "_flex_size",
+   "link",
+   "selected_icon"
+  ],
+  "icon-box": [
+   "_css_classes",
+   "description_text",
+   "position",
+   "selected_icon",
+   "title_text"
+  ],
+  "icon-list": [
+   "_css_classes",
+   "icon_list",
+   "view"
+  ],
+  "image": [
+   "_css_classes",
+   "image",
+   "image_size"
+  ],
+  "social-icons": [
+   "_css_classes",
+   "social_icon_list"
+  ],
+  "star-rating": [
+   "_css_classes",
+   "rating",
+   "title"
+  ],
+  "testimonial": [
+   "_css_classes",
+   "testimonial_alignment",
+   "testimonial_content",
+   "testimonial_image",
+   "testimonial_job",
+   "testimonial_name"
+  ],
+  "text-editor": [
+   "_css_classes",
+   "editor"
+  ]
+ }
+}
