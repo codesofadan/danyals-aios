@@ -1,0 +1,165 @@
+# The audit altitudes — what was built, and why
+
+**Status:** built and verified on real data, 2026-08-25.
+**Anchor run:** `smileon.pk` — 197 pages, 15,617 findings (`docs/audit/fixtures/README.md`).
+
+## The problem, in one measurement
+
+A real 197-page audit produced **15,617 findings**, of which **8,077** were `fail`/`warn`.
+Those 8,077 rows contain **461 distinct causes**. The client was being handed 8,077 things to
+read when there were 461 things to fix — rendered as an **833-page, 15.4 MB PDF**.
+
+Two further defects were measured on the same run:
+
+- **`subcategory` was 38% populated** and sometimes carried values absent from the checklist
+  vocabulary, so the pillar × subpoint spine could not be trusted.
+- **Technical scored 97.2 having run 25 of 100 technical checks**, and `strategy` scored nothing
+  at all while being silently dropped from the denominator.
+
+## The three altitudes
+
+```
+MACRO   audit_rollups              pillar / subpoint verdict + COVERAGE
+                                   "Technical 88.7 — ran 25 of 100"
+                                   "Strategy  not measured — ran 0 of 21"
+MICRO   audit_findings             one CAUSE, N instances
+                                   "Image alt text optimization — 121 pages"
+NANO    audit_finding_instances    one occurrence, one locus
+                                   "/about-us/  images=23, missing_alt=6"
+        audit_pages                the page-side pivot
+```
+
+Measured collapse: **8,077 rows → 461 findings + 8,077 instances**, a **94.3% reduction** in what
+a human reads, with **zero instances lost** (asserted in tests).
+
+## The rules that make it honest
+
+**A cause is `(check_id, locus, discriminator)`, and the locus is where the fix goes.** A missing
+H1 across 42 pages of one template is one edit, not 42 problems. Two *different* broken templates
+stay two causes — merging them means one gets fixed, the finding stays open, and the client is
+told nothing changed.
+
+**Nothing that moves with the site enters the fingerprint** — no URL, no evidence value, no page
+id, no run id, no count. Otherwise "is this the same problem as last month" is unanswerable.
+
+**One flat score formula at every level**, over the checks that actually ran there:
+`score = 100 × (1 − severity_mass(failed) / severity_mass(ran))`. A pillar score is *not* an
+average of its subpoints. There is no per-category weight table, so the renormalisation defect
+that produced the 58.0 composite is **not representable**.
+
+**`checks_ran == 0` ⇒ `score = null`**, rendered "not measured". Never 0 — a zero score and an
+unmeasured dimension are opposite claims.
+
+**`url_health_pct`** ships alongside as a basis-free number: denominator is *pages*, so it stays
+comparable across tiers and months. Critical-only, because including `major` returned 0.0% on the
+real run and could not discriminate.
+
+**`basis_hash`** on every row. Two scores compare only when it matches.
+
+## The roadmap
+
+Findings → a sequenced plan, with **every number measured or operator-supplied**:
+
+```
+impact   = severity weight × reach × confidence     (all measured)
+effort   = fix locus + fix surface (+ volume, url-locus only)
+priority = impact / effort
+phase    = greedy bin-pack into windows sized by ONE operator input
+```
+
+`capacity_points_per_month` (default 40) is the **only** origin of any timeline number. Phases are
+**relative windows** (`p0_30d`, `p1_90d`, `p2_180d`, `p3_365d`) — never dates. Overflow goes to
+`backlog` explicitly. Verified: at 40 pts/month 162 of 461 items plan; at 80, 322 plan.
+
+A template fix costs the same whether it covers 4 pages or 400 — that is the entire reason causes
+and instances are separate.
+
+## The deliverable
+
+`audit-workbook.xlsx` + uncapped CSVs + `audit-pack.zip`. Built in **1.2s** for the 197-page audit:
+**690 KB**, against the engine's 15.4 MB / 833-page PDF.
+
+| Sheet | Altitude | Rows on the anchor run |
+|---|---|---|
+| `00_Read_Me` · `01_Executive_Summary` | macro | 22 · 7 |
+| `02_Pillar_Scorecard` · `03_Subpoint_Scorecard` | macro | 7 · 95 |
+| `05_Roadmap` | macro | the plan, in relative windows |
+| `10_Findings` | **micro** | 462 |
+| `20_Instances` | **nano** | 8,078 |
+| `21_Pages` · `22_Coverage` | pivot / macro | 198 · 364 |
+
+The XLSX caps instances at 100,000 to stay openable; **the CSV never caps**, and `00_Read_Me` says
+so when the cap bites.
+
+## Files
+
+**Engine** — `audit_engine/checklist.py` (the 363-check registry, previously never read at
+runtime), `audit_engine/emit.py` (pages.json, coverage.json, taxonomy enrichment),
+`db/repository.py` (`PageRepository.by_run`), `cli/main.py` (emission hooks + the google_nl
+zero-spend fix).
+
+**Migrations** — `0094_audit_altitudes.sql`, `0095_audit_roadmap.sql`.
+
+**Backend** — `app/services/{audit_altitude,audit_rollups,audit_ingest,audit_workbook,audit_roadmap}.py`,
+`app/db/audit_findings_repo.py`, `app/routers/audit_findings.py`, `workers/tasks/audit.py` (wiring).
+
+**API** — `GET /audits/{id}/rollups` · `/findings` · `/findings/{fid}/instances` · `/pages` ·
+`/roadmap` · `/download/{name}`.
+
+## Verification
+
+- **130 new tests**, all green: checklist 13, emit 18, altitude 24, rollups 16, workbook 15,
+  roadmap 21, endpoints 16, integration-against-real-Postgres 7.
+- Backend suite **5,793 passed** (9 pre-existing `beat_schedule` failures, unrelated — verified by
+  re-running with this work stashed). Engine suite **68 passed**.
+- All **96 migrations** fresh-apply in order; RLS gate passes, 99 tables all FORCE RLS.
+- Ingest of the 197-page audit: **1.3s**, idempotent — a second ingest produces identical counts
+  and advances `last_seen_at` rather than duplicating.
+- The registry independently reproduces **every** containment count in `R4-audit-tiering.md`
+  (197/219/228 and 171/193/197), which is a mutual check on both documents.
+
+---
+
+## A finding that changes what "363 checks" means
+
+While building the coverage record, the reason strings were too coarse: a check that ran and found
+nothing and a check that never executed both read `no_finding_emitted`, which tells a client their
+site was checked when it may not have been.
+
+Splitting them surfaced this, measured on run `837b75d6`:
+
+> Of the **90 free, deterministic checks that produced nothing**, **82 have no analyzer module at
+> all** and 8 have a module but no function. **None** were implemented-but-silent.
+
+So the checklist is partly a **catalogue of intent**, not a statement of capability. On a paid,
+all-providers run the engine emitted findings for **160 of 363** checks.
+
+**An over-claim was caught and corrected during this work, and the correction matters.** The first
+version of this diagnostic labelled those checks `analyzer_not_implemented`. That label is wrong:
+**160 checks ran while only 31 declared `analyzer:` paths resolve by import**, so roughly 129
+*working* checks are dispatched by some route other than their declaration. A path that fails to
+import proves the **declaration** is unusable — not that the check is unimplemented. The reason
+string is therefore `analyzer_path_unresolved`, and a test pins the wording so the stronger claim
+cannot creep back:
+
+```python
+def test_the_path_check_is_not_treated_as_proof_of_implementation():
+    assert emit.SKIP_UNRESOLVED_ANALYZER == "analyzer_path_unresolved"
+    assert "not_implemented" not in emit.SKIP_UNRESOLVED_ANALYZER
+```
+
+On a free-tier run the coverage now reads:
+
+```
+planned 171 · ran 76
+  source_not_permitted      192   the tier forbids the provider   (correct, expected)
+  analyzer_path_unresolved   94   catalogued, declaration broken  (a real backlog)
+  no_finding_emitted          1   ran, site was clean             (a real pass)
+```
+
+Previously all 287 of those were one undifferentiated bucket.
+
+**What this is worth to the owner:** it converts a vague "the engine runs 363 checks" into a costed,
+prioritised backlog — 90 checks that are free, deterministic, and unbuilt. That is the highest-value
+engine work available, and it is now visible in `22_Coverage` of every workbook rather than needing
+an investigation to find.
