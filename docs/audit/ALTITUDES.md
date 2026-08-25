@@ -163,3 +163,58 @@ Previously all 287 of those were one undifferentiated bucket.
 prioritised backlog — 90 checks that are free, deterministic, and unbuilt. That is the highest-value
 engine work available, and it is now visible in `22_Coverage` of every workbook rather than needing
 an investigation to find.
+
+---
+
+## The operator surface
+
+Route `/admin/audit/[auditId]`, linked from the audit list. Plain CSS on the app's
+own tokens (this codebase uses no Tailwind and no component library), `.card`/`.seg`
+primitives, Material Symbols, TanStack Query.
+
+| Tab | Altitude | What it answers |
+|---|---|---|
+| Overview | macro | Where is this site weak — and did we actually look? |
+| Plan | macro | What do we do first? |
+| Findings | micro → nano | One card per problem; expand for every affected URL |
+| Pages | pivot | Which pages are worst |
+| Downloads | — | The workbook and the uncapped CSVs |
+
+**The rule the UI enforces.** `scoreDisplay` is the only sanctioned way to render a
+score; `score ?? 0` in a component is a bug, and a test pins it. An unmeasured
+dimension renders "Not measured", states *why* (a tier restriction is an operator
+action; a missing analyzer is engineering work), and is styled **absent** — muted and
+dashed — rather than **bad** — red. Verified live: Strategy renders
+`Not measured — ran 0 of 21 checks`.
+
+**Three walls of data were found by looking at the rendered page**, not by reasoning
+about it, and all three are fixed:
+
+| View | Before | After |
+|---|---|---|
+| Subpoint table | 95 rows, half "100 / 0 issues" | defaults to subpoints *with findings* |
+| Plan | **17,025 px** tall | **1,539 px**, 8 per column + expander |
+| Findings | **13,016 px** tall | **1,973 px**, paged at 25 |
+
+Every collapse states the count it is holding back. A filtered view that does not
+say what it filtered is how a dashboard starts lying by omission.
+
+Also caught on inspection: a finding displayed `Owner A3` — an internal engine agent
+code where a job title belongs. It now resolves the dimension through the same role
+vocabulary the workbook and roadmap use, so all three name the same person.
+
+**Verified end to end in a real browser** against the live API and the real 197-page
+audit: logged in, all five tabs rendered, a finding expanded to its three exact URLs
+with observed evidence, all six downloads served `200`, the allow-list refused
+traversal `404`, an unauthenticated read was refused `401`, and there were zero
+console errors.
+
+## Final state
+
+| Suite | Result |
+|---|---|
+| Backend | **5,809 passed** (9 pre-existing `beat_schedule` failures, unrelated) |
+| Backend integration (real Postgres) | **7 passed** |
+| Engine | **71 passed** |
+| Frontend | **71 passed**, new files lint-clean, `next build` green |
+| Migrations | all 97 fresh-apply in order; RLS gate passes |
