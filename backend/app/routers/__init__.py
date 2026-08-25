@@ -13,6 +13,7 @@ from app.routers.activity import router as activity_router
 from app.routers.admin_public_audits import router as admin_public_audits_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.ai_assist import router as ai_assist_router
+from app.routers.audit_findings import router as audit_findings_router
 from app.routers.audits import router as audits_router
 from app.routers.auth import router as auth_router
 from app.routers.backups import router as backups_router
@@ -55,6 +56,7 @@ api_v1.include_router(integrations_router)
 api_v1.include_router(jobs_router)
 api_v1.include_router(tiers_router)
 api_v1.include_router(audits_router)
+api_v1.include_router(audit_findings_router)
 api_v1.include_router(content_router)
 api_v1.include_router(tasks_router)
 api_v1.include_router(team_router)

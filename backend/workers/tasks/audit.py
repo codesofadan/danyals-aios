@@ -30,6 +30,7 @@ from app.logging_setup import get_logger
 from app.services import pricing
 from app.services.audit_artifacts import ArtifactStore, LocalArtifactStore, local_store_from_settings
 from app.services.audit_sheets import SheetMeta, store_audit_sheets
+from app.services import audit_ingest, audit_workbook
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
@@ -105,6 +106,7 @@ class _Runner(Protocol):
         tier: str,
         comprehensive: bool = False,
         types: list[str] | None = None,
+        max_pages: int | None = None,
     ) -> AuditRunResult: ...
 
 
@@ -240,6 +242,98 @@ def _store_sheets(
         logger.warning("audit_sheet_build_failed", audit_id=audit_id)
 
 
+def _ingest_altitudes(
+    artifacts: ArtifactStore | None,
+    audit_id: str,
+    result: AuditRunResult,
+    row: dict[str, Any],
+    *,
+    tier_label: str,
+) -> None:
+    """Load the run into the three altitude tables, then build the workbook.
+
+    This is what turns a 9.3 MB JSON blob into rows a human and a query can both
+    use: on a real 197-page audit, 15,617 findings become 197 pages + 461 causes
+    + 8,077 instances + 105 rollups in ~1.3s.
+
+    NEVER FATAL, for the same reason ``_store_sheets`` is not: the audit itself
+    has already succeeded and its report already exists. Losing a completed
+    client deliverable because a supplementary transform failed would be a strictly
+    worse outcome than shipping without the workbook. Failures are logged and the
+    audit stays ``done``.
+    """
+    if not result.artifact_dir:
+        return
+    try:
+        ingested = audit_ingest.ingest(
+            audit_id=audit_id,
+            client_id=str(row["client_id"]) if row.get("client_id") else None,
+            artifact_dir=result.artifact_dir,
+            site_url=str(row.get("url") or ""),
+            run_uuid=str(result.run_uuid or ""),
+            tier=tier_label.lower(),
+            types=list(row.get("types") or []),
+        )
+        logger.info(
+            "audit_altitudes_ingested",
+            audit_id=audit_id,
+            pages=ingested.pages,
+            findings=ingested.findings,
+            instances=ingested.instances,
+            truncated=ingested.truncated,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "audit_altitude_ingest_failed",
+            audit_id=audit_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return
+
+    # The plan. Deterministic and model-free: if this fails the audit still has
+    # its findings, so it is warned about rather than raised.
+    try:
+        planned = audit_ingest.store_roadmap(
+            audit_id=audit_id,
+            client_id=str(row["client_id"]) if row.get("client_id") else None,
+        )
+        logger.info("audit_roadmap_stored", audit_id=audit_id, **planned)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "audit_roadmap_failed",
+            audit_id=audit_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    if not isinstance(artifacts, LocalArtifactStore):
+        return
+    try:
+        built = audit_workbook.build(
+            audit_id=audit_id,
+            out_dir=artifacts.sheets_dir(audit_id),
+            artifact_dir=result.artifact_dir,
+            meta={
+                "url": str(row.get("url") or ""),
+                "client_name": str(row.get("client_name") or ""),
+                "tier": tier_label,
+                "generated_at": _utcnow().isoformat(),
+            },
+        )
+        logger.info(
+            "audit_workbook_built",
+            audit_id=audit_id,
+            findings=built.findings,
+            instances=built.instances,
+            capped=built.capped,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "audit_workbook_build_failed",
+            audit_id=audit_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
 def execute_audit(
     store: AuditStore,
     settings: Settings,
@@ -298,6 +392,11 @@ def execute_audit(
             tier=tier,
             comprehensive=True,
             types=row.get("types"),
+            # The breadth the OPERATOR asked for, snapshotted on the row at
+            # enqueue. Null on rows written before migration 0084, which falls
+            # back to the config default - i.e. exactly what those rows already
+            # ran at, so a queued-before-deploy job is unaffected.
+            max_pages=row.get("max_pages"),
         )
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("audit_job_crashed", audit_id=audit_id)
@@ -356,6 +455,7 @@ def execute_audit(
     )
     # Role-based remediation sheets (xlsx + csvs) from the SAME findings.json.
     _store_sheets(artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free")
+    _ingest_altitudes(artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free")
     # Publish a client deliverable for a completed audit that produced a PDF
     # (best-effort; never fails the job). Public/unlinked audits have no client.
     if pdf_key and row.get("client_id"):
