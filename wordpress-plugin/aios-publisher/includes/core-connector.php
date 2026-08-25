@@ -175,8 +175,128 @@ function aios_publisher_rest_ping( $request ) {
 			'site'           => esc_url_raw( home_url() ),
 			'name'           => sanitize_text_field( get_bloginfo( 'name' ) ),
 			'plugin_version' => AIOS_PUBLISHER_VERSION,
+			// --- 1.8.0: what this site can actually do ------------------------
+			// Added so the platform stops INFERRING the editor from a settings
+			// flag and asks the site instead. Purely additive: every field above
+			// is unchanged, so a caller written against 1.7.0 keeps working.
+			'capabilities'   => aios_publisher_capabilities(),
 		),
 		200
+	);
+}
+
+/**
+ * The post meta keys AIOS may write, so the platform can find out which of them
+ * this site will actually accept over the WP REST API.
+ *
+ * WHY THIS LIST IS NARROW: `get_registered_meta_keys()` returns every key every
+ * plugin on the site has registered. Returning all of them would leak another
+ * plugin's internals to us for no reason and bloat a response that is polled. We
+ * only need to know about the keys WE write.
+ *
+ * @return array<int,string>
+ */
+function aios_publisher_known_meta_keys() {
+	return array(
+		'_elementor_data',
+		'_elementor_edit_mode',
+		'_elementor_version',
+		'_wp_page_template',
+		'_yoast_wpseo_title',
+		'_yoast_wpseo_metadesc',
+		'_yoast_wpseo_focuskw',
+		'rank_math_title',
+		'rank_math_description',
+		'rank_math_focus_keyword',
+	);
+}
+
+/**
+ * Which of our known meta keys are registered with `show_in_rest` on this site.
+ *
+ * THE POINT OF THIS FIELD. WordPress SILENTLY DROPS a REST write to a meta key
+ * that is not registered with `show_in_rest`: the response is 200 and carries the
+ * OLD value, so a publish reports success and changes nothing. This plugin's own
+ * endpoint is unaffected (it calls `update_post_meta()` directly in PHP, which
+ * needs no registration) - but the platform also has a native WP-REST transport,
+ * and on THAT path an unregistered key is a false success.
+ *
+ * So the platform can now write only proven-registered keys and report the rest as
+ * HELD, instead of discovering the drop by reading the live page later.
+ *
+ * @param string $post_type Post type to inspect ('post' or 'page').
+ * @return array<int,string> The registered subset, in a stable order.
+ */
+function aios_publisher_registered_meta_keys( $post_type ) {
+	if ( ! function_exists( 'get_registered_meta_keys' ) ) {
+		return array();
+	}
+	$registered = get_registered_meta_keys( 'post', $post_type );
+	if ( ! is_array( $registered ) ) {
+		return array();
+	}
+	$out = array();
+	foreach ( aios_publisher_known_meta_keys() as $key ) {
+		if ( ! isset( $registered[ $key ] ) || ! is_array( $registered[ $key ] ) ) {
+			continue;
+		}
+		// `show_in_rest` may be `true` OR an args array; both mean exposed.
+		if ( ! empty( $registered[ $key ]['show_in_rest'] ) ) {
+			$out[] = $key;
+		}
+	}
+	return $out;
+}
+
+/**
+ * Describe what this WordPress install can do, for the platform's editor-mode
+ * decision.
+ *
+ * NEVER FATALS. A capability probe that throws would break the connection check
+ * itself, which is strictly worse than having no probe: the platform would read a
+ * reachable site as unreachable and stop publishing to it. Every lookup below is
+ * guarded, and anything unknown is reported as null/false rather than guessed.
+ *
+ * @return array<string,mixed>
+ */
+function aios_publisher_capabilities() {
+	$theme_name = '';
+	$stylesheet = '';
+	$template   = '';
+	if ( function_exists( 'wp_get_theme' ) ) {
+		$theme = wp_get_theme();
+		if ( $theme instanceof WP_Theme ) {
+			$theme_name = sanitize_text_field( (string) $theme->get( 'Name' ) );
+			$stylesheet = sanitize_key( (string) $theme->get_stylesheet() );
+			$template   = sanitize_key( (string) $theme->get_template() );
+		}
+	}
+
+	// Elementor sets ELEMENTOR_VERSION when it loads. Checking the constant is
+	// more reliable than is_plugin_active(), which needs wp-admin includes and
+	// reports a plugin that is active-but-erroring as available.
+	$elementor         = defined( 'ELEMENTOR_VERSION' );
+	$elementor_version = $elementor ? sanitize_text_field( (string) ELEMENTOR_VERSION ) : null;
+
+	// Core block editor. `parse_blocks` is the function this plugin's own
+	// sanitizer depends on, so probing for it answers the question that matters
+	// here rather than a general "is WP 5.0+".
+	$gutenberg = function_exists( 'parse_blocks' ) && function_exists( 'serialize_blocks' );
+
+	return array(
+		'wp_version'           => sanitize_text_field( (string) get_bloginfo( 'version' ) ),
+		'active_theme'         => array(
+			'name'       => $theme_name,
+			'stylesheet' => $stylesheet,
+			'template'   => $template,
+		),
+		'elementor'            => $elementor,
+		'elementor_version'    => $elementor_version,
+		'gutenberg'            => $gutenberg,
+		'registered_meta_keys' => array(
+			'post' => aios_publisher_registered_meta_keys( 'post' ),
+			'page' => aios_publisher_registered_meta_keys( 'page' ),
+		),
 	);
 }
 /* -------------------------------------------------------------------------- *

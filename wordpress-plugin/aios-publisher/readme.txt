@@ -3,7 +3,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -79,6 +79,24 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.8.0 =
+* `GET /ping` now reports what the site can actually DO, under a new `capabilities`
+  key: WordPress version, active theme, whether Elementor is loaded (and its
+  version), whether the core block editor is present, and which of AIOS's post-meta
+  keys are registered with `show_in_rest` for posts and pages.
+* Why the meta list matters: WordPress SILENTLY DROPS a REST write to a meta key that
+  is not registered with `show_in_rest` - the response is 200 and carries the OLD
+  value. This plugin's own endpoint is unaffected (it calls `update_post_meta()`
+  directly), but the platform also has a native WP-REST transport, and on that path an
+  unregistered key is a false success. The platform can now write only proven-
+  registered keys and report the rest as held.
+* Purely additive. Every field the 1.7.0 ping returned is unchanged and in the same
+  place, so an older platform build keeps working against this plugin, and a newer
+  platform build keeps working against an older plugin (it simply learns nothing and
+  falls back to its configured default).
+* No change to publishing, sanitizing or meta writing. The 1.3.0 `<style>`/`<script>`
+  strip and the 1.6.0 block-comment JSON fix are untouched.
 
 = 1.7.0 =
 * Every push now sends `tags` (the content job's own keyword research - primary
