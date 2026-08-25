@@ -221,19 +221,98 @@ class DataForSeoProvider(HttpProviderClient):
         return out
 
 
+# DataForSEO location CODES, not names. The Protocol takes a country hint like "us",
+# and the API rejects that outright: `location_name` wants "United States", and passing
+# "us" returns task status 40501 Invalid Field: 'location_name'.
+#
+# MEASURED against the live API 2026-08-25. Every keyword call this integration has ever
+# made returned 40501 and zero rows - see `_dfs_items` below for why nobody noticed.
+# With a correct location the same call returns real demand ("leak detection", 12,100/mo,
+# $30.14 CPC) at $0.0126.
+#
+# Codes rather than names because a name is a free-text field with a spelling to get
+# wrong; a code either resolves or does not.
+_DFS_LOCATION_CODES: dict[str, int] = {
+    "us": 2840, "usa": 2840, "united states": 2840,
+    "gb": 2826, "uk": 2826, "united kingdom": 2826,
+    "ca": 2124, "canada": 2124,
+    "au": 2036, "australia": 2036,
+    "nz": 2554, "new zealand": 2554,
+    "ie": 2372, "ireland": 2372,
+    "in": 2356, "india": 2356,
+    "de": 2276, "germany": 2276,
+    "fr": 2250, "france": 2250,
+    "es": 2724, "spain": 2724,
+}
+
+# The product is US local SEO. An absent geo means "the default market", not "every
+# market" - and DataForSEO Labs requires a location, so there is no no-location option.
+DEFAULT_LOCATION_CODE = 2840
+
+# DataForSEO's own success code. Anything else on a TASK is a failure of that task,
+# even when the envelope around it says 20000.
+_DFS_OK = 20000
+
+
+class DataForSeoTaskError(RuntimeError):
+    """One DataForSEO task failed. Carries the API's own code and message."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(f"DataForSEO task failed: {code} {message}")
+        self.code = code
+        self.message = message
+
+
+def resolve_location_code(geo: str | None) -> int:
+    """A DataForSEO location code for a country hint.
+
+    An UNRECOGNISED hint raises rather than falling back to the default. Silently
+    serving United States data for a request that said "fr" would be worse than
+    failing: the numbers look valid, and nothing downstream can tell they describe the
+    wrong country.
+    """
+    if not geo or not geo.strip():
+        return DEFAULT_LOCATION_CODE
+    key = geo.strip().lower()
+    code = _DFS_LOCATION_CODES.get(key)
+    if code is None:
+        raise ValueError(
+            f"unknown DataForSEO location {geo!r}; add it to _DFS_LOCATION_CODES with "
+            "its numeric code rather than letting it default to another country"
+        )
+    return code
+
+
 def _dfs_request_body(keywords: list[str], geo: str | None, limit: int) -> dict[str, Any]:
-    """One DataForSEO Labs task body (keywords + optional geo + a bounded limit)."""
-    body: dict[str, Any] = {"keywords": keywords, "limit": max(1, min(limit, 1000))}
-    if geo:
-        body["location_name"] = geo
-    return body
+    """One DataForSEO Labs task body (keywords + resolved location + bounded limit)."""
+    return {
+        "keywords": keywords,
+        "limit": max(1, min(limit, 1000)),
+        "location_code": resolve_location_code(geo),
+        "language_code": "en",
+    }
 
 
 def _dfs_items(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Pull ``tasks[].result[].items[]`` out of a DataForSEO envelope defensively."""
+    """``tasks[].result[].items[]`` from a DataForSEO envelope - raising on a failed task.
+
+    THE SILENT FAILURE THIS FIXES. DataForSEO reports per-TASK errors inside an envelope
+    whose own `status_code` is 20000 Ok. This function used to walk straight past a
+    failed task and return `[]`, which is indistinguishable from "this keyword has no
+    ideas" - so a request rejected as malformed looked like a keyword with no demand,
+    on every call, forever. The integration returned zero rows for its entire life and
+    reported nothing wrong.
+
+    Now a failed task raises. The caller degrades to `estimated` metrics either way, but
+    it degrades KNOWING, and the reason reaches the log instead of vanishing.
+    """
     items: list[dict[str, Any]] = []
     for task in data.get("tasks") or []:
-        for result in (task or {}).get("result") or []:
+        task = task or {}
+        code = task.get("status_code")
+        if isinstance(code, int) and code != _DFS_OK:
+            raise DataForSeoTaskError(code, str(task.get("status_message") or ""))
+        for result in task.get("result") or []:
             for item in (result or {}).get("items") or []:
                 if isinstance(item, dict):
                     items.append(item)
