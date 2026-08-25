@@ -154,6 +154,10 @@ def run_schema_links(
         "warnings": len(getattr(verdict, "warnings", ())),
     }
     ctx.brief["json_ld"] = graph
+    # The GATE scores a schema_validity dimension off this. Storing only the graph and
+    # not the verdict made the gate re-derive it as "absent" and score 60 on a document
+    # that had just validated clean - caught by running the two stages back to back.
+    ctx.brief["schema_validation"] = verdict
     return ctx.record(StageResult(
         STAGE,
         outcome="ok" if data["valid"] else "degraded",
