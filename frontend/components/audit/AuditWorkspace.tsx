@@ -2,13 +2,21 @@
 
 import { useCallback, useState } from "react";
 import {
+  auditDepths,
   auditTypes,
   TYPE_LABEL,
+  type AuditDepth,
   type AuditTypeKey,
   type JobStatus,
   type Tier,
 } from "@/lib/audit";
-import { useAudits, useAuditStats, useCreateAudit } from "@/lib/hooks/audits";
+import {
+  useAudits,
+  useAuditEstimate,
+  useAuditStats,
+  useCreateAudit,
+  type AuditEstimate,
+} from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
 import { useSpendHalted } from "@/lib/hooks/cost";
 import { downloadFile, getReportHtml } from "@/lib/api";
@@ -21,6 +29,23 @@ const STATUS_META: Record<JobStatus, { pill: string; label: string; icon: string
   done: { pill: "ok", label: "Done", icon: "check_circle" },
   failed: { pill: "warn", label: "Failed", icon: "error" },
 };
+
+const DEPTH_LABEL: Record<AuditDepth, string> = {
+  free: "Free",
+  standard: "Standard",
+  deep: "Deep",
+};
+
+// A run that cost materially MORE than it was quoted. This is the comparison the
+// platform could never make before: the estimate was a flat constant that left no
+// trace on the row, so nobody could tell whether the cost model was any good.
+// Flagged one way only — coming in under estimate is not a problem to chase.
+const OVERSPEND_TOLERANCE = 1.15;
+
+function overspent(r: { cost: number | null; estimatedCost: number | null }) {
+  if (r.cost === null || r.estimatedCost === null || r.estimatedCost <= 0) return false;
+  return r.cost > r.estimatedCost * OVERSPEND_TOLERANCE;
+}
 
 function scoreClass(score: number) {
   if (score >= 80) return "ok";
@@ -48,7 +73,17 @@ export default function AuditWorkspace() {
   const [url, setUrl] = useState("");
   const [clientId, setClientId] = useState("");
   const [types, setTypes] = useState<AuditTypeKey[]>([]);
+  const [depth, setDepth] = useState<AuditDepth>("standard");
   const effectiveClientId = clientId || clients[0]?.id || "";
+
+  // The quote currently on screen, or null. Held in state (not react-query cache)
+  // because a confirmation is bound to ONE figure: the moment any input changes,
+  // the number the operator agreed to is no longer the number the run would cost,
+  // so the quote is dropped rather than reused. The server enforces the same rule
+  // independently — it compares the echoed figure against a freshly computed one
+  // and returns 409 if they have drifted.
+  const estimateM = useAuditEstimate();
+  const [quote, setQuote] = useState<AuditEstimate | null>(null);
 
   // Table filters
   const [statusFilter, setStatusFilter] = useState<"all" | JobStatus>("all");
@@ -65,20 +100,75 @@ export default function AuditWorkspace() {
   // global API-spend halt is engaged.
   const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending && !halted;
 
-  const toggleType = (k: AuditTypeKey) =>
+  // A run's TIER is derived from what will actually execute, and an EMPTY
+  // selection is the full comprehensive audit — every paid provider plus all 21
+  // AI agents. This previously read `types.some(isPaid)`, which is false for an
+  // empty array, so the most expensive run the platform can launch was sent as
+  // "Free" and skipped both cost gates server-side. The server now refuses that
+  // combination outright; this keeps the button sending a request it will accept.
+  const tier: Tier = types.length === 0 || types.some((t) => PAID_TYPES.has(t)) ? "Paid" : "Free";
+
+  // Free tier can only run at free depth: `--mode free` clears every paid provider
+  // at the engine, so extra breadth would buy more pages of the same two
+  // deterministic dimensions. Shown as a disabled option with the reason rather
+  // than hidden, so the constraint is legible instead of mysterious.
+  const effectiveDepth: AuditDepth =
+    tier === "Free" ? "free" : depth === "free" ? "standard" : depth;
+  const depthMeta = auditDepths.find((d) => d.key === effectiveDepth);
+  const needsConfirm = depthMeta?.confirms ?? false;
+  // A quote only counts for the request it was issued against.
+  const confirmed =
+    quote !== null && quote.depth === effectiveDepth && quote.tier === tier;
+
+  const dropQuote = () => setQuote(null);
+
+  const toggleType = (k: AuditTypeKey) => {
+    dropQuote();
     setTypes((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+  };
+
+  const pickDepth = (k: AuditDepth) => {
+    dropQuote();
+    setDepth(k);
+  };
+
+  // The URL is sent so a deep quote can measure the site's own sitemap and price
+  // the run it would actually make, rather than the depth's 300-page ceiling.
+  const getEstimate = () =>
+    estimateM.mutate(
+      { tier, depth: effectiveDepth, types, url: url.trim() },
+      { onSuccess: setQuote },
+    );
 
   const runAudit = () => {
     if (!canRun) return;
+    // A depth that requires confirmation cannot be launched until a quote for THIS
+    // exact request has been shown and accepted. The server enforces it too; this
+    // is the step that makes the number visible, which is the actual point.
+    if (needsConfirm && !confirmed) return;
     const clean = url.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    // Empty selection = the full comprehensive run (on-page + technical + off-page +
-    // local + 21 AI agents + PDF); a subset scopes the engine to those dimensions.
-    // A selection that touches a paid dimension runs as Paid (cost-gated); an empty
-    // or free-only selection stays Free.
-    const tier: Tier = types.some((t) => PAID_TYPES.has(t)) ? "Paid" : "Free";
     createAudit.mutate(
-      { client_id: effectiveClientId, url: clean, tier, types },
-      { onSuccess: () => { setUrl(""); setTypes([]); } },
+      {
+        client_id: effectiveClientId,
+        url: clean,
+        tier,
+        types,
+        depth: effectiveDepth,
+        // Echo the exact figure that was displayed. If unit prices or the depth's
+        // page budget moved since the quote, the server returns 409 rather than
+        // charging against a number the operator never saw.
+        ...(needsConfirm && quote
+          ? {
+              // Echo BOTH: the budget the quote was priced for and the figure
+              // itself. The server re-derives the price from the budget and
+              // compares — so the confirmation is checked arithmetically rather
+              // than by re-measuring a site that may have changed meanwhile.
+              max_pages: quote.pages,
+              confirmed_estimate: quote.estimatedCost,
+            }
+          : {}),
+      },
+      { onSuccess: () => { setUrl(""); setTypes([]); dropQuote(); } },
     );
   };
 
@@ -91,6 +181,7 @@ export default function AuditWorkspace() {
 
   const runningCount = rows.filter((r) => r.status === "running").length;
   const createErr = createAudit.error instanceof Error ? createAudit.error.message : null;
+  const estimateErr = estimateM.error instanceof Error ? estimateM.error.message : null;
 
   return (
     <>
@@ -136,19 +227,20 @@ export default function AuditWorkspace() {
                   <th>Client</th>
                   <th>Site / URL</th>
                   <th>Type</th>
-                  <th>Tier</th>
+                  <th>Tier &amp; depth</th>
                   <th>Status</th>
                   <th className="num">Score</th>
+                  <th className="num">Cost</th>
                   <th>Artifacts</th>
                   <th className="num">Run time</th>
                 </tr>
               </thead>
               <tbody>
                 {auditsQ.isLoading && (
-                  <tr><td colSpan={8} className="au-empty">Loading audits…</td></tr>
+                  <tr><td colSpan={9} className="au-empty">Loading audits…</td></tr>
                 )}
                 {auditsQ.isError && !auditsQ.isLoading && (
-                  <tr><td colSpan={8} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
+                  <tr><td colSpan={9} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
                 )}
                 {!auditsQ.isLoading && !auditsQ.isError && shown.map((r) => {
                   const sm = STATUS_META[r.status];
@@ -170,7 +262,17 @@ export default function AuditWorkspace() {
                           )}
                         </div>
                       </td>
-                      <td><span className={`au-tier ${r.tier.toLowerCase()}`}>{r.tier}</span></td>
+                      <td>
+                        <span className={`au-tier ${r.tier.toLowerCase()}`}>{r.tier}</span>
+                        {/* Depth is null on runs created before it was recorded — that
+                            is "breadth unknown", not "free", so it renders as a dash
+                            rather than borrowing a default it never had. */}
+                        <div className="au-when">
+                          {r.depth === null
+                            ? "—"
+                            : `${DEPTH_LABEL[r.depth]}${r.maxPages ? ` · ${r.maxPages}p` : ""}`}
+                        </div>
+                      </td>
                       <td>
                         <span className={`status-pill ${sm.pill}`}>
                           <span className={`material-symbols-rounded${r.status === "running" ? " au-spin" : ""}`}>{sm.icon}</span>
@@ -182,6 +284,18 @@ export default function AuditWorkspace() {
                           <span className="au-dash">—</span>
                         ) : (
                           <span className={`au-score ${scoreClass(r.score)}`}>{r.score}</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {r.cost === null ? (
+                          <span className="au-dash" title="Nothing spent yet — the engine has not started">—</span>
+                        ) : (
+                          <span className={overspent(r) ? "au-score crit" : undefined}>
+                            ${r.cost.toFixed(2)}
+                          </span>
+                        )}
+                        {r.estimatedCost !== null && (
+                          <div className="au-when">est ${r.estimatedCost.toFixed(2)}</div>
                         )}
                       </td>
                       <td>
@@ -224,7 +338,7 @@ export default function AuditWorkspace() {
                   );
                 })}
                 {!auditsQ.isLoading && !auditsQ.isError && shown.length === 0 && (
-                  <tr><td colSpan={8} className="au-empty">No audits match these filters.</td></tr>
+                  <tr><td colSpan={9} className="au-empty">No audits match these filters.</td></tr>
                 )}
               </tbody>
             </table>
@@ -245,7 +359,10 @@ export default function AuditWorkspace() {
             <input
               placeholder="northpeakdental.com"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              // A deep quote is priced from THIS site's sitemap, so changing the
+              // target invalidates it. Dropping the quote here is what stops a
+              // price measured on one site being confirmed against another.
+              onChange={(e) => { dropQuote(); setUrl(e.target.value); }}
               onKeyDown={(e) => e.key === "Enter" && runAudit()}
             />
           </div>
@@ -285,20 +402,104 @@ export default function AuditWorkspace() {
 
           <div className="fld-hint" style={{ margin: "2px 0 10px" }}>
             <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: "16px" }}>info</span>{" "}
-            Leave empty to run a <b>full audit</b> (all types). Pick a subset to scope the
-            run; any paid dimension ($) runs behind the cost gate.
+            Leave empty to run a <b>full audit</b> — every dimension, every paid
+            provider and all 21 AI agents. That is the largest run the platform makes,
+            so it goes through the cost gate as <b>Paid</b>. Pick a subset to scope it;
+            a free-only subset runs as Free.
           </div>
 
-          <button className="primary-btn wide" onClick={runAudit} disabled={!canRun}>
-            <span className="material-symbols-rounded">rocket_launch</span>
-            {halted
-              ? "API spend is halted"
-              : createAudit.isPending
-                ? "Starting…"
-                : types.length === 0
-                  ? "Run full audit"
-                  : `Run ${types.length}-type audit`}
-          </button>
+          <div className="fld">
+            <label>Depth</label>
+            <div className="au-pick">
+              {auditDepths.map((d) => {
+                const blocked = tier === "Free" ? d.key !== "free" : d.key === "free";
+                return (
+                  <button
+                    key={d.key}
+                    type="button"
+                    className={`chip${effectiveDepth === d.key ? " on" : ""}`}
+                    onClick={() => pickDepth(d.key)}
+                    disabled={blocked}
+                    title={
+                      blocked
+                        ? tier === "Free"
+                          ? "A Free run crawls at free depth — the engine clears every paid provider, so extra breadth buys more pages of the same two checks."
+                          : "Free depth is the zero-spend lead-magnet crawl; this selection runs paid providers."
+                        : d.blurb
+                    }
+                  >
+                    {d.label}
+                    {d.confirms && <span className="au-pick-paid" aria-label="confirm required">!</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {needsConfirm && (
+            <div className="au-run-note" role="status">
+              <span className="material-symbols-rounded">receipt_long</span>
+              {confirmed && quote ? (
+                <span>
+                  Estimated <b>${quote.estimatedCost.toFixed(2)}</b> — up to{" "}
+                  <b>{quote.pages}</b> pages
+                  {quote.agents ? ", including the AI agent analysis" : ", no AI agents"}.{" "}
+                  {quote.measuredPages === null ? (
+                    <>
+                      We could not read this site&apos;s sitemap, so this is the full
+                      depth allowance — the real run may be smaller, and you are only
+                      billed for what it crawls.
+                    </>
+                  ) : (
+                    <>
+                      Its sitemap lists <b>{quote.measuredPages}</b> page
+                      {quote.measuredPages === 1 ? "" : "s"}
+                      {quote.sizeTruncated ? " (at least — the sitemap is large)" : ""}.
+                    </>
+                  )}{" "}
+                  Confirm to run at this price.
+                </span>
+              ) : (
+                <span>
+                  A deep audit is costed before it runs. Get the estimate, then confirm it.
+                </span>
+              )}
+            </div>
+          )}
+          {estimateErr && (
+            <div className="au-run-note" role="alert" style={{ color: "var(--warn, #A96913)" }}>
+              <span className="material-symbols-rounded">error</span>
+              {estimateErr}
+            </div>
+          )}
+
+          {needsConfirm && !confirmed ? (
+            <button
+              className="primary-btn wide"
+              onClick={getEstimate}
+              disabled={!canRun || estimateM.isPending}
+            >
+              <span className="material-symbols-rounded">calculate</span>
+              {halted
+                ? "API spend is halted"
+                : estimateM.isPending
+                  ? "Estimating…"
+                  : "Estimate cost"}
+            </button>
+          ) : (
+            <button className="primary-btn wide" onClick={runAudit} disabled={!canRun}>
+              <span className="material-symbols-rounded">rocket_launch</span>
+              {halted
+                ? "API spend is halted"
+                : createAudit.isPending
+                  ? "Starting…"
+                  : needsConfirm && quote
+                    ? `Confirm $${quote.estimatedCost.toFixed(2)} & run`
+                    : types.length === 0
+                      ? "Run full audit"
+                      : `Run ${types.length}-type audit`}
+            </button>
+          )}
           {halted && (
             <div className="au-run-note" role="status" style={{ color: "var(--warn, #A96913)" }}>
               <span className="material-symbols-rounded">block</span>

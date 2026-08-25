@@ -20,6 +20,15 @@ from app.util.timefmt import format_runtime, format_when
 
 AuditTier = Literal["Free", "Paid"]
 AuditStatus = Literal["queued", "running", "done", "failed"]
+# Crawl BREADTH, a separate axis from ``tier`` (which authorises spend) and from
+# ``types`` (which scopes dimensions). Recovery plan §3.2 names four tiers; the
+# fourth - type-scoped - is the ``types`` picker and is orthogonal to these three.
+# ``free`` is the condensed lead magnet, ``standard`` the routine macro health
+# read, ``deep`` the full consulting run. Stored lowercase, exactly as written.
+AuditDepth = Literal["free", "standard", "deep"]
+# Depth is null on rows written before migration 0084. That is a real state
+# ("breadth unknown - it came from a process-wide setting"), never a default.
+_ALL_DEPTHS: frozenset[str] = frozenset({"free", "standard", "deep"})
 # The audit-type picker (frontend ``lib/audit.ts`` ``AuditTypeKey``). On-Page +
 # Technical are the FREE deterministic dimensions; Off-Page / Local SEO / AI (GEO)
 # / Strategy each rely on a paid provider or the AI agents.
@@ -43,6 +52,28 @@ def tier_from_db(value: str | None) -> AuditTier:
     return "Paid" if value == "paid" else "Free"
 
 
+def depth_from_db(value: str | None) -> AuditDepth | None:
+    """Map the stored depth back, preserving NULL rather than inventing a default.
+
+    A null here means the row predates the depth axis (migration 0084 backfills
+    nothing, deliberately). Coercing it to ``"free"`` would claim a 15-page crawl
+    for runs that may have covered 100.
+    """
+    return value if value in _ALL_DEPTHS else None  # type: ignore[return-value]
+
+
+def default_depth_for_tier(tier: AuditTier) -> AuditDepth:
+    """The depth a request means when it names a tier but not a depth.
+
+    A ``Free`` tier run can only ever be ``free`` depth - the engine hard-clears
+    every paid provider on ``--mode free``, so a wider crawl would be a bigger
+    free crawl, not a better audit. A ``Paid`` request that names no depth gets
+    ``standard``: the routine check-in, and the one depth that does not interrupt
+    the operator for a confirmation.
+    """
+    return "free" if tier == "Free" else "standard"
+
+
 class AuditCreate(BaseModel):
     """POST /audits body: the client, the target URL, the tier, and the types.
 
@@ -58,6 +89,23 @@ class AuditCreate(BaseModel):
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
     types: list[AuditTypeKey] = Field(default_factory=list)
+    # Crawl breadth. Omitted -> `default_depth_for_tier` (Free->free, Paid->standard),
+    # which is exactly what every request meant before this field existed, so an
+    # older client keeps its behaviour unchanged.
+    depth: AuditDepth | None = None
+    # The page budget the quote was issued for, echoed back. This is how a deep run
+    # reproduces the number it was quoted WITHOUT the server re-probing the site:
+    # re-probing on submit would make a confirmation depend on a value that can
+    # move between quote and submit, producing spurious 409s for no gain. The
+    # server still bounds it - see `routers/audits.py`, which refuses anything
+    # above the depth's ceiling - so echoing it back can only ever ask for a run
+    # the caller was already entitled to.
+    max_pages: int | None = Field(default=None, gt=0)
+    # The estimate the operator was shown and accepted, in USD. REQUIRED for a
+    # depth in `CONFIRM_REQUIRED_DEPTHS` (deep) and ignored otherwise. It is the
+    # number itself rather than a bare "yes" so the server can verify the operator
+    # confirmed the CURRENT price: a stale figure is refused, not silently honoured.
+    confirmed_estimate: float | None = Field(default=None, ge=0)
 
     @field_validator("types")
     @classmethod
@@ -73,6 +121,31 @@ class AuditCreate(BaseModel):
         """The requested types that need a paid data source."""
         return [t for t in self.types if t in PAID_AUDIT_TYPES]
 
+    def runs_paid_providers(self) -> bool:
+        """Whether the run this request describes will actually fire a paid provider.
+
+        NOT the same question as ``paid_types()``, and the difference was a live
+        spend-gate bypass. An EMPTY selection is not "no paid dimensions" - it is
+        the FULL comprehensive audit. ``build_argv`` gives an empty selection
+        ``--mode paid --serper --places --citations --agents on --ai-narrative
+        on``, and ``execute_audit`` passes ``comprehensive=True`` unconditionally
+        for a dashboard run, so the engine's mode does not consult the stored tier
+        at all. ``paid_types()`` returns ``[]`` for that request, which read as
+        "nothing to gate" everywhere it was consulted.
+        """
+        return not self.types or bool(self.paid_types())
+
+    def resolved_depth(self) -> AuditDepth:
+        """The depth this request runs at, after defaults.
+
+        A ``Free`` tier request is pinned to ``free`` depth even if it asked for
+        more: ``--mode free`` hard-clears every paid provider at the engine, so a
+        wider free crawl buys more pages of the same two deterministic dimensions
+        while multiplying the cost of an UNMETERED path. The endpoint refuses that
+        combination rather than quietly downgrading it - see ``routers/audits.py``.
+        """
+        return self.depth or default_depth_for_tier(self.tier)
+
 
 class AuditResponse(BaseModel):
     """One audit row in the frontend ``AuditRow`` shape."""
@@ -83,6 +156,24 @@ class AuditResponse(BaseModel):
     types: list[AuditTypeKey]
     tier: AuditTier
     status: AuditStatus
+    # null on rows written before migration 0084 - "breadth unknown", not "free".
+    depth: AuditDepth | None = None
+    # The pages the engine was asked for. Snapshotted per row, so re-reading an old
+    # audit reports the breadth IT ran at rather than today's setting.
+    max_pages: int | None = Field(default=None, serialization_alias="maxPages")
+    # What the pre-flight gate was told this would cost, next to what it did cost.
+    estimated_cost: float | None = Field(default=None, serialization_alias="estimatedCost")
+    # The COMMITTED cost, runtime-derived from the engine's own observables.
+    #
+    # It was already recorded on the row and already visible in Cost Controls, one
+    # screen away from the table where audits are actually reviewed. Being
+    # reachable is not the same as being present at the decision: an operator
+    # scanning the audit list could see what a run was QUOTED and never what it
+    # SPENT, which is exactly the comparison that says whether the cost model is
+    # any good. Staff-safe by construction - every caller of `GET /audits`
+    # (`ViewReports`) can already read `GET /cost/log`, which carries these same
+    # figures; the PORTAL response deliberately still omits it.
+    cost: float | None = None
     score: int | None = None  # 0-100 composite; null while pending
     runtime: str  # "6m 12s" or "—" while pending
     when: str  # display timestamp, e.g. "Today · 09:14"
@@ -92,12 +183,24 @@ class AuditResponse(BaseModel):
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> AuditResponse:
         score = row.get("score")
+        max_pages = row.get("max_pages")
+        estimated = row.get("estimated_cost")
+        # `cost` is `not null default 0`, so a queued row reads as $0.00 - which is
+        # true and misleading: nothing has been spent YET. It is surfaced only once
+        # the engine actually started, which is exactly the condition the worker
+        # commits a cost under (`if result.run_uuid is not None`). Before that it is
+        # null: "not yet spent", not "free".
+        committed = row.get("cost") if row.get("run_uuid") else None
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
             url=row.get("url", ""),
             types=[t for t in (row.get("types") or []) if t in _ALL_TYPES],
             tier=tier_from_db(row.get("tier")),
+            depth=depth_from_db(row.get("depth")),
+            max_pages=int(max_pages) if max_pages is not None else None,
+            estimated_cost=float(estimated) if estimated is not None else None,
+            cost=float(committed) if committed is not None else None,
             status=row.get("status", "queued"),
             score=int(score) if score is not None else None,
             runtime=format_runtime(row.get("runtime_seconds")),
@@ -132,6 +235,11 @@ class PortalAuditCreate(BaseModel):
     def paid_types(self) -> list[str]:
         """The requested types that need a paid data source."""
         return [t for t in self.types if t in PAID_AUDIT_TYPES]
+
+    def runs_paid_providers(self) -> bool:
+        """See :meth:`AuditCreate.runs_paid_providers` - an empty selection is the
+        FULL comprehensive run, not a cheap one."""
+        return not self.types or bool(self.paid_types())
 
 
 class PortalAuditResponse(BaseModel):
@@ -217,3 +325,66 @@ def compute_audit_stats(rows: list[dict[str, Any]]) -> AuditStatsResponse:
         running_now=running,
         turnaround_min=turnaround,
     )
+
+
+class AuditEstimateRequest(BaseModel):
+    """POST /audits/estimate body: what a run WOULD cost, before committing to it.
+
+    Mirrors the shape of ``AuditCreate`` minus the target URL, because the price
+    is a function of breadth and dimensions, not of which site is crawled. No
+    ``client_id`` either: this endpoint reads nothing tenant-scoped and spends
+    nothing, so it needs no tenant.
+    """
+
+    tier: AuditTier = "Free"
+    depth: AuditDepth | None = None
+    types: list[AuditTypeKey] = Field(default_factory=list)
+    # Optional, and only consulted for a depth that scales to site size (deep).
+    # Given one, the quote measures the site's own sitemap and prices the run it
+    # would ACTUALLY make rather than the depth's ceiling. Omitted -> the ceiling,
+    # which errs high; the quote says which of the two it did.
+    url: str | None = None
+
+    @field_validator("types")
+    @classmethod
+    def _dedupe(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
+        seen: list[AuditTypeKey] = []
+        for t in value:
+            if t not in seen:
+                seen.append(t)
+        return seen
+
+    def resolved_depth(self) -> AuditDepth:
+        """The depth this quote is for, after defaults."""
+        return self.depth or default_depth_for_tier(self.tier)
+
+
+class AuditEstimateResponse(BaseModel):
+    """A quote for one audit run: the number, and everything it was derived from.
+
+    The derivation is returned alongside the figure ON PURPOSE. An operator asked
+    to approve a spend is being asked to approve a judgement, and "$1.15" alone
+    is not reviewable - ``pages`` and ``agents`` are the two variables that move
+    it, so they are shown. ``estimatedCost`` is the value the caller echoes back
+    as ``confirmedEstimate`` when it creates the run.
+    """
+
+    tier: AuditTier
+    depth: AuditDepth
+    pages: int  # the --max-pages ceiling this depth hands the engine
+    agents: bool  # whether the 21-agent AI fan-out fires for these types
+    estimated_cost: float = Field(serialization_alias="estimatedCost")
+    # True when creating this run requires echoing the figure back. Lets the UI
+    # decide whether to show a confirmation step without duplicating the policy.
+    confirmation_required: bool = Field(serialization_alias="confirmationRequired")
+    # What the site's own sitemap reported, or null for "could not tell". Null is
+    # NOT zero: `pages` above then falls back to the depth's ceiling, and the
+    # operator can see that is what happened instead of guessing why the number
+    # looks round.
+    measured_pages: int | None = Field(default=None, serialization_alias="measuredPages")
+    # Where the measurement came from (robots_sitemap | sitemap | sitemap_index |
+    # unknown), so a surprising quote can be traced to its evidence.
+    size_source: str = Field(default="unknown", serialization_alias="sizeSource")
+    # True when a probe bound stopped the count short, making `measuredPages` a
+    # FLOOR on the real total rather than the total.
+    size_truncated: bool = Field(default=False, serialization_alias="sizeTruncated")

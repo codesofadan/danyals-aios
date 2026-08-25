@@ -119,7 +119,17 @@ async def test_create_enqueues_queued_row(
     )
     assert resp.status_code == 201
     body = resp.json()
-    assert set(body) == {"id", "client", "url", "types", "tier", "status", "score", "runtime", "when", "pdf", "json"}
+    assert set(body) == {
+        "id", "client", "url", "types", "tier", "status", "score", "runtime",
+        "when", "pdf", "json",
+        # The depth axis (migration 0084): what breadth was asked for, and what
+        # the pre-flight gate was told it would cost, beside what it actually cost.
+        "depth", "maxPages", "estimatedCost", "cost",
+    }
+    assert body["depth"] == "free"  # Free tier pins the depth
+    assert body["maxPages"] == 15
+    assert body["estimatedCost"] == 0.0  # a free run fires no paid provider
+    assert body["cost"] is None  # queued: nothing spent YET, which is not $0.00
     assert body["types"] == ["technical", "onpage"]
     assert body["status"] == "queued"
     assert body["tier"] == "Free"
@@ -135,18 +145,62 @@ async def test_create_empty_types_is_full_audit(
     client: httpx.AsyncClient, repo: FakeAuditsRepo, enqueued: list[str], wire: Callable[..., None]
 ) -> None:
     # No types selected = a FULL audit (every type). It must be accepted (not a 422),
-    # persist an empty selection, and enqueue - even on the Free tier (paid_types is
-    # empty, so the Free-tier paid gate never trips).
+    # persist an empty selection, and enqueue. It runs as PAID: an empty selection is
+    # the comprehensive pipeline, so every paid provider and all 21 agents fire.
     wire("manager")
     resp = await client.post(
         "/api/v1/audits",
-        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": []},
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Paid", "types": []},
     )
     assert resp.status_code == 201
     body = resp.json()
     assert body["types"] == []
     assert enqueued == [body["id"]]
     assert repo.rows[body["id"]]["types"] == []
+
+
+async def test_empty_types_on_the_free_tier_is_refused_not_run_ungated(
+    client: httpx.AsyncClient, enqueued: list[str], wire: Callable[..., None]
+) -> None:
+    """The regression test for a measured spend-gate bypass.
+
+    This test previously asserted the OPPOSITE - that `{"tier": "Free", "types":
+    []}` returns 201 - with the note *"even on the Free tier (paid_types is empty,
+    so the Free-tier paid gate never trips)"*. That reasoning was correct about
+    `paid_types()` and wrong about the run: an empty selection is not "no paid
+    dimensions", it is EVERY dimension.
+
+    Traced end to end, at the commit that introduced this test:
+
+      * the dashboard derived `tier` as `types.some(isPaid)`, which is `false` for
+        an empty array, so the full audit was submitted as Free;
+      * this endpoint's cost gate is `if body.tier == "Paid"`, so it was skipped;
+      * the row persisted `tier=free`, and `execute_audit`'s re-check is
+        `if tier == "paid"`, so that was skipped too;
+      * `execute_audit` then called the engine with `comprehensive=True`, and
+        `run_audit` computes `mode = "paid" if (tier == "paid" or comprehensive)`
+        - so the stored tier never reached the engine at all, and `build_argv`
+        emitted `--mode paid --serper --places --citations --agents on
+        --ai-narrative on`.
+
+    Net: the platform's single largest spend ran with the cost dial, the client
+    budget cap AND the global spend halt all bypassed. The cost was still logged
+    afterwards (the commit hardcodes `mode="paid"`), so this was ungated spend
+    rather than invisible spend - which is precisely what a pre-flight gate exists
+    to prevent.
+
+    Refused rather than silently upgraded to Paid, because a silent upgrade is the
+    WU-7 defect mirrored: there the caller asked for free and got every provider;
+    here it would charge a client budget against a request that said Free.
+    """
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": []},
+    )
+    assert resp.status_code == 400
+    assert "full comprehensive run" in resp.json()["error"]["message"]
+    assert enqueued == []  # and above all: nothing ran
 
 
 async def test_create_requires_run_audits(
@@ -162,7 +216,10 @@ async def test_create_rejects_private_url(
 ) -> None:
     wire("analyst")
     resp = await client.post(
-        "/api/v1/audits", json={"client_id": "cl-1", "url": "http://127.0.0.1/admin"}
+        "/api/v1/audits",
+        # An explicit free-only selection: this test is about the SSRF guard, and
+        # an empty selection would now be refused earlier as an ungated full run.
+        json={"client_id": "cl-1", "url": "http://127.0.0.1/admin", "types": ["technical"]},
     )
     assert resp.status_code == 400
     assert "public address" in resp.json()["error"]["message"]
@@ -234,7 +291,10 @@ async def test_create_unknown_client_404(
     client: httpx.AsyncClient, wire: Callable[..., None]
 ) -> None:
     wire("manager", client_exists=False)
-    resp = await client.post("/api/v1/audits", json={"client_id": "nope", "url": _PUBLIC_URL})
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "nope", "url": _PUBLIC_URL, "types": ["technical"]},
+    )
     assert resp.status_code == 404
 
 

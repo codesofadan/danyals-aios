@@ -42,6 +42,14 @@ def test_response_matches_auditrow_shape() -> None:
     assert set(body) == {
         "id", "client", "url", "types", "tier", "status",
         "score", "runtime", "when", "pdf", "json",
+        # The depth axis (migration 0084): the breadth this run was asked for and
+        # the figure the pre-flight gate was given. `AuditRow` in
+        # frontend/lib/audit.ts carries the same three; test_contract_lock.py
+        # fails the build if either side moves alone.
+        "depth", "maxPages", "estimatedCost",
+        # The committed figure, beside the quote. Present so the comparison happens
+        # where audits are reviewed rather than one screen away in Cost Controls.
+        "cost",
     }
     assert body["client"] == "NorthPeak Dental"
     assert body["tier"] == "Paid"  # stored 'paid' -> surfaced 'Paid'

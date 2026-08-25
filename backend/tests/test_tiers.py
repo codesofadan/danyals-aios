@@ -66,6 +66,86 @@ def test_delivery_tier_modes_are_presets_over_the_dial() -> None:
     assert all(m == "api" for m in fully.values())
 
 
+# --------------------------------------------------------------------------- #
+# The matrix against the document it was sold from.
+#
+# `FEATURE_AREAS` is not internal reference data. It is the encoded form of the
+# comparison table in `docs/deliverables/danyal-AIOS-Service-Tiers.pdf`, delivered to
+# the agency owner on 9 July 2026, and it is served to the portal as an upsell page -
+# so a drift here is not a bug, it is the platform telling a client something the
+# document they hold contradicts.
+#
+# Nothing compared the two. This does, from the document's own words.
+# --------------------------------------------------------------------------- #
+
+# Transcribed from the delivered PDF's per-area rows. `off` where the document prints
+# an explicit "no" mark; `byhand` where it describes a person doing it or an upload;
+# `api` where it says it runs on its own / auto / live.
+_DELIVERED_MATRIX: dict[str, dict[str, str]] = {
+    # A - "Your data & rankings": Free is "upload your own file / only when you ask",
+    # Semi is "serper.dev on a schedule, or DataForSEO for top keywords", Fully is
+    # "DataForSEO - the most accurate rankings", "every night".
+    "A": {"free": "byhand", "semi": "byhand", "fully": "api"},
+    # B - "Audits & site health": Free is "upload a Screaming Frog file, or 1 free
+    # sample audit", Semi "on request", Fully "runs weekly on its own".
+    "B": {"free": "byhand", "semi": "byhand", "fully": "api"},
+    # C - "Backlinks (off-page)": Free "upload your own file" for the list but an
+    # explicit no-mark on every other row, Semi "we compare your weekly uploads",
+    # Fully "pulled auto every week".
+    "C": {"free": "off", "semi": "byhand", "fully": "api"},
+    # D - "Content & publishing": Free is a no-mark on every row except blog articles,
+    # which reads "No (1 sample only)". Semi is "AI writes a draft, a person edits &
+    # posts". Fully is "drafts queued auto, posted after one approval".
+    "D": {"free": "off", "semi": "byhand", "fully": "api"},
+    # E - "Local SEO (Google Business Profile)": Free no-mark throughout, Semi "AI
+    # suggests, you apply", Fully "auto-posts", "at scale".
+    "E": {"free": "off", "semi": "byhand", "fully": "api"},
+    # F - "Competitors & strategy": Free no-mark throughout, Semi "by hand" / "AI
+    # drafts, a strategist decides", Fully "auto".
+    "F": {"free": "off", "semi": "byhand", "fully": "api"},
+    # G - "Reports, alerts & workflow": Free "on request, basic branding" plus a basic
+    # portal, Semi "data pulled + AI write-up, you edit", Fully "built & sent on a
+    # schedule".
+    "G": {"free": "byhand", "semi": "byhand", "fully": "api"},
+}
+
+
+@pytest.mark.unit
+def test_the_tier_matrix_still_matches_the_document_it_was_sold_from() -> None:
+    from app.schemas.tiers import FEATURE_AREAS
+
+    encoded = {area.id: dict(area.modes) for area in FEATURE_AREAS}
+    assert encoded == _DELIVERED_MATRIX, (
+        "the served tier matrix no longer matches danyal-AIOS-Service-Tiers.pdf (9 July "
+        "2026). This table is shown to clients as what each tier includes; changing it "
+        "changes what the platform claims to sell. If the change is intended, the "
+        "DOCUMENT is the thing to re-issue, and this transcription follows it."
+    )
+
+
+@pytest.mark.unit
+def test_free_is_zero_paid_spend_in_every_area_the_document_switches_off() -> None:
+    """The one property the free tier's whole commercial basis rests on.
+
+    The document is unambiguous: *"The client pays nothing and we spend nothing on
+    data... There is no automation and no paid data."* An area at ``api`` for ``free``
+    would mean a metered provider call for a client paying nothing.
+
+    Note what this test does NOT claim. It pins the MATRIX, not the enforcement. As of
+    2026-08-24 ``delivery_tier`` is consulted in exactly one route
+    (``services/client_audits.py``) and ``delivery_tier_modes`` has no production
+    caller at all - so this matrix is a sales page, not a control. See
+    ``KNOWN_LIMITATIONS.md``.
+    """
+    from app.schemas.tiers import FEATURE_AREAS
+
+    on_paid_apis = sorted(a.id for a in FEATURE_AREAS if a.modes["free"] == "api")
+    assert not on_paid_apis, (
+        f"feature area(s) {on_paid_apis} are set to run on paid APIs for the FREE tier, "
+        "which the delivered document prices at $0 to run"
+    )
+
+
 async def test_list_tiers(client: httpx.AsyncClient, wire: Callable[[str], None]) -> None:
     wire("viewer")
     resp = await client.get("/api/v1/tiers")

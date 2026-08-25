@@ -16,6 +16,9 @@
 import { SERIES } from "@/lib/data";
 
 export type Tier = "Free" | "Paid";
+// Crawl BREADTH — a separate axis from `Tier` (which authorises spend) and from
+// `AuditTypeKey[]` (which scopes dimensions). Backend enum `audit_depth`.
+export type AuditDepth = "free" | "standard" | "deep";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 export type AuditTypeKey = "onpage" | "offpage" | "technical" | "local" | "geo" | "strategy";
 
@@ -120,12 +123,60 @@ export type AuditRow = {
   types: AuditTypeKey[];
   tier: Tier;
   status: JobStatus;
+  // null on runs created before the depth axis existed (migration 0084). That is
+  // "breadth unknown", NOT "free" — those runs took their page budget from a
+  // process-wide setting that no row recorded. Render it as unknown, never as a
+  // default, or the table will assert a fact the database does not hold.
+  depth: AuditDepth | null;
+  maxPages: number | null; // the --max-pages ceiling this run was given
+  estimatedCost: number | null; // USD quoted pre-flight; compare against the bill
+  // The committed USD cost, runtime-derived from the engine's observables. null
+  // until the engine actually started — "not yet spent", not "free". The column
+  // defaults to 0, so rendering it for a queued row would show $0.00 for work
+  // that simply has not happened.
+  cost: number | null;
   score: number | null; // 0–100 composite site score; null while pending
   runtime: string; // wall-clock turnaround, or "—" while pending
   when: string; // display timestamp
   pdf: boolean;
   json: boolean;
 };
+
+// The three depths an operator can pick, with what each one buys. `pages` is
+// indicative for the picker only — the authoritative budget comes back from
+// POST /audits/estimate, which reads the server's live settings. Never price a
+// run from these numbers.
+export type AuditDepthOption = {
+  key: AuditDepth;
+  label: string;
+  blurb: string;
+  paidOnly: boolean;
+  confirms: boolean; // requires confirming a cost estimate before it runs
+};
+
+export const auditDepths: AuditDepthOption[] = [
+  {
+    key: "free",
+    label: "Free",
+    blurb: "Condensed lead-magnet crawl. Zero paid providers, enforced at the engine.",
+    paidOnly: false,
+    confirms: false,
+  },
+  {
+    key: "standard",
+    label: "Standard",
+    blurb: "The routine client check-in — a macro health read across the main pages.",
+    paidOnly: true,
+    confirms: false,
+  },
+  {
+    key: "deep",
+    label: "Deep",
+    blurb: "The full consulting run across the site. Costed and confirmed before it starts.",
+    paidOnly: true,
+    confirms: true,
+  },
+];
 
 // Existing agency clients (for the "Run new audit" picker).
 export const clientNames: string[] = [

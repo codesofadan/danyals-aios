@@ -135,7 +135,12 @@ def _int(value: Any) -> int:
 
 
 def audit_cost(
-    settings: Settings, *, pages_crawled: int, mode: str, usage: dict[str, Any] | None = None
+    settings: Settings,
+    *,
+    pages_crawled: int,
+    mode: str,
+    usage: dict[str, Any] | None = None,
+    agent_calls: int | None = None,
 ) -> float:
     """RUNTIME-derived cost of one external audit-engine run.
 
@@ -153,6 +158,16 @@ def audit_cost(
       ``mode``, so the cost is ``pages_crawled x per-page unit`` (crawl/Serper/PSI
       work scales per page) + the ``agent_calls`` fan-out priced at the haiku unit
       from per-agent token estimates. Still scaled by real run outputs.
+
+    ``agent_calls`` overrides the fan-out size in the DERIVED path only. It exists
+    for the PRE-FLIGHT estimate (``services.audit_depth.estimate_audit_cost``),
+    which knows from the type selection whether the agents will fire at all and
+    must not price 21 of them for a run that launches none. Omitted -> the
+    configured count, so every COMMITTED cost this function has ever produced is
+    unchanged. (That the committed derived path also assumes a full fan-out for a
+    type-scoped run is a real over-charge; it is recorded in KNOWN_LIMITATIONS
+    rather than fixed here, because changing a number that has already been
+    billed is its own decision.)
     """
     if mode == "free":
         return 0.0
@@ -177,6 +192,7 @@ def audit_cost(
         input_tokens=settings.audit_agent_tokens_in,
         output_tokens=settings.audit_agent_tokens_out,
     )
+    calls = settings.audit_agent_calls if agent_calls is None else agent_calls
     cost = max(pages_crawled, 0) * settings.audit_cost_per_page
-    cost += max(settings.audit_agent_calls, 0) * per_agent
+    cost += max(calls, 0) * per_agent
     return round(cost, 6)

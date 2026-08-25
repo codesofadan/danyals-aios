@@ -9,7 +9,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { AuditRow, AuditTypeKey, Tier } from "@/lib/audit";
+import type { AuditDepth, AuditRow, AuditTypeKey, Tier } from "@/lib/audit";
 
 export const AUDITS_KEY = ["audits"] as const;
 export const AUDIT_STATS_KEY = ["audits", "stats"] as const;
@@ -48,7 +48,56 @@ export type CreateAuditInput = {
   url: string;
   tier: Tier;
   types: AuditTypeKey[];
+  depth?: AuditDepth;
+  // The page budget the quote was issued for, echoed back so the run reproduces
+  // the price it was quoted without the server re-probing the site. Bounded
+  // server-side by the depth's ceiling, so it can only ever narrow the run.
+  max_pages?: number;
+  // The figure from useAuditEstimate, echoed back. Required by the server for a
+  // depth whose quote said `confirmationRequired`; a stale figure is refused with
+  // 409 rather than charged, so always re-quote before resubmitting.
+  confirmed_estimate?: number;
 };
+
+// Mirrors AuditEstimateResponse. `pages` and `agents` are the two variables that
+// move the price and are shown alongside it: an operator approving a spend is
+// approving a judgement, and a bare dollar figure cannot be reviewed.
+export type AuditEstimate = {
+  tier: Tier;
+  depth: AuditDepth;
+  pages: number; // the budget this quote is priced for — echo back as max_pages
+  agents: boolean;
+  estimatedCost: number;
+  confirmationRequired: boolean;
+  // What the site's own sitemap reported, or null for "could not tell". null is
+  // NOT zero — `pages` then falls back to the depth's ceiling, and showing the
+  // null is what lets an operator see that rather than wonder why it is round.
+  measuredPages: number | null;
+  sizeSource: "robots_sitemap" | "sitemap" | "sitemap_index" | "unknown";
+  sizeTruncated: boolean; // measuredPages is a floor on the real total
+};
+
+export type AuditEstimateInput = {
+  tier: Tier;
+  depth?: AuditDepth;
+  types: AuditTypeKey[];
+  // Only consulted for a depth that scales to site size (deep). Given it, the
+  // quote measures the site's sitemap and prices the run it would actually make.
+  url?: string;
+};
+
+/**
+ * Quote a run before creating it. Spends nothing and creates nothing — it prices
+ * the request against the server's live unit costs. A mutation rather than a
+ * query because it is a deliberate operator action, and because caching a price
+ * is exactly how a confirmation ends up bound to a figure that has since moved.
+ */
+export function useAuditEstimate() {
+  return useMutation({
+    mutationFn: (input: AuditEstimateInput) =>
+      api.post<AuditEstimate>("/audits/estimate", input),
+  });
+}
 
 /**
  * Enqueue a new audit. `retry: 0` (inherited from the client's mutation default)

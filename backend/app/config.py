@@ -109,6 +109,20 @@ class Settings(BaseSettings):
     # paid, authenticated product. Deliberately a SEPARATE knob so raising the
     # paid audit's depth can never silently widen an unauthenticated crawl.
     audit_free_max_pages: int = 15
+    # Crawl breadth for the two METERED depths (recovery plan §3.2). Standard is
+    # the routine macro health read; Deep is the full consulting run. Both are
+    # CEILINGS handed to the engine's --max-pages - the crawl stops at whatever
+    # the site actually has, so a small site never costs a deep run's ceiling.
+    # Separate knobs from the free funnel above for the same reason that one is
+    # separate from the paid default: widening one must never widen another.
+    audit_standard_max_pages: int = 20
+    audit_deep_max_pages: int = 300
+    # Tolerance (USD) between the estimate an operator CONFIRMED for a deep audit
+    # and the estimate the server computes when the run is actually submitted. A
+    # confirmation is a decision about a specific number; if prices or depth
+    # settings moved underneath it, the operator is asked again rather than
+    # charged against a figure they never saw.
+    audit_estimate_tolerance_usd: float = 0.01
     # Hard daily ceiling on public free audits, agency-wide (UTC day). The public
     # funnel is UNAUTHENTICATED, so per-IP rate limiting alone bounds one abuser,
     # not a distributed one. This is the backstop that bounds the platform's total

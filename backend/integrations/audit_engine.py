@@ -312,6 +312,7 @@ def run_audit(
     tier: str,
     comprehensive: bool = False,
     types: list[str] | None = None,
+    max_pages: int | None = None,
 ) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
@@ -321,6 +322,14 @@ def run_audit(
     picker) then SCOPES it - empty = the full run, a subset gates the paid work
     (see ``build_argv``). The URL is SSRF-validated here (defense in depth - the
     endpoint already validated at enqueue) before any subprocess is spawned.
+
+    ``max_pages`` is the PER-RUN breadth, snapshotted onto the audit row at
+    enqueue from its depth (migration 0084). It overrides the config default so
+    two runs launched minutes apart can legitimately differ - which the previous
+    arrangement could not express, because breadth came from one process-wide
+    setting read at run time. Omitted (or non-positive) falls back to the config
+    default, which is what every caller predating the depth axis gets: unchanged
+    behaviour, including the public funnel's condensed crawl.
     """
     # 1) SSRF guard. Sync context (a Celery worker, no event loop) so a direct
     # call is fine - no to_thread needed off the loop.
@@ -339,6 +348,8 @@ def run_audit(
     # keeps the full one. Selected here (not inside build_argv) so the argv
     # builder stays a pure function of its arguments.
     pages = cfg.max_pages if comprehensive else cfg.free_max_pages
+    if max_pages is not None and max_pages > 0:
+        pages = max_pages
     argv = build_argv(
         domain=url, mode=mode, max_pages=pages, profile=cfg.profile,
         comprehensive=comprehensive, types=types,
