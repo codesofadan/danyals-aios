@@ -22,6 +22,33 @@ _Rows = list[dict[str, Any]]
 _MAX_PAGE = 500
 
 
+def _filter_clause(
+    *,
+    dimension: str | None = None,
+    pillar: str | None = None,
+    subcategory: str | None = None,
+    severity: str | None = None,
+    check_id: str | None = None,
+) -> tuple[str, list[Any]]:
+    """The WHERE fragment shared by the findings page and its count.
+
+    Built once so a filtered page and its total cannot disagree about what they
+    are filtering. Column names are literals from this tuple, never caller
+    input, so the f-string cannot become an injection point.
+    """
+    sql = ""
+    params: list[Any] = []
+    for column, value in (
+        ("dimension", dimension), ("pillar", pillar),
+        ("subcategory", subcategory), ("severity", severity),
+        ("check_id", check_id),
+    ):
+        if value:
+            sql += f" and f.{column} = %s"
+            params.append(value)
+    return sql, params
+
+
 class AuditFindingsRepo:
     def __init__(self, user_id: str) -> None:
         self._user_id = user_id
@@ -63,14 +90,12 @@ class AuditFindingsRepo:
             "               where i.finding_id = f.id and i.audit_id = %s)"
         )
         params: list[Any] = [audit_id]
-        for column, value in (
-            ("dimension", dimension), ("pillar", pillar),
-            ("subcategory", subcategory), ("severity", severity),
-            ("check_id", check_id),
-        ):
-            if value:
-                sql += f" and f.{column} = %s"
-                params.append(value)
+        clause, filter_params = _filter_clause(
+            dimension=dimension, pillar=pillar, subcategory=subcategory,
+            severity=severity, check_id=check_id,
+        )
+        sql += clause
+        params += filter_params
         # Worst first, then widest blast radius. Deterministic tail-break on
         # check_id so two calls never disagree about ordering.
         sql += (
@@ -83,14 +108,38 @@ class AuditFindingsRepo:
             cur.execute(sql, params)
             return cur.fetchall()
 
-    def finding_count(self, audit_id: str) -> int:
+    def finding_count(
+        self,
+        audit_id: str,
+        *,
+        dimension: str | None = None,
+        pillar: str | None = None,
+        subcategory: str | None = None,
+        severity: str | None = None,
+        check_id: str | None = None,
+    ) -> int:
+        """How many findings match, WITH the same filters as the page.
+
+        This used to count every finding in the audit regardless of filter, so a
+        severity-filtered request returned 14 rows and a total of 461. The pager
+        then read "1 to 100 of 461" over a set of 14, and nothing in the UI
+        contradicted it. The filter clause is now built once and shared, which
+        is the only way the two can be kept in step.
+        """
+        sql = (
+            "select count(*) as c from public.audit_findings f"
+            " where exists (select 1 from public.audit_finding_instances i"
+            "               where i.finding_id = f.id and i.audit_id = %s)"
+        )
+        params: list[Any] = [audit_id]
+        clause, filter_params = _filter_clause(
+            dimension=dimension, pillar=pillar, subcategory=subcategory,
+            severity=severity, check_id=check_id,
+        )
+        sql += clause
+        params += filter_params
         with rls_connection(self._user_id) as cur:
-            cur.execute(
-                "select count(*) as c from public.audit_findings f"
-                " where exists (select 1 from public.audit_finding_instances i"
-                "               where i.finding_id = f.id and i.audit_id = %s)",
-                (audit_id,),
-            )
+            cur.execute(sql, params)
             row = cur.fetchone()
             return int(row["c"]) if row else 0
 

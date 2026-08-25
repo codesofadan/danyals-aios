@@ -319,6 +319,7 @@ def write_full_bundle(
     ai_narrative: bool = False,
     mode: str = "auto",
     usage: dict[str, Any] | None = None,
+    coverage: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     """Render MD + HTML + PDF (best-effort) + consolidated narrative.
 
@@ -337,6 +338,9 @@ def write_full_bundle(
         scores=scores,
         findings=findings,
         artifact_dir=artifact_dir,
+        # Optional and additive: a scorecard without a denominator is the
+        # easiest way for a client to misread the report.
+        coverage=coverage,
     )
     md_paths = md_reporter.write_artifacts(
         artifact_dir,

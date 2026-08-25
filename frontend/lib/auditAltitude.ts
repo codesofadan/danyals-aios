@@ -153,6 +153,31 @@ export type Paged<T> = { total: number; limit: number; offset: number; items: T[
 // Presentation
 // --------------------------------------------------------------------------- //
 
+/** What a pager should say, and whether it should exist at all.
+ *
+ * Extracted from the component because the arithmetic is where the bugs live:
+ * an off-by-one here tells an operator "1 to 100 of 461" while showing rows
+ * 101 to 200, and nothing in the UI would contradict it.
+ *
+ * `page` is 0-based; the returned bounds are 1-based, because that is what a
+ * person reads.
+ */
+export function pageRange(
+  page: number,
+  pageSize: number,
+  total: number,
+): { first: number; last: number; lastPage: number; needed: boolean } {
+  const safeSize = Math.max(1, pageSize);
+  const lastPage = Math.max(0, Math.ceil(total / safeSize) - 1);
+  const clamped = Math.min(Math.max(0, page), lastPage);
+  return {
+    first: total === 0 ? 0 : clamped * safeSize + 1,
+    last: Math.min((clamped + 1) * safeSize, total),
+    lastPage,
+    needed: total > safeSize,
+  };
+}
+
 export const NOT_MEASURED = "Not measured";
 
 /** The ONLY sanctioned way to render a score. */

@@ -41,6 +41,20 @@ export function useAudits() {
   });
 }
 
+/** ONE audit, by id.
+ *
+ * The detail page used to find its header row inside `useAudits()`, which the
+ * server caps at 50 rows ordered newest-first - so any audit outside that
+ * window opened with the coded fallback title and a raw UUID.
+ */
+export function useAudit(auditId: string) {
+  return useQuery({
+    queryKey: [...AUDITS_KEY, auditId],
+    queryFn: () => api.get<AuditRow>(`/audits/${auditId}`),
+    enabled: Boolean(auditId),
+  });
+}
+
 export function useAuditStats() {
   return useQuery({
     queryKey: AUDIT_STATS_KEY,

@@ -17,7 +17,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { downloadFile } from "@/lib/api";
-import { useAudits } from "@/lib/hooks/audits";
+import { useAudit } from "@/lib/hooks/audits";
 import {
   useAuditFindings,
   useAuditPages,
@@ -28,6 +28,7 @@ import {
   DOWNLOADS,
   coverageLabel,
   isMeasured,
+  pageRange,
   scoreDisplay,
   scoreTone,
 } from "@/lib/auditAltitude";
@@ -47,28 +48,99 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "downloads", label: "Downloads", icon: "download" },
 ];
 
+//: Findings fetched per request. The endpoint caps at 500; 100 keeps the page
+//: responsive and makes the pager's arithmetic legible to a reader.
+const FINDINGS_PAGE = 100;
+
+//: The severity vocabulary, in the order an operator triages. `null` is "all",
+//: kept in the same list so the control has one code path.
+const SEVERITIES: { key: string | null; label: string }[] = [
+  { key: null, label: "All" },
+  { key: "critical", label: "Critical" },
+  { key: "major", label: "Major" },
+  { key: "minor", label: "Minor" },
+];
+
+/** Server-side pager. Renders nothing when everything already fits on one page. */
+function Pager({
+  page,
+  pageSize,
+  total,
+  onChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onChange: (next: number) => void;
+}) {
+  const { first, last, lastPage, needed } = pageRange(page, pageSize, total);
+  if (!needed) return null;
+  return (
+    <div className="alt-pager">
+      <button
+        type="button"
+        className="alt-pager-btn"
+        disabled={page === 0}
+        onClick={() => onChange(page - 1)}
+      >
+        <span className="material-symbols-rounded">chevron_left</span>
+        Previous
+      </button>
+      <span className="alt-pager-count">
+        {first.toLocaleString()} to {last.toLocaleString()} of {total.toLocaleString()}
+      </span>
+      <button
+        type="button"
+        className="alt-pager-btn"
+        disabled={page >= lastPage}
+        onClick={() => onChange(page + 1)}
+      >
+        Next
+        <span className="material-symbols-rounded">chevron_right</span>
+      </button>
+    </div>
+  );
+}
+
 export default function AuditDetail({ auditId }: { auditId: string }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [dimension, setDimension] = useState<string | null>(null);
+  const [severity, setSeverity] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
 
   const rollups = useAuditRollups(auditId);
+  // Server-side paging. This used to fetch a flat `limit: 200`, so on the real
+  // 461-finding audit 261 problems were reachable only by downloading the CSV -
+  // and the UI gave no sign they existed.
   const findings = useAuditFindings(auditId, {
     dimension: dimension ?? undefined,
-    limit: 200,
+    severity: severity ?? undefined,
+    limit: FINDINGS_PAGE,
+    offset: page * FINDINGS_PAGE,
   });
   const roadmap = useAuditRoadmap(auditId);
   const pages = useAuditPages(auditId);
-  const audits = useAudits();
+  // The header used to scan the /audits list, which the server caps at 50 rows,
+  // so any older audit opened with a placeholder title and a raw UUID.
+  const audit = useAudit(auditId);
+  const row = audit.data;
+  const changeDimension = (next: string | null) => {
+    setDimension(next);
+    setPage(0);
+  };
+  const changeSeverity = (next: string | null) => {
+    setSeverity(next);
+    setPage(0);
+  };
 
-  const row = useMemo(
-    () => (audits.data ?? []).find((a) => a.id === auditId),
-    [audits.data, auditId],
-  );
   const site = useMemo(
     () => (rollups.data ?? []).find((r) => r.level === "site") ?? null,
     [rollups.data],
   );
 
+  // `name` already carries the artifact's extension (findings.csv, workbook.xlsx).
+  // Building the filename from the route key alone saved three of the buttons'
+  // files with no extension at all, so the operating system could not open them.
   const onDownload = (name: string) =>
     downloadFile(`/audits/${auditId}/download/${name}`, `audit-${auditId}-${name}`);
 
@@ -76,9 +148,29 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
     return <div className="alt-loading">Loading audit...</div>;
   }
 
+  // A failed request is not an empty audit. Without this branch a 404 or a
+  // backend outage rendered as a successful audit with no data, and four of the
+  // five tabs affirmatively stated the audit was empty.
+  if (rollups.isError) {
+    return (
+      <div className="alt-empty big">
+        <span className="material-symbols-rounded">error</span>
+        <h2>This audit could not be loaded</h2>
+        <p>
+          The request failed, so nothing below would be trustworthy. This is not
+          the same as an audit with no findings. Reload, and if it persists the
+          run may have been removed.
+        </p>
+        <Link className="alt-back" href="/admin/audit">
+          Back to audits
+        </Link>
+      </div>
+    );
+  }
+
   // An audit run before the altitude ingest existed has no rows to show. That is
   // a legitimate state, not an error - say so plainly and offer the old report.
-  if (!rollups.isError && (rollups.data ?? []).length === 0) {
+  if ((rollups.data ?? []).length === 0) {
     return (
       <div className="alt-empty big">
         <span className="material-symbols-rounded">layers_clear</span>
@@ -147,7 +239,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           rollups={rollups.data ?? []}
           selected={dimension}
           onSelect={(d) => {
-            setDimension(d);
+            changeDimension(d);
             if (d) setTab("issues");
           }}
         />
@@ -226,7 +318,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
                     <span className="material-symbols-rounded">download</span>
                     {dimension} CSV
                   </button>
-                  <button type="button" className="alt-clear" onClick={() => setDimension(null)}>
+                  <button type="button" className="alt-clear" onClick={() => changeDimension(null)}>
                     <span className="material-symbols-rounded">close</span>
                     {dimension}
                   </button>
@@ -244,14 +336,40 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
               )}
             </div>
           </div>
+          <div className="alt-filters">
+            <span className="alt-filters-label">Severity</span>
+            {SEVERITIES.map((s) => (
+              <button
+                key={s.key ?? "all"}
+                type="button"
+                className={`alt-chip${severity === s.key ? " on" : ""}`}
+                onClick={() => changeSeverity(s.key)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
           {findings.isLoading ? (
             <div className="alt-loading">Loading issues...</div>
+          ) : findings.isError ? (
+            <div className="alt-empty">
+              <span className="material-symbols-rounded">error</span>
+              <p>Issues could not be loaded. This is not an audit with no issues.</p>
+            </div>
           ) : (
-            <FindingList
-              auditId={auditId}
-              findings={findings.data?.items ?? []}
-              total={findings.data?.total ?? 0}
-            />
+            <>
+              <FindingList
+                auditId={auditId}
+                findings={findings.data?.items ?? []}
+                total={findings.data?.total ?? 0}
+              />
+              <Pager
+                page={page}
+                pageSize={FINDINGS_PAGE}
+                total={findings.data?.total ?? 0}
+                onChange={setPage}
+              />
+            </>
           )}
         </div>
       ) : null}

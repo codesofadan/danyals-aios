@@ -110,7 +110,13 @@ async def audit_findings(
         subcategory=subcategory, severity=severity, check_id=check_id,
         limit=limit, offset=offset,
     )
-    total = await asyncio.to_thread(altitudes.finding_count, audit_id)
+    # The SAME filters as the page. Counting every finding regardless of filter
+    # made a severity-filtered request return 14 rows and a total of 461, so a
+    # pager read "1 to 100 of 461" over a set of 14.
+    total = await asyncio.to_thread(
+        altitudes.finding_count, audit_id, dimension=dimension, pillar=pillar,
+        subcategory=subcategory, severity=severity, check_id=check_id,
+    )
     return {"total": total, "limit": limit, "offset": offset, "items": rows}
 
 

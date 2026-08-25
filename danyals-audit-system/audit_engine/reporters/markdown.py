@@ -56,6 +56,49 @@ def render_findings_table(findings: list[dict], *, limit: int | None = None) -> 
     return "\n".join(lines) + "\n"
 
 
+#: Scorecard pillar key -> (label, the key `scores` uses, the coverage pillar).
+_SCORECARD: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("Overall", ("overall",), ""),
+    ("On-Page", ("on_page", "onpage"), "on-page"),
+    ("Technical", ("technical",), "technical"),
+    ("Off-Page", ("off_page", "offpage"), "off-page"),
+    ("Local SEO", ("local", "local_seo"), "local-seo"),
+)
+
+
+def _scorecard_rows(scores: dict, coverage: dict | None) -> list[str]:
+    """The scorecard, with a denominator wherever we have one.
+
+    A score with no denominator is the single easiest way for a client to
+    misread an audit. 97.2 over 25 of 100 technical checks is not a clean bill
+    of health, and the number alone cannot say so.
+    """
+    by_pillar = (coverage or {}).get("by_pillar") or {}
+    totals = (coverage or {}).get("counts") or {}
+    has_coverage = bool(by_pillar or totals)
+    header = (
+        ["| Dimension | Score | Checks run |", "|---|---|---|"]
+        if has_coverage
+        else ["| Dimension | Score |", "|---|---|"]
+    )
+    rows = list(header)
+    for label, keys, pillar in _SCORECARD:
+        value = next((scores.get(k) for k in keys if scores.get(k) is not None), None)
+        # NULL means NOT MEASURED, never 0 - they are opposite statements.
+        shown = "-" if value is None else (f"**{value}**" if label == "Overall" else f"{value}")
+        if not has_coverage:
+            rows.append(f"| {label} | {shown} |")
+            continue
+        if pillar:
+            bucket = by_pillar.get(pillar) or {}
+            ran, applicable = bucket.get("ran", 0), bucket.get("applicable", 0)
+        else:
+            ran, applicable = totals.get("ran", 0), (coverage or {}).get("registry_total", 0)
+        cell = f"{ran} of {applicable}" if applicable else "-"
+        rows.append(f"| {label} | {shown} | {cell} |")
+    return rows
+
+
 def render_audit(
     *,
     domain: str,
@@ -67,8 +110,15 @@ def render_audit(
     scores: dict[str, float | None],
     findings: list[dict],
     artifact_dir: Path,
+    coverage: dict | None = None,
 ) -> tuple[str, str, str]:
-    """Returns (executive_md, full_md, remediation_md)."""
+    """Returns (executive_md, full_md, remediation_md).
+
+    ``coverage`` is optional and additive. Without it the scorecard shows a
+    score with no denominator, which is the single easiest way for a client to
+    misread the report: a technical score of 97.2 computed over 25 of 100
+    technical checks looks like a clean bill of health.
+    """
 
     # ----- Executive summary -----
     by_cat = _group(findings, "category")
@@ -86,13 +136,7 @@ def render_audit(
         "",
         "## Scorecard",
         "",
-        "| Dimension | Score |",
-        "|---|---|",
-        f"| Overall | **{scores.get('overall') or '-'}** |",
-        f"| On-Page | {scores.get('on_page') or '-'} |",
-        f"| Technical | {scores.get('technical') or '-'} |",
-        f"| Off-Page | {scores.get('off_page') or '-'} |",
-        f"| Local SEO | {scores.get('local') or '-'} |",
+        *_scorecard_rows(scores, coverage),
         "",
         "## Top critical findings",
         "",

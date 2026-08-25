@@ -232,3 +232,94 @@ td.t-warn { color: var(--warn); font-weight: 700; }
   border: 1px solid var(--line); padding: 4px 9px; border-radius: 999px; cursor: pointer; }
 .alt-dlmini:hover { border-color: var(--violet); background: var(--hover); }
 .alt-dlmini .material-symbols-rounded { font-size: 14px; }
+
+/* --------------------------------------------------------------------------
+   Severity filter + server pager.
+
+   The findings list used to fetch a flat 200 rows with only a dimension
+   filter, so on a 461-finding audit 261 problems existed only in the CSV and
+   the UI gave no sign of them.
+   -------------------------------------------------------------------------- */
+
+.alt-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.alt-filters-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.alt-chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.alt-chip:hover {
+  background: var(--surface-2);
+}
+
+.alt-chip.on {
+  background: var(--accent-soft, var(--surface-2));
+  border-color: var(--accent, var(--border));
+  font-weight: 600;
+}
+
+.alt-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.alt-pager-count {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.alt-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.alt-pager-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.alt-pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.alt-pager-btn .material-symbols-rounded {
+  font-size: 18px;
+}

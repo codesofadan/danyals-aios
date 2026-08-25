@@ -512,6 +512,28 @@ def _permitted_cost_classes(
     return frozenset(classes)
 
 
+def _coverage_for_report(
+    findings: list[dict],
+    *,
+    permitted: frozenset[str],
+    dimensions: frozenset[str] | None = None,
+) -> dict | None:
+    """Coverage for the reporters, computed in memory.
+
+    coverage.json is written AFTER the bundle on purpose - it is additive, and a
+    failure to write a supplementary file must never destroy a report that
+    rendered. build_coverage is pure, so the reporters can have the same numbers
+    without moving that write earlier and giving up the property.
+    """
+    try:
+        return _emit.build_coverage(
+            findings, dimensions=dimensions, permitted_cost_classes=permitted
+        )
+    except Exception as e:  # a scorecard denominator is not worth failing a run
+        log.warning("coverage_for_report_failed", error=type(e).__name__)
+        return None
+
+
 def _write_altitude(
     *,
     artifact_dir: Path,
@@ -1143,7 +1165,15 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
 
     # ----- Report bundle (MD + HTML + PDF) -----
     duration = time.monotonic() - t0
+    # Coverage for the scorecard: a score with no denominator is the
+    # easiest way for a client to misread the report. Computed here in
+    # memory; coverage.json is still written after the bundle so a failed
+    # supplementary write cannot destroy a report that rendered.
+    _report_coverage = _coverage_for_report(
+        all_findings, permitted=_permitted_cost_classes(psi=psi, billable=bool(use_agents or use_ai))
+    )
     paths = write_full_bundle(
+        coverage=_report_coverage,
         artifact_dir=artifact_dir,
         domain=domain,
         run_uuid=run_uuid,
@@ -1823,7 +1853,15 @@ async def _run_full(
     scores = aggregate(all_findings, profile=profile)
     duration = time.monotonic() - t0
 
+    # Coverage for the scorecard: a score with no denominator is the
+    # easiest way for a client to misread the report. Computed here in
+    # memory; coverage.json is still written after the bundle so a failed
+    # supplementary write cannot destroy a report that rendered.
+    _report_coverage = _coverage_for_report(
+        all_findings, permitted=_permitted_cost_classes(psi=psi, billable=bool(serper or places or citations or moz or use_agents or use_ai))
+    )
     paths = write_full_bundle(
+        coverage=_report_coverage,
         artifact_dir=artifact_dir,
         domain=domain,
         run_uuid=run_uuid,
@@ -2220,7 +2258,15 @@ async def _run_local(
     scores = aggregate(all_findings, profile="local")
     duration = time.monotonic() - t0
 
+    # Coverage for the scorecard: a score with no denominator is the
+    # easiest way for a client to misread the report. Computed here in
+    # memory; coverage.json is still written after the bundle so a failed
+    # supplementary write cannot destroy a report that rendered.
+    _report_coverage = _coverage_for_report(
+        all_findings, permitted=_permitted_cost_classes(billable=bool(use_places or use_citations or use_agents or use_ai))
+    )
     paths = write_full_bundle(
+        coverage=_report_coverage,
         artifact_dir=artifact_dir,
         domain=domain,
         run_uuid=run_uuid,

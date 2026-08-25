@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-import httpx
 import pytest
 from fastapi import FastAPI
 
@@ -59,7 +58,11 @@ class FakeAltitudeRepo:
         self.calls.append(("findings", kw))
         return list(self._findings)
 
-    def finding_count(self, audit_id):
+    def finding_count(self, audit_id, **kw):
+        # Accepts the same filters as `findings`, because the route now passes
+        # them: counting every finding regardless of filter made a filtered page
+        # report a total for the whole audit.
+        self.calls.append(("finding_count", kw))
         return len(self._findings)
 
     def instances(self, audit_id, **kw):
@@ -252,3 +255,20 @@ async def test_only_allow_listed_downloads_resolve(client, wire):
     wire()
     for bad in ("../../etc/passwd", "secrets.env", "report.pdf%00.csv"):
         assert (await client.get(f"{API}/audits/{AUDIT}/download/{bad}")).status_code == 404
+
+
+async def test_the_findings_total_honours_the_same_filters_as_the_page(client, wire, altitudes):
+    """The count used to ignore every filter, so a severity-filtered request
+    returned 14 rows and a total of 461. A pager then read "1 to 100 of 461"
+    over a set of 14, and nothing in the UI contradicted it."""
+    wire()
+    r = await client.get(
+        f"{API}/audits/{AUDIT}/findings",
+        params={"severity": "critical", "dimension": "technical"},
+    )
+    assert r.status_code == 200
+
+    counted = [kw for name, kw in altitudes.calls if name == "finding_count"]
+    assert counted, "the route never asked for a count"
+    assert counted[0]["severity"] == "critical"
+    assert counted[0]["dimension"] == "technical"
