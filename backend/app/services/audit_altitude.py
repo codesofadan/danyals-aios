@@ -247,7 +247,7 @@ def _detail_from(evidence: dict[str, Any]) -> str:
     return ", ".join(parts)[:500]
 
 
-def _disambiguate_instance_keys(cause: "Cause") -> None:
+def _disambiguate_instance_keys(cause: Cause) -> None:
     """Make every instance key unique WITHIN its cause, without losing anything.
 
     Measured on real run 837b75d6: 394 of 8,077 instances share a (cause, url)

@@ -22,9 +22,10 @@ client actually reads.
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from app.db.database import privileged_connection
 
@@ -321,7 +322,7 @@ def render(data: ReportInput) -> str:
         sev_counts[k] = sev_counts.get(k, 0) + 1
 
     o: list[str] = []
-    o.append(f'<!doctype html><html lang="en"><head><meta charset="utf-8">')
+    o.append('<!doctype html><html lang="en"><head><meta charset="utf-8">')
     o.append(f'<title>SEO audit - {esc(m.get("client_name") or m.get("url", ""))}</title>')
     o.append(f"<style>{_CSS}</style></head><body><div class=\"wrap\">")
 

@@ -31,11 +31,12 @@ from __future__ import annotations
 
 import csv
 import json
-from collections import Counter
 import zipfile
+from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
@@ -49,7 +50,6 @@ from app.db.database import privileged_connection
 from app.services.audit_sheets import (
     _HEADER_FILL,
     _HEADER_FONT,
-    _TITLE_FONT,
     _cap,
     _priority_label,
     _priority_score,
