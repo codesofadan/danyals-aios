@@ -1063,8 +1063,12 @@ def iter_per_page_checks(p: ParsedHTML) -> Iterable[tuple[str, str, Verdict]]:
     yield ("ON-045", "A3", check_heading_questions(p))
     yield ("ON-046", "A5", check_featured_snippet(p))
     yield ("ON-047", "A5", check_passage_ranking(p))
-    yield ("ON-048", "A5", check_ai_overview(p))
-    yield ("ON-049", "A5", check_direct_answer(p))
+    # ON-048/ON-049 are emitted by analyzers/ai_search.py, not here. Both ids had
+    # two competing implementations firing on the same page in the same run, so a
+    # page carried two different scores for one check. The ai_search pair wins:
+    # it is self-contained (check_ai_overview below is a mean of three other
+    # checks, one of them check_direct_answer), it reaches pass/warn/fail rather
+    # than pass/warn only, and its remediation names the measurement.
     yield ("ON-050", "A3", check_faq_optimization(p))
     yield ("ON-051", "A1", check_readability(p))
     yield ("ON-053", "A1", check_paragraph_length(p))

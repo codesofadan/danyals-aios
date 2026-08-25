@@ -179,3 +179,24 @@ def test_hardcoded_finding_metadata_matches_the_checklist(line, check_id, name, 
     assert subcategory == spec.subcategory, (
         f"main.py:{line} files {check_id} under {subcategory}, not {spec.subcategory}"
     )
+
+
+def test_no_check_id_is_emitted_twice_by_the_same_per_page_iterator_set():
+    """One page must not carry two scores for one check.
+
+    ON-048 and ON-049 had competing implementations in onpage.py and
+    ai_search.py, both firing per page. Whichever landed last in the list won
+    in some readers and lost in others; the two disagreed on score.
+    """
+    from audit_engine.analyzers.ai_search import iter_per_page_ai_search
+    from audit_engine.analyzers.onpage import iter_per_page_checks
+    from audit_engine.parsers import html as html_parser
+
+    for name in ("clean.html", "thin.html", "broken-schema.html"):
+        fixture = pathlib.Path(__file__).parent / "fixtures" / name
+        page = html_parser.parse(fixture.read_text(), "https://example.com/")
+        emitted: list[str] = []
+        for it in (iter_per_page_checks, iter_per_page_ai_search):
+            emitted.extend(cid for cid, *_rest in it(page))
+        dupes = sorted({c for c in emitted if emitted.count(c) > 1})
+        assert not dupes, f"{name}: emitted twice for one page: {dupes}"

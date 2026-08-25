@@ -639,5 +639,16 @@ def iter_per_page_extras(p: ParsedHTML) -> Iterable[tuple[str, str, Verdict]]:
     uppercase, query params, slug-title mismatch - is the Semrush "URL
     structure" family and is not emitted anywhere else, so it is activated
     here. Owner A3 (headings / meta / URL structure analyst).
+
+    TECH-025 Pagination optimization is the other genuine gap: no other module
+    emits it, and check_pagination reads rel=next/prev straight off the crawled
+    HTML, which is what the checklist declares it needs. Owner B1.
+
+    The remaining check_* functions in this module are deliberately NOT wired:
+    each duplicates a check onpage.py already emits (check_image_filenames vs
+    ON-069, check_anchor_text_quality vs ON-058, check_author_existence vs
+    ON-029, check_h1_title_alignment vs ON-119). Wiring them would put two
+    scores on one check for one page - the defect just removed from ON-048/049.
     """
     yield ("ON-097", "A3", check_url_structure(p))
+    yield ("TECH-025", "B1", check_pagination(p))
