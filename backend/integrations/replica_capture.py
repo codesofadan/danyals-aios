@@ -92,6 +92,19 @@ _JS_TEMPLATE = """
   const REPLACED = new Set(['IMG','PICTURE','VIDEO','IFRAME','SVG','CANVAS']);
   // Hashed CSS-in-JS class names carry no meaning and inflate the payload.
   const GENERATED = /^(css-|sc-|jsx-|emotion-|[A-Za-z]+_[A-Za-z0-9]{5,}$)/;
+  // Framework classes are kept but rank BEHIND the author's own. The cap used to be
+  // applied in DOM order, and an Elementor column carries eight of its own classes
+  // before the author's - so `product-card`, sitting last in the attribute, was cut
+  // by the cap on every single card. The author's classes are the BEM names the
+  // whole component-detection stage keys on; the framework's are reconstructible.
+  const FRAMEWORK = /^(elementor|e-|wp-|ast-|has-|is-|aios-|et_|fl-|vc_|fusion-)/;
+  const classesOf = (el) => {
+    if (!el.className || typeof el.className !== 'string') return [];
+    const all = el.className.trim().split(/\\s+/).filter(c => c && !GENERATED.test(c));
+    const own = all.filter(c => !FRAMEWORK.test(c));
+    const fw = all.filter(c => FRAMEWORK.test(c));
+    return own.concat(fw).slice(0, 10);
+  };
 
   const styles = [], styleIx = new Map();
   const intern = (cs) => {
@@ -159,17 +172,15 @@ _JS_TEMPLATE = """
     // CLASSES are not, because BEM names sit on wrappers.
     if (!keep && children.length === 1) {
       const only = children[0];
-      const mine = (el.className && typeof el.className === 'string')
-        ? el.className.trim().split(/\\s+/).filter(c => c && !GENERATED.test(c)) : [];
-      only.cls = Array.from(new Set([...(mine || []), ...(only.cls || [])])).slice(0, 8);
+      const merged = Array.from(new Set([...classesOf(el), ...(only.cls || [])]));
+      const own = merged.filter(c => !FRAMEWORK.test(c));
+      only.cls = own.concat(merged.filter(c => FRAMEWORK.test(c))).slice(0, 10);
       return only;
     }
     if (!keep && children.length === 0) return null;
 
     count++;
-    const cls = (el.className && typeof el.className === 'string')
-      ? el.className.trim().split(/\\s+/).filter(c => c && !GENERATED.test(c)).slice(0, 8)
-      : [];
+    const cls = classesOf(el);
     const node = {
       t: el.tagName.toLowerCase(),
       s: intern(cs),
