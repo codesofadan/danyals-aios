@@ -57,6 +57,12 @@ class CrawlContext:
     discovered_urls: set[str] = field(default_factory=set)
     #: normalised external hosts linked to, with a count
     external_hosts: dict[str, int] = field(default_factory=dict)
+    #: the parsed robots.txt, when one was fetched
+    robots: Any | None = None
+    #: every URL as the crawler requested it, before normalisation. by_url is
+    #: keyed on the NORMALISED form, so anything looking for two URLs that mean
+    #: one page must read this instead.
+    raw_urls: list[str] = field(default_factory=list)
 
     # -- lookups ------------------------------------------------------------
 
@@ -81,6 +87,25 @@ class CrawlContext:
 
     def inbound_count(self, url: str) -> int:
         return len(self.inbound.get(self.key(url), ()))
+
+    @property
+    def is_partial(self) -> bool:
+        """True when the crawl saw less than the site it discovered.
+
+        Reachability is only meaningful over a COMPLETE crawl. On a truncated
+        one, a page looks orphaned or unreachable simply because the page that
+        links to it was never fetched. Reporting that to a client as "6 of your
+        8 pages are unreachable" is a measurement of our own page cap, not of
+        their site.
+        """
+        known = self.discovered_urls | self.sitemap_urls
+        return bool(known - self.crawled_urls)
+
+    @property
+    def coverage(self) -> float:
+        """Share of known URLs that were actually fetched."""
+        known = self.discovered_urls | self.sitemap_urls
+        return len(self.crawled_urls) / len(known) if known else 1.0
 
     # -- derived sets --------------------------------------------------------
 
@@ -125,6 +150,9 @@ def build_context(
             continue
         ctx.by_url[k] = cp
         ctx.crawled_urls.add(k)
+        raw_requested = getattr(cp, "url", "") or raw
+        if raw_requested:
+            ctx.raw_urls.append(raw_requested)
         ctx.outbound.setdefault(k, set())
         ctx.inbound.setdefault(k, set())
         # the pre-redirect URL must also resolve to this page
@@ -167,6 +195,7 @@ def build_context(
             if k:
                 ctx.sitemap_urls.add(k)
 
+    ctx.robots = getattr(crawl_result, "robots", None)
     ctx.depth = _bfs_depth(ctx)
     return ctx
 

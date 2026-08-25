@@ -44,6 +44,8 @@ from audit_engine.checklist import load_registry as load_registry_specs
 # Importing an analyzer module is what registers its checks. Keep this beside
 # the registry import so the two are never separated by an autoformatter.
 from audit_engine.analyzers import headers as _headers_checks  # noqa: F401
+from audit_engine.analyzers import crawl_graph as _crawl_graph_checks  # noqa: F401
+from audit_engine.analyzers import page_tech as _page_tech_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,

@@ -364,3 +364,74 @@ Storing headers did not unblock these, so parking them under
   crawled status. Buildable now; Wave 3.
 
 Ledger: **170 → 158**.
+
+---
+
+# Wave 3 — 33 checks over data already crawled
+
+**2026-08-25.** Twenty site-wide checks over the crawl graph, thirteen per-page
+checks over parsed data that was being thrown away. No new inputs, no new
+spend.
+
+## The crawl graph (20)
+
+Broken pages: `TECH-012` 404s (separating **linked** 404s, which strand a
+visitor, from unlinked ones that cost nothing), `TECH-014` 5xx, `TECH-013` soft
+404s — a page returning 200 while telling the visitor it was not found.
+
+Redirects, now possible because `redirect_hops` records the **status** of each
+hop: `TECH-016` loops, `TECH-017` chains, `TECH-018` temporary redirects used
+for permanent moves. The hop threshold is labelled an **adopted convention** in
+its own evidence — Google publishes no hop limit, and the figure everyone
+quotes is community lore.
+
+Reachability and duplication: `TECH-009` orphans, `TECH-026` crawl traps,
+`TECH-022` duplicate URLs, `TECH-076` duplicate page bodies, `TECH-023`
+parameter entry points, `TECH-024` faceted navigation, `TECH-027` indexable
+internal search. Domain form: `TECH-059` www, `TECH-060` trailing slash.
+Linking: `TECH-068` click depth, `TECH-069` equity flow. Sitemap agreement:
+`TECH-004` status, `TECH-003` indexability contradictions, `TECH-083` hidden
+pages.
+
+## A false positive caught by running it
+
+The first live run reported `TECH-068` as a **failure**: 6 of 8 pages
+unreachable from the homepage. The site was fine. With `--max-pages 8` against
+a 108-URL sitemap, pages look unreachable because the pages linking to them
+were never fetched.
+
+**That is a measurement of our page cap, not of their site.** `CrawlContext`
+now exposes `is_partial` and `coverage`, and the three reachability checks
+(`TECH-068`, `TECH-009`, `TECH-083`) return `n_a` with the coverage figure
+rather than a fabricated failure. Tests pin both directions: suppressed on a
+partial crawl, still reported on a complete one.
+
+## Per-page (13)
+
+`TECH-019` canonical (using the O-2 normalisation, so a trailing-slash
+difference is not a false conflict), `TECH-035`/`036`/`093`/`037`/`038`
+structured data, `TECH-086` Open Graph, `TECH-087` Twitter cards, `TECH-057`
+mixed content, `TECH-074` semantic landmarks, `TECH-067` AMP, `ON-081`
+crawlability, `ON-098` slug.
+
+Two are worth naming:
+
+**`TECH-093`** catches the quiet failure — schema that is valid JSON, that
+Search Console reports as present, and that never produces a rich result
+because a property Google requires is absent. A `Recipe` with no
+`recipeIngredient` is the classic.
+
+**`TECH-086`** is precise rather than conventional, because Open Graph has an
+exact primary source: ogp.me lists `og:title`, `og:type`, `og:image` and
+`og:url` as required. Most SEO thresholds do not get to be this definite, and
+the evidence says which authority it is citing.
+
+`TECH-067` reports `n_a` for a page with no AMP and says why: **Google dropped
+the Top Stories AMP requirement in 2021**, so absence is not a defect. Only a
+page that *claims* AMP is checked.
+
+`TECH-074` and `TECH-069` are two more ids that Wave 0 freed — they were
+carrying a First Contentful Paint measurement and an HTTP-version check
+respectively.
+
+Ledger: **158 → 125**.
