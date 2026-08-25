@@ -215,3 +215,20 @@ td.t-warn { color: var(--warn); font-weight: 700; }
   padding: 10px; cursor: pointer; }
 .alt-more:hover { background: var(--hover); border-color: var(--violet); }
 .alt-more .material-symbols-rounded { font-size: 17px; }
+
+/* "Where this site stands" is persistent, so it needs a little more presence than
+   a normal card without competing with the hero numbers. */
+.alt-stands { position: relative; }
+
+/* A score computed over a fraction of a subpoint's checks. Shown, because it is a
+   real signal, but marked - one failing check out of seven must not read as a
+   full verdict. */
+.alt-indicative { display: block; font-style: normal; font-size: 9.5px; font-weight: 700;
+  letter-spacing: .02em; text-transform: uppercase; color: var(--muted-2); margin-top: 2px; }
+
+/* Inline download beside a filtered view. */
+.alt-dlmini { display: inline-flex; align-items: center; gap: 4px; font-family: inherit;
+  font-size: 11px; font-weight: 700; color: var(--violet); background: var(--card);
+  border: 1px solid var(--line); padding: 4px 9px; border-radius: 999px; cursor: pointer; }
+.alt-dlmini:hover { border-color: var(--violet); background: var(--hover); }
+.alt-dlmini .material-symbols-rounded { font-size: 14px; }

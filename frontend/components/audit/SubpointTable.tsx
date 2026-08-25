@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import type { Rollup } from "@/lib/auditAltitude";
 import {
   coverageLabel,
+  isLowCoverage,
   isMeasured,
   notMeasuredReason,
   scoreDisplay,
@@ -98,6 +99,14 @@ export default function SubpointTable({ rollups }: { rollups: Rollup[] }) {
                   <td>{sub}</td>
                   <td className={`num alt-score t-${scoreTone(measured ? r.score : null)}`}>
                     {scoreDisplay(r)}
+                    {measured && isLowCoverage(r) ? (
+                      <em
+                        className="alt-indicative"
+                        title={`Only ${r.checks_ran} of ${r.checks_applicable} checks ran - this score describes that fraction, not the whole subpoint`}
+                      >
+                        indicative
+                      </em>
+                    ) : null}
                   </td>
                   <td className="alt-cov-cell">
                     ran {coverageLabel(r)}

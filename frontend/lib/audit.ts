@@ -154,29 +154,42 @@ export type AuditDepthOption = {
   confirms: boolean; // requires confirming a cost estimate before it runs
 };
 
+// The three breadths an audit can run at.
+//
+// LABELS ONLY differ from the keys. `key` is the Postgres `audit_depth` enum
+// (`free|standard|deep`) written by migration 0093, so renaming a key would be a
+// migration plus a break for every row already carrying the old value. The
+// operator reads Basic / Standard / Advanced; the database keeps its own words.
 export const auditDepths: AuditDepthOption[] = [
   {
     key: "free",
-    label: "Free",
-    blurb: "Condensed lead-magnet crawl. Zero paid providers, enforced at the engine.",
+    label: "Basic",
+    blurb: "The free public audit. Zero paid providers, enforced at the engine — this is what a stranger gets from the landing page.",
     paidOnly: false,
     confirms: false,
   },
   {
     key: "standard",
     label: "Standard",
-    blurb: "The routine client check-in — a macro health read across the main pages.",
+    blurb: "The routine client check-in — a macro health read across the main pages, with paid providers on.",
     paidOnly: true,
     confirms: false,
   },
   {
     key: "deep",
-    label: "Deep",
-    blurb: "The full consulting run across the site. Costed and confirmed before it starts.",
+    label: "Advanced",
+    blurb: "The full consulting run across the whole site, with every dimension and the AI specialists. Costed and confirmed before it starts.",
     paidOnly: true,
     confirms: true,
   },
 ];
+
+/** Operator-facing name for a stored depth value. */
+export const DEPTH_LABEL: Record<AuditDepth, string> = {
+  free: "Basic",
+  standard: "Standard",
+  deep: "Advanced",
+};
 
 // Existing agency clients (for the "Run new audit" picker).
 export const clientNames: string[] = [

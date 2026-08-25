@@ -511,6 +511,7 @@ async def create_audit(
                 datetime.now(UTC) if depth in CONFIRM_REQUIRED_DEPTHS else None
             ),
             "status": "queued",
+            "visible_to_client": body.visible_to_client,
         },
     )
     enqueue(str(row["id"]))

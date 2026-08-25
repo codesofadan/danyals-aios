@@ -8,10 +8,9 @@ type Tile = {
   label: string;
   value: number;
   decimals?: number;
+  prefix?: string;
   unit?: string;
   suffix?: string;
-  delta?: string;
-  deltaDir?: "up" | "down";
   note: string;
   hero?: boolean;
 };
@@ -35,10 +34,13 @@ function useCountUp(target: number, decimals = 0) {
   return ref;
 }
 
-function Value({ value, decimals, unit, suffix }: { value: number; decimals?: number; unit?: string; suffix?: string }) {
+function Value({
+  value, decimals, prefix, unit, suffix,
+}: { value: number; decimals?: number; prefix?: string; unit?: string; suffix?: string }) {
   const ref = useCountUp(value, decimals);
   return (
     <div className="val">
+      {prefix && <span className="u">{prefix}</span>}
       <span ref={ref}>0</span>
       {unit && <span className="u">{unit}</span>}
       {suffix && <span className="u">{suffix}</span>}
@@ -47,23 +49,34 @@ function Value({ value, decimals, unit, suffix }: { value: number; decimals?: nu
 }
 
 export default function AuditStats({
-  runningNow,
+  lifetime,
   thisMonth,
-  avgScore,
-  turnaroundMin,
+  runningNow,
+  avgCostUsd,
 }: {
-  runningNow: number;
+  lifetime: number;
   thisMonth: number;
-  avgScore: number;
-  turnaroundMin: number;
+  runningNow: number;
+  avgCostUsd: number;
 }) {
-  // Every value is the live figure from GET /audits/stats — no fabricated
-  // deltas. On a fresh tenant these read 0, which is the honest current state.
+  // Every value is the live figure from GET /audits/stats - no fabricated deltas.
+  // On a fresh tenant these read 0, which is the honest current state.
+  //
+  // `avgCostUsd` carries FOUR decimals on purpose. A month of mostly free-tier
+  // runs has a genuine mean in the fractions of a cent, and rounding that to
+  // $0.00 would tell an operator the platform costs nothing to run.
   const tiles: Tile[] = [
-    { icon: "fact_check", label: "Audits this month", value: thisMonth, note: "completed + queued this month", hero: true },
-    { icon: "speed", label: "Avg. site score", value: avgScore, note: "composite · completed audits" },
+    { icon: "history", label: "Lifetime audits", value: lifetime, note: "every run, all time", hero: true },
+    { icon: "fact_check", label: "Audits this month", value: thisMonth, note: "completed + queued this month" },
     { icon: "play_circle", label: "Running now", value: runningNow, note: "in the job queue" },
-    { icon: "timer", label: "Avg. turnaround", value: turnaroundMin, suffix: "m", note: "queued → done" },
+    {
+      icon: "payments",
+      label: "Avg. audit cost",
+      value: avgCostUsd,
+      decimals: 4,
+      prefix: "$",
+      note: "committed spend · completed runs",
+    },
   ];
   return (
     <section className="kpis">
@@ -71,20 +84,8 @@ export default function AuditStats({
         <div key={t.label} className={t.hero ? "kpi hero" : "kpi"}>
           <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
           <div className="lab">{t.label}</div>
-          <Value value={t.value} decimals={t.decimals} unit={t.unit} suffix={t.suffix} />
-          <div className="sub">
-            {t.delta ? (
-              <>
-                <span className={`delta ${t.deltaDir}`}>
-                  <span className="material-symbols-rounded">{t.deltaDir === "up" ? "trending_up" : "trending_down"}</span>
-                  {t.delta}
-                </span>{" "}
-                {t.note}
-              </>
-            ) : (
-              t.note
-            )}
-          </div>
+          <Value value={t.value} decimals={t.decimals} prefix={t.prefix} unit={t.unit} suffix={t.suffix} />
+          <div className="sub">{t.note}</div>
         </div>
       ))}
     </section>

@@ -118,3 +118,53 @@
    does not style itself. */
 a.au-art { text-decoration: none; }
 a.au-art[aria-disabled="true"] { opacity: .32; cursor: not-allowed; pointer-events: none; }
+
+/* ---- search over the audit table -------------------------------------------
+   Filters the rows already on screen. Deliberately NOT the top-bar search, which
+   navigates between dashboards - an operator looking for a client's audit wants
+   this table narrowed, not a different page. */
+.au-search { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
+.au-search:focus-within { border-color: var(--violet); box-shadow: 0 0 0 3px var(--ring); }
+.au-search .material-symbols-rounded { font-size: 16px; color: var(--muted); }
+.au-search input { border: none; outline: none; background: none; font-family: inherit;
+  font-size: 12px; color: var(--ink); width: 168px; }
+.au-search input::placeholder { color: var(--muted-2); }
+.au-search button { display: grid; place-items: center; border: none; background: none;
+  cursor: pointer; padding: 0; color: var(--muted); }
+.au-search button:hover { color: var(--crit); }
+
+/* the client name is the way into the audit */
+.au-open { color: var(--violet); text-decoration: none; }
+.au-open:hover { text-decoration: underline; }
+
+/* ---- select all / clear on the type picker ---- */
+.au-pick-tools { float: right; display: inline-flex; gap: 8px; }
+.au-pick-tools button { font-family: inherit; font-size: 10.5px; font-weight: 800;
+  letter-spacing: .02em; color: var(--violet); background: none; border: none;
+  cursor: pointer; padding: 0; }
+.au-pick-tools button:hover { text-decoration: underline; }
+
+/* ---- what the current type selection buys ----
+   An operator picking "Local SEO" should not have to open the checklists to find
+   out it needs Google Places. */
+.au-seldesc { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 12px;
+  padding: 10px 12px; border-radius: 11px; background: var(--well); border: 1px solid var(--line); }
+.au-seldesc-row { display: flex; flex-direction: column; gap: 2px; }
+.au-seldesc-row b { font-size: 12px; font-weight: 800; color: var(--ink); }
+.au-seldesc-row b em { font-style: normal; font-size: 9.5px; font-weight: 800; margin-left: 6px;
+  padding: 1px 6px; border-radius: 999px; color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent); text-transform: uppercase; }
+.au-seldesc-row span { font-size: 11.5px; color: var(--body); }
+.au-seldesc-checks { color: var(--muted) !important; font-size: 10.5px !important; }
+
+/* ---- share with client ----
+   A disclosure control. Off by default, and it says what the client will and will
+   not see, because "show this" is not self-explanatory about scope. */
+.au-share { display: flex; gap: 9px; align-items: flex-start; margin: 4px 0 14px;
+  padding: 10px 12px; border-radius: 11px; border: 1px dashed var(--line-2);
+  background: var(--card); cursor: pointer; }
+.au-share:hover { border-color: var(--violet); }
+.au-share input { margin-top: 2px; accent-color: var(--violet); width: 15px; height: 15px; }
+.au-share b { display: block; font-size: 12px; font-weight: 700; color: var(--ink); }
+.au-share em { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; }

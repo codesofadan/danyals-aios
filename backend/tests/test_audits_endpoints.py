@@ -326,9 +326,40 @@ async def test_stats_shape(
     resp = await client.get("/api/v1/audits/stats")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"thisMonth", "avgScore", "runningNow", "turnaroundMin"}
+    # The four original keys are a PUBLISHED CONTRACT: `.claude/skills/aios-audit`
+    # documents and reads them. They stay even though the operator dashboard now
+    # renders `lifetime` and `avgCostUsd` instead of avgScore/turnaroundMin.
+    assert {"thisMonth", "avgScore", "runningNow", "turnaroundMin"} <= set(body)
+    assert set(body) == {
+        "thisMonth", "avgScore", "runningNow", "turnaroundMin", "lifetime", "avgCostUsd",
+    }
     assert body["runningNow"] == 1
     assert body["thisMonth"] == 3  # the 60-day-old run excluded
+    assert body["lifetime"] == 4   # every run ever, not just this month
+
+
+async def test_stats_average_cost_counts_only_completed_runs(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """A queued row's `cost` column defaults to 0. Averaging that in would report
+    work that has not happened yet as work that was free, and drag the mean down
+    every time an operator queues a run."""
+    repo.seed(status="done", score=80, runtime_seconds=60, cost=1.0)
+    repo.seed(status="done", score=80, runtime_seconds=60, cost=0.5)
+    repo.seed(status="queued", score=None, runtime_seconds=None, cost=0)
+    wire("viewer")
+    body = (await client.get("/api/v1/audits/stats")).json()
+    assert body["avgCostUsd"] == 0.75
+    assert body["lifetime"] == 3
+
+
+async def test_stats_average_cost_is_zero_when_nothing_completed(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(status="queued", score=None, runtime_seconds=None)
+    wire("viewer")
+    body = (await client.get("/api/v1/audits/stats")).json()
+    assert body["avgCostUsd"] == 0.0
 
 
 async def test_list_audits_default_pagination(
@@ -355,3 +386,37 @@ async def test_list_audits_cap_enforcement(
     wire("viewer")
     assert (await client.get("/api/v1/audits", params={"limit": 0})).status_code == 422
     assert (await client.get("/api/v1/audits", params={"limit": 201})).status_code == 422
+
+
+async def test_an_audit_is_internal_unless_the_operator_shares_it(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """Before 0096 there was no such decision: `portal_audits` filtered on
+    `client_id` alone, so every client-linked audit was visible in that client's
+    portal the moment it was created - including queued and failed runs nobody
+    had reviewed. A disclosure control must default to NOT disclosing."""
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "c-1", "url": _PUBLIC_URL, "tier": "Free",
+              "types": ["technical"]},
+    )
+    assert resp.status_code == 201
+    row = next(iter(repo.rows.values()))
+    assert row["visible_to_client"] is False
+
+
+async def test_the_operator_can_share_an_audit_at_creation(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits",
+        json={
+            "client_id": "c-1", "url": _PUBLIC_URL, "tier": "Free",
+            "types": ["technical"], "visible_to_client": True,
+        },
+    )
+    assert resp.status_code == 201
+    row = next(iter(repo.rows.values()))
+    assert row["visible_to_client"] is True

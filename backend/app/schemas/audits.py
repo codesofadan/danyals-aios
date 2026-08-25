@@ -89,6 +89,10 @@ class AuditCreate(BaseModel):
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
     types: list[AuditTypeKey] = Field(default_factory=list)
+    # Does this run appear in the client's own portal? Default FALSE: an audit is
+    # internal until someone decides to share it. Before 0096 there was no such
+    # decision - every client-linked audit was visible the moment it was created.
+    visible_to_client: bool = False
     # Crawl breadth. Omitted -> `default_depth_for_tier` (Free->free, Paid->standard),
     # which is exactly what every request meant before this field existed, so an
     # older client keeps its behaviour unchanged.
@@ -286,12 +290,24 @@ class PortalAuditResponse(BaseModel):
 
 
 class AuditStatsResponse(BaseModel):
-    """Audit KPI headline in the frontend ``auditStats`` shape."""
+    """Audit KPI headline in the frontend ``auditStats`` shape.
+
+    ``lifetime`` and ``avgCostUsd`` were added for the operator dashboard, which
+    reads "how many have we ever run" and "what does one cost us" rather than the
+    composite score. The four original fields are KEPT even though the dashboard
+    no longer renders two of them: ``.claude/skills/aios-audit`` documents this
+    response as ``{thisMonth, avgScore, runningNow, turnaroundMin}`` and reads it,
+    so removing them would break the skill for a cosmetic change.
+    """
 
     this_month: int = Field(serialization_alias="thisMonth")
     avg_score: int = Field(serialization_alias="avgScore")
     running_now: int = Field(serialization_alias="runningNow")
     turnaround_min: int = Field(serialization_alias="turnaroundMin")
+    lifetime: int = Field(default=0, serialization_alias="lifetime")
+    # Mean COMMITTED cost of completed runs. Rounded to cents at the edge; a
+    # sub-cent mean is real (a free-tier-heavy month) and must not round to 0.
+    avg_cost_usd: float = Field(default=0.0, serialization_alias="avgCostUsd")
 
 
 def compute_audit_stats(rows: list[dict[str, Any]]) -> AuditStatsResponse:
@@ -306,6 +322,7 @@ def compute_audit_stats(rows: list[dict[str, Any]]) -> AuditStatsResponse:
     running = 0
     scores: list[int] = []
     runtimes: list[int] = []
+    costs: list[float] = []
     for r in rows:
         if str(r.get("created_at", ""))[:7] == month_prefix:
             this_month += 1
@@ -317,13 +334,21 @@ def compute_audit_stats(rows: list[dict[str, Any]]) -> AuditStatsResponse:
                 scores.append(int(r["score"]))
             if r.get("runtime_seconds"):
                 runtimes.append(int(r["runtime_seconds"]))
+            # Only COMPLETED runs have a committed cost. A queued row's `cost`
+            # column defaults to 0, and averaging that in would report work that
+            # has not happened as work that was free.
+            if r.get("cost") is not None:
+                costs.append(float(r["cost"]))
     avg_score = round(sum(scores) / len(scores)) if scores else 0
     turnaround = round(sum(runtimes) / len(runtimes) / 60) if runtimes else 0
+    avg_cost = round(sum(costs) / len(costs), 4) if costs else 0.0
     return AuditStatsResponse(
         this_month=this_month,
         avg_score=avg_score,
         running_now=running,
         turnaround_min=turnaround,
+        lifetime=len(rows),
+        avg_cost_usd=avg_cost,
     )
 
 

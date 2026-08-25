@@ -20,6 +20,11 @@ export type AuditStats = {
   avgScore: number;
   runningNow: number;
   turnaroundMin: number;
+  // Added for the operator dashboard. `avgScore` and `turnaroundMin` are kept in
+  // the type because the API still serves them (the aios-audit skill reads them)
+  // even though the KPI strip no longer renders them.
+  lifetime: number;
+  avgCostUsd: number;
 };
 
 const isPending = (r: AuditRow) => r.status === "queued" || r.status === "running";
@@ -49,6 +54,10 @@ export type CreateAuditInput = {
   tier: Tier;
   types: AuditTypeKey[];
   depth?: AuditDepth;
+  // Does the client see this run in their own portal? Server default is FALSE.
+  // Before migration 0096 there was no such choice - every client-linked audit
+  // appeared in that client's portal the moment it was created.
+  visible_to_client?: boolean;
   // The page budget the quote was issued for, echoed back so the run reproduces
   // the price it was quoted without the server re-probing the site. Bounded
   // server-side by the depth's ceiling, so it can only ever narrow the run.

@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import {
   auditDepths,
   auditTypes,
+  DEPTH_LABEL,
   TYPE_LABEL,
   type AuditDepth,
   type AuditTypeKey,
@@ -29,12 +30,6 @@ const STATUS_META: Record<JobStatus, { pill: string; label: string; icon: string
   running: { pill: "info", label: "Running", icon: "progress_activity" },
   done: { pill: "ok", label: "Done", icon: "check_circle" },
   failed: { pill: "warn", label: "Failed", icon: "error" },
-};
-
-const DEPTH_LABEL: Record<AuditDepth, string> = {
-  free: "Free",
-  standard: "Standard",
-  deep: "Deep",
 };
 
 // A run that cost materially MORE than it was quoted. This is the comparison the
@@ -75,6 +70,9 @@ export default function AuditWorkspace() {
   const [clientId, setClientId] = useState("");
   const [types, setTypes] = useState<AuditTypeKey[]>([]);
   const [depth, setDepth] = useState<AuditDepth>("standard");
+  // Off by default, matching the server. Sharing a report is a decision someone
+  // makes, not a side effect of picking a client.
+  const [shareWithClient, setShareWithClient] = useState(false);
   const effectiveClientId = clientId || clients[0]?.id || "";
 
   // The quote currently on screen, or null. Held in state (not react-query cache)
@@ -88,7 +86,11 @@ export default function AuditWorkspace() {
 
   // Table filters
   const [statusFilter, setStatusFilter] = useState<"all" | JobStatus>("all");
-  const [typeFilter, setTypeFilter] = useState<"all" | AuditTypeKey>("all");
+  // "full" is its own filter: a run with an EMPTY types array ran every
+  // dimension, so it also matches each individual type chip below - but an
+  // operator asking "which of these were full audits" needs to ask that directly.
+  const [typeFilter, setTypeFilter] = useState<"all" | "full" | AuditTypeKey>("all");
+  const [search, setSearch] = useState("");
 
   // The audit whose report.html is open in the full-screen page-viewer (null = none).
   const [viewId, setViewId] = useState<string | null>(null);
@@ -155,6 +157,7 @@ export default function AuditWorkspace() {
         tier,
         types,
         depth: effectiveDepth,
+        visible_to_client: shareWithClient,
         // Echo the exact figure that was displayed. If unit prices or the depth's
         // page budget moved since the quote, the server returns 409 rather than
         // charging against a number the operator never saw.
@@ -169,16 +172,35 @@ export default function AuditWorkspace() {
             }
           : {}),
       },
-      { onSuccess: () => { setUrl(""); setTypes([]); dropQuote(); } },
+      {
+        onSuccess: () => {
+          setUrl("");
+          setTypes([]);
+          // Reset the share choice too: it applied to THAT audit, and leaving it
+          // on would silently publish the next one.
+          setShareWithClient(false);
+          dropQuote();
+        },
+      },
     );
   };
 
-  const shown = rows.filter(
-    (r) =>
-      (statusFilter === "all" || r.status === statusFilter) &&
-      // A full audit (empty types) ran every dimension, so it matches every type filter.
-      (typeFilter === "all" || r.types.length === 0 || r.types.includes(typeFilter)),
-  );
+  const q = search.trim().toLowerCase();
+  const shown = rows.filter((r) => {
+    if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (typeFilter === "full") {
+      if (r.types.length !== 0) return false;
+    } else if (typeFilter !== "all") {
+      // A full audit (empty types) ran every dimension, so it matches every
+      // individual type filter too.
+      if (r.types.length !== 0 && !r.types.includes(typeFilter)) return false;
+    }
+    // Search matches the two things an operator actually remembers: who it was
+    // for, and which site. Case-insensitive substring, no fuzzy matching - a
+    // near-miss that silently returns the wrong client is worse than no match.
+    if (q && !`${r.client} ${r.url}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   const runningCount = rows.filter((r) => r.status === "running").length;
   const createErr = createAudit.error instanceof Error ? createAudit.error.message : null;
@@ -187,10 +209,10 @@ export default function AuditWorkspace() {
   return (
     <>
       <AuditStats
-        runningNow={runningCount}
+        lifetime={statsQ.data?.lifetime ?? rows.length}
         thisMonth={statsQ.data?.thisMonth ?? rows.length}
-        avgScore={statsQ.data?.avgScore ?? 0}
-        turnaroundMin={statsQ.data?.turnaroundMin ?? 0}
+        runningNow={runningCount}
+        avgCostUsd={statsQ.data?.avgCostUsd ?? 0}
       />
 
       <div className="row">
@@ -211,8 +233,24 @@ export default function AuditWorkspace() {
                 </button>
               ))}
             </div>
+            <label className="au-search">
+              <span className="material-symbols-rounded">search</span>
+              <input
+                type="search"
+                placeholder="Search client or site…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search audits by client or site"
+              />
+              {search ? (
+                <button type="button" onClick={() => setSearch("")} aria-label="Clear search">
+                  <span className="material-symbols-rounded">close</span>
+                </button>
+              ) : null}
+            </label>
             <div className="au-chips">
               <button className={`chip${typeFilter === "all" ? " on" : ""}`} onClick={() => setTypeFilter("all")}>All types</button>
+              <button className={`chip${typeFilter === "full" ? " on" : ""}`} onClick={() => setTypeFilter("full")}>Full</button>
               {auditTypes.map((t) => (
                 <button key={t.key} className={`chip${typeFilter === t.key ? " on" : ""}`} onClick={() => setTypeFilter(t.key)}>
                   {t.short}
@@ -228,7 +266,7 @@ export default function AuditWorkspace() {
                   <th>Client</th>
                   <th>Site / URL</th>
                   <th>Type</th>
-                  <th>Tier &amp; depth</th>
+                  <th>Tier</th>
                   <th>Status</th>
                   <th className="num">Score</th>
                   <th className="num">Cost</th>
@@ -248,7 +286,11 @@ export default function AuditWorkspace() {
                   return (
                     <tr key={r.id}>
                       <td>
-                        <div className="au-client">{r.client}</div>
+                        {/* The row IS the way into the audit. The artifact column
+                            carries downloads only, so the name has to be the link. */}
+                        <Link className="au-client au-open" href={`/admin/audit/${r.id}`}>
+                          {r.client}
+                        </Link>
                         <div className="au-when">{r.when}</div>
                       </td>
                       <td><span className="au-url"><span className="material-symbols-rounded">link</span>{r.url}</span></td>
@@ -301,30 +343,13 @@ export default function AuditWorkspace() {
                       </td>
                       <td>
                         <div className="au-arts">
-                          {/* The altitudes view. Placed FIRST because it is now the
-                              primary way to read an audit: the PDF beside it is an
-                              833-page document on a large site, and this is the same
-                              data as six numbers you can drill into. */}
-                          <Link
-                            className="au-art"
-                            title="Open findings, plan and evidence"
-                            href={`/admin/audit/${r.id}`}
-                            aria-disabled={r.status !== "done"}
-                            onClick={(e) => { if (r.status !== "done") e.preventDefault(); }}
-                          >
-                            <span className="material-symbols-rounded">layers</span>
-                          </Link>
+                          {/* TWO downloads, and only two. The report and the
+                              workbook are the deliverable; everything else about
+                              this audit is reachable by opening it, so extra
+                              icons here were four ways to ask the same question. */}
                           <button
                             className="au-art"
-                            title="View report"
-                            disabled={r.status !== "done"}
-                            onClick={() => setViewId(r.id)}
-                          >
-                            <span className="material-symbols-rounded">visibility</span>
-                          </button>
-                          <button
-                            className="au-art"
-                            title="Download PDF report"
+                            title="Download the full PDF report"
                             disabled={!r.pdf}
                             onClick={() =>
                               downloadFile(`/audits/${r.id}/report.pdf`, `${r.client}-audit-${r.id}.pdf`)
@@ -334,12 +359,12 @@ export default function AuditWorkspace() {
                           </button>
                           <button
                             className="au-art"
-                            title="Download remediation sheets (Excel)"
-                            disabled={!r.json}
+                            title="Download the full workbook (every sheet, every occurrence)"
+                            disabled={r.status !== "done"}
                             onClick={() =>
                               downloadFile(
-                                `/audits/${r.id}/sheets/remediation.xlsx`,
-                                `${r.client}-remediation-${r.id}.xlsx`,
+                                `/audits/${r.id}/download/workbook`,
+                                `${r.client}-audit-${r.id}.xlsx`,
                               )
                             }
                           >
@@ -396,8 +421,38 @@ export default function AuditWorkspace() {
             </select>
           </div>
 
+          <label className="au-share">
+            <input
+              type="checkbox"
+              checked={shareWithClient}
+              onChange={(e) => setShareWithClient(e.target.checked)}
+            />
+            <span>
+              <b>Show this audit in the client&rsquo;s portal</b>
+              <em>
+                Off by default. The client sees the report, score and downloads —
+                never the cost, the error or the internal paths.
+              </em>
+            </span>
+          </label>
+
           <div className="fld">
-            <label>Audit types</label>
+            <label>
+              Audit types
+              <span className="au-pick-tools">
+                <button
+                  type="button"
+                  onClick={() => { dropQuote(); setTypes(auditTypes.map((t) => t.key)); }}
+                >
+                  Select all
+                </button>
+                {types.length > 0 ? (
+                  <button type="button" onClick={() => { dropQuote(); setTypes([]); }}>
+                    Clear
+                  </button>
+                ) : null}
+              </span>
+            </label>
             <div className="au-pick">
               {auditTypes.map((t) => (
                 <button
@@ -414,13 +469,35 @@ export default function AuditWorkspace() {
             </div>
           </div>
 
-          <div className="fld-hint" style={{ margin: "2px 0 10px" }}>
-            <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: "16px" }}>info</span>{" "}
-            Leave empty to run a <b>full audit</b> — every dimension, every paid
-            provider and all 21 AI agents. That is the largest run the platform makes,
-            so it goes through the cost gate as <b>Paid</b>. Pick a subset to scope it;
-            a free-only subset runs as Free.
-          </div>
+          {/* What the current selection actually buys. An operator picking
+              "Local SEO" should not have to open the checklists to learn that it
+              needs Google Places, or that Off-Page needs a backlink provider. */}
+          {types.length > 0 ? (
+            <div className="au-seldesc">
+              {types.map((k) => {
+                const t = auditTypes.find((x) => x.key === k);
+                if (!t) return null;
+                return (
+                  <div key={k} className="au-seldesc-row">
+                    <b>
+                      {t.label}
+                      {t.paid ? <em title="Uses a paid data source">paid</em> : null}
+                    </b>
+                    <span>{t.blurb}</span>
+                    <span className="au-seldesc-checks">{t.checks.join(" · ")}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="fld-hint" style={{ margin: "2px 0 10px" }}>
+              <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: "16px" }}>info</span>{" "}
+              Nothing selected runs a <b>full audit</b> — every dimension, every paid
+              provider and all 21 AI agents. That is the largest run the platform makes,
+              so it goes through the cost gate as <b>Paid</b>. Use <b>Select all</b> to
+              choose them explicitly, or pick a subset to scope it.
+            </div>
+          )}
 
           <div className="fld">
             <label>Depth</label>

@@ -170,6 +170,27 @@ export function coverageLabel(r: Pick<Rollup, "checks_ran" | "checks_applicable"
   return `${r.checks_ran} of ${r.checks_applicable}`;
 }
 
+/**
+ * Below this share of a subpoint's checks, a score is not a usable verdict.
+ *
+ * MEASURED: on the real run `technical/performance` ran 1 of 7 checks, that one
+ * check failed, and the subpoint therefore scored 0 - which reads as "your
+ * performance is catastrophic" when the honest statement is "we looked at one
+ * seventh of it and that part failed". `off-page/authority` did the same at 1 of 5.
+ *
+ * The score is still shown - hiding it would lose a real signal - but it is
+ * marked INDICATIVE, so a single failing check cannot masquerade as a full verdict.
+ */
+export const LOW_COVERAGE_PCT = 50;
+
+/** True when too little of a subpoint ran for its score to stand on its own. */
+export function isLowCoverage(
+  r: Pick<Rollup, "checks_ran" | "checks_applicable">,
+): boolean {
+  if (!r.checks_applicable || !r.checks_ran) return false;
+  return coveragePct(r) < LOW_COVERAGE_PCT;
+}
+
 export function coveragePct(r: Pick<Rollup, "checks_ran" | "checks_applicable">): number {
   if (!r.checks_applicable) return 0;
   return Math.round((r.checks_ran / r.checks_applicable) * 100);

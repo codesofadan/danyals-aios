@@ -96,19 +96,11 @@ export default function RoadmapBoard({ data }: { data: RoadmapResponse }) {
 
   return (
     <div className="rm">
-      <div className="rm-basis">
-        <span className="material-symbols-rounded">info</span>
-        <div>
-          Phases are <b>relative windows</b>, not dates. Everything below is packed at{" "}
-          <b>{roadmap.capacity_points_per_month} points per month</b> - the single
-          assumption this schedule rests on. Change it and the phases re-pack.
-          {roadmap.start_date === null
-            ? " No start date is set, so no calendar dates are shown."
-            : null}
-        </div>
-      </div>
-
-      <div className="rm-board">
+      <div
+        className="rm-board"
+        title={`Packed at ${roadmap.capacity_points_per_month} points per month. `
+          + `Phases are relative windows, not calendar dates.`}
+      >
         {planned.map((p) => (
           <Column key={p.phase} phase={p.phase as RoadmapPhaseKey} items={p.items} />
         ))}

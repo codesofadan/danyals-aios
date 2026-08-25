@@ -5,14 +5,13 @@
 //
 // The shape of this page IS the argument: an operator lands on six numbers, not
 // on 8,077 rows. A real 197-page audit produced 15,617 findings; the same data
-// here is 6 pillar cards -> 461 problem cards -> every occurrence on demand.
+// here is 6 pillar cards -> 461 issue cards -> every occurrence on demand.
 //
-// Progressive disclosure, in the order the work actually happens:
-//   Overview   the verdict + the coverage that qualifies it
-//   Plan       what to do first (the highest-value output of any audit)
-//   Findings   one card per problem, expandable to its evidence
-//   Pages      the same data pivoted per URL
-//   Downloads  the workbook and the uncapped CSVs
+// "WHERE THIS SITE STANDS" IS PERSISTENT, not a tab. It is the frame every other
+// view is read inside - which pillar you are looking at, and how much of it was
+// actually measured - so it stays on screen while you move between the plan, the
+// issues and the pages. Selecting a pillar filters the issues and STAYS selected
+// when you come back; clicking it again clears it.
 // ============================================================
 
 import { useMemo, useState } from "react";
@@ -29,7 +28,6 @@ import {
   DOWNLOADS,
   coverageLabel,
   isMeasured,
-  notMeasuredReason,
   scoreDisplay,
   scoreTone,
 } from "@/lib/auditAltitude";
@@ -39,12 +37,12 @@ import FindingList from "@/components/audit/FindingList";
 import RoadmapBoard from "@/components/audit/RoadmapBoard";
 import AuditPagesTable from "@/components/audit/AuditPagesTable";
 
-type Tab = "overview" | "plan" | "findings" | "pages" | "downloads";
+type Tab = "overview" | "strategy" | "issues" | "pages" | "downloads";
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "Overview", icon: "insights" },
-  { key: "plan", label: "Plan", icon: "flag" },
-  { key: "findings", label: "Findings", icon: "bug_report" },
+  { key: "strategy", label: "Strategy", icon: "flag" },
+  { key: "issues", label: "Issues", icon: "bug_report" },
   { key: "pages", label: "Pages", icon: "description" },
   { key: "downloads", label: "Downloads", icon: "download" },
 ];
@@ -120,11 +118,11 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
                 {site.url_health_pct === null ? "-" : `${site.url_health_pct}%`}
               </span>
               <span className="alt-hero-sub">
-                of {site.pages_crawled.toLocaleString()} crawled - comparable across runs
+                of {site.pages_crawled.toLocaleString()} crawled
               </span>
             </div>
             <div className="alt-hero">
-              <span className="alt-hero-lab">Problems to fix</span>
+              <span className="alt-hero-lab">Issues to fix</span>
               <span className="alt-hero-val">{site.findings_open.toLocaleString()}</span>
               <span className="alt-hero-sub">
                 across {site.instances_open.toLocaleString()} occurrences
@@ -133,6 +131,27 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           </div>
         ) : null}
       </header>
+
+      {/* Persistent across every tab: the frame the rest is read inside. */}
+      <div className="card alt-stands">
+        <div className="card-h">
+          <div>
+            <div className="ct">Where this site stands</div>
+            <div className="cs">
+              Every score carries the number of checks behind it. A pillar we could not
+              measure says so - it never shows as zero. Select one to filter the issues.
+            </div>
+          </div>
+        </div>
+        <PillarScorecard
+          rollups={rollups.data ?? []}
+          selected={dimension}
+          onSelect={(d) => {
+            setDimension(d);
+            if (d) setTab("issues");
+          }}
+        />
+      </div>
 
       <nav className="alt-tabs seg" role="tablist">
         {TABS.map((t) => (
@@ -151,83 +170,79 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
       </nav>
 
       {tab === "overview" ? (
-        <>
-          <div className="card">
-            <div className="card-h">
-              <div>
-                <div className="ct">Where this site stands</div>
-                <div className="cs">
-                  Every score carries the number of checks behind it. A dimension we could
-                  not measure says so - it never shows as zero.
-                </div>
-              </div>
-            </div>
-            <PillarScorecard
-              rollups={rollups.data ?? []}
-              selected={dimension}
-              onSelect={(d) => {
-                setDimension(d);
-                if (d) setTab("findings");
-              }}
-            />
-          </div>
-
-          <div className="card">
-            <div className="card-h">
-              <div>
-                <div className="ct">By subpoint</div>
-                <div className="cs">
-                  The checklist&rsquo;s own vocabulary - worst measured first, unmeasured last.
-                </div>
-              </div>
-            </div>
-            <SubpointTable rollups={rollups.data ?? []} />
-          </div>
-        </>
-      ) : null}
-
-      {tab === "plan" ? (
         <div className="card">
           <div className="card-h">
             <div>
-              <div className="ct">The plan</div>
+              <div className="ct">By subpoint</div>
               <div className="cs">
-                Ordered by impact over effort. A template fix costs the same whether it
-                covers four pages or four hundred.
+                The checklist&rsquo;s own vocabulary - worst measured first, unmeasured last.
               </div>
             </div>
           </div>
-          {roadmap.isLoading ? <div className="alt-loading">Loading plan...</div> : null}
+          <SubpointTable rollups={rollups.data ?? []} />
+        </div>
+      ) : null}
+
+      {tab === "strategy" ? (
+        <div className="card">
+          <div className="card-h">
+            <div>
+              <div className="ct">Strategy</div>
+              <div className="cs">Ordered by impact over effort.</div>
+            </div>
+          </div>
+          {roadmap.isLoading ? <div className="alt-loading">Loading strategy...</div> : null}
           {roadmap.isError ? (
             <div className="alt-empty">
               <span className="material-symbols-rounded">flag</span>
-              <p>No plan has been generated for this audit yet.</p>
+              <p>No strategy has been generated for this audit yet.</p>
             </div>
           ) : null}
           {roadmap.data ? <RoadmapBoard data={roadmap.data} /> : null}
         </div>
       ) : null}
 
-      {tab === "findings" ? (
+      {tab === "issues" ? (
         <div className="card">
           <div className="card-h">
             <div>
-              <div className="ct">Findings</div>
+              <div className="ct">Issues</div>
               <div className="cs">
                 One card per problem. Open one to see every page it affects.
               </div>
             </div>
             <div className="tools">
               {dimension ? (
-                <button type="button" className="alt-clear" onClick={() => setDimension(null)}>
-                  <span className="material-symbols-rounded">close</span>
-                  {dimension}
+                <>
+                  <button
+                    type="button"
+                    className="alt-dlmini"
+                    title={`Download the ${dimension} issues as CSV`}
+                    onClick={() => onDownload("findings.csv")}
+                  >
+                    <span className="material-symbols-rounded">download</span>
+                    CSV
+                  </button>
+                  <button type="button" className="alt-clear" onClick={() => setDimension(null)}>
+                    <span className="material-symbols-rounded">close</span>
+                    {dimension}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="alt-dlmini"
+                  title="Download every issue as CSV"
+                  onClick={() => onDownload("findings.csv")}
+                >
+                  <span className="material-symbols-rounded">download</span>
+                  CSV
                 </button>
-              ) : null}
+              )}
             </div>
           </div>
           {findings.isLoading ? (
-            <div className="alt-loading">Loading findings...</div>
+            <div className="alt-loading">Loading issues...</div>
           ) : (
             <FindingList
               auditId={auditId}
@@ -283,15 +298,6 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
             ))}
           </div>
         </div>
-      ) : null}
-
-      {site ? (
-        <footer className="alt-foot">
-          Scores are comparable only against another run with the same basis (
-          <code>{site.basis_hash || "-"}</code>, model{" "}
-          <code>{site.scoring_model_version || "-"}</code>).
-          {!isMeasured(site) ? ` This run measured nothing: ${notMeasuredReason(site)}.` : null}
-        </footer>
       ) : null}
     </div>
   );
