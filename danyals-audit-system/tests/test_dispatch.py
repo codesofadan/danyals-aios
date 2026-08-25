@@ -26,9 +26,10 @@ from audit_engine.checklist import load_registry
 
 @pytest.fixture(autouse=True)
 def _clean():
+    _snapshot = reg_mod.registered()
     reg_mod.clear_registry_for_tests()
     yield
-    reg_mod.clear_registry_for_tests()
+    reg_mod.restore_registry_for_tests(_snapshot)
 
 
 def full_ids(n):

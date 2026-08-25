@@ -40,6 +40,10 @@ from audit_engine.analyzers.common import Verdict
 from audit_engine.analyzers.context import build_context
 from audit_engine.analyzers.dispatch import run_rollups, run_scope
 from audit_engine.analyzers import registry
+from audit_engine.checklist import load_registry as load_registry_specs
+# Importing an analyzer module is what registers its checks. Keep this beside
+# the registry import so the two are never separated by an autoformatter.
+from audit_engine.analyzers import headers as _headers_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
@@ -424,6 +428,23 @@ async def _emit_ai_crawl_readiness(*, run_id: int, crawl_result: Any) -> Finding
             remediation,
         )
     return _finding(run_id=run_id, page_id=None, check_id="ON-106", owner="A5", verdict=merged)
+
+
+def _permitted_registered_ids(permitted: frozenset[str]) -> set[str]:
+    """Which REGISTERED checks this run is allowed to execute.
+
+    Without this the dispatcher would run every registered check regardless of
+    tier - which is exactly how google_nl came to spend on a free run: absence
+    from a gate read as permission. Fails closed: a check whose spec cannot be
+    found is not run.
+    """
+    specs = load_registry_specs()
+    out: set[str] = set()
+    for cid in registry.registered():
+        spec = specs.get(cid)
+        if spec is not None and spec.runs_under(permitted):
+            out.add(cid)
+    return out
 
 
 def _permitted_cost_classes(
@@ -998,7 +1019,12 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
     # ----- Free extras (URL slug, image filenames, readability, etc) -----
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
-    findings.extend(_emit_registered(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
+    _run_permitted_classes = _permitted_cost_classes(psi=psi, billable=bool(use_agents or use_ai))
+    findings.extend(_emit_registered(
+        run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result,
+        parsed_pages=parsed_pages,
+        permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
+    ))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
@@ -1663,7 +1689,12 @@ async def _run_full(
     # ----- Free extras (URL slug, image filenames, readability, etc) -----
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
-    findings.extend(_emit_registered(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
+    _run_permitted_classes = _permitted_cost_classes( psi=psi, billable=bool(serper or places or citations or moz or use_agents or use_ai), )
+    findings.extend(_emit_registered(
+        run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result,
+        parsed_pages=parsed_pages,
+        permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
+    ))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
@@ -2057,7 +2088,12 @@ async def _run_local(
     # ----- Free extras (URL slug, image filenames, readability, etc) -----
     console.print("[bold]> Running free deterministic extras + AI-search analyzers...[/bold]")
     findings.extend(_emit_extras(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
-    findings.extend(_emit_registered(run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result, parsed_pages=parsed_pages))
+    _run_permitted_classes = _permitted_cost_classes( billable=bool(use_places or use_citations or use_agents or use_ai), )
+    findings.extend(_emit_registered(
+        run_id=run_id, page_id_by_url=page_id_by_url, crawl_result=crawl_result,
+        parsed_pages=parsed_pages,
+        permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
+    ))
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001

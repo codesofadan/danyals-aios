@@ -291,3 +291,76 @@ before Wave 8 ships.**
 `FOURSQUARE_API_KEY` returns **401 Invalid request token** and should be
 treated as dead until replaced. `APIFY_API_TOKEN` authenticates and has a
 citation actor configured.
+
+---
+
+# Wave 2 — the response headers
+
+**2026-08-25.** The crawler always had `resp.headers` — it read `content-type`
+off them — but `CrawledPage` never stored them, so sixteen declared checks had
+no data to run on.
+
+`CrawledPage` gains `headers` and `redirect_hops`, both **appended last with
+defaults** so every existing positional construction keeps working.
+`redirect_chain` is untouched.
+
+**Credential headers are dropped before storage.** A stored header reaches
+`evidence_json` → `findings.json` → the client PDF, and that is the one way
+this feature leaks something that matters. `set-cookie`, `cookie`,
+`authorization`, `proxy-authorization`, `www-authenticate`, `x-api-key`,
+`x-auth-token` and the CSRF pair are removed; values are capped at 2 KB and the
+map at 100 keys, because a pathological server can return thousands.
+
+`redirect_hops` records the **status** of each hop. `redirect_chain` stores
+only URLs, so a permanent 301 and a temporary 302 look identical to any check
+that needs to tell them apart.
+
+## Twelve checks implemented
+
+| Check | Measures | Threshold source |
+|---|---|---|
+| `TECH-050` | response is compressed at all | — |
+| `TECH-051` | gzip (Brotli and zstd count) | — |
+| `TECH-052` | Brotli | Google: 15–20% smaller than gzip for text |
+| `TECH-053` | cache policy suits the content type | RFC 9111 §5.2.2.1 |
+| `TECH-055` | HTTPS end-to-end plus HSTS | RFC 6797 §7.2 |
+| `TECH-072` | **time to first byte** | web.dev/ttfb: 800 ms good, 1800 ms poor |
+| `TECH-095` | required headers, and version disclosure | RFC 9110 §6.6.1 |
+| `TECH-096` | Content-Type, charset, nosniff | — |
+| `TECH-098` | HTTP/3 on the wire or via Alt-Svc | — |
+| `TECH-099` | origin latency vs network latency | — |
+| `TECH-006` | **X-Robots-Tag noindex** | — |
+| `TECH-021` | Link-header vs HTML canonical conflict | — |
+
+`TECH-072` is the id that spent months carrying an `interaction_to_next_paint`
+measurement under the name "Server response analysis". It now measures what it
+says, against Google's own published bands, so a client sees one story from
+PageSpeed and from us.
+
+`TECH-006` is the highest-value check in the wave: an `X-Robots-Tag: noindex`
+is **invisible in the HTML**. It is the easiest way to deindex a site by
+accident and the hardest to spot by looking at the page.
+
+Two judgement calls are marked as such in the source: compression is reported
+`n_a` below ~1.5 KB (gzip can make a tiny response *larger*), and HTML cached
+beyond an hour is flagged because a published correction cannot reach visitors
+who already hold the page.
+
+## Four were NOT implemented, and the ledger now says why
+
+Storing headers did not unblock these, so parking them under
+"needs_response_headers" would have been a false excuse. That reason is now
+**retired entirely** — a test fails on any reason nobody uses.
+
+- **`TECH-082` Malware detection** — its declared sources (`crawled_html`,
+  `http_headers`) *cannot* detect malware; a header scan would be security
+  theatre. Google Safe Browsing v4 is free with the existing `GOOGLE_API_KEY`
+  and is the correct implementation. **Its declared `data_sources` are wrong** —
+  same family as O-9.
+- **`ON-070`, `TECH-090`** — need the HTTP response of each *image*. The
+  crawler fetches HTML documents only, so both need an image-fetch pass with
+  its own budget.
+- **`TECH-003`** — needs a site-scope cross-reference of sitemap URLs against
+  crawled status. Buildable now; Wave 3.
+
+Ledger: **170 → 158**.

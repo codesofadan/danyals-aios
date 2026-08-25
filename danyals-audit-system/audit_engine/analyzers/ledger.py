@@ -31,8 +31,6 @@ class Reason(StrEnum):
     NEEDS_BACKLINK_PROVIDER = "needs_backlink_provider"
     #: Needs a paid third-party API that is not backlinks.
     NEEDS_PROVIDER = "needs_provider"
-    #: Needs HTTP response headers, which the crawler holds but does not store.
-    NEEDS_RESPONSE_HEADERS = "needs_response_headers"
     #: Needs detail from the PageSpeed audits[] array we do not parse.
     NEEDS_PSI_DETAIL = "needs_psi_detail"
     #: Needs the page as a browser renders it.
@@ -58,7 +56,6 @@ REASON_REQUIRES: dict[Reason, frozenset[str]] = {
         "serper", "serper_geo", "serper_top10", "google_places", "otterly",
         "google_nl", "w3c_validator", "web_fetch", "wikidata",
     }),
-    Reason.NEEDS_RESPONSE_HEADERS: frozenset({"http_headers", "http_resp", "http_timing"}),
     Reason.NEEDS_PSI_DETAIL: frozenset({"psi", "psi_mobile", "crux"}),
     Reason.NEEDS_RENDERED_DOM: frozenset({
         "rendered_html", "rendered_html_mobile", "screenshot_breakpoints",
@@ -96,8 +93,6 @@ NOTES: dict[Reason, str] = {
         "at $0.024 per request and would supply this.",
     Reason.NEEDS_PROVIDER:
         "Requires a paid third-party API that is not currently called for this check.",
-    Reason.NEEDS_RESPONSE_HEADERS:
-        "The crawler reads resp.headers but CrawledPage does not store them; Wave 2 adds the field.",
     Reason.NEEDS_PSI_DETAIL:
         "The PageSpeed audits[] array is fetched but not parsed; Wave 4 adds the parser.",
     Reason.NEEDS_RENDERED_DOM:
@@ -264,8 +259,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_PROVIDER]),  # NLP keyword coverage
     _e("ON-020", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Internal topical relevance analysis
-    _e("ON-070", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Image compression analysis
+    _e("ON-070", Reason.NOT_YET_BUILT, "Wave 3",
+       "Needs the HTTP response of each IMAGE, not of the page. The crawler fetches HTML documents only, so this needs an image-fetch pass with its own budget."),
     _e("ON-081", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Crawlability analysis (on-page)
     _e("ON-082", Reason.NEEDS_PSI_DETAIL, "Wave 4",
@@ -300,14 +295,12 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.ROLLUP_PENDING]),  # Meta tag overall score (rollup)
     _e("ON-118", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
        NOTES[Reason.ROLLUP_PENDING]),  # Overall on page SEO score
-    _e("TECH-003", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Sitemap indexability check
+    _e("TECH-003", Reason.NOT_YET_BUILT, "Wave 3",
+       "Headers are now stored, so that blocker is gone. Needs a site-scope check that cross-references sitemap URLs against their crawled status and indexability."),
     _e("TECH-004", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Sitemap URL status analysis
     _e("TECH-005", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawlability analysis
-    _e("TECH-006", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Indexability analysis
     _e("TECH-007", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawl budget optimization
     _e("TECH-009", Reason.NOT_YET_BUILT, "Wave 3",
@@ -326,8 +319,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # 302 redirect misuse detection
     _e("TECH-019", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Canonical tag validation
-    _e("TECH-021", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Canonical conflict detection
     _e("TECH-022", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Duplicate URL detection
     _e("TECH-023", Reason.NOT_YET_BUILT, "Wave 3",
@@ -374,18 +365,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_PSI_DETAIL]),  # Unused JS detection
     _e("TECH-049", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Excessive DOM size analysis
-    _e("TECH-050", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Compression analysis
-    _e("TECH-051", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # GZIP validation
-    _e("TECH-052", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Brotli compression validation
-    _e("TECH-053", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Browser caching analysis
     _e("TECH-054", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
        NOTES[Reason.NEEDS_NETWORK_PROBE]),  # CDN optimization analysis
-    _e("TECH-055", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # HTTPS validation
     _e("TECH-056", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
        NOTES[Reason.NEEDS_NETWORK_PROBE]),  # SSL certificate analysis
     _e("TECH-057", Reason.NOT_YET_BUILT, "Wave 3",
@@ -410,8 +391,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawl log analysis
     _e("TECH-071", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Googlebot activity analysis
-    _e("TECH-072", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Server response analysis
     _e("TECH-073", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # HTML validation analysis
     _e("TECH-074", Reason.NOT_YET_BUILT, "Wave 3",
@@ -422,8 +401,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # Duplicate page detection (technical)
     _e("TECH-078", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Index bloat detection
-    _e("TECH-082", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Malware detection
+    _e("TECH-082", Reason.NOT_YET_BUILT, "Wave 3",
+       "Its declared sources (crawled_html, http_headers) cannot detect malware; a header scan would be security theatre. Google Safe Browsing v4 is free with the existing GOOGLE_API_KEY and is the correct implementation. The declared data_sources are wrong."),
     _e("TECH-083", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Hidden page detection
     _e("TECH-084", Reason.NOT_YET_BUILT, "Wave 3",
@@ -436,22 +415,14 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # Image crawlability analysis
     _e("TECH-089", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Image indexing analysis
-    _e("TECH-090", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # WebP support analysis
+    _e("TECH-090", Reason.NOT_YET_BUILT, "Wave 3",
+       "Server WebP support is proved by content negotiation on an image request, which needs the image-fetch pass. ON-071 already reports webp usage in the HTML."),
     _e("TECH-091", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Video indexing analysis
     _e("TECH-093", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Broken structured data analysis
     _e("TECH-094", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # XML errors analysis
-    _e("TECH-095", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Header response validation
-    _e("TECH-096", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Content type validation
-    _e("TECH-098", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # HTTP/3 validation
-    _e("TECH-099", Reason.NEEDS_RESPONSE_HEADERS, "Wave 2",
-       NOTES[Reason.NEEDS_RESPONSE_HEADERS]),  # Server latency analysis
     _e("TECH-100", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
        NOTES[Reason.NEEDS_NETWORK_PROBE]),  # Hosting performance analysis
     _e("TECH-101", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
@@ -462,8 +433,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 170
-LEDGER_FLOOR = 170
+LEDGER_CEILING = 158
+LEDGER_FLOOR = 158
 
 
 def ledgered() -> dict[str, LedgerEntry]:

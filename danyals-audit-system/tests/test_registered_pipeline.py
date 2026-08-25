@@ -13,15 +13,17 @@ import pytest
 
 from audit_engine.analyzers import registry as reg_mod
 from audit_engine.analyzers.common import Verdict
+from audit_engine.checklist import cost_class as cl_cost
 from audit_engine.checklist import load_registry
 from audit_engine.cli.main import _emit_registered
 
 
 @pytest.fixture(autouse=True)
 def _clean():
+    _snapshot = reg_mod.registered()
     reg_mod.clear_registry_for_tests()
     yield
-    reg_mod.clear_registry_for_tests()
+    reg_mod.restore_registry_for_tests(_snapshot)
 
 
 @dataclass
@@ -166,3 +168,60 @@ def test_permitted_check_ids_restricts_what_runs():
         parsed_pages=[FakeParsed()], permitted_check_ids={a},
     )
     assert {f.check_id for f in out} == {a}
+
+
+# --------------------------------------------------------------------------
+# The tier gate. Without it the dispatcher would run every registered check
+# regardless of tier - which is exactly how google_nl came to spend on a free
+# run: absence from a gate read as permission.
+# --------------------------------------------------------------------------
+
+def test_a_billable_check_is_excluded_from_a_free_tier():
+    from audit_engine.cli.main import (
+        _permitted_cost_classes,
+        _permitted_registered_ids,
+    )
+
+    specs = load_registry()
+    free_id = next(
+        c for c, s in specs.items()
+        if s.automation == "full" and set(s.data_sources) and
+        all(cl_cost(x) == "zero" for x in s.data_sources)
+    )
+    billable_id = next(
+        c for c, s in specs.items()
+        if s.automation == "full" and any(cl_cost(x) == "billable" for x in s.data_sources)
+    )
+
+    @reg_mod.check(free_id, scope="page")
+    def free_check(p):  # pragma: no cover
+        return Verdict("pass", 10.0, "info", 1.0, {})
+
+    @reg_mod.check(billable_id, scope="page")
+    def paid_check(p):  # pragma: no cover
+        return Verdict("pass", 10.0, "info", 1.0, {})
+
+    free_tier = _permitted_registered_ids(_permitted_cost_classes())
+    assert free_id in free_tier
+    assert billable_id not in free_tier, "a billable check was admitted to a free run"
+
+    paid_tier = _permitted_registered_ids(
+        _permitted_cost_classes(psi=True, billable=True, connections=True)
+    )
+    assert {free_id, billable_id} <= paid_tier
+
+
+def test_the_gate_fails_closed_on_an_unknown_check():
+    """A check the checklist cannot describe must not run, not run by default."""
+    from audit_engine.cli.main import _permitted_cost_classes, _permitted_registered_ids
+
+    reg_mod._REGISTRY["ZZZ-999"] = reg_mod.Registration(
+        check_id="ZZZ-999", scope="page", func=lambda p: None,
+        is_async=False, dotted_path="test.fake",
+    )
+    try:
+        assert "ZZZ-999" not in _permitted_registered_ids(
+            _permitted_cost_classes(psi=True, billable=True, connections=True)
+        )
+    finally:
+        reg_mod._REGISTRY.pop("ZZZ-999", None)

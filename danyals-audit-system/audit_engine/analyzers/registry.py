@@ -165,3 +165,14 @@ def for_scope(scope: str) -> list[Registration]:
 def clear_registry_for_tests() -> None:
     """Only tests may empty the registry."""
     _REGISTRY.clear()
+
+
+def restore_registry_for_tests(snapshot: dict[str, Registration]) -> None:
+    """Put back a snapshot taken with :func:`registered`.
+
+    A test that clears the registry and does not restore it silently empties it
+    for every test that runs afterwards, so real registrations appear to have
+    vanished. Always pair this with clear_registry_for_tests.
+    """
+    _REGISTRY.clear()
+    _REGISTRY.update(snapshot)

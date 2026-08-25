@@ -16,7 +16,8 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse
+from typing import Any
+from urllib.parse import urlparse
 
 from audit_engine.config import CrawlConfig
 from audit_engine.crawlers.browser_client import BrowserClient, CrawlerTransportError
@@ -43,6 +44,61 @@ def _is_public_or_drop(url: str) -> bool:
     return False
 
 
+#: Headers that carry a credential or a session. They must never be stored:
+#: a stored header reaches evidence_json -> findings.json -> the client PDF,
+#: and that is the one way this feature leaks something that matters.
+SENSITIVE_HEADERS = frozenset({
+    "set-cookie", "cookie", "authorization", "proxy-authorization",
+    "www-authenticate", "proxy-authenticate", "authentication-info",
+    "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token",
+})
+
+#: Caps. A pathological server can return thousands of headers, and every one
+#: of them would be carried through the whole pipeline.
+MAX_HEADER_KEYS = 100
+MAX_HEADER_VALUE_BYTES = 2048
+
+
+def sanitise_headers(raw: Any) -> dict[str, str]:
+    """Lowercased header map, credentials removed and size-capped.
+
+    Returns a plain dict so it is JSON-serialisable and cheap to copy.
+    """
+    out: dict[str, str] = {}
+    if not raw:
+        return out
+    try:
+        items = list(raw.items())
+    except Exception:
+        return out
+    for k, v in items:
+        if len(out) >= MAX_HEADER_KEYS:
+            break
+        name = str(k).lower().strip()
+        if not name or name in SENSITIVE_HEADERS:
+            continue
+        value = str(v)
+        if len(value) > MAX_HEADER_VALUE_BYTES:
+            value = value[:MAX_HEADER_VALUE_BYTES] + "...[truncated]"
+        # Repeated headers (several set-cookie, several link) collapse to a
+        # comma-joined value, matching how HTTP defines duplicate field lines.
+        out[name] = f"{out[name]}, {value}" if name in out else value
+    return out
+
+
+@dataclass
+class RedirectHop:
+    """One step of a redirect chain, with the status that produced it.
+
+    ``redirect_chain`` records only URLs, so a 301 and a 302 look identical to
+    a check that needs to tell a permanent redirect from a temporary one.
+    """
+
+    url: str
+    status: int
+    location: str | None = None
+
+
 @dataclass
 class CrawledPage:
     url: str
@@ -56,6 +112,11 @@ class CrawledPage:
     parsed: html_parser.ParsedHTML | None = None
     error: str | None = None
     http_version: str | None = None  # "HTTP/1.0", "HTTP/1.1", "HTTP/2", "HTTP/3"
+    #: Sanitised response headers, lowercased. Appended last, defaulted, so
+    #: every existing positional construction still works.
+    headers: dict[str, str] = field(default_factory=dict)
+    #: Redirect chain WITH status codes. `redirect_chain` is unchanged.
+    redirect_hops: list[RedirectHop] = field(default_factory=list)
 
 
 @dataclass
@@ -90,6 +151,14 @@ async def _fetch_page(
         )
 
     redirect_chain = [str(h.url) for h in resp.history] if resp.history else []
+    redirect_hops = [
+        RedirectHop(
+            url=str(h.url),
+            status=h.status_code,
+            location=h.headers.get("location") if h.headers else None,
+        )
+        for h in (resp.history or [])
+    ]
     ms = int((time.monotonic() - start) * 1000)
     ctype = resp.headers.get("content-type")
     body = resp.text if parse_body and ctype and "html" in ctype.lower() else None
@@ -97,7 +166,7 @@ async def _fetch_page(
     if body:
         try:
             parsed = html_parser.parse(body, str(resp.url))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("html_parse_failed", url=url, error=type(e).__name__)
 
     return CrawledPage(
@@ -111,6 +180,8 @@ async def _fetch_page(
         html=body,
         parsed=parsed,
         http_version=resp.http_version,
+        headers=sanitise_headers(resp.headers),
+        redirect_hops=redirect_hops,
     )
 
 
@@ -240,7 +311,7 @@ async def _render_homepage_links(site_url: str, *, max_urls: int) -> list[str]:
             await browser.close()
         log.info("playwright_render_fallback_ok", site=site_url, links=len(hrefs))
         return hrefs[: max_urls * 2]
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("playwright_render_failed", site=site_url, error=type(e).__name__)
         return []
 
