@@ -218,3 +218,100 @@ console errors.
 | Engine | **71 passed** |
 | Frontend | **71 passed**, new files lint-clean, `next build` green |
 | Migrations | all 97 fresh-apply in order; RLS gate passes |
+
+---
+
+## The deliverables
+
+### The client report — `app/services/audit_report.py`
+
+A **Python template filled from measured rows**. Everything on it is arithmetic over
+data the audit already produced, so a model has nothing to add and two things to cost:
+money per report, and the standing risk of a fabricated number in a document a client
+acts on. The layout is code, the content is a query, and the same input renders the same
+bytes — regenerating a report next year produces the report that was sent.
+
+Charts are **inline SVG generated in-process**: no chart library, no JavaScript, no font
+host, no remote asset. It renders identically in a browser, in an email client and
+through a print pass, with no network at all.
+
+| | engine's report | this |
+|---|---:|---:|
+| pages | 833 | **11** |
+| size | 15.4 MB | **530 KB** |
+| render | ~3 min | **0.01 s** |
+| marginal cost | model calls | **$0** |
+
+Sections: cover · executive summary · where the site stands · weakest areas · the plan ·
+the issues · what we checked · how to read this.
+
+It enforces the **same three rules a third time** — no score without its coverage, no
+unmeasured dimension as zero, no calendar date on a phase — because this is the artefact
+that leaves the building.
+
+### The workbook
+
+Every data sheet is now a real **Excel table**: filter dropdowns, sort, banding,
+structured references — not a bare grid whose first use is Ctrl+T. Plus a
+score-and-coverage bar chart and a severity breakdown.
+
+The trade: tables and charts need a normal worksheet, and `openpyxl`'s write-only mode
+supports neither. At 8,077 rows normal mode builds in ~1.4 s, so streaming bought
+nothing at this scale and cost both features.
+
+**Per-pillar issue exports** ship alongside — `issues-onpage.csv` (370),
+`issues-geo.csv` (80), `issues-local.csv` (5), `issues-technical.csv` (4),
+`issues-offpage.csv` (2). A dimension with no issues gets **no file**: an empty CSV reads
+as "nothing wrong here" when the truth is often "we never looked".
+
+### Subpoint names
+
+94 subpoints had been printing their internal keys onto a client-facing scorecard.
+`semantic-3.8-koray` is a researcher's surname; `semantic-3.9-info-quality` is a section
+number. They now read **"Contextual hierarchy"** and **"Information density"**.
+
+Keyed by pillar *then* subcategory, because the same key means different things in
+different files: on-page `crawlability` is one page's own directives, technical `crawl`
+is site-wide access. The keys are never renamed — they are the join between YAML, finding
+and rollup. The engine publishes the names in `coverage.json`, so the platform carries no
+second copy of a vocabulary it does not own.
+
+## A bug the report found, and it was destroying history
+
+Building the report against a second audit of the same site cut the **first** audit from
+8,077 occurrences to 3,225. Two causes:
+
+- instances were deleted by `finding_id` alone, so a later run erased an earlier run's
+  evidence for every cause they shared;
+- instance identity was `(finding_id, instance_key)` with no audit in it, so the second
+  audit to observe the same page failing the same check was silently dropped by
+  `on conflict do nothing`.
+
+A finding is a persistent **cause** many audits observe; an instance is what **one** audit
+saw. Migration `0097` puts the audit into the identity and makes the FK cascade —
+`on delete set null` was wrong twice over: it orphans evidence from the observation that
+produced it, and nulling the column collapsed instances from different audits onto one
+identity, so **deleting an audit failed outright**.
+
+Reports now read findings through their own audit's instances, never
+`audit_findings.audit_id`, which is last-writer-wins. Two regression tests pin both halves.
+
+## Client visibility
+
+`portal_audits` filtered on `client_id` **alone** — so every client-linked audit was
+visible in that client's portal the moment it was created: queued runs, failed runs,
+exploratory runs on a prospect's site. Nobody ever chose to show it; a foreign key did.
+
+Migration `0096` adds `visible_to_client`, default **false**, with an explicit checkbox at
+creation. Existing rows are backfilled **true** in the opposite direction — they are
+visible now, and defaulting them off would silently remove reports clients can currently
+open.
+
+## Scores of zero — which are real, and which were not
+
+Most are real: `meta-description` ran 3 of 3 and failed all three across 151 pages.
+
+Two were misleading: `technical/performance` ran **1 of 7** and `off-page/authority`
+**1 of 5**, and one failing check rendered as a catastrophic 0. Those now carry an
+**indicative** marker. The score still shows — it is real signal — it just no longer
+wears the authority of a full verdict.
