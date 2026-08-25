@@ -387,6 +387,41 @@ class ContentPlanningStore:
                  cache_write_tokens, cache_read_tokens, cost),
             )
 
+    # --- what the RESEARCH stage reads instead of paying to invent ---------- #
+    def metrics_for(self, engagement_id: str | None, keyword: str) -> dict[str, Any] | None:
+        """The metrics stage 1 already bought for this term, or None.
+
+        None is a real answer, not a failure. It means nobody bought a number for this
+        keyword, and the research stage marks the term `estimated` rather than deriving
+        one and presenting it as demand. Volume originates in Google's ad auction;
+        there is no offline derivation, so a computed figure here would be a
+        fabrication with a provider's name on it.
+
+        Matched case-insensitively on the exact term: a fuzzy match would silently
+        attach one keyword's bought volume to a different keyword.
+        """
+        if not engagement_id or not keyword.strip():
+            return None
+        with privileged_connection() as cur:
+            cur.execute(
+                """select t.volume, t.difficulty, t.cpc, t.competition, t.intent,
+                          t.estimated, t.relevance, t.opportunity, t.cluster_key,
+                          p.provider, p.provider_run_at
+                   from public.keyword_plan_terms t
+                   join public.keyword_plans p on p.id = t.plan_id
+                   where p.engagement_id = %s and lower(t.keyword) = lower(%s)
+                   order by t.estimated asc, p.provider_run_at desc nulls last
+                   limit 1""",
+                (engagement_id, keyword.strip()),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        # A row that is ITSELF estimated is not a bought number. Returning it would
+        # launder an estimate into "read from the keyword plan" in the stage notes.
+        if row.get("estimated"):
+            return None
+        return dict(row)
 
 # --------------------------------------------------------------------------- #
 # The RLS-scoped half: what an HTTP caller may see

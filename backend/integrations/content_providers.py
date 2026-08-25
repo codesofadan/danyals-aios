@@ -39,7 +39,13 @@ from app.config import Settings
 from app.logging_setup import get_logger
 from app.services.content_images import content_image_store_from_settings
 from integrations.content_research import FakeSerpResearcher, SerperResearcher, SerpResearcher
+from integrations.errors import ProviderNotConfiguredError
 from integrations.images import FakeImageGenerator, ImageGenerator, OpenAIImageGenerator
+from integrations.keyword_data import (
+    DataForSeoProvider,
+    FakeKeywordDataProvider,
+    KeywordDataProvider,
+)
 from integrations.llm import AnthropicSummarizer, FakeSummarizer, SystemSummarizer
 from integrations.wordpress import FakeWordPressPublisher, WordPressPublisher
 
@@ -65,6 +71,17 @@ class ContentProviders:
     writer: SystemSummarizer
     images: ImageGenerator
     wordpress: WordPressPublisher
+    # None when DataForSEO is not configured - deliberately NOT a fake.
+    #
+    # `FakeKeywordDataProvider` synthesises volume and difficulty from a hash. Those
+    # are exactly the numbers a client makes budget decisions on, and nothing
+    # downstream can tell a synthesised 880 from a bought one. v1 already shipped
+    # `difficulty = log10(totalResults) * 8` looking like vendor data; substituting a
+    # fake here would be the same lie with a nicer provenance story.
+    #
+    # So an absent provider is absent. The research stage marks every term `estimated`
+    # and that label rides through to the workbook's Data source column.
+    keyword_data: KeywordDataProvider | None
     model_writer: str
     model_heavy: str
     research_cost_estimate: float
@@ -126,10 +143,30 @@ def content_providers_from_settings(settings: Settings) -> ContentProviders | No
         else FakeImageGenerator()
     )
 
+    # NOT a bundle-level gate, unlike the writer and serper keys above. A missing
+    # keyword provider costs FIDELITY (estimated metrics, honestly labelled); a missing
+    # writer or SERP key means there is nothing to write or nothing to write it from.
+    # Degrading the whole bundle for the first would stop work that can legitimately
+    # proceed.
+    keyword_data: KeywordDataProvider | None = None
+    dfs_login, dfs_password = settings.dataforseo_login, settings.dataforseo_password
+    if dfs_login and dfs_password and dfs_password.get_secret_value():
+        try:
+            keyword_data = DataForSeoProvider(
+                login=dfs_login, password=dfs_password.get_secret_value()
+            )
+        except ProviderNotConfiguredError as exc:
+            # The AI/http extra is missing on this deploy. Same reasoning as above:
+            # report it and carry on estimating, rather than failing the bundle.
+            logger.info("keyword_data_degraded", reason=str(exc)[:120])
+    else:
+        logger.info("keyword_data_degraded", reason="missing_dataforseo_credentials")
+
     return ContentProviders(
         serp=serp,
         writer=writer,
         images=images,
+        keyword_data=keyword_data,
         # Per-site WP credentials live in the vault, not settings; the service layer
         # builds the real client per publish. The factory default is the fake.
         wordpress=FakeWordPressPublisher(),
@@ -149,6 +186,7 @@ def content_providers_for_tests(
         writer=FakeSummarizer(),
         images=FakeImageGenerator(),
         wordpress=FakeWordPressPublisher(),
+        keyword_data=FakeKeywordDataProvider(),
         model_writer="fake-writer",
         model_heavy="fake-heavy",
         research_cost_estimate=research_cost,
