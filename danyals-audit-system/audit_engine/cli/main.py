@@ -49,6 +49,7 @@ from audit_engine.analyzers import crawl_graph as _crawl_graph_checks  # noqa: F
 from audit_engine.analyzers import page_tech as _page_tech_checks  # noqa: F401
 from audit_engine.analyzers import psi_detail as _psi_detail_checks  # noqa: F401
 from audit_engine.analyzers import rollups as _rollup_checks  # noqa: F401
+from audit_engine.analyzers import network as _network_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,

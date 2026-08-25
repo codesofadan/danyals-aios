@@ -33,8 +33,6 @@ class Reason(StrEnum):
     NEEDS_PROVIDER = "needs_provider"
     #: Needs the page as a browser renders it.
     NEEDS_RENDERED_DOM = "needs_rendered_dom"
-    #: Needs DNS, WHOIS or a TLS handshake.
-    NEEDS_NETWORK_PROBE = "needs_network_probe"
     #: Needs Search Console or server logs, both client-granted.
     NEEDS_SEARCH_CONSOLE = "needs_search_console"
     #: Every input is already available. This is simply not written yet.
@@ -58,7 +56,6 @@ REASON_REQUIRES: dict[Reason, frozenset[str]] = {
     Reason.NEEDS_RENDERED_DOM: frozenset({
         "rendered_html", "rendered_html_mobile", "screenshot_breakpoints",
     }),
-    Reason.NEEDS_NETWORK_PROBE: frozenset({"dns", "tls_handshake"}),
     Reason.NEEDS_SEARCH_CONSOLE: frozenset({
         "gsc_coverage", "gsc_ctr", "gsc_queries", "server_logs", "crawl_log",
     }),
@@ -94,8 +91,6 @@ NOTES: dict[Reason, str] = {
     Reason.NEEDS_RENDERED_DOM:
         "Needs the page as a browser renders it. Firecrawl is available (1000 credits/month) "
         "and avoids shipping Chromium beside the API.",
-    Reason.NEEDS_NETWORK_PROBE:
-        "Needs a DNS, WHOIS or TLS probe; no such dependency is installed yet.",
     Reason.NEEDS_SEARCH_CONSOLE:
         "Needs data only the site owner can grant. Google OAuth credentials exist; "
         "the per-client grant does not.",
@@ -259,10 +254,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Lazy load indexing analysis
     _e("TECH-049", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Excessive DOM size analysis
-    _e("TECH-054", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
-       NOTES[Reason.NEEDS_NETWORK_PROBE]),  # CDN optimization analysis
-    _e("TECH-056", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
-       NOTES[Reason.NEEDS_NETWORK_PROBE]),  # SSL certificate analysis
     _e("TECH-065", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Responsive design validation
     _e("TECH-070", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
@@ -289,16 +280,14 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # Video indexing analysis
     _e("TECH-094", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # XML errors analysis
-    _e("TECH-100", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
-       NOTES[Reason.NEEDS_NETWORK_PROBE]),  # Hosting performance analysis
 ])
 
 
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 92
-LEDGER_FLOOR = 92
+LEDGER_CEILING = 89
+LEDGER_FLOOR = 89
 
 
 def ledgered() -> dict[str, LedgerEntry]:

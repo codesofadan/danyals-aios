@@ -606,3 +606,55 @@ alarm would double-count them.
 
 Ledger: **110 → 92**. `rollup_pending` is retired — the third reason a wave has
 closed out entirely.
+
+---
+
+# Wave 7 — the network probes
+
+**2026-08-25.** Three checks that open their own connection: TLS, DNS, hosting.
+
+**The plan gated this wave on a new dependency. It does not need one.** Python's
+`ssl` and `socket` modules answer all three questions, so `dnspython` and
+`cryptography` stay out of the deployment surface.
+
+## The SSRF guard matters most here
+
+These are the only checks that connect to a host **of their own accord** rather
+than following the crawler. A redirect or a sitemap entry pointing at
+`169.254.169.254` would otherwise become a way to reach cloud metadata from
+inside the audit. Every probe goes through `validate_public_host`, and 21
+parametrised tests assert that seven private-address forms are never probed by
+any of the three.
+
+Writing those tests found a real gap: `TECH-100` did not resolve DNS for a
+private host — so there was no SSRF — but it still returned a hosting verdict
+about an address it refused to look at. It now declines explicitly.
+
+**No test in this module touches the network.** An autouse fixture replaces
+`socket.create_connection`, `gethostbyname_ex` and `gethostbyaddr` with
+functions that raise, so a test that reached the network would fail loudly
+rather than become slow and flaky in CI.
+
+## The three checks
+
+**`TECH-056` SSL certificate** — issuer, expiry, SAN coverage and negotiated
+protocol from a real handshake. Critical on: expired, does not cover the host,
+or TLS 1.0/1.1 (deprecated by RFC 8996 in 2021 and refused by every current
+browser). **Expiry inside 14 days is critical, not a warning** — every public CA
+now issues for 90 days or less, so at 14 days an automated renewal has already
+failed and a manual one is nearly out of road.
+
+**`TECH-054` CDN** — three independent signals: vendor headers, the `Server`
+token, and CDN fingerprints in the DNS alias chain. **Reported as a warning at
+minor severity when absent, never a failure.** A CDN is not required, and a
+local business served fast from one region does not need one.
+
+**`TECH-100` Hosting performance** — measured response time plus reverse DNS, so
+a slow origin can be *attributed* rather than guessed at.
+
+Verified against the live site: TLS 1.3, Starfield issuer, 47 days to expiry,
+Sucuri detected via two independent signals, origin resolved to
+`cloudproxy10005.sucuri.net` at 555 ms.
+
+Ledger: **92 → 89**. `needs_network_probe` is retired — the fourth reason a
+wave has closed out entirely.
