@@ -354,3 +354,147 @@ class TestRefusals:
         widths = [tuple(c.width_pct for c in r.columns) for r in _all_rows(page)
                   if len(r.columns) == 3]
         assert (33, 33, 34) in [tuple(sorted(w)) for w in widths] or (34, 33, 33) in widths
+
+
+class TestTheAlligatorLessons:
+    """Iteration 4-5 against a second live site (a pool company drawn entirely as
+    rounded-outline cards). Each test reproduces a defect that shipped: the fix is
+    the assertion."""
+
+    @staticmethod
+    def _n(t: str, box: list[int], s: dict[str, str] | None = None,
+           kids: list[dict[str, Any]] | None = None, txt: str = "",
+           **extra: Any) -> dict[str, Any]:
+        return {"t": t, "box": box, "s": s or {}, "cls": [], "txt": txt,
+                "kids": kids or [], **extra}
+
+    def _card_page(self, *, interior_nests: bool = False) -> dict[str, Any]:
+        """A band whose sole content chain lands on a PAINTED wrapper (the card)."""
+        n = self._n
+        card_style = {"borderRadius": "25px", "borderTopStyle": "double",
+                      "borderTopWidth": "5px", "borderTopColor": "rgb(62, 71, 81)",
+                      "backgroundColor": "rgba(0, 0, 0, 0)"}
+        eyebrow = n("div", [160, 1030, 1120, 53],
+                    kids=[n("h2", [160, 1030, 1120, 19], txt="Trust Us")])
+        heading = n("h3", [160, 1084, 1120, 64], txt="Five-Star Reputation")
+        divider = n("div", [160, 1148, 1120, 43], kids=[
+            n("div", [160, 1148, 1120, 9], kids=[
+                n("span", [160, 1152, 1120, 1],
+                  s={"borderTopWidth": "1px", "borderTopStyle": "solid",
+                     "borderTopColor": "rgb(12, 13, 14)"})])])
+        button = n("div", [160, 2020, 1120, 123], kids=[
+            n("a", [540, 2070, 357, 58],
+              s={"backgroundColor": "rgb(242, 183, 47)", "paddingLeft": "48px"},
+              kids=[n("span", [640, 2090, 157, 16], txt="All Pool Services")],
+              href="/services")])
+        interior: list[dict[str, Any]] = [eyebrow, heading, divider, button]
+        if interior_nests:
+            # LEFT column itself holds a 2-col row -> the interior already nests
+            left = n("div", [200, 1300, 500, 400], kids=[
+                n("div", [200, 1300, 240, 120],
+                  kids=[n("p", [210, 1310, 220, 100], txt="stat one")]),
+                n("div", [460, 1300, 240, 120],
+                  kids=[n("p", [470, 1310, 220, 100], txt="stat two")]),
+            ])
+            right = n("div", [760, 1300, 500, 400],
+                      kids=[n("p", [770, 1310, 480, 120], txt="right text")])
+            interior = [eyebrow, left, right, button]
+        card = n("div", [120, 978, 1200, 1230], s=card_style, kids=interior)
+        section = n("section", [0, 868, 1440, 1450],
+                    kids=[n("div", [120, 868, 1200, 1450], kids=[card])])
+        return self._n("div", [0, 0, 1440, 2400], kids=[section])
+
+    def test_a_painted_wrapper_becomes_a_card_column_with_its_outline(self) -> None:
+        page = infer_layout(self._card_page(), viewport_width=1440)
+        assert len(page.sections) == 1
+        row = page.sections[0].rows[0]
+        assert len(row.columns) == 1
+        card = row.columns[0]
+        assert card.radius_px == 25
+        assert card.border_px == 5
+        assert card.border_style == "double"
+
+    def test_the_bands_padding_measures_to_the_card_box_not_its_widgets(self) -> None:
+        page = infer_layout(self._card_page(), viewport_width=1440)
+        s = page.sections[0]
+        # band y=868, card y=978 -> 110; NOT the 162 to the first widget
+        assert s.pad_top == 110
+
+    def test_an_eyebrow_wrapped_leaf_and_a_lone_button_row_both_survive(self) -> None:
+        page = infer_layout(self._card_page(), viewport_width=1440)
+
+        def widget_types(p: Any) -> list[str]:
+            out = []
+            for sec in p.sections:
+                for r in _all_rows_local(sec):
+                    for c in r.columns:
+                        out += [w.type for w in c.widgets]
+            return out
+
+        def _all_rows_local(sec: Any) -> list[Any]:
+            rows = []
+
+            def add(r: Any) -> None:
+                rows.append(r)
+                for c in r.columns:
+                    for sub in c.rows:
+                        add(sub)
+
+            for r in sec.rows:
+                add(r)
+            return rows
+
+        kinds = widget_types(page)
+        assert "button" in kinds, "the lone-button row used to vanish"
+        headings = kinds.count("heading")
+        assert headings >= 2, "the wrapped eyebrow h2 used to vanish"
+        assert "divider" in kinds, "the hairline divider used to vanish"
+
+    def test_a_nesting_interior_refuses_the_wrap_for_elementor_legality(self) -> None:
+        page = infer_layout(self._card_page(interior_nests=True), viewport_width=1440)
+        notes = [n for r in page.sections[0].rows for n in r.notes]
+        assert not any("card column" in n for n in notes), (
+            "an interior that already nests must not gain a second nesting level"
+        )
+
+    def test_an_off_page_carousel_slide_is_dropped_a_visible_item_is_not(self) -> None:
+        n = self._n
+        slide1 = n("div", [217, 100, 1006, 100],
+                   s={"backgroundImage": "url(https://x/a.png)"})
+        slide2 = n("div", [1223, 100, 1006, 100],
+                   s={"backgroundImage": "url(https://x/b.png)"})
+        wrapper = n("div", [217, 100, 1006, 100], kids=[slide1, slide2])
+        section = n("section", [0, 0, 1440, 300], kids=[
+            n("div", [120, 0, 1200, 300], kids=[
+                n("div", [120, 0, 1200, 300], kids=[
+                    n("h2", [160, 10, 1120, 40], txt="Reviews"), wrapper])])])
+        root = n("div", [0, 0, 1440, 400], kids=[section])
+        page = infer_layout(root, viewport_width=1440)
+        imgs = [w for s in page.sections for r in s.rows for c in r.columns
+                for cc in c.all_columns() for w in cc.widgets if w.type == "image"]
+        assert len(imgs) == 1, "the overflow slide (x=1223, 21% on-page) must drop"
+        notes = " ".join(nn for s in page.sections for r in s.rows for nn in r.notes)
+        assert "carousel overflow" in notes
+
+    def test_a_wide_hairline_classifies_as_a_divider_not_a_spacer(self) -> None:
+        hairline = {"t": "span", "box": [0, 0, 1118, 1], "cls": [], "txt": "",
+                    "s": {"borderTopWidth": "1px", "borderTopStyle": "solid"},
+                    "kids": []}
+        assert classify(hairline) == "divider"
+
+    def test_a_painted_question_pill_decorates_its_row_column(self) -> None:
+        n = self._n
+        pill_style = {"borderTopWidth": "1px", "borderTopStyle": "solid",
+                      "borderTopColor": "rgb(3, 76, 82)", "borderRadius": "12px",
+                      "backgroundColor": "rgb(255, 255, 255)"}
+        pills = [n("div", [160, 100 + i * 84, 1120, 68], s=pill_style,
+                   kids=[n("p", [212, 116 + i * 84, 1050, 36],
+                           txt=f"Question number {i}?")])
+                 for i in range(3)]
+        section = n("section", [0, 0, 1440, 400], kids=[
+            n("div", [120, 0, 1200, 400], kids=pills)])
+        root = n("div", [0, 0, 1440, 500], kids=[section])
+        page = infer_layout(root, viewport_width=1440)
+        cols = [c for s in page.sections for r in s.rows for c in r.columns]
+        decorated = [c for c in cols if c.border_px == 1 and c.radius_px == 12]
+        assert len(decorated) == 3, "each FAQ pill keeps its outline on the column"

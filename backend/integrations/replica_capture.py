@@ -126,12 +126,41 @@ _JS_TEMPLATE = """
     if (px(cs.paddingTop) >= 8 || px(cs.paddingLeft) >= 8) return true;
     return false;
   };
-  const ownText = (el) => {
-    // Joined with spaces: an h1 split across inline spans/breaks concatenated to
-    // "Comfort that feelslike home" - a missing space in a client-facing headline.
+  // Inline formatting elements whose text belongs to the PARENT's flow. A <p> whose
+  // copy is "link text; plain tail" captured only the tail before ("; we're
+  // partners...") because direct text nodes and inline children were walked
+  // separately - reading order lives in childNodes and nowhere else.
+  const INLINE = new Set(['B','U','EM','STRONG','I','SMALL','MARK','SUB','SUP',
+                          'SPAN','S','DEL','INS','CITE','Q','ABBR','TIME']);
+  const consumable = (c, pcs) => {
+    if (!c.tagName || !INLINE.has(c.tagName.toUpperCase())) return false;
+    const ccs = getComputedStyle(c);
+    if (ccs.display !== 'inline' && ccs.display !== 'inline-block') return false;
+    if (paints(ccs, pcs)) return false;
+    // anything replaced, interactive or painted below it must stay in the tree
+    if (c.querySelector('img,svg,video,iframe,picture,input,button,a')) return false;
+    for (const d of c.querySelectorAll('*')) {
+      const dcs = getComputedStyle(d);
+      if (paints(dcs, ccs)) return false;
+      if (dcs.display !== 'inline' && dcs.display !== 'inline-block') return false;
+    }
+    return true;
+  };
+  const inlineParts = (el, cs) => {
+    // Walk childNodes IN ORDER: text nodes contribute directly; unpainted inline
+    // formatting children (u/b/span...) contribute their whole text and are
+    // consumed (skipped when recursing), so "We're not your average pool company;
+    // we're partners..." survives as ONE ordered sentence.
+    const consumed = new Set();
     let t = '';
-    for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue + ' ';
-    return t.replace(/\\s+/g, ' ').trim();
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) { t += n.nodeValue + ' '; continue; }
+      if (n.nodeType !== 1) continue;
+      if (SKIP.has(n.tagName.toUpperCase())) continue;
+      if (consumable(n, cs)) { t += n.textContent + ' '; consumed.add(n); }
+    }
+    t = t.replace(/\\s+/g, ' ').replace(/\\s+([,;.!?%)])/g, '$1').trim();
+    return [t, consumed];
   };
   const kids = (el) => Array.from(el.children).filter(c => !SKIP.has(c.tagName.toUpperCase()));
   // A real row: two or more children whose vertical extents overlap.
@@ -190,15 +219,17 @@ _JS_TEMPLATE = """
                kids: hoisted };
     }
 
+    const [rawText, consumed] = inlineParts(el, cs);
     let children = [];
     if (depth < MAX_DEPTH) {
       for (const c of kids(el)) {
+        if (consumed.has(c)) continue;
         const n = walk(c, depth + 1, cs);
         if (n) children.push(n);
       }
     } else if (kids(el).length) { truncated = true; }
 
-    const text = ownText(el).slice(0, MAX_TEXT);
+    const text = rawText.slice(0, MAX_TEXT);
     const replaced = REPLACED.has(TAG);
     const keep = !!text || replaced || paints(cs, pcs) || children.length >= 2 ||
                  (children.length && hasRow(el));
@@ -263,7 +294,15 @@ _JS_TEMPLATE = """
     if (text) node.txt = text;
     if (TAG === 'A' && el.getAttribute('href')) node.href = el.getAttribute('href');
     if (TAG === 'IMG') {
-      node.src = el.currentSrc || el.getAttribute('src') || '';
+      // A lazy loader can still be holding its data: placeholder when the walk
+      // reaches this img (a race the scroll pass usually - not always - wins);
+      // the real URL is parked on data-lazy-src/data-src. A data: URI is never
+      // a publishable source.
+      let src = el.currentSrc || el.getAttribute('src') || '';
+      if (!src || src.indexOf('data:') === 0) {
+        src = el.getAttribute('data-lazy-src') || el.getAttribute('data-src') || src;
+      }
+      node.src = (src && src.indexOf('data:') === 0) ? '' : src;
       node.alt = el.getAttribute('alt') || '';
       if (el.naturalWidth) node.nat = [el.naturalWidth, el.naturalHeight];
     }
@@ -271,8 +310,20 @@ _JS_TEMPLATE = """
     return node;
   }
 
-  // Content root: an Elementor page states its own boundary; otherwise main/article.
-  const root = document.querySelector('[data-elementor-type]') ||
+  // Content root: an Elementor page states its own boundary - but on an Elementor
+  // Pro site the HEADER and FOOTER templates carry data-elementor-type too, and the
+  // header comes first in the DOM. Taking the first match replicated a pool
+  // company's NAVBAR as its whole site (17 nodes of an 8,076px page). Prefer the
+  // page-content types, then the TALLEST candidate, and never a location template.
+  const candidates = Array.from(document.querySelectorAll('[data-elementor-type]'))
+    .filter(el => {
+      const t = el.getAttribute('data-elementor-type') || '';
+      if (/header|footer|popup/.test(t)) return false;
+      if (/elementor-location-(header|footer)/.test(el.className + '')) return false;
+      return true;
+    })
+    .sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height);
+  const root = candidates[0] ||
                document.querySelector('main') ||
                document.querySelector('article') || document.body;
 
@@ -306,10 +357,23 @@ _JS_TEMPLATE = """
   const fonts = Array.from(document.querySelectorAll('link[rel=stylesheet]'))
     .map(l => l.href).filter(h => /fonts\\.(googleapis|gstatic)/.test(h)).slice(0, 10);
 
+  // The page's own ground: the tint behind every band lives on body/html, which
+  // the content-root walk never visits - without it a soft blue-grey page
+  // rebuilds stark white.
+  let bodyBg = '';
+  try {
+    bodyBg = getComputedStyle(document.body).backgroundColor;
+    if (bodyBg === 'rgba(0, 0, 0, 0)' || bodyBg === 'transparent') {
+      bodyBg = getComputedStyle(document.documentElement).backgroundColor;
+    }
+    if (bodyBg === 'rgba(0, 0, 0, 0)' || bodyBg === 'transparent') bodyBg = '';
+  } catch (e) { bodyBg = ''; }
+
   return {
     url: location.href,
     title: document.title || '',
     lang: document.documentElement.lang || '',
+    bodyBg: bodyBg,
     docHeight: Math.round(document.documentElement.scrollHeight),
     props: PROPS,
     styles: styles,
@@ -379,6 +443,8 @@ class ReplicaCapture:
     viewports: list[ReplicaViewport] = field(default_factory=list)
     css_vars: dict[str, str] = field(default_factory=dict)
     font_links: tuple[str, ...] = ()
+    # the page's ground colour, read from body/html - bands sit ON it
+    body_bg: str = ""
     notes: tuple[str, ...] = ()
 
     def viewport(self, name: str) -> ReplicaViewport | None:
@@ -489,6 +555,7 @@ def capture_replica(
                         out.lang = str(meta.get("lang") or "")
                         out.css_vars = dict(meta.get("vars") or {})
                         out.font_links = tuple(meta.get("fonts") or ())
+                        out.body_bg = str(meta.get("bodyBg") or "")
             finally:
                 browser.close()
     except Exception as exc:

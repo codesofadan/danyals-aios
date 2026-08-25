@@ -138,7 +138,9 @@ def _w_heading(w: InferredWidget, ds: DesignSystem,
                responsive: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     node, style = w.node, w.node.get("s") or {}
     level = node.get("t", "h2")
-    text = node.get("txt") or ""
+    # An h3 whose words live on nested spans has no own text - join the subtree in
+    # document order, or the page's main headline arrives as an empty widget.
+    text = node.get("txt") or _inline_text(node)
     out: dict[str, Any] = {
         "title": text,
         "header_size": level if level in ("h1", "h2", "h3", "h4", "h5", "h6") else "h2",
@@ -199,9 +201,25 @@ def _w_text(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
 
 def _w_image(w: InferredWidget, _ds: DesignSystem) -> dict[str, Any]:
     node = w.node
-    url = node.get("src") or _bg_image_url(node.get("s") or {})
-    return {"image": {"url": url, "id": "", "alt": node.get("alt") or ""},
-            "image_size": "full"}
+    style = node.get("s") or {}
+    url = node.get("src") or _bg_image_url(style)
+    if url.startswith("data:"):
+        url = ""  # a lazy-loader placeholder, never a publishable source
+    out: dict[str, Any] = {"image": {"url": url, "id": "", "alt": node.get("alt") or ""},
+                           "image_size": "full"}
+    # The measured box IS the size the source renders - without it Elementor shows
+    # the file at natural size, and an 86px service icon arrived as a full-width
+    # graphic. `width` is the image widget's own control, so it stays editable.
+    # EXCEPT a background tile drawn with `contain`: its box is the frame, not the
+    # picture (a 170px review badge sat in a 1006px slide; box-width blew it up).
+    box = node.get("box") or [0, 0, 0, 0]
+    contained = (not node.get("src")
+                 and "contain" in (style.get("backgroundSize") or ""))
+    if box[2] and box[2] >= 16 and not contained:
+        out["width"] = {"unit": "px", "size": int(box[2])}
+    if contained and "50%" in (style.get("backgroundPosition") or ""):
+        out["align"] = "center"  # the frame centred its picture; keep that
+    return out
 
 
 def _subtree_text(node: dict[str, Any]) -> str:
@@ -209,6 +227,30 @@ def _subtree_text(node: dict[str, Any]) -> str:
     for k in node.get("kids") or []:
         parts.append(_subtree_text(k))
     return " ".join(x for x in parts if x).strip()
+
+
+def _parse_shadow(raw: str) -> dict[str, Any] | None:
+    """A computed box-shadow -> Elementor's shadow object (first shadow only).
+
+    Chrome serialises colour-first: ``rgba(0, 0, 0, 0.5) 0px 0px 10px 0px``. The
+    hard-offset black shadow on the reference's yellow CTAs and the soft ring on
+    its floating cards are both DESIGN, not decoration to drop.
+    """
+    if not raw or raw == "none":
+        return None
+    m = re.match(
+        r"(rgba?\([^)]*\)|#\S+)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px"
+        r"(?:\s+(-?[\d.]+)px)?",
+        raw.strip(),
+    )
+    if not m:
+        return None
+    colour, hx, vy, blur, spread = m.groups()
+    return {
+        "horizontal": round(float(hx)), "vertical": round(float(vy)),
+        "blur": round(float(blur)), "spread": round(float(spread or 0)),
+        "color": colour,
+    }
 
 
 def _w_button(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
@@ -232,11 +274,18 @@ def _w_button(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
                                 "bottom": str(radius), "left": str(radius),
                                 "isLinked": True}
     _typography(out, "", ds.fonts.get("body", ""), _px(style.get("fontSize", "")))
+    shadow = _parse_shadow(style.get("boxShadow", ""))
+    if shadow:
+        out["button_box_shadow_box_shadow_type"] = "yes"
+        out["button_box_shadow_box_shadow"] = shadow
     return out
 
 
 def _w_icon_list(w: InferredWidget, ds: DesignSystem) -> dict[str, Any]:
-    items = [k.get("txt") or "" for k in (w.node.get("kids") or []) if k.get("txt")]
+    # per-item text is the ITEM's whole inline subtree: an <li> whose label sits on
+    # a nested <a><span> captured as an empty item, and three city cards rendered
+    # with headings and no services under them
+    items = [t for t in (_inline_text(k) for k in (w.node.get("kids") or [])) if t]
     if not items and w.node.get("txt"):
         items = [w.node["txt"]]
     out: dict[str, Any] = {"icon_list": [
@@ -258,8 +307,19 @@ def _w_spacer(w: InferredWidget, _ds: DesignSystem) -> dict[str, Any]:
     return {"space": {"unit": "px", "size": max(10, w.node.get("box", [0, 0, 0, 40])[3])}}
 
 
-def _w_divider(_w: InferredWidget, _ds: DesignSystem) -> dict[str, Any]:
-    return {"style": "solid", "weight": {"unit": "px", "size": 1}}
+def _w_divider(w: InferredWidget, _ds: DesignSystem) -> dict[str, Any]:
+    style = w.node.get("s") or {}
+    out: dict[str, Any] = {"style": "solid", "weight": {"unit": "px", "size": 1}}
+    try:
+        weight = round(float((style.get("borderTopWidth") or "1").rstrip("px")))
+        if weight:
+            out["weight"] = {"unit": "px", "size": min(weight, 10)}
+    except ValueError:
+        pass
+    colour = _colour(style.get("borderTopColor", ""))
+    if colour:
+        out["color"] = colour
+    return out
 
 
 def _w_testimonial(w: InferredWidget, _ds: DesignSystem) -> dict[str, Any]:
@@ -314,6 +374,13 @@ def _widget(w: InferredWidget, ds: DesignSystem, ids: _IdGen,
         raise UnknownSettingError(f"no builder for widget type {w.type!r}")
     settings = (_w_heading(w, ds, responsive) if w.type == "heading"
                 else builder(w, ds))
+    if w.gap_below >= 0:
+        # the measured distance to the next widget IS the design's rhythm; leaving
+        # it to the kit default (20px on everything) is why the rebuild breathed
+        # looser than the source everywhere
+        settings["_margin"] = {"unit": "px", "top": "0", "right": "0",
+                               "bottom": str(w.gap_below), "left": "0",
+                               "isLinked": False}
     if w.classes:
         settings["_css_classes"] = " ".join(w.classes[:4])
     return {
@@ -340,10 +407,32 @@ def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
     if bg and bg != ds.palette.get("background"):
         settings["background_background"] = "classic"
         settings["background_color"] = bg
+    if any(col.pad):
+        top_, right_, bottom_, left_ = col.pad
+        settings["padding"] = {"unit": "px", "top": str(top_), "right": str(right_),
+                              "bottom": str(bottom_), "left": str(left_),
+                              "isLinked": False}
     if col.radius_px:
         r = str(col.radius_px)
         settings["border_radius"] = {"unit": "px", "top": r, "right": r,
                                      "bottom": r, "left": r, "isLinked": True}
+    if col.border_px:
+        # the rounded-OUTLINE card: the outline is the design, and it maps onto
+        # the column's own border group so the editor's controls stay live
+        bw = str(col.border_px)
+        settings["border_border"] = (col.border_style
+                                     if col.border_style in ("solid", "double",
+                                                             "dashed", "dotted")
+                                     else "solid")
+        settings["border_width"] = {"unit": "px", "top": bw, "right": bw,
+                                    "bottom": bw, "left": bw, "isLinked": True}
+        border_colour = _colour(col.border_color)
+        if border_colour:
+            settings["border_color"] = border_colour
+    col_shadow = _parse_shadow(col.shadow)
+    if col_shadow:
+        settings["box_shadow_box_shadow_type"] = "yes"
+        settings["box_shadow_box_shadow"] = col_shadow
     grad = _gradient(col.scrim)
     if grad:
         settings.update(grad)
@@ -353,6 +442,18 @@ def _column(col: InferredColumn, ds: DesignSystem, ids: _IdGen,
             elements.append(_row_as_inner_section(row, ds, ids, container_px, responsive, mobile_pos))
     else:
         elements = [_widget(w, ds, ids, responsive) for w in col.widgets]
+        # BUTTON ALIGNMENT is geometric: Elementor left-aligns by default, but the
+        # measured centre of a CTA sitting on the column's centre line says the
+        # author centred it. The builder cannot know this - only the column can.
+        col_centre = col.x + col.width_px / 2
+        for w, el in zip(col.widgets, elements, strict=True):
+            if w.type != "button":
+                continue
+            bx, _, bw, _ = (w.node.get("box") or [0, 0, 0, 0])
+            if not bw or bw >= col.width_px * 0.9:
+                continue
+            if abs((bx + bw / 2) - col_centre) <= max(12.0, col.width_px * 0.04):
+                el["settings"]["align"] = "center"
     return {
         "id": ids.next(f"col:{col.x}:{col.width_pct}"),
         "elType": "column",
@@ -414,6 +515,13 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
         settings["background_image"] = {"url": section.background_image, "id": ""}
         settings["background_size"] = "cover"
         settings["background_position"] = "center center"
+    if section.pad_top or section.pad_bottom:
+        # the page's own vertical rhythm, measured from where content actually sits
+        # inside the band - not Elementor's default breathing
+        settings["padding"] = {
+            "unit": "px", "top": str(section.pad_top), "right": "0",
+            "bottom": str(section.pad_bottom), "left": "0", "isLinked": False,
+        }
     if section.classes:
         settings["_css_classes"] = " ".join(section.classes[:4])
     if section.element_id:

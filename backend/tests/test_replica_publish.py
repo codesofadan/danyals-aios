@@ -117,3 +117,20 @@ class TestDegradesNamedNotRaised:
     def test_the_result_shape_is_stable(self) -> None:
         r = ReplicaResult()
         assert r.ok is False and r.notes == []
+
+
+class TestThePageGround:
+    def test_the_measured_body_tint_reaches_the_design_css(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.layout_infer import InferredPage
+        from app.services.replica_css import generate
+        css = generate(InferredPage(sections=(), container_px=1200), DesignSystem(),
+                       body_bg="rgb(243, 245, 248)")
+        assert "body{background-color:rgb(243, 245, 248) !important}" in css
+
+    def test_no_tint_no_rule(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.layout_infer import InferredPage
+        from app.services.replica_css import generate
+        css = generate(InferredPage(sections=(), container_px=1200), DesignSystem())
+        assert "body{background-color" not in css

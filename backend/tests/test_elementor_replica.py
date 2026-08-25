@@ -239,3 +239,126 @@ def test_mobile_position_facts_are_measured(tmp_path: pathlib.Path) -> None:
     stacked = InferredRow(columns=(col("A"), col("C")), y=0)
     assert _row_stays_inline_on_mobile(inline, pos) is True
     assert _row_stays_inline_on_mobile(stacked, pos) is False
+
+
+class TestIterationFiveRegressions:
+    """The alligator lessons, emitter side: shadows, shattered headings, contained
+    badges, empty icon-lists, geometric button centring, the page's own ground."""
+
+    def test_parse_shadow_reads_chromes_colour_first_form(self) -> None:
+        from app.services.elementor_replica import _parse_shadow
+        s = _parse_shadow("rgba(0, 0, 0, 0.5) 0px 0px 10px 0px")
+        assert s == {"horizontal": 0, "vertical": 0, "blur": 10, "spread": 0,
+                     "color": "rgba(0, 0, 0, 0.5)"}
+        hard = _parse_shadow("rgb(0, 0, 0) 4px 5px 0px 0px")
+        assert hard is not None
+        assert (hard["horizontal"], hard["vertical"], hard["blur"]) == (4, 5, 0)
+        assert _parse_shadow("none") is None
+        assert _parse_shadow("") is None
+
+    def test_a_heading_whose_words_live_on_nested_spans_joins_them(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _w_heading
+        from app.services.layout_infer import InferredWidget
+        node = {"t": "h3", "box": [0, 0, 556, 144], "txt": "",
+                "s": {"fontSize": "64px", "textAlign": "center"},
+                "kids": [
+                    {"t": "span", "box": [0, 0, 360, 72], "txt": "Pool Service Made",
+                     "s": {}, "kids": []},
+                    {"t": "span", "box": [0, 72, 154, 72], "txt": "Easy!",
+                     "s": {}, "kids": []},
+                ]}
+        out = _w_heading(InferredWidget(type="heading", node=node), DesignSystem())
+        assert out["title"] == "Pool Service Made Easy!"
+        assert out["align"] == "center"
+
+    def test_a_contained_badge_keeps_natural_size_and_centres(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _w_image
+        from app.services.layout_infer import InferredWidget
+        node = {"t": "div", "box": [217, 1190, 1006, 100], "txt": "",
+                "s": {"backgroundImage": "url(https://x/badge.png)",
+                      "backgroundSize": "contain",
+                      "backgroundPosition": "50% 50%"},
+                "kids": []}
+        out = _w_image(InferredWidget(type="image", node=node), DesignSystem())
+        assert "width" not in out, "box-width blew a 250px badge up to 1006px"
+        assert out.get("align") == "center"
+
+    def test_a_real_img_keeps_its_measured_width(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _w_image
+        from app.services.layout_infer import InferredWidget
+        node = {"t": "img", "box": [323, 1821, 86, 86], "txt": "",
+                "src": "https://x/icon.png", "s": {}, "kids": []}
+        out = _w_image(InferredWidget(type="image", node=node), DesignSystem())
+        assert out["width"] == {"unit": "px", "size": 86}
+
+    def test_a_data_uri_never_ships_as_an_image_source(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _w_image
+        from app.services.layout_infer import InferredWidget
+        node = {"t": "img", "box": [0, 0, 100, 100], "txt": "",
+                "src": "data:image/svg+xml;base64,xyz", "s": {}, "kids": []}
+        out = _w_image(InferredWidget(type="image", node=node), DesignSystem())
+        assert out["image"]["url"] == ""
+
+    def test_icon_list_items_read_their_whole_inline_subtree(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _w_icon_list
+        from app.services.layout_infer import InferredWidget
+        node = {"t": "ul", "box": [0, 0, 268, 92], "txt": "", "s": {}, "kids": [
+            {"t": "li", "box": [0, 0, 268, 29], "txt": "", "s": {}, "kids": [
+                {"t": "a", "box": [0, 0, 268, 24], "txt": "", "s": {}, "kids": [
+                    {"t": "span", "box": [0, 0, 225, 24],
+                     "txt": "Pool Cleaning - Coral Gables", "s": {}, "kids": []}]}]},
+            {"t": "li", "box": [0, 34, 268, 29], "txt": "", "s": {}, "kids": [
+                {"t": "a", "box": [0, 34, 268, 24], "txt": "", "s": {}, "kids": [
+                    {"t": "span", "box": [0, 34, 206, 24],
+                     "txt": "Pool Repair - Coral Gables", "s": {}, "kids": []}]}]},
+        ]}
+        out = _w_icon_list(InferredWidget(type="icon-list", node=node), DesignSystem())
+        texts = [i["text"] for i in out["icon_list"]]
+        assert texts == ["Pool Cleaning - Coral Gables", "Pool Repair - Coral Gables"]
+
+    def test_a_bordered_shadowed_column_carries_both_groups(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _column, _IdGen
+        from app.services.layout_infer import InferredColumn
+        col = InferredColumn(width_pct=100, x=120, width_px=1200, radius_px=25,
+                             border_px=5, border_style="double",
+                             border_color="rgb(62, 71, 81)",
+                             shadow="rgba(0, 0, 0, 0.5) 0px 0px 10px 0px")
+        el = _column(col, DesignSystem(), _IdGen(), 1200)
+        s = el["settings"]
+        assert s["border_border"] == "double"
+        assert s["border_width"]["top"] == "5"
+        assert s["box_shadow_box_shadow_type"] == "yes"
+        assert s["box_shadow_box_shadow"]["blur"] == 10
+
+    def test_a_button_on_the_columns_centre_line_centres(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _column, _IdGen
+        from app.services.layout_infer import InferredColumn, InferredWidget
+        btn = InferredWidget(type="button", node={
+            "t": "a", "box": [542, 2071, 357, 58], "txt": "All Pool Services",
+            "s": {"backgroundColor": "rgb(242, 183, 47)"}, "kids": [],
+            "href": "/services"})
+        col = InferredColumn(width_pct=100, x=189, width_px=1062, widgets=(btn,))
+        el = _column(col, DesignSystem(), _IdGen(), 1062)
+        assert el["elements"][0]["settings"]["align"] == "center"
+
+    def test_a_buttons_hard_shadow_is_design_and_ships(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import _w_button
+        from app.services.layout_infer import InferredWidget
+        node = {"t": "a", "box": [563, 3627, 313, 52], "txt": "Book a Call",
+                "s": {"backgroundColor": "rgb(242, 183, 47)",
+                      "boxShadow": "rgb(0, 0, 0) 4px 5px 0px 0px"},
+                "kids": [], "href": "/call"}
+        out = _w_button(InferredWidget(type="button", node=node), DesignSystem())
+        assert out["button_box_shadow_box_shadow_type"] == "yes"
+        assert out["button_box_shadow_box_shadow"]["horizontal"] == 4
+
+    def test_the_new_keys_still_satisfy_the_oracle(self, tree: list[dict[str, Any]]) -> None:
+        validate_tree(tree, load_oracle())

@@ -24,12 +24,22 @@ MAX_CSS_BYTES = 24_000
 
 
 def generate(page: InferredPage, ds: DesignSystem,
-             author_vars: dict[str, str] | None = None) -> str:
+             author_vars: dict[str, str] | None = None,
+             body_bg: str = "") -> str:
     out: list[str] = []
     surface = ds.palette.get("surface", "#f5f5f5")
     border = ds.palette.get("border", "#e5e7eb")
     radius = (ds.radius_scale[len(ds.radius_scale) // 2]
               if ds.radius_scale else 8)
+
+    # The page's GROUND. The tint behind every band lives on the source's body -
+    # outside the content root, so no section carries it - and without it a soft
+    # blue-grey page rebuilds stark white.
+    if body_bg:
+        # !important because this CSS is PAGE-SCOPED meta: on a site whose own
+        # site-wide stylesheet also paints body (the test site's does), cascade
+        # order buries the measured ground; important wins and leaks nowhere.
+        out.append(f"body{{background-color:{body_bg} !important}}")
 
     # The author's own tokens, verbatim - their names are their documentation.
     author_vars = author_vars or {}

@@ -153,3 +153,52 @@ class TestItNeverBreaksTheCaller:
         cap = capture_replica("http://127.0.0.1:9/nothing", timeout_ms=2000)
         assert cap.viewports == [] or all(v.root is None for v in cap.viewports)
         assert cap.notes
+
+
+class TestOrderedInlineText:
+    """A <p> whose copy interleaves text nodes with inline children (a <u> link,
+    a <b> word) captured only the direct text - '; we're partners...' with the
+    link's words missing. Reading order lives in childNodes and nowhere else."""
+
+    def test_the_extractor_walks_childnodes_in_order(self) -> None:
+        js = _extractor_js()
+        assert "childNodes" in js
+        assert "consumable" in js
+        assert "INLINE" in js
+
+    def test_consumed_inline_children_leave_the_tree(self) -> None:
+        js = _extractor_js()
+        assert "consumed.has(c)" in js, "a consumed span must not be walked again"
+
+    def test_painted_or_interactive_inlines_are_never_consumed(self) -> None:
+        js = _extractor_js()
+        assert "img,svg,video,iframe,picture,input,button,a" in js
+
+    def test_space_never_precedes_punctuation_in_the_join(self) -> None:
+        js = _extractor_js()
+        assert "([,;.!?%)])" in js, "'4.9 /5' and 'company ;' are join artefacts"
+
+
+class TestLazyImageSources:
+    """A lazy loader can still hold its data: placeholder when the walk arrives -
+    two illustrations shipped with empty src (alt intact) exactly this way."""
+
+    def test_the_lazy_attributes_are_the_fallback(self) -> None:
+        js = _extractor_js()
+        assert "data-lazy-src" in js
+        assert "data-src" in js
+
+    def test_a_data_uri_is_never_a_source(self) -> None:
+        js = _extractor_js()
+        assert "indexOf('data:')" in js
+
+
+class TestThePagesOwnGround:
+    def test_body_background_is_read_outside_the_content_root(self) -> None:
+        js = _extractor_js()
+        assert "bodyBg" in js
+        assert "getComputedStyle(document.body).backgroundColor" in js
+
+    def test_the_capture_carries_it(self) -> None:
+        from integrations.replica_capture import ReplicaCapture
+        assert ReplicaCapture(url="https://x").body_bg == ""

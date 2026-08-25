@@ -148,7 +148,8 @@ def replicate(
         "content": "<p>Replicated by AIOS. Open in Elementor to edit.</p>",
         "elementor_data": to_json(tree),
         "elementor_edit_mode": "builder",
-        "design_css": generate(page, ds, capture.css_vars),
+        "design_css": generate(page, ds, capture.css_vars,
+                               body_bg=getattr(capture, "body_bg", "")),
     }
     try:
         pushed = publisher.publish(payload)

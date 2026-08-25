@@ -205,16 +205,43 @@ def test_form_specs_catalog_has_at_least_fifty_automation_ready_directories() ->
         assert spec.success_indicator, name  # a way to know it worked
 
 
-def test_playwright_bot_degrades_cleanly_without_the_optional_dependency() -> None:
-    # Playwright is not installed in this test env - this IS the production-without-
-    # the-automation-extra case, not a test artifact to work around.
+def test_playwright_bot_degrades_cleanly_without_the_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Playwright's ABSENCE is now simulated rather than assumed of the env: the
+    design-capture work installs the automation extra into the backend venv (that is
+    the intended deploy state since install.sh gained `.[automation]`), so a test
+    that relies on the import genuinely failing broke the day capture started
+    working. The production-without-the-extra case is still the case under test."""
+    import builtins
+
+    real = builtins.__import__
+
+    def no_playwright(name: str, *a: object, **k: object) -> object:
+        if name.startswith("playwright"):
+            raise ImportError("no playwright")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_playwright)
     with pytest.raises(ProviderNotConfiguredError):
         PlaywrightCitationSubmitter()
 
 
-def test_citation_bot_from_settings_degrades_to_none_without_playwright() -> None:
+def test_citation_bot_from_settings_degrades_to_none_without_playwright(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
     from app.config import Settings
 
+    real = builtins.__import__
+
+    def no_playwright(name: str, *a: object, **k: object) -> object:
+        if name.startswith("playwright"):
+            raise ImportError("no playwright")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_playwright)
     settings = Settings(_env_file=None, app_env="dev")
     assert citation_bot_from_settings(settings, captcha_solver=None) is None
 

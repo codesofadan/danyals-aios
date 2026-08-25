@@ -169,7 +169,15 @@ def test_web2_board_rollup_counts() -> None:
 # --------------------------------------------------------------------------- #
 # Citation engine status board
 # --------------------------------------------------------------------------- #
-def test_engine_status_all_missing_on_keyless_settings() -> None:
+def test_engine_status_all_missing_on_keyless_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The bot's availability is install-based, not key-based - and the design-capture
+    # work now installs the automation extra into this venv, so its absence is
+    # SIMULATED rather than assumed of the environment.
+    import integrations.citation_status as cs
+
+    monkeypatch.setattr(cs, "playwright_bot_available", lambda: False)
     settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
     engines = {e.key: e for e in citation_engine_status(settings)}
     assert engines["bing_places"].connected is False

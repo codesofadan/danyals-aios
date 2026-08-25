@@ -134,6 +134,61 @@ def _own_classes(n: dict[str, Any]) -> list[str]:
     return out
 
 
+def _content_extent(item: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    """(min_x, min_y, max_right, max_bottom) of the item's real content."""
+    xs: list[int] = []
+    ys: list[int] = []
+    rights: list[int] = []
+    bottoms: list[int] = []
+
+    def visit(n: dict[str, Any]) -> None:
+        if (n.get("txt") or "").strip() or n.get("src"):
+            x, y, w, h = _box(n)
+            xs.append(x)
+            ys.append(y)
+            rights.append(x + w)
+            bottoms.append(y + h)
+        for k in _kids(n):
+            visit(k)
+
+    visit(item)
+    if not xs:
+        return None
+    return (min(xs), min(ys), max(rights), max(bottoms))
+
+
+def _column_padding(item: dict[str, Any]) -> tuple[int, int, int, int]:
+    """The column's content inset, measured geometrically.
+
+    Computed padding lies here: the inset is often built from child MARGINS, so the
+    honest number is where content actually sits relative to the box.
+    """
+    extent = _content_extent(item)
+    if extent is None:
+        return (0, 0, 0, 0)
+    x, y, w, h = _box(item)
+    ex, ey, er, eb = extent
+
+    def clamp(v: int) -> int:
+        return max(0, min(120, v))
+
+    return (clamp(ey - y), clamp(x + w - er), clamp(y + h - eb), clamp(ex - x))
+
+
+def _widget_gaps(widgets: list[InferredWidget]) -> list[InferredWidget]:
+    """Rewrite each widget with its measured gap to the next one below it."""
+    out: list[InferredWidget] = []
+    ordered = sorted(widgets, key=lambda w: _box(w.node)[1])
+    for i, w in enumerate(ordered):
+        gap = -1
+        if i + 1 < len(ordered):
+            _, y, _, h = _box(w.node)
+            gap = max(0, min(80, _box(ordered[i + 1].node)[1] - (y + h)))
+        out.append(InferredWidget(type=w.type, node=w.node, classes=w.classes,
+                                  gap_below=gap))
+    return out
+
+
 def _decoration(item: dict[str, Any]) -> tuple[int, str]:
     """(border-radius px, scrim) for a column - read from the item or its first
     covering child, where wrapper collapse tends to leave them."""
@@ -148,6 +203,35 @@ def _decoration(item: dict[str, Any]) -> tuple[int, str]:
         if radius or scrim:
             return (min(radius, 100), scrim)
     return (0, "")
+
+
+def _shadow_of(item: dict[str, Any]) -> str:
+    """The column's own box-shadow (raw computed string) - a floating card's lift.
+    Measured case: city mini-cards are TRANSPARENT boxes whose whole look is a
+    half-alpha 10px shadow ring; without it they vanish into the page."""
+    for node in (item, *(_kids(item)[:1])):
+        raw = (_style(node).get("boxShadow") or "none").strip()
+        if raw and raw != "none":
+            return raw
+    return ""
+
+
+def _border_of(item: dict[str, Any]) -> tuple[int, str, str]:
+    """(width px, style, colour) of a column's own outline - the rounded-outline
+    card is a whole design language (a pool company drew every section as a
+    bordered card; without this the rebuild lost the page's identity)."""
+    for node in (item, *(_kids(item)[:1])):
+        s_ = _style(node)
+        style = (s_.get("borderTopStyle") or "").strip()
+        if style not in ("solid", "double", "dashed", "dotted"):
+            continue
+        try:
+            width = round(float((s_.get("borderTopWidth") or "0").rstrip("px")))
+        except ValueError:
+            width = 0
+        if width > 0:
+            return (min(width, 20), style, s_.get("borderTopColor") or "")
+    return (0, "", "")
 
 
 def _gather_classes(item: dict[str, Any], *, max_depth: int = 3) -> tuple[str, ...]:
@@ -188,6 +272,8 @@ class InferredWidget:
     type: str
     node: dict[str, Any]
     classes: tuple[str, ...] = ()
+    # measured vertical gap to the NEXT widget in the column - the page's own rhythm
+    gap_below: int = -1  # -1 = unmeasured (last widget, or unknown)
 
     def __post_init__(self) -> None:
         if self.type not in WIDGET_TYPES:
@@ -201,6 +287,14 @@ class InferredColumn:
     width_px: int
     radius_px: int = 0
     scrim: str = ""
+    # the column's own outline (width px, style, colour) - a bordered card
+    border_px: int = 0
+    border_style: str = ""
+    border_color: str = ""
+    # raw computed box-shadow - a floating card's lift
+    shadow: str = ""
+    # content inset measured from the widgets' extent vs the column box
+    pad: tuple[int, int, int, int] = (0, 0, 0, 0)  # top right bottom left
     widgets: tuple[InferredWidget, ...] = ()
     # A column may hold ROWS instead of widgets - Elementor's one legal nesting level
     # (section > column > inner section > column). The reference hero keeps a 50/50
@@ -241,6 +335,9 @@ class InferredSection:
     full_bleed: bool
     rows: tuple[InferredRow, ...]
     background: str = ""
+    # geometric padding: where content actually starts and ends inside the band
+    pad_top: int = 0
+    pad_bottom: int = 0
     # A band's imagery usually lives on a child spanning the band, not on the
     # section element - the reference hero is a white <section> whose dark look IS
     # its backdrop image. Dropping it turned the hero white with invisible text.
@@ -404,6 +501,12 @@ def classify(node: dict[str, Any]) -> str | None:
         b = _box(node)
         if (s.get("backgroundImage") or "none") != "none":
             return "image"
+        if _paints(node) and b[2] >= 60 and b[3] <= 6:
+            # A wide hairline is a rule, not a box: Elementor's own divider renders
+            # as a 1px-bordered span, and the reference card sections draw one
+            # under every heading. Height before width - a 60x60 test can't reach
+            # here because <=6 and >=60 are disjoint.
+            return "divider"
         if _paints(node) and b[2] >= 60 and b[3] >= 60:
             return "spacer"
     return None
@@ -415,11 +518,14 @@ def _collect_widgets(node: dict[str, Any], out: list[InferredWidget]) -> None:
         out.append(InferredWidget(
             type=kind, node=node, classes=tuple(_own_classes(node))))
         if kind in ("icon-list", "star-rating", "testimonial", "accordion", "button",
-                    "image", "google_maps", "text-editor"):
+                    "image", "google_maps", "text-editor", "heading"):
             # composite widgets own their subtree. text-editor is here because a
             # styled fragment ("4.9" with a nested small "/5") is ONE piece of text;
             # recursing emitted the child as a second stacked widget and the stats
             # card rendered "/5" on its own line with the 4.9 lost above it.
+            # heading for the same reason: an h3 whose words live on nested spans
+            # ("Pool Service Made" + "Easy!") emitted an EMPTY heading plus two
+            # stray text-editors - the emitter joins the subtree into the title.
             return
     for k in _kids(node):
         _collect_widgets(k, out)
@@ -543,8 +649,14 @@ def _descend_to_content(node: dict[str, Any]) -> dict[str, Any]:
         cursor = kids[0]
 
 
-def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
-    """A content node's children, resolved into rows of columns."""
+def _rows_of(node: dict[str, Any], depth: int = 0, page_w: int = 0) -> list[InferredRow]:
+    """A content node's children, resolved into rows of columns.
+
+    ``page_w`` is the page's own width: items lying mostly beyond it are clipped
+    carousel slides, not layout. Visibility is judged against the PAGE, never the
+    container - a container box narrower than its anchored children is common
+    (the reference testimonial strip), and clipping against it dropped a fully
+    visible card."""
     if depth > 6:
         return []
     content = _descend_to_content(node)
@@ -568,7 +680,21 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
     kids_all = _kids(content)
     children = []
     for child in kids_all:
-        _, _, w, h = _box(child)
+        cx0, _, w, h = _box(child)
+        # OFF-CANVAS items are clipped content, not layout. A swiper carousel keeps
+        # every slide in the DOM side by side and overflow-hides all but one -
+        # measured case: a review-badge carousel whose second slide sat at x=1223
+        # and ran to x=2229 on a 1440px page, so the rebuild showed a huge second
+        # badge the source never renders. Judged against the PAGE, not the
+        # container (see the docstring).
+        if page_w:
+            visible_w = max(0, min(page_w, cx0 + w) - max(0, cx0))
+            if w and visible_w < 0.4 * w:
+                pending_notes.append(
+                    f"an item at x={cx0} lies mostly beyond the page's edge "
+                    "(carousel overflow?) and was left out"
+                )
+                continue
         # Size alone does not make a backdrop - a column wrapper is also full-size.
         # The defining property is GLUING: a backdrop vertically overlaps multiple
         # siblings, which is exactly how one image chained three unrelated bands
@@ -639,18 +765,43 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
         if len(cluster) == 1:
             item = cluster[0]
             # A non-painting stack is a row GROUP: its children are more rows.
-            if _kids(item) and not _paints(item) and not (item.get("txt") or "").strip():
-                for sub_row in _rows_of(item, depth + 1):
-                    emit(sub_row)  # not extend: pending notes must reach a row
-                continue
+            # But only when descent actually finds rows - a wrapper around a single
+            # LEAF (an eyebrow h2, a divider, a lone button) descends to the leaf,
+            # finds no children to cluster, and used to vanish here: three of a
+            # card's five elements dropped this way. And a container that IS a
+            # widget (a ul, an <a>) must never be shredded into pseudo-rows.
+            if (_kids(item) and not _paints(item)
+                    and not (item.get("txt") or "").strip()
+                    and classify(item) is None):
+                sub_rows = _rows_of(item, depth + 1, page_w)
+                if sub_rows:
+                    for sub_row in sub_rows:
+                        emit(sub_row)  # not extend: pending notes must reach a row
+                    continue
             widgets: list[InferredWidget] = []
             _collect_widgets(item, widgets)
             if not widgets:
                 continue
+            # A painted WRAPPER around this row's content is a pill/card and its
+            # paint belongs on the column (the reference FAQ draws every question
+            # as a bordered rounded strip). Only when the item is NOT itself a
+            # widget - decorating a button's own column would draw its pill twice.
+            rad1, bpx1 = 0, 0
+            scr1, bst1, bcl1, shad1 = "", "", "", ""
+            pad1: tuple[int, int, int, int] = (0, 0, 0, 0)
+            if _paints(item) and classify(item) is None:
+                rad1, scr1 = _decoration(item)
+                bpx1, bst1, bcl1 = _border_of(item)
+                shad1 = _shadow_of(item)
+                pad1 = _column_padding(item)
             emit(InferredRow(
                 columns=(InferredColumn(
                     width_pct=100, x=_box(item)[0], width_px=_box(item)[2],
-                    widgets=tuple(widgets), classes=tuple(_own_classes(item)),
+                    radius_px=rad1, scrim=scr1,
+                    border_px=bpx1, border_style=bst1, border_color=bcl1,
+                    shadow=shad1, pad=pad1,
+                    widgets=tuple(_widget_gaps(widgets)),
+                    classes=tuple(_own_classes(item)),
                     background=_style(item).get("backgroundColor", ""),
                 ),),
                 y=_box(item)[1], inner=depth > 0,
@@ -763,7 +914,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
             # A column whose own children form multi-column rows is a NESTED layout,
             # and Elementor has a shape for it: the inner section. Flattening it is
             # what lost the hero's internal splits.
-            sub = _rows_of(item, depth + 1) if depth < 4 else []
+            sub = _rows_of(item, depth + 1, page_w) if depth < 4 else []
             if any(len(r.columns) > 1 for r in sub):
                 columns.append(InferredColumn(
                     width_pct=pct, x=_box(item)[0], width_px=_box(item)[2],
@@ -774,10 +925,14 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
             widgets = []
             _collect_widgets(item, widgets)
             rad, scr = _decoration(item)
+            bpx, bst, bcl = _border_of(item)
             columns.append(InferredColumn(
                 width_pct=pct, x=_box(item)[0], width_px=_box(item)[2],
-                radius_px=rad, scrim=scr,
-                widgets=tuple(widgets), classes=_gather_classes(item),
+                radius_px=rad, scrim=scr, pad=_column_padding(item),
+                border_px=bpx, border_style=bst, border_color=bcl,
+                shadow=_shadow_of(item),
+                widgets=tuple(_widget_gaps(widgets)),
+                classes=_gather_classes(item),
                 background=_style(item).get("backgroundColor", ""),
             ))
         if not any(c.widgets or c.rows for c in columns):
@@ -897,7 +1052,7 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
         if w < min_width:
             notes.append(f"skipped a {w}px-wide fragment at y={y}: not a band")
             continue
-        rows = _rows_of(cand)
+        rows = _rows_of(cand, page_w=viewport_width)
         if not rows:
             continue
         background = _style(cand).get("backgroundColor", "")
@@ -936,10 +1091,78 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
                             background = child["scrim"]
                     nxt.append(child)
             frontier = nxt
+        extent = _content_extent(cand)
+        pad_top = pad_bottom = 0
+        if extent is not None:
+            pad_top = max(0, min(200, extent[1] - y))
+            pad_bottom = max(0, min(200, y + h - extent[3]))
+
+        # A CARD BAND: the band's sole content chain lands on a PAINTED wrapper
+        # (border, radius or its own background) that is visibly smaller than the
+        # band. That wrapper is the design - a pool company draws every section as
+        # a rounded-outline card - and descending through it demolished the look:
+        # the outline vanished and the card's children became bare top-level rows.
+        # Wrap the rows back into one full-width column carrying the wrapper's
+        # paint, and measure the band's padding to the CARD box, not the widgets
+        # (the card's inset is its own padding; counting both doubled the gap).
+        content_node = _descend_to_content(cand)
+        if content_node is not cand and rows:
+            # OWN style only: `_decoration`/`_border_of` fall back to the first
+            # child, and that eagerness wrapped the reference hero into a "card"
+            # because a rounded child sat first in it. A card is a wrapper that
+            # paints ITSELF.
+            s_own = _style(content_node)
+            raw_r = (s_own.get("borderRadius") or "0").split(" ")[0]
+            try:
+                rad = round(float(raw_r.rstrip("px"))) if raw_r.endswith("px") else 0
+            except ValueError:
+                rad = 0
+            rad = min(rad, 100)
+            scr = str(content_node.get("scrim") or "")
+            bst = (s_own.get("borderTopStyle") or "").strip()
+            try:
+                bpx = round(float((s_own.get("borderTopWidth") or "0").rstrip("px")))
+            except ValueError:
+                bpx = 0
+            if bst not in ("solid", "double", "dashed", "dotted"):
+                bpx = 0
+            bpx = min(bpx, 20)
+            bcl = s_own.get("borderTopColor") or ""
+            cbg = s_own.get("backgroundColor", "")
+            if cbg in ("rgba(0, 0, 0, 0)", "transparent"):
+                cbg = ""
+            bx, by, bw, bh = _box(content_node)
+            # LEGALITY GUARD: Elementor allows exactly ONE inner-section level
+            # (section > column > inner section > column). Wrapping pushes every
+            # interior row one level down, so an interior that already nests
+            # (the reference hero holds a stat pair AND a trio inside its rows)
+            # would need inner-inside-inner - the editor cannot express it. Wrap
+            # only a FLAT interior; otherwise the paint is the price of legality.
+            interior_nests = any(c2.rows for r_ in rows for c2 in r_.columns)
+            if (rad or bpx or cbg) and not interior_nests \
+                    and (bh <= h * 0.92 or bw <= w * 0.92):
+                card = InferredColumn(
+                    width_pct=100, x=bx, width_px=bw,
+                    radius_px=rad, scrim=scr,
+                    border_px=bpx, border_style=bst, border_color=bcl,
+                    shadow=("" if (s_own.get("boxShadow") or "none").strip() == "none"
+                            else (s_own.get("boxShadow") or "").strip()),
+                    pad=_column_padding(content_node),
+                    rows=tuple(rows),
+                    classes=_gather_classes(content_node),
+                    background=cbg,
+                )
+                rows = [InferredRow(
+                    columns=(card,), y=by,
+                    notes=("a painted wrapper kept as a card column",),
+                )]
+                pad_top = max(0, min(200, by - y))
+                pad_bottom = max(0, min(200, y + h - (by + bh)))
         sections.append(InferredSection(
             y=y, height=h, full_bleed=w >= viewport_width * 0.98,
             rows=tuple(rows),
             background=background,
+            pad_top=pad_top, pad_bottom=pad_bottom,
             background_image=bg_image,
             classes=tuple(_own_classes(cand)),
             element_id=cand.get("eid") or "",
@@ -950,9 +1173,9 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
         # paragraph), and a leaf holds no rows. The page still has a layout - the
         # ROOT is it. One full-width section from the root's own rows, rather than
         # an empty result for a page a person can plainly see.
-        root_rows = _rows_of(root)
+        root_rows = _rows_of(root, page_w=viewport_width)
         if root_rows:
-            rx, ry, rw, rh = _box(root)
+            _rx, ry, _rw, rh = _box(root)
             sections.append(InferredSection(
                 y=ry, height=max(rh, MIN_SECTION_HEIGHT), full_bleed=False,
                 rows=tuple(root_rows),
