@@ -3,7 +3,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.9.0
+Stable tag: 1.9.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -79,6 +79,26 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.9.1 =
+* FIXED: every Elementor page this plugin has ever pushed was being corrupted on
+  render. `aios_publisher_render_article` is hooked on `the_content` at priority 20
+  and Elementor renders at priority 9, so an Elementor page was wrapped in
+  `.aios-article`, prefixed with a "By admin - date - N min read" byline, and given an
+  auto-TOC built by injecting ids into its H2s. The article template is for the
+  flat-HTML publishing path; an Elementor page now passes through untouched.
+* The pushed design CSS still loads on those pages - it now hangs off a standalone
+  handle instead of `article.css`, so the design ships without the article stylesheet
+  fighting Elementor's own rules.
+* FIXED: the design-CSS sanitizer stripped `>` as well as `<`, silently rewriting every
+  child combinator into a descendant selector. Measured on a real design system: 130 of
+  557 selectors (23%) were affected - no error, no warning, subtly wrong styling
+  everywhere. Only `<` is stripped now, which preserves the security property (a tag
+  cannot form without `<`) and leaves `>` intact.
+* The design-CSS ceiling was 40,000 bytes; a real design system measured in production
+  is 93,622, so the cap truncated it mid-rule. Raised to 200,000.
+* No change to publishing, the block sanitizer, or meta writing. The 1.3.0
+  `<style>`/`<script>` strip and the 1.6.0 block-comment JSON fix are untouched.
 
 = 1.9.0 =
 * New `POST /site`: deliver a WHOLE SITE in one request - pages, their parent/child

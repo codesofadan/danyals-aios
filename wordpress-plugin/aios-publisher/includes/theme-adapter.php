@@ -80,6 +80,26 @@ function aios_publisher_current_managed_post() {
 }
 
 /**
+ * Is this post an Elementor-built page?
+ *
+ * WHY THIS EXISTS (a live defect, found 2026-08-25): `aios_publisher_render_article`
+ * is hooked on `the_content` at priority 20 and Elementor renders at priority 9, so
+ * EVERY Elementor page this plugin has ever pushed was being wrapped in
+ * `.aios-article`, prefixed with a "By admin - date - N min read" byline, and given
+ * an auto-TOC built by injecting ids into its H2s. A faithful design was corrupted on
+ * arrival, on the client's live site, by us.
+ *
+ * The article template is for the FLAT-HTML publishing path. An Elementor page renders
+ * its own layout and must be left exactly as Elementor emitted it.
+ *
+ * @param int $post_id Post to test.
+ * @return bool
+ */
+function aios_publisher_is_elementor_page( $post_id ) {
+	return 'builder' === get_post_meta( (int) $post_id, '_elementor_edit_mode', true );
+}
+
+/**
  * Enqueue the article stylesheet ONLY on a singular managed post.
  *
  * @return void
@@ -89,15 +109,26 @@ function aios_publisher_enqueue_article_assets() {
 	if ( ! $post_id ) {
 		return;
 	}
-	wp_enqueue_style(
-		'aios-publisher-article',
-		// AIOS_PUBLISHER_FILE (the MAIN plugin file, defined in the loader) - NOT
-		// this include's own __FILE__ - so the URL resolves to <plugin root>/
-		// templates/article.css, not <plugin root>/includes/templates/article.css.
-		plugins_url( 'templates/article.css', AIOS_PUBLISHER_FILE ),
-		array(),
-		AIOS_PUBLISHER_VERSION
-	);
+	// An Elementor page renders its own layout, so article.css must not load over it -
+	// but the design CSS still must. Registering a STANDALONE empty handle gives the
+	// inline styles somewhere to hang without dragging in the article template's
+	// stylesheet, which would fight Elementor's own rules.
+	$elementor = aios_publisher_is_elementor_page( $post_id );
+	$handle    = $elementor ? 'aios-publisher-design' : 'aios-publisher-article';
+	if ( $elementor ) {
+		wp_register_style( $handle, false, array(), AIOS_PUBLISHER_VERSION );
+		wp_enqueue_style( $handle );
+	} else {
+		wp_enqueue_style(
+			$handle,
+			// AIOS_PUBLISHER_FILE (the MAIN plugin file, defined in the loader) - NOT
+			// this include's own __FILE__ - so the URL resolves to <plugin root>/
+			// templates/article.css, not <plugin root>/includes/templates/article.css.
+			plugins_url( 'templates/article.css', AIOS_PUBLISHER_FILE ),
+			array(),
+			AIOS_PUBLISHER_VERSION
+		);
+	}
 	// The analyzed-site / template design CSS (colours, fonts, layout, component styling),
 	// attached as an INLINE stylesheet AFTER article.css so it wins on specificity/order.
 	// This is the seam that makes a published page match the analyzed design on ANY theme
@@ -106,7 +137,7 @@ function aios_publisher_enqueue_article_assets() {
 	$design_css = (string) get_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_CSS, true );
 	$design_css = aios_publisher_sanitize_css( $design_css );
 	if ( '' !== $design_css ) {
-		wp_add_inline_style( 'aios-publisher-article', $design_css );
+		wp_add_inline_style( $handle, $design_css );
 	}
 }
 
@@ -124,6 +155,11 @@ function aios_publisher_render_article( $content ) {
 	}
 	$post_id = aios_publisher_current_managed_post();
 	if ( ! $post_id ) {
+		return $content;
+	}
+	// Elementor already rendered this page's own layout at priority 9. Wrapping it,
+	// prefixing a byline and injecting a TOC into its headings corrupts the design.
+	if ( aios_publisher_is_elementor_page( $post_id ) ) {
 		return $content;
 	}
 

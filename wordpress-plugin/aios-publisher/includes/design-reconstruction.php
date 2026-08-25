@@ -79,12 +79,23 @@ function aios_publisher_sideload_body_images( $post_id, $content ) {
  */
 function aios_publisher_sanitize_css( $css ) {
 	$css = (string) $css;
-	// Remove any angle brackets: inside <style>, `</style>` is the only way out. No tags,
-	// no `<`, no `>` -> the text is inert CSS that cannot escape the style element.
-	$css = str_replace( array( '<', '>' ), '', $css );
+	// Strip `<` ONLY - not `>`.
+	//
+	// The security property is unchanged: an HTML tag cannot form without `<`, so with
+	// every `<` removed the text cannot close the surrounding <style> element or open
+	// any other. A bare `>` is inert in that context.
+	//
+	// Removing `>` as well was silently corrupting real stylesheets. MEASURED on a
+	// production design system: 130 of its 557 selectors (23%) use the `>` child
+	// combinator, and every one of them was being rewritten into a DESCENDANT selector -
+	// which still parses, still applies, and matches far more than it should. That is
+	// the worst kind of failure: no error, no warning, subtly wrong styling.
+	$css = str_replace( '<', '', $css );
 	$css = trim( $css );
-	if ( strlen( $css ) > 40000 ) {
-		$css = substr( $css, 0, 40000 );
+	// 40,000 was below what a real design system needs - the same measured stylesheet is
+	// 93,622 bytes, so the old cap truncated it mid-rule and shipped a broken block.
+	if ( strlen( $css ) > AIOS_PUBLISHER_MAX_DESIGN_CSS ) {
+		$css = substr( $css, 0, AIOS_PUBLISHER_MAX_DESIGN_CSS );
 	}
 	return $css;
 }

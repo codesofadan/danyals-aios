@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       AIOS Publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
- * Version:           1.9.0
+ * Version:           1.9.1
  * Requires at least: 5.6
  * Requires PHP:      7.2
  * Author:            AIOS
@@ -34,13 +34,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 // be plugin-root-relative: register_activation_hook() and plugins_url() lookups.
 define( 'AIOS_PUBLISHER_FILE', __FILE__ );
 
-define( 'AIOS_PUBLISHER_VERSION', '1.9.0' );
+define( 'AIOS_PUBLISHER_VERSION', '1.9.1' );
 define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 
 // A hard cap on how many <img> tags a single push will sideload into the media
 // library, so a pathological draft cannot turn one publish into dozens of blocking
 // outbound image fetches.
 define( 'AIOS_PUBLISHER_MAX_BODY_IMAGES', 20 );
+// Ceiling for a pushed design stylesheet. 200,000 rather than the previous 40,000:
+// a real design system measured in production is 93,622 bytes, so the old cap
+// truncated it mid-rule and shipped a broken block with no error.
+define( 'AIOS_PUBLISHER_MAX_DESIGN_CSS', 200000 );
 
 // wp_options keys. The API key lives in its own option so a "regenerate" is a
 // focused write; the operator-tunable defaults live in one options array.
