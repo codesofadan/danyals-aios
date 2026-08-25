@@ -193,8 +193,20 @@ def ratelimit(app: FastAPI) -> dict[str, int]:
 
     class _FakeRedis:
         async def incr(self, key: str) -> int:
-            counts[key] = counts.get(key, 0) + 1
-            return counts[key]
+            # Strip the trailing wall-clock window bucket from the key.
+            #
+            # `rate_limit` keys on `rl:{scope}:{user}:{int(time.time()) // 60}`. A test
+            # firing 8 requests that happens to straddle a minute boundary gets a NEW
+            # key mid-test, its counter resets, and an exact-allowance assertion fails
+            # for a reason that has nothing to do with the limiter. That made
+            # `test_the_discover_sweep_is_rate_limited` an intermittent failure whose
+            # trigger was simply how long the preceding suite took to run.
+            #
+            # Collapsing the bucket makes one test one window, which is what the
+            # assertions are actually about.
+            stable = key.rsplit(":", 1)[0]
+            counts[stable] = counts.get(stable, 0) + 1
+            return counts[stable]
 
         async def expire(self, key: str, seconds: int) -> bool:
             return True
