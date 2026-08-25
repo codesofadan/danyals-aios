@@ -68,6 +68,7 @@ from audit_engine.db.repository import (
 )
 from audit_engine.integrations.citations import CitationsClient, CitationSummary
 from audit_engine.integrations.google_nl import GoogleNLClient, NLAnalysis
+from audit_engine import emit as _emit
 from audit_engine.integrations.moz import MozClient
 from audit_engine.integrations.pagespeed import PageSpeedClient
 from audit_engine.integrations.places import Place, PlacesClient
@@ -338,6 +339,51 @@ def _emit_psi_findings(*, run_id: int, page_id: int | None, psi_result: Any) -> 
 async def _emit_llms_txt(*, run_id: int, site_url: str) -> Finding:
     v = await check_llms_txt(site_url)
     return _finding(run_id=run_id, page_id=None, check_id="TECH-041", owner="A5", verdict=v)
+
+
+def _permitted_cost_classes(
+    *, psi: bool = False, billable: bool = False, connections: bool = False
+) -> frozenset[str]:
+    """What this run is ALLOWED to spend, as data-source cost classes.
+
+    Derived from the flags actually in effect rather than from the mode name, so
+    the coverage record describes the run that happened. ``zero`` is always
+    permitted - it is the target site itself.
+    """
+    classes = {"zero"}
+    if psi:
+        classes.add("free_quota")
+    if connections:
+        classes.add("connection")
+    if billable:
+        classes.add("billable")
+    return frozenset(classes)
+
+
+def _write_altitude(
+    *,
+    artifact_dir: Path,
+    findings: list[dict],
+    page_rows: list[dict],
+    permitted: frozenset[str],
+    dimensions: frozenset[str] | None = None,
+) -> None:
+    """Write pages.json + coverage.json and enrich findings.json in place.
+
+    Best-effort by design: these artifacts are ADDITIVE and the report bundle has
+    already been written by the time we get here. A failure to write a
+    supplementary file must never destroy a report that rendered.
+    """
+    try:
+        _emit.write_altitude_artifacts(
+            artifact_dir,
+            findings=findings,
+            page_rows=page_rows,
+            dimensions=dimensions,
+            permitted_cost_classes=permitted,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("altitude_artifacts_failed", error=type(e).__name__)
 
 
 async def _emit_google_nl_snapshot(
@@ -909,6 +955,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
     with connection() as conn:
         FindingRepository.insert_many(conn, findings)
         all_findings = FindingRepository.by_run(conn, run_id)
+        all_pages = PageRepository.by_run(conn, run_id)
 
     # ----- Score -----
     scores = aggregate(all_findings, profile=profile)
@@ -926,6 +973,14 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         scores=scores,
         findings=all_findings,
         ai_narrative=use_ai,
+    )
+
+    # ----- Altitude artifacts: pages.json + coverage.json, findings enriched -----
+    _write_altitude(
+        artifact_dir=artifact_dir,
+        findings=all_findings,
+        page_rows=all_pages,
+        permitted=_permitted_cost_classes(psi=psi, billable=bool(use_agents or use_ai)),
     )
 
     # ----- Finalize DB row -----
@@ -1575,6 +1630,7 @@ async def _run_full(
     with connection() as conn:
         FindingRepository.insert_many(conn, findings)
         all_findings = FindingRepository.by_run(conn, run_id)
+        all_pages = PageRepository.by_run(conn, run_id)
 
     scores = aggregate(all_findings, profile=profile)
     duration = time.monotonic() - t0
@@ -1595,6 +1651,17 @@ async def _run_full(
         # token usage this run, so the AIOS cost gate commits usage x unit price.
         usage=run_usage_snapshot(),
     )
+    # ----- Altitude artifacts: pages.json + coverage.json, findings enriched -----
+    _write_altitude(
+        artifact_dir=artifact_dir,
+        findings=all_findings,
+        page_rows=all_pages,
+        permitted=_permitted_cost_classes(
+            psi=psi,
+            billable=bool(serper or places or citations or moz or use_agents or use_ai),
+        ),
+    )
+
     with connection() as conn:
         AuditRunRepository.finalize(
             conn, run_id,
@@ -1947,6 +2014,7 @@ async def _run_local(
     with connection() as conn:
         FindingRepository.insert_many(conn, findings)
         all_findings = FindingRepository.by_run(conn, run_id)
+        all_pages = PageRepository.by_run(conn, run_id)
 
     scores = aggregate(all_findings, profile="local")
     duration = time.monotonic() - t0
@@ -1963,6 +2031,16 @@ async def _run_local(
         findings=all_findings,
         ai_narrative=use_ai,
     )
+    # ----- Altitude artifacts: pages.json + coverage.json, findings enriched -----
+    _write_altitude(
+        artifact_dir=artifact_dir,
+        findings=all_findings,
+        page_rows=all_pages,
+        permitted=_permitted_cost_classes(
+            billable=bool(use_places or use_citations or use_agents or use_ai),
+        ),
+    )
+
     with connection() as conn:
         AuditRunRepository.finalize(
             conn, run_id,

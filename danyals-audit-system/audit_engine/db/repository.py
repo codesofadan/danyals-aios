@@ -217,6 +217,21 @@ class PageRepository:
         return row["id"]
 
 
+    @staticmethod
+    def by_run(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:
+        """Every crawled page for a run.
+
+        The engine has always recorded this and never emitted it, so a finding
+        left the engine carrying a per-run integer ``page_id`` and no URL - which
+        made the per-page grain unrecoverable from the artifacts. See
+        ``audit_engine/emit.py``.
+        """
+        rows = conn.execute(
+            "SELECT * FROM pages WHERE run_id = ? ORDER BY id", (run_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 class FindingRepository:
     @staticmethod
     def insert_many(conn: sqlite3.Connection, findings: list[Finding]) -> None:
