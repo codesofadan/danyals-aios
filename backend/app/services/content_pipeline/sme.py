@@ -175,7 +175,7 @@ def run_sme(
                     _question_prompt(ctx, missing_slots),
                     page_type=ctx.page_type,
                     vertical=ctx.vertical or None,
-                    max_tokens=900,
+                    max_tokens=6_000,  # thinking + the questions; see outline.REASONING_MAX_TOKENS
                     expected_calls=1,
                     accounting=accounting,
                 )

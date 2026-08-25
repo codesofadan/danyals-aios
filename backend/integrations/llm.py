@@ -34,6 +34,21 @@ logger = get_logger("integrations.llm")
 # Anthropic allows at most four cache breakpoints per request.
 _MAX_CACHE_BREAKPOINTS = 4
 
+
+class EmptyCompletionError(RuntimeError):
+    """The model produced no TEXT because ``max_tokens`` ran out first.
+
+    Found live 2026-08-25: this model emits extended-THINKING blocks, and on a complex
+    prompt it can spend the entire budget reasoning before writing a single text
+    token. `summarize` reads only text blocks, so the caller received `""` - which is
+    indistinguishable from "the model had nothing to say" and, in a pipeline that
+    tolerates empty output, produces a silently blank page.
+
+    Raising instead makes the real cause - too small a budget for thinking PLUS output
+    - visible at the call site. Every pipeline stage already degrades on an exception,
+    so the failure is handled rather than hidden.
+    """
+
 _INSTALL_HINT = "install the AI extra (pip install -e '.[ai]') and set ANTHROPIC_API_KEY"
 
 # Frozen, factual system prompt for CONTEXT COMPACTION ONLY. Stable prefix =>
@@ -205,6 +220,13 @@ class AnthropicSummarizer:
             if getattr(block, "type", None) == "text"
         )
         usage = message.usage
+        if not text.strip() and getattr(message, "stop_reason", None) == "max_tokens":
+            raise EmptyCompletionError(
+                f"the model produced no text within max_tokens={max_tokens} "
+                f"({usage.output_tokens} output tokens were spent, all on reasoning). "
+                "Raise max_tokens: a complex prompt needs budget for thinking AND the "
+                "answer."
+            )
         return LLMResult(
             text=text,
             input_tokens=int(usage.input_tokens),

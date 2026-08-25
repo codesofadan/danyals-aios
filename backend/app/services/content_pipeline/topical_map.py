@@ -52,6 +52,21 @@ MAX_REPAIRS = 2
 # both blow the prompt and bury the real opportunities under long-tail noise.
 MAX_CANDIDATES = 60
 
+# Token budget for a REASONING stage.
+#
+# MEASURED live 2026-08-25, not guessed. This model emits extended-THINKING blocks. On
+# the outline prompt it spent 4,000 tokens reasoning and produced ZERO text - the call
+# returned an empty string that looked like "the model had nothing to say", and the
+# stage degraded for a reason nobody could see. At 12,000 it finished thinking in
+# ~9,965 tokens and wrote a full answer.
+#
+# So the budget has to cover THINKING PLUS THE ANSWER, not just the answer. That is
+# also why `integrations.llm.EmptyCompletionError` exists: if this is ever set too low
+# again, the failure is loud instead of a blank page.
+# The map's ANSWER is larger than the outline's - a whole site's nodes rather than
+# one page's sections - so it gets more room on top of the same thinking budget.
+REASONING_MAX_TOKENS = 16_000
+
 
 class MapStore(Protocol):
     def create_map(self, *, engagement_id: str, plan_id: str | None = ...) -> str: ...
@@ -175,7 +190,7 @@ def run_topical_map(
             raw = writer.write(
                 STAGE, _prompt(ctx, candidates, collisions),
                 page_type=ctx.page_type, vertical=ctx.vertical or None,
-                max_tokens=8000, expected_calls=MAX_REPAIRS + 1,
+                max_tokens=REASONING_MAX_TOKENS, expected_calls=MAX_REPAIRS + 1,
                 model=model, accounting=accounting,
             )
         except Exception as exc:

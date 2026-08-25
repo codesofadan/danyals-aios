@@ -31,10 +31,24 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from app.services.doctrine_routes import assemble
-from integrations.llm import SystemSummarizer
+from integrations.llm import EmptyCompletionError, SystemSummarizer
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.config import Settings
+
+
+# Ceiling for the adaptive retry.
+#
+# 20k, not higher, and the limit is the SDK's not ours: a non-streaming request whose
+# `max_tokens` implies it could run past 10 minutes is refused outright with
+# "Streaming is required for operations that may take longer than 10 minutes". Found
+# by a retry doubling into that wall and surfacing as an opaque BadRequestError on the
+# second batch of a page.
+#
+# 20k still clears the deepest reasoning measured (~10k) plus a long answer. Going
+# beyond it means moving this seam to streaming, which is a bigger change than any
+# stage currently needs.
+MAX_ADAPTIVE_TOKENS = 20_000
 
 
 class UsageRecorder(Protocol):
@@ -101,13 +115,38 @@ class DoctrineWriter:
         )
         used_model = model or self._model
 
-        result = self._inner.summarize(
-            prompt,
-            model=used_model,
-            max_tokens=max_tokens,
-            system=blocks.as_system(),
-            cache=blocks.cache_flags(expected_calls=expected_calls),
-        )
+        # ADAPTIVE BUDGET. This model reasons before it writes, and how much reasoning
+        # a prompt provokes is not knowable in advance - measured on real calls it
+        # ranged from a few hundred tokens to ~10,000 for the SAME stage on different
+        # inputs. A fixed allowance is therefore either wasteful or occasionally too
+        # small, and too small means `EmptyCompletionError`: the whole budget spent
+        # thinking, no text, a blank section.
+        #
+        # So: try the stage's budget, and if reasoning consumed it, retry ONCE with
+        # double. Normal calls stay cheap; the rare deep-reasoning one still lands.
+        # The failed attempt's tokens are real spend and are counted, because
+        # pretending a paid-for failure was free is how a cost model drifts.
+        cost = 0.0
+        result = None
+        budget = max_tokens
+        for attempt in range(2):
+            try:
+                result = self._inner.summarize(
+                    prompt,
+                    model=used_model,
+                    max_tokens=budget,
+                    system=blocks.as_system(),
+                    cache=blocks.cache_flags(expected_calls=expected_calls),
+                )
+                break
+            except EmptyCompletionError:
+                if accounting is not None:
+                    # The spend happened even though no text came back.
+                    accounting.calls += 1
+                if attempt == 1:
+                    raise
+                budget = min(budget * 2, MAX_ADAPTIVE_TOKENS)
+        assert result is not None
 
         cost = self._cost(used_model, result)
         if accounting is not None:

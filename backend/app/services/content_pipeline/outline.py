@@ -47,6 +47,19 @@ MAX_REPAIRS = 2
 # would leave most headings unrepresented. This is not the body-text default.
 HEADING_SHINGLE_SIZE = 3
 
+# Token budget for a REASONING stage.
+#
+# MEASURED live 2026-08-25, not guessed. This model emits extended-THINKING blocks. On
+# this stage's prompt it spent 4,000 tokens reasoning and produced ZERO text - the call
+# returned an empty string that looked like "the model had nothing to say", and the
+# stage degraded for a reason nobody could see. At 12,000 it finished thinking in
+# ~9,965 tokens and wrote a full answer.
+#
+# So the budget has to cover THINKING PLUS THE ANSWER, not just the answer. That is
+# also why `integrations.llm.EmptyCompletionError` exists: if this is ever set too low
+# again, the failure is loud instead of a blank page.
+REASONING_MAX_TOKENS = 12_000
+
 _PLACEHOLDER = "<TARGET>"
 _CITY_PLACEHOLDER = "<CITY>"
 
@@ -167,7 +180,7 @@ def run_outline(
             raw = writer.write(
                 STAGE, _prompt(ctx, forbidden),
                 page_type=ctx.page_type, vertical=ctx.vertical or None,
-                framework=ctx.framework, max_tokens=4000,
+                framework=ctx.framework, max_tokens=REASONING_MAX_TOKENS,
                 expected_calls=MAX_REPAIRS + 1, model=model, accounting=accounting,
             )
         except Exception as exc:
