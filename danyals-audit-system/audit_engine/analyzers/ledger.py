@@ -226,8 +226,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        "A sub-rollup of what? OFF-080 already covers the whole off-page pillar."),
     _e("ON-010", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # NLP keyword coverage
-    _e("ON-020", Reason.NOT_YET_BUILT, "Wave 3",
-       NOTES[Reason.NOT_YET_BUILT]),  # Internal topical relevance analysis
     _e("ON-070", Reason.NOT_YET_BUILT, "Wave 3",
        "Needs the HTTP response of each IMAGE, not of the page. The crawler fetches HTML documents only, so this needs an image-fetch pass with its own budget."),
     _e("ON-083", Reason.NOT_YET_BUILT, "Wave 3",
@@ -262,32 +260,22 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Googlebot activity analysis
     _e("TECH-073", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # HTML validation analysis
-    _e("TECH-075", Reason.NOT_YET_BUILT, "Wave 3",
-       NOTES[Reason.NOT_YET_BUILT]),  # Thin page detection (technical)
     _e("TECH-078", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Index bloat detection
     _e("TECH-082", Reason.NOT_YET_BUILT, "Wave 3",
        "Its declared sources (crawled_html, http_headers) cannot detect malware; a header scan would be security theatre. Google Safe Browsing v4 is free with the existing GOOGLE_API_KEY and is the correct implementation. The declared data_sources are wrong."),
     _e("TECH-084", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Cloaking detection
-    _e("TECH-088", Reason.NOT_YET_BUILT, "Wave 3",
-       NOTES[Reason.NOT_YET_BUILT]),  # Image crawlability analysis
-    _e("TECH-089", Reason.NOT_YET_BUILT, "Wave 3",
-       NOTES[Reason.NOT_YET_BUILT]),  # Image indexing analysis
     _e("TECH-090", Reason.NOT_YET_BUILT, "Wave 3",
        "Server WebP support is proved by content negotiation on an image request, which needs the image-fetch pass. ON-071 already reports webp usage in the HTML."),
-    _e("TECH-091", Reason.NOT_YET_BUILT, "Wave 3",
-       NOTES[Reason.NOT_YET_BUILT]),  # Video indexing analysis
-    _e("TECH-094", Reason.NOT_YET_BUILT, "Wave 3",
-       NOTES[Reason.NOT_YET_BUILT]),  # XML errors analysis
 ])
 
 
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 89
-LEDGER_FLOOR = 89
+LEDGER_CEILING = 83
+LEDGER_FLOOR = 83
 
 
 def ledgered() -> dict[str, LedgerEntry]:

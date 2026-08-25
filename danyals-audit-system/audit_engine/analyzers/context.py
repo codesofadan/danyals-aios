@@ -59,6 +59,8 @@ class CrawlContext:
     external_hosts: dict[str, int] = field(default_factory=dict)
     #: the parsed robots.txt, when one was fetched
     robots: Any | None = None
+    #: the Sitemap objects as parsed, including any that failed to parse
+    sitemaps: list[Any] = field(default_factory=list)
     #: every URL as the crawler requested it, before normalisation. by_url is
     #: keyed on the NORMALISED form, so anything looking for two URLs that mean
     #: one page must read this instead.
@@ -196,6 +198,7 @@ def build_context(
                 ctx.sitemap_urls.add(k)
 
     ctx.robots = getattr(crawl_result, "robots", None)
+    ctx.sitemaps = list(getattr(crawl_result, "sitemaps", []) or [])
     ctx.depth = _bfs_depth(ctx)
     return ctx
 

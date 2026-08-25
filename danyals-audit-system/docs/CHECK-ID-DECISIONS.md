@@ -658,3 +658,44 @@ Sucuri detected via two independent signals, origin resolved to
 
 Ledger: **92 → 89**. `needs_network_probe` is retired — the fourth reason a
 wave has closed out entirely.
+
+---
+
+# Wave 3b — the last checks whose inputs were already free
+
+**2026-08-25.** Six checks ledgered as `not_yet_built` — the only reason that
+claims no blocker exists beyond the work itself. Leaving them parked while
+building waves that needed new plumbing would have been the wrong order.
+
+`TECH-075` thin pages, `ON-020` internal topical relevance, `TECH-094` sitemap
+XML errors, `TECH-088` image crawlability, `TECH-089` image indexing,
+`TECH-091` video indexing.
+
+Three of these are careful about **not manufacturing work**:
+
+- **`TECH-075` reports a site-level share, not page by page.** A contact page is
+  meant to be brief. Under 20% thin pages passes with a note saying so; only a
+  site that is *mostly* thin has a content problem worth a client's time.
+- **`TECH-091` returns `n_a` when a site has no video at all.** A dental
+  practice with no video is not failing a video check, and saying so would be
+  noise on most sites.
+- **`ON-020` describes its own method honestly.** It measures shared title and
+  H1 wording between linked pages — a lexical overlap, not a semantic model —
+  and the evidence says exactly that rather than implying more than it does. It
+  returns `n_a` below five comparable pairs rather than drawing a conclusion
+  from three.
+
+## What remains under `not_yet_built`
+
+Five, and every one needs an input the crawler does not currently fetch:
+
+| Check | Needs |
+|---|---|
+| `ON-070`, `TECH-090` | the HTTP response of each **image** |
+| `ON-083` | a **mobile and a desktop** crawl to compare |
+| `TECH-084` | a **Googlebot-UA** crawl to compare against a normal one |
+| `TECH-082` | **Google Safe Browsing** (free with the existing key) |
+
+Each is an added fetch pass with its own budget, not a missing analyzer.
+
+Ledger: **89 → 83**. Reachable: **280 of 363 (77%)**.
