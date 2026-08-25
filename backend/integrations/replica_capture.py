@@ -70,7 +70,7 @@ DEFAULT_VIEWPORTS: tuple[tuple[str, int, int], ...] = (
 )
 
 
-def _extractor_js() -> str:
+def _extractor_js(max_depth: int = MAX_DEPTH) -> str:
     """The in-page extractor, built with the property list injected.
 
     Kept as a function rather than a constant so `CAPTURED_PROPS` stays the single
@@ -80,7 +80,7 @@ def _extractor_js() -> str:
     props = json.dumps(list(CAPTURED_PROPS))
     return _JS_TEMPLATE.replace("__PROPS__", props).replace(
         "__MAX_NODES__", str(MAX_NODES)).replace(
-        "__MAX_DEPTH__", str(MAX_DEPTH)).replace("__MAX_TEXT__", str(MAX_TEXT))
+        "__MAX_DEPTH__", str(max_depth)).replace("__MAX_TEXT__", str(MAX_TEXT))
 
 
 _JS_TEMPLATE = """
@@ -131,7 +131,7 @@ _JS_TEMPLATE = """
     for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue;
     return t.replace(/\\s+/g, ' ').trim();
   };
-  const kids = (el) => Array.from(el.children).filter(c => !SKIP.has(c.tagName));
+  const kids = (el) => Array.from(el.children).filter(c => !SKIP.has(c.tagName.toUpperCase()));
   // A real row: two or more children whose vertical extents overlap.
   const hasRow = (el) => {
     const cs = kids(el).map(c => c.getBoundingClientRect()).filter(r => r.height > 4);
@@ -149,11 +149,40 @@ _JS_TEMPLATE = """
 
   function walk(el, depth, pcs) {
     if (count >= MAX_NODES) { truncated = true; return null; }
-    if (SKIP.has(el.tagName)) return null;
+    // toUpperCase because SVG-namespace elements preserve lowercase tagName - so
+    // 'svg' never matched the uppercase SKIP set, inline SVG innards were walked
+    // as content, and <text> inside an icon leaked into the page's copy.
+    const TAG = el.tagName.toUpperCase();
+    if (SKIP.has(TAG)) return null;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') return null;
-    if (r.width < 1 || r.height < 1) return null;
+    // Screen-reader-only text is 1x1px with clip/clip-path - it renders to nothing
+    // and reproducing it as visible copy puts accessibility scaffolding on the page.
+    if (r.width <= 2 && r.height <= 2) return null;
+    if (cs.clipPath && cs.clipPath.indexOf('inset(50%') !== -1) return null;
+    if (cs.clip && cs.clip.indexOf('rect(0') === 0) return null;
+    if (r.width < 1 || r.height < 1) {
+      // display:contents wrappers report a zero rect while their children render
+      // fully - dropping the node here dropped whole visible subtrees. Walk the
+      // children and hoist them under a synthetic box.
+      const hoisted = [];
+      for (const c of kids(el)) {
+        const n = walk(c, depth + 1, pcs);
+        if (n) hoisted.push(n);
+      }
+      if (!hoisted.length) return null;
+      if (hoisted.length === 1) return hoisted[0];
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const n of hoisted) {
+        x0 = Math.min(x0, n.box[0]); y0 = Math.min(y0, n.box[1]);
+        x1 = Math.max(x1, n.box[0] + n.box[2]); y1 = Math.max(y1, n.box[1] + n.box[3]);
+      }
+      count++;
+      return { t: TAG.toLowerCase(), s: intern(cs),
+               box: [x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)],
+               kids: hoisted };
+    }
 
     let children = [];
     if (depth < MAX_DEPTH) {
@@ -164,7 +193,7 @@ _JS_TEMPLATE = """
     } else if (kids(el).length) { truncated = true; }
 
     const text = ownText(el).slice(0, MAX_TEXT);
-    const replaced = REPLACED.has(el.tagName);
+    const replaced = REPLACED.has(TAG);
     const keep = !!text || replaced || paints(cs, pcs) || children.length >= 2 ||
                  (children.length && hasRow(el));
 
@@ -172,17 +201,27 @@ _JS_TEMPLATE = """
     // CLASSES are not, because BEM names sit on wrappers.
     if (!keep && children.length === 1) {
       const only = children[0];
-      const merged = Array.from(new Set([...classesOf(el), ...(only.cls || [])]));
-      const own = merged.filter(c => !FRAMEWORK.test(c));
-      only.cls = own.concat(merged.filter(c => FRAMEWORK.test(c))).slice(0, 10);
-      return only;
+      // Collapse ONLY when the wrapper's box coincides with the child's. A
+      // flex-centering or min-height wrapper whose geometry differs from its child
+      // IS the layout cell, and collapsing it substituted the child's smaller box
+      // for the cell - losing the spatial extent the row clustering depends on.
+      const same = Math.abs(r.x + sx - only.box[0]) <= 2 &&
+                   Math.abs(r.y + sy - only.box[1]) <= 2 &&
+                   Math.abs(r.width - only.box[2]) <= 2 &&
+                   Math.abs(r.height - only.box[3]) <= 2;
+      if (same) {
+        const merged = Array.from(new Set([...classesOf(el), ...(only.cls || [])]));
+        const own = merged.filter(c => !FRAMEWORK.test(c));
+        only.cls = own.concat(merged.filter(c => FRAMEWORK.test(c))).slice(0, 10);
+        return only;
+      }
     }
     if (!keep && children.length === 0) return null;
 
     count++;
     const cls = classesOf(el);
     const node = {
-      t: el.tagName.toLowerCase(),
+      t: TAG.toLowerCase(),
       s: intern(cs),
       box: [Math.round(r.x + sx), Math.round(r.y + sy),
             Math.round(r.width), Math.round(r.height)],
@@ -190,8 +229,8 @@ _JS_TEMPLATE = """
     if (cls.length) node.cls = cls;
     if (el.id) node.eid = el.id;
     if (text) node.txt = text;
-    if (el.tagName === 'A' && el.getAttribute('href')) node.href = el.getAttribute('href');
-    if (el.tagName === 'IMG') {
+    if (TAG === 'A' && el.getAttribute('href')) node.href = el.getAttribute('href');
+    if (TAG === 'IMG') {
       node.src = el.currentSrc || el.getAttribute('src') || '';
       node.alt = el.getAttribute('alt') || '';
       if (el.naturalWidth) node.nat = [el.naturalWidth, el.naturalHeight];
@@ -379,14 +418,31 @@ def capture_replica(
                     page.set_viewport_size({"width": width, "height": height})
                     # Lazy-loaded imagery only resolves once it has been near the
                     # viewport, and a page rebuilt without its images is not a rebuild.
+                    # `behavior: 'instant'` throughout: a site with CSS
+                    # scroll-behavior: smooth lags the counter, so lazy content
+                    # never came near the viewport before extraction - and the
+                    # final return to top was never verified, leaving document
+                    # coordinates offset by wherever the smooth scroll had reached.
                     page.evaluate(
                         "() => new Promise(r => { let y = 0; const t = setInterval(() => {"
-                        " window.scrollTo(0, y); y += window.innerHeight;"
+                        " window.scrollTo({top: y, behavior: 'instant'});"
+                        " y += window.innerHeight;"
                         " if (y > document.body.scrollHeight) { clearInterval(t);"
-                        " window.scrollTo(0, 0); r(); } }, 40); })"
+                        " window.scrollTo({top: 0, behavior: 'instant'});"
+                        " requestAnimationFrame(() => r()); } }, 40); })"
                     )
                     page.wait_for_timeout(settle_ms)
                     raw = page.evaluate(js)
+                    # The size guard, for real. MAX_PAYLOAD_BYTES sat unused while
+                    # the docstring claimed a drop-deepest-and-retry existed; on an
+                    # oversized page the capture simply hit MAX_NODES and silently
+                    # lost the BOTTOM of the page. One retry at reduced depth trades
+                    # depth for completeness and says so.
+                    import json as _json
+
+                    if len(_json.dumps(raw)) > MAX_PAYLOAD_BYTES:
+                        raw = page.evaluate(_extractor_js(max_depth=MAX_DEPTH - 4))
+                        raw["truncated"] = True
                     root, meta = parse_extraction(raw)
                     out.viewports.append(ReplicaViewport(
                         viewport=name, width=width, height=height, root=root,
@@ -407,8 +463,9 @@ def capture_replica(
     for vp in out.viewports:
         if vp.truncated:
             notes.append(
-                f"{vp.viewport}: the node budget was reached, so the deepest level was "
-                "dropped - the rebuild will be shallower than the source"
+                f"{vp.viewport}: the capture budget was reached - content walked "
+                "LAST (the page's later and deeper regions) is missing, and the "
+                "rebuild will be incomplete there"
             )
     if not out.css_vars:
         notes.append("no :root custom properties were readable (cross-origin stylesheets?)")

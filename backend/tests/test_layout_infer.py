@@ -88,7 +88,7 @@ class TestEveryRowSumsToExactlyOneHundred:
     @pytest.mark.parametrize(("raw_pcts", "expected"), [
         ([33.3, 33.3, 33.3], [34, 33, 33]),  # remainder lands on the FIRST widest
         ([50.0, 50.0], [50, 50]),
-        ([64.0, 36.0], [67, 33]),
+        ([64.0, 36.0], [66, 34]),  # the point goes where the error is largest
         ([25.0, 25.0, 25.0, 25.0], [25, 25, 25, 25]),
         ([100.0], [100]),
     ])
@@ -100,6 +100,91 @@ class TestEveryRowSumsToExactlyOneHundred:
         narrowest."""
         out = snap_widths([60.0, 20.0, 20.0])
         assert sum(out) == 100 and max(out) == 60
+
+
+class TestTheAdversarialReviewsExecutedFailures:
+    """Each case below was DEMONSTRATED against the previous code by an independent
+    refuter running the real module - not argued. They stay as regressions."""
+
+    @pytest.mark.parametrize("n", [6, 7, 8])
+    def test_wide_equal_grids_never_go_negative(self, n: int) -> None:
+        """The ladder's floor is 16 and 100/n for n>=6 snaps to it, so the whole
+        correction landed on one column: measured [-12, 16 x7] for eight columns. A
+        NEGATIVE width, published."""
+        out = snap_widths([100.0 / n] * n)
+        assert sum(out) == 100
+        assert all(w >= 5 for w in out), out
+        assert max(out) - min(out) <= 1, f"an equal grid must stay equal: {out}"
+
+    def test_a_genuine_quarter_quarter_half_row_is_not_rewritten_to_thirds(self) -> None:
+        """Equal start deltas alone are not an equal grid: 25/25/50 has equal deltas
+        because the wide column is LAST and starts never see its width. Measured
+        rewrite: 34/33/33, sums to 100, looks plausible, silently wrong."""
+        kids = [
+            {"t": "div", "box": [0, 0, 300, 200], "txt": "a", "s": {}, "kids": []},
+            {"t": "div", "box": [310, 0, 300, 200], "txt": "b", "s": {}, "kids": []},
+            {"t": "div", "box": [620, 0, 620, 200], "txt": "c", "s": {}, "kids": []},
+        ]
+        tree = {"t": "div", "box": [0, 0, 1240, 220], "s": {}, "kids": [
+            {"t": "section", "box": [0, 0, 1240, 220], "s": {}, "kids": kids}]}
+        page = infer_layout(tree, viewport_width=1240)
+        widths = next(tuple(c.width_pct for c in r.columns)
+                      for r in _all_rows(page) if len(r.columns) == 3)
+        assert widths[2] >= 45, f"the half-width panel must stay wide: {widths}"
+
+    def test_a_ribbon_over_text_is_an_overlay_not_a_column(self) -> None:
+        """An absolutely-positioned badge overlapping in-flow content was shrunk into
+        a fake 16% in-flow column with no note."""
+        kids = [
+            {"t": "div", "box": [0, 0, 1200, 400], "s": {}, "kids": [
+                {"t": "h1", "box": [40, 60, 500, 80], "txt": "Headline", "s": {}, "kids": []},
+                {"t": "p", "box": [40, 160, 900, 60], "txt": "Copy", "s": {}, "kids": []},
+            ]},
+            {"t": "div", "box": [700, 40, 180, 90], "txt": "",
+             "s": {"backgroundColor": "rgb(161, 98, 7)", "position": "absolute"},
+             "kids": []},
+        ]
+        tree = {"t": "div", "box": [0, 0, 1200, 420], "s": {}, "kids": [
+            {"t": "section", "box": [0, 0, 1200, 420], "s": {}, "kids": kids}]}
+        page = infer_layout(tree, viewport_width=1200)
+        for row in _all_rows(page):
+            assert len(row.columns) <= 1, "the ribbon must not become a column"
+        notes = " ".join(n for r in _all_rows(page) for n in r.notes)
+        assert "overlays are not columns" in notes
+
+    def test_an_anchored_element_in_clear_space_stays_in_the_layout(self) -> None:
+        """The counter-case, measured on the reference hero: the author ANCHORS a real
+        strip absolutely, in space no in-flow content occupies - Elementor's own truth
+        declares it columns. Excluding every `position:absolute` node lost it."""
+        kids = [
+            {"t": "div", "box": [0, 0, 500, 300], "s": {}, "kids": [
+                {"t": "p", "box": [10, 10, 480, 60], "txt": "left copy", "s": {}, "kids": []}]},
+            {"t": "div", "box": [700, 0, 400, 300], "txt": "anchored panel",
+             "s": {"position": "absolute"}, "kids": []},
+        ]
+        tree = {"t": "div", "box": [0, 0, 1200, 320], "s": {}, "kids": [
+            {"t": "section", "box": [0, 0, 1200, 320], "s": {}, "kids": kids}]}
+        page = infer_layout(tree, viewport_width=1200)
+        assert any(len(r.columns) == 2 for r in _all_rows(page)), (
+            "clear-space anchored content must remain part of the layout")
+
+    def test_a_tall_item_does_not_chain_unrelated_bands_into_one_row(self) -> None:
+        """Membership was tested only against row[0], so one tall item glued bands
+        sharing zero overlap with each other; the glued cluster then x-overlapped and
+        a genuine multi-column section flattened to one column."""
+        kids = [
+            {"t": "img", "box": [0, 0, 480, 800], "src": "https://x.test/a.jpg",
+             "alt": "", "s": {}, "kids": []},
+            {"t": "div", "box": [520, 0, 600, 300], "txt": "top band", "s": {}, "kids": []},
+            {"t": "div", "box": [520, 500, 600, 300], "txt": "bottom band", "s": {}, "kids": []},
+        ]
+        tree = {"t": "div", "box": [0, 0, 1200, 820], "s": {}, "kids": [
+            {"t": "section", "box": [0, 0, 1200, 820], "s": {}, "kids": kids}]}
+        page = infer_layout(tree, viewport_width=1200)
+        texts = [" ".join(w.node.get("txt") or "" for c in r.columns for w in c.widgets)
+                 for r in _all_rows(page)]
+        joined = [t for t in texts if "top band" in t and "bottom band" in t]
+        assert not joined, "the two bands share no vertical overlap and must not merge"
 
 
 class TestSelfGradeAgainstTheSourcesOwnDeclarations:

@@ -205,6 +205,19 @@ def extract(
     }
     declared_colours = {k: to_hex(v) for k, v in own.items() if to_hex(v)}
 
+    # Colours that ARE a framework token's value are the THEME speaking, not the
+    # author. Measured: a deeper capture surfaced #046bd2 on 17 unstyled links -
+    # saturation 0.96, outscoring the real brass - and it is literally
+    # `--ast-global-color-0`, Astra's default, confirmed by three separate framework
+    # variables. Unless the author also declared it themselves, it cannot be the
+    # brand accent.
+    framework_colours = {
+        to_hex(v)
+        for k, v in css_vars.items()
+        if k.startswith(("--e-global", "--elementor", "--wp", "--ast", "--kit"))
+        and to_hex(v)
+    } - set(declared_colours.values())
+
     # --- 2. derive from what the browser actually resolved ------------------ #
     bg_counts: Counter[str] = Counter()
     text_counts: Counter[str] = Counter()
@@ -311,6 +324,7 @@ def extract(
     chromatic = [
         c for c, n in candidates.items()
         if saturation(c) >= _MIN_ACCENT_SATURATION and n >= _MIN_ACCENT_USES
+        and c not in framework_colours
     ]
     chromatic.sort(key=lambda c: (-saturation(c), -candidates[c]))
     assign("accent", chromatic[0] if chromatic else "",

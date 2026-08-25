@@ -33,6 +33,17 @@ TRUTH = {
 }
 
 
+_CSSVARS = pathlib.Path(__file__).parent / "fixtures" / "replica" / "spotino_cssvars.json"
+
+
+def _framework_vars() -> dict[str, str]:
+    """Only the FRAMEWORK variables - readable on any site, unlike the author's own
+    tokens, which the derived-only tests deliberately withhold as ground truth."""
+    all_vars = json.loads(_CSSVARS.read_text())
+    return {k: v for k, v in all_vars.items()
+            if k.startswith(("--e-global", "--elementor", "--wp", "--ast", "--kit"))}
+
+
 @pytest.fixture(scope="module")
 def nodes() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -80,7 +91,7 @@ class TestDerivedFromMeasurementAlone:
         """The one that is VISIBLE if wrong. Two earlier rules failed here: ranking
         links by count returned #ffffff (white link text on a dark band), and a low
         saturation floor returned a slate while the real brass sat further down."""
-        assert extract(nodes).palette["accent"] == TRUTH["brass"]
+        assert extract(nodes, css_vars=_framework_vars()).palette["accent"] == TRUTH["brass"]
 
     def test_it_recovers_the_page_background_and_surface(self, nodes: list[dict[str, Any]]) -> None:
         ds = extract(nodes)
@@ -133,7 +144,7 @@ class TestDerivedFromMeasurementAlone:
     ) -> None:
         """The headline claim: a hand-coded site with no CSS variables still yields the
         author's real design tokens. Measured 6/6 on the reference page."""
-        got = set(extract(nodes).palette.values())
+        got = set(extract(nodes, css_vars=_framework_vars()).palette.values())
         missing = [name for name, hexv in TRUTH.items() if hexv not in got]
         assert not missing, f"did not recover: {missing}"
 

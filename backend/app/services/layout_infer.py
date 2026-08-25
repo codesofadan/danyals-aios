@@ -261,17 +261,43 @@ def snap_widths(raw_pcts: list[float]) -> list[int]:
     """Snap to the ladder, then normalise so every row sums to EXACTLY 100.
 
     The old `100 // cols` gave 33+33+33 = 99: Elementor renders it, slightly wrong,
-    forever. The remainder goes to the widest column - 33/33/34 - because a one-point
-    surplus is invisible on the widest box and visible on the narrowest.
+    forever.
+
+    TWO RULES EARNED BY AN ADVERSARIAL REVIEW THAT EXECUTED THE FAILURES:
+
+    - THE LADDER STOPS AT FIVE COLUMNS. Its floor is 16, and 100/n for n >= 6 sits
+      within snap tolerance of it - so every column of an 8-across strip snapped to
+      16 and the whole -28 correction landed on one column: measured output
+      [-12, 16, 16, 16, 16, 16, 16, 16]. A NEGATIVE column width, published. Six or
+      more columns use an even split directly; Elementor accepts any _inline_size.
+    - THE CORRECTION IS SPREAD, ONE POINT AT A TIME, to the columns whose snap error
+      is largest - never dumped on a single column. Dumping it is how an equal
+      6-across logo strip rendered 20/16/16/16/16/16.
     """
+    n = len(raw_pcts)
+    if n == 0:
+        return []
+    if n >= 6:
+        base, rem = divmod(100, n)
+        return [base + (1 if i < rem else 0) for i in range(n)]
+
     snapped: list[int] = []
     for pct in raw_pcts:
         best = min(WIDTH_LADDER, key=lambda w: abs(w - pct))
         snapped.append(best if abs(best - pct) <= SNAP_TOLERANCE else max(1, round(pct)))
-    total = sum(snapped)
-    if snapped and total != 100:
-        widest = snapped.index(max(snapped))
-        snapped[widest] += 100 - total
+    diff = 100 - sum(snapped)
+    step = 1 if diff > 0 else -1
+    guard = 0
+    while diff != 0 and guard < 200:
+        # give/take one point where it distorts the least: the column whose current
+        # value is furthest from its raw measurement in the correcting direction
+        errors = [(snapped[i] - raw_pcts[i]) * step for i in range(n)]
+        idx = errors.index(min(errors))
+        if snapped[idx] + step < 1:
+            idx = snapped.index(max(snapped))
+        snapped[idx] += step
+        diff -= step
+        guard += 1
     return snapped
 
 
@@ -370,9 +396,16 @@ def _cluster_rows(children: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         _, y, _, h = _box(item)
         placed = False
         for row in rows:
-            _, ry, _, rh = _box(row[0])
-            overlap = min(y + h, ry + rh) - max(y, ry)
-            if overlap > ROW_OVERLAP * min(h, rh):
+            # Overlap with EVERY member, not just the first. Testing only row[0]
+            # let one tall item chain bands that share zero overlap with each
+            # other into a single "row", which then x-overlapped and flattened a
+            # genuine multi-column section to one column.
+            def overlaps(member: dict[str, Any], _y: int = y, _h: int = h) -> bool:
+                _, my, _, mh = _box(member)
+                ov = min(_y + _h, my + mh) - max(_y, my)
+                return ov > ROW_OVERLAP * min(_h, mh)
+
+            if all(overlaps(m) for m in row):
                 row.append(item)
                 placed = True
                 break
@@ -411,7 +444,14 @@ def _column_widths(items: list[dict[str, Any]]) -> list[float]:
     if len(xs) >= 3:
         deltas = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
         mean = sum(deltas) / len(deltas)
-        if mean > 0 and all(abs(d - mean) <= mean * 0.12 for d in deltas):
+        # Equal deltas alone are NOT enough: a genuine 25/25/50 row has equal start
+        # deltas too, because the wide column is LAST and start positions never see
+        # its width. Executed failure: 25/25/50 silently rewritten to 34/33/33. The
+        # mean delta must also match the whole span divided by the count - i.e. the
+        # last column's own track is as wide as everyone else's.
+        track = span / len(xs)
+        if (mean > 0 and all(abs(d - mean) <= mean * 0.12 for d in deltas)
+                and abs(mean - track) <= track * 0.12):
             return [100.0 / len(xs)] * len(xs)
 
     gaps = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)] + [right - xs[-1]]
@@ -469,6 +509,15 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
         return []
     content = _descend_to_content(node)
     out: list[InferredRow] = []
+    pending_notes: list[str] = []
+
+    def emit(row: InferredRow) -> None:
+        nonlocal pending_notes
+        if pending_notes:
+            row = InferredRow(columns=row.columns, y=row.y, inner=row.inner,
+                              notes=(*pending_notes, *row.notes))
+            pending_notes = []
+        out.append(row)
 
     # BACKDROPS COME OUT BEFORE CLUSTERING. A hero's imagery spans the whole band,
     # so it vertically overlaps every real row - and the clustering rule chains
@@ -500,7 +549,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
             _collect_widgets(child, widgets_bd)
             textual = [x for x in widgets_bd if x.type != "image"]
             if textual:
-                out.append(InferredRow(
+                emit(InferredRow(
                     columns=(InferredColumn(
                         width_pct=100, x=_box(child)[0], width_px=w,
                         widgets=tuple(textual), classes=_gather_classes(child)),),
@@ -510,18 +559,55 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
             continue
         children.append(child)
 
+
+    # Absolutely positioned items: overlay or layout? `position: absolute` alone
+    # decides nothing - measured on the reference hero, the author ANCHORS a real
+    # 3-column strip absolutely (and Elementor's own truth declares it col-33 x3),
+    # while an award ribbon anchored OVER text is the overlay the refusal exists
+    # for. The distinguishing property is COVERAGE: an anchored element whose box
+    # overlaps the content extent of an in-flow sibling in its y-band is an overlay
+    # and comes out; one occupying clear space is layout, approximated as a column
+    # (the closest thing legacy Elementor can express), and says so.
+    anchored = [c for c in children
+                if (_style(c).get("position") or "") in ("absolute", "fixed")]
+    for item in anchored:
+        ax, ay, aw, ah = _box(item)
+        covers = False
+        for sib in children:
+            if sib is item or sib in anchored:
+                continue
+            _, sy, _, sh = _box(sib)
+            if min(ay + ah, sy + sh) - max(ay, sy) <= 0:
+                continue  # different y-band
+            extent = _widget_extent(sib) or (_box(sib)[0], _box(sib)[0] + _box(sib)[2])
+            if ax < extent[1] - 8 and ax + aw > extent[0] + 8:
+                covers = True
+                break
+        if covers:
+            children = [c for c in children if c is not item]
+            pending_notes.append(
+                f"an absolutely-positioned element at y={ay} overlaps in-flow "
+                "content and was left out: overlays are not columns"
+            )
+        else:
+            pending_notes.append(
+                f"an absolutely-positioned element at y={ay} occupies clear space "
+                "and was approximated as an in-flow column"
+            )
+
     for cluster in _cluster_rows(children):
         if len(cluster) == 1:
             item = cluster[0]
             # A non-painting stack is a row GROUP: its children are more rows.
             if _kids(item) and not _paints(item) and not (item.get("txt") or "").strip():
-                out.extend(_rows_of(item, depth + 1))
+                for sub_row in _rows_of(item, depth + 1):
+                    emit(sub_row)  # not extend: pending notes must reach a row
                 continue
             widgets: list[InferredWidget] = []
             _collect_widgets(item, widgets)
             if not widgets:
                 continue
-            out.append(InferredRow(
+            emit(InferredRow(
                 columns=(InferredColumn(
                     width_pct=100, x=_box(item)[0], width_px=_box(item)[2],
                     widgets=tuple(widgets), classes=tuple(_own_classes(item)),
@@ -560,7 +646,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
                 if textual and len(rest) >= 2:
                     # The backdrop's own content must not vanish with it - a wide
                     # marquee strip is a backdrop by geometry and content by nature.
-                    out.append(InferredRow(
+                    emit(InferredRow(
                         columns=(InferredColumn(
                             width_pct=100, x=_box(b)[0], width_px=_box(b)[2],
                             widgets=tuple(textual), classes=_gather_classes(b)),),
@@ -573,7 +659,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
                 widgets = []
                 _collect_widgets(item, widgets)
                 if widgets:
-                    out.append(InferredRow(
+                    emit(InferredRow(
                         columns=(InferredColumn(
                             width_pct=100, x=_box(item)[0], width_px=_box(item)[2],
                             widgets=tuple(widgets), classes=_gather_classes(item),
@@ -595,7 +681,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
                 _collect_widgets(item, widgets)
             if not widgets:
                 continue
-            out.append(InferredRow(
+            emit(InferredRow(
                 columns=(InferredColumn(
                     width_pct=100, x=cx, width_px=cw, widgets=tuple(widgets)),),
                 y=min(_box(i)[1] for i in cluster), inner=depth > 0,
@@ -610,6 +696,10 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
             shrunk = _shrink_to_content(cluster)
             if shrunk is not None and not _x_overlaps(shrunk):
                 cluster = shrunk
+                notes.append(
+                    "an over-wide wrapper was shrunk to its content extent to "
+                    "resolve an overlap; verify this band against the source"
+                )
         if _x_overlaps(cluster):
             # An overlay, not columns. Refuse to guess: one column, flagged.
             widgets = []
@@ -617,7 +707,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
                 _collect_widgets(item, widgets)
             if not widgets:
                 continue
-            out.append(InferredRow(
+            emit(InferredRow(
                 columns=(InferredColumn(
                     width_pct=100, x=cx, width_px=cw, widgets=tuple(widgets)),),
                 y=min(_box(i)[1] for i in cluster), inner=depth > 0,
@@ -654,7 +744,7 @@ def _rows_of(node: dict[str, Any], depth: int = 0) -> list[InferredRow]:
             # the hero's whole lower band vanished this way while every cluster in
             # it was measured correctly.
             continue
-        out.append(InferredRow(
+        emit(InferredRow(
             columns=tuple(columns), y=min(_box(i)[1] for i in cluster),
             inner=depth > 0, notes=tuple(notes),
         ))
