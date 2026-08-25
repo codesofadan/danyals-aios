@@ -27,6 +27,7 @@ from app.modules.content_planning.schemas import (
     SmeDossier,
     SmeSlot,
 )
+from app.services.brand_kit import BRAND_ASSET_KINDS
 
 _Row = dict[str, Any]
 
@@ -386,6 +387,113 @@ class ContentPlanningStore:
                  dropped_chunk_ids or [], input_tokens, output_tokens,
                  cache_write_tokens, cache_read_tokens, cost),
             )
+
+    # --- brand kits (P6.1) --------------------------------------------------- #
+    def active_brand_kit(self, client_id: str) -> _Row | None:
+        """The client's current kit, or None.
+
+        "Current" is a DATABASE guarantee, not a convention this method upholds:
+        `brand_kits_active_per_client_idx` is a partial unique index on
+        `(client_id) where active`, so two active kits cannot exist to choose between.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.brand_kits where client_id = %s and active limit 1",
+                (client_id,),
+            )
+            return cur.fetchone()
+
+    def save_brand_kit(
+        self,
+        *,
+        client_id: str,
+        source_url: str,
+        palette: dict[str, Any],
+        typography: dict[str, Any],
+        spacing: dict[str, Any],
+        components: dict[str, Any],
+        blueprint: list[dict[str, Any]],
+        raw_measurements: dict[str, Any] | None = None,
+    ) -> str:
+        """Store a new kit VERSION and make it the active one.
+
+        A new capture never overwrites the old kit. Pages published under v1 have to
+        stay explainable after the client redesigns, and an overwrite silently rewrites
+        the history of every page that already shipped.
+
+        Deactivate-then-insert in ONE transaction, because the partial unique index
+        means the intermediate state - two active kits - is not merely untidy, it is
+        rejected. Doing it in two statements outside a transaction would leave a client
+        with no active kit if the insert failed.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select coalesce(max(version), 0) + 1 as next "
+                "from public.brand_kits where client_id = %s",
+                (client_id,),
+            )
+            row = cur.fetchone()
+            version = int((row or {}).get("next") or 1)
+
+            cur.execute(
+                "update public.brand_kits set active = false "
+                "where client_id = %s and active",
+                (client_id,),
+            )
+            cur.execute(
+                """insert into public.brand_kits
+                     (client_id, source_url, version, palette, typography, spacing,
+                      components, blueprint, raw_measurements, active)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, true)
+                   returning id""",
+                (
+                    client_id, source_url, version, Jsonb(palette), Jsonb(typography),
+                    Jsonb(spacing), Jsonb(components), Jsonb(blueprint),
+                    Jsonb(raw_measurements or {}),
+                ),
+            )
+            inserted = cur.fetchone()
+            if inserted is None:  # a RETURNING insert that yields nothing is a bug
+                raise RuntimeError("brand kit insert returned no id")
+            return str(inserted["id"])
+
+    def record_brand_asset(
+        self,
+        *,
+        kit_id: str,
+        kind: str,
+        source_url: str,
+        stored_key: str = "",
+        sha256: str = "",
+        width: int | None = None,
+        height: int | None = None,
+    ) -> str | None:
+        """Record one re-hosted asset. Returns None when the bytes are already stored.
+
+        Content-addressed: `brand_assets_kit_sha_idx` makes the same bytes one row, so
+        a logo that appears on every captured page is fetched once and stored once.
+        `on conflict do nothing` rather than an existence check - two workers fetching
+        the same asset concurrently would both pass a check and one would then fail.
+        """
+        # Checked here so the failure names the value and the allowed set. Reaching
+        # Postgres with a bad kind raises InvalidTextRepresentation from inside a
+        # worker, which says nothing about which vocabulary was wrong.
+        if kind not in BRAND_ASSET_KINDS:
+            raise ValueError(
+                f"{kind!r} is not a brand_asset_kind; expected one of "
+                f"{sorted(BRAND_ASSET_KINDS)}"
+            )
+        with privileged_connection() as cur:
+            cur.execute(
+                """insert into public.brand_assets
+                     (kit_id, kind, source_url, stored_key, sha256, width, height)
+                   values (%s, %s, %s, %s, %s, %s, %s)
+                   on conflict do nothing
+                   returning id""",
+                (kit_id, kind, source_url, stored_key, sha256, width, height),
+            )
+            row = cur.fetchone()
+            return str(row["id"]) if row else None
 
     # --- what the RESEARCH stage reads instead of paying to invent ---------- #
     def metrics_for(self, engagement_id: str | None, keyword: str) -> dict[str, Any] | None:

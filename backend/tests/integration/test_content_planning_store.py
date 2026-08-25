@@ -151,3 +151,91 @@ def test_doctrine_usage_records_the_cache_accounting(store: Any) -> None:
         dropped_chunk_ids=[], engagement_id=eng.id, input_tokens=234,
         cache_write_tokens=74_580, cache_read_tokens=0, cost=0.2837,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Brand kits (P6.1) - the versioning the partial unique index enforces
+# --------------------------------------------------------------------------- #
+def _client_id(store: Any) -> str:
+    """A real client row, since brand_kits.client_id is a FK with no null allowed."""
+    from app.db.database import privileged_connection
+
+    with privileged_connection() as cur:
+        cur.execute(
+            "insert into public.clients (name) values ('Brand Kit Test') returning id"
+        )
+        return str(cur.fetchone()["id"])
+
+
+def _kit(store: Any, client_id: str, **over: Any) -> str:
+    base: dict[str, Any] = {
+        "client_id": client_id, "source_url": "https://x.test",
+        "palette": {"primary": "#0b3d91"}, "typography": {"heading_font": "Georgia"},
+        "spacing": {"container_width": "1180px"}, "components": {"hero_style": "split"},
+        "blueprint": [{"kind": "hero"}],
+    }
+    base.update(over)
+    return store.save_brand_kit(**base)
+
+
+def test_a_new_capture_versions_the_kit_rather_than_overwriting_it(store: Any) -> None:
+    """Pages published under v1 must stay explainable after the client redesigns. An
+    overwrite silently rewrites the history of every page that already shipped."""
+    client_id = _client_id(store)
+    first = _kit(store, client_id, palette={"primary": "#111111"})
+    second = _kit(store, client_id, palette={"primary": "#222222"})
+    assert first != second
+
+    active = store.active_brand_kit(client_id)
+    assert str(active["id"]) == second
+    assert active["version"] == 2
+    assert active["palette"]["primary"] == "#222222"
+
+
+def test_exactly_one_kit_is_active_and_the_database_enforces_it(store: Any) -> None:
+    """`brand_kits_active_per_client_idx` is a partial unique index on
+    (client_id) where active, so two active kits cannot exist to choose between - the
+    deactivate and the insert have to share a transaction."""
+    from app.db.database import privileged_connection
+
+    client_id = _client_id(store)
+    for _ in range(3):
+        _kit(store, client_id)
+    with privileged_connection() as cur:
+        cur.execute(
+            "select count(*) as n from public.brand_kits where client_id = %s and active",
+            (client_id,),
+        )
+        assert cur.fetchone()["n"] == 1
+        cur.execute(
+            "select count(*) as n from public.brand_kits where client_id = %s", (client_id,)
+        )
+        assert cur.fetchone()["n"] == 3, "older versions are kept, not replaced"
+
+
+def test_a_client_with_no_kit_reads_as_none(store: Any) -> None:
+    assert store.active_brand_kit(_client_id(store)) is None
+
+
+def test_the_same_asset_bytes_are_stored_once(store: Any) -> None:
+    """Content-addressed dedup. A logo appearing on every captured page is fetched
+    once and stored once - `on conflict do nothing` rather than an existence check,
+    because two workers fetching concurrently would both pass a check."""
+    kit_id = _kit(store, _client_id(store))
+    first = store.record_brand_asset(
+        kit_id=kit_id, kind="logo", source_url="https://x.test/logo.svg", sha256="abc123"
+    )
+    second = store.record_brand_asset(
+        kit_id=kit_id, kind="logo", source_url="https://x.test/logo-copy.svg", sha256="abc123"
+    )
+    assert first is not None
+    assert second is None, "same bytes, second insert must be a no-op"
+
+
+def test_assets_without_a_hash_are_not_deduped_against_each_other(store: Any) -> None:
+    """The unique index is partial - `where sha256 <> ''` - so an asset we could not
+    hash still records rather than colliding with every other unhashed one."""
+    kit_id = _kit(store, _client_id(store))
+    a = store.record_brand_asset(kit_id=kit_id, kind="photo", source_url="https://x.test/a.jpg")
+    b = store.record_brand_asset(kit_id=kit_id, kind="photo", source_url="https://x.test/b.jpg")
+    assert a is not None and b is not None and a != b
