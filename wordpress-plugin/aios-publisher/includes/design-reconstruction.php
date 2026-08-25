@@ -154,5 +154,13 @@ function aios_publisher_store_elementor_data( $post_id, $request ) {
 	update_post_meta( $post_id, '_elementor_version', $version );
 	// Elementor renders its own layout, so tell the theme to use a full-width/blank
 	// template where supported (best-effort; harmless on themes that ignore it).
-	update_post_meta( $post_id, '_wp_page_template', 'elementor_header_footer' );
+	// The caller may name the template: a full replica carries its OWN navbar and
+	// footer as page sections, and the theme's chrome must not double up around
+	// them - that is `elementor_canvas`. Anything outside the safe set falls back
+	// to the header/footer template this plugin has always written.
+	$template = sanitize_text_field( (string) $request->get_param( 'template' ) );
+	if ( ! in_array( $template, array( 'elementor_canvas', 'elementor_header_footer' ), true ) ) {
+		$template = 'elementor_header_footer';
+	}
+	update_post_meta( $post_id, '_wp_page_template', $template );
 }

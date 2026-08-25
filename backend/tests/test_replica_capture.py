@@ -202,3 +202,28 @@ class TestThePagesOwnGround:
     def test_the_capture_carries_it(self) -> None:
         from integrations.replica_capture import ReplicaCapture
         assert ReplicaCapture(url="https://x").body_bg == ""
+
+
+class TestTheChromeAndTheHead:
+    """Header, footer and <head> fundamentals ride the capture."""
+
+    def test_header_and_footer_are_found_by_semantics(self) -> None:
+        js = _extractor_js()
+        assert "pickRegion" in js
+        assert '[data-elementor-type="header"]' in js
+        assert '[data-elementor-type="footer"]' in js
+        assert "el.contains(root) || root.contains(el)" in js, (
+            "a region equal to or containing the content root is not chrome")
+
+    def test_the_head_fundamentals_are_collected(self) -> None:
+        js = _extractor_js()
+        for needle in ('meta[name="description"]', 'link[rel="canonical"]',
+                       'meta[property="og:title"]', 'meta[name="robots"]'):
+            assert needle in js, needle
+
+    def test_the_capture_carries_chrome_and_head(self) -> None:
+        from integrations.replica_capture import ReplicaCapture, ReplicaViewport
+        cap = ReplicaCapture(url="https://x")
+        assert cap.head == {}
+        vp = ReplicaViewport(viewport="desktop", width=1440, height=900)
+        assert vp.header is None and vp.footer is None

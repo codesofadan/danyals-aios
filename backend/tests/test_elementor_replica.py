@@ -362,3 +362,37 @@ class TestIterationFiveRegressions:
 
     def test_the_new_keys_still_satisfy_the_oracle(self, tree: list[dict[str, Any]]) -> None:
         validate_tree(tree, load_oracle())
+
+
+class TestNavbarEmission:
+    def test_three_regions_three_columns_marker_class_oracle_valid(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_navbar
+        from app.services.layout_infer import InferredNavbar, NavLink
+        nav = InferredNavbar(
+            height=80, background="rgb(213, 233, 232)",
+            logo_src="https://x/logo.png", logo_width=150,
+            links=(NavLink("Services", "/services/"), NavLink("About", "/about/")),
+            cta_node={"t": "a", "box": [1280, 20, 120, 40], "txt": "Contact",
+                      "s": {"backgroundColor": "rgb(242, 183, 47)"}, "kids": [],
+                      "href": "/contact/"},
+        )
+        section = build_navbar(nav, DesignSystem(), 1200)
+        assert section["settings"]["css_classes"] == "aios-replica-nav"
+        assert section["settings"]["structure"] == "30"
+        assert [c["settings"]["_column_size"] for c in section["elements"]] == [25, 50, 25]
+        menu = section["elements"][1]["elements"][0]
+        assert menu["widgetType"] == "icon-list"
+        assert menu["settings"]["view"] == "inline"
+        assert [i["text"] for i in menu["settings"]["icon_list"]] == ["Services", "About"]
+        validate_tree([section], load_oracle())
+
+    def test_menu_only_headers_still_build(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_navbar
+        from app.services.layout_infer import InferredNavbar, NavLink
+        nav = InferredNavbar(height=60, links=(NavLink("A", "/a"), NavLink("B", "/b")))
+        section = build_navbar(nav, DesignSystem(), 1200)
+        assert len(section["elements"]) == 1
+        assert section["elements"][0]["settings"]["_column_size"] == 100
+        validate_tree([section], load_oracle())

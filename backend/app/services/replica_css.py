@@ -25,7 +25,8 @@ MAX_CSS_BYTES = 24_000
 
 def generate(page: InferredPage, ds: DesignSystem,
              author_vars: dict[str, str] | None = None,
-             body_bg: str = "") -> str:
+             body_bg: str = "",
+             has_navbar: bool = False) -> str:
     out: list[str] = []
     surface = ds.palette.get("surface", "#f5f5f5")
     border = ds.palette.get("border", "#e5e7eb")
@@ -40,6 +41,14 @@ def generate(page: InferredPage, ds: DesignSystem,
         # site-wide stylesheet also paints body (the test site's does), cascade
         # order buries the measured ground; important wins and leaks nowhere.
         out.append(f"body{{background-color:{body_bg} !important}}")
+    if has_navbar:
+        # The navbar guard. Measured collision: a site-wide rule
+        # `.elementor > .elementor-section:has(.elementor-icon-list--layout-inline)
+        # {display:none}` on the host site hid the whole replicated navbar (and its
+        # lazy logo never loaded). This CSS ships page-scoped, so the important
+        # display guard cannot leak beyond the replica.
+        out.append(".elementor .elementor-section.aios-replica-nav"
+                   "{display:block !important}")
 
     # The author's own tokens, verbatim - their names are their documentation.
     author_vars = author_vars or {}

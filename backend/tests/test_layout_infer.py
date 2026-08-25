@@ -498,3 +498,66 @@ class TestTheAlligatorLessons:
         cols = [c for s in page.sections for r in s.rows for c in r.columns]
         decorated = [c for c in cols if c.border_px == 1 and c.radius_px == 12]
         assert len(decorated) == 3, "each FAQ pill keeps its outline on the column"
+
+
+class TestNavbarRecognition:
+    """The header's NATURE is recognised - logo, menu band, CTA - not guessed."""
+
+    @staticmethod
+    def _header(with_cta: bool = True, links: int = 4) -> dict[str, Any]:
+        n = TestTheAlligatorLessons._n
+        kids = [n("a", [40, 20, 160, 40], href="/", kids=[
+            n("img", [40, 20, 150, 40], src="https://x/logo.png")])]
+        labels = ["Services", "Pricing", "About", "Tips", "Blog", "Team"]
+        for i in range(links):
+            kids.append(n("a", [500 + i * 110, 30, 90, 20],
+                          txt=labels[i], href=f"/{labels[i].lower()}/"))
+        if with_cta:
+            kids.append(n("a", [1280, 20, 120, 40], txt="Contact",
+                          s={"backgroundColor": "rgb(242, 183, 47)",
+                             "paddingLeft": "24px"}, href="/contact/"))
+        return n("header", [0, 0, 1440, 80], kids=kids)
+
+    def test_the_full_shape_is_named(self) -> None:
+        from app.services.layout_infer import infer_navbar
+        nav = infer_navbar(self._header(), viewport_width=1440)
+        assert nav is not None
+        assert nav.layout == "logo-left menu-center cta-right"
+        assert [link.text for link in nav.links] == ["Services", "Pricing", "About", "Tips"]
+        assert nav.logo_src == "https://x/logo.png"
+        assert nav.cta_node is not None
+
+    def test_a_painted_link_is_the_cta_not_a_menu_item(self) -> None:
+        from app.services.layout_infer import infer_navbar
+        nav = infer_navbar(self._header(), viewport_width=1440)
+        assert nav is not None
+        assert "Contact" not in [link.text for link in nav.links]
+
+    def test_no_cta_no_problem(self) -> None:
+        from app.services.layout_infer import infer_navbar
+        nav = infer_navbar(self._header(with_cta=False), viewport_width=1440)
+        assert nav is not None
+        assert nav.cta_node is None
+        assert len(nav.links) == 4
+
+    def test_a_hamburger_header_notes_its_thin_menu(self) -> None:
+        from app.services.layout_infer import infer_navbar
+        nav = infer_navbar(self._header(links=1), viewport_width=1440)
+        assert nav is not None
+        assert any("fewer than two menu links" in note for note in nav.notes)
+
+    def test_an_empty_header_is_none(self) -> None:
+        from app.services.layout_infer import infer_navbar
+        n = TestTheAlligatorLessons._n
+        assert infer_navbar(n("header", [0, 0, 1440, 80]), viewport_width=1440) is None
+
+    def test_a_band_carrying_its_own_backdrop_image_keeps_it(self) -> None:
+        n = TestTheAlligatorLessons._n
+        band = n("div", [0, 0, 1440, 500],
+                 s={"backgroundImage": 'url("https://x/leafy.jpg")'},
+                 kids=[n("h3", [200, 40, 300, 40], txt="Footer heading"),
+                       n("p", [200, 120, 400, 40], txt="Some footer copy here.")])
+        root = n("div", [0, 0, 1440, 600], kids=[band])
+        page = infer_layout(root, viewport_width=1440)
+        assert page.sections
+        assert page.sections[0].background_image == "https://x/leafy.jpg"

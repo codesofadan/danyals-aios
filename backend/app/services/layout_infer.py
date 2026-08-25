@@ -1060,6 +1060,14 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
                 and cand.get("scrim") and "gradient" not in str(cand.get("scrim")):
             background = str(cand["scrim"])
         bg_image = ""
+        # A band can carry its own backdrop image directly (a footer's leafy
+        # ground lives ON the band element; lazy loaders often paint bands via
+        # background-image) - read the element itself before scanning children.
+        own_bgi = _style(cand).get("backgroundImage", "")
+        if own_bgi and own_bgi != "none":
+            m_own = re.search(r'url\(["\']?([^"\')]+)', own_bgi)
+            if m_own and not m_own.group(1).startswith("data:"):
+                bg_image = m_own.group(1)
         # Look shallowly for the band's real paint: a backdrop image spanning it,
         # and - when the section element itself is unpainted - a full-coverage
         # child's background colour (the reference footer's dark lives one level
@@ -1205,3 +1213,187 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
         sections=tuple(sections), container_px=container,
         components=components, notes=tuple(notes),
     )
+
+
+# --------------------------------------------------------------------------- #
+# The navbar - recognised, not guessed
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class NavLink:
+    text: str
+    href: str
+
+
+@dataclass(frozen=True)
+class InferredNavbar:
+    """What a header IS, read from geometry and tags: a logo, a row of short
+    links sharing a y-band, and optionally one painted CTA. The `layout` string
+    names the recognised nature so the emitter (and a human) can see what the
+    system decided."""
+
+    height: int
+    background: str = ""
+    logo_src: str = ""
+    logo_text: str = ""
+    logo_href: str = ""
+    logo_width: int = 0
+    links: tuple[NavLink, ...] = ()
+    link_color: str = ""
+    link_font: str = ""
+    link_size_px: int = 0
+    cta_node: dict[str, Any] | None = None
+    layout: str = ""
+    notes: tuple[str, ...] = ()
+
+
+def _nav_anchors(header: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    def visit(n: dict[str, Any]) -> None:
+        if n.get("t") == "a":
+            out.append(n)
+            return  # an <a> inside an <a> is invalid HTML; do not double-count
+        for k in _kids(n):
+            visit(k)
+
+    visit(header)
+    return out
+
+
+def _first_image(n: dict[str, Any]) -> dict[str, Any] | None:
+    if n.get("t") == "img" and n.get("src"):
+        return n
+    if (_style(n).get("backgroundImage") or "none") != "none":
+        return n
+    for k in _kids(n):
+        found = _first_image(k)
+        if found is not None:
+            return found
+    return None
+
+
+def infer_navbar(header: dict[str, Any], *, viewport_width: int) -> InferredNavbar | None:
+    """Recognise the header's nature. None when the tree holds no nav at all."""
+    _hx, _hy, hw, hh = _box(header)
+    if hw <= 0 or hh <= 0:
+        return None
+    notes: list[str] = []
+    anchors = [a for a in _nav_anchors(header)
+               if _box(a)[2] > 0 and _box(a)[3] > 0]
+    if not anchors:
+        return None
+
+    # LOGO: the leftmost anchor that carries an image, else the header's first
+    # image, else the leftmost anchor whose text renders large.
+    logo: dict[str, Any] | None = None
+    logo_img: dict[str, Any] | None = None
+    with_img = [(a, _first_image(a)) for a in anchors]
+    with_img = [(a, im) for a, im in with_img if im is not None]
+    if with_img:
+        logo, logo_img = min(with_img, key=lambda p: _box(p[0])[0])
+    else:
+        header_img = _first_image(header)
+        if header_img is not None:
+            logo_img = header_img
+        else:
+            big = [a for a in anchors
+                   if (_all_text(a).strip()
+                       and _px_float(_style(a).get("fontSize")) >= 18)]
+            if big:
+                logo = min(big, key=lambda a: _box(a)[0])
+
+    # CTA: the rightmost PAINTED short-text anchor - a nav's one button.
+    def is_cta(a: dict[str, Any]) -> bool:
+        if a is logo:
+            return False
+        text = _all_text(a).strip()
+        return bool(text) and len(text) <= 30 and _paints(a)
+
+    ctas = [a for a in anchors if is_cta(a)]
+    cta = max(ctas, key=lambda a: _box(a)[0]) if ctas else None
+
+    # MENU: short-text anchors sharing the dominant y-band, left to right.
+    candidates = []
+    for a in anchors:
+        if a is logo or a is cta:
+            continue
+        text = _all_text(a).strip()
+        if not text or len(text) > 30:
+            continue
+        candidates.append(a)
+    links: list[NavLink] = []
+    band_members: list[dict[str, Any]] = []
+    if candidates:
+        centers = [(_box(a)[1] + _box(a)[3] // 2, a) for a in candidates]
+        best_band: list[dict[str, Any]] = []
+        for cy, _ in centers:
+            band = [a for oy, a in centers if abs(oy - cy) <= 12]
+            if len(band) > len(best_band):
+                best_band = band
+        band_members = sorted(best_band, key=lambda a: _box(a)[0])
+        seen: set[tuple[str, str]] = set()
+        for a in band_members:
+            text = " ".join(_all_text(a).split())
+            href = a.get("href") or ""
+            if (text, href) in seen:
+                continue
+            seen.add((text, href))
+            links.append(NavLink(text=text, href=href))
+    if len(links) < 2:
+        notes.append("fewer than two menu links were recognised; the header may "
+                     "use a hamburger or an unusual structure")
+
+    # The recognised NATURE, named.
+    def region(x_center: int) -> str:
+        third = viewport_width / 3
+        return "left" if x_center < third else ("center" if x_center < 2 * third else "right")
+
+    parts = []
+    if logo is not None or logo_img is not None:
+        anchor_box = _box(logo if logo is not None else logo_img)  # type: ignore[arg-type]
+        parts.append(f"logo-{region(anchor_box[0] + anchor_box[2] // 2)}")
+    if band_members:
+        xs = [_box(a)[0] for a in band_members]
+        rights = [_box(a)[0] + _box(a)[2] for a in band_members]
+        parts.append(f"menu-{region((min(xs) + max(rights)) // 2)}")
+    if cta is not None:
+        parts.append(f"cta-{region(_box(cta)[0] + _box(cta)[2] // 2)}")
+
+    background = _style(header).get("backgroundColor", "")
+    if not background or background in ("rgba(0, 0, 0, 0)", "transparent"):
+        for child in _kids(header)[:3]:
+            _, _, cw2, _ch2 = _box(child)
+            cbg = _style(child).get("backgroundColor", "")
+            if cw2 >= hw * 0.85 and cbg and cbg not in ("rgba(0, 0, 0, 0)", "transparent"):
+                background = cbg
+                break
+
+    sample = band_members[0] if band_members else (candidates[0] if candidates else anchors[0])
+    s_link = _style(sample)
+    logo_box_w = 0
+    if logo_img is not None:
+        logo_box_w = _box(logo_img)[2]
+    elif logo is not None:
+        logo_box_w = _box(logo)[2]
+    return InferredNavbar(
+        height=max(40, min(hh, 200)),
+        background=background,
+        logo_src=(logo_img or {}).get("src", "") if logo_img is not None else "",
+        logo_text=" ".join(_all_text(logo).split()) if logo is not None and logo_img is None else "",
+        logo_href=(logo or {}).get("href", "") if logo is not None else "",
+        logo_width=min(logo_box_w, 400),
+        links=tuple(links),
+        link_color=s_link.get("color", ""),
+        link_font=s_link.get("fontFamily", ""),
+        link_size_px=round(_px_float(s_link.get("fontSize"))),
+        cta_node=cta,
+        layout=" ".join(parts) or "unrecognised",
+        notes=tuple(notes),
+    )
+
+
+def _px_float(v: str | None) -> float:
+    try:
+        return float((v or "0").rstrip("px"))
+    except ValueError:
+        return 0.0

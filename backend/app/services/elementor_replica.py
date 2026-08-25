@@ -32,6 +32,7 @@ from app.services.design_system import DesignSystem
 from app.services.elementor import _IdGen
 from app.services.layout_infer import (
     InferredColumn,
+    InferredNavbar,
     InferredPage,
     InferredRow,
     InferredSection,
@@ -704,3 +705,104 @@ def validate_tree(tree: list[dict[str, Any]], oracle: dict[str, Any] | None = No
 
 def to_json(tree: list[dict[str, Any]]) -> str:
     return json.dumps(tree, separators=(",", ":"), ensure_ascii=False)
+
+
+# --------------------------------------------------------------------------- #
+# The navbar - emitted from what was recognised
+# --------------------------------------------------------------------------- #
+def build_navbar(nav: InferredNavbar, ds: DesignSystem,
+                 container_px: int) -> dict[str, Any]:
+    """The recognised header as ONE editable Elementor section.
+
+    Free Elementor has no nav-menu widget (that is Pro), so the menu is an INLINE
+    icon-list - the standard free-tier pattern: horizontal, one item per link,
+    every label and URL a real editor field. Logo and CTA reuse the ordinary
+    image/button builders so their styling stays measured.
+    """
+    ids = _IdGen()
+    columns: list[dict[str, Any]] = []
+
+    def col(widgets: list[dict[str, Any]], pct: int) -> None:
+        settings: dict[str, Any] = {"_column_size": pct, "_inline_size": pct,
+                                    "content_position": "center"}
+        columns.append({"id": ids.next(f"navcol:{len(columns)}"), "elType": "column",
+                        "settings": settings, "elements": widgets})
+
+    logo_widgets: list[dict[str, Any]] = []
+    if nav.logo_src:
+        logo_node: dict[str, Any] = {
+            "t": "img", "box": [0, 0, nav.logo_width or 160, nav.height],
+            "src": nav.logo_src, "alt": "logo", "s": {}, "kids": [],
+        }
+        logo_widgets.append(_widget(
+            InferredWidget(type="image", node=logo_node), ds, ids))
+    elif nav.logo_text:
+        logo_node = {"t": "h4", "box": [0, 0, nav.logo_width or 200, 40],
+                     "txt": nav.logo_text, "s": {}, "kids": []}
+        logo_widgets.append(_widget(
+            InferredWidget(type="heading", node=logo_node), ds, ids))
+
+    menu_widgets: list[dict[str, Any]] = []
+    if nav.links:
+        items = []
+        for link in nav.links:
+            items.append({
+                "text": link.text,
+                "selected_icon": {"value": "", "library": ""},
+                "link": {"url": link.href, "is_external": "", "nofollow": ""},
+            })
+        menu_settings: dict[str, Any] = {
+            "view": "inline",
+            "icon_list": items,
+            "space_between": {"unit": "px", "size": 12},
+        }
+        colour = _colour(nav.link_color)
+        if colour:
+            menu_settings["text_color"] = colour
+        menu_widgets.append({"id": ids.next("navmenu"), "elType": "widget",
+                             "widgetType": "icon-list", "settings": menu_settings})
+
+    cta_widgets: list[dict[str, Any]] = []
+    if nav.cta_node is not None:
+        cta = _widget(InferredWidget(type="button", node=nav.cta_node), ds, ids)
+        cta["settings"]["align"] = "right"
+        cta_widgets.append(cta)
+
+    # Column split mirrors the recognised regions; the fallbacks keep a partial
+    # recognition publishable (logo only, menu only...).
+    if logo_widgets and menu_widgets and cta_widgets:
+        col(logo_widgets, 25)
+        col(menu_widgets, 50)
+        col(cta_widgets, 25)
+    elif logo_widgets and menu_widgets:
+        col(logo_widgets, 30)
+        col(menu_widgets, 70)
+    elif menu_widgets:
+        col(menu_widgets, 100)
+    else:
+        col(logo_widgets or cta_widgets or
+            [{"id": ids.next("navspacer"), "elType": "widget",
+              "widgetType": "spacer", "settings": {"space": {"unit": "px", "size": 10}}}], 100)
+
+    settings: dict[str, Any] = {
+        "stretch_section": "section-stretched",
+        "layout": "boxed",
+        "content_width": {"unit": "px", "size": container_px},
+        "padding": {"unit": "px", "top": "10", "right": "0",
+                    "bottom": "10", "left": "0", "isLinked": False},
+        # The marker the page-scoped guard rule keys on. Measured necessity: the
+        # test site's own custom CSS hides ANY top-level section holding an
+        # inline icon-list (an unscoped rule meant for one of its own pages) -
+        # a client site's stylesheet must not be able to disappear the navbar.
+        # `css_classes`, NOT `_css_classes`: sections name the control without
+        # the underscore (the widget spelling stored fine and rendered nothing).
+        "css_classes": "aios-replica-nav",
+    }
+    if len(columns) > 1:
+        settings["structure"] = f"{len(columns)}0"
+    bg = _colour(nav.background)
+    if bg:
+        settings["background_background"] = "classic"
+        settings["background_color"] = bg
+    return {"id": ids.next("navbar"), "elType": "section",
+            "settings": settings, "elements": columns}

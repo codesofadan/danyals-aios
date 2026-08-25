@@ -20,17 +20,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from app.services.design_system import DesignSystem, extract
 from app.services.elementor_replica import (
     UnknownSettingError,
+    build_navbar,
     build_tree,
     mobile_text_positions,
     responsive_heading_sizes,
     to_json,
     validate_tree,
 )
-from app.services.layout_infer import InferredPage, infer_layout
+from app.services.layout_infer import InferredPage, infer_layout, infer_navbar
 from app.services.replica_css import generate
 
 
@@ -133,6 +135,48 @@ def replicate(
         responsive_heading_sizes(captures),
         mobile_text_positions(captures),
     )
+
+    # THE SITE'S CHROME. A replica without the source's navbar and footer is a
+    # torso - the owner's words. The header is RECOGNISED (logo / menu / CTA from
+    # geometry and tags) and emitted as one editable section; the footer is a
+    # normal multi-column region and rides the standard inference. Either may be
+    # absent; the page publishes without it, and the note says so.
+    chrome_used = False
+    nav_used = False
+    hdr = getattr(desktop, "header", None)
+    if hdr is not None:
+        nav = infer_navbar(_serialize(hdr), viewport_width=desktop.width)
+        if nav is not None:
+            for n in nav.notes:
+                result.note(f"navbar: {n}")
+            result.note(f"navbar recognised: {nav.layout} "
+                        f"({len(nav.links)} links)")
+            tree.insert(0, build_navbar(nav, ds, page.container_px))
+            chrome_used = True
+            nav_used = True
+        else:
+            result.note("a header was captured but no navbar was recognised in it")
+    else:
+        result.note("no header element was found on the source")
+    ftr = getattr(desktop, "footer", None)
+    if ftr is not None:
+        ftr_raw = _serialize(ftr)
+        footer_page = infer_layout(ftr_raw, viewport_width=desktop.width)
+        if footer_page.sections:
+            footer_secs = build_tree(footer_page, ds)
+            _paint_footer_ground(footer_secs, ftr_raw)
+            tree.extend(footer_secs)
+            result.note(f"footer replicated: {len(footer_secs)} section(s)")
+            chrome_used = True
+        else:
+            result.note("a footer was captured but no layout was inferred from it")
+    else:
+        result.note("no footer element was found on the source")
+
+    # INTERNAL LINKS point at the replica's own site, not back at the source:
+    # same-host URLs become path-relative, so sibling pages replicated at the
+    # same slugs connect to each other.
+    _localize_links(tree, url)
     try:
         validate_tree(tree)
     except UnknownSettingError as exc:
@@ -141,6 +185,7 @@ def replicate(
         result.note(f"refused by the oracle: {exc}")
         return result
 
+    head = getattr(capture, "head", {}) or {}
     payload = {
         "title": title or (capture.title or "Replicated page"),
         "slug": slug or "",
@@ -149,8 +194,24 @@ def replicate(
         "elementor_data": to_json(tree),
         "elementor_edit_mode": "builder",
         "design_css": generate(page, ds, capture.css_vars,
-                               body_bg=getattr(capture, "body_bg", "")),
+                               body_bg=getattr(capture, "body_bg", ""),
+                               has_navbar=nav_used),
     }
+    # THE <head> FUNDAMENTALS travel with the page: the source's meta title and
+    # description ARE the replica's (it is the same page), written through the
+    # plugin into whichever SEO plugin the site runs. The canonical is NOT
+    # copied - the source's canonical names the source's domain, and a replica
+    # claiming it would be pointing search engines at someone else's URL;
+    # WordPress emits the correct SELF-canonical on singular pages by itself.
+    if head.get("title"):
+        payload["meta_title"] = head["title"]
+    if head.get("description"):
+        payload["meta_description"] = head["description"]
+    if chrome_used:
+        # With the navbar and footer replicated ON the page, the theme's own
+        # header/footer must not double up around them.
+        payload["template"] = "elementor_canvas"
+
     try:
         pushed = publisher.publish(payload)
     except Exception as exc:
@@ -163,3 +224,79 @@ def replicate(
     result.sections = len(page.sections)
     result.widgets = to_json(tree).count('"widgetType"')
     return result
+
+
+def _localize_links(tree: list[dict[str, Any]], source_url: str) -> int:
+    """Rewrite same-host link URLs to path-relative, in place. Returns the count.
+
+    A replica's internal links must not lead back to the source's domain: once
+    sibling pages are replicated at matching slugs, path-relative links connect
+    them on the NEW site. Cross-domain links (socials, maps, tel/mailto) are left
+    exactly as captured. Image/file sources are NOT rewritten - the media still
+    lives on the source until sideloading happens.
+    """
+    host = urlparse(source_url).netloc.lower().removeprefix("www.")
+    if not host:
+        return 0
+    rewritten = 0
+
+    def rewrite(value: str) -> str:
+        nonlocal rewritten
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https"):
+            return value
+        if parsed.netloc.lower().removeprefix("www.") != host:
+            return value
+        rewritten += 1
+        path = parsed.path or "/"
+        return path + (f"?{parsed.query}" if parsed.query else "")
+
+    def visit(obj: Any) -> None:
+        if isinstance(obj, dict):
+            link = obj.get("link")
+            if isinstance(link, dict) and isinstance(link.get("url"), str):
+                link["url"] = rewrite(link["url"])
+            # button/link settings carry {"link": {...}}; a bare "url" key is an
+            # image source or background and stays pointed at the real file
+            for v in obj.values():
+                visit(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                visit(v)
+
+    visit(tree)
+    return rewritten
+
+
+def _paint_footer_ground(sections: list[dict[str, Any]], footer_root: dict[str, Any]) -> None:
+    """Give unpainted footer sections the footer element's OWN ground, in place.
+
+    A footer's dark look usually lives on the <footer> element itself; the bands
+    inside it are transparent. The band inference reads each band's own paint, so
+    every replicated footer section arrived white and the footer's white text
+    vanished into it. Sections that measured their own background keep it.
+    """
+    import re as _re
+
+    from app.services.design_system import to_hex
+
+    style = footer_root.get("s") or {}
+    ground = to_hex(style.get("backgroundColor", ""))
+    image = ""
+    m = _re.search(r'url\(["\']?([^"\')]+)', style.get("backgroundImage", "") or "")
+    if m:
+        image = m.group(1)
+    if not ground and not image:
+        return
+    for sec in sections:
+        settings = sec.setdefault("settings", {})
+        if settings.get("background_color") or settings.get("background_image"):
+            continue
+        if ground:
+            settings["background_background"] = "classic"
+            settings["background_color"] = ground
+        if image and not image.startswith("data:"):
+            settings["background_background"] = "classic"
+            settings["background_image"] = {"url": image, "id": ""}
+            settings["background_size"] = "cover"
+            settings["background_position"] = "center center"

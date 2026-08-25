@@ -329,6 +329,53 @@ _JS_TEMPLATE = """
 
   const tree = walk(root, 0, getComputedStyle(document.body));
 
+  // HEADER and FOOTER are captured as their own trees - the owner's mandate: a
+  // replica without the site's navbar and footer is a torso. They are found by
+  // semantics first (the <header>/<footer> elements, Elementor location
+  // templates), never by guessing from geometry alone, and they must not contain
+  // or equal the content root (a degenerate page whose only landmark IS the
+  // body). Content is walked FIRST so it wins the node budget.
+  const pickRegion = (sels) => {
+    for (const sel of sels) {
+      let el; try { el = document.querySelector(sel); } catch (e) { continue; }
+      if (!el) continue;
+      if (el === root || el.contains(root) || root.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < innerWidth * 0.5 || r.height < 20) continue;
+      return el;
+    }
+    return null;
+  };
+  const headerEl = pickRegion([
+    '[data-elementor-type="header"]', '.elementor-location-header',
+    'header.site-header', 'body header', '#masthead', 'body > div header',
+  ]);
+  const footerEl = pickRegion([
+    '[data-elementor-type="footer"]', '.elementor-location-footer',
+    'footer.site-footer', 'body footer', '#colophon', 'body > div footer',
+  ]);
+  const headerTree = headerEl ? walk(headerEl, 0, getComputedStyle(document.body)) : null;
+  const footerTree = footerEl ? walk(footerEl, 0, getComputedStyle(document.body)) : null;
+
+  // The <head> fundamentals - title, description, canonical, og, robots,
+  // favicon - the SEO identity a faithful rebuild must carry.
+  const q = (sel, attr) => {
+    const el = document.querySelector(sel);
+    return el ? (el.getAttribute(attr) || '').slice(0, 500) : '';
+  };
+  const head = {
+    title: (document.title || '').slice(0, 300),
+    description: q('meta[name="description"]', 'content'),
+    canonical: q('link[rel="canonical"]', 'href'),
+    robots: q('meta[name="robots"]', 'content'),
+    ogTitle: q('meta[property="og:title"]', 'content'),
+    ogDescription: q('meta[property="og:description"]', 'content'),
+    ogImage: q('meta[property="og:image"]', 'content'),
+    ogType: q('meta[property="og:type"]', 'content'),
+    twitterCard: q('meta[name="twitter:card"]', 'content'),
+    favicon: q('link[rel="icon"]', 'href') || q('link[rel="shortcut icon"]', 'href'),
+  };
+
   // :root custom properties - the source author's own design tokens.
   const vars = {};
   try {
@@ -374,6 +421,9 @@ _JS_TEMPLATE = """
     title: document.title || '',
     lang: document.documentElement.lang || '',
     bodyBg: bodyBg,
+    header: headerTree,
+    footer: footerTree,
+    head: head,
     docHeight: Math.round(document.documentElement.scrollHeight),
     props: PROPS,
     styles: styles,
@@ -430,6 +480,9 @@ class ReplicaViewport:
     width: int
     height: int
     root: ReplicaNode | None = None
+    # the site chrome, captured as their own trees (None when absent)
+    header: ReplicaNode | None = None
+    footer: ReplicaNode | None = None
     doc_height: int = 0
     node_count: int = 0
     truncated: bool = False
@@ -445,6 +498,8 @@ class ReplicaCapture:
     font_links: tuple[str, ...] = ()
     # the page's ground colour, read from body/html - bands sit ON it
     body_bg: str = ""
+    # the <head> fundamentals: title, description, canonical, og, robots, favicon
+    head: dict[str, str] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 
     def viewport(self, name: str) -> ReplicaViewport | None:
@@ -544,8 +599,14 @@ def capture_replica(
                         raw = page.evaluate(_extractor_js(max_depth=MAX_DEPTH - 4))
                         raw["truncated"] = True
                     root, meta = parse_extraction(raw)
+                    styles_ = raw.get("styles") or []
+                    props_ = raw.get("props") or list(CAPTURED_PROPS)
+                    hdr = raw.get("header")
+                    ftr = raw.get("footer")
                     out.viewports.append(ReplicaViewport(
                         viewport=name, width=width, height=height, root=root,
+                        header=_node_from(hdr, styles_, props_) if isinstance(hdr, dict) else None,
+                        footer=_node_from(ftr, styles_, props_) if isinstance(ftr, dict) else None,
                         doc_height=int(meta.get("docHeight") or 0),
                         node_count=int(meta.get("nodeCount") or 0),
                         truncated=bool(meta.get("truncated")),
@@ -556,6 +617,10 @@ def capture_replica(
                         out.css_vars = dict(meta.get("vars") or {})
                         out.font_links = tuple(meta.get("fonts") or ())
                         out.body_bg = str(meta.get("bodyBg") or "")
+                        head_raw = meta.get("head")
+                        if isinstance(head_raw, dict):
+                            out.head = {str(k): str(v) for k, v in head_raw.items()
+                                        if isinstance(v, str) and v}
             finally:
                 browser.close()
     except Exception as exc:
