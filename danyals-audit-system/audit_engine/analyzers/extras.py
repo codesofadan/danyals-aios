@@ -569,14 +569,21 @@ def iter_cwv_findings(psi_result: Any) -> Iterable[tuple[str, str, Verdict]]:
     FCP row, and the id it used to borrow (TECH-074) is 'Semantic HTML
     structure analysis'. Owner decision O-4 - add a row or leave it unreported.
     """
+    # Match on the CANONICAL key, never the raw name. CrUX returns
+    # LARGEST_CONTENTFUL_PAINT_MS and Lighthouse returns
+    # largest-contentful-paint, so matching `name` finds one and silently
+    # misses the other - which is why LCP and CLS were reported as "not
+    # measured" on every audit while the response contained both.
+    from audit_engine.integrations.pagespeed import canonical_metric
+
     by_id_field: dict[str, float] = {}
     for m in getattr(psi_result, "field_metrics", []) or []:
-        mid = (m.name or "").lower()
+        mid = getattr(m, "key", "") or canonical_metric(m.name or "")
         if mid and m.percentile is not None:
             by_id_field[mid] = float(m.percentile)
     by_id_lab: dict[str, float] = {}
     for m in getattr(psi_result, "lab_metrics", []) or []:
-        mid = (m.name or "").lower()
+        mid = getattr(m, "key", "") or canonical_metric(m.name or "")
         if mid and m.value is not None:
             by_id_lab[mid] = float(m.value)
 

@@ -435,3 +435,108 @@ carrying a First Contentful Paint measurement and an HTTP-version check
 respectively.
 
 Ledger: **158 → 125**.
+
+---
+
+# Wave 4 — the Lighthouse audits array
+
+**2026-08-25.** PageSpeed was fetched, three numbers were taken off it, and the
+rest was thrown away. The `audits[]` array names the exact resources costing
+the page its score — which stylesheet blocks rendering, which script is unused,
+which element is the Largest Contentful Paint — and none of it reached a
+finding.
+
+## The parser gate
+
+`PageSpeedResult` gains `audits: dict[str, dict]` holding **every** Lighthouse
+audit keyed by id, passing or failing. `opportunities` and `diagnostics` keep
+only rows scoring below 1, so a check reading them **cannot tell "this passed"
+from "we did not look"** — and reporting the second as the first is exactly the
+class of lie this audit system exists to avoid. Only row counts and savings
+totals are kept; the full details blob can be megabytes and would be carried
+into `evidence_json` and then a client PDF.
+
+Appended last with a default, so positional construction and every existing
+test keep working.
+
+**PSI responses are now persisted to `psi.json`.** Until now a run could not be
+replayed and a disputed finding could not be checked against what Google
+actually returned.
+
+## Fifteen checks
+
+Render blocking (`TECH-029`/`045`/`046`), unused CSS and JS
+(`TECH-047`/`048`), Core Web Vitals in detail (`TECH-039`, `ON-084`–`ON-088`),
+performance (`TECH-044`, `ON-088`), mobile (`TECH-063`, `TECH-064`, `ON-082`).
+
+Four judgement calls, each stated in the finding rather than hidden:
+
+- **`TECH-039` is not an average.** Google's pass condition is all three Core
+  Web Vitals in the good band, so one poor metric fails the assessment
+  regardless of the others. Its confidence scales with how many of the three
+  the response actually contained.
+- **`ON-084` does not oversell.** Page experience is a **tie-breaker between
+  comparable results**, not a primary ranking signal, and the evidence says so.
+  On lab-only data it returns `n_a` — lab numbers do not feed that signal, and
+  claiming otherwise is the most common way an audit sells the wrong work.
+- **`ON-087` falls back to Total Blocking Time** when field INP is absent, and
+  labels it a lab proxy at lower confidence rather than passing it off as INP.
+- **A saving below 150 ms is reported as a warning, not a failure.** Below that
+  the change sits inside the noise of a single measurement, so treating it as
+  work invites effort that cannot be shown to have helped. The floor is in the
+  evidence.
+
+`TECH-045` and `TECH-046` both read Lighthouse's single `render-blocking-resources`
+audit. Each says so in its own evidence and names the other, rather than
+pretending to two independent measurements of one defect.
+
+Ledger: **125 → 110**. `needs_psi_detail` is retired — the second reason a wave
+has closed out entirely.
+
+## The bug Wave 4 found: Core Web Vitals were never reported
+
+Running the checks against a real PageSpeed response — rather than only against
+fixtures — exposed a defect older than any of this work.
+
+PageSpeed names one metric three ways. CrUX field data returns
+`LARGEST_CONTENTFUL_PAINT_MS`; Lighthouse lab data returns
+`largest-contentful-paint`. `iter_cwv_findings` matched on the lowercased raw
+name, so it found neither.
+
+**Largest Contentful Paint and Cumulative Layout Shift have been reported as
+"not measured" on every audit ever run**, while the response contained both.
+Only INP matched, because its CrUX name happens to carry no unit suffix.
+
+On the frozen `smileon.pk` response the real numbers are:
+
+| Metric | Value | Band | Was reported as |
+|---|---:|---|---|
+| **LCP** | **7238 ms** | poor (target 2500) | *not measured* |
+| CLS | 0.0 | good | *not measured* |
+| INP | 127 ms | good | 127 ms |
+| TTFB | 5638 ms | poor | 5638 ms |
+
+The client's single worst Core Web Vital — nearly three times the "poor"
+threshold — was invisible in every report.
+
+`canonical_metric()` now collapses every shape to one key at parse time, and
+`CWVMetric` carries it. Both the legacy CWV findings and the new checks use it.
+Eight parametrised tests pin the mapping, and two pin the regression itself.
+
+## Lighthouse renames, caught the same way
+
+Lighthouse 12 renamed several audits and **removed three outright**:
+
+| Was | Now |
+|---|---|
+| `render-blocking-resources` | `render-blocking-insight` |
+| `largest-contentful-paint-element` | `lcp-discovery-insight` |
+| `layout-shift-elements` | `layout-shifts` |
+| `viewport` | `meta-viewport`, `viewport-insight` |
+| `font-size`, `tap-targets`, `content-width` | **removed** |
+
+A check pinned to a single id silently stops measuring after a Lighthouse
+upgrade. Each constant is now the list of ids that have carried that
+measurement, and the mobile checks **name the audits this Lighthouse version
+does not have** rather than reporting "no failures found" over nothing
+measured.

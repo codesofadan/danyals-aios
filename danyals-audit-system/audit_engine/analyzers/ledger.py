@@ -31,8 +31,6 @@ class Reason(StrEnum):
     NEEDS_BACKLINK_PROVIDER = "needs_backlink_provider"
     #: Needs a paid third-party API that is not backlinks.
     NEEDS_PROVIDER = "needs_provider"
-    #: Needs detail from the PageSpeed audits[] array we do not parse.
-    NEEDS_PSI_DETAIL = "needs_psi_detail"
     #: Needs the page as a browser renders it.
     NEEDS_RENDERED_DOM = "needs_rendered_dom"
     #: Needs DNS, WHOIS or a TLS handshake.
@@ -56,7 +54,6 @@ REASON_REQUIRES: dict[Reason, frozenset[str]] = {
         "serper", "serper_geo", "serper_top10", "google_places", "otterly",
         "google_nl", "w3c_validator", "web_fetch", "wikidata",
     }),
-    Reason.NEEDS_PSI_DETAIL: frozenset({"psi", "psi_mobile", "crux"}),
     Reason.NEEDS_RENDERED_DOM: frozenset({
         "rendered_html", "rendered_html_mobile", "screenshot_breakpoints",
     }),
@@ -93,8 +90,6 @@ NOTES: dict[Reason, str] = {
         "at $0.024 per request and would supply this.",
     Reason.NEEDS_PROVIDER:
         "Requires a paid third-party API that is not currently called for this check.",
-    Reason.NEEDS_PSI_DETAIL:
-        "The PageSpeed audits[] array is fetched but not parsed; Wave 4 adds the parser.",
     Reason.NEEDS_RENDERED_DOM:
         "Needs the page as a browser renders it. Firecrawl is available (1000 credits/month) "
         "and avoids shipping Chromium beside the API.",
@@ -261,20 +256,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NOT_YET_BUILT]),  # Internal topical relevance analysis
     _e("ON-070", Reason.NOT_YET_BUILT, "Wave 3",
        "Needs the HTTP response of each IMAGE, not of the page. The crawler fetches HTML documents only, so this needs an image-fetch pass with its own budget."),
-    _e("ON-082", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Mobile friendliness analysis (on-page)
     _e("ON-083", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Mobile content parity analysis
-    _e("ON-084", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Core Web Vitals impact on SEO
-    _e("ON-085", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # LCP element analysis
-    _e("ON-086", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # CLS issue detection
-    _e("ON-087", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # INP interaction analysis
-    _e("ON-088", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Page speed impact analysis
     _e("ON-108", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Hidden content detection
     _e("ON-112", Reason.ROLLUP_PENDING, "Wave 5 + O-1",
@@ -297,8 +280,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawl budget optimization
     _e("TECH-028", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # JavaScript rendering analysis
-    _e("TECH-029", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Render blocking resource detection
     _e("TECH-030", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Mobile rendering analysis
     _e("TECH-031", Reason.NEEDS_RENDERED_DOM, "Wave 6",
@@ -309,28 +290,12 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # JS hidden content detection
     _e("TECH-034", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Lazy load indexing analysis
-    _e("TECH-039", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Core Web Vitals analysis (overall)
-    _e("TECH-044", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Page speed optimization analysis
-    _e("TECH-045", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Render blocking CSS detection
-    _e("TECH-046", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Render blocking JS detection
-    _e("TECH-047", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Unused CSS detection
-    _e("TECH-048", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Unused JS detection
     _e("TECH-049", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Excessive DOM size analysis
     _e("TECH-054", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
        NOTES[Reason.NEEDS_NETWORK_PROBE]),  # CDN optimization analysis
     _e("TECH-056", Reason.NEEDS_NETWORK_PROBE, "Wave 7",
        NOTES[Reason.NEEDS_NETWORK_PROBE]),  # SSL certificate analysis
-    _e("TECH-063", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Mobile friendliness analysis (technical)
-    _e("TECH-064", Reason.NEEDS_PSI_DETAIL, "Wave 4",
-       NOTES[Reason.NEEDS_PSI_DETAIL]),  # Mobile usability issue detection
     _e("TECH-065", Reason.NEEDS_RENDERED_DOM, "Wave 6",
        NOTES[Reason.NEEDS_RENDERED_DOM]),  # Responsive design validation
     _e("TECH-070", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
@@ -367,8 +332,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 125
-LEDGER_FLOOR = 125
+LEDGER_CEILING = 110
+LEDGER_FLOOR = 110
 
 
 def ledgered() -> dict[str, LedgerEntry]:

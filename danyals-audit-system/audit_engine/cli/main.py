@@ -46,6 +46,7 @@ from audit_engine.checklist import load_registry as load_registry_specs
 from audit_engine.analyzers import headers as _headers_checks  # noqa: F401
 from audit_engine.analyzers import crawl_graph as _crawl_graph_checks  # noqa: F401
 from audit_engine.analyzers import page_tech as _page_tech_checks  # noqa: F401
+from audit_engine.analyzers import psi_detail as _psi_detail_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
@@ -387,13 +388,50 @@ def _emit_registered(
     return out
 
 
-def _emit_psi_findings(*, run_id: int, page_id: int | None, psi_result: Any) -> list[Finding]:
+def _persist_psi(artifact_dir: Path, psi_result: Any) -> None:
+    """Write the PageSpeed response to the artifact dir.
+
+    Until now PSI was fetched, three numbers were taken off it, and the rest
+    was discarded - so a run could never be replayed, and a disputed finding
+    could not be checked against what Google actually returned. The audits
+    array alone drives fifteen checks.
+    """
+    if psi_result is None or getattr(psi_result, "error", None):
+        return
+    try:
+        (artifact_dir / "psi.json").write_text(
+            json.dumps({
+                "url": getattr(psi_result, "url", None),
+                "strategy": getattr(psi_result, "strategy", None),
+                "fetch_time": getattr(psi_result, "fetch_time", None),
+                "lighthouse_scores": getattr(psi_result, "lighthouse_scores", {}),
+                "field_metrics": [m.__dict__ for m in getattr(psi_result, "field_metrics", [])],
+                "lab_metrics": [m.__dict__ for m in getattr(psi_result, "lab_metrics", [])],
+                "audits": getattr(psi_result, "audits", {}),
+            }, indent=1, default=str),
+            encoding="utf-8",
+        )
+    except OSError as e:
+        log.warning("psi_persist_failed", error=str(e))
+
+
+def _emit_psi_findings(
+    *, run_id: int, page_id: int | None, psi_result: Any,
+    permitted_check_ids: set[str] | None = None,
+) -> list[Finding]:
     """Per-metric CWV findings + Lighthouse category findings from a PSI result."""
     out: list[Finding] = []
     for check_id, owner, verdict in iter_cwv_findings(psi_result):
         out.append(_finding(run_id=run_id, page_id=page_id, check_id=check_id, owner=owner, verdict=verdict))
     for check_id, owner, verdict in iter_psi_quality_findings(psi_result):
         out.append(_finding(run_id=run_id, page_id=page_id, check_id=check_id, owner=owner, verdict=verdict))
+    # Checks registered at "psi" scope. This is the only place a PsiResult
+    # exists, so the dispatcher is called here rather than in _emit_registered.
+    for check_id, verdict in run_scope(
+        "psi", psi_result, only=permitted_check_ids
+    ).verdicts:
+        out.append(_finding(run_id=run_id, page_id=page_id, check_id=check_id,
+                            owner=_OWNER_BY_CHECK.get(check_id, ""), verdict=verdict))
     return out
 
 
@@ -836,6 +874,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         try:
             async with PageSpeedClient(api_key=keys.google_pagespeed) as client:
                 psi_result = await client.analyze(crawl_result.site_url, strategy="mobile")
+                _persist_psi(artifact_dir, psi_result)
             ev = {
                 "lighthouse_scores": psi_result.lighthouse_scores,
                 "lab_metrics": [m.__dict__ for m in psi_result.lab_metrics],
@@ -875,6 +914,12 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
                 run_id=run_id,
                 page_id=page_id_by_url.get(crawl_result.site_url),
                 psi_result=psi_result,
+                # Reaching here means PSI ran, so free_quota is permitted. Nothing
+                # more is inferred from that: a billable psi-scope check still
+                # needs the run to have permitted billable spend.
+                permitted_check_ids=_permitted_registered_ids(
+                    _permitted_cost_classes(psi=True)
+                ),
             ))
         except Exception as e:  # noqa: BLE001
             console.print(f"  [red]PSI failed: {type(e).__name__}: {e}[/red]")
@@ -1345,6 +1390,7 @@ async def _run_full(
         try:
             async with PageSpeedClient(api_key=keys.google_pagespeed) as psi_client:
                 psi_result = await psi_client.analyze(crawl_result.site_url, strategy="mobile")
+                _persist_psi(artifact_dir, psi_result)
             perf_score = psi_result.lighthouse_scores.get("performance")
             if perf_score is not None:
                 score = round(perf_score / 10.0, 1)
@@ -1380,6 +1426,12 @@ async def _run_full(
                 run_id=run_id,
                 page_id=page_id_by_url.get(crawl_result.site_url),
                 psi_result=psi_result,
+                # Reaching here means PSI ran, so free_quota is permitted. Nothing
+                # more is inferred from that: a billable psi-scope check still
+                # needs the run to have permitted billable spend.
+                permitted_check_ids=_permitted_registered_ids(
+                    _permitted_cost_classes(psi=True)
+                ),
             ))
         except Exception as e:  # noqa: BLE001
             console.print(f"  [yellow]PSI failed: {type(e).__name__}: {e}[/yellow]")
