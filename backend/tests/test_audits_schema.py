@@ -50,6 +50,10 @@ def test_response_matches_auditrow_shape() -> None:
         # The committed figure, beside the quote. Present so the comparison happens
         # where audits are reviewed rather than one screen away in Cost Controls.
         "cost",
+        # Whether this audit is shared into the client's portal. It was settable
+        # at creation and readable nowhere, so exposure could not be reviewed or
+        # revoked. PATCH /audits/{id}/visibility is the other half.
+        "visibleToClient",
     }
     assert body["client"] == "NorthPeak Dental"
     assert body["tier"] == "Paid"  # stored 'paid' -> surfaced 'Paid'

@@ -689,16 +689,64 @@ def check_related_entities(p: ParsedHTML) -> Verdict:
                    "Add relevant entities, tools, and attributes to strengthen semantic context.")
 
 
+#: Domains whose presence in an outbound link is a genuine authority signal.
+_AUTHORITATIVE_HOSTS = (
+    ".gov", ".edu", ".ac.uk", ".gov.uk", "doi.org", "ncbi.nlm.nih.gov",
+    "pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov", "cochrane.org",
+    "nice.org.uk", "cdc.gov", "nhs.uk", "mayoclinic.org", "sciencedirect.com",
+    "jamanetwork.com", "thelancet.com", "bmj.com", "nejm.org",
+)
+
+#: A STATISTIC: a figure with a unit or a magnitude, not a loose digit. Matches
+#: "38%", "1 in 4", "12 million", "4.5 out of 5", "£1,200", "20 minutes".
+_STATISTIC = re.compile(
+    r"\b\d[\d,.]*\s?%"                                  # 38%, 12.5 %
+    r"|\b\d[\d,.]*\s?(?:million|billion|thousand|k\b)"   # 12 million
+    r"|\b\d+\s+(?:in|out\s+of)\s+\d+"                    # 1 in 4
+    r"|[$£€]\s?\d[\d,.]*"                                 # £1,200
+    r"|\b\d[\d,.]*\s?(?:mg|ml|kg|cm|mm|years?|months?|weeks?|days?|hours?|minutes?)\b",
+    re.IGNORECASE,
+)
+
+
 def check_expertise_signals(p: ParsedHTML) -> Verdict:
-    """ON-027 Expertise signal detection (heuristic)."""
-    numbers = sum(1 for ch in (p.body_text or "") if ch.isdigit())
+    """ON-027 Expertise signal detection.
+
+    This counted DIGIT CHARACTERS anywhere in the body and scored
+    ``min(10, digits * 0.2 + citations * 2)``. Fifty digits - a phone number,
+    a price list, opening hours - was a perfect expertise score with no citation
+    of any kind, which on a local business site is close to guaranteed. The
+    check reported expertise for having a contact block.
+
+    It now counts two things that actually evidence expertise: STATISTICS (a
+    figure carrying a unit or a magnitude) and citations to recognised
+    authorities. Both are capped so neither alone can carry the score, because
+    a page of numbers with no sources and a page of sources with no specifics
+    are each half the signal.
+    """
+    body = p.body_text or ""
+    statistics = len(_STATISTIC.findall(body))
     external = [link.href for link in p.links if not link.is_internal]
-    citations = sum(1 for u in external if ".gov" in u or ".edu" in u or "doi.org" in u)
-    score = min(10.0, numbers * 0.2 + citations * 2.0)
+    citations = sum(
+        1 for u in external if any(host in u.lower() for host in _AUTHORITATIVE_HOSTS)
+    )
+    # JUDGEMENT: six statistics or three authoritative citations is a page that
+    # is evidencing its claims. Neither term can exceed 6 of the 10 on its own.
+    score = min(6.0, statistics * 1.0) + min(6.0, citations * 2.0)
+    score = min(10.0, score)
+    ev = {"statistics": statistics, "citations": citations,
+          "external_links": len(external)}
     if score >= 7:
-        return Verdict("pass", score, "info", 0.75, {"numbers": numbers, "citations": citations})
-    return Verdict("warn", max(4.0, score), "minor", 0.7, {"numbers": numbers, "citations": citations},
-                   "Add data points, citations, or research references to demonstrate expertise.")
+        return Verdict("pass", score, "info", 0.7, ev)
+    if statistics == 0 and citations == 0:
+        return Verdict("warn", 4.0, "minor", 0.7, ev,
+                       "The page makes claims without a single figure or cited source. Add "
+                       "specifics (quantities, durations, prices, success rates) and link "
+                       "the claims that need backing to a recognised authority.")
+    return Verdict("warn", max(4.0, score), "minor", 0.7, ev,
+                   f"The page carries {statistics} specific figures and {citations} citations "
+                   f"to recognised sources. Both are what separate an expert page from "
+                   f"marketing copy on the same subject.")
 
 
 def check_trust_signals(p: ParsedHTML) -> Verdict:

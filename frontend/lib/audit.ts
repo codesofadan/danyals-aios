@@ -140,6 +140,15 @@ export type AuditRow = {
   when: string; // display timestamp
   pdf: boolean;
   json: boolean;
+  // Is this audit shared into the client's own portal?
+  //
+  // It was settable when an audit was created and readable nowhere, so an
+  // operator could share a run and then had no way to see that they had — or to
+  // undo it. Migration 0096 additionally backfilled `true` for every audit that
+  // already had a client, so the shared set is historical rather than chosen.
+  // Render it wherever an audit is listed: exposure a reviewer cannot see is
+  // exposure nobody reviews.
+  visibleToClient: boolean;
 };
 
 // The three depths an operator can pick, with what each one buys. `pages` is

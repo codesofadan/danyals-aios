@@ -190,7 +190,10 @@ def test_evidence_is_decoded_from_its_json_string():
     pages = _pages("https://x.test/only")
     causes = A.build_causes([_f(page_id=1, evidence={"word_count": 21})], pages)
     assert causes[0].instances[0].evidence == {"word_count": 21}
-    assert "word_count=21" in causes[0].instances[0].detail
+    # The raw evidence is kept on the instance for operators; the DETAIL column
+    # is client-facing and now renders through the client-safe spec, so a raw
+    # field name never reaches it: "word_count=21" became "words: 21".
+    assert causes[0].instances[0].detail == "words: 21"
 
 
 def test_unparseable_evidence_is_kept_not_dropped():

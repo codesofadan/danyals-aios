@@ -31,6 +31,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from audit_engine.evidence_text import humanise_evidence
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -2651,6 +2652,26 @@ def _evidence_to_str(ev) -> str:
         return str(ev).strip()
 
 
+#: Checks that are COMPOSITES - a score computed over other checks rather than a
+#: measurement of the site. They live in each pillar's `scoring` subpoint, plus
+#: ON-004, a rollup that sits outside it.
+#:
+#: They must not appear as issues to FIX. A composite restates checks that have
+#: already reported their own severity, so listing it again double-counts the
+#: same defect and pads the issue count with rows nobody can action - "Overall
+#: on-page SEO score" is not a task. The composite still renders as a SCORE
+#: wherever scores are shown; it is the issue list it is kept out of.
+_COMPOSITE_SUBPOINT = "scoring"
+_COMPOSITE_EXTRA_IDS = frozenset({"ON-004"})
+
+
+def _is_composite(check_id: str, subcategory: object) -> bool:
+    return (
+        str(subcategory or "").strip().lower() == _COMPOSITE_SUBPOINT
+        or (check_id or "").strip().upper() in _COMPOSITE_EXTRA_IDS
+    )
+
+
 def compute_full_issue_list(artifact_dir: Path, pages_total: int | None = None) -> list[dict]:
     """Every unique warn/fail issue-type the engine found, deduped to one row
     per check_id, with its worst severity, affected-page count, report area,
@@ -2670,6 +2691,8 @@ def compute_full_issue_list(artifact_dir: Path, pages_total: int | None = None) 
         cid = (r.get("check_id") or "").strip()
         status = (r.get("status") or "").lower()
         if not cid or status not in ("warn", "fail"):
+            continue
+        if _is_composite(cid, r.get("subcategory")):
             continue
         nsev = _norm_sev(r.get("severity"))
         rank = sev_rank.get(nsev, 1)
@@ -2761,6 +2784,27 @@ def compute_full_issue_list(artifact_dir: Path, pages_total: int | None = None) 
 # pair. The template is filled with the values from evidence_json. Falls
 # back to a generic key:value sentence if the check_id is not listed.
 _ISSUE_TEMPLATES: dict[str, str] = {
+    # --- Written for the checks that actually produce cards -------------------
+    # Chosen by measured frequency across every recorded run, not alphabetically:
+    # a small set of ids produces most of the issue cards, and copy written for a
+    # check that never fires is copy nobody reads. Each template interpolates the
+    # check's own evidence, so the sentence names the real number.
+    "ON-026": "E-E-A-T signals score {expertise}/10 for expertise, {trust}/10 for trust and {author}/10 for authorship. For a health or finance site these are the signals Google weighs most heavily before ranking anything.",
+    "ON-027": "The page cites {citations} authoritative sources. Claims made without a source are the difference between a page that reads as expert and one that reads as marketing copy.",
+    "ON-028": "The site is missing standard trust pages. A visitor cannot find a privacy policy, terms, or a clear way to verify who they are dealing with before handing over their details.",
+    "ON-049": "The opening paragraph is {first_paragraph_words} words. AI Overviews and featured snippets lift a self-contained 40 to 80 word answer from the top of a page; there is nothing here to lift.",
+    "ON-051": "Flesch reading ease is {flesch_reading_ease} across {words:,} words. Below 50 the text reads at university level, which suppresses time-on-page for a general audience.",
+    "ON-103": "Body text is {text_to_html_ratio:.1%} of the page's HTML across {word_count:,} words. AI tools extract prose to build a citation; a page that is mostly markup gives them very little to work with.",
+    "ON-104": "Average sentence length is {avg_sentence_words} words, with {long_sentence_share:.0%} of sentences over 35 words. Long sentences are truncated or paraphrased badly when an AI assistant quotes the page.",
+    "ON-105": "The page has {h2_count} H2 sections and {question_h2s} phrased as questions, with no FAQ markup. Generative search lifts self-contained question-and-answer passages; this page offers none.",
+    "ON-122": "The page declares {sameAs_count} sameAs links. Without them Google cannot confirm that this website, the social profiles and the business listing are the same organisation.",
+    "ON-128": "{paragraphs_referencing_central_entity} of {sampled_paragraphs} sampled paragraphs mention the page's main subject. Sections that drift off-topic dilute what the page is understood to be about.",
+    "ON-133": "One term dominates the copy across {total_tokens:,} words. Repetition at this density reads as keyword stuffing to a ranking model rather than as relevance.",
+    "ON-136": "The opening paragraph shares no wording with the page title. A reader who lands here cannot tell in the first sentence that they are in the right place, and neither can a ranking model.",
+    "ON-138": "{authoritative_links} of {external_links_total} outbound links point to an authoritative source. On a health or finance topic, citing recognised sources is a direct trust signal.",
+    "ON-139": "{question_h2} of {h2_count} H2 headings are phrased as questions, and there is no FAQ markup. Question headings are how a page becomes eligible for People Also Ask and AI Overviews.",
+    "ON-140": "The page carries {facts_per_100_words} verifiable facts per 100 words. Specifics such as prices, durations, quantities and dates are what make a page more useful than a competitor's on the same subject.",
+    "ON-142": "No byline, no Person markup and no stated credentials. On a health or finance topic these are the three signals a reader and a ranking model both look for first.",
     # ON family
     "ON-034": "Pages return no title tag in raw HTML (length 0). Without a title, search engines have nothing to show as the headline in results.",
     "ON-023": "Pages have only {word_count} words against a 300-word threshold for substantive content. Google flags this as thin and demotes the URL in helpful-content rollups.",
@@ -2814,6 +2858,23 @@ _ISSUE_TEMPLATES: dict[str, str] = {
 # Per-check IMPACT templates (the "what this means for your business" callout).
 # Falls back to the dimension-default below when a check_id is not listed.
 _IMPACT_TEMPLATES: dict[str, str] = {
+    # --- Why each of the above matters, in the client's terms -----------------
+    "ON-026": "E-E-A-T is the framework Google's own quality raters apply to health and finance sites. Weak scores here cap how far any other improvement can take the site.",
+    "ON-027": "Uncited claims read as opinion. On a medical or financial subject that is the difference between a page a search engine is willing to rank and one it is not.",
+    "ON-028": "A visitor who cannot find a privacy policy or a real address before entering their details usually leaves. This costs enquiries before ranking is even involved.",
+    "ON-049": "Featured snippets and AI Overviews take the clearest short answer on the page. Without one, a competitor's answer is quoted above your result and takes the click.",
+    "ON-051": "Copy pitched above a reader's level increases bounce rate. Time on page is a behavioural signal, so this compounds rather than staying cosmetic.",
+    "ON-103": "AI assistants build answers from extractable prose. A page they cannot read cleanly is not cited, however good the underlying content is.",
+    "ON-104": "When an AI assistant cannot quote a sentence cleanly it paraphrases or skips the page. Citations go to whoever wrote the liftable sentence.",
+    "ON-105": "Generative results are assembled from self-contained passages. A page with no question-shaped sections is not a candidate for that surface at all.",
+    "ON-122": "Without sameAs, Google treats the website and the social profiles as unrelated entities. Brand searches then return a fragmented result instead of a knowledge panel.",
+    "ON-128": "A page whose sections wander is harder to classify, so it ranks for nothing in particular rather than strongly for one thing.",
+    "ON-133": "Keyword stuffing is an explicit spam signal in Google's guidelines. The risk is a manual action, not just weaker ranking.",
+    "ON-136": "The first sentence decides whether a visitor stays. It is also the strongest signal of what the page is about.",
+    "ON-138": "Outbound citations to recognised sources are one of the few trust signals a site can add without earning a backlink.",
+    "ON-139": "People Also Ask and AI Overviews are the two fastest-growing result surfaces. Question headings plus FAQ markup are the entry ticket to both.",
+    "ON-140": "Two pages covering the same subject are separated by specifics. The one with real numbers is the one that gets cited and linked.",
+    "ON-142": "On a health or finance topic, an anonymous author caps the trust signals a page can earn no matter how accurate it is.",
     "ON-034": "Without a title tag, the search result for this page is whatever Google chooses to invent from your copy. Click rates fall and your page can be outranked by competitors with strong, specific titles.",
     "ON-023": "Thin pages do not satisfy a query and they pull down the helpful-content score for the whole site. Even pages on other topics rank worse when thin pages exist.",
     "ON-041": "Multiple H1 tags confuse search engines about the actual topic of the page. The result is that the page ranks for nothing in particular.",
@@ -2963,6 +3024,11 @@ _NAME_REWRITES: list[tuple[str, str]] = [
     ("date freshness",                  "Published / updated dates missing"),
     ("organization schema entity",      "Organization schema missing key fields"),
     ("sameas",                          "sameAs links missing - brand entity unverified"),
+    # More specific first: the table is scanned in order and the first match
+    # wins. "LLM readability optimization" also contains "readability", so
+    # without this line ON-104 and ON-051 rewrote to the SAME headline and both
+    # appeared in one report.
+    ("llm readability",                 "Sentences too long for an AI assistant to quote"),
     ("readability",                     "Reading grade too high for the topic"),
     # Technical
     ("robots.txt validation",           "robots.txt unreachable or broken"),
@@ -3032,6 +3098,23 @@ def _specific_title_for_issue(e: dict) -> str:
     return rewritten
 
 
+#: Words that make a check NAME read as a problem rather than a topic. After
+#: _specific_title_for_issue rewrites, most names already say what is wrong
+#: ("H1 missing or duplicated on 16 pages"), and appending "flagged on the
+#: affected pages" to one of those produces a stutter.
+_PROBLEM_WORDS = (
+    " missing", " not ", " no ", " too ", " failed", " absent", " broken",
+    " duplicated", " unverified", " undefined", " blocked", " weak", " thin",
+    " slow", " insecure", " expired", " invalid", " unreachable", " exceeds",
+    " below", " without", "n't ", " on ",
+)
+
+
+def _reads_as_a_problem(name: str) -> bool:
+    low = f" {name.lower()} "
+    return any(w in low for w in _PROBLEM_WORDS) or any(c.isdigit() for c in name)
+
+
 def _describe_issue(e: dict) -> str:
     """Build a 2-3 line plain-English description of the issue from the
     template registry above, falling back to a key:value rendering of
@@ -3056,27 +3139,27 @@ def _describe_issue(e: dict) -> str:
             pass
 
     if not base:
-        # Generic fallback: parse evidence_json into a short sentence.
-        if isinstance(ev, dict) and ev:
-            reason = ev.get("reason")
-            if reason and isinstance(reason, str):
-                base = reason if len(reason) < 220 else (reason[:217] + "...")
-            else:
-                parts: list[str] = []
-                for k, v in list(ev.items())[:3]:
-                    if v is None:
-                        parts.append(f"{k}: not captured")
-                    elif isinstance(v, list):
-                        parts.append(f"{k}: {len(v)} items")
-                    else:
-                        parts.append(f"{k}: {v}")
-                snippet = ", ".join(parts)
-                if e.get("name"):
-                    base = f"{e['name']} flagged across affected pages. Observed: {snippet}."
-                else:
-                    base = f"Observed: {snippet}."
-        else:
-            base = f"{e.get('name', 'This check')} flagged on the affected pages."
+        # No hand-written copy for this check. Describe what was measured, in
+        # words - never by printing the evidence dict.
+        #
+        # This branch used to render the first three evidence keys verbatim,
+        # which shipped Python dict reprs, internal module paths and the string
+        # "not captured" (for a value we simply had not recorded) into client
+        # reports. Measured across every recorded run, 100% of the newly built
+        # checks reached a client through exactly this path.
+        observed = humanise_evidence(ev)
+        name = (e.get("name") or "This check").rstrip(". ")
+        # The name is already a problem statement after _specific_title_for_issue
+        # ("Trust signals missing for a YMYL site on 5 pages"), so appending
+        # "flagged on the affected pages" to it reads as a stutter. Only a bare
+        # check name needs the sentence completing.
+        lead = (
+            f"{name}." if _reads_as_a_problem(name)
+            else f"{name} flagged on the affected pages."
+        )
+        # An empty observation is how "Observed: ." reached a report: when
+        # nothing in the evidence is worth showing, say the finding and stop.
+        base = f"{lead} {observed[0].upper()}{observed[1:]}." if observed else lead
 
     # Append 1-3 example URLs when the issue affects a small enough subset
     # that examples add clarity. Above 30 affected pages we skip examples
@@ -3205,10 +3288,36 @@ def build_issue_register_pages(issues: list[dict], pages_crawled: int) -> list[s
 DIMENSION_ORDER = ["strategy", "content", "onpage", "technical", "offpage", "local", "geo"]
 
 
+def _measured_over_a_partial_crawl(row: dict) -> bool:
+    """True when this verdict covers only part of the site.
+
+    The engine sets `crawl_was_partial` on checks whose answer depends on having
+    seen the whole site (orphans, click depth, hidden pages). On a capped crawl
+    those checks return n_a rather than a fabricated failure - but a PASS that
+    slipped through still means "none in the fraction we reached".
+    """
+    raw = row.get("evidence_json") or row.get("evidence")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "{}")
+        except (ValueError, TypeError):
+            return False
+    return bool(isinstance(raw, dict) and raw.get("crawl_was_partial"))
+
+
 def _passes_by_dimension(artifact_dir: Path) -> dict[str, list[str]]:
     """For each dimension key, return up to 5 distinct passing check_names.
+
     A "pass" is a finding row with status == 'pass'. The same check_id
-    appearing on multiple pages collapses to one entry."""
+    appearing on multiple pages collapses to one entry.
+
+    A pass computed over a PARTIAL crawl is excluded. The engine records
+    `crawl_was_partial` on the reachability checks precisely because "no orphan
+    pages" over a fraction of the site is not the same statement as "no orphan
+    pages" - and this is the one error class a client cannot detect and will act
+    on. Reporting it under a heading called "What's working" is the worst place
+    to make that claim.
+    """
     rows = _load_all_finding_rows(artifact_dir)
     seen: dict[str, set[str]] = {k: set() for k in DIMENSION_ORDER}
     names: dict[str, list[str]] = {k: [] for k in DIMENSION_ORDER}
@@ -3217,6 +3326,8 @@ def _passes_by_dimension(artifact_dir: Path) -> dict[str, list[str]]:
             continue
         cid = (r.get("check_id") or "").strip()
         if not cid:
+            continue
+        if _measured_over_a_partial_crawl(r):
             continue
         dim = _section_categorize(cid, r.get("category"), r.get("subcategory"))
         if cid in seen.get(dim, set()):

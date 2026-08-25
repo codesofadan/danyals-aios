@@ -48,6 +48,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.services.audit_artifacts import LocalArtifactStore
+from app.services.evidence_text import humanise_evidence
 
 # --------------------------------------------------------------------------- #
 # Roles (the SEO-team owners a finding can be assigned to).
@@ -284,10 +285,9 @@ def _evidence_text(finding: dict[str, Any]) -> str:
             except (json.JSONDecodeError, ValueError):
                 return _cap(stripped)
     if isinstance(data, dict):
-        reason = data.get("reason")
-        if isinstance(reason, str) and reason.strip():
-            return _cap(reason)
-        return _cap("; ".join(f"{k}: {v}" for k, v in data.items()))
+        # Rendered through the shared spec: the old `f"{k}: {v}"` flatten put
+        # raw keys, nested dicts and internal module paths in front of a client.
+        return _cap(humanise_evidence(data))
     if isinstance(data, list):
         return _cap("; ".join(str(x) for x in data))
     if data not in (None, ""):

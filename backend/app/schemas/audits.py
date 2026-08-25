@@ -151,6 +151,18 @@ class AuditCreate(BaseModel):
         return self.depth or default_depth_for_tier(self.tier)
 
 
+class AuditVisibilityUpdate(BaseModel):
+    """The one field ``PATCH /audits/{id}/visibility`` may change.
+
+    Deliberately a single-field model rather than a partial ``AuditCreate``:
+    sharing a document with a client is the only mutation this route exists for,
+    and a wider body would let an operator edit a completed run's url, tier or
+    quoted cost through a route reviewed as a sharing control.
+    """
+
+    visible_to_client: bool
+
+
 class AuditResponse(BaseModel):
     """One audit row in the frontend ``AuditRow`` shape."""
 
@@ -183,6 +195,16 @@ class AuditResponse(BaseModel):
     when: str  # display timestamp, e.g. "Today · 09:14"
     pdf: bool
     json_: bool = Field(serialization_alias="json")
+    # Is this audit shared into the client's portal?
+    #
+    # It was settable at creation and readable NOWHERE, so an operator could
+    # share an audit and then had no way to see that they had, and no way to
+    # undo it. Migration 0096 also backfilled `true` for every pre-existing
+    # client-linked audit, which was correct at the time - it preserved the
+    # behaviour of the view it replaced - but it means the exposed set is
+    # historical rather than chosen. Surfacing the flag is what makes it
+    # reviewable; `PATCH /audits/{id}/visibility` is what makes it reversible.
+    visible_to_client: bool = Field(default=False, serialization_alias="visibleToClient")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> AuditResponse:
@@ -211,6 +233,7 @@ class AuditResponse(BaseModel):
             when=format_when(row.get("created_at")),
             pdf=bool(row.get("pdf_path")),
             json_=bool(row.get("json_path")),
+            visible_to_client=bool(row.get("visible_to_client")),
         )
 
 

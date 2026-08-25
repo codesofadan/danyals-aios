@@ -36,6 +36,7 @@ from app.schemas.audits import (
     AuditEstimateResponse,
     AuditResponse,
     AuditStatsResponse,
+    AuditVisibilityUpdate,
     compute_audit_stats,
     tier_to_db,
 )
@@ -520,3 +521,44 @@ async def create_audit(
         entity_type="client", entity_id=body.client_id,
     )
     return AuditResponse.from_row(row)
+
+
+@router.patch("/audits/{audit_id}/visibility", response_model=AuditResponse)
+async def set_audit_visibility(
+    audit_id: str,
+    body: AuditVisibilityUpdate,
+    repo: AuditsRepoDep,
+    store: ArtifactStoreDep,
+    actor: RunAudits,
+) -> AuditResponse:
+    """Share this audit into the client's portal, or stop sharing it.
+
+    Gated on ``run_audits`` rather than ``view_reports``: putting a document in
+    front of a client is an outward-facing act, and every role that holds
+    ``run_audits`` is exactly the set the ``audits_modify`` RLS policy admits.
+    A ``viewer`` is refused twice over - by the permission here and by the
+    policy underneath.
+
+    RLS refusal does not raise, it matches zero rows, so a missing row is
+    reported as a 404 rather than returned as a successful no-op.
+    """
+    row = await asyncio.to_thread(
+        repo.set_visibility, audit_id, visible=body.visible_to_client
+    )
+    if row is None:
+        raise _AUDIT_NOT_FOUND
+    await record_activity(
+        actor,
+        kind="audit",
+        action=(
+            "shared an audit with the client portal"
+            if body.visible_to_client
+            else "removed an audit from the client portal"
+        ),
+        target=str(row.get("url") or audit_id),
+        entity_type="client",
+        entity_id=str(row["client_id"]) if row.get("client_id") else None,
+    )
+    resp = AuditResponse.from_row(row)
+    resp.pdf, resp.json_ = await asyncio.to_thread(honest_artifact_flags, store, row)
+    return resp

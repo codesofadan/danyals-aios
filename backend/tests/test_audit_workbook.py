@@ -116,7 +116,7 @@ def test_instances_stored_is_reported_separately_from_instances_observed():
 def test_timestamps_are_strings_because_excel_rejects_tz_aware_datetimes():
     import datetime as dt
     r = W._finding_rows([_finding(last_seen_at=dt.datetime(2026, 8, 24, 12, 0,
-                                                           tzinfo=dt.timezone.utc))])[0]
+                                                           tzinfo=dt.UTC))])[0]
     assert isinstance(r[19], str) and r[19].startswith("2026-08-24")
 
 
@@ -174,9 +174,28 @@ def test_the_coverage_sheet_lists_checks_that_did_NOT_run():
 
 
 def test_evidence_renders_deterministically():
-    a = W._evidence_text({"b": 2, "a": 1})
-    b = W._evidence_text({"a": 1, "b": 2})
-    assert a == b
+    """The same evidence always renders the same string.
+
+    This used to assert order-INDEPENDENCE, because the old renderer
+    `json.dumps(..., sort_keys=True)`. It no longer sorts: an analyzer writes
+    its evidence with the headline measurement first, and sorting scrambles
+    that - TECH-039 would lead with "layout shift score" and bury a 7.2s
+    largest contentful paint at the end.
+
+    Determinism is what the workbook actually needs (a regenerated file must not
+    diff spuriously), and key order is stable per check because each analyzer
+    builds its dict from a literal.
+    """
+    evidence = {"word_count": 21, "response_ms": 315}
+    assert W._evidence_text(evidence) == W._evidence_text(dict(evidence))
+    assert W._evidence_text(evidence) == "words: 21; server response: 315ms"
+
+
+def test_evidence_keeps_the_analyzers_ordering():
+    """The first key an analyzer wrote is the first thing a client reads."""
+    assert W._evidence_text({"lcp_ms": 7238, "cls": 0.0}).startswith(
+        "largest contentful paint"
+    )
 
 
 def test_empty_evidence_is_blank_not_the_string_none():

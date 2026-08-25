@@ -64,6 +64,16 @@ class FakeAuditsRepo:
         self.rows[aid] = rec
         return rec
 
+    def set_visibility(self, audit_id: str, *, visible: bool) -> dict[str, Any] | None:
+        # Mirrors the real repo: an RLS refusal matches zero rows rather than
+        # raising, so an unknown id and a refused UPDATE are indistinguishable
+        # here on purpose - both must surface as a 404, never a silent success.
+        row = self.rows.get(audit_id)
+        if row is None:
+            return None
+        row["visible_to_client"] = visible
+        return row
+
 
 class FakeClientsRepo:
     def __init__(self, exists: bool = True) -> None:
@@ -125,7 +135,11 @@ async def test_create_enqueues_queued_row(
         # The depth axis (migration 0084): what breadth was asked for, and what
         # the pre-flight gate was told it would cost, beside what it actually cost.
         "depth", "maxPages", "estimatedCost", "cost",
+        # Whether the run is shared into the client's portal, so exposure is
+        # visible wherever an audit is listed rather than write-once and unseen.
+        "visibleToClient",
     }
+    assert body["visibleToClient"] is False  # internal until someone shares it
     assert body["depth"] == "free"  # Free tier pins the depth
     assert body["maxPages"] == 15
     assert body["estimatedCost"] == 0.0  # a free run fires no paid provider
@@ -420,3 +434,105 @@ async def test_the_operator_can_share_an_audit_at_creation(
     assert resp.status_code == 201
     row = next(iter(repo.rows.values()))
     assert row["visible_to_client"] is True
+
+
+# --------------------------------------------------------------------------
+# PATCH /audits/{id}/visibility
+#
+# Sharing was write-once: settable at creation, absent from every response, and
+# impossible to change. An operator could expose a client's audit and then had
+# no way to see that they had, or to undo it. Migration 0096 additionally
+# backfilled `true` for every pre-existing client-linked audit, so the exposed
+# set is historical rather than chosen - which is only reviewable once the flag
+# is readable and reversible.
+# --------------------------------------------------------------------------
+
+async def test_visibility_is_readable_on_every_audit_response(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    repo.seed(id="aud-vis", visible_to_client=True)
+    resp = await client.get("/api/v1/audits/aud-vis")
+    assert resp.status_code == 200
+    assert resp.json()["visibleToClient"] is True
+
+
+async def test_an_operator_can_revoke_a_shared_audit(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    repo.seed(id="aud-1", visible_to_client=True)
+    resp = await client.patch(
+        "/api/v1/audits/aud-1/visibility", json={"visible_to_client": False}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["visibleToClient"] is False
+    assert repo.rows["aud-1"]["visible_to_client"] is False
+
+
+async def test_an_operator_can_share_an_existing_audit(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    repo.seed(id="aud-2", visible_to_client=False)
+    resp = await client.patch(
+        "/api/v1/audits/aud-2/visibility", json={"visible_to_client": True}
+    )
+    assert resp.status_code == 200
+    assert repo.rows["aud-2"]["visible_to_client"] is True
+
+
+async def test_an_update_that_matched_no_row_is_a_404_not_a_silent_success(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """The load-bearing case. `audits_modify` is a `for all` policy scoped to
+    operator roles, and an RLS refusal does NOT raise - it matches zero rows. If
+    the route returned 200 on an empty result, a refused write would be reported
+    to the operator as a successful share."""
+    wire("manager")
+    resp = await client.patch(
+        "/api/v1/audits/does-not-exist/visibility", json={"visible_to_client": True}
+    )
+    assert resp.status_code == 404
+
+
+async def test_a_viewer_cannot_change_who_sees_an_audit(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """Putting a document in front of a client is an outward-facing act, so it
+    is gated on `run_audits` - which is exactly the role set the `audits_modify`
+    policy admits. A viewer is refused twice: here, and by RLS underneath."""
+    wire("viewer")
+    repo.seed(id="aud-3", visible_to_client=False)
+    resp = await client.patch(
+        "/api/v1/audits/aud-3/visibility", json={"visible_to_client": True}
+    )
+    assert resp.status_code == 403
+    assert repo.rows["aud-3"]["visible_to_client"] is False
+
+
+async def test_a_portal_client_cannot_reach_the_sharing_control(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("client")
+    repo.seed(id="aud-4", visible_to_client=False)
+    resp = await client.patch(
+        "/api/v1/audits/aud-4/visibility", json={"visible_to_client": True}
+    )
+    assert resp.status_code == 403
+
+
+async def test_the_route_cannot_be_used_to_edit_anything_else(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """A wider body would let an operator rewrite a completed run's url or
+    quoted cost through a route reviewed as a sharing control."""
+    wire("manager")
+    repo.seed(id="aud-5", url="verdecafe.co", visible_to_client=False)
+    resp = await client.patch(
+        "/api/v1/audits/aud-5/visibility",
+        json={"visible_to_client": True, "url": "attacker.example", "cost": 999},
+    )
+    assert resp.status_code == 200
+    assert repo.rows["aud-5"]["url"] == "verdecafe.co"
+    assert repo.rows["aud-5"].get("cost") != 999

@@ -40,6 +40,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+from app.services.evidence_text import humanise_evidence
+
 #: Bumping this changes every fingerprint and therefore orphans every open
 #: finding, so it may only move with a migration that closes existing rows as
 #: ``superseded``. It is stored on every row for exactly that reason.
@@ -235,16 +237,13 @@ def _worst(a: str, b: str) -> str:
 
 
 def _detail_from(evidence: dict[str, Any]) -> str:
-    """A single renderable line, so the nano row is readable without the blob."""
-    if not evidence:
-        return ""
-    parts = []
-    for k, v in list(evidence.items())[:4]:
-        if isinstance(v, (str, int, float, bool)) or v is None:
-            parts.append(f"{k}={v}")
-        elif isinstance(v, list):
-            parts.append(f"{k}=[{len(v)}]")
-    return ", ".join(parts)[:500]
+    """A single renderable line, so the nano row is readable without the blob.
+
+    Rendered through the shared client-safe spec. The old `f"{k}={v}"` flatten
+    emitted `covers_host=False` and `cache_control=None` into a client-facing
+    Detail column - a raw field name and a value we had simply not recorded.
+    """
+    return humanise_evidence(evidence, limit=4)
 
 
 def _disambiguate_instance_keys(cause: Cause) -> None:

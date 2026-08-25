@@ -123,3 +123,29 @@ export function useCreateAudit() {
     },
   });
 }
+
+/**
+ * Share an audit into the client's portal, or stop sharing it.
+ *
+ * Sharing used to be write-once: chosen when the audit was created, absent from
+ * every response, and impossible to change afterwards. An operator could put a
+ * run in front of a client and then had no way to see that they had. Migration
+ * 0096 additionally backfilled `true` for every audit that already had a client,
+ * so what is shared today is historical rather than chosen — which only becomes
+ * reviewable once it is both readable and reversible.
+ *
+ * A 404 here means the update matched no row. That is NOT only "no such audit":
+ * the `audits_modify` policy is scoped to operator roles and an RLS refusal
+ * matches zero rows rather than raising, so a refused write arrives as a 404
+ * instead of being reported as a successful share.
+ */
+export function useSetAuditVisibility() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, visible }: { id: string; visible: boolean }) =>
+      api.patch<AuditRow>(`/audits/${id}/visibility`, { visible_to_client: visible }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: AUDITS_KEY });
+    },
+  });
+}

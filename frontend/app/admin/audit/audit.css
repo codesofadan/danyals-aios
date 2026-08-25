@@ -49,6 +49,19 @@
 .au-art:disabled { opacity: .32; cursor: not-allowed; }
 .au-art .material-symbols-rounded { font-size: 17px; }
 
+/* Client-portal exposure. Deliberately reads as state rather than as an action
+   button: the question an operator scans this column for is "can the client see
+   this", not "what happens if I click". Shared is tinted, internal is muted. */
+.au-share { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--well); color: var(--muted);
+  transition: border-color .15s, color .15s, background .15s; }
+.au-share:hover:not(:disabled) { color: var(--fg-strong); border-color: var(--violet-2); }
+.au-share.is-on { color: var(--fg-strong); border-color: var(--violet-2);
+  background: color-mix(in srgb, var(--violet) 18%, transparent); }
+.au-share:disabled { opacity: .5; cursor: progress; }
+.au-share .material-symbols-rounded { font-size: 15px; }
+
 .au-empty { text-align: center; color: var(--muted); font-size: 12.5px; padding: 26px 0 !important; }
 
 /* running spinner */

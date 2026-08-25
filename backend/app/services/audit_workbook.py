@@ -55,6 +55,7 @@ from app.services.audit_sheets import (
     _priority_score,
     role_for_section,
 )
+from app.services.evidence_text import humanise_evidence
 
 #: The XLSX stops here so the file stays openable on a normal machine; the CSV
 #: does not stop at all. Excel's own hard ceiling is 1,048,576 rows.
@@ -164,11 +165,14 @@ def _coverage_cell(ran: int, applicable: int) -> str:
 
 
 def _evidence_text(evidence: Any) -> str:
-    if isinstance(evidence, str):
-        return _cap(evidence)
-    if isinstance(evidence, dict) and evidence:
-        return _cap(json.dumps(evidence, ensure_ascii=False, sort_keys=True))
-    return ""
+    """What the client reads in the Evidence column.
+
+    This used to `json.dumps` the whole evidence dict, so a cell in the file
+    this module's own docstring calls "the client deliverable" could read
+    `{"weighting": "scorers.aggregator", "inputs_ran": ["OFF-001", ...]}`.
+    Rendered through the shared spec instead: a sentence, or nothing.
+    """
+    return _cap(humanise_evidence(evidence))
 
 
 # --------------------------------------------------------------------------- #

@@ -40,6 +40,25 @@ class AuditsRepo:
             cur.execute("select * from public.audits where id = %s limit 1", (audit_id,))
             return cur.fetchone()
 
+    def set_visibility(self, audit_id: str, *, visible: bool) -> dict[str, Any] | None:
+        """Share this audit with the client's portal, or stop sharing it.
+
+        Returns the updated row, or None when nothing was updated.
+
+        The None case is load-bearing. ``audits_modify`` is a ``for all`` policy
+        scoped to owner/admin/manager/specialist/analyst, so a ``viewer`` hitting
+        this path is refused by RLS - and an RLS refusal does NOT raise, it
+        matches zero rows. Returning the row and making the caller check it is
+        what stops a silent no-op being reported to an operator as "shared".
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.audits set visible_to_client = %s "
+                "where id = %s returning *",
+                (visible, audit_id),
+            )
+            return cur.fetchone()
+
     def insert_audit(self, row: dict[str, Any]) -> dict[str, Any]:
         cols = list(row.keys())
         stmt = sql.SQL("insert into public.audits ({cols}) values ({vals}) returning *").format(

@@ -16,6 +16,7 @@ import {
   useAuditEstimate,
   useAuditStats,
   useCreateAudit,
+  useSetAuditVisibility,
   type AuditEstimate,
 } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
@@ -59,6 +60,7 @@ export default function AuditWorkspace() {
   const statsQ = useAuditStats();
   const clientsQ = useClients();
   const createAudit = useCreateAudit();
+  const setVisibility = useSetAuditVisibility();
   const { halted } = useSpendHalted(); // global API-spend kill-switch
 
   const rows = auditsQ.data ?? [];
@@ -271,15 +273,20 @@ export default function AuditWorkspace() {
                   <th className="num">Score</th>
                   <th className="num">Cost</th>
                   <th>Artifacts</th>
+                  {/* Exposure a reviewer cannot see is exposure nobody reviews.
+                      This was chosen once at creation and then invisible, so an
+                      operator had no way to tell which of a client's audits that
+                      client could already read. */}
+                  <th>Client sees</th>
                   <th className="num">Run time</th>
                 </tr>
               </thead>
               <tbody>
                 {auditsQ.isLoading && (
-                  <tr><td colSpan={9} className="au-empty">Loading audits…</td></tr>
+                  <tr><td colSpan={10} className="au-empty">Loading audits…</td></tr>
                 )}
                 {auditsQ.isError && !auditsQ.isLoading && (
-                  <tr><td colSpan={9} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
+                  <tr><td colSpan={10} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
                 )}
                 {!auditsQ.isLoading && !auditsQ.isError && shown.map((r) => {
                   const sm = STATUS_META[r.status];
@@ -372,12 +379,32 @@ export default function AuditWorkspace() {
                           </button>
                         </div>
                       </td>
+                      <td>
+                        <button
+                          className={`au-share${r.visibleToClient ? " is-on" : ""}`}
+                          aria-pressed={r.visibleToClient}
+                          disabled={setVisibility.isPending}
+                          title={
+                            r.visibleToClient
+                              ? "This client can read this audit in their portal. Click to stop sharing it."
+                              : "Internal only. Click to share it into the client's portal."
+                          }
+                          onClick={() =>
+                            setVisibility.mutate({ id: r.id, visible: !r.visibleToClient })
+                          }
+                        >
+                          <span className="material-symbols-rounded">
+                            {r.visibleToClient ? "visibility" : "visibility_off"}
+                          </span>
+                          {r.visibleToClient ? "Shared" : "Internal"}
+                        </button>
+                      </td>
                       <td className="num au-runtime">{r.runtime}</td>
                     </tr>
                   );
                 })}
                 {!auditsQ.isLoading && !auditsQ.isError && shown.length === 0 && (
-                  <tr><td colSpan={9} className="au-empty">No audits match these filters.</td></tr>
+                  <tr><td colSpan={10} className="au-empty">No audits match these filters.</td></tr>
                 )}
               </tbody>
             </table>
