@@ -105,3 +105,96 @@ One was a genuine gap and is now wired: `check_pagination` → `TECH-025`
 `O-1` rollup weightings · `O-2` URL normalisation policy · `O-5` `ON-041`/`ON-042`
 · `O-6` Moz pricing · `O-7` idle agents (B3, B4, D2 and all M\* own zero
 `ai-assisted` checks while A1 owns 25).
+
+---
+
+# Wave A — Python no longer shadows an agent
+
+**2026-08-25.** Seventeen checks were marked `ai-assisted` in the checklist *and*
+computed in Python. Both paths write a finding for the same check, so one run
+could carry two verdicts that disagree. On the paid `smileon.pk` run this was
+not hypothetical:
+
+| Check | Two verdicts on the same page |
+|---|---|
+| `ON-048` | `fail 1.5` vs `warn 6.0`, on all 197 pages |
+| `ON-049` | `fail 3.0` vs `warn 6.0`, on all 197 pages |
+| `LOC-002` | agent `n_a 0.2` vs Python `n_a 0.4` |
+
+All seventeen checklist rows are now `automation: full`. The Python stays, the
+model call goes. Consequences, all verified:
+
+- **A5 is retired.** All 7 of its checks were Python-computed, so it now owns
+  zero and the dispatcher skips it — no model call at all. It joins B3, B4, D2
+  and M1–M5 as an idle agent, which is what **O-7** asks about.
+- A1 drops 25 → 19 checks, A3 4 → 1, D1 2 → 1. Smaller prompts, lower cost.
+- The automation split moves 276/87 → 293/70.
+- Nine checks now count as free-tier runnable (`n(ZERO, True)` 171 → 180).
+  They already *ran* free — Python emits regardless of cost class — so this
+  corrects the accounting rather than widening the offer.
+
+`tests/test_check_id_bindings.py` now asserts the invariant two ways: from the
+YAML, and through the dispatcher. Both were shown to fail when a single row is
+reverted.
+
+---
+
+## O-9 · Eight rows declare data their deterministic implementation never reads
+
+These stay excluded from free-tier coverage even though the Python that
+implements them runs free and needs none of the declared inputs:
+
+| Check | Declares | What the Python actually reads |
+|---|---|---|
+| `ON-022` | `serper_top10` | `word_count`, heading count |
+| `ON-035` | `gsc_ctr` | the title string |
+| `ON-039` | `gsc_ctr` | the meta description string |
+| `ON-044` | `google_nl` | term overlap on body text |
+| `ON-046` | `serper_top10` | paragraph, list and table counts |
+| `ON-048` | `serper_top10`, `otterly` | headings, first paragraph |
+| `ON-105` | `otterly` | H2s, schema types |
+
+(`LOC-002` also stays excluded, but correctly — its Python genuinely calls
+Google Places.)
+
+**This is a commercial decision, not an engineering one.** Correcting the
+`data_sources` would move seven more checks into the free lead-magnet tier.
+The test suite deliberately breaks when the free set changes, so this cannot be
+done quietly.
+
+**Options.** (a) Correct `data_sources` to what the code reads — free audits get
+seven more checks. (b) Leave them — the rows describe a richer future check that
+uses ranking and AI-visibility data, and the free tier stays narrower.
+
+**Recommendation: (a) for `ON-035`/`ON-039`/`ON-044`/`ON-046`, (b) for the
+rest.** CTR analysis without Search Console and snippet fitness without SERP
+data are still useful structural checks; AI-visibility checks (`ON-048`,
+`ON-105`) genuinely want Otterly data to mean much, and `ON-022` content depth
+is far more useful benchmarked against the ranking set than against a fixed
+900-word threshold.
+
+---
+
+## Four heuristics are now the sole source, and one is wrong
+
+Demoting means the Python verdict is all a client gets. Three are thin but
+honest. **`ON-027` Expertise signal detection is not:**
+
+```python
+numbers = sum(1 for ch in (p.body_text or "") if ch.isdigit())
+citations = sum(1 for u in external if ".gov" in u or ".edu" in u or "doi.org" in u)
+score = min(10.0, numbers * 0.2 + citations * 2.0)
+```
+
+It counts **digit characters anywhere on the page**. Fifty digits — prices, a
+phone number, opening hours — scores full marks for "expertise", with no
+citation of any kind. On a dental site that is close to guaranteed. `ON-026`
+E-E-A-T is a mean of `ON-027`/`ON-028`/`ON-029`, so it inherits the defect.
+
+`ON-035` and `ON-039` share a milder version: any digit in the title or meta
+description scores 10.0.
+
+These were masked while an agent produced a second opinion. **They should be
+fixed as Wave 3 quality work**, and the fix for `ON-027` is to count cited
+statistics rather than digit characters. Flagged here because Wave A is what
+made them load-bearing.

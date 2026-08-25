@@ -142,7 +142,8 @@ def test_a_check_whose_provider_is_barred_says_so(registry):
     reasons = {s["check_id"]: s["reason"] for s in cov["skipped"]}
     moz = next(c for c, s in registry.items() if "moz_links" in s.data_sources)
     assert reasons[moz] == emit.SKIP_SOURCE_NOT_PERMITTED
-    assert cov["counts"]["planned"] == 193  # the frozen free-tier check set
+    # 193 before Wave A; +9 demoted checks whose sources are all zero-cost.
+    assert cov["counts"]["planned"] == 202  # the frozen free-tier check set
 
 
 def test_planned_but_silent_is_its_own_reason(registry):

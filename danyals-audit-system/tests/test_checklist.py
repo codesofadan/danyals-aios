@@ -87,14 +87,22 @@ def test_containment_counts_are_frozen(registry):
     assert n(ZERO_QUOTA) == 219
     assert n(ZERO_QUOTA_CONN) == 228
     assert n(ALL) == 363
-    assert n(ZERO, True) == 171
-    assert n(ZERO_QUOTA, True) == 193
-    assert n(ZERO_QUOTA_CONN, True) == 197
+    # Wave A moved 17 checks from ai-assisted to full: Python already computed
+    # every one of them, so the model call was paying for a second opinion that
+    # then collided with the first. Nine of the 17 declare only zero-cost
+    # sources, so they now count as free-tier runnable - which they always were
+    # in practice. The other eight declare sources their deterministic
+    # implementation never reads and stay excluded; see O-9.
+    assert n(ZERO, True) == 180
+    assert n(ZERO_QUOTA, True) == 202
+    assert n(ZERO_QUOTA_CONN, True) == 208
 
 
 def test_automation_split_is_frozen(registry):
     counts = collections.Counter(s.automation for s in registry.values())
-    assert dict(counts) == {"full": 276, "ai-assisted": 87}
+    # 276/87 before Wave A. The 17 demoted checks were emitted by Python AND
+    # sent to an agent, so each could be scored twice in one run.
+    assert dict(counts) == {"full": 293, "ai-assisted": 70}
 
 
 def test_an_ai_assisted_check_never_runs_on_a_zero_spend_tier(registry):

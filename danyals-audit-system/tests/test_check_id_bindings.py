@@ -200,3 +200,58 @@ def test_no_check_id_is_emitted_twice_by_the_same_per_page_iterator_set():
             emitted.extend(cid for cid, *_rest in it(page))
         dupes = sorted({c for c in emitted if emitted.count(c) > 1})
         assert not dupes, f"{name}: emitted twice for one page: {dupes}"
+
+
+# --------------------------------------------------------------------------
+# Wave A: Python must never shadow an agent.
+#
+# A check marked `ai-assisted` is sent to its owning agent AND, if Python also
+# emits it, computed deterministically. Both paths write a finding for the same
+# check, so one run can carry two verdicts that disagree. Observed on the paid
+# smileon.pk run: LOC-002 scored twice (agent + Python), and ON-048/ON-049
+# scored 1.5/fail against 6.0/warn on all 197 pages.
+# --------------------------------------------------------------------------
+
+def _python_emitted_check_ids() -> set[str]:
+    """Check ids that appear as a string constant anywhere in engine source.
+
+    checklist.py is excluded: it *defines* the ids rather than emitting them.
+    """
+    out: set[str] = set()
+    for path in sorted(ENGINE_ROOT.rglob("*.py")):
+        if path.name == "checklist.py":
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        out |= {
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant)
+            and isinstance(n.value, str)
+            and n.value in REGISTRY
+        }
+    return out
+
+
+def test_no_ai_assisted_check_is_also_computed_by_python():
+    shadowed = sorted(
+        c for c in _python_emitted_check_ids() if REGISTRY[c].automation == "ai-assisted"
+    )
+    assert not shadowed, (
+        "these checks are sent to an agent AND computed in Python, so one run "
+        f"can score them twice: {shadowed}. Either demote the checklist row to "
+        "automation: full, or delete the Python emitter."
+    )
+
+
+def test_the_agent_dispatch_set_contains_no_python_computed_check():
+    """Same invariant, asserted through the dispatcher rather than the YAML."""
+    from audit_engine.agents.dispatcher import checks_for_agent, load_check_specs
+
+    specs = load_check_specs()
+    python_emitted = _python_emitted_check_ids()
+    offenders = {}
+    for agent in sorted({s.owner_agent.upper() for s in specs if s.owner_agent}):
+        dup = [c.id for c in checks_for_agent(agent, specs) if c.id in python_emitted]
+        if dup:
+            offenders[agent] = dup
+    assert not offenders, f"agents are paid to recompute deterministic checks: {offenders}"

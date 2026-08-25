@@ -24,7 +24,7 @@ checks:
     severity_default: critical
     data_sources: [google_places]
     analyzer: audit_engine.analyzers.gbp.categories
-    automation: ai-assisted
+    automation: full
 
   - id: LOC-003
     name: GBP profile completeness

@@ -211,7 +211,7 @@ checks:
     severity_default: critical
     data_sources: [crawled_html, serper_top10]
     analyzer: audit_engine.analyzers.content.depth
-    automation: ai-assisted
+    automation: full
 
   - id: ON-023
     name: Thin content detection
@@ -247,7 +247,7 @@ checks:
     severity_default: critical
     data_sources: [crawled_html, site_pages]
     analyzer: audit_engine.analyzers.eeat.overall
-    automation: ai-assisted
+    automation: full
 
   - id: ON-027
     name: Expertise signal detection
@@ -256,7 +256,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, site_pages]
     analyzer: audit_engine.analyzers.eeat.expertise
-    automation: ai-assisted
+    automation: full
 
   - id: ON-028
     name: Trust signal analysis
@@ -265,7 +265,7 @@ checks:
     severity_default: critical
     data_sources: [crawled_html, site_pages]
     analyzer: audit_engine.analyzers.eeat.trust
-    automation: ai-assisted
+    automation: full
 
   - id: ON-029
     name: Author credibility analysis
@@ -274,7 +274,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, schema_blocks]
     analyzer: audit_engine.analyzers.eeat.author
-    automation: ai-assisted
+    automation: full
 
   - id: ON-030
     name: Content originality check
@@ -329,7 +329,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, gsc_ctr]
     analyzer: audit_engine.analyzers.titles.ctr
-    automation: ai-assisted
+    automation: full
 
   - id: ON-036
     name: Title uniqueness check
@@ -366,7 +366,7 @@ checks:
     severity_default: minor
     data_sources: [crawled_html, gsc_ctr]
     analyzer: audit_engine.analyzers.meta.description_ctr
-    automation: ai-assisted
+    automation: full
 
   - id: ON-040
     name: Meta description uniqueness
@@ -412,7 +412,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, google_nl]
     analyzer: audit_engine.analyzers.headings.semantic
-    automation: ai-assisted
+    automation: full
 
   - id: ON-045
     name: Question based heading detection
@@ -431,7 +431,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, serper_top10]
     analyzer: audit_engine.analyzers.snippets.featured
-    automation: ai-assisted
+    automation: full
 
   - id: ON-047
     name: Passage ranking optimization
@@ -440,7 +440,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html]
     analyzer: audit_engine.analyzers.snippets.passage
-    automation: ai-assisted
+    automation: full
 
   - id: ON-048
     name: AI overview optimization
@@ -449,7 +449,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, serper_top10, otterly]
     analyzer: audit_engine.analyzers.ai_search.overview
-    automation: ai-assisted
+    automation: full
 
   - id: ON-049
     name: Direct answer optimization
@@ -458,7 +458,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html]
     analyzer: audit_engine.analyzers.ai_search.direct_answer
-    automation: ai-assisted
+    automation: full
 
   - id: ON-050
     name: FAQ optimization
@@ -522,7 +522,7 @@ checks:
     severity_default: minor
     data_sources: [crawled_html]
     analyzer: audit_engine.analyzers.readability.intro
-    automation: ai-assisted
+    automation: full
 
   - id: ON-057
     name: Above the fold optimization
@@ -957,7 +957,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html]
     analyzer: audit_engine.analyzers.ai_search.extraction
-    automation: ai-assisted
+    automation: full
 
   - id: ON-104
     name: LLM readability optimization
@@ -966,7 +966,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html]
     analyzer: audit_engine.analyzers.ai_search.llm_readability
-    automation: ai-assisted
+    automation: full
 
   - id: ON-105
     name: Generative search optimization
@@ -975,7 +975,7 @@ checks:
     severity_default: major
     data_sources: [crawled_html, otterly]
     analyzer: audit_engine.analyzers.ai_search.generative
-    automation: ai-assisted
+    automation: full
 
   - id: ON-106
     name: AI crawl readiness analysis
