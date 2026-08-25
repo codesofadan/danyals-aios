@@ -274,9 +274,18 @@ def ingest(
             # --- instances: replaced for this finding, then re-inserted. The
             # --- unique key is (finding_id, instance_key), never url - an entity
             # --- instance has no url and every one would collide on ''.
+            # SCOPED TO THIS AUDIT, and that scope is the whole point.
+            #
+            # A finding is a persistent CAUSE that many audits observe; an
+            # instance is what ONE audit saw. Deleting by finding_id alone made a
+            # re-run destroy the previous run's evidence: re-ingesting a later
+            # 12-page audit of the same site cut the earlier 197-page audit from
+            # 8,077 occurrences to 3,225, because the two share causes. A report
+            # that cannot be regenerated from its own audit is not a record.
             cur.execute(
-                "delete from public.audit_finding_instances where finding_id = %s",
-                (finding_id,),
+                "delete from public.audit_finding_instances "
+                "where finding_id = %s and audit_id = %s",
+                (finding_id, audit_id),
             )
             rows = []
             for inst in c.instances[:keep]:
@@ -294,7 +303,7 @@ def ingest(
                           url, page_id, template_id, locator, observed, expected,
                           detail, evidence, severity_override)
                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                       on conflict (finding_id, instance_key) do nothing""",
+                       on conflict do nothing""",
                     rows[i:i + _INSERT_BATCH],
                 )
             result.instances += len(rows)

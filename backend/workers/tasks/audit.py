@@ -30,7 +30,7 @@ from app.logging_setup import get_logger
 from app.services import pricing
 from app.services.audit_artifacts import ArtifactStore, LocalArtifactStore, local_store_from_settings
 from app.services.audit_sheets import SheetMeta, store_audit_sheets
-from app.services import audit_ingest, audit_workbook
+from app.services import audit_ingest, audit_report, audit_workbook
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
@@ -317,6 +317,18 @@ def _ingest_altitudes(
                 "client_name": str(row.get("client_name") or ""),
                 "tier": tier_label,
                 "generated_at": _utcnow().isoformat(),
+            },
+        )
+        # The client-facing document, from the same rows. Deterministic and free:
+        # no model call, so it costs nothing per report and cannot invent a number.
+        audit_report.build(
+            audit_id=audit_id,
+            out_dir=artifacts.sheets_dir(audit_id),
+            meta={
+                "url": str(row.get("url") or ""),
+                "client_name": str(row.get("client_name") or ""),
+                "tier": tier_label,
+                "generated_at": _utcnow().strftime("%d %B %Y"),
             },
         )
         logger.info(

@@ -134,3 +134,44 @@ def test_lookup_is_trimmed_and_total(registry):
     assert cl.get("NOPE-999") is None
     for cid in registry:
         assert cl.get(cid) is not None
+
+
+# ----------------------------------------------- subpoint display names
+
+def test_every_subpoint_has_a_client_readable_name(registry):
+    """The keys are internal and several are research shorthand - `semantic-3.8-koray`
+    is a researcher's surname, `semantic-3.9-info-quality` is a section number -
+    and they were being printed straight onto a client-facing scorecard."""
+    for spec in registry.values():
+        label = cl.subpoint_label(spec.pillar, spec.subcategory)
+        assert label, f"{spec.pillar}/{spec.subcategory} has no name"
+        assert label != spec.subcategory or "-" not in spec.subcategory, (
+            f"{spec.pillar}/{spec.subcategory} still renders its raw key"
+        )
+        # no internal shorthand may survive into a label
+        assert "semantic-" not in label.lower()
+        assert not any(ch.isdigit() for ch in label) or label in {"AMP"}
+
+
+def test_the_label_map_covers_the_whole_vocabulary(registry):
+    unmapped = {
+        (s.pillar, s.subcategory)
+        for s in registry.values()
+        if s.subcategory not in cl.SUBPOINT_LABEL.get(s.pillar, {})
+    }
+    assert unmapped == set(), f"unmapped subpoints: {sorted(unmapped)}"
+    assert sum(len(v) for v in cl.SUBPOINT_LABEL.values()) == 94
+
+
+def test_the_same_key_can_mean_different_things_in_different_pillars():
+    """`crawlability` on-page is one page's own directives; `crawl` in technical is
+    site-wide access. Keying the map on subcategory alone would conflate them."""
+    assert cl.subpoint_label("on-page", "crawlability") != cl.subpoint_label("technical", "crawl")
+    assert cl.subpoint_label("on-page", "schema") == cl.subpoint_label("technical", "schema")
+    assert cl.subpoint_label("local-seo", "schema") == "Local schema"
+
+
+def test_an_unmapped_subpoint_degrades_to_a_readable_fallback():
+    """A new key should read awkwardly, never disappear from a scorecard."""
+    assert cl.subpoint_label("on-page", "some-new-thing") == "Some new thing"
+    assert cl.subpoint_label("nope", "") == ""

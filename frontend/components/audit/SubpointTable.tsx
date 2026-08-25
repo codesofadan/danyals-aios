@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import type { Rollup } from "@/lib/auditAltitude";
 import {
   coverageLabel,
+  pillarLabel,
   isLowCoverage,
   isMeasured,
   notMeasuredReason,
@@ -91,11 +92,14 @@ export default function SubpointTable({ rollups }: { rollups: Rollup[] }) {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const [pillar, sub] = r.key.split("/");
+              const [pillar] = r.key.split("/");
+            // `label` is the client-facing name the engine publishes; the key is
+            // internal. Falling back to the key keeps an older audit readable.
+            const sub = r.label || r.key.split("/")[1];
               const measured = isMeasured(r);
               return (
                 <tr key={r.key} className={measured ? "" : "dim"}>
-                  <td className="alt-mono">{pillar}</td>
+                  <td>{pillarLabel(pillar)}</td>
                   <td>{sub}</td>
                   <td className={`num alt-score t-${scoreTone(measured ? r.score : null)}`}>
                     {scoreDisplay(r)}

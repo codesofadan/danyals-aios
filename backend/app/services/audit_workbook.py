@@ -31,13 +31,19 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
 from openpyxl import Workbook
+from openpyxl.chart import BarChart, PieChart, Reference
+from openpyxl.chart.label import DataLabelList
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.worksheet import Worksheet
 
 from app.db.database import privileged_connection
 from app.services.audit_sheets import (
@@ -64,6 +70,12 @@ BUNDLE_NAME = "audit-pack.zip"
 _DIMENSION_TO_SECTION = {
     "onpage": "on-page", "technical": "technical", "offpage": "off-page",
     "local": "local", "geo": "geo", "strategy": "strategy",
+}
+
+#: The four checklist files, in operator language rather than filenames.
+PILLAR_LABEL: dict[str, str] = {
+    "on-page": "On-Page", "technical": "Technical",
+    "off-page": "Off-Page", "local-seo": "Local SEO",
 }
 
 _DIMENSION_ORDER = ["onpage", "technical", "offpage", "local", "geo", "strategy"]
@@ -228,9 +240,12 @@ def _subpoint_rows(rollups: list[dict]) -> list[list[Any]]:
     for r in rollups:
         if r["level"] != "subpoint":
             continue
-        pillar, _, sub = (r["key"] or "").partition("/")
+        pillar, _, raw = (r["key"] or "").partition("/")
+        # `label` is the client-facing subpoint name the engine publishes; `key`
+        # is the internal one. A deliverable prints the former.
+        sub = r.get("label") or raw
         rows.append([
-            pillar, sub, _score_cell(r["score"], r["checks_ran"]),
+            PILLAR_LABEL.get(pillar, pillar), sub, _score_cell(r["score"], r["checks_ran"]),
             _coverage_cell(r["checks_ran"], r["checks_applicable"]),
             r["checks_ran"], r["checks_applicable"], r["findings_open"],
             r["instances_open"], r["pages_affected"],
@@ -330,6 +345,118 @@ def _write_csv(path: Path, headers: tuple[str, ...], rows) -> int:
 
 
 
+# --------------------------------------------------------------------------- #
+# Sheet construction
+# --------------------------------------------------------------------------- #
+# Every data sheet ships as a real Excel TABLE, not a bare grid.
+#
+# WHY THAT MATTERS AND IS NOT DECORATION. A bare grid is inert: no filter
+# dropdowns, no sort, no banding, no structured reference. The operator's first
+# act on receiving one is Ctrl+T - re-doing by hand, per sheet, per audit, work
+# the generator can do once. A table also carries its own header row, so freezing
+# and filtering survive a re-sort, which a manually frozen pane does not.
+#
+# The cost is that tables need a NORMAL worksheet; openpyxl's write-only mode
+# supports neither tables nor charts. Measured on the real 8,077-instance audit,
+# normal mode builds the whole workbook in a few seconds, so the streaming mode
+# buys nothing at this scale and costs both features.
+
+_TABLE_STYLE = TableStyleInfo(
+    name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False,
+    showFirstColumn=False, showLastColumn=False,
+)
+
+_TITLE_FONT_SHEET = Font(bold=True, size=13, color="6E1423")
+_HEADER_ALIGN = Alignment(vertical="center", wrap_text=True)
+
+#: Column widths per header name. Anything unlisted takes the default.
+_WIDTHS: dict[str, int] = {
+    "URL": 52, "Check Name": 40, "Title": 46, "Recommendation / Fix": 54,
+    "Evidence": 40, "Detail": 44, "What was observed": 40, "Observed": 30,
+    "Exit Criterion": 46, "Locus Value": 26, "Template": 24, "Subpoint": 26,
+    "Skip Reason": 24, "Data Sources": 30, "Field": 30, "Value": 60,
+    "Metric": 34, "Basis": 30, "Not Measured Reason": 34, "Coverage": 14,
+}
+_DEFAULT_WIDTH = 15
+
+
+def _safe_table_name(sheet: str) -> str:
+    """Excel table names cannot start with a digit or contain punctuation, and
+    every sheet name here starts with one (`10_Findings`)."""
+    return "t_" + "".join(c if c.isalnum() else "_" for c in sheet)
+
+
+def _write_sheet(
+    wb: Workbook, name: str, headers: tuple[str, ...], rows: list[list[Any]],
+    *, table: bool = True,
+) -> Worksheet:
+    """One data sheet: header, rows, widths, frozen header, and a real table."""
+    ws = wb.create_sheet(name)
+    ws.append(list(headers))
+    for row in rows:
+        ws.append(row)
+
+    for idx, h in enumerate(headers, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = _WIDTHS.get(h, _DEFAULT_WIDTH)
+        c = ws.cell(row=1, column=idx)
+        c.font = _HEADER_FONT
+        c.fill = _HEADER_FILL
+        c.alignment = _HEADER_ALIGN
+
+    ws.freeze_panes = "A2"
+    # A table needs at least one body row; a header-only range is invalid and
+    # Excel repairs the file by silently discarding it.
+    if table and rows:
+        ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
+        t = Table(displayName=_safe_table_name(name), ref=ref)
+        t.tableStyleInfo = _TABLE_STYLE
+        ws.add_table(t)
+    return ws
+
+
+def _add_score_chart(ws: Worksheet, n_rows: int) -> None:
+    """Score by pillar, with coverage beside it.
+
+    The two series are deliberately on ONE chart: a score is not readable without
+    the number of checks behind it, and putting them on separate charts is how a
+    97 over a quarter of the checklist gets quoted on its own.
+    """
+    if n_rows < 1:
+        return
+    chart = BarChart()
+    chart.type = "col"
+    chart.style = 10
+    chart.title = "Score and coverage by pillar"
+    chart.y_axis.title = "Score / % of checks run"
+    chart.height, chart.width = 8, 18
+    data = Reference(ws, min_col=2, max_col=2, min_row=1, max_row=n_rows + 1)
+    cov = Reference(ws, min_col=13, max_col=13, min_row=1, max_row=n_rows + 1)
+    cats = Reference(ws, min_col=1, min_row=2, max_row=n_rows + 1)
+    chart.add_data(data, titles_from_data=True)
+    chart.add_data(cov, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.dLbls = DataLabelList()
+    chart.dLbls.showVal = True
+    ws.add_chart(chart, f"A{n_rows + 4}")
+
+
+def _add_severity_chart(ws: Worksheet, anchor_row: int, n: int) -> None:
+    """How the issues break down by severity."""
+    if n < 1:
+        return
+    chart = PieChart()
+    chart.title = "Issues by severity"
+    chart.height, chart.width = 7, 11
+    data = Reference(ws, min_col=2, min_row=anchor_row, max_row=anchor_row + n - 1)
+    cats = Reference(ws, min_col=1, min_row=anchor_row, max_row=anchor_row + n - 1)
+    chart.add_data(data, titles_from_data=False)
+    chart.set_categories(cats)
+    chart.dLbls = DataLabelList()
+    chart.dLbls.showVal = True
+    chart.dLbls.showPercent = True
+    ws.add_chart(chart, "E2")
+
+
 def build(
     *,
     audit_id: str,
@@ -360,10 +487,14 @@ def build(
         )
         findings = _fetch_all(
             cur,
-            """select * from public.audit_findings where audit_id = %s
-               order by case severity when 'critical' then 0 when 'major' then 1
-                                      when 'minor' then 2 else 3 end,
-                        instance_count desc, check_id""",
+            # Via this audit's own instances - see audit_findings_repo for why
+            # `audit_findings.audit_id` cannot be used for a historical report.
+            """select f.* from public.audit_findings f
+               where exists (select 1 from public.audit_finding_instances i
+                             where i.finding_id = f.id and i.audit_id = %s)
+               order by case f.severity when 'critical' then 0 when 'major' then 1
+                                        when 'minor' then 2 else 3 end,
+                        f.instance_count desc, f.check_id""",
             (audit_id,),
         )
         pages = _fetch_all(
@@ -411,86 +542,89 @@ def build(
         res.csvs.append(instances_csv)
 
         # ---------------- XLSX ----------------------------------------------
-        wb = Workbook(write_only=True)
+        # Ordered so the workbook reads front-to-back like a report: what this is,
+        # the headline, where the site is weak, what to do, then the evidence.
+        wb = Workbook()
+        wb.remove(wb.active)
 
-        ws = wb.create_sheet("00_Read_Me")
-        ws.append(READ_ME_HEADERS)
         capped = res.instances > XLSX_INSTANCE_CAP
         res.capped = capped
-        readme = [
-            ("Audit", meta.get("url", "")),
-            ("Client", meta.get("client_name", "")),
-            ("Generated", meta.get("generated_at", "")),
-            ("Tier", meta.get("tier", "")),
-            ("", ""),
-            ("HOW TO READ THIS WORKBOOK", ""),
-            ("02_Pillar_Scorecard", "MACRO - where the site is weak, and whether we looked"),
-            ("05_Roadmap", "The plan: what to do first, in relative windows (no dates)"),
-            ("10_Findings", "MICRO - one row per PROBLEM. This is the fix list."),
-            ("20_Instances", "NANO - one row per OCCURRENCE. Join on 'Instances Ref'."),
-            ("21_Pages", "Every crawled page, with its issue counts"),
-            ("22_Coverage", "Every check in the registry - including what did NOT run"),
-            ("", ""),
-            ("Score basis", site.get("basis_hash", "")),
-            ("Scoring model", site.get("scoring_model_version", "")),
-            ("Checks ran", f"{site.get('checks_ran', 0)} of {site.get('checks_applicable', 0)}"),
-            ("Pages crawled", site.get("pages_crawled", 0)),
-            ("Findings (causes)", res.findings),
-            ("Instances (occurrences)", res.instances),
-            ("", ""),
-            ("IMPORTANT", "A score is only comparable to another score with the SAME basis."),
-            ("", "'not measured' means the check did not run - it does NOT mean zero."),
+
+        # --- 00 Read Me -------------------------------------------------------
+        readme_rows: list[list[Any]] = [
+            ["Audit", meta.get("url", "")],
+            ["Client", meta.get("client_name", "")],
+            ["Generated", meta.get("generated_at", "")],
+            ["Tier", meta.get("tier", "")],
+            ["", ""],
+            ["HOW TO READ THIS WORKBOOK", ""],
+            ["02_Pillar_Scorecard", "Where the site is weak, and whether we looked"],
+            ["03_Subpoint_Scorecard", "The same, one level down"],
+            ["05_Roadmap", "What to do first, in relative windows (no dates)"],
+            ["10_Issues", "One row per PROBLEM. This is the fix list."],
+            ["20_Occurrences", "One row per OCCURRENCE. Join on 'Issue Ref'."],
+            ["21_Pages", "Every crawled page, with its issue counts"],
+            ["22_Coverage", "Every check in the registry - including what did NOT run"],
+            ["", ""],
+            ["Checks ran", f"{site.get('checks_ran', 0)} of {site.get('checks_applicable', 0)}"],
+            ["Pages crawled", site.get("pages_crawled", 0)],
+            ["Issues (distinct problems)", res.findings],
+            ["Occurrences", res.instances],
+            ["", ""],
+            ["IMPORTANT", "A score is only comparable to another score with the SAME basis."],
+            ["", "'not measured' means the check did not run - it does NOT mean zero."],
         ]
         if capped:
-            readme += [
-                ("", ""),
-                ("INSTANCE CAP APPLIED", f"20_Instances shows the first {XLSX_INSTANCE_CAP:,}"),
-                ("Complete record", "instances.csv - uncapped"),
+            readme_rows += [
+                ["", ""],
+                ["OCCURRENCE CAP APPLIED", f"20_Occurrences shows the first {XLSX_INSTANCE_CAP:,}"],
+                ["Complete record", "instances.csv - uncapped"],
             ]
-        for row in readme:
-            ws.append(list(row))
+        _write_sheet(wb, "00_Read_Me", READ_ME_HEADERS, readme_rows, table=False)
 
-        ws = wb.create_sheet("01_Executive_Summary")
-        ws.append(EXEC_HEADERS)
+        # --- 01 Executive summary + severity chart ----------------------------
         basis = f"{site.get('checks_ran', 0)} of {site.get('checks_applicable', 0)} checks"
-        for row in [
+        exec_rows: list[list[Any]] = [
             ["Overall score", _score_cell(site.get("score"), site.get("checks_ran", 0)), basis],
             ["URL health (critical-free pages)", site.get("url_health_pct"), "denominator: pages crawled"],
             ["Pages crawled", site.get("pages_crawled", 0), ""],
-            ["Problems to fix", res.findings, "distinct causes"],
+            ["Issues to fix", res.findings, "distinct problems"],
             ["Total occurrences", res.instances, "across all pages"],
             ["Checks run", site.get("checks_ran", 0), f"of {site.get('checks_applicable', 0)} in the registry"],
-        ]:
-            ws.append(row)
+        ]
+        sev_counts = Counter((f["severity"] or "info").lower() for f in findings)
+        sev_start = len(exec_rows) + 3
+        exec_rows += [["", "", ""], ["Issues by severity", "", ""]]
+        for sev in _SEVERITY_ORDER:
+            exec_rows.append([sev.capitalize(), sev_counts.get(sev, 0), ""])
+        ws = _write_sheet(wb, "01_Executive_Summary", EXEC_HEADERS, exec_rows, table=False)
+        ws.cell(row=sev_start, column=1).font = _TITLE_FONT_SHEET
+        _add_severity_chart(ws, sev_start + 1, len(_SEVERITY_ORDER))
 
-        for name, headers, rows in (
-            ("02_Pillar_Scorecard", PILLAR_HEADERS, _pillar_rows(rollups)),
-            ("03_Subpoint_Scorecard", SUBPOINT_HEADERS, _subpoint_rows(rollups)),
-            ("05_Roadmap", ROADMAP_HEADERS, _roadmap_rows(roadmap_items)),
-            ("10_Findings", FINDING_HEADERS, _finding_rows(findings)),
-            ("21_Pages", PAGE_HEADERS, _page_rows(pages)),
-        ):
-            ws = wb.create_sheet(name)
-            ws.append(list(headers))
-            for row in rows:
-                ws.append(row)
+        # --- 02 Pillar scorecard + chart --------------------------------------
+        pillar_rows = _pillar_rows(rollups)
+        ws = _write_sheet(wb, "02_Pillar_Scorecard", PILLAR_HEADERS, pillar_rows)
+        _add_score_chart(ws, len(pillar_rows))
 
-        ws = wb.create_sheet("20_Instances")
-        ws.append(list(INSTANCE_HEADERS))
-        written = 0
+        # --- 03 / 05 / 10 / 21 ------------------------------------------------
+        _write_sheet(wb, "03_Subpoint_Scorecard", SUBPOINT_HEADERS, _subpoint_rows(rollups))
+        if roadmap_items:
+            _write_sheet(wb, "05_Roadmap", ROADMAP_HEADERS, _roadmap_rows(roadmap_items))
+        _write_sheet(wb, "10_Issues", FINDING_HEADERS, _finding_rows(findings))
+        _write_sheet(wb, "21_Pages", PAGE_HEADERS, _page_rows(pages))
+
+        # --- 20 Occurrences ---------------------------------------------------
+        inst_rows: list[list[Any]] = []
         for inst in _iter_instances(cur, audit_id):
-            if written >= XLSX_INSTANCE_CAP:
-                ws.append(["TRUNCATED", f"see instances.csv for all {res.instances:,}"])
+            if len(inst_rows) >= XLSX_INSTANCE_CAP:
                 break
-            ws.append(_instance_row(inst))
-            written += 1
-        res.instances_in_xlsx = written
+            inst_rows.append(_instance_row(inst))
+        res.instances_in_xlsx = len(inst_rows)
+        _write_sheet(wb, "20_Occurrences", INSTANCE_HEADERS, inst_rows)
 
+        # --- 22 Coverage ------------------------------------------------------
         if coverage:
-            ws = wb.create_sheet("22_Coverage")
-            ws.append(list(COVERAGE_HEADERS))
-            for row in _coverage_rows(coverage):
-                ws.append(row)
+            _write_sheet(wb, "22_Coverage", COVERAGE_HEADERS, _coverage_rows(coverage))
 
         res.xlsx = out / WORKBOOK_NAME
         wb.save(res.xlsx)

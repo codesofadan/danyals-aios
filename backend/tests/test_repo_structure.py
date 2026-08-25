@@ -696,6 +696,68 @@ def test_no_new_route_ships_with_authentication_as_its_only_guard() -> None:
     )
 
 
+# (c) A MUTATING ROUTE MAY NEVER JOIN THE RLS-BOUNDED CLASS.
+#
+#     Every entry above is a GET except `auth.logout`, which is open by design and makes
+#     no RLS claim at all. That is not a coincidence to be preserved by habit; it is a
+#     property to enforce, because "RLS covers it" is a MATERIALLY WEAKER statement for a
+#     write than for a read, and the difference is invisible from the outside.
+#
+#     A read denied by RLS returns zero rows, which is exactly the outcome wanted, and
+#     `rowcount == 0` is unambiguous. **A write denied by RLS also SUCCEEDS - it simply
+#     matches nothing.** It does not raise. So a probe of a mutating handler prints
+#     "ALLOWED" for a statement that changed nothing, and an author reasonably concludes
+#     the app tier can mutate the table when the truth is that it cannot, or vice versa.
+#     A sibling session hit precisely this while proving the Evidence table immutable:
+#     its first probe reported `staff UPDATE: ALLOWED`, which was a VACUOUS SUCCESS.
+#
+#     So a mutating handler admitted here would rest on a justification whose usual test
+#     cannot distinguish "refused" from "matched nothing". It needs an explicit guard, or
+#     a trigger that RAISES rather than a policy that filters. This check makes that
+#     non-negotiable rather than remembered.
+_MUTATING_DECORATORS: frozenset[str] = frozenset({
+    "router.post", "router.put", "router.patch", "router.delete",
+})
+
+# Routes exempt because they make no RLS claim: the caller acts only on itself.
+_MUTATING_BUT_SELF_SCOPED: frozenset[str] = frozenset({"app/routers/auth.py::logout"})
+
+
+def _mutating_auth_only_handlers() -> list[str]:
+    out: list[str] = []
+    for path in sorted(_APP_DIR.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        src_text = path.read_text(encoding="utf-8")
+        if "@router." not in src_text:
+            continue
+        rel = path.relative_to(_REPO_ROOT / "backend").as_posix()
+        for node in ast.walk(ast.parse(src_text)):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            entry = f"{rel}::{node.name}"
+            if entry not in _AUTH_ONLY_HANDLERS or entry in _MUTATING_BUT_SELF_SCOPED:
+                continue
+            for dec in node.decorator_list:
+                if ast.unparse(dec).split("(")[0] in _MUTATING_DECORATORS:
+                    out.append(entry)
+    return out
+
+
+def test_no_mutating_route_relies_on_rls_alone() -> None:
+    offenders = sorted(set(_mutating_auth_only_handlers()))
+    assert not offenders, (
+        "Mutating route(s) with authentication as their only guard:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nA read denied by RLS returns zero rows, which is the wanted outcome. A "
+        "WRITE denied by RLS also succeeds - it just matches nothing - so the usual "
+        "probe cannot tell 'refused' from 'changed nothing', and reports ALLOWED either "
+        "way. Give it an explicit guard, or a trigger that RAISES rather than a policy "
+        "that filters. Do not add it to the exemption unless the caller acts solely on "
+        "itself, as `logout` does."
+    )
+
+
 def test_the_auth_only_population_only_shrinks() -> None:
     """Guarding one of these is progress and must be recorded, so the list cannot keep
     naming routes that no longer need the exemption."""

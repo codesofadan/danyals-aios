@@ -52,7 +52,7 @@ def pools():
 
 def _artifacts(tmp_path: Path, findings: list[dict], pages: list[dict], coverage: dict) -> Path:
     d = tmp_path / "artifacts"
-    d.mkdir()
+    d.mkdir(parents=True, exist_ok=True)
     (d / "findings.json").write_text(json.dumps(findings))
     (d / "pages.json").write_text(json.dumps(pages))
     (d / "coverage.json").write_text(json.dumps(coverage))
@@ -220,3 +220,91 @@ def test_deleting_an_audit_removes_its_altitude_rows(pools, tmp_path):
         assert cur.fetchone()["c"] == 0
         cur.execute("select count(*) c from public.audit_rollups where audit_id=%s", (audit_id,))
         assert cur.fetchone()["c"] == 0
+
+
+def test_a_later_audit_of_the_same_site_does_not_edit_the_earlier_one(pools, tmp_path):
+    """The defect this pins, measured on real data.
+
+    A finding is a persistent CAUSE that many audits observe; an instance is what
+    ONE audit saw. Two mistakes made a re-run rewrite history:
+
+      * instances were deleted by `finding_id` alone, so a later run erased an
+        earlier run's evidence for every cause they shared;
+      * instance identity was `(finding_id, instance_key)` with no audit, so the
+        second audit to see the same page fail the same check was silently
+        dropped by `on conflict do nothing`.
+
+    Together they cut a real 197-page audit from 8,077 occurrences to 7,591 the
+    moment a 12-page run of the same site was ingested - with no error. A report
+    that a later run can quietly edit is not a record.
+    """
+    # A findings row is keyed on scope_key and OUTLIVES any single audit - that is
+    # the whole point of it. So this test needs its own host, or it counts causes
+    # every other test in this file left behind.
+    host = f"hist-{uuid.uuid4().hex[:8]}.test"
+    first = _seed_audit(f"https://{host}")
+    second = _seed_audit(f"https://{host}")
+    pages = [dict(p, url=p["url"].replace("alt.test", host)) for p in PAGES]
+
+    # Both audits see the SAME cause on the SAME pages - the overlap is the point.
+    d1 = _artifacts(tmp_path / "a", [_finding("ON-001", p) for p in (1, 2, 3)],
+                    pages, _coverage(["ON-001"]))
+    d2 = _artifacts(tmp_path / "b", [_finding("ON-001", p) for p in (1, 2)],
+                    pages[:2], _coverage(["ON-001"]))
+
+    r1 = audit_ingest.ingest(audit_id=first, client_id=None, artifact_dir=d1,
+                             site_url=f"https://{host}", tier="paid", types=[])
+    assert r1.instances == 3
+
+    r2 = audit_ingest.ingest(audit_id=second, client_id=None, artifact_dir=d2,
+                             site_url=f"https://{host}", tier="paid", types=[])
+    assert r2.instances == 2, "the second audit must record its own evidence"
+
+    with privileged_connection() as cur:
+        # The earlier audit still holds everything it observed.
+        cur.execute(
+            "select count(*) c from public.audit_finding_instances where audit_id = %s",
+            (first,))
+        assert cur.fetchone()["c"] == 3, "a later run erased the earlier run's evidence"
+        cur.execute(
+            "select count(*) c from public.audit_finding_instances where audit_id = %s",
+            (second,))
+        assert cur.fetchone()["c"] == 2
+
+        # One CAUSE, shared - that part is meant to be shared.
+        cur.execute("select count(*) c from public.audit_findings where scope_key = %s",
+                    (host,))
+        assert cur.fetchone()["c"] == 1
+
+
+def test_a_report_reads_the_findings_its_own_audit_observed(pools, tmp_path):
+    """`audit_findings.audit_id` is last-writer-wins, so a report keyed on it
+    loses findings the moment a newer audit of the same site upserts them. The
+    report joins through the audit's own instances instead."""
+    host = f"obs-{uuid.uuid4().hex[:8]}.test"
+    first = _seed_audit(f"https://{host}")
+    second = _seed_audit(f"https://{host}")
+    pages = [dict(p, url=p["url"].replace("alt.test", host)) for p in PAGES]
+    d1 = _artifacts(tmp_path / "a",
+                    [_finding("ON-001", 1), _finding("ON-002", 2)], pages,
+                    _coverage(["ON-001", "ON-002"]))
+    d2 = _artifacts(tmp_path / "b", [_finding("ON-001", 1)], pages[:1],
+                    _coverage(["ON-001"]))
+    audit_ingest.ingest(audit_id=first, client_id=None, artifact_dir=d1,
+                        site_url=f"https://{host}", tier="paid", types=[])
+    audit_ingest.ingest(audit_id=second, client_id=None, artifact_dir=d2,
+                        site_url=f"https://{host}", tier="paid", types=[])
+
+    with privileged_connection() as cur:
+        # ON-001 was re-observed, so its `audit_id` now points at the SECOND run.
+        cur.execute("select audit_id from public.audit_findings"
+                    " where check_id = 'ON-001' and scope_key = %s", (host,))
+        assert str(cur.fetchone()["audit_id"]) == second
+
+        # The first audit's report must still show BOTH of its findings.
+        cur.execute(
+            "select count(*) c from public.audit_findings f"
+            " where exists (select 1 from public.audit_finding_instances i"
+            "               where i.finding_id = f.id and i.audit_id = %s)",
+            (first,))
+        assert cur.fetchone()["c"] == 2

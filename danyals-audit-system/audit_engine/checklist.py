@@ -235,6 +235,139 @@ def subpoints() -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in sorted(out.items())}
 
 
+
+# --------------------------------------------------------------------------- #
+# Subpoint display names
+# --------------------------------------------------------------------------- #
+# The checklist's subcategory keys are INTERNAL. Several are research shorthand
+# that means nothing outside this repo - `semantic-3.8-koray` is a person's name,
+# `semantic-3.9-info-quality` is a section number - and they were being printed
+# straight onto a client-facing scorecard.
+#
+# Keyed by PILLAR then subcategory, because the same key means different things
+# in different files: on-page `crawlability` is about one page's own directives,
+# technical `crawl` is about site-wide crawl access.
+#
+# The KEY is never renamed. It is the join between the YAML, the emitted finding
+# and the stored rollup; only the presentation changes.
+SUBPOINT_LABEL: dict[str, dict[str, str]] = {
+    "on-page": {
+        "ai-search": "AI search readiness",
+        "canonical": "Canonical tags",
+        "content-quality": "Content quality",
+        "conversion": "Conversion elements",
+        "crawlability": "Crawlability",
+        "cwv": "Core Web Vitals",
+        "duplication": "Duplicate content",
+        "eeat": "Experience & trust (E-E-A-T)",
+        "engagement": "Engagement signals",
+        "entities": "Entity coverage",
+        "external-links": "Outbound links",
+        "headings": "Heading structure",
+        "images": "Images & alt text",
+        "indexability": "Indexability",
+        "internal-links": "Internal linking",
+        "keywords": "Keyword targeting",
+        "meta-description": "Meta descriptions",
+        "mobile": "Mobile experience",
+        "penalties": "Penalty risk",
+        "readability": "Readability",
+        "schema": "Structured data",
+        "scoring": "On-page rollups",
+        "search-intent": "Search intent match",
+        "security": "Page security",
+        "semantic-3.1-central-entity": "Central entity clarity",
+        "semantic-3.2-entity": "Entity completeness",
+        "semantic-3.3-topical-map": "Topical map coverage",
+        "semantic-3.4-contextual": "Contextual connection",
+        "semantic-3.5-query-intent": "Query intent alignment",
+        "semantic-3.6-lexical": "Vocabulary range",
+        "semantic-3.7-ngram": "Phrase cannibalisation",
+        "semantic-3.8-koray": "Contextual hierarchy",
+        "semantic-3.9-info-quality": "Information density",
+        "snippets": "Featured snippet fitness",
+        "structured-content": "Content structure",
+        "titles": "Title tags",
+        "topics": "Topic coverage",
+        "url": "URL structure",
+        "ux": "Page experience",
+    },
+    "technical": {
+        "accessibility": "Accessibility",
+        "amp": "AMP",
+        "caching": "Caching",
+        "canonical": "Canonicalisation",
+        "compression": "Compression",
+        "crawl": "Crawl access",
+        "crawl-logs": "Crawl logs",
+        "cwv": "Core Web Vitals",
+        "domain": "Domain & DNS",
+        "duplication": "Duplicate URLs",
+        "errors": "HTTP errors",
+        "html": "HTML validity",
+        "indexability": "Indexation",
+        "internal-links": "Link architecture",
+        "international": "International targeting",
+        "low-quality": "Thin & low-value pages",
+        "media": "Media delivery",
+        "mobile": "Mobile rendering",
+        "pagination": "Pagination",
+        "performance": "Page speed",
+        "redirects": "Redirects",
+        "rendering": "JavaScript rendering",
+        "robots-sitemap": "Robots & sitemaps",
+        "schema": "Structured data",
+        "scoring": "Technical rollups",
+        "security": "Security & HTTPS",
+        "server": "Server & hosting",
+        "social": "Social markup",
+        "spam": "Spam signals",
+        "url-parameters": "URL parameters",
+    },
+    "off-page": {
+        "ai-search": "AI search authority",
+        "anchors": "Anchor text profile",
+        "authority": "Domain authority",
+        "backlinks": "Backlink profile",
+        "brand-signals": "Brand signals",
+        "competitor": "Competitor gap",
+        "diversity": "Link diversity",
+        "historical": "Link history",
+        "link-attributes": "Link attributes",
+        "link-placement": "Link placement",
+        "link-quality": "Link quality",
+        "link-types": "Link types",
+        "outreach": "Outreach opportunities",
+        "pbn": "Private network risk",
+        "scoring": "Off-page rollups",
+        "topical-authority": "Topical authority",
+        "toxicity": "Toxic links",
+    },
+    "local-seo": {
+        "citations": "Citations & directories",
+        "gbp": "Google Business Profile",
+        "local-keywords": "Local keywords",
+        "local-pack": "Local pack presence",
+        "nap": "NAP consistency",
+        "reviews": "Reviews & ratings",
+        "schema": "Local schema",
+        "scoring": "Local rollups",
+    },
+}
+
+
+def subpoint_label(pillar: str, subcategory: str) -> str:
+    """The operator/client-facing name for a subpoint.
+
+    Falls back to a title-cased key rather than an empty string: an unmapped
+    subpoint should read awkwardly, not disappear from a scorecard.
+    """
+    mapped = SUBPOINT_LABEL.get(pillar, {}).get(subcategory)
+    if mapped:
+        return mapped
+    return (subcategory or "").replace("-", " ").replace("_", " ").strip().capitalize()
+
+
 def checks_for_dimensions(dimensions: frozenset[str] | None) -> frozenset[str]:
     """Check ids belonging to the selected dimensions. Empty/None selects ALL,
     which is the documented meaning of an empty type picker (ADM-012 / AUD-005)."""

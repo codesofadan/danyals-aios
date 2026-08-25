@@ -235,9 +235,18 @@ def build_coverage(
         for cid, spec in sorted(registry.items())
     }
 
+    # Display names for every pillar/subpoint pair, so the platform can label a
+    # scorecard without carrying its own copy of the vocabulary. The engine owns
+    # the checklist, therefore the engine owns what its keys are CALLED.
+    subpoint_labels = {
+        f"{spec.pillar}/{spec.subcategory}": cl.subpoint_label(spec.pillar, spec.subcategory)
+        for spec in registry.values()
+    }
+
     return {
         "registry_total": len(registry),
         "checks": checks,
+        "subpoint_labels": dict(sorted(subpoint_labels.items())),
         "selected_dimensions": sorted(dimensions) if dimensions else [],
         "permitted_cost_classes": sorted(permitted_cost_classes),
         "counts": {

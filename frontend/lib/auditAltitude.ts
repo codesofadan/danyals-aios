@@ -313,6 +313,18 @@ export function ownerLabel(f: { dimension: string; owner_agent: string }): strin
   return (role ? ROLE_LABEL[role] : undefined) ?? f.owner_agent ?? "-";
 }
 
+/** The four checklist files, in operator language rather than filenames. */
+export const PILLAR_LABEL: Record<string, string> = {
+  "on-page": "On-Page",
+  technical: "Technical",
+  "off-page": "Off-Page",
+  "local-seo": "Local SEO",
+};
+
+export function pillarLabel(pillar: string): string {
+  return PILLAR_LABEL[pillar] ?? pillar;
+}
+
 export const DIMENSION_ICON: Record<string, string> = {
   onpage: "checklist",
   technical: "build",
@@ -324,7 +336,8 @@ export const DIMENSION_ICON: Record<string, string> = {
 
 /** The downloadable pack, mirroring the backend allow-list. */
 export const DOWNLOADS: { name: string; label: string; hint: string }[] = [
-  { name: "workbook", label: "Workbook (XLSX)", hint: "9 sheets, all three altitudes" },
+  { name: "report", label: "Client report", hint: "the readable document - 11 pages, not 833" },
+  { name: "workbook", label: "Workbook (XLSX)", hint: "9 sheets, every occurrence, filterable" },
   { name: "bundle", label: "Full pack (ZIP)", hint: "workbook + every CSV" },
   { name: "instances.csv", label: "Every occurrence (CSV)", hint: "uncapped - the complete record" },
   { name: "findings.csv", label: "Findings (CSV)", hint: "one row per problem" },

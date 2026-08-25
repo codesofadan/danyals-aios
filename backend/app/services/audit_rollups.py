@@ -171,6 +171,17 @@ def _bucket_keys(spec_pillar: str, spec_subcat: str, spec_dimension: str) -> dic
     }
 
 
+def subpoint_labels_from_coverage(coverage: dict[str, Any]) -> dict[str, str]:
+    """Display names for `pillar/subpoint`, as published by the engine.
+
+    Read from the artifact rather than duplicated here: the engine owns the
+    checklist, so it owns what its keys are called. An older artifact without the
+    map simply yields raw keys, which is what happened before this existed.
+    """
+    raw = coverage.get("subpoint_labels") or {}
+    return {str(k): str(v) for k, v in raw.items() if v}
+
+
 def build_rollups(
     *,
     causes: list[Cause],
@@ -207,6 +218,7 @@ def build_rollups(
         if prev is None or weight(c.severity) > weight(prev):
             failed_severity[c.check_id] = c.severity
 
+    sub_labels = subpoint_labels_from_coverage(coverage)
     rollups: dict[tuple[str, str], Rollup] = {}
     ran_mass: dict[tuple[str, str], float] = {}
     failed_mass: dict[tuple[str, str], float] = {}
@@ -230,7 +242,11 @@ def build_rollups(
             LEVEL_SITE: "Site",
             LEVEL_PILLAR: PILLAR_LABEL.get(spec.pillar, spec.pillar),
             LEVEL_DIMENSION: DIMENSION_LABEL.get(spec.dimension, spec.dimension),
-            LEVEL_SUBPOINT: spec.subcategory,
+            # The client-facing name, not the internal key. `semantic-3.8-koray`
+            # is a researcher's surname and was being printed on a scorecard.
+            LEVEL_SUBPOINT: sub_labels.get(
+                f"{spec.pillar}/{spec.subcategory}", spec.subcategory
+            ),
         }
         for level, key in keys.items():
             r = _get(level, key, labels[level])

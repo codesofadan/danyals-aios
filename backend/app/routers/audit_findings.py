@@ -31,6 +31,7 @@ from app.services.audit_roadmap import (
     PHASE_MONTHS,
     effort_table,
 )
+from app.services.audit_report import REPORT_NAME
 from app.services.audit_workbook import BUNDLE_NAME, WORKBOOK_NAME
 
 router = APIRouter(tags=["audits"])
@@ -45,6 +46,7 @@ _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 #: The downloadable pack. Restricted to an allow-list before any path is
 #: resolved, exactly as the legacy sheet download does.
 _DOWNLOADS: dict[str, tuple[str, str]] = {
+    "report": (REPORT_NAME, "text/html; charset=utf-8"),
     "workbook": (WORKBOOK_NAME, _XLSX),
     "bundle": (BUNDLE_NAME, "application/zip"),
     "findings.csv": ("findings.csv", "text/csv"),

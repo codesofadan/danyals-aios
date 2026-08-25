@@ -51,7 +51,17 @@ class AuditFindingsRepo:
         limit: int = 100,
         offset: int = 0,
     ) -> _Rows:
-        sql = "select * from public.audit_findings where audit_id = %s"
+        # Findings THIS audit observed, joined through its own instances.
+        #
+        # NOT `audit_findings.audit_id`: that column is last-writer-wins, so once
+        # a newer audit of the same site upserts a shared cause, the older audit's
+        # report loses it. Instances carry their own `audit_id` and every cause
+        # emits at least one, so this join is both complete and stable over time.
+        sql = (
+            "select f.* from public.audit_findings f"
+            " where exists (select 1 from public.audit_finding_instances i"
+            "               where i.finding_id = f.id and i.audit_id = %s)"
+        )
         params: list[Any] = [audit_id]
         for column, value in (
             ("dimension", dimension), ("pillar", pillar),
@@ -59,14 +69,14 @@ class AuditFindingsRepo:
             ("check_id", check_id),
         ):
             if value:
-                sql += f" and {column} = %s"
+                sql += f" and f.{column} = %s"
                 params.append(value)
         # Worst first, then widest blast radius. Deterministic tail-break on
         # check_id so two calls never disagree about ordering.
         sql += (
-            " order by case severity when 'critical' then 0 when 'major' then 1"
-            "                        when 'minor' then 2 else 3 end,"
-            " instance_count desc, check_id limit %s offset %s"
+            " order by case f.severity when 'critical' then 0 when 'major' then 1"
+            "                          when 'minor' then 2 else 3 end,"
+            " f.instance_count desc, f.check_id limit %s offset %s"
         )
         params += [min(max(limit, 1), _MAX_PAGE), max(offset, 0)]
         with rls_connection(self._user_id) as cur:
@@ -76,7 +86,9 @@ class AuditFindingsRepo:
     def finding_count(self, audit_id: str) -> int:
         with rls_connection(self._user_id) as cur:
             cur.execute(
-                "select count(*) as c from public.audit_findings where audit_id = %s",
+                "select count(*) as c from public.audit_findings f"
+                " where exists (select 1 from public.audit_finding_instances i"
+                "               where i.finding_id = f.id and i.audit_id = %s)",
                 (audit_id,),
             )
             row = cur.fetchone()
