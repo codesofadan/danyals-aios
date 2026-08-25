@@ -40,3 +40,8 @@ docs/deliverables/*.txt
 # It was never committed; this entry exists so it can never be added by accident.
 whatsapp chats, media and calls/
 *.opus
+
+# Audit artifact store (AUDIT_ARTIFACT_DIR). Generated per run: report PDFs, the
+# workbook and the CSV pack. Client data and megabytes of it - it belongs on the
+# volume the worker writes to, never in git.
+/data/
