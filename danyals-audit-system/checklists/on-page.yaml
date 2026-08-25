@@ -1002,7 +1002,7 @@ checks:
     owner_agent: B5
     severity_default: critical
     data_sources: [crawled_html, rendered_html]
-    analyzer: audit_engine.analyzers.penalties.hidden_content
+    analyzer: audit_engine.analyzers.rendering.check_hidden_content
     automation: full
 
   - id: ON-109

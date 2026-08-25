@@ -263,7 +263,7 @@ checks:
     owner_agent: B3
     severity_default: major
     data_sources: [crawled_html_raw, rendered_html]
-    analyzer: audit_engine.analyzers.rendering.js
+    analyzer: audit_engine.analyzers.rendering.check_javascript_rendering
     automation: full
 
   - id: TECH-029
@@ -281,7 +281,7 @@ checks:
     owner_agent: B3
     severity_default: critical
     data_sources: [rendered_html_mobile, psi_mobile]
-    analyzer: audit_engine.analyzers.rendering.mobile
+    analyzer: audit_engine.analyzers.rendering.check_mobile_rendering
     automation: full
 
   - id: TECH-031
@@ -290,7 +290,7 @@ checks:
     owner_agent: B3
     severity_default: major
     data_sources: [crawled_html_raw, rendered_html]
-    analyzer: audit_engine.analyzers.rendering.csr_issues
+    analyzer: audit_engine.analyzers.rendering.check_client_side_rendering
     automation: full
 
   - id: TECH-032
@@ -299,7 +299,7 @@ checks:
     owner_agent: B3
     severity_default: major
     data_sources: [crawled_html_raw, rendered_html]
-    analyzer: audit_engine.analyzers.rendering.dom_diff
+    analyzer: audit_engine.analyzers.rendering.check_dom_content_comparison
     automation: full
 
   - id: TECH-033
@@ -308,7 +308,7 @@ checks:
     owner_agent: B3
     severity_default: major
     data_sources: [rendered_html]
-    analyzer: audit_engine.analyzers.rendering.js_hidden
+    analyzer: audit_engine.analyzers.rendering.check_js_hidden_content
     automation: full
 
   - id: TECH-034
@@ -317,7 +317,7 @@ checks:
     owner_agent: B3
     severity_default: minor
     data_sources: [rendered_html]
-    analyzer: audit_engine.analyzers.rendering.lazy_load_indexing
+    analyzer: audit_engine.analyzers.rendering.check_lazy_load_indexing
     automation: full
 
   # ----- Structured Data (4) -----
@@ -455,7 +455,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi, rendered_html]
-    analyzer: audit_engine.analyzers.performance.dom_size
+    analyzer: audit_engine.analyzers.rendering.check_dom_size
     automation: full
 
   # ----- Compression & Caching (5) -----
@@ -604,7 +604,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [rendered_html, screenshot_breakpoints]
-    analyzer: audit_engine.analyzers.mobile.responsive
+    analyzer: audit_engine.analyzers.rendering.check_responsive_design
     automation: full
 
   - id: TECH-066

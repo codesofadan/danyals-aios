@@ -51,6 +51,7 @@ from audit_engine.analyzers import psi_detail as _psi_detail_checks  # noqa: F40
 from audit_engine.analyzers import rollups as _rollup_checks  # noqa: F401
 from audit_engine.analyzers import network as _network_checks  # noqa: F401
 from audit_engine.analyzers import media_content as _media_checks  # noqa: F401
+from audit_engine.analyzers import rendering as _rendering_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
@@ -419,6 +420,67 @@ def _persist_psi(artifact_dir: Path, psi_result: Any) -> None:
         )
     except OSError as e:
         log.warning("psi_persist_failed", error=str(e))
+
+
+async def _emit_rendered(
+    *,
+    run_id: int,
+    page_id: int | None,
+    crawl_result: Any,
+    permitted: frozenset[str],
+) -> list[Finding]:
+    """Render the homepage in a real browser and run the `rendered` checks.
+
+    ONE page, not the whole crawl: rendering is a metered allowance and the
+    questions these checks answer - does the content need JavaScript, does the
+    title exist before render - are answered by the template, not by every URL.
+
+    Gated on `free_quota` being permitted, because rendering consumes a monthly
+    budget. `rendered_html` was classed `zero` until this wave, which would have
+    let a free lead-magnet audit burn it silently.
+    """
+    from audit_engine.analyzers.rendering import RenderedPage
+    from audit_engine.integrations.firecrawl import FirecrawlClient
+    from audit_engine.parsers import html as _html_parser
+
+    permitted_ids = _permitted_registered_ids(permitted)
+    wanted = {c for c, r in registry.registered().items() if r.scope == "rendered"}
+    if not (wanted & permitted_ids):
+        return []
+
+    home = next(
+        (cp for cp in getattr(crawl_result, "pages", []) or []
+         if (getattr(cp, "url", "") or "") == getattr(crawl_result, "site_url", "")),
+        None,
+    )
+    raw_html = getattr(home, "html", None) or "" if home is not None else ""
+    raw_parsed = getattr(home, "parsed", None) if home is not None else None
+
+    keys = get_keys()
+    async with FirecrawlClient(api_key=keys.firecrawl) as client:
+        result = await client.render(getattr(crawl_result, "site_url", ""))
+
+    rendered_parsed = None
+    if result.ok:
+        try:
+            rendered_parsed = _html_parser.parse(result.rendered_html, result.url)
+        except Exception as e:  # a bad render must not end the run
+            log.warning("rendered_parse_failed", error=type(e).__name__)
+
+    page = RenderedPage(
+        url=result.url or getattr(crawl_result, "site_url", ""),
+        raw_html=raw_html, rendered_html=result.rendered_html,
+        raw=raw_parsed, rendered=rendered_parsed,
+        error=result.error,
+        # Firecrawl's default profile is a desktop viewport. Saying so lets
+        # TECH-030 report n_a instead of guessing about mobile.
+        mobile=False,
+    )
+    out: list[Finding] = []
+    for check_id, verdict in run_scope("rendered", page, only=permitted_ids).verdicts:
+        out.append(_finding(run_id=run_id, page_id=page_id, check_id=check_id,
+                            owner=_OWNER_BY_CHECK.get(check_id, ""), verdict=verdict))
+    return out
 
 
 def _emit_psi_findings(
@@ -1101,6 +1163,13 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
         prior_findings=findings,
     ))
+    try:
+        findings.extend(await _emit_rendered(
+            run_id=run_id, page_id=page_id_by_url.get(crawl_result.site_url),
+            crawl_result=crawl_result, permitted=_run_permitted_classes,
+        ))
+    except Exception as e:  # a render is best-effort; the audit stands without it
+        console.print(f"  [yellow]rendered checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
@@ -1788,6 +1857,13 @@ async def _run_full(
         prior_findings=findings,
     ))
     try:
+        findings.extend(await _emit_rendered(
+            run_id=run_id, page_id=page_id_by_url.get(crawl_result.site_url),
+            crawl_result=crawl_result, permitted=_run_permitted_classes,
+        ))
+    except Exception as e:  # a render is best-effort; the audit stands without it
+        console.print(f"  [yellow]rendered checks skipped: {type(e).__name__}: {e}[/yellow]")
+    try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
         console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
@@ -2195,6 +2271,13 @@ async def _run_local(
         permitted_check_ids=_permitted_registered_ids(_run_permitted_classes),
         prior_findings=findings,
     ))
+    try:
+        findings.extend(await _emit_rendered(
+            run_id=run_id, page_id=page_id_by_url.get(crawl_result.site_url),
+            crawl_result=crawl_result, permitted=_run_permitted_classes,
+        ))
+    except Exception as e:  # a render is best-effort; the audit stands without it
+        console.print(f"  [yellow]rendered checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001

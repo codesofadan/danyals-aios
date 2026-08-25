@@ -31,8 +31,6 @@ class Reason(StrEnum):
     NEEDS_BACKLINK_PROVIDER = "needs_backlink_provider"
     #: Needs a paid third-party API that is not backlinks.
     NEEDS_PROVIDER = "needs_provider"
-    #: Needs the page as a browser renders it.
-    NEEDS_RENDERED_DOM = "needs_rendered_dom"
     #: Needs Search Console or server logs, both client-granted.
     NEEDS_SEARCH_CONSOLE = "needs_search_console"
     #: Every input is already available. This is simply not written yet.
@@ -52,9 +50,6 @@ REASON_REQUIRES: dict[Reason, frozenset[str]] = {
     Reason.NEEDS_PROVIDER: frozenset({
         "serper", "serper_geo", "serper_top10", "google_places", "otterly",
         "google_nl", "w3c_validator", "web_fetch", "wikidata",
-    }),
-    Reason.NEEDS_RENDERED_DOM: frozenset({
-        "rendered_html", "rendered_html_mobile", "screenshot_breakpoints",
     }),
     Reason.NEEDS_SEARCH_CONSOLE: frozenset({
         "gsc_coverage", "gsc_ctr", "gsc_queries", "server_logs", "crawl_log",
@@ -88,9 +83,6 @@ NOTES: dict[Reason, str] = {
         "at $0.024 per request and would supply this.",
     Reason.NEEDS_PROVIDER:
         "Requires a paid third-party API that is not currently called for this check.",
-    Reason.NEEDS_RENDERED_DOM:
-        "Needs the page as a browser renders it. Firecrawl is available (1000 credits/month) "
-        "and avoids shipping Chromium beside the API.",
     Reason.NEEDS_SEARCH_CONSOLE:
         "Needs data only the site owner can grant. Google OAuth credentials exist; "
         "the per-client grant does not.",
@@ -230,30 +222,12 @@ LEDGER: dict[str, LedgerEntry] = dict([
        "Needs the HTTP response of each IMAGE, not of the page. The crawler fetches HTML documents only, so this needs an image-fetch pass with its own budget."),
     _e("ON-083", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Mobile content parity analysis
-    _e("ON-108", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # Hidden content detection
     _e("ON-112", Reason.OWNER_DECISION, "O-1 follow-up",
        "No matching subpoint in the checklist. Which checks constitute user value is a product decision, not a taxonomy lookup."),
     _e("TECH-005", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawlability analysis
     _e("TECH-007", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawl budget optimization
-    _e("TECH-028", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # JavaScript rendering analysis
-    _e("TECH-030", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # Mobile rendering analysis
-    _e("TECH-031", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # Client side rendering issues
-    _e("TECH-032", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # DOM rendered content comparison
-    _e("TECH-033", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # JS hidden content detection
-    _e("TECH-034", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # Lazy load indexing analysis
-    _e("TECH-049", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # Excessive DOM size analysis
-    _e("TECH-065", Reason.NEEDS_RENDERED_DOM, "Wave 6",
-       NOTES[Reason.NEEDS_RENDERED_DOM]),  # Responsive design validation
     _e("TECH-070", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Crawl log analysis
     _e("TECH-071", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
@@ -274,8 +248,8 @@ LEDGER: dict[str, LedgerEntry] = dict([
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 83
-LEDGER_FLOOR = 83
+LEDGER_CEILING = 74
+LEDGER_FLOOR = 74
 
 
 def ledgered() -> dict[str, LedgerEntry]:
