@@ -111,6 +111,11 @@ celery_app = Celery(
         # per POST /site-builder/analyze), so no beat entry / overlap-lock is needed -
         # each job id is claimed exactly once by its own row.
         "app.modules.site_builder.tasks",
+        # Design Replication (stage 6): run_replica ('aios.replica.run') - the full
+        # URL -> Elementor-draft pipeline under @aios_job on the BROWSER queue (it
+        # drives a ~30-60s Playwright capture). Event-driven (enqueued per POST
+        # /replica), idempotent on (client, url, slug), so no beat entry is needed.
+        "workers.tasks.replica",
         # Reports/cron: the AUTONOMOUS reporting jobs (refresh_client_audits weekly,
         # generate_monthly_reports monthly, sweep_offpage_monitors weekly). All are
         # BEAT-driven (see the beat_schedule below) and idempotent: the audit refresh

@@ -476,6 +476,38 @@ class JobRunsRepo:
             cur.execute(f"select {_RUN_COLUMNS} from public.job_runs where id = %s", (run_id,))
             return cur.fetchone()
 
+    def get_run_by_celery_task_id(
+        self, task_id: str, *, job_name: str | None = None
+    ) -> dict[str, Any] | None:
+        """The run a given Celery message became - the ENQUEUE-time handle.
+
+        A router that enqueues returns the Celery message id immediately, but the
+        ``job_runs`` row is only created at first CLAIM, on the worker - so a status
+        endpoint keyed by that handle reads through this (row absent = accepted, not
+        yet claimed). ``job_name`` scopes the lookup to one logical job, so a caller
+        mapping the row into a module-specific response shape can never be handed
+        some other module's run. Newest first, defensively: the id is unique per
+        send in practice, but nothing at the database enforces that.
+        """
+        query = f"select {_RUN_COLUMNS} from public.job_runs where celery_task_id = %s"
+        params: list[Any] = [task_id]
+        if job_name is not None:
+            query += " and job_name = %s"
+            params.append(job_name)
+        query += " order by created_at desc limit 1"
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchone()
+
+    def get_run_by_idempotency_key(self, key: str) -> dict[str, Any] | None:
+        """The run that owns a unit of work (the partial unique index -> at most one)."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                f"select {_RUN_COLUMNS} from public.job_runs where idempotency_key = %s",
+                (key,),
+            )
+            return cur.fetchone()
+
     def list_dead_letters(self, *, open_only: bool = True, limit: int = 50, offset: int = 0) -> _Rows:
         """The DLQ. Oldest first when open: the longest-unresolved lost work is the
         most urgent, which is the opposite of every other feed in the product."""

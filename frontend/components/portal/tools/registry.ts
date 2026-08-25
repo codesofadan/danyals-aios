@@ -12,6 +12,7 @@ import type { ComponentType } from "react";
 import ClientOnboardingActions from "./ClientOnboardingActions";
 import DataImportActions from "./DataImportActions";
 import BillingActions from "./BillingActions";
+import KeywordResearchActions from "./KeywordResearchActions";
 
 /** Props every action panel receives — `accent` is the tool group's colour so the
  * panel's icon matches the page's hero. */
@@ -22,6 +23,7 @@ const TOOL_ACTIONS: Record<string, ComponentType<ToolActionProps>> = {
   "client-onboarding": ClientOnboardingActions,
   "data-import": DataImportActions,
   billing: BillingActions,
+  "keyword-research": KeywordResearchActions,
 };
 
 export function getToolActions(slug: string): ComponentType<ToolActionProps> | null {

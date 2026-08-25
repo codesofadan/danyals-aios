@@ -22,10 +22,13 @@ the blocking psycopg call with ``asyncio.to_thread`` and records an activity ent
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import csv
+import io
+from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from app.core.auth import CurrentUser, require_feature, require_module_perm, require_perm
 from app.core.pagination import PageDep
@@ -123,6 +126,67 @@ async def list_keywords(
         offset=page.offset,
     )
     return [KeywordResponse.from_row(r) for r in rows]
+
+
+# The CSV export contract: a STABLE, pinned header row (a spreadsheet formula or a
+# re-import may key on it), a hard row cap, and ONLY clean columns - the internal
+# client_id never appears (the same rule every JSON response follows).
+_EXPORT_COLUMNS: tuple[str, ...] = (
+    "keyword", "volume", "difficulty", "intent", "winnable", "cpc", "updated_at"
+)
+_EXPORT_ROW_CAP = 5000
+_EXPORT_FILENAME = "keywords.csv"
+
+
+def _export_cell(row: dict[str, Any], col: str) -> str:
+    """One CSV cell: ``''`` for NULL (never the string ``None``), booleans as
+    ``true``/``false``, the numeric metrics at 2dp (matching the JSON rounding),
+    and timestamps in ISO-8601."""
+    value = row.get(col)
+    if value is None:
+        return ""
+    if col == "winnable":
+        return "true" if value else "false"
+    if col in ("difficulty", "cpc"):
+        return f"{float(value):.2f}"
+    if col == "updated_at" and hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
+
+
+@router.get("/keyword-research/keywords/export.csv")
+async def export_keywords_csv(
+    repo: KeywordRepoDep,
+    _feat: Feature,
+    _user: ViewReports,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+) -> StreamingResponse:
+    """The bank as a ``text/csv`` download - the missing OUT half of the CSV import.
+
+    Guarded exactly like the module's other reads (feature + ``view_reports``) and
+    client-scoped exactly like the list route (``clientId`` narrows; the repo read is
+    RLS-scoped either way). Best opportunities first, capped at 5000 rows; streamed
+    line-by-line with a Content-Disposition filename."""
+    rows = await asyncio.to_thread(
+        repo.list_keywords, client_id=client_id, limit=_EXPORT_ROW_CAP, offset=0
+    )
+
+    def _lines() -> Iterator[str]:
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\r\n")
+        writer.writerow(_EXPORT_COLUMNS)
+        yield buf.getvalue()
+        for row in rows:
+            buf.seek(0)
+            buf.truncate()
+            writer.writerow([_export_cell(row, col) for col in _EXPORT_COLUMNS])
+            yield buf.getvalue()
+
+    return StreamingResponse(
+        _lines(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_EXPORT_FILENAME}"'},
+    )
 
 
 @router.get("/keyword-research/stats", response_model=KeywordStats)

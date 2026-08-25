@@ -8,7 +8,7 @@ Three gates stack on every route, and each is pinned INDEPENDENTLY here - a test
 that only ever checks the happy path would not notice one of them vanishing:
 
 1. auth            - swept for the whole app by ``tests/test_route_auth_guard.py``;
-                     re-pinned for this module's 7 routes below.
+                     re-pinned for this module's 8 routes below.
 2. keyword_research FEATURE grant - every route.
 3. view_reports (reads) / run_research (paid research + mutations).
 """
@@ -16,6 +16,7 @@ that only ever checks the happy path would not notice one of them vanishing:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -36,6 +37,7 @@ _KEYWORD_KEYS = {
 # (method, path) for every route the module publishes.
 _READ_ROUTES: list[tuple[str, str]] = [
     ("GET", "/api/v1/keyword-research/keywords"),
+    ("GET", "/api/v1/keyword-research/keywords/export.csv"),
     ("GET", "/api/v1/keyword-research/stats"),
     ("GET", "/api/v1/keyword-research/workspace"),
     ("GET", "/api/v1/keyword-research/clusters"),
@@ -728,3 +730,57 @@ async def test_patch_null_target_url_and_tags_normalise_to_empty(
     # The columns are NOT NULL with '' / '{}' defaults, so a null clears rather than
     # writing NULL.
     assert repo.updates == [("KW-00001", {"target_url": "", "tags": []})]
+
+
+# --------------------------------------------------------------------------- #
+# 7. The CSV export.
+# --------------------------------------------------------------------------- #
+_EXPORT_PATH = "/api/v1/keyword-research/keywords/export.csv"
+_EXPORT_HEADER = "keyword,volume,difficulty,intent,winnable,cpc,updated_at"
+
+
+async def test_export_csv_happy_path_body_shape(
+    client: httpx.AsyncClient, repo: FakeKeywordRepo, wire: Callable[..., None]
+) -> None:
+    """The wire contract: text/csv + a save-as filename, the STABLE pinned header,
+    one line per keyword with the metrics at 2dp, booleans as true/false, NULLs as
+    empty cells (never the string ``None``), and a comma-carrying keyword quoted."""
+    repo.keywords = [
+        _keyword_row(updated_at=datetime(2026, 8, 25, 12, 30, tzinfo=UTC)),
+        _keyword_row(
+            keyword="emergency plumber, 24h", volume=90, difficulty=12.5,
+            cpc=1.0, intent=None, winnable=None,
+        ),
+    ]
+    wire("viewer")
+    resp = await client.get(_EXPORT_PATH)
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert resp.headers["content-disposition"] == 'attachment; filename="keywords.csv"'
+    lines = resp.text.splitlines()
+    assert lines[0] == _EXPORT_HEADER
+    assert lines[1] == "invisalign cost,8100,42.00,Commercial,true,6.40,2026-08-25T12:30:00+00:00"
+    assert lines[2] == '"emergency plumber, 24h",90,12.50,,,1.00,'
+    assert len(lines) == 3
+
+
+async def test_export_csv_scopes_by_client_and_caps_at_5000(
+    client: httpx.AsyncClient, repo: FakeKeywordRepo, wire: Callable[..., None]
+) -> None:
+    # Client scoping EXACTLY as the list route: clientId passes through to the
+    # RLS-scoped repo read; the cap is a hard limit, not a page default.
+    wire("viewer")
+    resp = await client.get(_EXPORT_PATH, params={"clientId": "cl-1"})
+    assert resp.status_code == 200
+    assert repo.list_kwargs is not None
+    assert repo.list_kwargs["client_id"] == "cl-1"
+    assert repo.list_kwargs["limit"] == 5000 and repo.list_kwargs["offset"] == 0
+
+
+async def test_export_csv_of_an_empty_bank_is_just_the_header(
+    client: httpx.AsyncClient, repo: FakeKeywordRepo, wire: Callable[..., None]
+) -> None:
+    wire("viewer")
+    resp = await client.get(_EXPORT_PATH)
+    assert resp.status_code == 200
+    assert resp.text.splitlines() == [_EXPORT_HEADER]

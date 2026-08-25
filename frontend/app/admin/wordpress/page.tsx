@@ -1,4 +1,5 @@
 import TopBar from "@/components/TopBar";
+import DesignReplicator from "@/components/wordpress/DesignReplicator";
 import WpConnections from "@/components/wordpress/WpConnections";
 
 export default function WordPressConnectionsPage() {
@@ -11,6 +12,7 @@ export default function WordPressConnectionsPage() {
         hideSearch
       />
       <WpConnections />
+      <DesignReplicator />
     </>
   );
 }
