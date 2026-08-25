@@ -173,13 +173,17 @@ def _make(check_id: str, inputs: tuple[str, ...], label: str, advice: str, minim
     """Register one rollup. Kept as a factory so the twenty-two below read as a
     table rather than twenty-two near-identical function bodies."""
 
-    @rollup(check_id, inputs=inputs, min_inputs_ran=minimum)
     def _fn(ctx: RollupContext, _i=inputs, _l=label, _a=advice) -> Verdict:
         return _verdict(ctx, _i, label=_l, low_advice=_a)
 
+    # Name it BEFORE registering. The registry records __qualname__ as the
+    # check's dotted path, and a factory-made closure reports
+    # `rollups._make.<locals>._fn` for all eighteen - which is useless in a
+    # coverage sheet and cannot be matched against the checklist.
     _fn.__name__ = f"check_{check_id.lower().replace('-', '_')}"
+    _fn.__qualname__ = _fn.__name__
     _fn.__doc__ = f"{check_id} - {label}, over {len(inputs)} declared inputs."
-    return _fn
+    return rollup(check_id, inputs=inputs, min_inputs_ran=minimum)(_fn)
 
 
 # --------------------------------------------------------------------------

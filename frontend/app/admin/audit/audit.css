@@ -181,3 +181,46 @@ a.au-art[aria-disabled="true"] { opacity: .32; cursor: not-allowed; pointer-even
 .au-share input { margin-top: 2px; accent-color: var(--violet); width: 15px; height: 15px; }
 .au-share b { display: block; font-size: 12px; font-weight: 700; color: var(--ink); }
 .au-share em { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* --------------------------------------------------------------------------
+   Load-older-audits control.
+
+   The list took the server default of 50 with no way to ask for more, so an
+   agency past its first fifty audits had older runs no screen could reach -
+   and the filters and search operated on that window silently, so "failed"
+   could render as "no failures".
+   -------------------------------------------------------------------------- */
+
+.au-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.au-more-count {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.au-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.au-more-btn:hover:not(:disabled) { background: var(--surface-2); }
+.au-more-btn:disabled { opacity: 0.5; cursor: default; }
+.au-more-btn .material-symbols-rounded { font-size: 18px; }

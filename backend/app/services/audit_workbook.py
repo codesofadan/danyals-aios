@@ -33,7 +33,7 @@ import csv
 import json
 import zipfile
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -106,12 +106,12 @@ class WorkbookResult:
 # Reading
 # --------------------------------------------------------------------------- #
 
-def _fetch_all(cur, sql: str, params: tuple) -> list[dict[str, Any]]:
+def _fetch_all(cur: Any, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     cur.execute(sql, params)
-    return cur.fetchall()
+    return [dict(r) for r in cur.fetchall()]
 
 
-def _iter_instances(cur, audit_id: str) -> Iterator[dict[str, Any]]:
+def _iter_instances(cur: Any, audit_id: str) -> Iterator[dict[str, Any]]:
     """Stream instances in batches - a 500-page site can hold tens of thousands
     and nothing here may materialise them all at once."""
     offset = 0
@@ -222,7 +222,7 @@ COVERAGE_HEADERS = (
 )
 
 
-def _pillar_rows(rollups: list[dict]) -> list[list[Any]]:
+def _pillar_rows(rollups: list[dict[str, Any]]) -> list[list[Any]]:
     by_key = {r["key"]: r for r in rollups if r["level"] == "dimension"}
     rows = []
     for key in _DIMENSION_ORDER:
@@ -245,7 +245,7 @@ def _pillar_rows(rollups: list[dict]) -> list[list[Any]]:
     return rows
 
 
-def _subpoint_rows(rollups: list[dict]) -> list[list[Any]]:
+def _subpoint_rows(rollups: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for r in rollups:
         if r["level"] != "subpoint":
@@ -265,7 +265,7 @@ def _subpoint_rows(rollups: list[dict]) -> list[list[Any]]:
     return rows
 
 
-def _finding_rows(findings: list[dict]) -> list[list[Any]]:
+def _finding_rows(findings: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for f in findings:
         score = _priority_score(f["severity"] or "", "fail", None)
@@ -292,7 +292,7 @@ def _instance_row(i: dict[str, Any]) -> list[Any]:
     ]
 
 
-def _page_rows(pages: list[dict]) -> list[list[Any]]:
+def _page_rows(pages: list[dict[str, Any]]) -> list[list[Any]]:
     return [[
         p["url"], p["template_id"], p["page_type"] or "", p["http_status"],
         p["indexable"], p["crawl_depth"], p["word_count"], p["is_orphan"],
@@ -301,7 +301,7 @@ def _page_rows(pages: list[dict]) -> list[list[Any]]:
     ] for p in pages]
 
 
-def _roadmap_rows(items: list[dict]) -> list[list[Any]]:
+def _roadmap_rows(items: list[dict[str, Any]]) -> list[list[Any]]:
     """The plan, in the order it should be worked.
 
     Phases are RELATIVE windows, never dates - nothing an audit measures supports
@@ -318,7 +318,7 @@ def _roadmap_rows(items: list[dict]) -> list[list[Any]]:
     ] for i in items]
 
 
-def _coverage_rows(coverage: dict) -> list[list[Any]]:
+def _coverage_rows(coverage: dict[str, Any]) -> list[list[Any]]:
     """One row per check in the whole registry - including the ones that did not
     run. This is the sheet that makes "we could not check this" visible, and it
     is also where the cost of each check is legible."""
@@ -348,7 +348,7 @@ def _coverage_rows(coverage: dict) -> list[list[Any]]:
 # Writing
 # --------------------------------------------------------------------------- #
 
-def _write_csv(path: Path, headers: tuple[str, ...], rows) -> int:
+def _write_csv(path: Path, headers: tuple[str, ...], rows: Iterable[Any]) -> int:
     n = 0
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)

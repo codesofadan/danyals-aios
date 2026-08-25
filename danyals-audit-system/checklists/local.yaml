@@ -342,7 +342,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.local.prominence
+    analyzer: audit_engine.analyzers.rollups.check_loc_037
     automation: full
 
   - id: LOC-038
@@ -351,7 +351,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.local.gbp_health
+    analyzer: audit_engine.analyzers.rollups.check_loc_038
     automation: full
 
   - id: LOC-039
@@ -360,7 +360,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.local.citation_strength
+    analyzer: audit_engine.analyzers.rollups.check_loc_039
     automation: full
 
   - id: LOC-040
@@ -369,5 +369,5 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.local.overall
+    analyzer: audit_engine.analyzers.rollups.check_loc_040
     automation: full

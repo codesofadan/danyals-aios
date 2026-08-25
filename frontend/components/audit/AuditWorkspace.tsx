@@ -12,6 +12,7 @@ import {
   type Tier,
 } from "@/lib/audit";
 import {
+  AUDITS_PAGE,
   useAudits,
   useAuditEstimate,
   useAuditStats,
@@ -56,7 +57,12 @@ function scoreClass(score: number) {
 const PAID_TYPES = new Set<AuditTypeKey>(auditTypes.filter((t) => t.paid).map((t) => t.key));
 
 export default function AuditWorkspace() {
-  const auditsQ = useAudits(); // live: GET /audits, polls while a job is in flight
+  // How many server pages of history to hold. The list took the server default
+  // of 50 with no way to ask for more, so an agency past its first fifty audits
+  // had older runs no screen could reach - and the filters and search operated
+  // on that window silently, so "failed" could render as "no failures".
+  const [pages, setPages] = useState(1);
+  const auditsQ = useAudits(pages); // live: GET /audits, polls while a job is in flight
   const statsQ = useAuditStats();
   const clientsQ = useClients();
   const createAudit = useCreateAudit();
@@ -409,6 +415,25 @@ export default function AuditWorkspace() {
               </tbody>
             </table>
           </div>
+          {/* A full page means there is probably more history behind it. The
+              count is the loaded window, stated plainly, so a filter that finds
+              nothing cannot be mistaken for a site that has nothing. */}
+          {rows.length >= pages * AUDITS_PAGE && (
+            <div className="au-more">
+              <span className="au-more-count">
+                Showing the {rows.length.toLocaleString()} most recent audits
+              </span>
+              <button
+                type="button"
+                className="au-more-btn"
+                disabled={auditsQ.isFetching}
+                onClick={() => setPages(pages + 1)}
+              >
+                <span className="material-symbols-rounded">expand_more</span>
+                {auditsQ.isFetching ? "Loading..." : "Load older audits"}
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Run new audit */}

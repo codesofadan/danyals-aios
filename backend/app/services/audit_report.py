@@ -377,7 +377,8 @@ def render(data: ReportInput) -> str:
 
     # ---- 03 by subpoint -----------------------------------------------------
     scored = [r for r in subs if r.get("checks_ran") and r.get("findings_open")]
-    scored.sort(key=lambda r: (num(r["score"]) if r["score"] is not None else 999))
+    # 999 sorts an unscored subpoint last WITHOUT pretending it scored 999.
+    scored.sort(key=lambda r: float(num(r["score"]) or 0) if r["score"] is not None else 999.0)
     if scored:
         o.append("<section>")
         o.append(_sec("03", "Weakest areas",

@@ -692,7 +692,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.off_page.authority_composite
+    analyzer: audit_engine.analyzers.rollups.check_off_074
     automation: full
 
   - id: OFF-075
@@ -710,7 +710,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.off_page.toxicity_risk
+    analyzer: audit_engine.analyzers.rollups.check_off_076
     automation: full
 
   - id: OFF-077
@@ -719,7 +719,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.off_page.link_quality
+    analyzer: audit_engine.analyzers.rollups.check_off_077
     automation: full
 
   - id: OFF-078
@@ -728,7 +728,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.off_page.backlink_relevance
+    analyzer: audit_engine.analyzers.rollups.check_off_078
     automation: full
 
   - id: OFF-079
@@ -737,7 +737,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.off_page.brand_popularity
+    analyzer: audit_engine.analyzers.rollups.check_off_079
     automation: full
 
   - id: OFF-080
@@ -746,5 +746,5 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.off_page.overall
+    analyzer: audit_engine.analyzers.rollups.check_off_080
     automation: full

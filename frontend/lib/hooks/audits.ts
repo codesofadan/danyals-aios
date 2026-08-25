@@ -29,11 +29,36 @@ export type AuditStats = {
 
 const isPending = (r: AuditRow) => r.status === "queued" || r.status === "running";
 
-/** The audit list. Polls every 2.5s WHILE any job is in flight, then stops. */
-export function useAudits() {
+//: The server caps a page at 200 and defaults to 50. Asking for the maximum in
+//: one request keeps the polling cheap while covering most agencies' history in
+//: a single call; anything beyond it is fetched by raising `pages`.
+export const AUDITS_PAGE = 200;
+
+/** The audit list. Polls every 2.5s WHILE any job is in flight, then stops.
+ *
+ * `pages` fetches N server pages and concatenates them. The list used to take
+ * the server default of 50 with no way to ask for more, so an agency past its
+ * first fifty audits had older runs that no screen could reach - and the
+ * filters and search silently operated on that window, so "failed" could render
+ * as "no failures".
+ */
+export function useAudits(pages = 1) {
+  const wanted = Math.max(1, pages);
   return useQuery({
-    queryKey: AUDITS_KEY,
-    queryFn: () => api.get<AuditRow[]>("/audits"),
+    queryKey: [...AUDITS_KEY, wanted],
+    queryFn: async () => {
+      const out: AuditRow[] = [];
+      for (let i = 0; i < wanted; i += 1) {
+        const batch = await api.get<AuditRow[]>(
+          `/audits?limit=${AUDITS_PAGE}&offset=${i * AUDITS_PAGE}`,
+        );
+        out.push(...batch);
+        // A short page is the last page. Asking for the next one would be a
+        // wasted round trip on every poll.
+        if (batch.length < AUDITS_PAGE) break;
+      }
+      return out;
+    },
     refetchInterval: (query) => {
       const rows = query.state.data as AuditRow[] | undefined;
       return rows?.some(isPending) ? 2500 : false;

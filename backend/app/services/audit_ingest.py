@@ -91,7 +91,9 @@ def scope_key_for(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def load_artifacts(artifact_dir: str | Path) -> tuple[list[dict], list[dict], dict]:
+def load_artifacts(
+    artifact_dir: str | Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Read the three artifacts. A missing file is an empty one, not a crash:
     an older engine build simply has nothing to ingest at these altitudes."""
     d = Path(artifact_dir)
@@ -116,9 +118,32 @@ def load_artifacts(artifact_dir: str | Path) -> tuple[list[dict], list[dict], di
     )
 
 
+class IngestError(RuntimeError):
+    """A write the ingest needed did not happen."""
+
+
+def _one(cur: Any, what: str) -> dict[str, Any]:
+    """The row an INSERT ... RETURNING must have produced.
+
+    ``fetchone()`` returns None when the statement matched nothing, and an RLS
+    refusal does exactly that: it does not raise, it writes zero rows. Indexing
+    the result directly turned that into a bare `TypeError: 'NoneType' object is
+    not subscriptable` several frames from the cause. This says which write was
+    refused.
+    """
+    row = cur.fetchone()
+    if row is None:
+        raise IngestError(
+            f"{what} returned no row. The write was refused - most likely by "
+            f"row-level security for this user - rather than failing outright."
+        )
+    return dict(row)
+
+
 def prepare(
-    findings: list[dict], pages: list[dict], coverage: dict, *, site_url: str = "",
-) -> tuple[list[Cause], list[dict], list[R.Rollup], str]:
+    findings: list[dict[str, Any]], pages: list[dict[str, Any]],
+    coverage: dict[str, Any], *, site_url: str = "",
+) -> tuple[list[Cause], list[dict[str, Any]], list[R.Rollup], str]:
     """The pure half: artifacts in, causes + templated pages + rollups out.
 
     Separated from the write so the whole derivation can be tested without a
@@ -189,7 +214,10 @@ def ingest(
         page_rows = []
         for p in pages:
             url = p.get("url") or ""
-            c = counts.get(url, {})
+            # Named, not `c`. The same name was reused below for a Cause, so
+            # mypy narrowed it to dict[str, int] and could not check any of the
+            # finding-ingest loop - 21 of this package's errors came from here.
+            sev = counts.get(url, {})
             page_rows.append((
                 audit_id, client_id, run_uuid, p.get("page_id"), url, url_hash(url),
                 p.get("canonical_url"), p.get("page_type"), p.get("template_id") or "",
@@ -197,8 +225,8 @@ def ingest(
                 p.get("meta_description"), p.get("h1"), p.get("word_count"),
                 _as_bool(p.get("indexable")), p.get("crawl_depth"),
                 bool(_as_bool(p.get("is_orphan"))),
-                c.get("total", 0), c.get("critical", 0), c.get("major", 0),
-                c.get("minor", 0), c.get("info", 0), c.get("critical", 0) == 0,
+                sev.get("total", 0), sev.get("critical", 0), sev.get("major", 0),
+                sev.get("minor", 0), sev.get("info", 0), sev.get("critical", 0) == 0,
             ))
         if page_rows:
             cur.executemany(
@@ -268,7 +296,7 @@ def ingest(
                     json.dumps(c.evidence), c.remediation, audit_id, audit_id,
                 ),
             )
-            finding_id = cur.fetchone()["id"]
+            finding_id = _one(cur, "audit_findings upsert")["id"]
             result.findings += 1
 
             # --- instances: replaced for this finding, then re-inserted. The
@@ -342,7 +370,7 @@ def ingest(
             "select count(*) as c from public.audit_finding_instances where audit_id = %s",
             (audit_id,),
         )
-        result.instances = cur.fetchone()["c"]
+        result.instances = _one(cur, "audit_finding_instances count")["c"]
 
     if result.capped:
         log.warning(
@@ -411,7 +439,7 @@ def store_roadmap(
                 len(roadmap.items), len(roadmap.planned), len(roadmap.backlog),
             ),
         )
-        roadmap_id = cur.fetchone()["id"]
+        roadmap_id = _one(cur, "audit_roadmaps insert")["id"]
 
         rows = [
             (

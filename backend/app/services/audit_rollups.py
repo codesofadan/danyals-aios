@@ -272,9 +272,10 @@ def build_rollups(
         subcat = c.subcategory or (spec.subcategory if spec else "")
         dimension = c.dimension or (spec.dimension if spec else "")
         for level, key in _bucket_keys(pillar, subcat, dimension).items():
-            r = rollups.get((level, key))
-            if r is None:
+            bucket = rollups.get((level, key))
+            if bucket is None:
                 continue
+            r = bucket
             r.findings_open += 1
             r.instances_open += c.instance_count
             r.severity_counts[c.severity] = r.severity_counts.get(c.severity, 0) + 1

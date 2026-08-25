@@ -45,7 +45,7 @@ checks:
     owner_agent: A2
     severity_default: major
     data_sources: [computed]
-    analyzer: audit_engine.scorers.search_intent.alignment
+    analyzer: audit_engine.analyzers.rollups.check_on_004
     automation: full
 
   - id: ON-005
@@ -191,7 +191,7 @@ checks:
     owner_agent: A4
     severity_default: major
     data_sources: [site_pages, internal_links]
-    analyzer: audit_engine.analyzers.topics.internal_relevance
+    analyzer: audit_engine.analyzers.media_content.check_internal_topical_relevance
     automation: full
 
   - id: ON-021
@@ -751,7 +751,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [robots, crawled_html]
-    analyzer: audit_engine.analyzers.crawlability.on_page
+    analyzer: audit_engine.analyzers.page_tech.check_crawlability_on_page
     automation: full
 
   # ----- Mobile (2) -----
@@ -761,7 +761,7 @@ checks:
     owner_agent: B2
     severity_default: critical
     data_sources: [psi_mobile]
-    analyzer: audit_engine.analyzers.mobile.friendliness
+    analyzer: audit_engine.analyzers.psi_detail.check_mobile_friendliness_on_page
     automation: full
 
   - id: ON-083
@@ -780,7 +780,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi, crux]
-    analyzer: audit_engine.analyzers.cwv.seo_impact
+    analyzer: audit_engine.analyzers.psi_detail.check_cwv_seo_impact
     automation: full
 
   - id: ON-085
@@ -789,7 +789,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.cwv.lcp_element
+    analyzer: audit_engine.analyzers.psi_detail.check_lcp_element
     automation: full
 
   - id: ON-086
@@ -798,7 +798,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.cwv.cls_issues
+    analyzer: audit_engine.analyzers.psi_detail.check_cls_issues
     automation: full
 
   - id: ON-087
@@ -807,7 +807,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi, crux]
-    analyzer: audit_engine.analyzers.cwv.inp
+    analyzer: audit_engine.analyzers.psi_detail.check_inp
     automation: full
 
   - id: ON-088
@@ -816,7 +816,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi, crux]
-    analyzer: audit_engine.analyzers.cwv.page_speed_impact
+    analyzer: audit_engine.analyzers.psi_detail.check_page_speed_impact
     automation: full
 
   - id: ON-089
@@ -909,7 +909,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [site_pages]
-    analyzer: audit_engine.analyzers.url.slug
+    analyzer: audit_engine.analyzers.page_tech.check_slug
     automation: full
 
   - id: ON-099
@@ -1048,7 +1048,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.topical_relevance
+    analyzer: audit_engine.analyzers.rollups.check_on_113
     automation: full
 
   - id: ON-114
@@ -1057,7 +1057,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.semantic_seo
+    analyzer: audit_engine.analyzers.rollups.check_on_114
     automation: full
 
   - id: ON-115
@@ -1066,7 +1066,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.content_quality
+    analyzer: audit_engine.analyzers.rollups.check_on_115
     automation: full
 
   - id: ON-116
@@ -1075,7 +1075,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.titles
+    analyzer: audit_engine.analyzers.rollups.check_on_116
     automation: full
 
   - id: ON-117
@@ -1084,7 +1084,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.meta
+    analyzer: audit_engine.analyzers.rollups.check_on_117
     automation: full
 
   - id: ON-118
@@ -1093,7 +1093,7 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.on_page_overall
+    analyzer: audit_engine.analyzers.rollups.check_on_118
     automation: full
 
   # ===========================================================================

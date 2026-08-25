@@ -266,7 +266,7 @@ def build(
                 break
             item.phase = phase
             item.sequence = seq
-            budget -= item.effort_points
+            budget -= int(item.effort_points)
             seq += 1
             idx += 1
             if budget <= 0:

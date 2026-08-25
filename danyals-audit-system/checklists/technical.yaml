@@ -31,7 +31,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [sitemap, http_headers, crawled_html]
-    analyzer: audit_engine.analyzers.sitemap.indexability
+    analyzer: audit_engine.analyzers.crawl_graph.check_sitemap_indexability
     automation: full
 
   - id: TECH-004
@@ -40,7 +40,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [sitemap, http_status]
-    analyzer: audit_engine.analyzers.sitemap.url_status
+    analyzer: audit_engine.analyzers.crawl_graph.check_sitemap_url_status
     automation: full
 
   # ----- Crawlability & Indexability (5) -----
@@ -59,7 +59,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [crawled_html, http_headers, robots]
-    analyzer: audit_engine.analyzers.indexability.overall
+    analyzer: audit_engine.analyzers.headers.check_indexability
     automation: full
 
   - id: TECH-007
@@ -86,7 +86,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [sitemap, internal_links]
-    analyzer: audit_engine.analyzers.crawl.orphans
+    analyzer: audit_engine.analyzers.crawl_graph.check_orphan_urls
     automation: full
 
   # ----- Speed Tests (1) -----
@@ -115,7 +115,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [http_status, internal_links]
-    analyzer: audit_engine.analyzers.errors.four_oh_four
+    analyzer: audit_engine.analyzers.crawl_graph.check_404_errors
     automation: full
 
   - id: TECH-013
@@ -124,7 +124,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [http_status, crawled_html]
-    analyzer: audit_engine.analyzers.errors.soft_404
+    analyzer: audit_engine.analyzers.crawl_graph.check_soft_404
     automation: full
 
   - id: TECH-014
@@ -133,7 +133,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [http_status]
-    analyzer: audit_engine.analyzers.errors.five_xx
+    analyzer: audit_engine.analyzers.crawl_graph.check_5xx_errors
     automation: full
 
   # ----- Redirects (4) -----
@@ -152,7 +152,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [http_status]
-    analyzer: audit_engine.analyzers.redirects.loops
+    analyzer: audit_engine.analyzers.crawl_graph.check_redirect_loops
     automation: full
 
   - id: TECH-017
@@ -161,7 +161,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [http_status]
-    analyzer: audit_engine.analyzers.redirects.three_oh_one
+    analyzer: audit_engine.analyzers.crawl_graph.check_301_chains
     automation: full
 
   - id: TECH-018
@@ -170,7 +170,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [http_status]
-    analyzer: audit_engine.analyzers.redirects.three_oh_two_misuse
+    analyzer: audit_engine.analyzers.crawl_graph.check_302_misuse
     automation: full
 
   # ----- Canonical (3) -----
@@ -180,7 +180,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.canonical.validate
+    analyzer: audit_engine.analyzers.page_tech.check_canonical_tag
     automation: full
 
   - id: TECH-020
@@ -198,7 +198,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [crawled_html, http_headers]
-    analyzer: audit_engine.analyzers.canonical.conflict
+    analyzer: audit_engine.analyzers.headers.check_canonical_conflict
     automation: full
 
   # ----- URL Parameters & Faceted Nav (6) -----
@@ -208,7 +208,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [sitemap, internal_links]
-    analyzer: audit_engine.analyzers.duplication.urls
+    analyzer: audit_engine.analyzers.crawl_graph.check_duplicate_urls
     automation: full
 
   - id: TECH-023
@@ -217,7 +217,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [internal_links, crawl_graph]
-    analyzer: audit_engine.analyzers.url_params.indexing
+    analyzer: audit_engine.analyzers.crawl_graph.check_url_parameter_indexing
     automation: full
 
   - id: TECH-024
@@ -226,7 +226,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [crawl_graph, internal_links]
-    analyzer: audit_engine.analyzers.url_params.faceted_nav
+    analyzer: audit_engine.analyzers.crawl_graph.check_faceted_navigation
     automation: full
 
   - id: TECH-025
@@ -244,7 +244,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [crawl_graph]
-    analyzer: audit_engine.analyzers.crawl.infinite_trap
+    analyzer: audit_engine.analyzers.crawl_graph.check_crawl_traps
     automation: full
 
   - id: TECH-027
@@ -253,7 +253,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [internal_links, crawled_html]
-    analyzer: audit_engine.analyzers.indexability.search_pages
+    analyzer: audit_engine.analyzers.crawl_graph.check_search_page_indexing
     automation: full
 
   # ----- JS Rendering (7) -----
@@ -272,7 +272,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.rendering.blocking_resources
+    analyzer: audit_engine.analyzers.psi_detail.check_render_blocking
     automation: full
 
   - id: TECH-030
@@ -327,7 +327,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.validate
+    analyzer: audit_engine.analyzers.page_tech.check_structured_data
     automation: full
 
   - id: TECH-036
@@ -336,7 +336,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.errors
+    analyzer: audit_engine.analyzers.page_tech.check_schema_errors
     automation: full
 
   - id: TECH-037
@@ -345,7 +345,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [schema_blocks, crawled_html]
-    analyzer: audit_engine.analyzers.schema.rich_result_tech
+    analyzer: audit_engine.analyzers.page_tech.check_rich_result_eligibility
     automation: full
 
   - id: TECH-038
@@ -354,7 +354,7 @@ checks:
     owner_agent: B4
     severity_default: minor
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.breadcrumb_validate
+    analyzer: audit_engine.analyzers.page_tech.check_breadcrumb_schema
     automation: full
 
   # ----- Core Web Vitals (5) -----
@@ -364,7 +364,7 @@ checks:
     owner_agent: B2
     severity_default: critical
     data_sources: [psi, crux]
-    analyzer: audit_engine.analyzers.cwv.overall
+    analyzer: audit_engine.analyzers.psi_detail.check_core_web_vitals
     automation: full
 
   - id: TECH-040
@@ -410,7 +410,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.performance.optimization
+    analyzer: audit_engine.analyzers.psi_detail.check_page_speed_optimization
     automation: full
 
   - id: TECH-045
@@ -419,7 +419,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.performance.blocking_css
+    analyzer: audit_engine.analyzers.psi_detail.check_render_blocking_css
     automation: full
 
   - id: TECH-046
@@ -428,7 +428,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.performance.blocking_js
+    analyzer: audit_engine.analyzers.psi_detail.check_render_blocking_js
     automation: full
 
   - id: TECH-047
@@ -437,7 +437,7 @@ checks:
     owner_agent: B2
     severity_default: minor
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.performance.unused_css
+    analyzer: audit_engine.analyzers.psi_detail.check_unused_css
     automation: full
 
   - id: TECH-048
@@ -446,7 +446,7 @@ checks:
     owner_agent: B2
     severity_default: minor
     data_sources: [psi]
-    analyzer: audit_engine.analyzers.performance.unused_js
+    analyzer: audit_engine.analyzers.psi_detail.check_unused_js
     automation: full
 
   - id: TECH-049
@@ -465,7 +465,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.compression.overall
+    analyzer: audit_engine.analyzers.headers.check_compression
     automation: full
 
   - id: TECH-051
@@ -474,7 +474,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.compression.gzip
+    analyzer: audit_engine.analyzers.headers.check_gzip
     automation: full
 
   - id: TECH-052
@@ -483,7 +483,7 @@ checks:
     owner_agent: B2
     severity_default: minor
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.compression.brotli
+    analyzer: audit_engine.analyzers.headers.check_brotli
     automation: full
 
   - id: TECH-053
@@ -492,7 +492,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.caching.browser
+    analyzer: audit_engine.analyzers.headers.check_browser_caching
     automation: full
 
   - id: TECH-054
@@ -501,7 +501,7 @@ checks:
     owner_agent: B5
     severity_default: minor
     data_sources: [http_headers, dns]
-    analyzer: audit_engine.analyzers.caching.cdn
+    analyzer: audit_engine.analyzers.network.check_cdn
     automation: full
 
   # ----- HTTPS & SSL (4) -----
@@ -511,7 +511,7 @@ checks:
     owner_agent: B5
     severity_default: critical
     data_sources: [http_resp]
-    analyzer: audit_engine.analyzers.security.https
+    analyzer: audit_engine.analyzers.headers.check_https_transport
     automation: full
 
   - id: TECH-056
@@ -520,7 +520,7 @@ checks:
     owner_agent: B5
     severity_default: critical
     data_sources: [tls_handshake]
-    analyzer: audit_engine.analyzers.security.ssl_cert
+    analyzer: audit_engine.analyzers.network.check_ssl_certificate
     automation: full
 
   - id: TECH-057
@@ -529,7 +529,7 @@ checks:
     owner_agent: B5
     severity_default: critical
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.security.mixed_content
+    analyzer: audit_engine.analyzers.page_tech.check_mixed_content
     automation: full
 
   - id: TECH-058
@@ -548,7 +548,7 @@ checks:
     owner_agent: B5
     severity_default: major
     data_sources: [http_status]
-    analyzer: audit_engine.analyzers.domain.www_consistency
+    analyzer: audit_engine.analyzers.crawl_graph.check_www_consistency
     automation: full
 
   - id: TECH-060
@@ -557,7 +557,7 @@ checks:
     owner_agent: B5
     severity_default: minor
     data_sources: [http_status]
-    analyzer: audit_engine.analyzers.domain.trailing_slash
+    analyzer: audit_engine.analyzers.crawl_graph.check_trailing_slash_consistency
     automation: full
 
   # ----- International / Hreflang (2) -----
@@ -586,7 +586,7 @@ checks:
     owner_agent: B2
     severity_default: critical
     data_sources: [psi_mobile]
-    analyzer: audit_engine.analyzers.mobile.friendliness_tech
+    analyzer: audit_engine.analyzers.psi_detail.check_mobile_friendliness_technical
     automation: full
 
   - id: TECH-064
@@ -595,7 +595,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [psi_mobile]
-    analyzer: audit_engine.analyzers.mobile.usability
+    analyzer: audit_engine.analyzers.psi_detail.check_mobile_usability_issues
     automation: full
 
   - id: TECH-065
@@ -623,7 +623,7 @@ checks:
     owner_agent: B5
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.amp.validate
+    analyzer: audit_engine.analyzers.page_tech.check_amp
     automation: full
 
   # ----- Internal Linking (2, technical view) -----
@@ -633,7 +633,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [internal_links, crawl_graph]
-    analyzer: audit_engine.analyzers.internal_links.crawl
+    analyzer: audit_engine.analyzers.crawl_graph.check_internal_linking_crawl
     automation: full
 
   - id: TECH-069
@@ -642,7 +642,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [internal_links, crawl_graph]
-    analyzer: audit_engine.analyzers.internal_links.equity_flow
+    analyzer: audit_engine.analyzers.crawl_graph.check_link_equity_flow
     automation: full
 
   # ----- Log Analysis (2) -----
@@ -671,7 +671,7 @@ checks:
     owner_agent: B5
     severity_default: major
     data_sources: [http_timing, http_headers]
-    analyzer: audit_engine.analyzers.server.response
+    analyzer: audit_engine.analyzers.headers.check_server_response
     automation: full
 
   # ----- HTML Validation (2) -----
@@ -690,7 +690,7 @@ checks:
     owner_agent: B5
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.html.semantic_tech
+    analyzer: audit_engine.analyzers.page_tech.check_semantic_html
     automation: full
 
   # ----- Thin / Duplicate / Index Bloat (4) -----
@@ -700,7 +700,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [crawled_html, site_pages]
-    analyzer: audit_engine.analyzers.low_quality.thin_pages
+    analyzer: audit_engine.analyzers.media_content.check_thin_pages
     automation: full
 
   - id: TECH-076
@@ -709,7 +709,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [site_pages]
-    analyzer: audit_engine.analyzers.duplication.pages
+    analyzer: audit_engine.analyzers.crawl_graph.check_duplicate_pages
     automation: full
 
   - id: TECH-077
@@ -773,7 +773,7 @@ checks:
     owner_agent: B5
     severity_default: critical
     data_sources: [robots, sitemap, crawled_html]
-    analyzer: audit_engine.analyzers.spam.hidden_pages
+    analyzer: audit_engine.analyzers.crawl_graph.check_hidden_pages
     automation: full
 
   - id: TECH-084
@@ -802,7 +802,7 @@ checks:
     owner_agent: B4
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.social.opengraph
+    analyzer: audit_engine.analyzers.page_tech.check_open_graph
     automation: full
 
   - id: TECH-087
@@ -811,7 +811,7 @@ checks:
     owner_agent: B4
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.social.twitter_card
+    analyzer: audit_engine.analyzers.page_tech.check_twitter_card
     automation: full
 
   # ----- Image & Video Indexing (4) -----
@@ -821,7 +821,7 @@ checks:
     owner_agent: B1
     severity_default: minor
     data_sources: [crawled_html, robots]
-    analyzer: audit_engine.analyzers.media.image_crawlability
+    analyzer: audit_engine.analyzers.media_content.check_image_crawlability
     automation: full
 
   - id: TECH-089
@@ -830,7 +830,7 @@ checks:
     owner_agent: B1
     severity_default: minor
     data_sources: [crawled_html, sitemap]
-    analyzer: audit_engine.analyzers.media.image_indexing
+    analyzer: audit_engine.analyzers.media_content.check_image_indexing
     automation: full
 
   - id: TECH-090
@@ -848,7 +848,7 @@ checks:
     owner_agent: B1
     severity_default: minor
     data_sources: [crawled_html, sitemap, schema_blocks]
-    analyzer: audit_engine.analyzers.media.video_indexing
+    analyzer: audit_engine.analyzers.media_content.check_video_indexing
     automation: full
 
   # ----- Accessibility (1) -----
@@ -868,7 +868,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.broken
+    analyzer: audit_engine.analyzers.page_tech.check_broken_structured_data
     automation: full
 
   - id: TECH-094
@@ -877,7 +877,7 @@ checks:
     owner_agent: B1
     severity_default: major
     data_sources: [sitemap, schema_blocks]
-    analyzer: audit_engine.analyzers.robots.xml_errors
+    analyzer: audit_engine.analyzers.media_content.check_sitemap_xml_errors
     automation: full
 
   # ----- Header & Content-Type (2) -----
@@ -887,7 +887,7 @@ checks:
     owner_agent: B5
     severity_default: major
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.server.headers
+    analyzer: audit_engine.analyzers.headers.check_header_response_validation
     automation: full
 
   - id: TECH-096
@@ -896,7 +896,7 @@ checks:
     owner_agent: B5
     severity_default: minor
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.server.content_type
+    analyzer: audit_engine.analyzers.headers.check_content_type
     automation: full
 
   # ----- HTTP/2, HTTP/3 (2) -----
@@ -915,7 +915,7 @@ checks:
     owner_agent: B5
     severity_default: minor
     data_sources: [http_headers]
-    analyzer: audit_engine.analyzers.server.http3
+    analyzer: audit_engine.analyzers.headers.check_http3
     automation: full
 
   # ----- Hosting & Latency (2) -----
@@ -925,7 +925,7 @@ checks:
     owner_agent: B5
     severity_default: major
     data_sources: [http_timing]
-    analyzer: audit_engine.analyzers.server.latency
+    analyzer: audit_engine.analyzers.headers.check_server_latency
     automation: full
 
   - id: TECH-100
@@ -934,7 +934,7 @@ checks:
     owner_agent: B5
     severity_default: major
     data_sources: [http_timing, dns]
-    analyzer: audit_engine.analyzers.server.hosting_performance
+    analyzer: audit_engine.analyzers.network.check_hosting_performance
     automation: full
 
   # ----- Overall Score (1) -----
@@ -944,5 +944,5 @@ checks:
     owner_agent: M2
     severity_default: info
     data_sources: [computed]
-    analyzer: audit_engine.scorers.technical_overall
+    analyzer: audit_engine.analyzers.rollups.check_tech_101
     automation: full

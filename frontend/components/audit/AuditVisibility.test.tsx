@@ -42,7 +42,16 @@ const row = (over: Record<string, unknown> = {}) => ({
 const rows = [row(), row({ id: "aud-2", client: "NorthPeak", visibleToClient: true })];
 
 vi.mock("@/lib/hooks/audits", () => ({
-  useAudits: () => ({ data: rows, isLoading: false, isError: false, error: null }),
+  // The list is paged; the workspace reads this to decide whether a full page
+  // means there is more history behind it.
+  AUDITS_PAGE: 200,
+  useAudits: () => ({
+    data: rows,
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null,
+  }),
   useAuditStats: () => ({ data: undefined, isLoading: false, isError: false }),
   useCreateAudit: () => ({ mutate: vi.fn(), isPending: false }),
   useAuditEstimate: () => ({ mutate: vi.fn(), isPending: false }),
