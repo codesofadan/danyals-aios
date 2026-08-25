@@ -83,7 +83,11 @@ def test_containment_counts_are_frozen(registry):
             1 for s in registry.values()
             if s.cost_classes <= permitted and (s.is_deterministic or not deterministic_only)
         )
-    assert n(ZERO) == 197
+    # Rendering moved zero -> free_quota when it was implemented against
+    # Firecrawl rather than a local browser: a metered monthly allowance is not
+    # "no quota is consumed". Nine checks left the truly-free tier as a result.
+    # ZERO_QUOTA is unchanged because free_quota still admits them.
+    assert n(ZERO) == 188
     assert n(ZERO_QUOTA) == 219
     assert n(ZERO_QUOTA_CONN) == 228
     assert n(ALL) == 363
@@ -93,7 +97,7 @@ def test_containment_counts_are_frozen(registry):
     # sources, so they now count as free-tier runnable - which they always were
     # in practice. The other eight declare sources their deterministic
     # implementation never reads and stay excluded; see O-9.
-    assert n(ZERO, True) == 180
+    assert n(ZERO, True) == 172
     assert n(ZERO_QUOTA, True) == 202
     assert n(ZERO_QUOTA_CONN, True) == 208
 

@@ -108,6 +108,35 @@ One was a genuine gap and is now wired: `check_pagination` → `TECH-025`
 
 ---
 
+# CORRECTION — DataForSEO, and what O-6 actually was
+
+**2026-08-25.** Everything below recommending **DataForSEO** as the answer to
+O-6 was written without having read `CLAUDE.md`, which states plainly:
+
+> **No DataForSEO. No BrightLocal.** Both explicitly rejected.
+
+That recommendation appears in the Wave 1 and Wave 2 sections of this document
+and in their commit messages. It was wrong when written.
+
+**The owner has since authorised DataForSEO explicitly** (2026-08-25), which
+supersedes the `CLAUDE.md` prohibition. The recommendation is therefore live
+again — but it stands on the owner's decision, not on the research, and
+`CLAUDE.md` should be updated to match rather than left contradicting itself.
+
+Two facts that were correct and still matter:
+
+- **`MOZ_ACCESS_ID` and `MOZ_SECRET_KEY` are empty.** All 39 backlink checks
+  were never going to run whatever the policy said.
+- `CLAUDE.md` also lists **`SEMRUSH_API_KEY`** as a supported source for domain
+  authority and traffic. It is not present in `.env`.
+
+DataForSEO authenticates and prices `backlinks/summary` at **$0.024 per
+request**, with a balance of **$0.94864** — enough to build and test against,
+not to run production audits.
+
+
+---
+
 # Wave A — Python no longer shadows an agent
 
 **2026-08-25.** Seventeen checks were marked `ai-assisted` in the checklist *and*

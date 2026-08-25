@@ -57,11 +57,18 @@ _ZERO: frozenset[str] = frozenset({
     "crawled_html", "crawled_html_desktop", "crawled_html_googlebot_ua",
     "crawled_html_mobile", "crawled_html_raw", "crawled_html_user_ua", "dns",
     "http_headers", "http_resp", "http_status", "http_timing", "internal_links",
-    "llms_txt", "rendered_html", "rendered_html_mobile", "robots", "schema_blocks",
-    "screenshot", "screenshot_breakpoints", "site_pages", "sitemap",
+    "llms_txt", "robots", "schema_blocks", "site_pages", "sitemap",
     "tls_handshake", "w3c_validator", "web_fetch", "whois", "wikidata",
 })
-_FREE_QUOTA: frozenset[str] = frozenset({"psi", "psi_mobile", "crux"})
+_FREE_QUOTA: frozenset[str] = frozenset({
+    "psi", "psi_mobile", "crux",
+    # Rendering was classed `zero` on the assumption of a local Playwright,
+    # which consumes no quota. It is implemented against Firecrawl, whose free
+    # tier is a metered monthly allowance, so `zero` would have let a free
+    # lead-magnet audit burn the rendering budget. That is the google_nl defect
+    # exactly: a cost the tier model could not see.
+    "rendered_html", "rendered_html_mobile", "screenshot", "screenshot_breakpoints",
+})
 _CONNECTION: frozenset[str] = frozenset({
     "gsc_query", "gsc_ctr", "gsc_coverage", "server_logs",
 })

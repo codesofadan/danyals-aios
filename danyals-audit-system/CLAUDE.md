@@ -63,7 +63,9 @@ The Downloads copy is skipped without erroring if the folder does not exist (rar
 
 **Profile per client, not per system.** Danyal's agency tackles every niche, so the default profile is `general` (30% on-page / 30% technical / 30% off-page / 10% local). When the audited business is a local-market business (storefront or service area), run with `--profile local`: local SEO then weighs 30% and unlocks Google Places, citation discovery, and Team D. The local-SEO depth built for the original local-agency variant is fully retained; it just activates per client instead of always-on.
 
-**No DataForSEO. No BrightLocal.** Both explicitly rejected. Use Moz Links, Serper.dev, PageSpeed Insights, CrUX, Otterly, Google Places, Google Cloud NL. Serper.dev doubles as both the SERP source and the local-SEO data source (geo-grid rankings via lat/lng params, citation discovery via search operators, knowledge-panel scrape) — paired with Google Places for canonical GBP data and Playwright/Firecrawl for per-citation NAP extraction.
+**DataForSEO is APPROVED as of 2026-08-25 (owner decision, supersedes the earlier rejection). BrightLocal remains rejected.** The original line read "No DataForSEO. No BrightLocal. Both explicitly rejected." The owner reversed the DataForSEO half after two facts were established: `MOZ_ACCESS_ID` and `MOZ_SECRET_KEY` are **empty**, so all 39 backlink checks were unrunnable regardless of policy; and DataForSEO authenticates today with `backlinks/summary` priced at $0.024 per request. Balance at the time of the decision was $0.95 — enough to build and test against, not to run production audits, so it needs topping up before the backlink checks ship.
+
+Otherwise: use Moz Links (if keys are ever supplied), Serper.dev, PageSpeed Insights, CrUX, Otterly, Google Places, Google Cloud NL. Serper.dev doubles as both the SERP source and the local-SEO data source (geo-grid rankings via lat/lng params, citation discovery via search operators, knowledge-panel scrape) — paired with Google Places for canonical GBP data and Playwright/Firecrawl for per-citation NAP extraction.
 
 ## Active state
 
