@@ -11,14 +11,24 @@
 // operator must come from the API, never from this file.
 // ============================================================
 
-// Categorical palette — mirrors the Avant-Garde theme tokens (--c1…--c5)
-// so JS-drawn charts match the CSS-driven surfaces.
+// Categorical palette — the JS mirror of the theme tokens --c1…--c5 in
+// app/globals.css, so JS-drawn charts match the CSS-driven surfaces.
+//
+// THESE MUST STAY BYTE-IDENTICAL TO THE CSS TOKENS. The comment above used to
+// claim they mirrored while all five had drifted to a neon palette (acid-lime,
+// teal, amber, cyan, magenta) — so every chart, stage pipeline and client
+// accent in the product rendered neon over a muted violet UI. `paletteSync`
+// in lib/palette.test.ts now parses globals.css and fails on any drift.
+//
+// They are literal hex rather than `var(--c1)` on purpose: callers append an
+// alpha suffix (`${SERIES.c1}88` in ClientGrowth.tsx), and `var(--c1)88` is
+// not valid CSS.
 export const SERIES = {
-  c1: "#C6FF3C", // acid-lime (accent)
-  c2: "#22E0C0", // teal
-  c3: "#FF9F1C", // amber
-  c4: "#4CC9F0", // cyan
-  c5: "#FF4D9D", // magenta
+  c1: "#432B52", // violet (brand)
+  c2: "#64B7A5", // sage
+  c3: "#F47B61", // coral
+  c4: "#7C5F91", // mauve
+  c5: "#3C7A6C", // forest
 } as const;
 
 // ============================================================

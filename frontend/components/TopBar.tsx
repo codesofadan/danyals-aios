@@ -27,6 +27,7 @@ const ADMIN_DESTS: Dest[] = [
   { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff" },
   { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board" },
   { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "cron jobs pdf downloads" },
+  { icon: "monitor_heart", label: "Operations", href: "/admin/operations", keywords: "jobs runs health failures dead letters queue logs retry cancel replay" },
   { icon: "savings", label: "Cost Controls", href: "/admin/cost", keywords: "spend budget dials pricing" },
   { icon: "key", label: "Key Vault", href: "/admin/vault", keywords: "api keys credentials secrets" },
   { icon: "settings", label: "Settings", href: "/admin/settings", keywords: "config preferences" },

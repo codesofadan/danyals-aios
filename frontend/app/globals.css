@@ -48,6 +48,19 @@
   --raise: rgba(33, 27, 41, .035); --raise-2: rgba(33, 27, 41, .06);
   --hover: rgba(67, 43, 82, .08);
   --pop-bg: #211B29; --scrim: rgba(33, 27, 41, .62); --ring: rgba(67, 43, 82, .35);
+
+  /* ---- ALIASES for names the stylesheets already reference ------------
+     These were used but never defined. `--border` and `--text` are used
+     WITHOUT a fallback in app/admin/audit/*.css, so every rule reading them
+     resolved to `initial`: borders rendered as none and that text lost its
+     colour, on the audit screens. Aliasing (rather than inventing new
+     values) keeps one source of truth per role - a second grey here would
+     be the drift that caused this. */
+  --border: var(--line);
+  --text: var(--ink);
+  --text-muted: var(--muted);
+  --surface-2: var(--card-2);
+  --accent: var(--violet);
   color-scheme: light;
 }
 
@@ -360,6 +373,9 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 .status-pill.info { color: var(--c4); background: color-mix(in srgb, var(--c4) 16%, transparent); }
 .status-pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .status-pill.mut { color: var(--muted); background: var(--hover); }
+/* `crit` exists so a DEGRADED outcome cannot share a colour with a successful one - a
+   campaign that delivered 28 of 30 properties is not a green tick. */
+.status-pill.crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 14%, transparent); }
 
 /* tier chip */
 .tier-chip { display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; letter-spacing: .02em;

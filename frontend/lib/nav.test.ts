@@ -128,3 +128,40 @@ describe("navigation integrity", () => {
     ).toEqual([]);
   });
 });
+
+// ============================================================
+// 3. THE SIDEBAR AND THE SEARCH BOX ARE ONE NAV, NOT TWO.
+//
+// TopBar's *_DESTS lists are a second, hand-maintained copy of the sidebars.
+// They had already drifted: /admin/operations — the sidebar's own "health
+// surface" — was absent from search, so an operator typing "jobs", "failures"
+// or "operations" was told the page did not exist. Nothing caught it, because
+// both lists resolve to real routes; the bug is only visible by comparing them.
+// ============================================================
+describe("search covers every navigable destination", () => {
+  const SIDEBARS = [
+    "components/Sidebar.tsx",
+    "components/portal/TeamSidebar.tsx",
+    "components/client/ClientSidebar.tsx",
+  ];
+
+  it("every sidebar href is reachable from the search box", () => {
+    const searchable = new Set(hrefsIn(read("components/TopBar.tsx")));
+    const missing: string[] = [];
+    for (const rel of SIDEBARS) {
+      for (const href of hrefsIn(read(rel))) {
+        if (!searchable.has(href)) missing.push(`${href} (in ${rel})`);
+      }
+    }
+    expect(
+      missing,
+      "these destinations appear in a sidebar but not in TopBar's *_DESTS, so " +
+        "searching for them returns nothing",
+    ).toEqual([]);
+  });
+
+  it("every searchable href is a real route", () => {
+    const bad = hrefsIn(read("components/TopBar.tsx")).filter((h) => !resolves(h));
+    expect(bad, "search offers destinations that do not resolve").toEqual([]);
+  });
+});
