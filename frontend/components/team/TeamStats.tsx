@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import anime from "animejs";
 import { useMembers, useTasks } from "@/lib/hooks/team";
+import QueryGuard from "@/components/ui/QueryGuard";
 
 type Tile = {
   icon: string;
@@ -46,8 +47,14 @@ function Value({ value, unit }: { value: number; unit?: string }) {
 }
 
 export default function TeamStats() {
-  const members = useMembers().data ?? [];
-  const tasks = useTasks().data ?? [];
+  // The QUERIES, not just their data: `?? []` turns a failed request into a
+  // confident animated 0 ("Team members: 0 · Avg. utilization: 0%"), which
+  // reads exactly like a real, healthy answer. QueryGuard shows the failure
+  // instead of the zero.
+  const membersQ = useMembers();
+  const tasksQ = useTasks();
+  const members = membersQ.data ?? [];
+  const tasks = tasksQ.data ?? [];
 
   // Derived live from the shared roster + task board so the tiles stay honest
   // as members are invited and tasks are assigned during the demo.
@@ -67,15 +74,17 @@ export default function TeamStats() {
   ];
 
   return (
-    <section className="kpis">
-      {TILES.map((t) => (
-        <div key={t.label} className={t.hero ? "kpi hero" : "kpi"}>
-          <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
-          <div className="lab">{t.label}</div>
-          <Value value={t.value} unit={t.unit} />
-          <div className="sub">{t.note}</div>
-        </div>
-      ))}
-    </section>
+    <QueryGuard queries={[membersQ, tasksQ]} label="team stats" minHeight={128}>
+      <section className="kpis">
+        {TILES.map((t) => (
+          <div key={t.label} className={t.hero ? "kpi hero" : "kpi"}>
+            <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
+            <div className="lab">{t.label}</div>
+            <Value value={t.value} unit={t.unit} />
+            <div className="sub">{t.note}</div>
+          </div>
+        ))}
+      </section>
+    </QueryGuard>
   );
 }

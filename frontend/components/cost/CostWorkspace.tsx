@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { type DialMode } from "@/lib/cost";
 import {
   useBudgets, useCostLog, useDial, useSpendStop,
@@ -27,6 +28,8 @@ export default function CostWorkspace() {
   // The cost-log TABLE paginates its own fetch (see CostLog), so it no longer grows
   // unbounded with this window.
   const costLog = logQ.data ?? [];
+
+  const [haltPrompt, setHaltPrompt] = useState(false);
 
   // API-spend HALT: the single agency-global kill-switch (halted === true).
   const halted = spendStopQ.data?.halted ?? false;
@@ -57,8 +60,22 @@ export default function CostWorkspace() {
   }
 
   // Flip the global halt (new halted = the inverse of the current state).
+  //
+  // CONFIRMED, BOTH WAYS. This one control stops - or restarts - every metered
+  // feature for the whole agency, and it used to fire on a single click while
+  // deleting one WordPress connection asked "are you sure?". ENGAGING it is the
+  // safe direction (work pauses, nothing is lost), so it confirms plainly;
+  // RELEASING it re-arms real money across every client, so it asks for the
+  // word to be typed.
   function handleToggleHalt() {
-    setSpendStop.mutate({ halted: !halted });
+    setHaltPrompt(true);
+  }
+
+  function commitHalt() {
+    setSpendStop.mutate(
+      { halted: !halted },
+      { onSuccess: () => setHaltPrompt(false) },
+    );
   }
 
   const readError =
@@ -103,6 +120,39 @@ export default function CostWorkspace() {
       <div className="row-single">
         <CostLog />
       </div>
+
+      <ConfirmDialog
+        open={haltPrompt}
+        tone={halted ? "danger" : "caution"}
+        title={halted ? "Resume API spending?" : "Halt all API spending?"}
+        body={
+          halted ? (
+            <>
+              Every metered feature starts calling providers again for <b>all clients</b> —
+              audits, content, policy ask, keyword, rank, embeddings and images — governed
+              only by each client&apos;s dials and caps.
+            </>
+          ) : (
+            <>
+              Every paid call is refused platform-wide, immediately and for all clients.
+              Audits, content generation, policy ask and every metered tool stop spending
+              at once.
+            </>
+          )
+        }
+        reassurance={
+          halted
+            ? undefined
+            : "Work already in progress is not deleted, and nothing you have paid for is lost — new paid calls are simply refused until you turn this off."
+        }
+        confirmLabel={halted ? "Resume spending" : "Halt spending"}
+        // Typing is required only to RELEASE the halt: engaging it is the safe
+        // direction, releasing it re-arms real money across every client.
+        typeToConfirm={halted ? "RESUME" : undefined}
+        pending={setSpendStop.isPending}
+        onConfirm={commitHalt}
+        onCancel={() => setHaltPrompt(false)}
+      />
     </div>
   );
 }

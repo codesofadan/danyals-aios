@@ -28,6 +28,7 @@
 import { useMemo, useState } from "react";
 import { relativeTime, type DeadLetter, type ReplayResult } from "@/lib/jobs";
 import { useReplayDeadLetter, useResolveDeadLetter } from "@/lib/hooks/jobs";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 export default function DeadLetterQueue({
   rows,
@@ -51,6 +52,9 @@ export default function DeadLetterQueue({
   // the retry after the list refetches.
   const [replayed, setReplayed] = useState<Record<string, ReplayResult>>({});
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  // A replay RE-RUNS the job: real side effects, real provider spend. It fired
+  // on a single click, so it now asks first.
+  const [replayPrompt, setReplayPrompt] = useState<DeadLetter | null>(null);
   const [resolution, setResolution] = useState("");
 
   const groups = useMemo(() => {
@@ -179,12 +183,7 @@ export default function DeadLetterQueue({
                           type="button"
                           className="ops-btn primary"
                           disabled={replay.isPending}
-                          onClick={() =>
-                            replay.mutate(d.id, {
-                              onSuccess: (res: ReplayResult) =>
-                                setReplayed((prev) => ({ ...prev, [d.id]: res })),
-                            })
-                          }
+                          onClick={() => setReplayPrompt(d)}
                         >
                           <span className="material-symbols-rounded">replay</span>
                           Replay
@@ -315,6 +314,33 @@ export default function DeadLetterQueue({
             : " Replay and resolve are lead actions (owner / admin / manager)."}
         </span>
       </div>
+
+      <ConfirmDialog
+        open={replayPrompt !== null}
+        title="Replay this job?"
+        body={
+          <>
+            <b>{replayPrompt?.jobName}</b> runs again with its original arguments
+            {replayPrompt?.clientName ? <> for {replayPrompt.clientName}</> : null}. It
+            performs the same work as the first attempt — including any provider calls it
+            paid for and anything it publishes.
+          </>
+        }
+        reassurance="It runs under a fresh idempotency key, so a job that already succeeded elsewhere will not be double-counted."
+        confirmLabel="Replay job"
+        pending={replay.isPending}
+        onCancel={() => setReplayPrompt(null)}
+        onConfirm={() => {
+          const target = replayPrompt;
+          if (!target) return;
+          replay.mutate(target.id, {
+            onSuccess: (res: ReplayResult) => {
+              setReplayed((prev) => ({ ...prev, [target.id]: res }));
+              setReplayPrompt(null);
+            },
+          });
+        }}
+      />
     </section>
   );
 }

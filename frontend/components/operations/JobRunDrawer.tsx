@@ -265,14 +265,19 @@ export default function JobRunDrawer({
                 type="text"
                 maxLength={500}
                 value={reason}
-                placeholder="Why are you stopping this run? (recorded on the activity log)"
+                placeholder="Why are you stopping this run? (required — recorded on the activity log)"
                 onChange={(e) => setReason(e.target.value)}
                 aria-label="Cancellation reason"
               />
+              {/* The reason is REQUIRED, not decorative. Cancelling used to be a
+                  single click with an optional note; the deliberation a written
+                  reason forces is the confirmation step here, and it matches
+                  resolving a dead letter. It is also the only record of WHY the
+                  run stopped - the row itself only records that it was cancelled. */}
               <button
                 type="button"
                 className="ops-btn crit"
-                disabled={cancel.isPending}
+                disabled={cancel.isPending || reason.trim().length === 0}
                 onClick={() => cancel.mutate({ runId: run.id, reason: reason.trim() })}
               >
                 <span className="material-symbols-rounded">cancel</span>
