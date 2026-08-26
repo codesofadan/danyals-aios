@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import anime from "animejs";
 import { projectProgress } from "@/lib/milestones";
 import { useMilestones } from "@/lib/hooks/milestones";
+import QueryGuard from "@/components/ui/QueryGuard";
 
 // No `delta` field, deliberately. These tiles used to carry hard-coded ones -
 // `"1"`, `"6"`, `"5%"`, every one of them pointing up, beside a note reading
@@ -47,7 +48,12 @@ function Value({ value, unit, suffix }: { value: number; unit?: string; suffix?:
 }
 
 export default function MilestoneStats() {
-  const projects = useMilestones().data ?? [];
+  // The QUERY, not just its data. `?? []` turned a failed `/milestones` read into
+  // four confident animated zeroes - "Active projects 0", "0 at-risk need
+  // attention" - which is how a dead backend gets rendered as a portfolio with
+  // nothing going wrong. QueryGuard shows the failure where the zeroes were.
+  const projectsQ = useMilestones();
+  const projects = projectsQ.data ?? [];
 
   // Derived from the live projects so the tiles stay honest.
   const active = projects.filter((p) => p.health !== "completed").length;
@@ -66,15 +72,17 @@ export default function MilestoneStats() {
   ];
 
   return (
-    <section className="kpis">
-      {TILES.map((t) => (
-        <div key={t.label} className={t.hero ? "kpi hero" : "kpi"}>
-          <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
-          <div className="lab">{t.label}</div>
-          <Value value={t.value} unit={t.unit} suffix={t.suffix} />
-          <div className="sub">{t.note}</div>
-        </div>
-      ))}
-    </section>
+    <QueryGuard queries={[projectsQ]} label="milestone stats" minHeight={128}>
+      <section className="kpis">
+        {TILES.map((t) => (
+          <div key={t.label} className={t.hero ? "kpi hero" : "kpi"}>
+            <div className="ic"><span className="material-symbols-rounded">{t.icon}</span></div>
+            <div className="lab">{t.label}</div>
+            <Value value={t.value} unit={t.unit} suffix={t.suffix} />
+            <div className="sub">{t.note}</div>
+          </div>
+        ))}
+      </section>
+    </QueryGuard>
   );
 }

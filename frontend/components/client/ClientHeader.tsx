@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { HEALTH_META } from "@/lib/milestones";
 import { useClient } from "./ClientContext";
 import { useClientMilestones } from "@/lib/hooks/portalClient";
+import { ApiError } from "@/lib/api";
 
 function greeting(name: string): string {
   const h = new Date().getHours();
@@ -16,10 +17,26 @@ function greeting(name: string): string {
 // avatar/initials are derived from the name, and health comes from the client's
 // own /portal/milestones project. The eyebrow line is the time-of-day greeting
 // ("Good morning, {name}"), computed after mount to stay SSR-safe.
+//
+// ONLY THE HEALTH PILL DEGRADES. This hero is the client's own chrome — their
+// name, their plan, their site — none of which comes from /portal/milestones, so
+// a milestones failure must not take the header down with it; the tenant would be
+// looking at a portal that had forgotten who they are. So the failure is scoped to
+// the one figure that came from the failed read (which is why this file does not
+// use QueryGuard: the guard replaces its whole region, and the region here is a
+// single pill inside a flex row).
+//
+// A 404 is NOT a failure here: the hook documents it as "this client has no project
+// yet", which is true and expected, and it stays silent exactly as before. Anything
+// else — a 500, a dropped connection — says so, because a missing pill otherwise
+// reads as "no health concerns".
 export default function ClientHeader({ focus }: { focus?: React.ReactNode }) {
   const { client, grants } = useClient();
-  const project = useClientMilestones().data;
+  const projectQ = useClientMilestones();
+  const project = projectQ.data;
   const health = project ? HEALTH_META[project.health] : null;
+  const healthUnavailable =
+    !project && projectQ.isError && (projectQ.error as ApiError)?.status !== 404;
 
   const [hi, setHi] = useState(`Welcome, ${client.cn.split(" ")[0]}`);
   useEffect(() => { setHi(greeting(client.cn)); }, [client.cn]);
@@ -38,6 +55,12 @@ export default function ClientHeader({ focus }: { focus?: React.ReactNode }) {
             <span className={`status-pill ${health.cls}`}>
               <span className="material-symbols-rounded" style={{ fontSize: 14 }}>{health.icon}</span>
               {health.label}
+            </span>
+          )}
+          {healthUnavailable && (
+            <span className="status-pill mut" title="We couldn't reach the server for your project health.">
+              <span className="material-symbols-rounded" style={{ fontSize: 14 }}>cloud_off</span>
+              Health unavailable
             </span>
           )}
         </div>

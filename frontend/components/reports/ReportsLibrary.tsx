@@ -11,6 +11,12 @@ import { downloadFile } from "@/lib/api";
 //      (GET /reports/generated, downloaded as JSON).
 //   2. Every audit that has a stored report file (the weekly audit-refresh cron and any
 //      hand-run audit) — the guarded /audits/{id}/report.pdf | /findings.json downloads.
+//
+// Both lists had a loading branch and an empty branch and nothing between them, so a
+// failed read landed on the empty copy: "No monthly reports yet", "No stored audit
+// reports yet" — the platform reporting that it has produced nothing for anyone, when
+// what actually happened is that it could not ask. Each list is three branches now
+// (loading · failed · empty), the shape BacklinksTab uses.
 export default function ReportsLibrary() {
   const generatedQ = useGeneratedReports();
   const auditsQ = useAudits();
@@ -41,6 +47,11 @@ export default function ReportsLibrary() {
       <div className="rp-lib-sub">Monthly SEO reports</div>
       {generatedQ.isLoading ? (
         <div style={muted}>Loading reports...</div>
+      ) : generatedQ.isError ? (
+        <div style={muted} role="alert">
+          Couldn&apos;t load the monthly reports — {(generatedQ.error as Error)?.message ?? "try again"}.
+          None are listed because the request failed, not because none exist.
+        </div>
       ) : reports.length === 0 ? (
         <div style={muted}>
           No monthly reports yet. The scheduled report job generates one per active client and
@@ -89,6 +100,11 @@ export default function ReportsLibrary() {
       <div className="rp-lib-sub">Audit reports</div>
       {auditsQ.isLoading ? (
         <div style={muted}>Loading reports...</div>
+      ) : auditsQ.isError ? (
+        <div style={muted} role="alert">
+          Couldn&apos;t load the audit ledger — {(auditsQ.error as Error)?.message ?? "try again"}.
+          None are listed because the request failed, not because none exist.
+        </div>
       ) : audits.length === 0 ? (
         <div style={muted}>No stored audit reports yet. An audit&apos;s PDF appears here once generated.</div>
       ) : (

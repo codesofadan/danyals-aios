@@ -24,7 +24,13 @@ export default function CostLog() {
   const [page, setPage] = useState(0); // zero-based page index
 
   const q = useCostLogPage(page * PAGE_SIZE, PAGE_SIZE);
-  const pageRows = q.data ?? [];
+  // A FAILED LEDGER IS NOT AN EMPTY ONE. The table had a loading branch and an empty
+  // branch and nothing else, so a dead `/cost/log` fell straight through to
+  // "No gated calls yet." on the cost screen — the platform reporting, in its own
+  // voice, that it had spent nothing. `pageRows` is emptied on a failed read for the
+  // same reason: with `placeholderData` keeping the previous page, page 2 failing
+  // would otherwise re-print page 1's rows under page 2's pager.
+  const pageRows = q.isError ? [] : q.data ?? [];
   // has-more signal: a full page means there may be another page after it.
   const hasMore = pageRows.length === PAGE_SIZE;
 
@@ -118,10 +124,21 @@ export default function CostLog() {
                 );
               }}
             />
-            {rows.length === 0 && (
+            {q.isLoading && (
+              <tr><td colSpan={7} className="cst-log-empty">Loading…</td></tr>
+            )}
+            {q.isError && !q.isLoading && (
               <tr>
                 <td colSpan={7} className="cst-log-empty">
-                  {q.isLoading ? "Loading…" : filter === "all" ? "No gated calls yet." : "No calls of this type on this page."}
+                  Couldn&apos;t load the cost log — {(q.error as Error)?.message ?? "try again"}.
+                  This page of the ledger is unavailable; it is not empty.
+                </td>
+              </tr>
+            )}
+            {!q.isLoading && !q.isError && rows.length === 0 && (
+              <tr>
+                <td colSpan={7} className="cst-log-empty">
+                  {filter === "all" ? "No gated calls yet." : "No calls of this type on this page."}
                 </td>
               </tr>
             )}
@@ -131,7 +148,13 @@ export default function CostLog() {
 
       <div className="cst-budget-foot">
         <span>
-          {rows.length} calls on this page · <b>{cachedCount}</b> cached · logged <b>{usd(shown, 2)}</b>
+          {/* The same rule as the table body: on a failed read these are unknown, and
+              "0 calls · logged $0.00" is a spend figure the platform did not measure. */}
+          {q.isError ? (
+            <>Totals for this page are unavailable — the ledger didn&apos;t load.</>
+          ) : (
+            <>{rows.length} calls on this page · <b>{cachedCount}</b> cached · logged <b>{usd(shown, 2)}</b></>
+          )}
         </span>
         <div className="cst-pager">
           <button

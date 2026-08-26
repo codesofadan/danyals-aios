@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import { useOffpageKpis } from "@/lib/hooks/offpage";
+import QueryGuard from "@/components/ui/QueryGuard";
 import BacklinksTab from "./BacklinksTab";
 import CitationsTab from "./CitationsTab";
 import Web2Tab from "./Web2Tab";
@@ -56,7 +57,12 @@ function KpiTile({ k }: { k: Kpi }) {
 
 export default function OffpageWorkspace() {
   const [tab, setTab] = useState<TabKey>("backlinks");
-  const kpis = useOffpageKpis().data;
+  // The QUERY, not just its data. `?? 0` on a failed `/offpage/kpis` read paints
+  // "Referring domains 0 · Lost links 0 · Toxic / spam flagged 0" — a clean link
+  // profile, asserted by an outage. QueryGuard shows the failure instead; only the
+  // KPI strip is wrapped, so the tabs below stay reachable when the tiles cannot load.
+  const kpisQ = useOffpageKpis();
+  const kpis = kpisQ.data;
 
   // Live values only — the tiles carry no fabricated period-over-period deltas
   // (there is no historical link series to compute a real trend from yet). The notes
@@ -72,9 +78,11 @@ export default function OffpageWorkspace() {
 
   return (
     <>
-      <section className="kpis">
-        {KPIS.map((k) => <KpiTile key={k.label} k={k} />)}
-      </section>
+      <QueryGuard queries={[kpisQ]} label="off-page KPIs" minHeight={128}>
+        <section className="kpis">
+          {KPIS.map((k) => <KpiTile key={k.label} k={k} />)}
+        </section>
+      </QueryGuard>
 
       {/* Quality gate — the off-page contract: human-approved, diversified, never spam. */}
       <section className="op-gate">

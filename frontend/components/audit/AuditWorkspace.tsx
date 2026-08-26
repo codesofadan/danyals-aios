@@ -7,10 +7,12 @@ import {
   DEPTH_LABEL,
   TYPE_LABEL,
   type AuditDepth,
+  type AuditRow,
   type AuditTypeKey,
   type JobStatus,
   type Tier,
 } from "@/lib/audit";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import {
   AUDITS_PAGE,
   useAudits,
@@ -68,6 +70,8 @@ export default function AuditWorkspace() {
   const createAudit = useCreateAudit();
   const setVisibility = useSetAuditVisibility();
   const { halted } = useSpendHalted(); // global API-spend kill-switch
+  // The audit awaiting a "share this into the client's portal" confirmation.
+  const [sharePrompt, setSharePrompt] = useState<AuditRow | null>(null);
 
   const rows = auditsQ.data ?? [];
   const clients = clientsQ.data ?? [];
@@ -267,48 +271,74 @@ export default function AuditWorkspace() {
             </div>
           </div>
 
-          <div className="tbl-wrap">
+          {/* `au-tbl-wrap` is the query container. The fold below has to respond to
+              the space the TABLE has, not the space the window has - inside the
+              admin shell the rail takes 76-258px of it, so a viewport breakpoint
+              folds at the wrong moment in both directions. */}
+          <div className="tbl-wrap au-tbl-wrap">
             <table className="tbl au-tbl">
               <thead>
+                {/* SEVEN columns, not ten. Nothing was dropped - the pairs that
+                    only mean something together were merged into one cell, so each
+                    column now answers exactly one question:
+
+                      Client + Site/URL  -> Audit   (a URL is an attribute of the
+                                                     audit, not a peer of the client)
+                      Type + Tier + depth -> Scope  (all three answer "how much
+                                                     audit is this")
+                      Status + Run time  -> Status  (a duration means nothing except
+                                                     next to what it was doing)
+
+                    Ten columns did not fit, so the eye had nowhere to rest and the
+                    numeric columns - the ones actually scanned - were pushed off
+                    the right edge. */}
                 <tr>
-                  <th>Client</th>
-                  <th>Site / URL</th>
-                  <th>Type</th>
-                  <th>Tier</th>
+                  <th>Audit</th>
+                  <th className="au-h-scope">Scope</th>
                   <th>Status</th>
                   <th className="num">Score</th>
-                  <th className="num">Cost</th>
-                  <th>Artifacts</th>
+                  <th className="num au-h-cost">Cost</th>
                   {/* Exposure a reviewer cannot see is exposure nobody reviews.
                       This was chosen once at creation and then invisible, so an
                       operator had no way to tell which of a client's audits that
                       client could already read. */}
                   <th>Client sees</th>
-                  <th className="num">Run time</th>
+                  <th>Artifacts</th>
                 </tr>
               </thead>
               <tbody>
                 {auditsQ.isLoading && (
-                  <tr><td colSpan={10} className="au-empty">Loading audits…</td></tr>
+                  <tr><td colSpan={7} className="au-empty">Loading audits…</td></tr>
                 )}
                 {auditsQ.isError && !auditsQ.isLoading && (
-                  <tr><td colSpan={10} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
+                  <tr><td colSpan={7} className="au-empty">Couldn&apos;t load audits — {(auditsQ.error as Error)?.message ?? "try again"}.</td></tr>
                 )}
                 {!auditsQ.isLoading && !auditsQ.isError && shown.map((r) => {
                   const sm = STATUS_META[r.status];
                   return (
                     <tr key={r.id}>
-                      <td>
+                      <td className="au-c-audit">
                         {/* The row IS the way into the audit. The artifact column
                             carries downloads only, so the name has to be the link. */}
                         <Link className="au-client au-open" href={`/admin/audit/${r.id}`}>
                           {r.client}
                         </Link>
-                        <div className="au-when">{r.when}</div>
+                        <span className="au-url" title={r.url}>
+                          <span className="material-symbols-rounded">link</span>{r.url}
+                        </span>
+                        <div className="au-when">
+                          {r.when}
+                          {/* Shown only once the Scope column folds away below
+                              1180px. Whether a run was billable is not something a
+                              queue may quietly stop saying. */}
+                          <span className={`au-tier au-tier-fold ${r.tier.toLowerCase()}`}>
+                            {r.tier}
+                          </span>
+                        </div>
                       </td>
-                      <td><span className="au-url"><span className="material-symbols-rounded">link</span>{r.url}</span></td>
-                      <td>
+                      <td className="au-c-scope au-h-scope">
                         <div className="au-types">
+                          <span className={`au-tier ${r.tier.toLowerCase()}`}>{r.tier}</span>
                           {r.types.length === 0 ? (
                             <span className="au-type-tag au-type-full">Full audit</span>
                           ) : (
@@ -317,9 +347,6 @@ export default function AuditWorkspace() {
                             ))
                           )}
                         </div>
-                      </td>
-                      <td>
-                        <span className={`au-tier ${r.tier.toLowerCase()}`}>{r.tier}</span>
                         {/* Depth is null on runs created before it was recorded — that
                             is "breadth unknown", not "free", so it renders as a dash
                             rather than borrowing a default it never had. */}
@@ -329,11 +356,12 @@ export default function AuditWorkspace() {
                             : `${DEPTH_LABEL[r.depth]}${r.maxPages ? ` · ${r.maxPages}p` : ""}`}
                         </div>
                       </td>
-                      <td>
+                      <td className="au-c-status">
                         <span className={`status-pill ${sm.pill}`}>
                           <span className={`material-symbols-rounded${r.status === "running" ? " au-spin" : ""}`}>{sm.icon}</span>
                           {sm.label}
                         </span>
+                        <div className="au-when au-runtime">{r.runtime}</div>
                       </td>
                       <td className="num">
                         {r.score === null ? (
@@ -342,7 +370,7 @@ export default function AuditWorkspace() {
                           <span className={`au-score ${scoreClass(r.score)}`}>{r.score}</span>
                         )}
                       </td>
-                      <td className="num">
+                      <td className="num au-h-cost au-c-cost">
                         {r.cost === null ? (
                           <span className="au-dash" title="Nothing spent yet — the engine has not started">—</span>
                         ) : (
@@ -355,11 +383,70 @@ export default function AuditWorkspace() {
                         )}
                       </td>
                       <td>
+                        <button
+                          className={`au-share${r.visibleToClient ? " is-on" : ""}`}
+                          aria-pressed={r.visibleToClient}
+                          disabled={setVisibility.isPending}
+                          title={
+                            r.visibleToClient
+                              ? "This client can read this audit in their portal. Click to stop sharing it."
+                              : "Internal only. Click to share it into the client's portal."
+                          }
+                          onClick={() => {
+                            // Only SHARING asks. Publishing an audit into a
+                            // tenant's portal discloses it, and un-sharing later
+                            // cannot un-read it; withdrawing is the safe
+                            // direction and stays one click.
+                            if (r.visibleToClient) {
+                              setVisibility.mutate({ id: r.id, visible: false });
+                            } else {
+                              setSharePrompt(r);
+                            }
+                          }}
+                        >
+                          <span className="material-symbols-rounded">
+                            {r.visibleToClient ? "visibility" : "visibility_off"}
+                          </span>
+                          {/* Wrapped, not bare: the narrow-container rule drops the
+                              word and keeps the icon, and a text node cannot be
+                              selected. `aria-pressed` and `title` still carry the
+                              state when the word is hidden. */}
+                          <span className="au-share-t">
+                            {r.visibleToClient ? "Shared" : "Internal"}
+                          </span>
+                        </button>
+                      </td>
+                      <td>
                         <div className="au-arts">
-                          {/* TWO downloads, and only two. The report and the
-                              workbook are the deliverable; everything else about
-                              this audit is reachable by opening it, so extra
-                              icons here were four ways to ask the same question. */}
+                          {/* FOUR different questions, not four ways to ask one.
+                              The workspace first: it is the page an operator means
+                              by "the audit" - Overview, Strategy, Issues, Pages and
+                              Downloads under /admin/audit/<id>. It was reachable
+                              only by clicking the client's name, which does not
+                              read as a link, so the page people remembered became
+                              one nobody could find their way back to. */}
+                          <Link
+                            className="au-art is-primary"
+                            title="Open this audit - overview, issues, pages, downloads"
+                            aria-label={`Open the ${r.client} audit`}
+                            href={`/admin/audit/${r.id}`}
+                          >
+                            <span className="material-symbols-rounded">open_in_new</span>
+                          </Link>
+                          {/* The engine's narrative report, in the in-app page
+                              viewer. Removed in a cleanup that left ReportViewer
+                              mounted but unreachable - setViewId was only ever
+                              called with null, so nothing could open it. Gated on
+                              status, not on `pdf`: report.html is resolved by
+                              convention and survives a failed PDF render. */}
+                          <button
+                            className="au-art"
+                            title="Read the full report in the page viewer"
+                            disabled={r.status !== "done"}
+                            onClick={() => setViewId(r.id)}
+                          >
+                            <span className="material-symbols-rounded">menu_book</span>
+                          </button>
                           <button
                             className="au-art"
                             title="Download the full PDF report"
@@ -385,32 +472,11 @@ export default function AuditWorkspace() {
                           </button>
                         </div>
                       </td>
-                      <td>
-                        <button
-                          className={`au-share${r.visibleToClient ? " is-on" : ""}`}
-                          aria-pressed={r.visibleToClient}
-                          disabled={setVisibility.isPending}
-                          title={
-                            r.visibleToClient
-                              ? "This client can read this audit in their portal. Click to stop sharing it."
-                              : "Internal only. Click to share it into the client's portal."
-                          }
-                          onClick={() =>
-                            setVisibility.mutate({ id: r.id, visible: !r.visibleToClient })
-                          }
-                        >
-                          <span className="material-symbols-rounded">
-                            {r.visibleToClient ? "visibility" : "visibility_off"}
-                          </span>
-                          {r.visibleToClient ? "Shared" : "Internal"}
-                        </button>
-                      </td>
-                      <td className="num au-runtime">{r.runtime}</td>
                     </tr>
                   );
                 })}
                 {!auditsQ.isLoading && !auditsQ.isError && shown.length === 0 && (
-                  <tr><td colSpan={10} className="au-empty">No audits match these filters.</td></tr>
+                  <tr><td colSpan={7} className="au-empty">No audits match these filters.</td></tr>
                 )}
               </tbody>
             </table>
@@ -675,6 +741,30 @@ export default function AuditWorkspace() {
           }
         />
       )}
+
+      <ConfirmDialog
+        open={sharePrompt !== null}
+        title="Share this audit with the client?"
+        body={
+          <>
+            <b>{sharePrompt?.client}</b> will be able to open this audit of{" "}
+            <b>{sharePrompt?.url}</b> — its score, findings and report — from their
+            portal, immediately.
+          </>
+        }
+        reassurance="You can stop sharing it again at any time, though that will not un-read what they have already seen."
+        confirmLabel="Share with client"
+        pending={setVisibility.isPending}
+        onCancel={() => setSharePrompt(null)}
+        onConfirm={() => {
+          const target = sharePrompt;
+          if (!target) return;
+          setVisibility.mutate(
+            { id: target.id, visible: true },
+            { onSuccess: () => setSharePrompt(null) },
+          );
+        }}
+      />
     </>
   );
 }

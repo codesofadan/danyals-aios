@@ -84,16 +84,36 @@ describe("client-portal exposure in the audit queue", () => {
     expect(internal).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("lets an operator revoke a shared audit", async () => {
+  // Withdrawing is the SAFE direction and stays one click; sharing discloses the
+  // audit to a tenant and cannot be un-read, so only that direction confirms.
+  it("revokes a shared audit immediately, without asking", async () => {
     render(<AuditWorkspace />);
     await userEvent.click(screen.getByText("Shared").closest("button")!);
     expect(mutate).toHaveBeenCalledWith({ id: "aud-2", visible: false });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("lets an operator share an internal audit", async () => {
+  it("asks before disclosing an internal audit to the client", async () => {
     render(<AuditWorkspace />);
     await userEvent.click(screen.getByText("Internal").closest("button")!);
-    expect(mutate).toHaveBeenCalledWith({ id: "aud-1", visible: true });
+
+    // Nothing is shared on the first click.
+    expect(mutate).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAccessibleName(/share this audit with the client/i);
+
+    await userEvent.click(screen.getByRole("button", { name: "Share with client" }));
+    // The confirm path passes an onSuccess callback alongside the variables, so
+    // assert on the variables rather than the whole argument list.
+    expect(mutate.mock.calls[0][0]).toEqual({ id: "aud-1", visible: true });
+  });
+
+  it("shares nothing when the confirmation is dismissed", async () => {
+    render(<AuditWorkspace />);
+    await userEvent.click(screen.getByText("Internal").closest("button")!);
+    await userEvent.keyboard("{Escape}");
+    expect(mutate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("explains what sharing means in the control's own title", () => {

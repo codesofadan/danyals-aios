@@ -4,11 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import { BACKLINK_META, type BacklinkStatus } from "@/lib/offpage";
 import { useBacklinks } from "@/lib/hooks/offpage";
+import EmptyState from "@/components/ui/EmptyState";
+import QueryGuard from "@/components/ui/QueryGuard";
 
 // Backlink quality scatter — domain authority (x) vs spam score (y),
 // one dot per referring domain, coloured by status. Toxic links land
 // top-left (low authority · high spam); quality links bottom-right.
 // Animated SVG (anime.js) matching the AuditVolumeChart / TrafficChart idiom.
+//
+// A chart with no dots is a strong claim: NOTHING is toxic, nothing was lost.
+// `?? []` made a failed `/offpage/backlinks` read draw exactly that — clean axes,
+// an empty toxic quadrant, a clean bill of health produced by an outage. The plot
+// area is guarded now: loading and failure say so, and a genuinely empty profile
+// says so through EmptyState instead of through a chart that looks measured.
 
 const STATUS_COLOR: Record<BacklinkStatus, string> = {
   new: "var(--ok)",
@@ -139,7 +147,10 @@ export default function BacklinkScatter() {
       svg.removeEventListener("pointermove", onMove);
       svg.removeEventListener("pointerleave", onLeave);
     };
-  }, [backlinksQ.data]);
+    // isError/isLoading are deps because the plot is unmounted behind the guard in
+    // those states: without them, an error that resolves back to structurally
+    // identical data would remount the <svg> and never redraw into it.
+  }, [backlinksQ.data, backlinksQ.isError, backlinksQ.isLoading]);
 
   return (
     <section className="card">
@@ -163,26 +174,38 @@ export default function BacklinkScatter() {
         </div>
       </div>
 
-      <div className="svg-wrap">
-        <svg ref={svgRef} viewBox="0 0 760 340" preserveAspectRatio="none" aria-label="Backlink domain authority versus spam score, coloured by link status" />
-        <div className="chart-tip" ref={tipRef} />
-        <div className="hint">
-          <span className="material-symbols-rounded">touch_app</span>Hover a domain
-        </div>
-      </div>
+      <QueryGuard queries={[backlinksQ]} label="the backlink profile" minHeight={340}>
+        {backlinks.length === 0 ? (
+          <EmptyState
+            icon="hub"
+            title="No referring domains yet"
+            hint="Every link the monitor finds is plotted here by authority and spam score."
+          />
+        ) : (
+          <>
+            <div className="svg-wrap">
+              <svg ref={svgRef} viewBox="0 0 760 340" preserveAspectRatio="none" aria-label="Backlink domain authority versus spam score, coloured by link status" />
+              <div className="chart-tip" ref={tipRef} />
+              <div className="hint">
+                <span className="material-symbols-rounded">touch_app</span>Hover a domain
+              </div>
+            </div>
 
-      <div className={showTable ? "dtable show" : "dtable"}>
-        <table>
-          <thead><tr><th>Referring domain</th><th>Authority</th><th>Spam</th><th>Status</th></tr></thead>
-          <tbody>
-            {backlinks.map((b) => (
-              <tr key={b.id}>
-                <td>{b.refDomain}</td><td>{b.authority}</td><td>{b.spam}</td><td>{BACKLINK_META[b.status].label}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            <div className={showTable ? "dtable show" : "dtable"}>
+              <table>
+                <thead><tr><th>Referring domain</th><th>Authority</th><th>Spam</th><th>Status</th></tr></thead>
+                <tbody>
+                  {backlinks.map((b) => (
+                    <tr key={b.id}>
+                      <td>{b.refDomain}</td><td>{b.authority}</td><td>{b.spam}</td><td>{BACKLINK_META[b.status].label}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </QueryGuard>
     </section>
   );
 }

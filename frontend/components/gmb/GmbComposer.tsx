@@ -59,8 +59,21 @@ export default function GmbComposer({
 
       <label className="gmb-field">
         <span>Client</span>
-        <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
-          <option value="">Select a client…</option>
+        {/* An empty dropdown reads as "this agency has no clients". When the
+            roster failed to load, say THAT instead - otherwise the operator is
+            blocked with no idea why. */}
+        <select
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          disabled={clientsQ.isError || clientsQ.isLoading}
+        >
+          <option value="">
+            {clientsQ.isError
+              ? "Couldn't load clients — try again"
+              : clientsQ.isLoading
+                ? "Loading clients…"
+                : "Select a client…"}
+          </option>
           {clients.map((c) => (
             <option key={c.id} value={c.id}>{c.cn}</option>
           ))}
