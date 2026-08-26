@@ -1,7 +1,5 @@
-import type { CSSProperties } from "react";
+import DataTable from "@/components/ui/DataTable";
 import { DATASET_META, STATUS_META, type Workbook, sheetUrl } from "@/lib/reports";
-
-const RP_EMPTY: CSSProperties = { padding: "20px", textAlign: "center", color: "var(--muted)" };
 
 type Props = {
   workbooks: Workbook[];
@@ -29,78 +27,87 @@ export default function WorkbooksTable({ workbooks, syncing, onSync, onSyncAll, 
         </div>
       </div>
 
-      <div className="tbl-wrap rp-tbl-wrap">
-        <table className="tbl rp-tbl">
-          <thead>
-            <tr>
-              <th>Client</th>
-              <th>Workbook</th>
-              <th>Tabs synced</th>
-              <th className="num">Rows</th>
-              <th>Last sync</th>
-              <th>Status</th>
-              <th className="rp-act-col"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={7} style={RP_EMPTY}>Loading workbooks…</td></tr>
-            )}
-            {error && !loading && (
-              <tr><td colSpan={7} style={RP_EMPTY}>Couldn&apos;t load workbooks — {error}</td></tr>
-            )}
-            {!loading && !error && workbooks.length === 0 && (
-              <tr><td colSpan={7} style={RP_EMPTY}>No client workbooks yet.</td></tr>
-            )}
-            {!loading && !error && workbooks.map((w) => {
+      {/* On components/ui/DataTable: the three-branch body, the derived colSpan
+          (hand-written here as 7, one column-add away from being wrong) and the
+          scroll wrapper all come from the primitive now. */}
+      <DataTable
+        rows={workbooks}
+        rowKey={(w) => w.id}
+        query={{ isLoading: loading, isError: Boolean(error) }}
+        label="workbooks"
+        empty="No client workbooks yet."
+        tableClassName="rp-tbl"
+        caption="Per-client Google Sheets workbooks"
+        columns={[
+          { key: "client", header: "Client", className: "rp-client", cell: (w) => w.client },
+          {
+            key: "sheet",
+            header: "Workbook",
+            cell: (w) => (
+              <a
+                className={`rp-sheet-link${sheetUrl(w.sheet) ? "" : " off"}`}
+                href={sheetUrl(w.sheet) ?? undefined}
+                target={sheetUrl(w.sheet) ? "_blank" : undefined}
+                rel={sheetUrl(w.sheet) ? "noopener noreferrer" : undefined}
+                aria-label={sheetUrl(w.sheet) ? `Open ${w.client} workbook in Google Sheets` : `${w.client} has no workbook yet`}
+              >
+                <span className="material-symbols-rounded">table_view</span>
+                <span className="rp-mono rp-sheet-id">{w.sheet || "\u2014"}</span>
+                <span className="material-symbols-rounded rp-ext">open_in_new</span>
+              </a>
+            ),
+          },
+          {
+            key: "tabs",
+            header: "Tabs synced",
+            cell: (w) => (
+              <div className="rp-chips">
+                {w.tabs.map((d) => (
+                  <span key={d} className="rp-chip" style={{ color: DATASET_META[d].c }}>
+                    <span className="material-symbols-rounded">{DATASET_META[d].icon}</span>
+                    {DATASET_META[d].label}
+                  </span>
+                ))}
+              </div>
+            ),
+          },
+          { key: "rows", header: "Rows", numeric: true, className: "rp-rows", cell: (w) => w.rows.toLocaleString() },
+          {
+            key: "last",
+            header: "Last sync",
+            className: "rp-last",
+            cell: (w) => (syncing.has(w.id) || w.status === "syncing" ? "syncing\u2026" : w.lastSync),
+          },
+          {
+            key: "status",
+            header: "Status",
+            cell: (w) => {
               const isSyncing = syncing.has(w.id) || w.status === "syncing";
               const st = STATUS_META[isSyncing ? "syncing" : w.status];
               return (
-                <tr key={w.id}>
-                  <td className="rp-client">{w.client}</td>
-                  <td>
-                    <a
-                      className={`rp-sheet-link${sheetUrl(w.sheet) ? "" : " off"}`}
-                      href={sheetUrl(w.sheet) ?? undefined}
-                      target={sheetUrl(w.sheet) ? "_blank" : undefined}
-                      rel={sheetUrl(w.sheet) ? "noopener noreferrer" : undefined}
-                      aria-label={sheetUrl(w.sheet) ? `Open ${w.client} workbook in Google Sheets` : `${w.client} has no workbook yet`}
-                    >
-                      <span className="material-symbols-rounded">table_view</span>
-                      <span className="rp-mono rp-sheet-id">{w.sheet || "—"}</span>
-                      <span className="material-symbols-rounded rp-ext">open_in_new</span>
-                    </a>
-                  </td>
-                  <td>
-                    <div className="rp-chips">
-                      {w.tabs.map((d) => (
-                        <span key={d} className="rp-chip" style={{ color: DATASET_META[d].c }}>
-                          <span className="material-symbols-rounded">{DATASET_META[d].icon}</span>
-                          {DATASET_META[d].label}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="num rp-rows">{w.rows.toLocaleString()}</td>
-                  <td className="rp-last">{isSyncing ? "syncing…" : w.lastSync}</td>
-                  <td>
-                    <span className={`status-pill ${st.cls}`}>
-                      {isSyncing && <span className="material-symbols-rounded rp-spin">progress_activity</span>}
-                      {st.label}
-                    </span>
-                  </td>
-                  <td className="rp-act-col">
-                    <button className="ghostbtn rp-syncbtn" onClick={() => onSync(w.id)} disabled={isSyncing}>
-                      <span className="material-symbols-rounded">refresh</span>
-                      Sync now
-                    </button>
-                  </td>
-                </tr>
+                <span className={`status-pill ${st.cls}`}>
+                  {isSyncing && <span className="material-symbols-rounded rp-spin">progress_activity</span>}
+                  {st.label}
+                </span>
               );
-            })}
-          </tbody>
-        </table>
-      </div>
+            },
+          },
+          {
+            key: "act",
+            header: "",
+            className: "rp-act-col",
+            cell: (w) => {
+              const isSyncing = syncing.has(w.id) || w.status === "syncing";
+              return (
+                <button className="ghostbtn rp-syncbtn" onClick={() => onSync(w.id)} disabled={isSyncing}>
+                  <span className="material-symbols-rounded">refresh</span>
+                  Sync now
+                </button>
+              );
+            },
+          },
+        ]}
+      />
     </section>
   );
 }

@@ -10,6 +10,8 @@
 // ============================================================
 
 import { useMemo, useState } from "react";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { describeError } from "@/components/ui/Toast";
 import {
   useDeleteWpConnection,
   useSaveWpConnection,
@@ -26,17 +28,20 @@ import {
   wpStatusPill,
 } from "@/lib/wordpress";
 
-const CARD = "var(--card, #fff)";
-const LINE = "var(--line, #E8D2D7)";
-const INK = "var(--ink, #241015)";
-const BLUSH = "var(--blush, #F8ECEE)";
-const MAROON = "var(--maroon, #6E1423)";
+const CARD = "var(--card)";
+const LINE = "var(--line)";
+const INK = "var(--ink)";
+const BLUSH = "var(--well)";
+const MAROON = "var(--violet)";
 
+// Theme tokens, not a private palette: `--maroon` and `--blush` are defined
+// NOWHERE, so the fallbacks above were always the paint - this file and its
+// neighbour DesignReplicator rendered a dead pre-violet brand on a violet app.
 const PILL_TONE: Record<string, { bg: string; fg: string }> = {
-  ok: { bg: "#E7F6EC", fg: "#137333" },
-  warn: { bg: "#FEF3E0", fg: "#8A5B00" },
-  bad: { bg: "#FDE7E9", fg: "#B01B2E" },
-  idle: { bg: "#EEE9EA", fg: "#6B5860" },
+  ok: { bg: "color-mix(in srgb, var(--ok) 12%, transparent)", fg: "var(--ok)" },
+  warn: { bg: "color-mix(in srgb, var(--warn) 14%, transparent)", fg: "var(--warn)" },
+  bad: { bg: "color-mix(in srgb, var(--crit) 12%, transparent)", fg: "var(--crit)" },
+  idle: { bg: "var(--well)", fg: "var(--muted)" },
 };
 
 function StatusPill({ status, configured }: { status: string; configured: boolean }) {
@@ -94,10 +99,10 @@ function EditModal({
     );
   };
 
-  const onDelete = () => {
-    if (!window.confirm(`Remove the WordPress connection for ${conn.clientName}?`)) return;
-    del.mutate(conn.clientId, { onSuccess: () => onClose() });
-  };
+  // window.confirm worked, but it cannot say what is NOT lost - which is the
+  // sentence that lets someone click. It is also a sixth feedback mechanism on a
+  // screen now standardised on ConfirmDialog.
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const fieldStyle: React.CSSProperties = {
     width: "100%",
@@ -183,7 +188,7 @@ function EditModal({
                 </option>
               ))}
             </select>
-            <div style={{ fontSize: 12.5, color: "#6B5860", marginTop: 6, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>
               {WP_AUTH_HINT[authMethod]}
             </div>
           </label>
@@ -227,20 +232,22 @@ function EditModal({
           )}
 
           {(save.isError || del.isError) && (
-            <div style={{ fontSize: 13, color: "#B01B2E", fontWeight: 600 }}>
-              Could not save. Check the details and try again.
+            // The API's own reason, not "check the details": a 403 and a bad
+            // site URL are different problems with different fixes.
+            <div style={{ fontSize: 13, color: "var(--crit)", fontWeight: 600 }} role="alert">
+              {describeError(save.error ?? del.error) ?? "Could not save. Check the details and try again."}
             </div>
           )}
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 4 }}>
             <button
               type="button"
-              onClick={onDelete}
+              onClick={() => setConfirmDelete(true)}
               disabled={del.isPending || !conn.configured}
               style={{
                 border: "none",
                 background: "transparent",
-                color: conn.configured ? "#B01B2E" : "#B7A9AD",
+                color: conn.configured ? "var(--crit)" : "var(--muted-2)",
                 cursor: conn.configured ? "pointer" : "not-allowed",
                 fontSize: 13.5,
                 fontWeight: 700,
@@ -287,6 +294,31 @@ function EditModal({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        tone="danger"
+        title="Remove this WordPress connection?"
+        body={
+          <>
+            AIOS stops publishing to <b>{conn.clientName}</b>&rsquo;s site and the
+            stored credential is deleted. Anything already published there stays
+            published.
+          </>
+        }
+        reassurance="You can reconnect the site later, but the credential will have to be entered again."
+        confirmLabel="Remove connection"
+        pending={del.isPending}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() =>
+          del.mutate(conn.clientId, {
+            onSuccess: () => {
+              setConfirmDelete(false);
+              onClose();
+            },
+          })
+        }
+      />
     </div>
   );
 }
@@ -307,7 +339,7 @@ function TestButton({ conn }: { conn: WpConnection }) {
           borderRadius: 8,
           border: `1px solid ${LINE}`,
           background: CARD,
-          color: conn.configured ? INK : "#B7A9AD",
+          color: conn.configured ? INK : "var(--muted-2)",
           fontSize: 13,
           fontWeight: 700,
           cursor: test.isPending || !conn.configured ? "not-allowed" : "pointer",
@@ -319,7 +351,7 @@ function TestButton({ conn }: { conn: WpConnection }) {
       {result && (
         <span
           title={result.detail}
-          style={{ fontSize: 12.5, fontWeight: 700, color: result.ok ? "#137333" : "#B01B2E", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{ fontSize: 12.5, fontWeight: 700, color: result.ok ? "var(--ok)" : "var(--crit)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
           {result.ok ? "✓ " : "✕ "}
           {result.detail}
@@ -342,7 +374,7 @@ export default function WpConnections() {
     padding: "10px 14px",
     fontSize: 12,
     fontWeight: 700,
-    color: "#6B5860",
+    color: "var(--muted)",
     letterSpacing: 0.3,
     textTransform: "uppercase",
     borderBottom: `1px solid ${LINE}`,
@@ -362,7 +394,7 @@ export default function WpConnections() {
         }}
       >
         <div style={{ maxWidth: 640 }}>
-          <p style={{ fontSize: 14, color: "#5B4A4F", lineHeight: 1.55, margin: 0 }}>
+          <p style={{ fontSize: 14, color: "var(--body)", lineHeight: 1.55, margin: 0 }}>
             Connect each client&rsquo;s WordPress site once. Approved content is published
             straight to the right client&rsquo;s site using the auth method you set here.
             Credentials are sealed on the server and never shown again.
@@ -377,12 +409,12 @@ export default function WpConnections() {
 
       <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
         {isLoading ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#6B5860", fontSize: 14 }}>
+          <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
             Loading connections…
           </div>
         ) : isError ? (
           <div style={{ padding: 40, textAlign: "center" }}>
-            <div style={{ fontSize: 14, color: "#B01B2E", fontWeight: 700 }}>Could not load WordPress connections.</div>
+            <div style={{ fontSize: 14, color: "var(--crit)", fontWeight: 700 }}>Could not load WordPress connections.</div>
             <button
               type="button"
               onClick={() => void refetch()}
@@ -392,7 +424,7 @@ export default function WpConnections() {
             </button>
           </div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 44, textAlign: "center", color: "#6B5860" }}>
+          <div style={{ padding: 44, textAlign: "center", color: "var(--muted)" }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: INK }}>No clients yet</div>
             <div style={{ fontSize: 13.5, marginTop: 6 }}>Add a client first, then connect its WordPress site here.</div>
           </div>
@@ -418,10 +450,10 @@ export default function WpConnections() {
                           {conn.siteUrl.replace(/^https?:\/\//, "")}
                         </a>
                       ) : (
-                        <span style={{ color: "#B7A9AD" }}>— not set —</span>
+                        <span style={{ color: "var(--muted-2)" }}>— not set —</span>
                       )}
                     </td>
-                    <td style={td}>{conn.configured || conn.siteUrl ? WP_AUTH_LABEL[conn.authMethod] : <span style={{ color: "#B7A9AD" }}>—</span>}</td>
+                    <td style={td}>{conn.configured || conn.siteUrl ? WP_AUTH_LABEL[conn.authMethod] : <span style={{ color: "var(--muted-2)" }}>—</span>}</td>
                     <td style={td}>
                       <StatusPill status={conn.status} configured={conn.configured} />
                     </td>

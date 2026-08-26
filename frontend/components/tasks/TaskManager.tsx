@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import ThreadPanel from "@/components/threads/ThreadPanel";
+import { useToast } from "@/components/ui/Toast";
 import { useAllTasks, useSetTaskProof } from "@/lib/hooks/tasks";
 import { useTeamMembers } from "@/lib/hooks/team";
 import {
@@ -53,6 +54,7 @@ function LifecycleBar({ status }: { status: TaskStatus }) {
 /** The proof-link cell: an "Open proof" link when set, plus a lead's inline add/edit. */
 function ProofCell({ task }: { task: Task }) {
   const setProof = useSetTaskProof();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.proofUrl);
 
@@ -64,7 +66,16 @@ function ProofCell({ task }: { task: Task }) {
     }
     setProof.mutate(
       { code: task.id, proofUrl: value },
-      { onSuccess: () => setEditing(false) },
+      {
+        onSuccess: () => {
+          setEditing(false);
+          toast.success(`Proof saved for ${task.id}`);
+        },
+        // "Save failed" told the operator nothing: not whether it was a
+        // permission problem, a bad URL or a dropped connection. The API's own
+        // reason travels now, and an error toast does not auto-dismiss.
+        onError: (err) => toast.fromError(`Couldn't save proof for ${task.id}`, err),
+      },
     );
   }
 
@@ -109,7 +120,6 @@ function ProofCell({ task }: { task: Task }) {
             <span className="material-symbols-rounded">close</span>
           </button>
         </div>
-        {setProof.isError && <span className="tm-proof-err">Save failed</span>}
       </div>
     );
   }

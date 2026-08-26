@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { QueryProvider } from "@/lib/query";
 import { LoaderProvider } from "@/components/loader/LoaderProvider";
+import { ToastProvider } from "@/components/ui/Toast";
 import DemoSwitcher from "@/components/DemoSwitcher";
 import ClickFX from "@/components/ClickFX";
 
@@ -58,9 +59,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           <QueryProvider>
             <LoaderProvider>
-              {children}
-              <DemoSwitcher />
-              <ClickFX />
+              {/* Toasts sit inside Query so any mutation can report its outcome,
+                  and inside Loader so the viewport paints above the page chrome. */}
+              <ToastProvider>
+                {children}
+                <DemoSwitcher />
+                <ClickFX />
+              </ToastProvider>
             </LoaderProvider>
           </QueryProvider>
         </AuthProvider>
