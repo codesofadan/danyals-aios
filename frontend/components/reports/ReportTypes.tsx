@@ -22,7 +22,11 @@ export default function ReportTypes() {
       <div className="card-h">
         <div>
           <div className="ct">What gets synced</div>
-          <div className="cs">Three datasets pushed to every workbook</div>
+          {/* Was "Three datasets…" — a second hard-coded count sitting beside the
+              now-derived one, so a fourth dataset would have made the card
+              contradict itself. The subtitle says WHAT the card is; the pill
+              says how many, from the data. */}
+          <div className="cs">The datasets pushed to every workbook</div>
         </div>
         <div className="tools">
           {typesQ.data && (

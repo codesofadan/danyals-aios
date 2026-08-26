@@ -14,6 +14,14 @@
 // reference one of the honesty mechanisms — QueryGuard (loading/failure),
 // an explicit isError/isLoading branch, or SegmentError. Rendering EmptyState
 // alone does not count: "empty" is a claim about data, not about failure.
+//
+// WHAT THIS CANNOT CATCH, because it is a textual scan and not a type check:
+//   - Reading `q.data` WITHOUT `??`. `client/ClientHeader.tsx` had exactly this
+//     shape and was never flagged; its vanishing health pill read as "no health
+//     concerns" and was found by hand, not here.
+//   - A file that merely MENTIONS `isError` without rendering anything for it.
+// So a green run means "no file matches the known-bad shape", never "every
+// number in the product is honest". Widen the pattern when a new shape bites.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
