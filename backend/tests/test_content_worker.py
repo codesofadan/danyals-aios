@@ -955,9 +955,16 @@ def test_inject_images_distributes_one_per_section_not_bunched() -> None:
     assert "c.png" in _img_after("## Third section")
 
 
-def test_fake_or_empty_image_injects_nothing() -> None:
-    # The keyless FakeImageGenerator (the default test bundle) is BILLED as before but
-    # its placeholder URL is NOT injected -> the draft has no image markdown at all.
+def test_a_keyless_run_produces_no_images_and_is_billed_for_none() -> None:
+    # The keyless FakeImageGenerator (the default test bundle) makes no provider call,
+    # so it must produce NOTHING and cost NOTHING.
+    #
+    # This previously asserted `images > 0` - the job committed the per-image price to
+    # the cost ledger and incremented the count BEFORE checking whether the generator
+    # was the fake, so a deployment with no image key reported spend for calls that
+    # never happened and a picture count for images that do not exist. The cost screen
+    # is where an operator decides what the platform is worth running; it must not
+    # invent line items.
     store = FakeContentStore(_job_row())
     out = execute_content_job(
         store, content_providers_for_tests(), "CJ-4200",
@@ -965,7 +972,7 @@ def test_fake_or_empty_image_injects_nothing() -> None:
     )
     assert out.status == "needs_review"
     assert "![" not in store.row["draft_md"]  # no broken/placeholder image markdown
-    assert store.row["images"] > 0            # yet images were still counted (billed)
+    assert store.row["images"] == 0           # and nothing claimed, nothing billed
 
 
 class _RaisingImageGen:
@@ -1209,3 +1216,38 @@ def test_dispatch_scheduled_publishes_empty_claim_is_a_noop() -> None:
     result = execute_dispatch_scheduled_publishes([], store=store, enqueue=enqueued.append)
     assert enqueued == []
     assert result == {"claimed": 0, "dispatched": []}
+
+
+def test_the_chosen_keyword_is_what_gets_researched_not_the_title() -> None:
+    """The operator picks a keyword; the pipeline must research THAT.
+
+    The research fan-out sent only the page TITLE, so a page chosen for
+    "emergency pool repair miami" was researched against whatever the title
+    happened to be - a different query, a different SERP, and a draft optimised
+    for something nobody selected. The title names the page; the keyword is what
+    it is meant to rank for, and they are not the same string.
+    """
+    row = _job_row()
+    row["topic"] = "Weekend Brunch, Reimagined"  # the page TITLE
+    row["source_pack"] = {**row["source_pack"], "primary_keyword": "best brunch in portland"}
+    store = FakeContentStore(row)
+
+    execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(), gate=_gate(), fetcher=FakePageFetcher(),
+    )
+    assert store.row["keyword_map"]["primary"] == "best brunch in portland"
+
+
+def test_without_a_chosen_keyword_it_still_falls_back_to_the_topic() -> None:
+    """Jobs created before the keyword travelled - and the single-job path, which
+    has no keyword to pass - must keep working exactly as they did."""
+    row = _job_row()
+    assert "primary_keyword" not in row["source_pack"]
+    store = FakeContentStore(row)
+
+    execute_content_job(
+        store, content_providers_for_tests(), "CJ-4200",
+        settings=_settings(), gate=_gate(), fetcher=FakePageFetcher(),
+    )
+    assert store.row["keyword_map"]["primary"] == "best brunch in portland"

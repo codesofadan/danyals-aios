@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import type { ContentJob } from "@/lib/content";
 import ReadMore from "@/components/ui/ReadMore";
+import ApproveGate from "./ApproveGate";
 
 export type ReviewAction = "approve" | "edit" | "reject";
 
@@ -27,6 +29,9 @@ export default function ReviewGate({
   // to a direct edit if no preview handler is wired.
   const requestEdit = (id: string) =>
     onPreview ? onPreview(id) : onAction(id, "edit");
+  // D-4: approving publishes to a client's live site, so the QA verdict is shown
+  // and acknowledged HERE rather than living on a preview tab nobody must open.
+  const [approving, setApproving] = useState<ContentJob | null>(null);
   return (
     <section className="card">
       <div className="card-h">
@@ -80,7 +85,7 @@ export default function ReviewGate({
                   )}
                   <button
                     className="primary-btn co-approve"
-                    onClick={() => onAction(j.id, "approve")}
+                    onClick={() => setApproving(j)}
                     disabled={!canReview}
                     title={gateTitle}
                   >
@@ -108,6 +113,17 @@ export default function ReviewGate({
           />
         </div>
       )}
+
+      <ApproveGate
+        code={approving?.id ?? null}
+        title={approving?.topic ?? ""}
+        onCancel={() => setApproving(null)}
+        onConfirm={(note) => {
+          const job = approving;
+          setApproving(null);
+          if (job) onAction(job.id, "approve", note);
+        }}
+      />
     </section>
   );
 }

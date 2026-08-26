@@ -175,6 +175,7 @@ def _seed_source_pack(
     services: list[str] | None = None,
     design_profile: dict[str, Any] | None = None,
     template: str | None = None,
+    primary_keyword: str = "",
 ) -> dict[str, Any]:
     """Assemble the worker's ``source_pack`` grounding from the client + its site.
 
@@ -202,6 +203,10 @@ def _seed_source_pack(
         facts["contact_role"] = str(client["contact_role"])
 
     pack: dict[str, Any] = {"client_name": client.get("name", ""), "facts": facts}
+    # The chosen search term travels with the job. The worker researches THIS when
+    # it is present, falling back to the topic/title only when it is not.
+    if primary_keyword.strip():
+        pack["primary_keyword"] = primary_keyword.strip()
     proof = _clean_lines(proof_points)
     quotes = _clean_lines(testimonials)
     data = _clean_lines(unique_data)
@@ -256,6 +261,7 @@ async def _seed_and_insert_job(
     services: list[str] | None = None,
     design_profile: dict[str, Any] | None = None,
     template: str | None = None,
+    primary_keyword: str = "",
 ) -> dict[str, Any]:
     """Seed a job's ``source_pack``, insert the queued row (RLS path), enqueue the
     pipeline worker, and return the row. The shared create path behind BOTH
@@ -282,6 +288,7 @@ async def _seed_and_insert_job(
         services=services,
         design_profile=design_profile,
         template=template,
+        primary_keyword=primary_keyword,
     )
     row = await asyncio.to_thread(
         repo.insert_job,
@@ -596,6 +603,10 @@ async def generate_from_research(
             client_id=body.client_id,
             page_type=job_page_type_for(item.page_type),
             topic=item.title,
+            # The keyword the operator actually chose. Without this the worker
+            # re-derived a search term from the TITLE, so the page could be
+            # researched against something the operator never picked.
+            primary_keyword=item.primary_keyword,
             framework=body.framework,
             target=body.target,
             proof_points=body.proof_points,

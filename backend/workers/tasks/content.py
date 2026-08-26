@@ -675,13 +675,23 @@ def _generate_images(
     Each generated image is committed at its RUNTIME cost = 1 x the per-image unit
     price (pricing.py); the pre-check estimate is the same per-image price.
 
-    Returns ``(count, resolved)`` where ``count`` is the number of images billed (the
-    pre-existing integer behaviour, unchanged) and ``resolved`` is the ``(slot, image)``
-    list to inject into the draft. Only REAL hosted images make ``resolved``: a keyless
-    ``FakeImageGenerator`` result or an empty/missing url is billed-as-before but yields
-    NO injection (so the draft never gets a broken ``![]()``)."""
+    Returns ``(count, resolved)`` where ``count`` is the number of images ACTUALLY
+    produced and ``resolved`` is the ``(slot, image)`` list to inject into the draft.
+
+    A KEYLESS RUN PRODUCES NOTHING AND IS BILLED NOTHING. This function used to
+    commit the per-image price and increment ``count`` BEFORE checking whether the
+    generator was the deterministic ``FakeImageGenerator`` - so a deployment with no
+    image key wrote spend into the cost ledger for provider calls that never
+    happened, and reported an ``images`` count for pictures that do not exist. The
+    old docstring called that "billed-as-before", which named the behaviour without
+    justifying it. No provider call means no cost row and no count."""
     per_image = settings.price_image_per_image
-    is_fake = isinstance(images, FakeImageGenerator)
+    if isinstance(images, FakeImageGenerator):
+        # Nothing to generate and nothing to charge for. Said out loud, because a
+        # silent zero here is indistinguishable from "the plan asked for none".
+        logger.info("content_images_skipped_no_provider", code=code,
+                    planned=len(content.images_plan))
+        return 0, []
     count = 0
     resolved: list[tuple[str, GeneratedImage]] = []
     for item in content.images_plan:
@@ -699,13 +709,16 @@ def _generate_images(
             break
         try:
             image = images.generate(item.prompt, item.alt)
+            # An empty url means the provider answered without giving us a picture.
+            # Nothing is injected, so nothing is counted and nothing is charged -
+            # the ledger records what happened, not what was attempted.
+            if not image.url:
+                logger.warning("content_image_empty_url", code=code, slot=item.slot)
+                continue
             # ACTUAL cost = one image generated x the per-image unit price.
             gate.commit(ctx, pricing.image_cost(settings, images=1))
             count += 1
-            # Inject only a REAL hosted image; a fake/degraded result or an empty url
-            # injects nothing (count is unaffected - the existing behaviour is preserved).
-            if not is_fake and image.url:
-                resolved.append((item.slot, image))
+            resolved.append((item.slot, image))
         except Exception:  # one bad image never fails the job
             logger.warning("content_image_failed", code=code)
     return count, resolved
@@ -898,8 +911,15 @@ def _run_pipeline(
     client_id: str | None,
 ) -> ContentJobOutcome:
     """The happy-path composition (research -> ... -> qa loop -> needs_review)."""
-    keyword = str(row.get("topic") or "")
     source_pack = _source_pack_from_row(row)
+    # THE KEYWORD THE OPERATOR CHOSE, when the create path recorded one. Research
+    # used to re-derive a search term from the page TITLE, so a page picked for
+    # "emergency pool repair miami" could be researched against "Pool Repairs &
+    # Equipment" - a different query with a different SERP. The title is what the
+    # page is called; this is what it is meant to rank for. Falls back to the topic
+    # for jobs created before the keyword travelled, and for the single-job path.
+    keyword = str(_as_dict(row.get("source_pack")).get("primary_keyword")
+                  or row.get("topic") or "")
     geo = _geo_for(row, source_pack)
     # The reviewer's guided-edit instruction (set by a lead on the needs_review->
     # drafting `edit` transition). When present this run is a GUIDED re-draft: after
