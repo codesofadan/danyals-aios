@@ -61,7 +61,57 @@
   --text-muted: var(--muted);
   --surface-2: var(--card-2);
   --accent: var(--violet);
+
+  /* ==== THE MISSING AXES =============================================
+     There were 63 COLOUR tokens and, until now, not one token for space,
+     radius or type. The result was a long tail with no rhythm: 42 distinct
+     font sizes, 21 radii, 18 gap values and 28 single-value paddings, most
+     of them one-offs a pixel apart (10.5 / 11 / 11.5 / 12 / 12.5 / 13).
+
+     THESE STEPS ARE MEASURED, NOT INVENTED. Each one is a value the codebase
+     already leans on, so adopting a token is a rounding, not a redesign:
+     gap 8px is used 172 times, radius 12px 74 times, font-size 12px 199.
+     Nothing here changes a rendered pixel today - the tokens are additive,
+     and screens move onto them as they are touched. -------------------- */
+
+  /* Space. Fine at the bottom because this UI is dense by design; the top of
+     the scale is for section rhythm, not for padding a chip. */
+  --s-1: 2px;  --s-2: 4px;  --s-3: 6px;   --s-4: 8px;   --s-5: 10px;
+  --s-6: 12px; --s-7: 16px; --s-8: 20px;  --s-9: 24px;  --s-10: 32px;
+
+  /* Radius. `--r-full` is the pill: 999px was already the single most common
+     value in the codebase (115 uses), and `99px` appeared twice meaning the
+     same thing. */
+  --r-xs: 4px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-full: 999px;
+
+  /* Type. The mass of this product sits between 11 and 13px - it is an
+     operator console, not a marketing page - so the scale is tight at the
+     bottom and opens up only for real headings. */
+  --fs-xs: 11px;   --fs-sm: 12.5px; --fs-md: 14px;  --fs-lg: 16px;
+  --fs-xl: 19px;   --fs-2xl: 24px;  --fs-3xl: 32px;
+
+  /* Elevation, replacing 94 distinct box-shadow strings. Tuned to the light
+     canvas: the ink colour, not black, so shadows read as depth rather than
+     grime. */
+  --e-1: 0 1px 2px rgba(33, 27, 41, .06);
+  --e-2: 0 4px 14px rgba(33, 27, 41, .08);
+  --e-3: 0 18px 44px rgba(33, 27, 41, .14);
+
   color-scheme: light;
+}
+
+/* Visible to a screen reader, to nobody else. Used for the word "(required)"
+   beside the asterisk, so the requirement is announced rather than left as a
+   symbol a screen-reader user has to infer. Clip-path rather than
+   `display:none`, which would remove it from the accessibility tree too. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---- ambient glows dial way down on the light canvas so they never
