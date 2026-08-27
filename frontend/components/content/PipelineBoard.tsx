@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { COLUMNS, PAGE_TYPE_LABELS, type ContentJob, type ColumnKey } from "@/lib/content";
 import ReadMore from "@/components/ui/ReadMore";
 
@@ -32,7 +34,17 @@ function JobCard({ job, onSelect }: { job: ContentJob; onSelect?: (id: string) =
       aria-label={clickable ? `Preview ${job.id}: ${job.topic}` : undefined}
     >
       <div className="co-card-top">
-        <span className="co-jid">{job.id}</span>
+        {/* The code chip is the door to the job's DETAIL page - the full record
+            (process timeline, QA, republish, CSV). The card body keeps opening
+            the quick review preview. */}
+        <Link
+          className="co-jid"
+          href={`/admin/content/${job.id}`}
+          onClick={(e) => e.stopPropagation()}
+          title={`Open ${job.id} in full`}
+        >
+          {job.id}
+        </Link>
         <span className={`co-page ${job.pageType}`}>
           <span className="material-symbols-rounded">{PAGE_ICON[job.pageType]}</span>
           {PAGE_TYPE_LABELS[job.pageType]}

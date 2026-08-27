@@ -61,8 +61,6 @@ export const PARKED: ParkedEntry[] = [
     [
       ["ui/Modal.tsx", "any screen migrating off a hand-rolled modal (11 exist)"],
       ["ui/PageHeader.tsx", "the first LIST-archetype screen migration"],
-      ["ui/DetailShell.tsx", "the first new detail route (content job, client)"],
-      ["ui/StageTimeline.tsx", "the content job detail's Process tab (Phase 5)"],
       ["ui/useCountUp.ts", "the first KPI strip migrated off its local copy (11 exist)"],
     ] as const
   ).map(([path, when]): ParkedEntry => ({

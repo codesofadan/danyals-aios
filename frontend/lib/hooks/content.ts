@@ -316,3 +316,34 @@ export type ContentWp = {
 export function useContentWp(code: string | null) {
   return useContentColumn<ContentWp>(code, "wp");
 }
+
+// --- One job, by its public code (GET /content/jobs/{code}) --------------------
+// The single-job read existed on the server the whole time and had NO caller -
+// which is why content jobs had no detail page and every deep concern lived in a
+// modal. Polls while the pipeline is active so the detail's Process view moves.
+export function useContentJob(code: string | null) {
+  return useQuery({
+    queryKey: [...CONTENT_JOBS_KEY, "one", code] as const,
+    queryFn: () => api.get<ContentJob>(`/content/jobs/${code}`),
+    enabled: Boolean(code),
+    refetchInterval: (query) => {
+      const s = query.state.data?.status;
+      return s === "queued" || s === "drafting" || s === "publishing" ? 5_000 : false;
+    },
+  });
+}
+
+// --- Republish (POST /content/jobs/{code}/republish) ---------------------------
+// Built server-side, uncalled until now. Re-runs the publish leg only - for a
+// `degraded` job (drafted fine, never reached the site) or a `done` page whose
+// site-side copy was lost.
+export function useRepublishJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => api.post<ContentJob>(`/content/jobs/${code}/republish`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
+      void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
+    },
+  });
+}
