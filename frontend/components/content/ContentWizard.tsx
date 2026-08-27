@@ -10,7 +10,9 @@
 //   4  Generate & preview — fan the picks into jobs, then review the draft + images
 //   5  Approve → WordPress — one-click approve pushes a DRAFT to WordPress
 //
-// Reuses the existing hooks (useContentResearch / useSiteDesign /
+// Hooks: useContentResearch (step 1), useSiteDesign (step 2 - a claim this
+// comment made for weeks before the wizard actually called it), and
+// useGenerateFromResearch (the commit).
 // useGenerateFromResearch) and the existing ReviewPreview surface. No new
 // endpoints. Every metered action is disabled while the API-spend halt is on.
 // ============================================================
@@ -21,10 +23,11 @@ import {
   TEMPLATE_THEME_DEFAULTS, profileFromTemplate,
   type ContentJob, type ResearchContentType, type ResearchItem,
   type Framework, type PublishTarget, type PageTemplate,
-  type TemplateTheme,
+  type TemplateTheme, type SiteDesignProfile,
 } from "@/lib/content";
 import {
-  useContentResearch, useGenerateFromResearch,
+  useContentResearch, useGenerateFromResearch, useSiteDesign,
+  type SiteDesignResult,
 } from "@/lib/hooks/content";
 import { useClients } from "@/lib/hooks/clients";
 import ReviewPreview from "./ReviewPreview";
@@ -80,6 +83,15 @@ export default function ContentWizard({
   const [clientId, setClientId] = useState("");
   const [framework, setFramework] = useState<Framework | "Auto">("Auto");
   const [template, setTemplate] = useState<PageTemplate | "Auto">("Auto");
+  // DESIGN EXTRACTION - the other real choice on this step. POST /content/site-design
+  // measures the client's existing site and returns a SiteDesignProfile; this hook
+  // sat exported with ZERO callers while the step's own header comment claimed the
+  // wizard used it. When an extraction succeeds it becomes the design that rides to
+  // generate, beating any template pick. One paid call, metered under the content
+  // dial; a degraded result says why and costs the operator nothing further.
+  const extract = useSiteDesign();
+  const [extracted, setExtracted] = useState<SiteDesignProfile | null>(null);
+  const [extractedFrom, setExtractedFrom] = useState("");
   // The editable look for the chosen template (recolour + Google-Font pairing). Seeded
   // from the template's curated default; synthesised into a design_profile at generate.
   const [theme, setTheme] = useState<TemplateTheme>(TEMPLATE_THEME_DEFAULTS.service);
@@ -168,7 +180,10 @@ export default function ContentWizard({
     if (picks.length === 0 || !effectiveClientId || _lines(proof).length === 0 || halted || generate.isPending) return;
     // The look sent to the backend: a matched real site wins if attached; otherwise the
     // chosen template's theme (colour + fonts) is synthesised into the same design_profile.
-    const designToSend = template !== "Auto" ? profileFromTemplate(template, theme) : null;
+    // An extracted profile wins over a template: matching the client's real site
+    // is the stronger promise, and the operator made it explicitly.
+    const designToSend =
+      extracted ?? (template !== "Auto" ? profileFromTemplate(template, theme) : null);
     generate.mutate(
       {
         items: picks,
@@ -372,6 +387,77 @@ export default function ContentWizard({
         {/* ───────────────────────── STEP 2 — DESIGN (optional) ───────────────────────── */}
         {step === 2 && (
           <>
+            {/* EXTRACT the client's own design - the option this step always
+                claimed to have. The site from Step 1 seeds the field. */}
+            <div className="fld" style={{ marginBottom: 14 }}>
+              <label htmlFor="wiz-extract-site">Match the client&apos;s existing site</label>
+              <div className="fld-hint" style={{ marginTop: 0, marginBottom: 8 }}>
+                One metered analysis reads the live site&apos;s colours, fonts and layout so
+                every generated page is built to match it. Or skip this and pick a template below.
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  id="wiz-extract-site"
+                  value={extractedFrom || site}
+                  onChange={(e) => setExtractedFrom(e.target.value)}
+                  placeholder="https://clientsite.com"
+                  autoComplete="off"
+                  inputMode="url"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="ghostbtn"
+                  disabled={extract.isPending || !(extractedFrom || site).trim()}
+                  onClick={() =>
+                    extract.mutate(
+                      { site: (extractedFrom || site).trim() },
+                      {
+                        onSuccess: (res: SiteDesignResult) => {
+                          if (res.status === "ok" && res.profile) {
+                            setExtracted(res.profile);
+                            setExtractedFrom((extractedFrom || site).trim());
+                          } else {
+                            setExtracted(null);
+                          }
+                        },
+                      },
+                    )
+                  }
+                >
+                  <span className="material-symbols-rounded">auto_fix_high</span>
+                  {extract.isPending ? "Analyzing…" : "Extract design"}
+                </button>
+              </div>
+              {extracted && (
+                <div className="co-wiz-note" style={{ marginTop: 10 }} role="status">
+                  <span className="material-symbols-rounded">check_circle</span>
+                  <div>
+                    <b>Design extracted from {extractedFrom}.</b> Generated pages will match it -
+                    this beats any template pick below.{" "}
+                    <button type="button" className="clear-btn" onClick={() => setExtracted(null)}>
+                      Use a template instead
+                    </button>
+                  </div>
+                </div>
+              )}
+              {extract.data && extract.data.status === "degraded" && !extracted && (
+                <div className="co-wiz-note" style={{ marginTop: 10 }} role="alert">
+                  <span className="material-symbols-rounded">warning</span>
+                  <div>
+                    <b>Couldn&apos;t extract a design.</b>{" "}
+                    {extract.data.reason || "The analysis degraded."} Pick a template below instead.
+                  </div>
+                </div>
+              )}
+              {extract.isError && (
+                <div className="co-wiz-note" style={{ marginTop: 10 }} role="alert">
+                  <span className="material-symbols-rounded">error</span>
+                  <div><b>The analysis failed.</b> Try again, or pick a template below.</div>
+                </div>
+              )}
+            </div>
+
             {/* Template gallery — pick one of the 7 seeded templates, see it live, recolour + re-font it */}
             <div className="fld" style={{ marginBottom: 14 }}>
               <label>Choose a page template</label>
