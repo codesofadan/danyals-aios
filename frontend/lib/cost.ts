@@ -168,8 +168,9 @@ export const DIAL_MODES: DialMode[] = ["api", "byhand", "off"];
 // There is no per-day dollar threshold any more. GET /cost/spend-stop returns
 // { halted, todaySpent, monthSpent }.
 
-export const usd = (n: number, dp = 0) =>
-  "$" + n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+// Moved to lib/format.ts (the canonical formatting home); re-exported so the
+// existing importers keep working. New code imports from "@/lib/format".
+export { usd } from "@/lib/format";
 
 // --- Live provider unit pricing (GET /cost/pricing) --------------------------
 // The ONLY source of a unit price in the UI. Mirrors backend

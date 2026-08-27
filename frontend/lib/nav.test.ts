@@ -13,10 +13,15 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { ADMIN_NAV, CLIENT_NAV, TEAM_NAV } from "./nav";
+
 const ROOT = process.cwd();
 const APP = join(ROOT, "app");
 
-const NAV_SOURCES = [
+// After the single-source refactor the nav table lives in lib/nav.ts; the four
+// shell components render it and may not declare destinations of their own.
+const NAV_SOURCES = ["lib/nav.ts"];
+const NAV_RENDERERS = [
   "components/Sidebar.tsx",
   "components/portal/TeamSidebar.tsx",
   "components/client/ClientSidebar.tsx",
@@ -138,30 +143,46 @@ describe("navigation integrity", () => {
 // or "operations" was told the page did not exist. Nothing caught it, because
 // both lists resolve to real routes; the bug is only visible by comparing them.
 // ============================================================
-describe("search covers every navigable destination", () => {
-  const SIDEBARS = [
-    "components/Sidebar.tsx",
-    "components/portal/TeamSidebar.tsx",
-    "components/client/ClientSidebar.tsx",
-  ];
+describe("the one nav table is fit for search", () => {
+  // Parity between sidebar and search is now STRUCTURAL (both render lib/nav.ts),
+  // so the old cross-file comparison is vacuous. What can still rot is the table
+  // itself: an item without keywords is findable only by its exact label, and a
+  // duplicated href makes two entries claim one page.
+  const all = [...ADMIN_NAV.flatMap((g) => g.items), ...TEAM_NAV, ...CLIENT_NAV];
 
-  it("every sidebar href is reachable from the search box", () => {
-    const searchable = new Set(hrefsIn(read("components/TopBar.tsx")));
-    const missing: string[] = [];
-    for (const rel of SIDEBARS) {
-      for (const href of hrefsIn(read(rel))) {
-        if (!searchable.has(href)) missing.push(`${href} (in ${rel})`);
-      }
-    }
-    expect(
-      missing,
-      "these destinations appear in a sidebar but not in TopBar's *_DESTS, so " +
-        "searching for them returns nothing",
-    ).toEqual([]);
+  it("every destination carries search keywords beyond its label", () => {
+    const bare = all.filter((i) => !(i.keywords ?? "").trim()).map((i) => i.href);
+    expect(bare).toEqual([]);
   });
 
-  it("every searchable href is a real route", () => {
-    const bad = hrefsIn(read("components/TopBar.tsx")).filter((h) => !resolves(h));
-    expect(bad, "search offers destinations that do not resolve").toEqual([]);
+  it("no href appears twice within a portal", () => {
+    for (const list of [ADMIN_NAV.flatMap((g) => g.items), TEAM_NAV, CLIENT_NAV]) {
+      const hrefs = list.map((i) => i.href);
+      expect(new Set(hrefs).size).toBe(hrefs.length);
+    }
+  });
+
+  it("every nav destination resolves to a real route", () => {
+    const bad = all.filter((i) => !resolves(i.href)).map((i) => i.href);
+    expect(bad).toEqual([]);
+  });
+});
+
+// ============================================================
+// 4. ONE TABLE. A nav component that declares its own `href:` literal is a
+// second copy waiting to drift - which is exactly how search lost
+// /admin/operations. Links rendered from data (it.href, t.slug) are fine;
+// declaring a destination inline is not.
+// ============================================================
+describe("nav components declare no destinations of their own", () => {
+  it("no href literal outside lib/nav.ts", () => {
+    const offenders: string[] = [];
+    for (const rel of NAV_RENDERERS) {
+      const src = read(rel);
+      for (const m of src.matchAll(/href[:=]\s*"(\/[^"]*)"/g)) {
+        offenders.push(`${rel} declares ${m[1]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

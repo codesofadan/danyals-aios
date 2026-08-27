@@ -3,58 +3,19 @@
 import { useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { isNavLocked } from "@/lib/lockedInProd";
+import { searchDestinations, type NavItem } from "@/lib/nav";
 import NotificationBell from "@/components/notifications/NotificationBell";
 
 type Props = { eyebrow?: string; title: string; searchPlaceholder?: string; hideSearch?: boolean };
 
-type Dest = { icon: string; label: string; href: string; keywords?: string };
+// Destinations come from lib/nav.ts - the same table the sidebars render, so
+// search can never again lose a page the sidebar shows. This file used to carry
+// its own copies and they had drifted.
 
-// Searchable destinations per dashboard area. The top-bar search resolves the
-// current area from the pathname and jumps to any of its pages — so it works
-// identically in the admin, team and client shells without any area-only API
-// calls. Mirrors the Sidebar nav plus a few routes that exist but are unlisted.
-const ADMIN_DESTS: Dest[] = [
-  { icon: "space_dashboard", label: "Admin Dashboard", href: "/admin", keywords: "home overview" },
-  { icon: "fact_check", label: "Audit", href: "/admin/audit", keywords: "seo scan report" },
-  { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads public" },
-  { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish" },
-  { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections sites cms plugin xmlrpc" },
-  { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "nap directories" },
-  { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "backlinks properties" },
-  { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", keywords: "google updates algorithm" },
-  { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
-  { icon: "flag", label: "Milestones", href: "/admin/milestones", keywords: "projects delivery timeline stages roadmap" },
-  { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff" },
-  { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board" },
-  { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "cron jobs pdf downloads" },
-  { icon: "monitor_heart", label: "Operations", href: "/admin/operations", keywords: "jobs runs health failures dead letters queue logs retry cancel replay" },
-  { icon: "savings", label: "Cost Controls", href: "/admin/cost", keywords: "spend budget dials pricing" },
-  { icon: "key", label: "Key Vault", href: "/admin/vault", keywords: "api keys credentials secrets" },
-  { icon: "settings", label: "Settings", href: "/admin/settings", keywords: "config preferences" },
-];
-
-const TEAM_DESTS: Dest[] = [
-  { icon: "space_dashboard", label: "Team Home", href: "/team", keywords: "overview" },
-  { icon: "inbox", label: "Queue", href: "/team/queue", keywords: "tasks work" },
-  { icon: "rate_review", label: "Review", href: "/team/review", keywords: "qa approve" },
-  { icon: "local_shipping", label: "Deliver", href: "/team/deliver", keywords: "handoff" },
-];
-
-const CLIENT_DESTS: Dest[] = [
-  { icon: "space_dashboard", label: "Portal Home", href: "/client", keywords: "overview dashboard" },
-  { icon: "fact_check", label: "Audits", href: "/client/audits", keywords: "seo scan report pdf findings" },
-  { icon: "summarize", label: "Reports", href: "/client/reports", keywords: "deliverables pdf downloads" },
-  { icon: "support_agent", label: "Requests", href: "/client/requests", keywords: "tickets edits support" },
-  { icon: "flag", label: "Milestones", href: "/client/milestones", keywords: "roadmap progress" },
-];
-
-// The production lock list lives in ONE place — lib/lockedInProd.ts. This file
-// used to carry its own, and the two drifted.
-
-function destsForPath(pathname: string): Dest[] {
-  if (pathname.startsWith("/team")) return TEAM_DESTS;
-  if (pathname.startsWith("/client")) return CLIENT_DESTS;
-  return ADMIN_DESTS.filter((d) => !isNavLocked(d.href));
+function destsForPath(pathname: string): NavItem[] {
+  if (pathname.startsWith("/team")) return searchDestinations("team");
+  if (pathname.startsWith("/client")) return searchDestinations("client");
+  return searchDestinations("admin").filter((d) => !isNavLocked(d.href));
 }
 
 export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…", hideSearch = false }: Props) {
@@ -130,10 +91,10 @@ export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…"
                   left: 0,
                   right: 0,
                   zIndex: 60,
-                  background: "var(--card, #fff)",
-                  border: "1px solid var(--line, #E8D2D7)",
+                  background: "var(--card)",
+                  border: "1px solid var(--line)",
                   borderRadius: 12,
-                  boxShadow: "0 12px 32px rgba(63,14,24,0.14)",
+                  boxShadow: "var(--e-3)",
                   padding: 6,
                   maxHeight: 340,
                   overflowY: "auto",
@@ -163,8 +124,8 @@ export default function TopBar({ eyebrow, title, searchPlaceholder = "Search…"
                         border: "none",
                         cursor: "pointer",
                         fontSize: 14,
-                        color: "var(--ink, #241015)",
-                        background: i === active ? "var(--blush, #F8ECEE)" : "transparent",
+                        color: "var(--ink)",
+                        background: i === active ? "var(--hover)" : "transparent",
                       }}
                     >
                       <span className="material-symbols-rounded" style={{ fontSize: 19, opacity: 0.7 }}>{d.icon}</span>

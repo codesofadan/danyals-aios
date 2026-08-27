@@ -51,6 +51,32 @@ export type ParkedEntry = {
 };
 
 export const PARKED: ParkedEntry[] = [
+  // --- Phase-1 screen grammar: built ahead of the screens that mount them ----
+  // The approved Screen & Hierarchy Specification (plan of 2026-08-27) builds the
+  // shared vocabulary FIRST, then migrates screens onto it phase by phase. These
+  // are that vocabulary: finished, tested (components/ui/primitives.test.tsx),
+  // and waiting for Phases 2-5 to give them callers. Staged work, not options
+  // preserved from a removal - nothing unmounted them; their mounts are next.
+  ...(
+    [
+      ["ui/Modal.tsx", "any screen migrating off a hand-rolled modal (11 exist)"],
+      ["ui/PageHeader.tsx", "the first LIST-archetype screen migration"],
+      ["ui/TabBar.tsx", "the first WORKSPACE/DETAIL screen (Off-Page, client detail)"],
+      ["ui/DetailShell.tsx", "the first new detail route (content job, client)"],
+      ["ui/StageTimeline.tsx", "the content job detail's Process tab (Phase 5)"],
+      ["ui/useCountUp.ts", "the first KPI strip migrated off its local copy (11 exist)"],
+    ] as const
+  ).map(([path, when]): ParkedEntry => ({
+    path,
+    status: "active-parked",
+    unmountedBy: "never mounted - Phase 1 of the Screen & Hierarchy Specification (2026-08-27)",
+    reason:
+      "The screen grammar is built and tested before the screens that use it, so " +
+      "each later phase is a migration onto a proven primitive rather than an " +
+      "invention inside a feature branch.",
+    reEnableWhen: when,
+  })),
+
   // --- Citations: ACTIVE work, locked pending a data source -------------------
   // `app/admin/citations/page.tsx` renders a lock card that says so in plain words:
   // "Re-enable by restoring the CitationsTab render below (see git history) once the

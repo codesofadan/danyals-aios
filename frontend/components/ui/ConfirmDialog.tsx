@@ -24,6 +24,7 @@
 // Escape, and is a real role="dialog" + aria-modal.
 
 import { useEffect, useId, useRef, useState } from "react";
+import useFocusTrap from "./useFocusTrap";
 
 export type ConfirmTone = "danger" | "caution" | "normal";
 
@@ -68,7 +69,6 @@ export default function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const returnFocusTo = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const bodyId = useId();
   const [typed, setTyped] = useState("");
@@ -79,45 +79,9 @@ export default function ConfirmDialog({
     if (open) setTyped("");
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    returnFocusTo.current = document.activeElement as HTMLElement | null;
-    // Focus the panel rather than the confirm button: landing on the
-    // destructive verb invites a reflexive Enter.
-    panelRef.current?.focus();
-    return () => returnFocusTo.current?.focus?.();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusable = panel.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      // Wrap at both ends, and pull focus back in if it has escaped the panel.
-      if (e.shiftKey && (active === first || active === panel)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [open, onCancel]);
+  // Trap + restore + Escape live in ONE place (useFocusTrap), shared with Modal,
+  // so the two dialogs cannot drift apart on keyboard behaviour.
+  useFocusTrap(open, panelRef, onCancel);
 
   if (!open) return null;
 

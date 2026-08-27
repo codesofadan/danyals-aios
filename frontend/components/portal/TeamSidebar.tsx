@@ -5,20 +5,21 @@ import { usePathname } from "next/navigation";
 import { usePortal } from "./PortalContext";
 import { useAuth } from "@/lib/auth";
 import { toolForKey } from "@/lib/tools";
+import { TEAM_NAV } from "@/lib/nav";
 
-type Item = { icon: string; label: string; href: string; badge?: number };
 
 export default function TeamSidebar() {
   const pathname = usePathname();
   const { me, myGrants, openCount, reviewCount } = usePortal();
   const { logout } = useAuth();
 
-  const items: Item[] = [
-    { icon: "space_dashboard", label: "Team Dashboard", href: "/team" },
-    { icon: "view_kanban", label: "My Queue", href: "/team/queue", badge: openCount },
-    { icon: "play_circle", label: "Deliver", href: "/team/deliver" },
-    { icon: "how_to_reg", label: "Review", href: "/team/review", badge: reviewCount },
-  ];
+  // Identity from lib/nav.ts; the runtime COUNTS are this shell's context and
+  // are attached here by href.
+  const counts: Record<string, number> = {
+    "/team/queue": openCount,
+    "/team/review": reviewCount,
+  };
+  const items = TEAM_NAV.map((it) => ({ ...it, count: counts[it.href] }));
 
   // The tools this member can actually open — exactly what the admin
   // granted them, in feature order.
@@ -46,7 +47,7 @@ export default function TeamSidebar() {
               <Link key={it.label} href={it.href} className={active ? "active" : undefined}>
                 <span className="material-symbols-rounded">{it.icon}</span>
                 <span className="lbl">{it.label}</span>
-                {it.badge ? <span className="badge-n">{it.badge}</span> : null}
+                {it.count ? <span className="badge-n">{it.count}</span> : null}
               </Link>
             );
           })}

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useClient } from "./ClientContext";
 import { useAuth } from "@/lib/auth";
+import { CLIENT_NAV } from "@/lib/nav";
 
-type Item = { icon: string; label: string; href: string; badge?: number };
 
 export default function ClientSidebar() {
   const pathname = usePathname();
@@ -14,13 +14,10 @@ export default function ClientSidebar() {
 
   const openRequests = requests.filter((r) => r.status !== "resolved").length;
 
-  const items: Item[] = [
-    { icon: "insights", label: "Client Dashboard", href: "/client" },
-    { icon: "fact_check", label: "Audits", href: "/client/audits" },
-    { icon: "flag", label: "Milestones", href: "/client/milestones" },
-    { icon: "summarize", label: "Reports", href: "/client/reports" },
-    { icon: "forum", label: "Requests", href: "/client/requests", badge: openRequests },
-  ];
+  // Identity from lib/nav.ts; the unresolved-request count is this shell's
+  // context, attached by href.
+  const counts: Record<string, number> = { "/client/requests": openRequests };
+  const items = CLIENT_NAV.map((it) => ({ ...it, count: counts[it.href] }));
 
   return (
     <aside className="sidebar client-side">
@@ -42,7 +39,7 @@ export default function ClientSidebar() {
               <Link key={it.label} href={it.href} className={active ? "active" : undefined}>
                 <span className="material-symbols-rounded">{it.icon}</span>
                 <span className="lbl">{it.label}</span>
-                {it.badge ? <span className="badge-n">{it.badge}</span> : null}
+                {it.count ? <span className="badge-n">{it.count}</span> : null}
               </Link>
             );
           })}

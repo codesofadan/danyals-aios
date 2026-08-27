@@ -295,19 +295,7 @@ export function formatDuration(seconds: number | null | undefined): string {
  * work that has not happened yet. "" for null/empty/unparseable, so a missing
  * timestamp renders as nothing rather than "Invalid Date".
  */
-export function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const delta = Math.round((Date.now() - then) / 1000);
-  const secs = Math.abs(delta);
-  const past = delta >= 0;
-  const phrase = (text: string) => (past ? `${text} ago` : `in ${text}`);
-  if (secs < 45) return past ? "just now" : "in a moment";
-  if (secs < 3600) return phrase(`${Math.floor(secs / 60)}m`);
-  if (secs < 86400) return phrase(`${Math.floor(secs / 3600)}h`);
-  return phrase(`${Math.floor(secs / 86400)}d`);
-}
+export { relativeTime } from "@/lib/format";
 
 // --- who may act -------------------------------------------------------------
 // Reads need `view_reports` (all six staff roles hold it; a portal client does

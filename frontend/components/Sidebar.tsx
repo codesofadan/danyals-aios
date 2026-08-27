@@ -5,55 +5,12 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth, ROLE_META } from "@/lib/auth";
 import { isNavLocked } from "@/lib/lockedInProd";
+import { ADMIN_NAV } from "@/lib/nav";
 import { initialsOf } from "@/lib/initials";
 
-type Item = { icon: string; label: string; href: string; badge?: string };
-type Section = { title: string; items: Item[] };
-
-// Only built, navigable routes live here — module items are added as
-// each module ships.
-const SECTIONS: Section[] = [
-  {
-    title: "Overview",
-    items: [
-      { icon: "space_dashboard", label: "Admin Dashboard", href: "/admin" },
-    ],
-  },
-  {
-    title: "SEO Engine",
-    items: [
-      { icon: "fact_check", label: "Audit", href: "/admin/audit" },
-      { icon: "contact_mail", label: "Free Audits", href: "/admin/leads" },
-      { icon: "article", label: "Content", href: "/admin/content" },
-      { icon: "language", label: "WordPress", href: "/admin/wordpress" },
-      { icon: "storefront", label: "Citations", href: "/admin/citations", badge: "off" },
-      { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", badge: "test" },
-      { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar" },
-    ],
-  },
-  {
-    title: "Delivery",
-    items: [
-      { icon: "diversity_3", label: "Clients", href: "/admin/clients" },
-      { icon: "flag", label: "Milestones", href: "/admin/milestones" },
-      { icon: "groups", label: "Team Management", href: "/admin/team" },
-      { icon: "task_alt", label: "Task Manager", href: "/admin/tasks" },
-      { icon: "summarize", label: "Reports", href: "/admin/reports" },
-    ],
-  },
-  {
-    title: "Platform",
-    items: [
-      // First in the group: Operations is the health surface. Every other item here
-      // configures the platform; this one says whether it is actually working.
-      { icon: "monitor_heart", label: "Operations", href: "/admin/operations" },
-      { icon: "savings", label: "Cost Controls", href: "/admin/cost" },
-      { icon: "key", label: "Key Vault", href: "/admin/vault" },
-      { icon: "settings", label: "Settings", href: "/admin/settings" },
-    ],
-  },
-];
-
+// The nav tree lives in lib/nav.ts - ONE table renders here and indexes the
+// search box, so the two can never drift again (they had: /admin/operations
+// was in this sidebar and missing from search).
 // The production lock list lives in ONE place — lib/lockedInProd.ts. Do not
 // reintroduce a local copy here; lib/nav.test.ts fails if a second one appears.
 
@@ -92,7 +49,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="nav">
-        {SECTIONS.map((sec) => (
+        {ADMIN_NAV.map((sec) => (
           <div key={sec.title}>
             <div className="sec">{sec.title}</div>
             {sec.items
