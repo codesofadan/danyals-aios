@@ -12,6 +12,8 @@ import {
   useUpdateClient, useDeleteClient, useAllReportGrants, useSaveGrants,
   type ClientUpdate, type NewClientInput,
 } from "@/lib/hooks/clients";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { useToast, describeError } from "@/components/ui/Toast";
 import AddClientWizard from "./AddClientWizard";
 import EditClientModal from "./EditClientModal";
 import ClientAccessEditor from "./ClientAccessEditor";
@@ -67,10 +69,23 @@ export default function ClientDirectory() {
     updateClient.mutate({ id: infoEditId, changes }, { onSuccess: () => setInfoEditId(null) });
   }
 
+  // Deleting a client is the directory's one irreversible action: the account,
+  // its portal logins and its grant rows go with it. window.confirm could not
+  // say that, could not demand typing, and never answered whether it worked.
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const toast = useToast();
+
   function handleDeleteClient(id: string, name: string) {
     if (deleteClient.isPending) return;
-    if (!window.confirm(`Delete ${name}? This permanently removes the client account and can't be undone.`)) return;
-    deleteClient.mutate(id);
+    setDeleting({ id, name });
+  }
+
+  function confirmDelete() {
+    if (!deleting) return;
+    deleteClient.mutate(deleting.id, {
+      onSuccess: () => { toast.success("Client deleted", `${deleting.name} and its portal access are gone.`); setDeleting(null); },
+      onError: (e: unknown) => { toast.error("Couldn't delete the client", describeError(e)); setDeleting(null); },
+    });
   }
 
   function handleAddClient(input: NewClientInput) {
@@ -238,6 +253,18 @@ export default function ClientDirectory() {
           onSave={handleSaveGrants}
         />
       )}
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete ${deleting?.name ?? "this client"}?`}
+        body="The client account is permanently removed - its portal logins stop working and its report grants are deleted with it."
+        reassurance="Completed audits and published content remain in their own ledgers."
+        confirmLabel="Delete client"
+        tone="danger"
+        typeToConfirm="DELETE"
+        pending={deleteClient.isPending}
+        onCancel={() => setDeleting(null)}
+        onConfirm={confirmDelete}
+      />
     </section>
   );
 }

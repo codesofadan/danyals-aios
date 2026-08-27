@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
+
 import { MODULE_META, type RecStatus } from "@/lib/policy";
 import { useRecommendations, useTransitionRecommendation, type RecAction } from "@/lib/hooks/policy";
 import ReadMore from "@/components/ui/ReadMore";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string }> = {
   new: { label: "New", cls: "warn", icon: "fiber_new" },
@@ -121,6 +124,7 @@ function RecActions({
   busy: boolean;
   onAct: (action: RecAction) => void;
 }) {
+  const [confirmApply, setConfirmApply] = useState(false);
   return (
     <div className="pr-rec-actions">
       {status === "new" && (
@@ -135,17 +139,26 @@ function RecActions({
         type="button"
         className="primary-btn sm"
         disabled={busy}
-        onClick={() => {
-          // `apply` writes an audit overlay that changes what every client's report
-          // says. It is not undoable from here, so it asks.
-          if (window.confirm(`Apply "${title}"? This writes an overlay onto affected audits.`)) {
-            onAct("apply");
-          }
-        }}
+        onClick={() => setConfirmApply(true)}
         data-rec-id={id}
       >
         <span className="material-symbols-rounded">check_circle</span>Apply
       </button>
+      {/* `apply` writes an audit overlay that changes what every affected client's
+          report SAYS - outward-facing and not undoable from here, so it confirms
+          with the consequence spelled out (window.confirm could carry one line
+          and no reassurance). */}
+      <ConfirmDialog
+        open={confirmApply}
+        title={`Apply “${title}”?`}
+        body="An overlay is written onto every affected audit - the change appears in those clients' reports."
+        reassurance="The stored audits themselves are not mutated; the overlay is a separate layer the radar owns."
+        confirmLabel="Apply recommendation"
+        tone="caution"
+        pending={busy}
+        onCancel={() => setConfirmApply(false)}
+        onConfirm={() => { setConfirmApply(false); onAct("apply"); }}
+      />
     </div>
   );
 }

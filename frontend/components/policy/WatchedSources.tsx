@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
+
 import { useSpendHalted } from "@/lib/hooks/cost";
 import { useGeneratePolicyBrief, useSources } from "@/lib/hooks/policy";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 // What Policy Radar watches, and the control that refreshes the day's brief.
 //
@@ -18,6 +21,7 @@ import { useGeneratePolicyBrief, useSources } from "@/lib/hooks/policy";
 export default function WatchedSources() {
   const sourcesQ = useSources();
   const generate = useGeneratePolicyBrief();
+  const [confirmRefresh, setConfirmRefresh] = useState(false);
   const { halted } = useSpendHalted();
 
   const sources = sourcesQ.data ?? [];
@@ -35,11 +39,7 @@ export default function WatchedSources() {
             className="ghostbtn"
             disabled={generate.isPending || halted}
             title={halted ? "API spend is halted" : "Runs the brief generator now (spends)"}
-            onClick={() => {
-              if (window.confirm("Refresh the daily brief now? This runs the generator and spends against the policy budget.")) {
-                generate.mutate();
-              }
-            }}
+            onClick={() => setConfirmRefresh(true)}
           >
             <span className="material-symbols-rounded">refresh</span>
             {generate.isPending ? "Queued…" : "Refresh brief"}
@@ -101,6 +101,17 @@ export default function WatchedSources() {
           ))}
         </ul>
       )}
+      <ConfirmDialog
+        open={confirmRefresh}
+        title="Refresh the daily brief now?"
+        body="The brief generator runs immediately and its provider calls spend against the policy budget."
+        reassurance="The scheduled run still happens on its own cadence; this is an extra run, not a reschedule."
+        confirmLabel="Run and spend"
+        tone="caution"
+        pending={generate.isPending}
+        onCancel={() => setConfirmRefresh(false)}
+        onConfirm={() => { setConfirmRefresh(false); generate.mutate(); }}
+      />
     </section>
   );
 }

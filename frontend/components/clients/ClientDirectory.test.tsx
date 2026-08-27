@@ -13,6 +13,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "@/components/ui/Toast";
 
 import ClientDirectory from "./ClientDirectory";
 import type { ClientRecord } from "@/lib/data";
@@ -45,13 +46,13 @@ beforeEach(() => {
 describe("client report access", () => {
   it("shows how many reports each client can actually see", () => {
     grants = { c1: ["audit_scores", "milestones"] };
-    render(<ClientDirectory />);
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
     const action = screen.getByTitle(/Choose which reports/i);
     expect(within(action).getByText("2")).toBeInTheDocument();
   });
 
   it("surfaces a client that can see nothing", () => {
-    render(<ClientDirectory />);
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
     const action = screen.getByTitle(/Choose which reports/i);
     // The state every client was silently in: a dashboard of padlocks.
     expect(within(action).getByText("0")).toBeInTheDocument();
@@ -59,7 +60,7 @@ describe("client report access", () => {
 
   it("opens the editor and writes the chosen grants back", async () => {
     const user = userEvent.setup();
-    render(<ClientDirectory />);
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
 
     await user.click(screen.getByTitle(/Choose which reports/i));
     expect(screen.getByText(/Report access · Bellevue Dental/)).toBeInTheDocument();
@@ -78,7 +79,7 @@ describe("client report access", () => {
     // Opening early would present an empty set as the client's CURRENT access, and
     // saving would silently revoke everything they had.
     grantsLoading = true;
-    render(<ClientDirectory />);
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
     expect(screen.getByTitle(/Choose which reports/i)).toBeDisabled();
   });
 });
