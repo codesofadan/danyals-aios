@@ -377,7 +377,7 @@ class TestNavbarEmission:
                       "s": {"backgroundColor": "rgb(242, 183, 47)"}, "kids": [],
                       "href": "/contact/"},
         )
-        section = build_navbar(nav, DesignSystem(), 1200)
+        section, _notes = build_navbar(nav, DesignSystem(), 1200)
         assert section["settings"]["css_classes"] == "aios-replica-nav"
         assert section["settings"]["structure"] == "30"
         assert [c["settings"]["_column_size"] for c in section["elements"]] == [25, 50, 25]
@@ -392,7 +392,92 @@ class TestNavbarEmission:
         from app.services.elementor_replica import build_navbar
         from app.services.layout_infer import InferredNavbar, NavLink
         nav = InferredNavbar(height=60, links=(NavLink("A", "/a"), NavLink("B", "/b")))
-        section = build_navbar(nav, DesignSystem(), 1200)
+        section, _notes = build_navbar(nav, DesignSystem(), 1200)
         assert len(section["elements"]) == 1
         assert section["elements"][0]["settings"]["_column_size"] == 100
         validate_tree([section], load_oracle())
+
+
+class TestItBuildsToWhatTheTargetCanRender:
+    """A client paying for Elementor Pro must not get a downgraded rebuild of their
+    own site - and a client without it must not get a tree full of widgets their
+    editor stores and silently ignores."""
+
+    @staticmethod
+    def _nav():
+        from app.services.layout_infer import InferredNavbar, NavLink
+        return InferredNavbar(
+            height=80, background="rgb(213, 233, 232)",
+            logo_src="https://x/logo.png", logo_width=150,
+            link_color="rgb(20, 30, 40)",
+            links=(NavLink("Services", "/services/"), NavLink("About", "/about/")),
+        )
+
+    def test_a_pro_site_gets_a_real_navigation_menu(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_navbar
+        from app.services.replica_capability import TargetCapability
+
+        pro = TargetCapability.from_ping({
+            "elementor": True, "elementor_pro": True,
+            "elementor_version": "4.7.0", "elementor_pro_version": "3.2.0",
+            "elementor_widgets": ["heading", "icon-list", "image", "button", "nav-menu"],
+        })
+        section, notes = build_navbar(self._nav(), DesignSystem(), 1200, pro)
+        blob = json.dumps(section)
+        assert '"widgetType": "nav-menu"' in blob
+        assert "icon-list" not in blob, "the free-tier approximation must not also ship"
+        assert notes == [], "using the right widget is not a degradation"
+
+    def test_a_free_site_gets_the_link_list_and_is_told_why(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_navbar
+        from app.services.replica_capability import TargetCapability
+
+        free = TargetCapability.from_ping({
+            "elementor": True, "elementor_pro": False,
+            "elementor_version": "4.7.0",
+            "elementor_widgets": ["heading", "icon-list", "image", "button"],
+        })
+        section, notes = build_navbar(self._nav(), DesignSystem(), 1200, free)
+        blob = json.dumps(section)
+        assert '"widgetType": "icon-list"' in blob
+        assert "nav-menu" not in blob, (
+            "an unknown widgetType is STORED and silently ignored by the editor, "
+            "so the header would render as a hole with no error anywhere"
+        )
+        # The degradation is reported, not left for someone to notice.
+        assert any("no nav-menu widget" in n for n in notes), notes
+
+    def test_an_unmeasurable_site_is_treated_as_free_never_guessed_upward(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_navbar
+        from app.services.replica_capability import TargetCapability
+
+        # An older plugin that cannot report its registry.
+        unknown = TargetCapability.from_ping({"elementor": True, "elementor_version": "4.7.0"})
+        assert unknown.measured is False
+        section, notes = build_navbar(self._nav(), DesignSystem(), 1200, unknown)
+        assert '"widgetType": "icon-list"' in json.dumps(section)
+        assert notes, "silence about the target is itself worth reporting"
+
+    def test_the_capability_probe_covers_third_party_packs_not_just_pro(self) -> None:
+        # The registry is the answer, not a Pro boolean: a site with a widget pack
+        # that provides `tabs` can keep its tab strip even without Elementor Pro.
+        from app.services.replica_capability import TargetCapability
+
+        addons = TargetCapability.from_ping({
+            "elementor": True, "elementor_pro": False,
+            "elementor_widgets": ["heading", "accordion", "tabs"],
+        })
+        widget, note = addons.resolve("tabs")
+        assert widget == "tabs" and note is None
+
+    def test_a_missing_widget_degrades_to_something_renderable(self) -> None:
+        from app.services.replica_capability import FREE_WIDGETS, UPGRADES, TargetCapability
+
+        bare = TargetCapability.free_tier()
+        for construct in UPGRADES:
+            widget, note = bare.resolve(construct)
+            assert widget in FREE_WIDGETS, f"{construct} degraded to unrenderable {widget}"
+            assert note, f"{construct} degraded silently"

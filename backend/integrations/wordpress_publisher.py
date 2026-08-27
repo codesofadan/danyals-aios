@@ -183,6 +183,24 @@ class WordPressPluginPublisher(HttpProviderClient):
             return False
         return data.get("ok") is True
 
+    def capabilities(self) -> dict[str, Any]:
+        """What this site can render, from ``/ping``'s ``capabilities`` object.
+
+        The replica builder asks this BEFORE emitting, so it can use a client's
+        Elementor Pro (or any third-party widget pack) instead of assuming the free
+        tier for everyone. Never raises: an unreachable site or an older plugin that
+        does not report a registry returns ``{}``, and the builder falls back to the
+        conservative free vocabulary rather than guessing upward.
+        """
+        try:
+            data = self.request_json(
+                "GET", self._endpoint("ping"), params={"api_key": self._api_key}
+            )
+        except ProviderCallError:
+            return {}
+        caps = data.get("capabilities")
+        return dict(caps) if isinstance(caps, dict) else {}
+
     def publish(self, payload: dict[str, Any]) -> PluginPublishResult:
         """Push a content payload to the plugin and return its result.
 

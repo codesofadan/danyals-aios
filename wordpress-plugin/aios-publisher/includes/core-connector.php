@@ -278,6 +278,43 @@ function aios_publisher_capabilities() {
 	$elementor         = defined( 'ELEMENTOR_VERSION' );
 	$elementor_version = $elementor ? sanitize_text_field( (string) ELEMENTOR_VERSION ) : null;
 
+	// WHAT THIS SITE CAN ACTUALLY RENDER.
+	//
+	// Knowing "Elementor is installed" is not enough to decide what to build. A
+	// replica emitted with a `form` or `nav-menu` widget is stored and silently
+	// IGNORED by an editor that has no such widget, so the page renders with a
+	// hole in it and nothing reports a failure. Until now the builder assumed the
+	// free tier for everyone, which meant a client paying for Pro got a downgraded
+	// rebuild - a real menu became a list of links - for no reason.
+	//
+	// The widget registry is the honest answer, and it is strictly better than a
+	// Pro flag: it also covers third-party packs (Crocoblock, Essential Addons,
+	// theme bundles), so the builder can use whatever a given site happens to have
+	// rather than a hard-coded idea of the two Elementor tiers.
+	$elementor_pro     = defined( 'ELEMENTOR_PRO_VERSION' );
+	$elementor_pro_ver = $elementor_pro ? sanitize_text_field( (string) ELEMENTOR_PRO_VERSION ) : null;
+	$widgets           = array();
+	if ( $elementor && class_exists( '\\Elementor\\Plugin' ) ) {
+		try {
+			$instance = \Elementor\Plugin::$instance;
+			if ( $instance && isset( $instance->widgets_manager ) ) {
+				$types = $instance->widgets_manager->get_widget_types();
+				if ( is_array( $types ) ) {
+					// Names only. The full control registry per widget is large and
+					// the builder validates against its own oracle; what it needs
+					// from the live site is which widgets EXIST.
+					$widgets = array_values( array_map( 'strval', array_keys( $types ) ) );
+					sort( $widgets );
+				}
+			}
+		} catch ( \Throwable $e ) {
+			// A registry read must never break /ping - an empty list degrades the
+			// builder to its conservative free-tier vocabulary, which is the
+			// pre-existing behaviour.
+			$widgets = array();
+		}
+	}
+
 	// Core block editor. `parse_blocks` is the function this plugin's own
 	// sanitizer depends on, so probing for it answers the question that matters
 	// here rather than a general "is WP 5.0+".
@@ -292,6 +329,9 @@ function aios_publisher_capabilities() {
 		),
 		'elementor'            => $elementor,
 		'elementor_version'    => $elementor_version,
+		'elementor_pro'        => $elementor_pro,
+		'elementor_pro_version' => $elementor_pro_ver,
+		'elementor_widgets'    => $widgets,
 		'gutenberg'            => $gutenberg,
 		'registered_meta_keys' => array(
 			'post' => aios_publisher_registered_meta_keys( 'post' ),

@@ -33,6 +33,7 @@ from app.services.elementor_replica import (
     validate_tree,
 )
 from app.services.layout_infer import InferredPage, infer_layout, infer_navbar
+from app.services.replica_capability import TargetCapability
 from app.services.replica_css import generate
 
 
@@ -141,6 +142,24 @@ def replicate(
     # geometry and tags) and emitted as one editable section; the footer is a
     # normal multi-column region and rides the standard inference. Either may be
     # absent; the page publishes without it, and the note says so.
+    # WHAT THIS TARGET CAN RENDER, asked before anything is emitted. A client with
+    # Elementor Pro gets a real nav menu rather than the free-tier approximation;
+    # a site whose plugin cannot answer falls back to the conservative free set.
+    # Never guess upward: an unknown widget is stored and silently ignored by the
+    # editor, so an over-ambitious tree renders a page with holes and no error.
+    caps_raw: dict[str, Any] = {}
+    getter = getattr(publisher, "capabilities", None)
+    if callable(getter):
+        try:
+            caps_raw = getter() or {}
+        except Exception as exc:  # a probe must never fail the rebuild
+            result.note(f"capability probe failed: {type(exc).__name__}")
+    capability = (TargetCapability.from_ping(caps_raw) if caps_raw
+                  else TargetCapability.free_tier("the site did not report a widget registry"))
+    result.note(f"capability: {capability.summary()}")
+    for n in capability.notes:
+        result.note(f"capability: {n}")
+
     chrome_used = False
     nav_used = False
     hdr = getattr(desktop, "header", None)
@@ -151,7 +170,10 @@ def replicate(
                 result.note(f"navbar: {n}")
             result.note(f"navbar recognised: {nav.layout} "
                         f"({len(nav.links)} links)")
-            tree.insert(0, build_navbar(nav, ds, page.container_px))
+            navbar, nav_notes = build_navbar(nav, ds, page.container_px, capability)
+            for n in nav_notes:
+                result.note(f"navbar: {n}")
+            tree.insert(0, navbar)
             chrome_used = True
             nav_used = True
         else:

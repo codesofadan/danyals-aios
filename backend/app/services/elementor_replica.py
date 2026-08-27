@@ -38,6 +38,11 @@ from app.services.layout_infer import (
     InferredSection,
     InferredWidget,
 )
+from app.services.replica_capability import TargetCapability
+
+#: The WordPress menu a Pro `nav-menu` widget points at. One name, so a replica's
+#: header and the menu the publisher registers cannot drift apart.
+_NAV_MENU_NAME = "AIOS Replica"
 
 _ORACLE_PATH = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -711,13 +716,22 @@ def to_json(tree: list[dict[str, Any]]) -> str:
 # The navbar - emitted from what was recognised
 # --------------------------------------------------------------------------- #
 def build_navbar(nav: InferredNavbar, ds: DesignSystem,
-                 container_px: int) -> dict[str, Any]:
+                 container_px: int,
+                 capability: TargetCapability | None = None) -> tuple[dict[str, Any], list[str]]:
     """The recognised header as ONE editable Elementor section.
 
-    Free Elementor has no nav-menu widget (that is Pro), so the menu is an INLINE
-    icon-list - the standard free-tier pattern: horizontal, one item per link,
-    every label and URL a real editor field. Logo and CTA reuse the ordinary
-    image/button builders so their styling stays measured.
+    BUILT TO WHAT THE TARGET CAN RENDER. When the site has Elementor Pro's
+    ``nav-menu`` widget the header is rebuilt as a REAL menu - the thing the
+    source actually is, with Elementor's own dropdown and mobile-drawer behaviour.
+    When it does not, the menu degrades to an inline ``icon-list``: horizontal,
+    one item per link, every label and URL a real editor field. That fallback is
+    faithful in content and not in behaviour, so it is RETURNED AS A NOTE rather
+    than left for someone to notice.
+
+    This used to assume the free tier for every client, which meant a site paying
+    for Pro got a list of links where it had a navigation menu.
+
+    Returns ``(section, notes)``.
     """
     ids = _IdGen()
     columns: list[dict[str, Any]] = []
@@ -742,25 +756,47 @@ def build_navbar(nav: InferredNavbar, ds: DesignSystem,
         logo_widgets.append(_widget(
             InferredWidget(type="heading", node=logo_node), ds, ids))
 
+    cap = capability or TargetCapability.free_tier()
+    notes: list[str] = []
     menu_widgets: list[dict[str, Any]] = []
     if nav.links:
-        items = []
-        for link in nav.links:
-            items.append({
-                "text": link.text,
-                "selected_icon": {"value": "", "library": ""},
-                "link": {"url": link.href, "is_external": "", "nofollow": ""},
-            })
-        menu_settings: dict[str, Any] = {
-            "view": "inline",
-            "icon_list": items,
-            "space_between": {"unit": "px", "size": 12},
-        }
+        widget_type, degraded = cap.resolve("nav")
         colour = _colour(nav.link_color)
-        if colour:
-            menu_settings["text_color"] = colour
-        menu_widgets.append({"id": ids.next("navmenu"), "elType": "widget",
-                             "widgetType": "icon-list", "settings": menu_settings})
+        if widget_type == "nav-menu":
+            # THE REAL THING. Elementor Pro's nav-menu renders a registered
+            # WordPress menu, so the tree references one by name rather than
+            # carrying the links inline; the publisher creates it from the same
+            # recognised links (the plugin's /site route already builds menus).
+            # Layout mirrors what was measured off the source header.
+            menu_settings: dict[str, Any] = {
+                "layout": "horizontal",
+                "menu_name": _NAV_MENU_NAME,
+                "align_items": "center",
+                "pointer": "none",
+            }
+            if colour:
+                menu_settings["color_menu_item"] = colour
+            menu_widgets.append({"id": ids.next("navmenu"), "elType": "widget",
+                                 "widgetType": "nav-menu", "settings": menu_settings})
+        else:
+            items = []
+            for link in nav.links:
+                items.append({
+                    "text": link.text,
+                    "selected_icon": {"value": "", "library": ""},
+                    "link": {"url": link.href, "is_external": "", "nofollow": ""},
+                })
+            list_settings: dict[str, Any] = {
+                "view": "inline",
+                "icon_list": items,
+                "space_between": {"unit": "px", "size": 12},
+            }
+            if colour:
+                list_settings["text_color"] = colour
+            menu_widgets.append({"id": ids.next("navmenu"), "elType": "widget",
+                                 "widgetType": "icon-list", "settings": list_settings})
+            if degraded:
+                notes.append(degraded)
 
     cta_widgets: list[dict[str, Any]] = []
     if nav.cta_node is not None:
@@ -804,5 +840,6 @@ def build_navbar(nav: InferredNavbar, ds: DesignSystem,
     if bg:
         settings["background_background"] = "classic"
         settings["background_color"] = bg
-    return {"id": ids.next("navbar"), "elType": "section",
-            "settings": settings, "elements": columns}
+    section = {"id": ids.next("navbar"), "elType": "section",
+               "settings": settings, "elements": columns}
+    return section, notes
