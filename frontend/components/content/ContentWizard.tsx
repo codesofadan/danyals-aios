@@ -17,7 +17,7 @@
 // endpoints. Every metered action is disabled while the API-spend halt is on.
 // ============================================================
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   RESEARCH_CONTENT_TYPES, DIFFICULTY_META, FRAMEWORKS, TARGETS, PAGE_TEMPLATES,
   TEMPLATE_THEME_DEFAULTS, profileFromTemplate,
@@ -146,6 +146,24 @@ export default function ContentWizard({
       { onSuccess: (r) => setSelected(new Set(r.items.map((i) => i.title))) },
     );
   }
+
+  // THE KEYWORD BRIDGE. The Search workspace sends ?keyword= here; it arrives as
+  // a manual page (whose title IS the primary keyword downstream), pre-selected,
+  // so "found in research → drafted as content" is one click, not a re-type.
+  // Read via window.location, not useSearchParams, to keep the page prerenderable
+  // without a Suspense boundary.
+  useEffect(() => {
+    const kw = new URLSearchParams(window.location.search).get("keyword")?.trim();
+    if (!kw) return;
+    const item: ResearchItem = {
+      title: kw, pageType: contentType, primaryKeyword: kw, secondaryKeywords: [],
+      estVolume: 0, difficulty: "medium", rationale: "Sent from the Search workspace",
+      city: "", service: "",
+    };
+    setManualItems((prev) => (prev.some((p) => p.title === kw) ? prev : [...prev, item]));
+    setSelected((prev) => new Set(prev).add(kw));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: the URL param is read once
+  }, []);
 
   // Skip research: add ONE page by hand (title/topic) — becomes a selected pick so the
   // flow continues straight to design → details → generate, no research run needed.

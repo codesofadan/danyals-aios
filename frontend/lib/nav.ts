@@ -38,6 +38,7 @@ export const ADMIN_NAV: NavGroup[] = [
       { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard" },
       { icon: "hub", label: "Off-Page", href: "/admin/off-page", keywords: "backlinks links citations nap directories web 2.0 properties placements" },
       { icon: "auto_fix_high", label: "Site Builder", href: "/admin/site-builder", keywords: "wordpress publish connections replicate replica design elementor sites cms plugin" },
+      { icon: "travel_explore", label: "Search", href: "/admin/search", keywords: "keywords rankings competitors serp on-page local seo tools research rank tracker gbp" },
       { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", keywords: "google updates algorithm" },
     ],
   },

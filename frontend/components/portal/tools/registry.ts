@@ -13,6 +13,10 @@ import ClientOnboardingActions from "./ClientOnboardingActions";
 import DataImportActions from "./DataImportActions";
 import BillingActions from "./BillingActions";
 import KeywordResearchActions from "./KeywordResearchActions";
+import RankTrackerActions from "./RankTrackerActions";
+import CompetitorIntelActions from "./CompetitorIntelActions";
+import OnPageActions from "./OnPageActions";
+import LocalSeoActions from "./LocalSeoActions";
 
 /** Props every action panel receives — `accent` is the tool group's colour so the
  * panel's icon matches the page's hero. */
@@ -24,6 +28,10 @@ const TOOL_ACTIONS: Record<string, ComponentType<ToolActionProps>> = {
   "data-import": DataImportActions,
   billing: BillingActions,
   "keyword-research": KeywordResearchActions,
+  "rank-tracker": RankTrackerActions,
+  "competitor-intel": CompetitorIntelActions,
+  "on-page": OnPageActions,
+  "local-seo": LocalSeoActions,
 };
 
 export function getToolActions(slug: string): ComponentType<ToolActionProps> | null {
