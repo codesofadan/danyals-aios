@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState } from "react";
 import {
   ROLE_META, STATUS_META,
@@ -77,7 +79,7 @@ export default function TeamRoster({ members, onAdd }: { members: TeamMemberReco
                   <div className="mem">
                     <span className="av" style={{ background: m.c }}>{m.init}</span>
                     <div className="mem-meta">
-                      <div className="mem-name">{m.name}</div>
+                      <div className="mem-name"><Link href={`/admin/team/${m.id}`} title={`Open ${m.name} in full`}>{m.name}</Link></div>
                       <div className="mem-sub">{m.title} · {m.email}</div>
                     </div>
                   </div>

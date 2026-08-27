@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useRef, useState } from "react";
 import anime from "animejs";
 import {
@@ -112,7 +114,7 @@ export default function ProjectGantt() {
             <div className="gantt-row" key={p.id}>
               <div className="gantt-rowlabel">
                 <span className="av" style={{ background: p.c }}>{p.init}</span>
-                <span className="gantt-cn">{p.client}</span>
+                <span className="gantt-cn"><Link href={`/admin/milestones/${p.id}`} title={`Open ${p.client}\u2019s project`}>{p.client}</Link></span>
               </div>
               <div className="gantt-track">
                 {/* column separators */}

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useMemo, useState } from "react";
 import {
   TIER_COLOR,
@@ -165,7 +167,7 @@ export default function ClientDirectory() {
                   <tr key={c.id}>
                     <td>
                       <div className="cd-client">
-                        <div className="cd-name">{c.cn}</div>
+                        <div className="cd-name"><Link href={`/admin/clients/${c.id}`} title={`Open ${c.cn} in full`}>{c.cn}</Link></div>
                         <div className="cd-meta">{c.industry}{c.since ? ` · since ${c.since}` : ""}</div>
                       </div>
                     </td>

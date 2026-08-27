@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { Fragment, useMemo, useState } from "react";
 import ThreadPanel from "@/components/threads/ThreadPanel";
 import { useToast } from "@/components/ui/Toast";
@@ -265,7 +267,7 @@ export default function TaskManager() {
               {filtered.map((t) => (
                 <Fragment key={t.id}>
                 <tr>
-                  <td><strong>{t.id}</strong></td>
+                  <td><Link href={`/admin/tasks/${t.id}`} title={`Open ${t.id} in full`}><strong>{t.id}</strong></Link></td>
                   <td>{t.title}</td>
                   <td>{t.client || "—"}</td>
                   <td>{t.type}</td>

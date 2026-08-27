@@ -136,7 +136,7 @@ export const PARKED: ParkedEntry[] = [
   // --- No recorded rationale: these need a decision ---------------------------
   ...(
     [
-      ["settings/TeamCredentials.tsx", "Settings was trimmed to My Account only."],
+      ["settings/TeamCredentials.tsx", "Roster-shaped; the capability now lives per-member on /admin/team/[memberId] (Sign-in access tab)."],
       ["settings/ClientCredentials.tsx", "Settings was trimmed to My Account only."],
       ["overview/SiteAnalyticsCard.tsx", "The whole GSC/GA4 connect flow; it links to /admin/settings, which no longer contains it."],
       ["policy/KnowledgeBase.tsx", "Policy Radar renders only AskBox, Recommendations and ChangeFeed."],

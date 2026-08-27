@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useMemo, useState } from "react";
 import { downloadFile } from "@/lib/api";
 import { useLeads, type LeadStatus, type PublicAuditLead } from "@/lib/hooks/leads";
@@ -205,6 +207,13 @@ export default function LeadsWorkspace() {
                         </td>
                         <td className="lead-when">{fmtWhen(r.created_at)}</td>
                         <td>
+                          <Link
+                            className="lead-dl"
+                            href={`/admin/pipeline/${encodeURIComponent(r.report_token)}`}
+                            title="Open this lead in full - report, findings, downloads"
+                          >
+                            <span className="material-symbols-rounded">open_in_full</span>
+                          </Link>
                           <button
                             className="lead-dl"
                             title={r.has_pdf ? "Download the report PDF" : "No PDF yet"}
