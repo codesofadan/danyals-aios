@@ -114,3 +114,40 @@
 @media (max-width: 640px) {
   .op-toolset { width: 100%; }
 }
+
+/* --- Web 2.0 placement ledger -------------------------------------------------
+   The report screen. Two rules shape it:
+   1. A ledger row carries a primary fact and a qualifier (topic + framework, anchor +
+      destination, account + who owns it). Stacking the qualifier UNDER the primary in a
+      smaller, muted type keeps the row scannable instead of forcing nine wide columns
+      that push the table into a horizontal scroll on a laptop.
+   2. Nothing here may borrow a success colour it has not earned - `.w2-warn` exists so
+      a shared house account reads as a caveat rather than as neutral metadata. */
+.w2-ledger { min-width: 1040px; }
+.w2-ledger td { vertical-align: top; }
+.w2-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 2px;
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w2-sub.w2-warn { color: var(--warn); font-weight: 700; }
+.w2-note { max-width: 220px; }
+.w2-link { color: var(--lilac); font-weight: 600; text-decoration: none; }
+.w2-link:hover { text-decoration: underline; }
+
+/* --- breathing room ------------------------------------------------------------
+   The toolbar was a single flex row, so on a laptop the segmented control, the filter
+   and the primary action collided. Wrapping with a real gap costs one line of layout
+   and removes the crowding without moving anything. */
+.op-toolset { gap: 12px; row-gap: 8px; }
+.op-toolset > * { flex: 0 0 auto; }
+
+@media (max-width: 900px) {
+  .op-toolset { width: 100%; margin-left: 0; justify-content: flex-start; }
+  .w2-sub { max-width: 160px; }
+}
+
+/* Navigation row, separated from the action row above it. Views and filters are
+   different kinds of control from "create a campaign" and were competing for the same
+   line; giving them their own row removes the crowding without hiding anything. */
+.w2-tabs { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 2px 0 14px; }
+.w2-tabs-right { margin-left: auto; }
+@media (max-width: 900px) { .w2-tabs-right { margin-left: 0; } }

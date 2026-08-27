@@ -8,7 +8,7 @@ export default function AuditCoverage() {
       <div className="card-h">
         <div>
           <div className="ct">Audit Coverage</div>
-          <div className="cs">What the engine grades on a single URL — no logins required</div>
+          <div className="cs">Every audit covers all six. Depth decides how much of each is corroborated with paid data.</div>
         </div>
         <div className="tools">
           <span className="panel-hint"><span className="material-symbols-rounded">bolt</span>Runs behind a cost gate</span>
@@ -24,7 +24,7 @@ export default function AuditCoverage() {
               </span>
               <span className={`pill-tag sm ${t.paid ? "warn" : "ok"}`}>
                 <span className="material-symbols-rounded">{t.paid ? "workspace_premium" : "check_circle"}</span>
-                {t.paid ? "Paid data" : "Free tier"}
+                {t.paid ? "Needs paid data" : "From the crawl"}
               </span>
             </div>
             <div className="au-cov-name">{t.label}</div>

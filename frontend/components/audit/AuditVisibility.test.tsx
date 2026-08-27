@@ -69,7 +69,7 @@ describe("client-portal exposure in the audit queue", () => {
 
   it("shows the exposure state of every audit", () => {
     render(<AuditWorkspace />);
-    // One internal, one shared — an operator can see which is which at a glance.
+    // One internal, one shared - an operator can see which is which at a glance.
     expect(screen.getByText("Internal")).toBeInTheDocument();
     expect(screen.getByText("Shared")).toBeInTheDocument();
   });

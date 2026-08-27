@@ -87,6 +87,12 @@ const SECURITY_HEADERS = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Build directory, overridable per process. Defaults to Next's own ".next", so this
+  // changes nothing for a normal run. It exists because two `next dev` servers started
+  // from this same folder SHARE .next and corrupt each other's cache - the visible
+  // symptom is a route that compiled fine suddenly serving /_not-found. Set
+  // NEXT_DIST_DIR to give a second instance its own directory.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // Emit a self-contained server bundle (.next/standalone) for a small Docker
   // runtime image — ignored by `next dev`, only affects `next build`.
   output: "standalone",
@@ -102,6 +108,17 @@ const nextConfig = {
   async redirects() {
     return [
       { source: "/free-audit", destination: "/", permanent: true },
+      // --- The 2026-08-27 hierarchy restructure. Old bookmarks and muscle
+      // memory keep working: every pre-restructure URL lands on its new home.
+      // permanent:false (307) on purpose - a 308 is cached by the browser
+      // indefinitely, and this tree may still settle while the spec ships.
+      { source: "/admin/audit", destination: "/admin/audits", permanent: false },
+      { source: "/admin/audit/:id", destination: "/admin/audits/:id", permanent: false },
+      { source: "/admin/leads", destination: "/admin/pipeline", permanent: false },
+      { source: "/admin/wordpress", destination: "/admin/site-builder?tab=wordpress", permanent: false },
+      { source: "/admin/vault", destination: "/admin/integrations", permanent: false },
+      { source: "/admin/web2", destination: "/admin/off-page?tab=web2", permanent: false },
+      { source: "/admin/citations", destination: "/admin/off-page?tab=citations", permanent: false },
       { source: "/portal", destination: "/team", permanent: true },
       { source: "/portal/:path*", destination: "/team/:path*", permanent: true },
       ...OLD_ADMIN_PATHS.map((p) => ({

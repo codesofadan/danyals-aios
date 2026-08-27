@@ -62,9 +62,12 @@ export default function AuditStats({
   // Every value is the live figure from GET /audits/stats - no fabricated deltas.
   // On a fresh tenant these read 0, which is the honest current state.
   //
-  // `avgCostUsd` carries FOUR decimals on purpose. A month of mostly free-tier
-  // runs has a genuine mean in the fractions of a cent, and rounding that to
-  // $0.00 would tell an operator the platform costs nothing to run.
+  // `avgCostUsd` carries ONE decimal, by owner decision. Four decimals were
+  // chosen so a month of mostly free-tier runs did not round its sub-cent mean to
+  // $0.00 - but the tile they actually produce reads `$0.0000`, which is four
+  // digits of nothing. The trade is accepted knowingly: a real mean reads $13.5
+  // or $69.2, and a genuine fraction of a cent now reads $0.0. The per-run cost
+  // in the queue still carries cents, because that one is a bill.
   const tiles: Tile[] = [
     { icon: "history", label: "Lifetime audits", value: lifetime, note: "every run, all time", hero: true },
     { icon: "fact_check", label: "Audits this month", value: thisMonth, note: "completed + queued this month" },
@@ -73,7 +76,7 @@ export default function AuditStats({
       icon: "payments",
       label: "Avg. audit cost",
       value: avgCostUsd,
-      decimals: 4,
+      decimals: 1,
       prefix: "$",
       note: "committed spend · completed runs",
     },

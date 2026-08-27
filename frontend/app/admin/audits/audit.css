@@ -1,5 +1,5 @@
 /* ============================================================
-   AIOS · Audit module styles — prefix .au-
+   AIOS · Audit module styles - prefix .au-
    Reuses global .card/.kpi/.tbl/.seg/.chip/.status-pill/.fld.
    ============================================================ */
 
@@ -10,12 +10,31 @@
 /* ---- queue / history table ---- */
 .au-tbl { min-width: 720px; }
 .au-tbl thead th { white-space: nowrap; }
-.au-client { font-weight: 700; color: var(--ink); font-size: 13px; }
+/* inline-block, not block: the link affordance below has to hug the name.
+   A full-width border reads as a rule under the row, not as a link. The URL
+   under it is a flex block, so the name still gets its own line. */
+.au-client { display: inline-block; font-weight: 700; color: var(--ink); font-size: 13px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom; }
 .au-when { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-.au-url { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--body);
-  font-variant-numeric: tabular-nums; }
-.au-url .material-symbols-rounded { font-size: 15px; color: var(--violet-soft); }
+/* The URL now sits under the client name rather than in its own column, so it has
+   to be allowed to end. A long URL that sets the column width is how one row
+   pushes the numbers everyone actually scans off the right edge. */
+.au-url { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--body);
+  font-variant-numeric: tabular-nums; margin-top: 2px;
+  max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.au-url .material-symbols-rounded { flex: none; font-size: 15px; color: var(--violet-soft); }
+
+/* ---- column budget ----
+   Percentages, not pixels: the table has to hold at 1280px and at 1920px without
+   the numeric columns drifting apart from their headers. The three merged cells
+   take the space the ten-column layout could not give them. */
+.au-c-audit  { width: 28%; min-width: 190px; max-width: 320px; }
+.au-c-scope  { width: 20%; }
+.au-c-status { width: 14%; white-space: nowrap; }
+.au-c-status .au-runtime { margin-top: 3px; }
+.au-c-scope .au-types { margin-bottom: 3px; }
 
 .au-types { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; }
 .au-type-tag { font-size: 10px; font-weight: 800; letter-spacing: .01em; color: var(--lilac);
@@ -148,8 +167,13 @@ a.au-art[aria-disabled="true"] { opacity: .32; cursor: not-allowed; pointer-even
 .au-search button:hover { color: var(--crit); }
 
 /* the client name is the way into the audit */
-.au-open { color: var(--violet); text-decoration: none; }
-.au-open:hover { text-decoration: underline; }
+/* The client name is the other way into the audit, so it has to read as a link
+   AT REST. Underlining only on hover means it looks like plain text until the
+   pointer is already on it - which is how the page an operator remembered became
+   one they could not find their way back to. */
+.au-open { color: var(--violet); text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--violet) 45%, transparent); }
+.au-open:hover { border-bottom-style: solid; }
 
 /* ---- select all / clear on the type picker ---- */
 .au-pick-tools { float: right; display: inline-flex; gap: 8px; }
@@ -224,3 +248,48 @@ a.au-art[aria-disabled="true"] { opacity: .32; cursor: not-allowed; pointer-even
 .au-more-btn:hover:not(:disabled) { background: var(--surface-2); }
 .au-more-btn:disabled { opacity: 0.5; cursor: default; }
 .au-more-btn .material-symbols-rounded { font-size: 18px; }
+
+/* Reading the report is the common act; downloading it is the rare one. The
+   primary artifact button says so without adding a fourth colour to the row. */
+.au-art.is-primary { color: var(--fg-strong); border-color: var(--violet-2);
+  background: color-mix(in srgb, var(--violet) 18%, transparent); }
+.au-art.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--violet) 32%, transparent); }
+
+/* ---- when the table runs out of room ----
+   Scope and Cost fold away rather than the table growing a horizontal scrollbar
+   over the columns an operator came to read. Both are still on the audit's own
+   page; neither is why anyone opens this list. Scope keeps its tier chip inline
+   with the client name, so whether a run was billable never becomes unknowable.
+
+   A CONTAINER query, not a media query: the table sits inside the admin shell
+   behind a 76-258px rail, so the window width is not the table's width and a
+   viewport breakpoint folds at the wrong moment in both directions. */
+.au-tbl-wrap { container-type: inline-size; }
+.au-tier-fold { display: none; }
+.au-c-cost { white-space: nowrap; }
+
+@container (max-width: 1000px) {
+  .au-h-scope, .au-h-cost { display: none; }
+  .au-tbl { min-width: 520px; }
+  .au-tier-fold { display: inline-block; margin-left: 7px; font-size: 9.5px; padding: 1px 7px; }
+}
+@container (max-width: 660px) {
+  .au-c-audit { min-width: 150px; }
+  .au-tbl .au-share-t { display: none; }
+  .au-tbl .au-share { padding: 5px 7px; }
+}
+
+/* ---- depth filter ----
+   One select where eight type chips used to wrap onto two rows. It filters the
+   axis that actually differs between runs; the chips filtered a distinction the
+   runs never had. */
+.au-depthfilter { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px;
+  color: var(--muted); }
+.au-depthfilter span { font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
+  font-size: 10px; }
+.au-depthfilter select { font: inherit; font-size: 12px; color: var(--ink); cursor: pointer;
+  padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); }
+.au-depthfilter select:hover { border-color: var(--violet-2); }
+
+/* What the chosen depth buys, in a line, under the control that chose it. */
+.au-depthnote { margin-top: 7px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }

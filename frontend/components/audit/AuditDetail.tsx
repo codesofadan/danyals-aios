@@ -16,7 +16,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { downloadFile } from "@/lib/api";
+import { downloadFile, openFile } from "@/lib/api";
 import { useAudit } from "@/lib/hooks/audits";
 import {
   useAuditFindings,
@@ -138,11 +138,30 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
     [rollups.data],
   );
 
-  // `name` already carries the artifact's extension (findings.csv, workbook.xlsx).
-  // Building the filename from the route key alone saved three of the buttons'
-  // files with no extension at all, so the operating system could not open them.
-  const onDownload = (name: string) =>
-    downloadFile(`/audits/${auditId}/download/${name}`, `audit-${auditId}-${name}`);
+  // A failed download must SAY so. Both helpers reject on a 404, and neither call
+  // caught it - so an artifact that had not been generated (a run from before the
+  // PDF renderer landed) produced an unhandled rejection and a button that did
+  // nothing at all when clicked. Silence is the worst of the three outcomes: the
+  // operator cannot tell a missing file from a broken button.
+  const [dlError, setDlError] = useState<string | null>(null);
+  const explain = (label: string) => (err: unknown) =>
+    setDlError(
+      (err as { status?: number })?.status === 404
+        ? `${label} has not been generated for this audit yet. Rebuilding the report will produce it.`
+        : `${label} could not be downloaded: ${(err as Error)?.message ?? "unknown error"}`,
+    );
+
+  // The filename carries the extension. `audit-<id>-report` with no suffix is a
+  // blob the OS will not open, which is how the HTML report stopped being readable.
+  const onDownload = (name: string, file: string, label = file) => {
+    setDlError(null);
+    return downloadFile(`/audits/${auditId}/download/${name}`, `audit-${auditId}-${file}`)
+      .catch(explain(label));
+  };
+  const onOpen = (name: string, label = name) => {
+    setDlError(null);
+    return openFile(`/audits/${auditId}/download/${name}`).catch(explain(label));
+  };
 
   if (rollups.isLoading) {
     return <div className="alt-loading">Loading audit...</div>;
@@ -161,7 +180,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           the same as an audit with no findings. Reload, and if it persists the
           run may have been removed.
         </p>
-        <Link className="alt-back" href="/admin/audit">
+        <Link className="alt-back" href="/admin/audits">
           Back to audits
         </Link>
       </div>
@@ -179,7 +198,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           This run completed before findings were stored as rows, or produced no
           findings. The original report is still available from the audit list.
         </p>
-        <Link className="alt-back" href="/admin/audit">
+        <Link className="alt-back" href="/admin/audits">
           Back to audits
         </Link>
       </div>
@@ -189,7 +208,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
   return (
     <div className="alt">
       <header className="alt-head">
-        <Link className="alt-back" href="/admin/audit">
+        <Link className="alt-back" href="/admin/audits">
           <span className="material-symbols-rounded">arrow_back</span>
           Audits
         </Link>
@@ -313,7 +332,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
                     // The per-pillar file, not the whole 461-row export: the
                     // specialist who receives it should not be handed everyone
                     // else's work.
-                    onClick={() => onDownload(`issues-${dimension}.csv`)}
+                    onClick={() => onDownload(`issues-${dimension}.csv`, `issues-${dimension}.csv`)}
                   >
                     <span className="material-symbols-rounded">download</span>
                     {dimension} CSV
@@ -328,7 +347,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
                   type="button"
                   className="alt-dlmini"
                   title="Download every issue as CSV"
-                  onClick={() => onDownload("findings.csv")}
+                  onClick={() => onDownload("findings.csv", "findings.csv")}
                 >
                   <span className="material-symbols-rounded">download</span>
                   CSV
@@ -402,20 +421,42 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
               </div>
             </div>
           </div>
+          {dlError ? (
+            <div className="alt-dl-err" role="alert">
+              <span className="material-symbols-rounded">error</span>
+              {dlError}
+            </div>
+          ) : null}
           <div className="alt-dl">
             {DOWNLOADS.map((d) => (
-              <button
-                key={d.name}
-                type="button"
-                className="alt-dl-item"
-                onClick={() => onDownload(d.name)}
-              >
-                <span className="material-symbols-rounded">download</span>
-                <span>
-                  <b>{d.label}</b>
-                  <em>{d.hint}</em>
-                </span>
-              </button>
+              <div key={d.name} className={`alt-dl-row${d.view ? " is-view" : ""}`}>
+                <button
+                  type="button"
+                  className="alt-dl-item"
+                  onClick={() =>
+                    d.view ? onOpen(d.name, d.label) : onDownload(d.name, d.file, d.label)
+                  }
+                >
+                  <span className="material-symbols-rounded">
+                    {d.view ? "open_in_new" : "download"}
+                  </span>
+                  <span>
+                    <b>{d.label}</b>
+                    <em>{d.hint}</em>
+                  </span>
+                </button>
+                {d.view ? (
+                  <button
+                    type="button"
+                    className="alt-dl-save"
+                    title={`Save ${d.label} to disk`}
+                    aria-label={`Save ${d.label} to disk`}
+                    onClick={() => onDownload(d.name, d.file, d.label)}
+                  >
+                    <span className="material-symbols-rounded">download</span>
+                  </button>
+                ) : null}
+              </div>
             ))}
           </div>
         </div>

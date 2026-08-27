@@ -61,7 +61,6 @@ export const PARKED: ParkedEntry[] = [
     [
       ["ui/Modal.tsx", "any screen migrating off a hand-rolled modal (11 exist)"],
       ["ui/PageHeader.tsx", "the first LIST-archetype screen migration"],
-      ["ui/TabBar.tsx", "the first WORKSPACE/DETAIL screen (Off-Page, client detail)"],
       ["ui/DetailShell.tsx", "the first new detail route (content job, client)"],
       ["ui/StageTimeline.tsx", "the content job detail's Process tab (Phase 5)"],
       ["ui/useCountUp.ts", "the first KPI strip migrated off its local copy (11 exist)"],
@@ -100,7 +99,6 @@ export const PARKED: ParkedEntry[] = [
   ...(
     [
       ["offpage/OffpageWorkspace.tsx", "Off-page hub"],
-      ["offpage/BacklinksTab.tsx", "Off-page hub"],
       ["charts/BacklinkScatter.tsx", "Off-page hub"],
       ["upsells/UpsellsWorkspace.tsx", "Upsells"],
       ["upsells/UpsellManager.tsx", "Upsells"],
@@ -111,7 +109,6 @@ export const PARKED: ParkedEntry[] = [
       ["tiers/TierCards.tsx", "Service Tiers"],
       ["tiers/FeatureMatrix.tsx", "Service Tiers"],
       ["tiers/ClientAssignment.tsx", "Service Tiers"],
-      ["backups/BackupsWorkspace.tsx", "Backups"],
       ["gmb/GmbWorkspace.tsx", "GMB"],
       ["gmb/GmbComposer.tsx", "GMB"],
       ["gmb/GmbReview.tsx", "GMB"],

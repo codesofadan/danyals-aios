@@ -30,7 +30,10 @@ import { redirect } from "next/navigation";
 // typing the URL.
 // ============================================================
 
-export const LOCKED_IN_PROD = new Set<string>(["/admin/citations"]);
+// The 2026-08-27 restructure folded Citations into /admin/off-page as a TAB;
+// its lock card moved with it (see that page). No whole ROUTE is production-
+// locked right now - the set stays as the mechanism for the next one.
+export const LOCKED_IN_PROD = new Set<string>([]);
 
 export const HIDE_LOCKED = process.env.NODE_ENV === "production";
 

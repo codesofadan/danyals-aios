@@ -1,10 +1,10 @@
 /* ============================================================
-   AIOS · Audit altitudes — prefix .alt- (and .rm- for the plan)
+   AIOS · Audit altitudes - prefix .alt- (and .rm- for the plan)
    Reuses global .card/.card-h/.seg and the --ok/--warn/--crit tokens.
 
    The visual hierarchy carries the argument: a score is never larger or louder
    than the coverage that qualifies it, and an unmeasured dimension is styled as
-   ABSENT (muted, dashed) rather than as BAD (red) — because "we did not look"
+   ABSENT (muted, dashed) rather than as BAD (red) - because "we did not look"
    and "this is broken" are different messages about a client's site.
    ============================================================ */
 
@@ -170,6 +170,19 @@ td.t-warn { color: var(--warn); font-weight: 700; }
 .alt-dl-item b { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink); }
 .alt-dl-item em { display: block; font-size: 11px; font-style: normal; color: var(--muted); margin-top: 2px; }
 
+/* A viewable artefact (the report) gets the full-width primary action plus a
+   small save-to-disk affordance, so "open it" and "keep it" are separate acts.
+   The row spans the grid because the report is the deliverable, not one tile
+   among eight. */
+.alt-dl-row { display: contents; }
+.alt-dl-row.is-view { display: flex; gap: 6px; grid-column: 1 / -1; }
+.alt-dl-row.is-view .alt-dl-item { flex: 1; border-color: var(--violet); background: var(--raise); }
+.alt-dl-row.is-view .alt-dl-item .material-symbols-rounded { color: var(--violet); }
+.alt-dl-save { display: flex; align-items: center; justify-content: center; width: 46px;
+  border-radius: 11px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+.alt-dl-save:hover { border-color: var(--violet); background: var(--raise); }
+.alt-dl-save .material-symbols-rounded { font-size: 19px; color: var(--violet-soft); }
+
 /* ---- states ---- */
 .alt-loading { padding: 26px; text-align: center; font-size: 12.5px; color: var(--muted); }
 .alt-empty { padding: 26px; text-align: center; color: var(--muted); }
@@ -323,3 +336,11 @@ td.t-warn { color: var(--warn); font-weight: 700; }
 .alt-pager-btn .material-symbols-rounded {
   font-size: 18px;
 }
+
+/* A download that failed says so. Silence is the worst outcome: an operator
+   cannot tell a missing artifact from a broken button. */
+.alt-dl-err { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 11px;
+  padding: 10px 12px; border-radius: 10px; font-size: 12px; line-height: 1.5;
+  color: var(--crit); border: 1px solid color-mix(in srgb, var(--crit) 32%, transparent);
+  background: color-mix(in srgb, var(--crit) 8%, transparent); }
+.alt-dl-err .material-symbols-rounded { font-size: 17px; flex: none; }
