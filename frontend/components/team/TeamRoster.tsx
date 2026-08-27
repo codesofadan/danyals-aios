@@ -53,7 +53,7 @@ export default function TeamRoster({ members, onAdd }: { members: TeamMemberReco
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">groups</span>
-          {members.length} members · {members.filter((m) => m.status === "active").length} active now
+          {members.length} members{members.length === 200 ? " (first 200)" : ""} · {members.filter((m) => m.status === "active").length} active now
         </div>
         <button className="primary-btn" onClick={() => setOpen(true)}>
           <span className="material-symbols-rounded">person_add</span>Add team member

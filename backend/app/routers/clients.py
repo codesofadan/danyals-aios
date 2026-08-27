@@ -90,6 +90,16 @@ async def create_client(body: ClientCreate, repo: ClientsRepoDep, actor: ManageC
     return ClientResponse.from_row(row, site_count=0)
 
 
+@router.get("/clients/report-grants", response_model=dict[str, list[str]])
+async def get_all_report_grants(
+    grants: ReportGrantsRepoDep, _user: Staff
+) -> dict[str, list[str]]:
+    """Every client's report-grant keys at once ({client_id: keys[]}). The admin
+    directory needs the whole table; per-client GETs made that an N+1. Declared
+    BEFORE /clients/{client_id} so "report-grants" never binds as an id."""
+    return await asyncio.to_thread(grants.list_all_keys)
+
+
 @router.get("/clients/{client_id}", response_model=ClientResponse)
 async def get_client(client_id: str, repo: ClientsRepoDep, _user: Staff) -> ClientResponse:
     row = await asyncio.to_thread(repo.get_client, client_id)

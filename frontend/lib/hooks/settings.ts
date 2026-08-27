@@ -39,3 +39,64 @@ export function useUpdateNotifPrefs() {
     onSuccess: (data) => qc.setQueryData(NOTIF_PREFS_KEY, data),
   });
 }
+
+// --- Agency-global settings (owner/admin) -------------------------------------
+// GET/PUT /settings/workspace + /settings/security, and the owner-only danger
+// zone. These six routes existed with ZERO callers - the Settings screen was
+// trimmed to My Account and the platform half of the module went dark.
+
+import type { SecurityPolicy, WorkspaceSettingsData } from "@/lib/data";
+
+export function useWorkspaceSettings() {
+  return useQuery({
+    queryKey: ["settings", "workspace"],
+    queryFn: () => api.get<WorkspaceSettingsData>("/settings/workspace"),
+  });
+}
+
+export function useSaveWorkspaceSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: WorkspaceSettingsData) =>
+      api.put<WorkspaceSettingsData>("/settings/workspace", data),
+    onSuccess: (fresh) => qc.setQueryData(["settings", "workspace"], fresh),
+  });
+}
+
+export function useSecurityPolicy() {
+  return useQuery({
+    queryKey: ["settings", "security"],
+    queryFn: () => api.get<SecurityPolicy>("/settings/security"),
+  });
+}
+
+export function useSaveSecurityPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: SecurityPolicy) =>
+      api.put<SecurityPolicy>("/settings/security", data),
+    onSuccess: (fresh) => qc.setQueryData(["settings", "security"], fresh),
+  });
+}
+
+/** Owner-only: reset workspace + security to their defaults. */
+export function useResetSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ workspace: WorkspaceSettingsData; security: SecurityPolicy }>("/settings/danger/reset"),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["settings", "workspace"] });
+      void qc.invalidateQueries({ queryKey: ["settings", "security"] });
+    },
+  });
+}
+
+/** Owner-only: permanently delete the activity log. Returns the purged count. */
+export function usePurgeActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ purged: number }>("/settings/danger/purge-activity"),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["activity"] }),
+  });
+}

@@ -47,6 +47,9 @@ export default function MilestoneDetail({ id }: { id: string }) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">No project with this id</div>
+        {(projectsQ.data?.length ?? 0) === 200 ? (
+          <div className="cs" style={{ marginTop: 6 }}>The list window holds the first 200 projects — this one may sit beyond it.</div>
+        ) : null}
         <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/milestones">Back to Milestones</Link></div>
       </section>
     );

@@ -44,6 +44,9 @@ export default function MemberDetail({ memberId }: { memberId: string }) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">No member with this id</div>
+        {(membersQ.data?.length ?? 0) === 200 ? (
+          <div className="cs" style={{ marginTop: 6 }}>The roster window holds the first 200 members — this one may sit beyond it.</div>
+        ) : null}
         <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/team">Back to Team</Link></div>
       </section>
     );

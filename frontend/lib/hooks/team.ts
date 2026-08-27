@@ -35,7 +35,7 @@ export const RBAC_TEMPLATES_KEY = ["rbac", "templates"] as const;
 export function useMembers() {
   return useQuery({
     queryKey: MEMBERS_KEY,
-    queryFn: () => api.get<TeamMemberRecord[]>("/admin/users"),
+    queryFn: () => api.get<TeamMemberRecord[]>("/admin/users?limit=200"),
   });
 }
 
@@ -50,7 +50,7 @@ export function useMembers() {
 export function useTeamMembers() {
   return useQuery({
     queryKey: TEAM_MEMBERS_KEY,
-    queryFn: () => api.get<TeamMemberRecord[]>("/team/members"),
+    queryFn: () => api.get<TeamMemberRecord[]>("/team/members?limit=200"),
   });
 }
 
@@ -58,7 +58,7 @@ export function useTeamMembers() {
 export function useTasks() {
   return useQuery({
     queryKey: TASKS_KEY,
-    queryFn: () => api.get<Task[]>("/tasks"),
+    queryFn: () => api.get<Task[]>("/tasks?limit=200"),
   });
 }
 
@@ -66,7 +66,7 @@ export function useTasks() {
 export function useActivity() {
   return useQuery({
     queryKey: ACTIVITY_KEY,
-    queryFn: () => api.get<Activity[]>("/activity"),
+    queryFn: () => api.get<Activity[]>("/activity?limit=200"),
   });
 }
 

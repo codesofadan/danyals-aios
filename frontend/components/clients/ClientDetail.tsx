@@ -55,6 +55,9 @@ export default function ClientDetail({ clientId }: { clientId: string }) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">No client with this id</div>
+        {(clientsQ.data?.length ?? 0) === 200 ? (
+          <div className="cs" style={{ marginTop: 6 }}>The directory window holds the first 200 clients — this one may sit beyond it.</div>
+        ) : null}
         <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/clients">Back to Clients</Link></div>
       </section>
     );

@@ -93,7 +93,7 @@ export const reportGrantsKey = (clientId: string) =>
 export function useClients() {
   return useQuery({
     queryKey: CLIENTS_KEY,
-    queryFn: () => api.get<ClientRecord[]>("/clients"),
+    queryFn: () => api.get<ClientRecord[]>("/clients?limit=200"),
   });
 }
 
@@ -105,29 +105,20 @@ export function useClients() {
 // to remove.
 
 /**
- * Report grants for MANY clients, folded into the `{ [clientId]: keys[] }` shape the
- * Directory's Report-Access table renders from (mirrors the old store `clientGrants`).
- * The backend only exposes grants per-client, so this is one GET per client — deduped
- * + cached by React Query, and reused key-for-key by `useReportGrants`/`useSaveGrants`.
+ * Report grants for EVERY client in one request (GET /clients/report-grants →
+ * { [clientId]: keys[] }). This replaced a real N+1: the directory used to fire
+ * one GET per client, so 200 clients meant 200 requests on load. Clients with no
+ * grants are absent from the map — the directory renders those as zero.
  */
 export function useAllReportGrants(clientIds: string[]) {
-  return useQueries({
-    queries: clientIds.map((id) => ({
-      queryKey: reportGrantsKey(id),
-      queryFn: () => api.get<string[]>(`/clients/${id}/report-grants`),
-    })),
-    combine: (results) => {
-      const grants: Record<string, string[]> = {};
-      clientIds.forEach((id, i) => {
-        grants[id] = results[i]?.data ?? [];
-      });
-      return {
-        grants,
-        isLoading: results.some((r) => r.isLoading),
-        isError: results.some((r) => r.isError),
-      };
-    },
+  const q = useQuery({
+    queryKey: ["report-grants", "all"],
+    queryFn: () => api.get<Record<string, string[]>>("/clients/report-grants"),
   });
+  const grants: Record<string, string[]> = q.data
+    ? Object.fromEntries(clientIds.map((id) => [id, q.data![id] ?? []]))
+    : {};
+  return { ...q, grants };
 }
 
 /** Replace a client's report-access set (PUT /clients/{id}/report-grants → keys[]). */
@@ -138,6 +129,7 @@ export function useSaveGrants() {
       api.put<string[]>(`/clients/${clientId}/report-grants`, { reports }),
     onSuccess: (_keys, { clientId }) => {
       void qc.invalidateQueries({ queryKey: reportGrantsKey(clientId) });
+      void qc.invalidateQueries({ queryKey: ["report-grants", "all"] });
     },
   });
 }

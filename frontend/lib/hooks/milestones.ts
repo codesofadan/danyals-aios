@@ -20,7 +20,7 @@ export const AUTO_ADVANCE_KEY = ["milestones", "auto-advance"] as const;
 export function useMilestones() {
   return useQuery({
     queryKey: MILESTONES_KEY,
-    queryFn: () => api.get<ClientProject[]>("/milestones"),
+    queryFn: () => api.get<ClientProject[]>("/milestones?limit=200"),
   });
 }
 

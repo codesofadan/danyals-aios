@@ -234,7 +234,7 @@ export default function TaskManager() {
           </select>
         </label>
         <span className="tm-filter-count">
-          {filtered.length} of {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+          {filtered.length} of {tasks.length} {tasks.length === 1 ? "task" : "tasks"}{tasks.length === 200 ? " (first 200 — the server window is full)" : ""}
         </span>
       </div>
 

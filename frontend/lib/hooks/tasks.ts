@@ -22,7 +22,10 @@ export const ALL_TASKS_KEY = ["tasks"] as const;
 export function useAllTasks() {
   return useQuery({
     queryKey: ALL_TASKS_KEY,
-    queryFn: () => api.get<Task[]>("/tasks"),
+    // limit=200 is the server's hard cap; WITHOUT it the backend silently
+    // serves its 50-row default and the table claims completeness it doesn't
+    // have. Screens rendering this add a "first 200" note when the cap hits.
+    queryFn: () => api.get<Task[]>("/tasks?limit=200"),
   });
 }
 

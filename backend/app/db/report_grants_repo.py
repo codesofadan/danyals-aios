@@ -35,6 +35,19 @@ class ReportGrantsRepo:
             )
             return [str(r["report_key"]) for r in cur.fetchall()]
 
+    def list_all_keys(self) -> dict[str, list[str]]:
+        """Every client's granted report keys in ONE query - the bulk read behind
+        the admin directory, which previously issued one request per client."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select client_id, report_key from public.client_report_grants "
+                "order by client_id, report_key"
+            )
+            out: dict[str, list[str]] = {}
+            for r in cur.fetchall():
+                out.setdefault(str(r["client_id"]), []).append(str(r["report_key"]))
+            return out
+
     def replace_keys(self, client_id: str, keys: list[str]) -> list[str]:
         """Replace the whole grant set for ``client_id`` (delete-all + bulk insert),
         atomically in one transaction. ``granted_by`` snapshots the acting user.

@@ -48,6 +48,9 @@ export default function TaskDetail({ code }: { code: string }) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">No task {code}</div>
+        {(tasksQ.data?.length ?? 0) === 200 ? (
+          <div className="cs" style={{ marginTop: 6 }}>The task window holds the first 200 — this one may sit beyond it.</div>
+        ) : null}
         <div className="cs" style={{ marginTop: 8 }}>
           It may have been deleted, or the code is mistyped. <Link href="/admin/tasks">Back to Tasks</Link>.
         </div>

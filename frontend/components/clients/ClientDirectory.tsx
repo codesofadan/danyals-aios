@@ -216,7 +216,7 @@ export default function ClientDirectory() {
       </div>
 
       <div className="cd-foot">
-        <span>{clients.length} accounts</span>
+        <span>{clients.length} accounts{clients.length === 200 ? " (first 200 — the server window is full)" : ""}</span>
         <span className="cd-foot-hint">Account details, primary contact &amp; subscription for every client.</span>
       </div>
 
