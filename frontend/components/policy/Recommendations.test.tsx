@@ -62,16 +62,21 @@ describe("recommendation actions", () => {
     const user = userEvent.setup();
     render(<Recommendations />);
     await user.click(screen.getByRole("button", { name: /Apply/i }));
-    expect(window.confirm).toHaveBeenCalled();
+    // A real dialog now (window.confirm was suppressible and stated nothing):
+    // the overlay's outward consequence renders, then the named verb applies.
+    expect(mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent(/clients' reports/i);
+    await user.click(screen.getByRole("button", { name: /Apply recommendation/i }));
     expect(mutate).toHaveBeenCalledWith({ id: "r1", action: "apply" });
   });
 
-  it("does not apply when the confirmation is declined", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("does not apply when the confirmation is cancelled", async () => {
     const user = userEvent.setup();
     render(<Recommendations />);
     await user.click(screen.getByRole("button", { name: /Apply/i }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(mutate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("stops offering Acknowledge once it has been acknowledged", async () => {
