@@ -26,9 +26,6 @@ from audit_engine.checklist import load_registry
 class Reason(StrEnum):
     """Why a declared check does not run yet."""
 
-    #: Needs backlink data. DataForSEO backlinks/summary is priced at $0.024
-    #: per request, which answers O-6; Moz was never reachable.
-    NEEDS_BACKLINK_PROVIDER = "needs_backlink_provider"
     #: Needs a paid third-party API that is not backlinks.
     NEEDS_PROVIDER = "needs_provider"
     #: Needs Search Console or server logs, both client-granted.
@@ -43,10 +40,6 @@ class Reason(StrEnum):
 #: Sources that justify each reason. A check ledgered under a reason must
 #: declare at least one of these, or the excuse does not match the check.
 REASON_REQUIRES: dict[Reason, frozenset[str]] = {
-    Reason.NEEDS_BACKLINK_PROVIDER: frozenset({
-        "moz_links", "moz_links_historical", "moz_da", "moz_spam_score",
-        "moz_keyword", "competitor_moz_links", "competitor_moz_da",
-    }),
     Reason.NEEDS_PROVIDER: frozenset({
         "serper", "serper_geo", "serper_top10", "google_places", "otterly",
         "google_nl", "w3c_validator", "web_fetch", "wikidata",
@@ -78,9 +71,6 @@ def _e(cid: str, reason: Reason, blocked_on: str, note: str) -> tuple[str, Ledge
 
 
 NOTES: dict[Reason, str] = {
-    Reason.NEEDS_BACKLINK_PROVIDER:
-        "No backlink data is purchased. DataForSEO backlinks/summary is priced "
-        "at $0.024 per request and would supply this.",
     Reason.NEEDS_PROVIDER:
         "Requires a paid third-party API that is not currently called for this check.",
     Reason.NEEDS_SEARCH_CONSOLE:
@@ -128,88 +118,10 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_PROVIDER]),  # Review competitor benchmark (gap vs map pack peers)
     _e("LOC-029", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # Map pack ranking by geo grid (1, 3, 5, 10 mile rings)
-    _e("LOC-030", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Geo targeted keyword optimization
-    _e("OFF-002", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Domain rating analysis
-    _e("OFF-004", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Backlink profile analysis
-    _e("OFF-006", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Link velocity analysis
-    _e("OFF-007", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Toxic backlink detection
-    _e("OFF-008", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Spam backlink analysis
-    _e("OFF-009", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Lost backlink detection
-    _e("OFF-010", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # New backlink detection
-    _e("OFF-011", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # High authority backlink analysis
-    _e("OFF-015", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Homepage backlink analysis
-    _e("OFF-016", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Deep page backlink analysis
-    _e("OFF-020", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Exact match anchor analysis
-    _e("OFF-022", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Generic anchor analysis
-    _e("OFF-023", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Link diversity analysis
-    _e("OFF-024", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Dofollow backlink analysis
-    _e("OFF-025", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Nofollow backlink analysis
-    _e("OFF-026", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Sponsored link analysis
-    _e("OFF-027", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # UGC link analysis
-    _e("OFF-028", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Referring IP diversity analysis
-    _e("OFF-029", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Referring subnet diversity analysis
-    _e("OFF-030", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Country relevance analysis
-    _e("OFF-031", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # TLD distribution analysis
-    _e("OFF-035", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Sitewide backlink detection
-    _e("OFF-038", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Link farm detection
-    _e("OFF-041", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Competitor backlink gap analysis
-    _e("OFF-042", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Competitor authority comparison
-    _e("OFF-043", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Competitor referring domains comparison
-    _e("OFF-044", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Broken backlink opportunities
     _e("OFF-051", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # Knowledge Graph presence analysis
-    _e("OFF-052", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Branded search volume analysis
-    _e("OFF-055", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Press release backlink analysis
-    _e("OFF-057", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Forum backlink analysis
-    _e("OFF-058", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Profile backlink analysis
-    _e("OFF-059", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Redirect backlink analysis
-    _e("OFF-060", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Link decay analysis
-    _e("OFF-061", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Historical backlink trend analysis
-    _e("OFF-065", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Video backlink analysis
-    _e("OFF-066", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Image backlink analysis
     _e("OFF-068", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # Generative search visibility analysis
-    _e("OFF-070", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Trust flow analysis
-    _e("OFF-071", Reason.NEEDS_BACKLINK_PROVIDER, "O-6",
-       NOTES[Reason.NEEDS_BACKLINK_PROVIDER]),  # Citation flow analysis
     _e("OFF-072", Reason.OWNER_DECISION, "O-1 follow-up",
        "Indistinguishable from OFF-074 Authority given the current subpoints. Needs a definition that separates the two."),
     _e("OFF-073", Reason.OWNER_DECISION, "O-1 follow-up",
@@ -218,8 +130,6 @@ LEDGER: dict[str, LedgerEntry] = dict([
        "A sub-rollup of what? OFF-080 already covers the whole off-page pillar."),
     _e("ON-010", Reason.NEEDS_PROVIDER, "provider budget",
        NOTES[Reason.NEEDS_PROVIDER]),  # NLP keyword coverage
-    _e("ON-070", Reason.NOT_YET_BUILT, "Wave 3",
-       "Needs the HTTP response of each IMAGE, not of the page. The crawler fetches HTML documents only, so this needs an image-fetch pass with its own budget."),
     _e("ON-083", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Mobile content parity analysis
     _e("ON-112", Reason.OWNER_DECISION, "O-1 follow-up",
@@ -236,20 +146,16 @@ LEDGER: dict[str, LedgerEntry] = dict([
        NOTES[Reason.NEEDS_PROVIDER]),  # HTML validation analysis
     _e("TECH-078", Reason.NEEDS_SEARCH_CONSOLE, "client OAuth grant",
        NOTES[Reason.NEEDS_SEARCH_CONSOLE]),  # Index bloat detection
-    _e("TECH-082", Reason.NOT_YET_BUILT, "Wave 3",
-       "Its declared sources (crawled_html, http_headers) cannot detect malware; a header scan would be security theatre. Google Safe Browsing v4 is free with the existing GOOGLE_API_KEY and is the correct implementation. The declared data_sources are wrong."),
     _e("TECH-084", Reason.NOT_YET_BUILT, "Wave 3",
        NOTES[Reason.NOT_YET_BUILT]),  # Cloaking detection
-    _e("TECH-090", Reason.NOT_YET_BUILT, "Wave 3",
-       "Server WebP support is proved by content negotiation on an image request, which needs the image-fetch pass. ON-071 already reports webp usage in the HTML."),
 ])
 
 
 #: Two-sided ratchet. Both bounds are asserted separately with different
 #: messages, so implementing a check and forgetting to delete its entry fails
 #: just as loudly as adding an unexplained gap.
-LEDGER_CEILING = 74
-LEDGER_FLOOR = 74
+LEDGER_CEILING = 32
+LEDGER_FLOOR = 32
 
 
 def ledgered() -> dict[str, LedgerEntry]:

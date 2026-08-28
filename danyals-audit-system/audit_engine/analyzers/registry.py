@@ -29,11 +29,13 @@ from typing import Any, Literal
 from audit_engine.checklist import CheckSpec, load_registry
 
 Scope = Literal[
-    "page", "page_http", "site_parsed", "site_crawled", "psi", "rendered", "rollup"
+    "page", "page_http", "site_parsed", "site_crawled", "psi", "rendered",
+    "backlinks", "rollup",
 ]
 
 SCOPES: frozenset[str] = frozenset(
-    {"page", "page_http", "site_parsed", "site_crawled", "psi", "rendered", "rollup"}
+    {"page", "page_http", "site_parsed", "site_crawled", "psi", "rendered",
+     "backlinks", "rollup"}
 )
 
 #: What each scope receives, for error messages and documentation.
@@ -44,6 +46,7 @@ SCOPE_INPUT: dict[str, str] = {
     "site_crawled": "CrawlContext - the crawl graph",
     "psi": "PsiResult - one PageSpeed Insights response",
     "rendered": "RenderedPage - one page BEFORE and AFTER JavaScript",
+    "backlinks": "BacklinkProfile - the site's whole backlink profile",
     "rollup": "RollupContext - findings from other checks",
 }
 

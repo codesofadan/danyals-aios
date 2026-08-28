@@ -73,6 +73,9 @@ _CONNECTION: frozenset[str] = frozenset({
     "gsc_query", "gsc_ctr", "gsc_coverage", "server_logs",
 })
 _BILLABLE: frozenset[str] = frozenset({
+    # Provider-neutral. The `moz_*` names are kept because 39 checklist rows
+    # still carry them and they classify identically; new rows should use these.
+    "backlink_provider", "competitor_backlinks", "backlink_history",
     "competitor_moz_da", "competitor_moz_links", "embeddings", "google_nl",
     "google_places", "moz_da", "moz_keyword", "moz_links", "moz_links_historical",
     "moz_spam_score", "otterly", "serper", "serper_geo", "serper_top10", "web_search",

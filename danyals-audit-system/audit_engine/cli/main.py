@@ -52,6 +52,15 @@ from audit_engine.analyzers import rollups as _rollup_checks  # noqa: F401
 from audit_engine.analyzers import network as _network_checks  # noqa: F401
 from audit_engine.analyzers import media_content as _media_checks  # noqa: F401
 from audit_engine.analyzers import rendering as _rendering_checks  # noqa: F401
+# The 39 backlink checks. `_emit_backlinks` and the `backlinks` scope were both
+# built, but nothing imported these modules, so no check ever registered and the
+# dispatcher had an empty scope to run. They were dead code that the ledger's
+# string-literal heuristic nonetheless counted as implemented.
+from audit_engine.analyzers import backlinks_profile as _backlinks_profile_checks  # noqa: F401
+from audit_engine.analyzers import backlinks_anchors as _backlinks_anchors_checks  # noqa: F401
+from audit_engine.analyzers import backlinks_diversity as _backlinks_div_checks  # noqa: F401
+from audit_engine.analyzers import images as _image_checks  # noqa: F401
+from audit_engine.analyzers import security as _security_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
     iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
@@ -420,6 +429,50 @@ def _persist_psi(artifact_dir: Path, psi_result: Any) -> None:
         )
     except OSError as e:
         log.warning("psi_persist_failed", error=str(e))
+
+
+async def _emit_backlinks(
+    *,
+    run_id: int,
+    crawl_result: Any,
+    permitted: frozenset[str],
+) -> list[Finding]:
+    """Fetch the backlink profile once and run every check that reads it.
+
+    TWO requests for thirty-nine checks, about five cents. Per-check fetching
+    would be forty times the cost for the same answer, which is why these are
+    built around one shared profile.
+
+    Gated on `billable` being permitted. Thirty-nine checks declared a Moz
+    source and none could ever run - the Moz keys are empty and Moz was never
+    reachable. DataForSEO was authorised by the owner on 2026-08-25.
+    """
+    from audit_engine.integrations.dataforseo import DataForSeoClient
+
+    permitted_ids = _permitted_registered_ids(permitted)
+    wanted = {c for c, r in registry.registered().items() if r.scope == "backlinks"}
+    if not (wanted & permitted_ids):
+        return []
+
+    site = getattr(crawl_result, "site_url", "") or ""
+    keys = get_keys()
+    async with DataForSeoClient(
+        login=keys.dataforseo_login, password=keys.dataforseo_password
+    ) as client:
+        profile = await client.profile(site)
+
+    if profile.error:
+        console.print(f"  [yellow]backlink profile unavailable: {profile.error}[/yellow]")
+    else:
+        console.print(
+            f"  Backlinks: {profile.referring_domains} referring domains, "
+            f"rank {profile.rank}, spam score {profile.backlinks_spam_score}"
+        )
+    out: list[Finding] = []
+    for check_id, verdict in run_scope("backlinks", profile, only=permitted_ids).verdicts:
+        out.append(_finding(run_id=run_id, page_id=None, check_id=check_id,
+                            owner=_OWNER_BY_CHECK.get(check_id, ""), verdict=verdict))
+    return out
 
 
 async def _emit_rendered(
@@ -1171,6 +1224,12 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
     except Exception as e:  # a render is best-effort; the audit stands without it
         console.print(f"  [yellow]rendered checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
+        findings.extend(await _emit_backlinks(
+            run_id=run_id, crawl_result=crawl_result, permitted=_run_permitted_classes,
+        ))
+    except Exception as e:  # a provider outage must not cost the audit
+        console.print(f"  [yellow]backlink checks skipped: {type(e).__name__}: {e}[/yellow]")
+    try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
         console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
@@ -1864,6 +1923,12 @@ async def _run_full(
     except Exception as e:  # a render is best-effort; the audit stands without it
         console.print(f"  [yellow]rendered checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
+        findings.extend(await _emit_backlinks(
+            run_id=run_id, crawl_result=crawl_result, permitted=_run_permitted_classes,
+        ))
+    except Exception as e:  # a provider outage must not cost the audit
+        console.print(f"  [yellow]backlink checks skipped: {type(e).__name__}: {e}[/yellow]")
+    try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001
         console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
@@ -2278,6 +2343,12 @@ async def _run_local(
         ))
     except Exception as e:  # a render is best-effort; the audit stands without it
         console.print(f"  [yellow]rendered checks skipped: {type(e).__name__}: {e}[/yellow]")
+    try:
+        findings.extend(await _emit_backlinks(
+            run_id=run_id, crawl_result=crawl_result, permitted=_run_permitted_classes,
+        ))
+    except Exception as e:  # a provider outage must not cost the audit
+        console.print(f"  [yellow]backlink checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
     except Exception as e:  # noqa: BLE001

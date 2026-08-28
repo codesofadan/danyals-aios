@@ -277,8 +277,8 @@ checks:
     subcategory: local-keywords
     owner_agent: D4
     severity_default: critical
-    data_sources: [crawled_html, moz_keyword]
-    analyzer: audit_engine.analyzers.local_keywords.geo_targeted
+    data_sources: [backlink_provider]
+    analyzer: audit_engine.analyzers.backlinks_diversity.check_geo_targeted_keywords
     automation: full
 
   - id: LOC-031

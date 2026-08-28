@@ -254,13 +254,19 @@ def test_a_skipped_check_carries_the_ledgers_real_reason(registry):
 
     cov = emit.build_coverage([], dimensions=None, permitted_cost_classes=ALL_CLASSES)
     by_id = {s["check_id"]: s for s in cov["skipped"]}
-    ledgered = [c for c in led.LEDGER if c in by_id]
-    assert len(ledgered) > 50, "the ledger should account for most silent checks"
-    for cid in ledgered[:10]:
-        entry = led.LEDGER[cid]
-        assert by_id[cid]["reason"] == entry.reason.value
-        assert by_id[cid]["blocked_on"] == entry.blocked_on
-        assert by_id[cid]["note"] == entry.note
+
+    # EVERY ledger entry, not a magic threshold. This used to assert `> 50`,
+    # chosen when the ledger held 74; it went stale the moment 39 backlink
+    # checks were implemented and their excuses retired, and a threshold that
+    # has to be edited every time the work advances is a threshold that will be
+    # edited without being read.
+    missing = sorted(c for c in led.LEDGER if c not in by_id)
+    assert not missing, f"ledgered but not reported as skipped: {missing}"
+
+    for cid, entry in led.LEDGER.items():
+        assert by_id[cid]["reason"] == entry.reason.value, cid
+        assert by_id[cid]["blocked_on"] == entry.blocked_on, cid
+        assert by_id[cid]["note"] == entry.note, cid
 
 
 def test_every_skipped_record_can_be_read_by_a_person(registry):

@@ -839,7 +839,7 @@ checks:
     owner_agent: B2
     severity_default: minor
     data_sources: [crawled_html, http_resp]
-    analyzer: audit_engine.analyzers.media.webp_support
+    analyzer: audit_engine.analyzers.images.webp_support
     automation: full
 
   - id: TECH-091

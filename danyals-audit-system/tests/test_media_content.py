@@ -273,9 +273,20 @@ def test_a_list_valued_schema_type_is_handled():
     assert mc.check_video_indexing(c).status == "pass"
 
 
-def test_not_yet_built_is_down_to_five():
-    """Everything left under this reason needs an input we do not fetch."""
+def test_not_yet_built_now_means_only_what_we_cannot_fetch():
+    """The claim this reason makes, finally true of everything under it.
+
+    Its docstring always said "needs an input we do not fetch", but three of the
+    five sat there needing nothing of the sort: ON-070, TECH-082 and TECH-090 read
+    the crawled HTML and response headers this audit already collects, and were
+    simply unwritten. They are built.
+
+    The two left genuinely need a SECOND fetch of the same page - one under a
+    mobile viewport against a desktop one (ON-083), one under Googlebot's
+    user-agent against a browser's (TECH-084). That doubles crawl cost per page,
+    which is a decision about what an audit spends, not a gap in the analyzers.
+    """
     from audit_engine.analyzers.ledger import LEDGER, Reason
 
     remaining = {c for c, e in LEDGER.items() if e.reason is Reason.NOT_YET_BUILT}
-    assert remaining == {"ON-070", "ON-083", "TECH-082", "TECH-084", "TECH-090"}
+    assert remaining == {"ON-083", "TECH-084"}

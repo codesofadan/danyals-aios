@@ -49,6 +49,8 @@ class APIKeys:
     google_nl: str | None
     google_credentials_path: str | None
     firecrawl: str | None
+    dataforseo_login: str | None
+    dataforseo_password: str | None
     anthropic: str | None
 
     @classmethod
@@ -69,6 +71,8 @@ class APIKeys:
             google_nl=os.getenv("GOOGLE_NL_API_KEY") or google_fallback,
             google_credentials_path=os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or None,
             firecrawl=os.getenv("FIRECRAWL_API_KEY") or None,
+            dataforseo_login=os.getenv("DATAFORSEO_LOGIN") or None,
+            dataforseo_password=os.getenv("DATAFORSEO_PASSWORD") or None,
             anthropic=os.getenv("ANTHROPIC_API_KEY") or None,
         )
 
