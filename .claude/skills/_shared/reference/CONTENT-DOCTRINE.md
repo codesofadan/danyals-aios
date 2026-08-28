@@ -28,7 +28,12 @@ penalties.
   a reviewer can spot-check it.
 - **No invented facts.** If a section needs a fact that is not supplied, emit
   `[NEEDS: <what is missing>]`. A `[NEEDS:]` marker is a *feature* — it routes the
-  gap to a human, and it hard-blocks publish until resolved.
+  gap to a human. QA §2 records an unresolved marker as a hard fail
+  (`QaScore.blocked_by`), and the draft stops at the human review gate. **That QA
+  verdict is ADVISORY** — corrected 2026-08-26: this line said "hard-blocks publish
+  until resolved", and no code blocks on it (`raise PublishBlocked` appears nowhere).
+  The lead who approves is the only thing standing between a `[NEEDS:]` draft and the
+  client's site. See `backend/docs/CONTENT-MODULE.md`.
 - Prose is the writer LLM's job; **structure, facts, and the trace are the core's
   job.** The deterministic core assembles the skeleton (headings, the answer
   block, entity coverage, links, local anatomy) and feeds the writer only grounded

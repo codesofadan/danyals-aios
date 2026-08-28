@@ -38,12 +38,24 @@ and **no em dash (U+2014)** in generated copy (enforced by
 
 ## Code ↔ knowledge cross-map (what the code enforces, and its source)
 
-The generator (`app/services/content_generator.py`) and the QA gate
-(`app/services/content_qa.py`) enforce a **named numeric subset** of the spine. The
-publish gate is load-bearing: `workers/tasks/content.py` blocks any draft whose
-`QaScore.passed` is not `True` (invariant #12). The migration keeps that contract
-(`QaScore.passed` / `.blocked_by`) stable while re-deriving the thresholds from the
-knowledge base.
+The generator (`app/services/content_generator.py`) and the QA scorer
+(`app/services/content_qa.py`) encode a **named numeric subset** of the spine.
+
+> **Corrected 2026-08-26.** This paragraph previously read "the publish gate is
+> load-bearing: `workers/tasks/content.py` blocks any draft whose `QaScore.passed`
+> is not `True` (invariant #12)". **That gate does not exist and never did.**
+> `PublishBlocked` is defined (`workers/tasks/content.py:412`) and caught twice
+> (`:2187`, `:2486`) but **raised nowhere** — `grep -rn "raise PublishBlocked" app
+> workers integrations` returns nothing (re-verified 2026-08-26).
+> `publish_content_job` WILL publish a sub-threshold draft. The score is
+> **ADVISORY**; the **human review gate is the only enforced quality boundary**.
+> This file contradicted `CONTENT-MODULE.md` §"The QA score (ADVISORY — there is no
+> automated publish gate)", which has been correct since 2026-08-23. Making a gate
+> real is **D-4**.
+
+The migration keeps the `QaScore.passed` / `.blocked_by` contract stable — the fields
+the portal renders today and the ones a future gate would read — while re-deriving
+the thresholds from the knowledge base.
 
 | Code constant (content_generator.py) | Enforces (knowledge source) | Status |
 |---|---|---|
@@ -66,7 +78,7 @@ Two facts constrain the order of work:
 1. **The QA object changes shape.** SEO-CONTENT-OS is a fail-fast gate stack
    (auto-fail / warning per gate) plus a fail-count kill gate — not a weighted
    0–100 score with a single ≥85 threshold. The migration preserves
-   `QaScore.passed` + `.blocked_by` (the only fields the publish gate reads) and
+   `QaScore.passed` + `.blocked_by` (the only fields a publish gate would read) and
    keeps a `dimensions` / `weighted_total` compatibility projection so the DB
    `qa_score` jsonb and the portal readers keep working, while the *decision* is
    re-derived from the gates.

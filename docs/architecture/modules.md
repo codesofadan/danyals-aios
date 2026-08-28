@@ -65,14 +65,31 @@ proxy spend. Every off-page query is pinned to the client's own profile
 (`competitor_id is null`) so a rival's links never appear as the client's.
 
 - Tables: `backlinks`, `citations` (`0018`); web2 publish (`0028`); citation+web2
-  automation + directories seed/strategy (`0045`, `0046`, `0048`).
+  automation + directories seed/strategy (`0045`, `0046`, `0048`); the Web 2.0 safety
+  and campaign layer (`0100` accounts, `0101` property→account, `0102` similarity
+  fingerprints, `0103` platform tiers + per-client eligibility, `0104` pacing +
+  measured link `rel`, `0105` campaigns).
 - API: `/offpage/kpis`, `/offpage/backlinks` (+ `/flag-toxic`), `/offpage/citations`
-  (+ `/action`, `/bulk`), `/offpage/web2` (+ `/plan`, `/{id}/approve`),
+  (+ `/action`, `/bulk`), `/offpage/web2` (+ `/plan`, `/{id}/approve`, `/catalog`,
+  `/platform-board`, `/campaigns` + `/campaigns/estimate` + `/campaigns/{id}`
+  + `/campaigns/{id}/approve` — ONE operator decision that still transitions each
+  property individually and re-runs the gate per row, because Tumblr's API License
+  requires a per-post human action; a blocked property is HELD and named, never
+  waved through with the batch),
   `/citation-builder/*` (business profiles, directories, campaigns).
+- Web 2.0 safety rails (all server-side, none optional): every property is a distinct
+  article (a campaign refuses to reuse a topic — one topic across N platforms measures
+  as N identical articles); a cross-property similarity gate scores each draft against
+  the client's own set, everyone sharing a house account, and the same platform over 90
+  days, and **re-runs at approval** because a campaign's drafts are all written before
+  any of them is approved; publish pacing spreads a campaign over days rather than
+  minutes; and eligibility is computed per client from the platform's own terms, so the
+  full catalogue stays visible with a reason on every row it may not use.
 - Dial: **`backlinks`** (monitoring + Web2 publish, default byhand), **`citations`**
   (auto-submit, CAPTCHA+proxy spend, default api).
-- Keys: `SERPER_API_KEY`; Web2 house creds (`WEB2_HOUSE_CREDENTIALS_JSON` + per-client
-  vault `web2:<Platform>`); citations `BING_PLACES_API_KEY`/`FOURSQUARE_API_KEY`/
+- Keys: `SERPER_API_KEY`; Web2 credentials live in the vault as `web2:<Platform>` with
+  `label = <web2_accounts.id>` (migration `0100`; the `WEB2_HOUSE_CREDENTIALS_JSON`
+  fan-out was removed 2026-08-25 under R2-06); citations `BING_PLACES_API_KEY`/`FOURSQUARE_API_KEY`/
   `CAPTCHA_SOLVER_API_KEY`/proxy/`APIFY_*`. Full: `backend/docs/CITATIONS-WEB2-CREDENTIALS.md`.
 - Skills: `offpage`, `backlink-audit`, `citation-builder`, `citation-submit`, `web2-build`.
 

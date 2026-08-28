@@ -1,6 +1,6 @@
 # KNOWN LIMITATIONS
 
-**As of:** 2026-08-23 · **Scope:** what this Phase-3 session found and did **not** fix.
+**As of:** 2026-08-23 · **§1 re-measured 2026-08-26** · **Scope:** what this Phase-3 session found and did **not** fix.
 
 This is deliberately not a "final" document — Phase 3 is partially complete (see
 `IMPLEMENTATION_LOG.md` for what is done). Publishing a `FINAL_*` set now would misrepresent the
@@ -13,14 +13,20 @@ mine to make, or a trade I made deliberately and am naming rather than hiding.
 
 | ID | Item | State |
 |---|---|---|
-| **P0-3** | Job contract — retry, backoff, DLQ, idempotency, terminal states across all 39 Celery tasks | **Not started.** The critical path, and the prerequisite for P0-5 |
-| **P0-4** | Stop faking success — the WordPress publish cascade still marks `status="done"` on an artifact-only degraded publish | **Not started.** Analysed; needs an enum migration, a trigger change, and a frontend render change |
-| **P0-5** | Staged beat restore | **Blocked on P0-3** by the plan's own hard ordering rule ("never restore a schedule for tasks that cannot retry and have nowhere to fail to"). **Nine tests already assert it and are red** — see §2 |
+| **P0-3** | Job contract — retry, backoff, DLQ, idempotency, terminal states across all 39 Celery tasks | **DONE** (re-measured 2026-08-26). Landed as **WU-8**, migration `0080_job_contract.sql`, documented in `backend/docs/JOB-CONTRACT.md`, on branch `recovery/p0-3-job-contract`. This row said "Not started" |
+| **P0-4** | Stop faking success — the WordPress publish cascade marked `status="done"` on an artifact-only degraded publish | **DONE** (re-measured 2026-08-26). Landed as **WU-10** (`IMPLEMENTATION_LOG.md` §WU-10): the `degraded` label exists, `workers/tasks/content.py` writes it instead of `done`, and `tests/test_content_wp_push.py` + `tests/test_content_worker.py` assert the terminal status is **not** `done`. This row said "Not started" |
+| **P0-5** | Staged beat restore | **No longer blocked by P0-3** (which is done) — but **still not wanted**. `beat_schedule = {}` at `backend/workers/celery_app.py:220` is an owner instruction, not a technical dependency; the plan's ordering rule is satisfied, and "unblocked" is not "approved". **Nine tests still assert a populated schedule and are red** — see §2. Needs an owner decision, not engineering |
 | **P0-12** | Citation loaded-cost model + client re-baseline | **Blocked on an owner decision**, not on engineering (plan §13, risk R2) |
 | **P0-13** | Backup schedule + failure alert + **restore drill** | **Not started.** Requires real infrastructure (B2 credentials, a live database) that this environment does not have |
 | **P0-14** | Decide D-17 (Policy Radar in v1?) | **Owner decision.** One line of code either way |
 
 **P0-11 needs no work and its plan entry is stale — see §3.**
+
+> **Re-measured 2026-08-26.** Two rows above were stale: **P0-3** and **P0-4** both landed
+> (WU-8 and WU-10) and this table still called them "Not started". A document that
+> reports finished work as unstarted misroutes planning as badly as one that reports
+> unfinished work as done. §2–§4 below have **not** been re-measured in this pass and
+> should be treated as being as of 2026-08-23 until they are.
 
 ---
 

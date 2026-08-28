@@ -23,6 +23,13 @@ prose. That is not a hypothetical:
 > *`[CONFIRMED — [CODE] backend/CLAUDE.md item 12]`* as evidence for one of its six
 > headline defects. The audit cited documentation as code evidence, and the documentation
 > was false.
+>
+> **2026-08-26: a fifth site.** `backend/docs/CONTENT-DOCTRINE.md` still said "the publish
+> gate is load-bearing: `workers/tasks/content.py` blocks any draft whose `QaScore.passed`
+> is not `True`" — three days after the other four were corrected, and in direct
+> contradiction of `CONTENT-MODULE.md` in the same folder. A sweep that fixes the places
+> you remember is not a sweep. The check is
+> `grep -rn "raise PublishBlocked" app workers integrations`, and it still returns nothing.
 
 Separately, a forensic audit's single RED verdict rested on a count of **3** where the
 real figure is **50** — established four times over, including from the audited commit

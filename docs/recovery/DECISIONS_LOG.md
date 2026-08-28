@@ -186,7 +186,7 @@ reopen this entry, not the moment to discover it was never written.
 **Decided:** `GET /rbac/{features,permissions,roles,templates}` return **403** to a portal
 client. `GET /tiers` and `/tiers/feature-areas` remain readable by a client.
 
-**The split is deliberate.** The access model — 8 permissions × 6 roles, 11 features, and every
+**The split is deliberate.** The access model — 8 permissions × 6 roles, 17 features, and every
 role template's grants — is the agency's internal structure and has no client-facing purpose;
 the portal never renders it. Tier and price data does have one: the client portal sells upsells,
 and the delivered access matrix lists *"Click Fiverr upsells"* as a client capability. Locking

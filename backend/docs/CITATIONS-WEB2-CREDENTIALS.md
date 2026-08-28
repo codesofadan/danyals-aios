@@ -23,8 +23,9 @@ Vault screen or `POST /vault/keys`), `kind=api_key` for agency-wide ones.
 These three platforms are fully coded and tested; they only need a credential
 **per client, per platform** in the vault to go live. Nothing else to build.
 
-Vault convention: `provider = "web2:<Platform>"`, `label = <client_id>`, `secret` =
-a JSON blob with the fields below.
+Vault convention: `provider = "web2:<Platform>"`, `label = <web2_accounts.id>`,
+`secret` = a JSON blob with the fields below. (The label was the CLIENT id until
+2026-08-25; see the superseded note in §2 for why that changed.)
 
 | Platform | Vault secret JSON | How to get it |
 |---|---|---|
@@ -39,27 +40,38 @@ plan → write → review → publish pipeline for every client going forward.
 
 ## 2. Web 2.0 — the 10 newly-added platforms (do per client, as needed)
 
-Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
+Same vault convention (`provider = "web2:<Platform>"`, `label = <web2_accounts.id>`).
 
-> **House accounts + the seeder (2026-07-23).** The agency publishes through
-> shared HOUSE accounts (grill.publisher@gmail.com) rather than per-client logins.
-> Those credentials live in `WEB2_HOUSE_CREDENTIALS_JSON` (root `.env`, forwarded by
-> compose), and the idempotent CLI copies them into the per-client vault rows this
-> doc describes:
+> **SUPERSEDED 2026-08-25 — the house-account fan-out is gone (R2-06).** This section
+> used to tell you to put one set of shared HOUSE logins in
+> `WEB2_HOUSE_CREDENTIALS_JSON` and run `app.cli.seed_web2_vault`, which COPIED that
+> one credential into every client's vault row. That was the defect, not the feature:
+> one shared login is one shared failure domain (a suspension takes every client's
+> property down at once), and the per-client copies made the clients mutually
+> identifiable. The setting, the CLI and its test have all been deleted.
+>
+> An account is now a row in `public.web2_accounts` (migration `0100`) whose
+> credential is sealed **once** under `label=<web2_accounts.id>`:
 >
 > ```bash
-> docker compose exec api python -m app.cli.seed_web2_vault        # dry run
-> docker compose exec api python -m app.cli.seed_web2_vault --yes  # write rows
+> # a client-owned account (the default for WordPress.com / Blogger / Tumblr)
+> python -m app.cli.web2_accounts register --platform "Blogger" \
+>     --ownership per_client --client-id <uuid> --handle <client-brand-handle> \
+>     --email web@clientdomain.co.uk --credential-file creds.json --yes
+>
+> # an agency house account, only where publishing implies no durable identity
+> python -m app.cli.web2_accounts register --platform "Telegra.ph" \
+>     --ownership house --handle aios-house-telegraph --max-properties 10 --yes
+>
+> python -m app.cli.web2_accounts list          # what exists, health, property caps
+> python -m app.cli.web2_migrate_house          # dry run: reconcile the legacy rows
 > ```
 >
-> Re-run it after onboarding a new client (existing rows are never touched).
-> Seeded today: dev.to, Telegra.ph, Mataroa, Mastodon (mastodon.social),
-> Micro.blog, GitHub Pages (`grillpublisher/qanry`), GitLab Pages
-> (`qanry.com/qanry`), Hashnode (**publication_id still blank** — grab it from the
-> publication dashboard URL, update the JSON, re-run or rotate the row; until then
-> Hashnode publishes hold cleanly at review). WordPress.com still needs a human
-> OAuth run (the app's client_id/secret are in the root `.env` reference section —
-> they MINT per-blog tokens; the minted token is what goes in the vault).
+> A per-client handle is REJECTED if it embeds the platform name or a long hex run,
+> and its registration email may not use the shared catch-all domain — those were the
+> three keys that let a platform enumerate the whole client base from one suspended
+> account. Existing legacy rows keep working (the publisher falls back to the old
+> client-id label) until `web2_migrate_house --yes` attributes them.
 
 | Platform | Vault secret JSON | How to get it |
 |---|---|---|
@@ -80,7 +92,7 @@ Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
 
 ## 2b. Web 2.0 — the 4 newest platforms (Webflow / HubSpot CMS / Drupal / Joomla)
 
-Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
+Same vault convention (`provider = "web2:<Platform>"`, `label = <web2_accounts.id>`).
 
 | Platform | Vault secret JSON | How to get it |
 |---|---|---|
@@ -93,7 +105,7 @@ Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`).
 
 ## 2c. Web 2.0 — the third pass (19 more, Aug 2026)
 
-Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`). Every
+Same vault convention (`provider = "web2:<Platform>"`, `label = <web2_accounts.id>`). Every
 one below was web-verified live/self-serve at build time — see
 `integrations/web2_publishers.py`'s module docstring for the platforms that were
 investigated and deliberately **skipped** instead (Evernote, Issuu, Nostr long-form)
@@ -125,7 +137,7 @@ and why.
 
 ## 2d. Web 2.0 — the fourth pass (10 more, Aug 2026)
 
-Same vault convention (`provider = "web2:<Platform>"`, `label = <client_id>`). Every
+Same vault convention (`provider = "web2:<Platform>"`, `label = <web2_accounts.id>`). Every
 one below was web-verified live/self-serve at build time — see
 `integrations/web2_publishers.py`'s module docstring for the platforms that were
 investigated and deliberately **skipped** this pass instead (CodeSandbox, GitBook,

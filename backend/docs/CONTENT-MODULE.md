@@ -98,9 +98,20 @@ What actually happens today:
   (`content_publish_qa_advisory`, `:2110`), then publishes regardless. **A
   sub-threshold draft is published.**
 * `qa_score` is NOT part of the 15-key `ContentJobResponse` the review endpoint
-  returns, so **the approving lead is not shown the verdict and is never required to
-  acknowledge it.** D-4 asks for "advisory **+ mandatory acknowledgement**"; only the
+  returns, so **the verdict is absent from the approve action and is never required to
+  be acknowledged.** D-4 asks for "advisory **+ mandatory acknowledgement**"; only the
   advisory half exists.
+
+  > **Corrected 2026-08-26.** This bullet used to say the lead "is not shown the
+  > verdict". They *can* see it: `frontend/components/content/ReviewPreview.tsx` has a
+  > **"QA scorecard" tab** (`useContentQa` → `GET /content/jobs/{code}/qa`) that renders
+  > all 14 dimensions, the weighted total, the `blocked_by` list and the notes. What is
+  > true is narrower and still the point: the **queue-level approve**
+  > (`components/content/ReviewGate.tsx`, rendered by `ContentWorkspace` alongside the
+  > preview) mentions QA nowhere, and `ContentWizard` embeds the preview with
+  > `hideActions`. A lead can approve a sub-threshold draft without ever opening the
+  > tab, and nothing records that they looked. "Reachable behind a tab" is not
+  > "acknowledged"; D-4's missing half is unchanged.
 
 **The only enforced quality boundary is the human review gate** — a lead must move
 `needs_review → publishing`, and the DB trigger enforces that. `PublishBlocked` and
@@ -116,12 +127,19 @@ estimates, NOT yet validated against real ranking outcomes or a human SEO grade.
 of `{brief → expected-quality assertions}` run through the REAL Serper SERP + REAL
 Claude (no DB/broker — an in-memory store + permissive cost gate), asserting the
 provisional bar. It **auto-SKIPS unless `SERPER_API_KEY` + `ANTHROPIC_API_KEY` are
-set** (keys are deferred), so it never fails the default gate today.
+set**, so it never fails the default gate on a machine without them.
 
-**Calibration is the P7A-11 milestone:** run the golden set WITH keys + have a
-human SEO grade the drafts, then reconcile the weights + threshold. Until then, a
-golden-set failure once keys land is a CALIBRATION SIGNAL, not necessarily a
-regression.
+> **Corrected 2026-08-26.** This section used to add "(keys are deferred)" and frame
+> calibration as waiting on them. **Both keys are present in `backend/.env`**
+> (`SERPER_API_KEY`, `ANTHROPIC_API_KEY`), so the harness runs here. The blocker is
+> the *set*: `GOLDEN_SET` holds **2 cases** (`local_brunch`,
+> `service_emergency_dental`) and there is **no human SEO grader** assigned. You
+> cannot reconcile a 14-weight vector and a ≥85 threshold against two drafts.
+
+**Calibration is the P7A-11 milestone:** grow the golden set to a corpus that can
+separate the weights, run it, have a **human SEO grade the drafts**, then reconcile
+the weights + threshold. Until then, a golden-set failure is a CALIBRATION SIGNAL,
+not necessarily a regression.
 
 ## Key-gating & cost
 
