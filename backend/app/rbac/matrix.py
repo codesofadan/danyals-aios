@@ -33,7 +33,7 @@ Two authoritative datasets live here:
 * **8 permissions x 6 governance roles** (``DEFAULT_ROLE_PERMS``) - the coarse
   matrix the Team screen renders and the vocabulary shared-base routes enforce
   with ``require_perm``. It covers all six roles, so it is the enforcement base.
-* **11 features x 4 role templates** (``FEATURES`` / ``TEMPLATES``) - the
+* **17 features x 4 role templates** (``FEATURES`` / ``TEMPLATES``) - the
   fine-grained matrix the Add-Member screen renders. Templates seed a user's
   per-user feature grants; ``feature_allows`` enforces fine-grained access where
   a later module needs it. The doc's Full/View/Off is 3-state; the frontend
@@ -264,7 +264,7 @@ MODULE_PERM_ROLES: dict[ModulePermKey, frozenset[AppRole]] = {
     "run_research": frozenset({"owner", "admin", "manager"}),
 }
 
-# --- The 11 features ----------------------------------------------------------
+# --- The 17 features ----------------------------------------------------------
 
 FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef(key="technical_audit", label="Technical Audit", short="Tech Audit", icon="troubleshoot", group="Analytics", desc="Run site audits, review & mark issues fixed"),

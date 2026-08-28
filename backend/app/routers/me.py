@@ -150,7 +150,7 @@ async def change_my_password(body: ChangePasswordRequest, user: ViewReports) -> 
 
 @router.get("/me/grants", response_model=UserGrantsResponse)
 async def get_my_grants(user: ViewReports) -> UserGrantsResponse:
-    """The caller's OWN effective access level for all 11 features - self-serve, no
+    """The caller's OWN effective access level for all 17 features - self-serve, no
     ``access_control`` permission required (unlike ``GET /admin/users/{id}/grants``,
     which is owner-only). Always scoped to the verified token's ``user.id``, never a
     path/query param, so there is no escalation surface. ``ViewReports`` already

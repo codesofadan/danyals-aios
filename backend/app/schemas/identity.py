@@ -140,7 +140,7 @@ class UpdateGrantsRequest(BaseModel):
     """PUT body: set a user's per-feature access levels (the 11-feature toggles).
 
     ``grants`` maps a feature key -> ``full`` | ``view`` | ``off``. Every key MUST
-    be one of the 11 canonical ``accessFeatures`` keys (unknown keys are rejected
+    be one of the 17 canonical ``accessFeatures`` keys (unknown keys are rejected
     before any write); levels are validated by the ``AccessLevel`` literal. The
     map may be partial (only the listed features are changed).
     """
@@ -157,7 +157,7 @@ class UpdateGrantsRequest(BaseModel):
 
 
 class UserGrantsResponse(BaseModel):
-    """A user's effective access level for every one of the 11 features.
+    """A user's effective access level for every one of the 17 features.
 
     ``grants`` always carries ALL 11 keys (resolved via ``effective_feature_level``):
     an owner reads back all ``full`` (all-on and locked), otherwise a per-user
