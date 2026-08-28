@@ -45,3 +45,10 @@ whatsapp chats, media and calls/
 # workbook and the CSV pack. Client data and megabytes of it - it belongs on the
 # volume the worker writes to, never in git.
 /data/
+
+# Next.js build output from throwaway/parallel builds. `.next/` above catches the
+# default dir, but `next build --distDir .next-<name>` does not match it, and two
+# such dirs (.next-restructure, .next-web2demo = 219MB) reached the untracked set.
+# Next also rewrites frontend/tsconfig.json to `include` their types/ on every such
+# build; that edit is an artifact, not a source change - revert it, do not commit it.
+.next-*/
