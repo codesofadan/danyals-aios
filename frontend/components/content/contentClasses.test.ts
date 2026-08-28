@@ -3,7 +3,7 @@
  * stylesheet that /admin/content actually loads.
  *
  * Prevented defect: ContentWizard used `.op-toolset`, `.op-strong` and `.op-muted`,
- * which are declared ONLY in `app/admin/off-page/offpage.css` - a sheet the content
+ * which are declared ONLY in `app/admin/web2/offpage.css` - a sheet the content
  * route never imports. On a cold load of /admin/content the wizard toolbar lost its
  * flex layout and gaps.
  *

@@ -2,7 +2,7 @@
 
 // The DETAIL archetype's frame: identity header + actions + tabbed concerns.
 //
-// The product had exactly ONE detail route (/admin/audits/[auditId]) while the
+// The product had exactly ONE detail route (/admin/audit/[auditId]) while the
 // backend exposes per-entity endpoints for clients, tasks, leads, members,
 // milestones and content jobs - everything else was a list plus a modal. This
 // shell is what makes adding a detail page mechanical: identity at the top,

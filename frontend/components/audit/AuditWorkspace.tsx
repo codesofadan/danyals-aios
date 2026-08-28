@@ -309,7 +309,7 @@ export default function AuditWorkspace() {
                       <td className="au-c-audit">
                         {/* The row IS the way into the audit. The artifact column
                             carries downloads only, so the name has to be the link. */}
-                        <Link className="au-client au-open" href={`/admin/audits/${r.id}`}>
+                        <Link className="au-client au-open" href={`/admin/audit/${r.id}`}>
                           {r.client}
                         </Link>
                         <span className="au-url" title={r.url}>
@@ -421,7 +421,7 @@ export default function AuditWorkspace() {
                           {/* FOUR different questions, not four ways to ask one.
                               The workspace first: it is the page an operator means
                               by "the audit" - Overview, Strategy, Issues, Pages and
-                              Downloads under /admin/audits/<id>. It was reachable
+                              Downloads under /admin/audit/<id>. It was reachable
                               only by clicking the client's name, which does not
                               read as a link, so the page people remembered became
                               one nobody could find their way back to. */}
@@ -429,7 +429,7 @@ export default function AuditWorkspace() {
                             className="au-art is-primary"
                             title="Open this audit - overview, issues, pages, downloads"
                             aria-label={`Open the ${r.client} audit`}
-                            href={`/admin/audits/${r.id}`}
+                            href={`/admin/audit/${r.id}`}
                           >
                             <span className="material-symbols-rounded">open_in_new</span>
                           </Link>

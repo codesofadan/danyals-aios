@@ -88,13 +88,13 @@ export default function ClientDetail({ clientId }: { clientId: string }) {
       ]}
       actions={
         <>
-          <Link className="ghostbtn" href="/admin/audits">
+          <Link className="ghostbtn" href="/admin/audit">
             <span className="material-symbols-rounded">fact_check</span>Audits
           </Link>
           <Link className="ghostbtn" href="/admin/content">
             <span className="material-symbols-rounded">article</span>Content
           </Link>
-          <Link className="ghostbtn" href="/admin/site-builder?tab=wordpress">
+          <Link className="ghostbtn" href="/admin/wordpress">
             <span className="material-symbols-rounded">language</span>WordPress
           </Link>
         </>

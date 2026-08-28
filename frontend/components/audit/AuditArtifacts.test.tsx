@@ -75,7 +75,7 @@ describe("the artifact column", () => {
     // reachable only by clicking the client's name, which does not read as a link.
     render(<AuditWorkspace />);
     const open = screen.getByLabelText("Open the Verde Cafe audit");
-    expect(open).toHaveAttribute("href", "/admin/audits/aud-1");
+    expect(open).toHaveAttribute("href", "/admin/audit/aud-1");
   });
 
   it("gives every row its own way in", () => {

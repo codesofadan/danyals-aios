@@ -2,7 +2,7 @@
 
 // One free-audit lead, in full - the funnel's dead end, opened.
 //
-// /admin/pipeline was terminal: a row, two download buttons, nothing else. The
+// /admin/leads was terminal: a row, two download buttons, nothing else. The
 // backend has always returned the WHOLE report for a lead's token (status,
 // report.html, PDF, findings.json); this page puts it at a URL, so "look at
 // what this prospect's audit found" is a link a teammate can be sent.
@@ -38,7 +38,7 @@ export default function LeadDetail({ token }: { token: string }) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">Couldn&apos;t load the lead</div>
-        <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/pipeline">Back to Pipeline</Link></div>
+        <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/leads">Back to Pipeline</Link></div>
       </section>
     );
   }
@@ -49,7 +49,7 @@ export default function LeadDetail({ token }: { token: string }) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">No lead for this token</div>
-        <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/pipeline">Back to Pipeline</Link></div>
+        <div className="cs" style={{ marginTop: 8 }}><Link href="/admin/leads">Back to Pipeline</Link></div>
       </section>
     );
   }

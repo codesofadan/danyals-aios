@@ -209,7 +209,7 @@ export default function LeadsWorkspace() {
                         <td>
                           <Link
                             className="lead-dl"
-                            href={`/admin/pipeline/${encodeURIComponent(r.report_token)}`}
+                            href={`/admin/leads/${encodeURIComponent(r.report_token)}`}
                             title="Open this lead in full - report, findings, downloads"
                           >
                             <span className="material-symbols-rounded">open_in_full</span>

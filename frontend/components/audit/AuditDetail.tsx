@@ -180,7 +180,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           the same as an audit with no findings. Reload, and if it persists the
           run may have been removed.
         </p>
-        <Link className="alt-back" href="/admin/audits">
+        <Link className="alt-back" href="/admin/audit">
           Back to audits
         </Link>
       </div>
@@ -198,7 +198,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           This run completed before findings were stored as rows, or produced no
           findings. The original report is still available from the audit list.
         </p>
-        <Link className="alt-back" href="/admin/audits">
+        <Link className="alt-back" href="/admin/audit">
           Back to audits
         </Link>
       </div>
@@ -208,7 +208,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
   return (
     <div className="alt">
       <header className="alt-head">
-        <Link className="alt-back" href="/admin/audits">
+        <Link className="alt-back" href="/admin/audit">
           <span className="material-symbols-rounded">arrow_back</span>
           Audits
         </Link>

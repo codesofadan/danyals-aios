@@ -108,17 +108,25 @@ const nextConfig = {
   async redirects() {
     return [
       { source: "/free-audit", destination: "/", permanent: true },
-      // --- The 2026-08-27 hierarchy restructure. Old bookmarks and muscle
-      // memory keep working: every pre-restructure URL lands on its new home.
-      // permanent:false (307) on purpose - a 308 is cached by the browser
-      // indefinitely, and this tree may still settle while the spec ships.
-      { source: "/admin/audit", destination: "/admin/audits", permanent: false },
-      { source: "/admin/audit/:id", destination: "/admin/audits/:id", permanent: false },
-      { source: "/admin/leads", destination: "/admin/pipeline", permanent: false },
-      { source: "/admin/wordpress", destination: "/admin/site-builder?tab=wordpress", permanent: false },
-      { source: "/admin/vault", destination: "/admin/integrations", permanent: false },
-      { source: "/admin/web2", destination: "/admin/off-page?tab=web2", permanent: false },
-      { source: "/admin/citations", destination: "/admin/off-page?tab=citations", permanent: false },
+      // --- The 2026-08-28 revert. A 2026-08-27 restructure renamed and
+      // CONSOLIDATED the execution modules (WordPress and Web 2.0 became tabs
+      // inside "Site Builder" and "Off-Page", audits and leads merged, a
+      // "Search" module was added). The owner rejected that shape, so the old
+      // URLs are canonical again and the restructure's URLs redirect back.
+      // Anything bookmarked during the one day it was live still resolves.
+      { source: "/admin/audits", destination: "/admin/audit", permanent: false },
+      { source: "/admin/audits/:id", destination: "/admin/audit/:id", permanent: false },
+      { source: "/admin/pipeline", destination: "/admin/leads", permanent: false },
+      { source: "/admin/pipeline/:token", destination: "/admin/leads/:token", permanent: false },
+      { source: "/admin/site-builder", destination: "/admin/wordpress", permanent: false },
+      { source: "/admin/integrations", destination: "/admin/vault", permanent: false },
+      { source: "/admin/off-page", destination: "/admin/web2", permanent: false },
+      // Citations left the navigation with the revert; the module itself stays
+      // locked (no verified aggregator), so its URL points at its nearest home.
+      { source: "/admin/citations", destination: "/admin/web2", permanent: false },
+      // The Search module is gone from the admin portal. Its five tool
+      // workspaces remain reachable, RBAC-gated, at /team/tools/[slug].
+      { source: "/admin/search", destination: "/team", permanent: false },
       { source: "/portal", destination: "/team", permanent: true },
       { source: "/portal/:path*", destination: "/team/:path*", permanent: true },
       ...OLD_ADMIN_PATHS.map((p) => ({

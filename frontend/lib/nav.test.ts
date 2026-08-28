@@ -93,7 +93,7 @@ describe("navigation integrity", () => {
     // The authoritative list must be non-empty here, or a later "both are empty"
     // would pass this suite while locking nothing.
     // An EMPTY lock list is a legitimate state (2026-08-27: the citations lock
-    // moved from a whole route to a tab inside /admin/off-page, leaving no
+    // moved from a whole route to a tab inside /admin/web2, leaving no
     // route-level locks). What must hold is that the DEFINITION exists and
     // parsed - lockedSet() returns [] both for "empty set" and "regex missed",
     // so assert the declaration is present rather than the list non-empty.

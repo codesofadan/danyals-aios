@@ -31,42 +31,47 @@ export type NavGroup = { title: string; items: NavItem[] };
 
 export const ADMIN_NAV: NavGroup[] = [
   {
-    title: "Work",
+    title: "Overview",
     items: [
-      { icon: "space_dashboard", label: "Dashboard", href: "/admin", keywords: "home overview command center" },
-      { icon: "fact_check", label: "Audits", href: "/admin/audits", keywords: "seo scan report audit" },
-      { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard" },
-      { icon: "hub", label: "Off-Page", href: "/admin/off-page", keywords: "backlinks links citations nap directories web 2.0 properties placements" },
-      { icon: "auto_fix_high", label: "Site Builder", href: "/admin/site-builder", keywords: "wordpress publish connections replicate replica design elementor sites cms plugin" },
-      { icon: "travel_explore", label: "Search", href: "/admin/search", keywords: "keywords rankings competitors serp on-page local seo tools research rank tracker gbp" },
-      { icon: "radar", label: "Policy Radar", href: "/admin/policy-radar", keywords: "google updates algorithm" },
+      { icon: "space_dashboard", label: "Admin Dashboard", href: "/admin", keywords: "home overview command center main" },
     ],
   },
   {
-    title: "Clients",
+    // THE EXECUTION MODULES - the work the agency actually delivers, in the
+    // order it is delivered. This grouping is the owner's, restored 2026-08-28
+    // after a four-group restructure ("Work / Clients / Team / Platform") that
+    // folded WordPress and Web 2.0 into consolidated tabbed screens and added a
+    // Search module. Those consolidations are reverted: each execution module
+    // is its own destination again. Do not re-fold them.
+    title: "SEO Engine",
+    items: [
+      { icon: "fact_check", label: "Audit", href: "/admin/audit", keywords: "seo scan report audit paid depth engine findings" },
+      { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads free audits public prospects funnel pipeline" },
+      { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard" },
+      { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections replicate replica design elementor sites cms plugin" },
+      { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "web2 properties placements platforms articles anchors", badge: "test" },
+      { icon: "radar", label: "Google Updates", href: "/admin/policy-radar", keywords: "google updates algorithm policy radar changes core update guidance" },
+    ],
+  },
+  {
+    title: "Delivery",
     items: [
       { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
-      { icon: "contact_mail", label: "Pipeline", href: "/admin/pipeline", keywords: "leads free audits public prospects" },
       { icon: "flag", label: "Milestones", href: "/admin/milestones", keywords: "projects delivery timeline stages roadmap" },
+      { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff management" },
+      { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board manager" },
       { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "workbooks sheets pdf downloads" },
-    ],
-  },
-  {
-    title: "Team",
-    items: [
-      { icon: "groups", label: "Team", href: "/admin/team", keywords: "members assignees staff management" },
-      { icon: "task_alt", label: "Tasks", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board manager" },
     ],
   },
   {
     title: "Platform",
     items: [
-      // First in the group: Operations is the health surface. Every other item
-      // here configures the platform; this one says whether it is working.
-      { icon: "monitor_heart", label: "Operations", href: "/admin/operations", keywords: "jobs runs health failures dead letters queue logs retry cancel replay" },
-      { icon: "savings", label: "Cost", href: "/admin/cost", keywords: "spend budget dials pricing controls" },
-      { icon: "cable", label: "Integrations", href: "/admin/integrations", keywords: "api keys credentials secrets vault backups analytics gsc ga4" },
-      { icon: "settings", label: "Settings", href: "/admin/settings", keywords: "config preferences workspace security" },
+      // Operations leads the group: everything else here CONFIGURES the
+      // platform; this one says whether it is actually working.
+      { icon: "monitor_heart", label: "Operations", href: "/admin/operations", keywords: "jobs runs failures dead letters queue health ledger" },
+      { icon: "savings", label: "Cost Controls", href: "/admin/cost", keywords: "spend budget api money dial halt" },
+      { icon: "key", label: "Key Vault", href: "/admin/vault", keywords: "keys secrets credentials api integrations backups" },
+      { icon: "settings", label: "Settings", href: "/admin/settings", keywords: "account workspace security preferences notifications danger" },
     ],
   },
 ];

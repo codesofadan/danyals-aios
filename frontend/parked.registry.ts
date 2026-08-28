@@ -74,6 +74,25 @@ export const PARKED: ParkedEntry[] = [
     reEnableWhen: when,
   })),
 
+  // --- The 2026-08-28 revert: Backlinks loses its surface again ---------------
+  // The one-day "Off-Page" screen (backlinks | citations | web 2.0 tabs) was the
+  // only route BacklinksTab ever had. The owner rejected that consolidation and
+  // restored Web 2.0 as its own execution module, so this returns to the state it
+  // sat in for the months before: built, hook-wired, and unmounted. It is NOT
+  // dead code - `useBacklinks` and the toxic-link flow work - it simply has no
+  // screen the owner wants it on.
+  {
+    path: "offpage/BacklinksTab.tsx",
+    status: "active-parked",
+    unmountedBy: "the 2026-08-28 nav revert (app/admin/off-page removed)",
+    reason:
+      "Backlinks was never one of the owner's execution modules; it only became " +
+      "reachable as a tab on the consolidated Off-Page screen, which was reverted.",
+    reEnableWhen:
+      "The owner asks for a backlink surface - then it mounts on its own route, " +
+      "not as a tab, and needs server pagination first (the hook fetches unbounded).",
+  },
+
   // --- Citations: ACTIVE work, locked pending a data source -------------------
   // `app/admin/citations/page.tsx` renders a lock card that says so in plain words:
   // "Re-enable by restoring the CitationsTab render below (see git history) once the
