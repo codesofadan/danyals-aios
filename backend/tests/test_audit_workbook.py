@@ -233,3 +233,57 @@ def test_evidence_keeps_the_analyzers_ordering():
 def test_empty_evidence_is_blank_not_the_string_none():
     assert W._evidence_text(None) == ""
     assert W._evidence_text({}) == ""
+
+
+# --------------------------------------------- every data block is a real table
+#
+# Excel offers "Format as Table" on any rectangular range that is not already a
+# table. Seven of the nine sheets were tables; the executive summary was not, so
+# that prompt appeared on the first sheet an operator opens. These pin the
+# mechanism: `_write_sheet` tables a data sheet, and a sheet can carry two
+# non-overlapping tables (the summary's KPI block and its severity block).
+
+def _roundtrip(wb):
+    """Save and reload, so what is asserted is what Excel would read."""
+    import io
+
+    import openpyxl
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return openpyxl.load_workbook(buf)
+
+
+def test_a_data_sheet_is_written_as_a_real_table():
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    W._write_sheet(wb, "10_Issues", ("A", "B"), [[1, 2], [3, 4]])
+    ws = _roundtrip(wb)["10_Issues"]
+    assert list(ws.tables) == ["t_10_Issues"]
+    assert ws.tables["t_10_Issues"].ref == "A1:B3"
+
+
+def test_a_header_only_sheet_gets_no_table_because_excel_would_discard_it():
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    W._write_sheet(wb, "10_Issues", ("A", "B"), [])
+    assert list(_roundtrip(wb)["10_Issues"].tables) == []
+
+
+def test_one_sheet_can_carry_two_non_overlapping_tables():
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = W._write_sheet(wb, "01_Executive_Summary", ("Metric", "Value", "Basis"),
+                        [["a", 1, ""], ["b", 2, ""], ["", "", ""],
+                         ["Issues by severity", "Count", "Share of issues"],
+                         ["Critical", 3, "100%"]], table=False)
+    W._add_table(ws, "t_01_Summary", "A1:C3")
+    W._add_table(ws, "t_01_Severity", "A4:C5")
+    reloaded = _roundtrip(wb)["01_Executive_Summary"]
+    assert sorted(reloaded.tables) == ["t_01_Severity", "t_01_Summary"]
+    # Overlapping ranges are the one way two tables on a sheet corrupt the file.
+    assert reloaded.tables["t_01_Summary"].ref == "A1:C3"
+    assert reloaded.tables["t_01_Severity"].ref == "A4:C5"

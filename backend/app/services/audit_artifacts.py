@@ -29,6 +29,11 @@ _SHEETS_SUBDIR = "sheets"
 # report.pdf under ``<root>/<audit_id>/`` and is resolved by convention from the
 # audit id (no DB column) - see ``resolve_report_html``.
 REPORT_HTML_NAME = "report.html"
+#: The platform's own client report, written into `<audit_id>/sheets/` by the
+#: ingest step. Defined here rather than in `audit_report` because this module is
+#: the lower layer: the store must be able to find the file without importing the
+#: builder that writes it.
+REPORT_PDF_NAME = "audit-report.pdf"
 
 # Response headers for serving report.html. It is a static, self-contained document
 # (inline CSS, no scripts) the dashboard fetches into a sandboxed srcdoc viewer.
@@ -168,4 +173,11 @@ def honest_artifact_flags(
         return pdf_present, json_present
     pdf_ok = pdf_present and store.resolve(str(row.get("pdf_path") or "")) is not None
     json_ok = json_present and store.resolve(str(row.get("json_path") or "")) is not None
+    if not pdf_ok:
+        # The platform's own report is written by the ingest step, not the engine,
+        # so it has no column of its own and a run whose engine PDF backend was
+        # unavailable still has a PDF to serve. The flag has to know that or the
+        # button stays hidden over a file that exists.
+        audit_id = str(row.get("id") or "")
+        pdf_ok = bool(audit_id) and store.resolve_sheet(audit_id, REPORT_PDF_NAME) is not None
     return pdf_ok, json_ok

@@ -144,7 +144,10 @@ async def test_create_enqueues_queued_row(
     assert body["maxPages"] == 15
     assert body["estimatedCost"] == 0.0  # a free run fires no paid provider
     assert body["cost"] is None  # queued: nothing spent YET, which is not $0.00
-    assert body["types"] == ["technical", "onpage"]
+    # Always empty now: the audit-type picker is gone, every run is the full
+    # audit, and a client that still sends `types` has it ignored. Historical rows
+    # keep whatever they were created with.
+    assert body["types"] == []
     assert body["status"] == "queued"
     assert body["tier"] == "Free"
     assert body["client"] == "Verde Cafe"
@@ -155,66 +158,49 @@ async def test_create_enqueues_queued_row(
     assert enqueued == [body["id"]]
 
 
-async def test_create_empty_types_is_full_audit(
-    client: httpx.AsyncClient, repo: FakeAuditsRepo, enqueued: list[str], wire: Callable[..., None]
-) -> None:
-    # No types selected = a FULL audit (every type). It must be accepted (not a 422),
-    # persist an empty selection, and enqueue. It runs as PAID: an empty selection is
-    # the comprehensive pipeline, so every paid provider and all 21 agents fire.
-    wire("manager")
-    resp = await client.post(
-        "/api/v1/audits",
-        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Paid", "types": []},
-    )
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["types"] == []
-    assert enqueued == [body["id"]]
-    assert repo.rows[body["id"]]["types"] == []
-
-
-async def test_empty_types_on_the_free_tier_is_refused_not_run_ungated(
+async def test_a_free_tier_request_cannot_buy_paid_depth(
     client: httpx.AsyncClient, enqueued: list[str], wire: Callable[..., None]
 ) -> None:
-    """The regression test for a measured spend-gate bypass.
+    """The spend bypass this closes, restated on the axis that replaced it.
 
-    This test previously asserted the OPPOSITE - that `{"tier": "Free", "types":
-    []}` returns 201 - with the note *"even on the Free tier (paid_types is empty,
-    so the Free-tier paid gate never trips)"*. That reasoning was correct about
-    `paid_types()` and wrong about the run: an empty selection is not "no paid
-    dimensions", it is EVERY dimension.
+    Under the old audit-type picker an EMPTY selection meant "the full
+    comprehensive run", and `paid_types()` returned [] for it - so a request of
+    `{"tier": "Free", "types": []}` skipped the paid gate, stored tier=free, made
+    the worker skip its re-check for the same reason, and then called the engine
+    with `comprehensive=True`, which forced `mode="paid"` regardless. The
+    platform's single largest spend ran with the cost dial, the client budget cap
+    AND the global spend halt all bypassed.
 
-    Traced end to end, at the commit that introduced this test:
-
-      * the dashboard derived `tier` as `types.some(isPaid)`, which is `false` for
-        an empty array, so the full audit was submitted as Free;
-      * this endpoint's cost gate is `if body.tier == "Paid"`, so it was skipped;
-      * the row persisted `tier=free`, and `execute_audit`'s re-check is
-        `if tier == "paid"`, so that was skipped too;
-      * `execute_audit` then called the engine with `comprehensive=True`, and
-        `run_audit` computes `mode = "paid" if (tier == "paid" or comprehensive)`
-        - so the stored tier never reached the engine at all, and `build_argv`
-        emitted `--mode paid --serper --places --citations --agents on
-        --ai-narrative on`.
-
-    Net: the platform's single largest spend ran with the cost dial, the client
-    budget cap AND the global spend halt all bypassed. The cost was still logged
-    afterwards (the commit hardcodes `mode="paid"`), so this was ungated spend
-    rather than invisible spend - which is precisely what a pre-flight gate exists
-    to prevent.
-
-    Refused rather than silently upgraded to Paid, because a silent upgrade is the
-    WU-7 defect mirrored: there the caller asked for free and got every provider;
-    here it would charge a client budget against a request that said Free.
+    Keyed on DEPTH the shape cannot recur: the same value that names the request
+    also picks the engine mode, so there is no value that means "free to ask for
+    and paid to run". Refused rather than silently downgraded - a caller told
+    nothing would report the wrong thing.
     """
     wire("manager")
     resp = await client.post(
         "/api/v1/audits",
-        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": []},
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "depth": "deep"},
     )
     assert resp.status_code == 400
-    assert "full comprehensive run" in resp.json()["error"]["message"]
+    assert "Paid tier" in resp.json()["error"]["message"]
     assert enqueued == []  # and above all: nothing ran
+
+
+async def test_a_free_tier_request_with_no_depth_runs_free(
+    client: httpx.AsyncClient, enqueued: list[str], wire: Callable[..., None]
+) -> None:
+    # No depth named is not a loophole: it resolves to `free` for a Free tier, and
+    # `free` depth runs `--mode free`, which the engine enforces by clearing every
+    # provider after parsing.
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits",
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["depth"] == "free"
+    assert resp.json()["estimatedCost"] == 0.0
+    assert enqueued  # this one legitimately runs
 
 
 async def test_create_requires_run_audits(
@@ -231,22 +217,20 @@ async def test_create_rejects_private_url(
     wire("analyst")
     resp = await client.post(
         "/api/v1/audits",
-        # An explicit free-only selection: this test is about the SSRF guard, and
-        # an empty selection would now be refused earlier as an ungated full run.
-        json={"client_id": "cl-1", "url": "http://127.0.0.1/admin", "types": ["technical"]},
+        json={"client_id": "cl-1", "url": "http://127.0.0.1/admin"},
     )
     assert resp.status_code == 400
     assert "public address" in resp.json()["error"]["message"]
     assert enqueued == []  # never enqueued
 
 
-async def test_free_tier_rejects_paid_types(
+async def test_free_tier_rejects_paid_depth(
     client: httpx.AsyncClient, wire: Callable[..., None]
 ) -> None:
     wire("manager")
     resp = await client.post(
         "/api/v1/audits",
-        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "types": ["technical", "local"]},
+        json={"client_id": "cl-1", "url": _PUBLIC_URL, "tier": "Free", "depth": "standard"},
     )
     assert resp.status_code == 400
     assert "Paid tier" in resp.json()["error"]["message"]

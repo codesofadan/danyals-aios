@@ -77,22 +77,25 @@ def test_response_pending_row() -> None:
 
 
 def test_response_filters_unknown_types() -> None:
+    # The RESPONSE keeps `types`: historical rows carry a real selection, and
+    # dropping the field would make an old audit's scope unreadable.
     body = AuditResponse.from_row(_row(types=["technical", "bogus", "geo"]))
     assert body.types == ["technical", "geo"]
 
 
-def test_create_defaults_to_empty_full_audit_and_dedupes() -> None:
-    c = AuditCreate(client_id="cl-1", url="example.com")
-    assert c.tier == "Free"
-    assert c.types == []  # empty = a FULL audit (every type)
-    c2 = AuditCreate(client_id="cl-1", url="example.com", types=["local", "local", "technical"])
-    assert c2.types == ["local", "technical"]  # de-duplicated, order preserved
+def test_a_create_request_can_no_longer_ask_for_a_type_selection() -> None:
+    """The picker is gone, and a request that still sends one is not an error.
 
-
-def test_create_paid_types_helper() -> None:
-    c = AuditCreate(client_id="cl-1", url="x.com", tier="Paid", types=["technical", "local", "geo"])
-    assert set(c.paid_types()) == {"local", "geo"}
-    assert set(PAID_AUDIT_TYPES) == {"offpage", "local", "geo", "strategy"}
+    It could not do what its labels said: the engine has no per-dimension flag, so
+    the deterministic crawl always ran in full and a run scoped to "on-page +
+    technical" still returned GEO and strategy findings. Ignoring the field is the
+    correct reading of such a request - the caller wanted an audit, and every
+    audit is now the full one. Rejecting it would break older clients over a
+    preference the server no longer has any way to honour.
+    """
+    c = AuditCreate(client_id="cl-1", url="example.com", types=["local", "technical"])
+    assert not hasattr(c, "types")
+    assert c.resolved_depth() == "free"  # Free tier by default
 
 
 def test_tier_roundtrip() -> None:

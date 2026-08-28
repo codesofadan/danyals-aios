@@ -1,4 +1,4 @@
-/* ReportViewer — chrome for the in-dashboard audit-report page-viewer.
+/* ReportViewer - chrome for the in-dashboard audit-report page-viewer.
  * Uses the global design tokens (app/globals.css) so it adapts to every theme.
  * The report itself renders inside a sandboxed iframe and carries its own CSS. */
 

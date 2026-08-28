@@ -27,10 +27,9 @@ from psycopg.types.json import Jsonb
 from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
-from app.services import pricing
+from app.services import audit_ingest, audit_report, audit_workbook, pricing
 from app.services.audit_artifacts import ArtifactStore, LocalArtifactStore, local_store_from_settings
 from app.services.audit_sheets import SheetMeta, store_audit_sheets
-from app.services import audit_ingest, audit_report, audit_workbook
 from app.services.cost_gate import CostGate, GateContext, GateDecision
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
@@ -105,7 +104,7 @@ class _Runner(Protocol):
         url: str,
         tier: str,
         comprehensive: bool = False,
-        types: list[str] | None = None,
+        depth: str | None = None,
         max_pages: int | None = None,
     ) -> AuditRunResult: ...
 
@@ -282,7 +281,7 @@ def _ingest_altitudes(
             instances=ingested.instances,
             truncated=ingested.truncated,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "audit_altitude_ingest_failed",
             audit_id=audit_id,
@@ -298,7 +297,7 @@ def _ingest_altitudes(
             client_id=str(row["client_id"]) if row.get("client_id") else None,
         )
         logger.info("audit_roadmap_stored", audit_id=audit_id, **planned)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "audit_roadmap_failed",
             audit_id=audit_id,
@@ -338,7 +337,7 @@ def _ingest_altitudes(
             instances=built.instances,
             capped=built.capped,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "audit_workbook_build_failed",
             audit_id=audit_id,
@@ -393,17 +392,18 @@ def execute_audit(
     store.update(audit_id, {"status": "running", "started_at": _utcnow().isoformat()})
 
     try:
-        # The authenticated dashboard audit runs the consulting pipeline, SCOPED by
-        # the audit-type picker stored on the row (``types``): empty = the full run
-        # (on-page + technical + off-page + local + the 21 AI agents + narrative +
-        # PDF); a subset gates the paid providers + agents to the selection (see
-        # ``build_argv``). The public homepage funnel stays light/$0 - see below.
+        # The authenticated dashboard audit runs the consulting pipeline over EVERY
+        # dimension; ``depth`` decides how much paid corroboration it buys (see
+        # ``build_argv``). It replaced an audit-type picker that could not do what
+        # its labels said - the deterministic crawl always ran in full, so a run
+        # scoped to "on-page + technical" still returned GEO and strategy findings.
+        # The public homepage funnel stays light/$0 - see below.
         result = runner(
             _config_from_settings(settings),
             url=row["url"],
             tier=tier,
             comprehensive=True,
-            types=row.get("types"),
+            depth=row.get("depth"),
             # The breadth the OPERATOR asked for, snapshotted on the row at
             # enqueue. Null on rows written before migration 0084, which falls
             # back to the config default - i.e. exactly what those rows already
@@ -425,14 +425,29 @@ def execute_audit(
     finished = _utcnow().isoformat()
 
     # Commit the run cost through the Part-2 cost path once the engine has actually
-    # started (a run_uuid was minted). A dashboard audit is always the comprehensive
-    # (paid-provider) run, so the cost is computed at RUNTIME from the engine's
-    # run.json observables (real token usage + serper queries when the engine reports
-    # a `usage` block; else derived from pages_crawled + the agent fan-out) -- NEVER
-    # the flat estimate, which only fed the upfront pre-flight gate above.
+    # started (a run_uuid was minted). The cost is computed at RUNTIME from the
+    # engine's run.json observables (real token usage + serper queries when the
+    # engine reports a `usage` block; else derived from pages_crawled + the agent
+    # fan-out) -- NEVER the flat estimate, which only fed the pre-flight gate above.
+    #
+    # THE MODE IS THE ENGINE'S, NOT AN ASSUMPTION. This used to pass `mode="paid"`
+    # unconditionally, on the reasoning that "a dashboard audit is always the
+    # comprehensive run". That stopped being true when depth replaced the audit-type
+    # picker: `free` depth now runs `--mode free`, which the engine enforces by
+    # clearing every provider - so hardcoding paid would bill a real figure against
+    # a run that provably spent nothing. The public funnel already read the engine's
+    # own reported mode for exactly this reason; both paths now agree.
+    #
+    # The fallback is the mode we INVOKED with, derived from the row's depth, so a
+    # run that died before writing run.json is still billed if it could have spent.
+    # Fail-closed on money, in the direction that cannot under-report.
     if result.run_uuid is not None:
+        invoked_mode = "free" if (row.get("depth") or "standard") == "free" else "paid"
         cost = pricing.audit_cost(
-            settings, pages_crawled=result.pages_crawled, mode="paid", usage=result.usage
+            settings,
+            pages_crawled=result.pages_crawled,
+            mode=result.mode or invoked_mode,
+            usage=result.usage,
         )
         _safe_record_cost(store, row, cost)
 

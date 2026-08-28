@@ -25,7 +25,7 @@ from app.core.auth import CurrentUser, require_perm
 from app.db.audit_findings_repo import AuditFindingsRepoDep
 from app.db.audits_repo import AuditsRepoDep
 from app.routers.audits import ArtifactStoreDep
-from app.services.audit_report import REPORT_NAME
+from app.services.audit_report import REPORT_NAME, REPORT_PDF_NAME
 from app.services.audit_roadmap import (
     PHASE_BACKLOG,
     PHASE_LABEL,
@@ -47,6 +47,9 @@ _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 #: resolved, exactly as the legacy sheet download does.
 _DOWNLOADS: dict[str, tuple[str, str]] = {
     "report": (REPORT_NAME, "text/html; charset=utf-8"),
+    # The same document, printed. A separate name rather than content negotiation:
+    # the allow-list IS the traversal guard, and one name per file keeps it one.
+    "report.pdf": (REPORT_PDF_NAME, "application/pdf"),
     "workbook": (WORKBOOK_NAME, _XLSX),
     "bundle": (BUNDLE_NAME, "application/zip"),
     "findings.csv": ("findings.csv", "text/csv"),

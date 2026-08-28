@@ -108,7 +108,7 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
 
     def _runner(
         cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False,
-        types: list[str] | None = None, max_pages: int | None = None,
+        depth: str | None = None, max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir=str(tmp_path / "engine"), score=80,
@@ -218,3 +218,71 @@ async def test_download_404_when_store_unconfigured(
     wire_dl({"id": "aud-1", "pdf_path": "aud-1/report.pdf"}, None)
     resp = await client.get("/api/v1/audits/aud-1/report.pdf")
     assert resp.status_code == 404
+
+
+# --- the platform report wins over the engine's -------------------------------
+#
+# Two documents claim the name "the PDF": the engine writes a narrative built
+# from agent markdown, and the ingest step writes one built from the same stored
+# rows as the workbook. Only the second can reconcile with the workbook, so it is
+# the one this endpoint serves - while every run that could be downloaded before
+# still can, including ones that predate it.
+
+def _platform_report(store: LocalArtifactStore, audit_id: str) -> Path:
+    p = store.sheets_dir(audit_id) / "audit-report.pdf"
+    p.write_bytes(b"%PDF-1.4 platform")
+    return p
+
+
+async def test_the_platform_report_is_served_over_the_engines(
+    client: httpx.AsyncClient, tmp_path: Path,
+    wire_dl: Callable[[dict[str, Any] | None, LocalArtifactStore | None], None],
+) -> None:
+    pdf_src, findings_src = _engine_artifacts(tmp_path)
+    store = LocalArtifactStore(tmp_path / "root")
+    store.store("aud-1", pdf_src=pdf_src, findings_src=findings_src)
+    _platform_report(store, "aud-1")
+    wire_dl({"id": "aud-1", "pdf_path": "aud-1/report.pdf"}, store)
+
+    r = await client.get("/api/v1/audits/aud-1/report.pdf")
+    assert r.status_code == 200
+    assert r.content == b"%PDF-1.4 platform"
+
+
+async def test_an_older_run_still_serves_the_engine_pdf(
+    client: httpx.AsyncClient, tmp_path: Path,
+    wire_dl: Callable[[dict[str, Any] | None, LocalArtifactStore | None], None],
+) -> None:
+    pdf_src, findings_src = _engine_artifacts(tmp_path)
+    store = LocalArtifactStore(tmp_path / "root")
+    store.store("aud-1", pdf_src=pdf_src, findings_src=findings_src)
+    wire_dl({"id": "aud-1", "pdf_path": "aud-1/report.pdf"}, store)
+
+    r = await client.get("/api/v1/audits/aud-1/report.pdf")
+    assert r.status_code == 200
+    assert r.content == b"%PDF-1.4 hello"
+
+
+async def test_a_run_whose_engine_pdf_never_rendered_still_has_one(
+    client: httpx.AsyncClient, tmp_path: Path,
+    wire_dl: Callable[[dict[str, Any] | None, LocalArtifactStore | None], None],
+) -> None:
+    # pdf_path NULL: the engine's PDF backend was unavailable. The platform report
+    # is written by ingest regardless, so there is still a deliverable.
+    store = LocalArtifactStore(tmp_path / "root")
+    _platform_report(store, "aud-1")
+    wire_dl({"id": "aud-1", "pdf_path": None}, store)
+
+    r = await client.get("/api/v1/audits/aud-1/report.pdf")
+    assert r.status_code == 200
+    assert r.content == b"%PDF-1.4 platform"
+
+
+def test_the_download_flag_counts_the_platform_report(tmp_path: Path) -> None:
+    from app.services.audit_artifacts import honest_artifact_flags
+    store = LocalArtifactStore(tmp_path / "root")
+    row = {"id": "aud-1", "pdf_path": None, "json_path": None}
+    # A flag that ignores it hides the button over a file that is right there.
+    assert honest_artifact_flags(store, row) == (False, False)
+    _platform_report(store, "aud-1")
+    assert honest_artifact_flags(store, row) == (True, False)

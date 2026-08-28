@@ -88,7 +88,13 @@ class AuditCreate(BaseModel):
     client_id: str = Field(min_length=1)
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
-    types: list[AuditTypeKey] = Field(default_factory=list)
+    # NO `types`. The audit-type picker was removed: every audit covers every
+    # dimension, and DEPTH decides how much paid corroboration it buys. The picker
+    # could not deliver what its labels promised - the engine has no per-dimension
+    # flag, so the deterministic crawl always ran in full and a run scoped to
+    # "on-page + technical" still returned GEO and strategy findings. An older
+    # client that still sends `types` has it ignored (pydantic drops unknown
+    # fields), which is the correct reading of that request: the full audit.
     # Does this run appear in the client's own portal? Default FALSE: an audit is
     # internal until someone decides to share it. Before 0096 there was no such
     # decision - every client-linked audit was visible the moment it was created.
@@ -110,34 +116,6 @@ class AuditCreate(BaseModel):
     # number itself rather than a bare "yes" so the server can verify the operator
     # confirmed the CURRENT price: a stale figure is refused, not silently honoured.
     confirmed_estimate: float | None = Field(default=None, ge=0)
-
-    @field_validator("types")
-    @classmethod
-    def _dedupe(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
-        # Empty is allowed (= full audit); just de-duplicate while preserving order.
-        seen: list[AuditTypeKey] = []
-        for t in value:
-            if t not in seen:
-                seen.append(t)
-        return seen
-
-    def paid_types(self) -> list[str]:
-        """The requested types that need a paid data source."""
-        return [t for t in self.types if t in PAID_AUDIT_TYPES]
-
-    def runs_paid_providers(self) -> bool:
-        """Whether the run this request describes will actually fire a paid provider.
-
-        NOT the same question as ``paid_types()``, and the difference was a live
-        spend-gate bypass. An EMPTY selection is not "no paid dimensions" - it is
-        the FULL comprehensive audit. ``build_argv`` gives an empty selection
-        ``--mode paid --serper --places --citations --agents on --ai-narrative
-        on``, and ``execute_audit`` passes ``comprehensive=True`` unconditionally
-        for a dashboard run, so the engine's mode does not consult the stored tier
-        at all. ``paid_types()`` returns ``[]`` for that request, which read as
-        "nothing to gate" everywhere it was consulted.
-        """
-        return not self.types or bool(self.paid_types())
 
     def resolved_depth(self) -> AuditDepth:
         """The depth this request runs at, after defaults.
@@ -247,26 +225,6 @@ class PortalAuditCreate(BaseModel):
 
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
-    types: list[AuditTypeKey] = Field(default_factory=list)
-
-    @field_validator("types")
-    @classmethod
-    def _dedupe(cls, value: list[AuditTypeKey]) -> list[AuditTypeKey]:
-        # Empty is allowed (= full audit); de-duplicate while preserving order.
-        seen: list[AuditTypeKey] = []
-        for t in value:
-            if t not in seen:
-                seen.append(t)
-        return seen
-
-    def paid_types(self) -> list[str]:
-        """The requested types that need a paid data source."""
-        return [t for t in self.types if t in PAID_AUDIT_TYPES]
-
-    def runs_paid_providers(self) -> bool:
-        """See :meth:`AuditCreate.runs_paid_providers` - an empty selection is the
-        FULL comprehensive run, not a cheap one."""
-        return not self.types or bool(self.paid_types())
 
 
 class PortalAuditResponse(BaseModel):

@@ -9,7 +9,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { AuditDepth, AuditRow, AuditTypeKey, Tier } from "@/lib/audit";
+import type { AuditDepth, AuditRow, Tier } from "@/lib/audit";
 
 export const AUDITS_KEY = ["audits"] as const;
 export const AUDIT_STATS_KEY = ["audits", "stats"] as const;
@@ -91,7 +91,9 @@ export type CreateAuditInput = {
   client_id: string;
   url: string;
   tier: Tier;
-  types: AuditTypeKey[];
+  // NO `types`. Depth is the only scope axis: every audit covers every dimension,
+  // and depth decides how much paid corroboration it buys. The picker that used to
+  // live here promised per-dimension scoping the engine cannot do.
   depth?: AuditDepth;
   // Does the client see this run in their own portal? Server default is FALSE.
   // Before migration 0096 there was no such choice - every client-linked audit
@@ -128,7 +130,6 @@ export type AuditEstimate = {
 export type AuditEstimateInput = {
   tier: Tier;
   depth?: AuditDepth;
-  types: AuditTypeKey[];
   // Only consulted for a depth that scales to site size (deep). Given it, the
   // quote measures the site's sitemap and prices the run it would actually make.
   url?: string;

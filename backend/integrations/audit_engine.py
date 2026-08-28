@@ -73,12 +73,22 @@ _HTML_CANDIDATES: tuple[str, ...] = ("report.html",)
 _FINDINGS_FILE = "findings.json"
 _RUN_FILE = "run.json"
 
-# The dashboard audit-type picker keys the engine can scope a run by. Mirrors
-# ``app/schemas/audits.py`` ``AuditTypeKey`` (kept local so integrations never
-# import ``app.*``). Empty selection = the full comprehensive audit.
-_ENGINE_TYPES: frozenset[str] = frozenset(
-    {"onpage", "offpage", "technical", "local", "geo", "strategy"}
-)
+# What each DEPTH actually runs. Kept local so integrations never import
+# ``app.*``; mirrored by ``app.services.audit_depth`` and pinned by
+# ``tests/test_audit_depth.py`` so an estimate always prices the run that will
+# actually be launched.
+#
+# Every audit covers every dimension - the deterministic crawl cannot be scoped,
+# and pretending otherwise is the defect this replaced. Depth decides how much
+# PAID corroboration is bought on top.
+DEPTH_SCOPE: dict[str, dict[str, bool]] = {
+    "free": {"psi": False, "serper": False, "places": False,
+             "agents": False, "narrative": False},
+    "standard": {"psi": True, "serper": True, "places": False,
+                 "agents": False, "narrative": False},
+    "deep": {"psi": True, "serper": True, "places": True,
+             "agents": True, "narrative": True},
+}
 
 # The `Run UUID: <uuid4>` line is only 46 chars, so it never wraps at 80 cols.
 _RUN_UUID_RE = re.compile(r"^Run UUID:\s+([0-9a-fA-F-]{36})", re.MULTILINE)
@@ -142,70 +152,59 @@ def build_argv(
     max_pages: int,
     profile: str,
     comprehensive: bool = False,
-    types: list[str] | None = None,
+    depth: str | None = None,
 ) -> list[str]:
     """Build the ``python -m audit_engine.cli.main full ...`` argument vector.
 
     ``comprehensive=True`` (the authenticated dashboard audit) runs the consulting
-    pipeline. ``types`` is the audit-type picker; it SCOPES which paid providers +
-    AI agents fire:
+    pipeline, scoped by ``depth``.
 
-    * **empty** ``types`` = the FULL audit (every dimension + all 21 agents +
-      narrative, ``--mode paid``) - the pre-existing comprehensive behavior.
-    * a **subset** scopes the run. The deterministic crawl (on-page + technical +
-      the AI-search checks) ALWAYS runs and CANNOT be isolated - the engine has no
-      per-dimension CLI flag - so a subset only gates the PAID work:
-        - ``technical`` -> ``--psi`` (PageSpeed / CWV); else ``--no-psi``.
-        - ``offpage`` or ``strategy`` -> ``--serper`` (SERP + competitor gap).
-        - ``local`` -> ``--profile local`` + ``--places`` + ``--citations`` (the
-          engine gates GBP/citations/Team D behind ``profile=local``).
-        - ``geo`` or ``strategy`` -> ``--agents on`` (the 21 specialists, incl. A5
-          GEO; the engine has no per-team flag, so agents are all-or-nothing).
-        - ``strategy`` -> ``--ai-narrative on`` (the strategy recommendation prose).
+    WHY DEPTH AND NOT A TYPE PICKER. This used to take an audit-type selection
+    (on-page / technical / off-page / local / GEO / strategy) and the operator
+    reasonably read it as "audit only these". It never was. The deterministic
+    crawl - on-page, technical, AND the AI-search checks - ALWAYS runs and cannot
+    be isolated, because the engine has no per-dimension flag. Selecting "on-page
+    + technical" still produced GEO and strategy findings, because those checks
+    had run regardless. All the picker ever did was gate which PAID providers and
+    agents fired, under labels that promised something else.
+
+    So the axis is now the one the engine can actually honour: how much of the
+    paid pipeline runs. Every audit covers every dimension; depth decides how
+    deeply it is corroborated.
+
+    * ``free``     - the deterministic crawl alone. No paid provider, no agents.
+    * ``standard`` - plus PageSpeed/CWV and the SERP + competitor-gap lookup.
+    * ``deep``     - plus Google Places, citation discovery, the 21 specialists
+      and the AI narrative. ``--profile local`` so the engine unlocks GBP /
+      citations / Team D, which it gates behind that profile.
 
     ``comprehensive=False`` (the PUBLIC free-audit funnel) is the CONDENSED,
     GENUINELY FREE lead magnet - ``--mode free``. See the FREE FUNNEL note below.
     ``--no-moz`` always (Moz needs a separate paid key, out of scope).
     """
-    base = [
-        "-m", "audit_engine.cli.main", "full", domain,
-        "--profile", profile, "--max-pages", str(max_pages), "--no-moz",
-    ]
     if comprehensive:
-        selected = [t for t in (types or []) if t in _ENGINE_TYPES]
-        if not selected:
-            # Full audit: every dimension + all 21 agents + narrative (verbatim
-            # pre-existing comprehensive behavior).
-            return [
-                *base,
-                "--mode", "paid",
-                "--serper", "--places", "--citations",
-                "--agents", "on", "--ai-narrative", "on",
-            ]
-        # Scoped comprehensive: paid mode, but only the selected paid work fires.
-        profile_arg = "local" if "local" in selected else profile
+        scope = DEPTH_SCOPE.get(depth or "standard", DEPTH_SCOPE["standard"])
+        # `deep` unlocks the local pipeline, which the engine gates behind the
+        # profile rather than behind a flag: without `--profile local` the
+        # `--places` / `--citations` flags are accepted and then do nothing.
+        profile_arg = "local" if scope["places"] else profile
         argv = [
             "-m", "audit_engine.cli.main", "full", domain,
             "--profile", profile_arg, "--max-pages", str(max_pages),
-            "--no-moz", "--mode", "paid",
+            # The mode the CALLER resolved, not a hardcoded "paid". This branch
+            # used to pin it, so a `free` depth would have been described to the
+            # operator as free and handed to the engine as paid - the same
+            # asked-for-free-got-paid shape WU-7 removed from the public funnel.
+            "--no-moz", "--mode", mode,
         ]
-        argv += ["--psi"] if "technical" in selected else ["--no-psi"]
+        argv += ["--psi"] if scope["psi"] else ["--no-psi"]
+        argv += ["--serper"] if scope["serper"] else ["--no-serper"]
         argv += (
-            ["--serper"]
-            if ("offpage" in selected or "strategy" in selected)
-            else ["--no-serper"]
-        )
-        argv += (
-            ["--places", "--citations"]
-            if "local" in selected
+            ["--places", "--citations"] if scope["places"]
             else ["--no-places", "--no-citations"]
         )
-        argv += (
-            ["--agents", "on"]
-            if ("geo" in selected or "strategy" in selected)
-            else ["--agents", "off"]
-        )
-        argv += ["--ai-narrative", "on"] if "strategy" in selected else ["--ai-narrative", "off"]
+        argv += ["--agents", "on" if scope["agents"] else "off"]
+        argv += ["--ai-narrative", "on" if scope["narrative"] else "off"]
         return argv
     # ---------------------------------------------------------------------- #
     # PUBLIC free-audit funnel (comprehensive=False)
@@ -311,17 +310,17 @@ def run_audit(
     url: str,
     tier: str,
     comprehensive: bool = False,
-    types: list[str] | None = None,
+    depth: str | None = None,
     max_pages: int | None = None,
 ) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
     ``tier`` is the stored value (``free`` | ``paid``); it selects the engine
     ``--mode`` for the light path. ``comprehensive=True`` runs the consulting
-    pipeline for the authenticated dashboard audit; ``types`` (the audit-type
-    picker) then SCOPES it - empty = the full run, a subset gates the paid work
-    (see ``build_argv``). The URL is SSRF-validated here (defense in depth - the
-    endpoint already validated at enqueue) before any subprocess is spawned.
+    pipeline for the authenticated dashboard audit; ``depth`` then decides how
+    much of the paid pipeline it buys (see ``build_argv``). The URL is
+    SSRF-validated here (defense in depth - the endpoint already validated at
+    enqueue) before any subprocess is spawned.
 
     ``max_pages`` is the PER-RUN breadth, snapshotted onto the audit row at
     enqueue from its depth (migration 0084). It overrides the config default so
@@ -343,7 +342,18 @@ def run_audit(
     if not Path(cfg.engine_python).exists():
         return AuditRunResult(ok=False, error="audit engine interpreter not found")
 
-    mode = "paid" if (tier == "paid" or comprehensive) else "free"
+    # `free` depth spends nothing, so it runs `--mode free` even on the
+    # authenticated path. The flags in `DEPTH_SCOPE` already turn every provider
+    # off; `--mode free` is the ENGINE-SIDE guarantee on top - the CLI hard-clears
+    # psi/moz/serper/places/citations after parsing, so no flag added here later
+    # can reintroduce spend on a run the operator was told is free. It also makes
+    # the recorded cost DERIVED rather than asserted: `pricing.audit_cost` reads
+    # the mode the run itself reported, so a zero in the ledger is true by
+    # construction.
+    if comprehensive and (depth or "standard") == "free":
+        mode = "free"
+    else:
+        mode = "paid" if (tier == "paid" or comprehensive) else "free"
     # The public funnel crawls the condensed breadth; the authenticated audit
     # keeps the full one. Selected here (not inside build_argv) so the argv
     # builder stays a pure function of its arguments.
@@ -352,7 +362,7 @@ def run_audit(
         pages = max_pages
     argv = build_argv(
         domain=url, mode=mode, max_pages=pages, profile=cfg.profile,
-        comprehensive=comprehensive, types=types,
+        comprehensive=comprehensive, depth=depth,
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}

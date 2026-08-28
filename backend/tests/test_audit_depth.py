@@ -10,9 +10,9 @@ confirmation bound to a specific figure rather than to a yes.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
-from itertools import combinations
 from typing import Any
 
 import httpx
@@ -97,54 +97,118 @@ def test_the_estimate_moves_with_depth_which_the_flat_constant_could_not() -> No
     """The defect the derived estimate replaces.
 
     `settings.audit_paid_cost_estimate` is ONE number. It was the pre-flight
-    figure for a 20-page single-dimension run and for a 300-page full consulting
-    run alike, so the cost dial and the client budget cap could not tell a cheap
+    figure for a 20-page standard run and for a 300-page full consulting run
+    alike, so the cost dial and the client budget cap could not tell a cheap
     request from one an order of magnitude larger.
     """
     s = _settings()
-    standard = estimate_audit_cost(s, mode="paid", depth="standard", types=["onpage"])
-    deep = estimate_audit_cost(s, mode="paid", depth="deep", types=["onpage"])
+    standard = estimate_audit_cost(s, mode="paid", depth="standard")
+    deep = estimate_audit_cost(s, mode="paid", depth="deep")
     assert deep > standard * 10
     # Both were previously quoted at the same flat figure.
     assert s.audit_paid_cost_estimate not in (standard, deep)
 
 
-def test_the_estimate_drops_the_agent_fan_out_when_no_agent_type_is_selected() -> None:
+def test_only_deep_is_priced_with_the_agent_fan_out() -> None:
     s = _settings()
-    with_agents = estimate_audit_cost(s, mode="paid", depth="standard", types=["strategy"])
-    without = estimate_audit_cost(s, mode="paid", depth="standard", types=["onpage"])
-    assert with_agents > without
-    # The fan-out is the dominant term, which is why pricing it wrong made the
-    # flat estimate useless in both directions rather than merely imprecise.
-    assert with_agents > without * 4
+    # Same page budget on both sides, so the only thing that can differ is the
+    # fan-out - not the breadth that usually comes with the deeper run.
+    deep = estimate_audit_cost(s, mode="paid", depth="deep", pages=50)
+    standard = estimate_audit_cost(s, mode="paid", depth="standard", pages=50)
+    assert deep > standard
 
-
-def test_an_empty_selection_is_priced_as_the_full_run() -> None:
-    """Empty types is the comprehensive audit, not the cheapest one."""
-    s = _settings()
-    assert estimate_audit_cost(s, mode="paid", depth="deep", types=[]) == estimate_audit_cost(
-        s, mode="paid", depth="deep", types=["strategy"]
+    # And the difference IS the fan-out: price it with no agent calls and the two
+    # depths collapse onto the same number. That is a stronger claim than "deep
+    # costs more", which breadth alone would satisfy.
+    free_agents = _settings()
+    free_agents.audit_agent_calls = 0
+    assert (
+        estimate_audit_cost(free_agents, mode="paid", depth="deep", pages=50)
+        == estimate_audit_cost(free_agents, mode="paid", depth="standard", pages=50)
     )
 
 
-@pytest.mark.parametrize(
-    "types",
-    [list(c) for n in range(len(_TYPES) + 1) for c in combinations(_TYPES, n)],
-)
-def test_agent_fanout_mirrors_build_argv(types: list[str]) -> None:
+def test_a_free_depth_run_is_priced_at_zero() -> None:
+    # `free` depth runs `--mode free`, which the engine enforces by clearing every
+    # provider - so the zero is derived from the run's own mode, not asserted.
+    assert estimate_audit_cost(_settings(), mode="free", depth="free") == 0.0
+
+
+@pytest.mark.parametrize("depth", ["free", "standard", "deep"])
+def test_agent_fanout_mirrors_build_argv(depth: str) -> None:
     """The estimate is only honest if it prices the run that will ACTUALLY launch.
 
     `agent_fanout_enabled` duplicates a rule that lives in `build_argv`, and a
-    duplicated rule drifts. This walks all 64 type selections and asserts the two
-    agree on every one, so a change to the engine's flag gating fails here rather
-    than quietly mispricing every deep audit.
+    duplicated rule drifts. This walks every depth and asserts the two agree, so a
+    change to the engine's flag gating fails here rather than quietly mispricing
+    the audits that carry the fan-out.
     """
     argv = build_argv(
         domain="example.com", mode="paid", max_pages=100,
-        profile="general", comprehensive=True, types=types,
+        profile="general", comprehensive=True, depth=depth,
     )
     argv_says_on = "--agents" in argv and argv[argv.index("--agents") + 1] == "on"
-    assert agent_fanout_enabled(types) is argv_says_on
+    assert agent_fanout_enabled(depth) is argv_says_on
+
+
+@pytest.mark.parametrize(
+    ("depth", "expect"),
+    [
+        # Every audit covers every dimension; depth buys corroboration. The old
+        # audit-type picker promised per-dimension scoping the engine cannot do -
+        # the deterministic crawl always runs in full - so these flags are the
+        # only scoping that was ever real.
+        ("free", {"--no-psi", "--no-serper", "--no-places", "--no-citations"}),
+        ("standard", {"--psi", "--serper", "--no-places", "--no-citations"}),
+        ("deep", {"--psi", "--serper", "--places", "--citations"}),
+    ],
+)
+def test_depth_decides_which_paid_work_fires(depth: str, expect: set[str]) -> None:
+    argv = build_argv(
+        domain="example.com", mode="paid", max_pages=100,
+        profile="general", comprehensive=True, depth=depth,
+    )
+    assert expect <= set(argv)
+
+
+def test_free_depth_asks_the_engine_itself_to_refuse_paid_work(monkeypatch, tmp_path) -> None:
+    """Flags are the intention; `--mode free` is the guarantee.
+
+    The engine hard-clears psi/moz/serper/places/citations after parsing, so a
+    flag added here later cannot reintroduce spend on a run the operator was told
+    is free - and `pricing.audit_cost` then reads the mode the run itself
+    reported, making the zero in the ledger true by construction. The switch lives
+    in `run_audit`, because `build_argv` is a pure function of the mode it is
+    handed.
+    """
+    import integrations.audit_engine as AE
+
+    seen: dict = {}
+
+    def capture(argv, **kw):
+        # Return, do not raise: run_audit is documented never to raise, and a
+        # fake that raises would test the harness rather than the code.
+        seen["argv"] = list(argv)
+        return subprocess.CompletedProcess(argv, 1, b"", b"stopped")
+
+    py = tmp_path / "python"
+    py.write_text("")
+    monkeypatch.setattr(AE.subprocess, "run", capture)
+    cfg = AE.AuditEngineConfig(
+        engine_dir=str(tmp_path), engine_python=str(py),
+        max_pages=100, free_max_pages=15, profile="general",
+    )
+    # comprehensive=True used to force mode=paid unconditionally. At `free` depth
+    # that meant the operator was shown "free" and the engine was told "paid".
+    AE.run_audit(cfg, url="https://example.com", tier="paid",
+                 comprehensive=True, depth="free")
+    argv = seen["argv"]
+    assert argv[argv.index("--mode") + 1] == "free"
+
+    AE.run_audit(cfg, url="https://example.com", tier="paid",
+                 comprehensive=True, depth="deep")
+    argv = seen["argv"]
+    assert argv[argv.index("--mode") + 1] == "paid"
 
 
 # --------------------------------------------------------------------------- #

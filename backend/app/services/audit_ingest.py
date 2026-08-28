@@ -403,8 +403,21 @@ def store_roadmap(
     retrievable after a re-run.
     """
     with privileged_connection() as cur:
+        # Through THIS AUDIT'S OWN INSTANCES, not `audit_findings.audit_id`.
+        #
+        # That column is last-writer-wins: the finding upsert conflicts on
+        # (scope_type, scope_key, check_id, fingerprint) and reassigns
+        # `audit_id = excluded.audit_id`, so the moment a second audit of the same
+        # site runs, every shared finding is re-pointed at the newer run. Keyed on
+        # the column, regenerating an older audit's plan then reads zero findings
+        # and writes an EMPTY roadmap over the one the client was shown - which is
+        # exactly the "the plan was there and now it is gone" report. The report
+        # builder was already fixed this way; this is the same join.
         cur.execute(
-            "select * from public.audit_findings where audit_id = %s and status = 'open'",
+            """select f.* from public.audit_findings f
+               where f.status = 'open'
+                 and exists (select 1 from public.audit_finding_instances i
+                             where i.finding_id = f.id and i.audit_id = %s)""",
             (audit_id,),
         )
         findings = [dict(r) for r in cur.fetchall()]
@@ -420,6 +433,22 @@ def store_roadmap(
             pages_crawled=int(site.get("pages_crawled") or 0),
             capacity_points_per_month=capacity_points_per_month,
         )
+
+        # An empty plan never supersedes a real one. An audit that genuinely found
+        # nothing has no instances either, so the two cases are distinguishable -
+        # and replacing a plan a client was shown with a blank one, because a query
+        # went wrong upstream, is the one outcome this function must not produce.
+        if not roadmap.items:
+            cur.execute(
+                "select 1 from public.audit_finding_instances where audit_id = %s limit 1",
+                (audit_id,),
+            )
+            if cur.fetchone() is not None:
+                raise RuntimeError(
+                    f"refusing to store an empty roadmap for audit {audit_id}: it has "
+                    "stored findings, so a plan with no items means the findings query "
+                    "failed, not that there is no work to do"
+                )
 
         cur.execute(
             "update public.audit_roadmaps set status = 'superseded' "

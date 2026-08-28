@@ -359,14 +359,44 @@ export const DIMENSION_ICON: Record<string, string> = {
   strategy: "flag",
 };
 
-/** The downloadable pack, mirroring the backend allow-list. */
-export const DOWNLOADS: { name: string; label: string; hint: string }[] = [
-  { name: "report", label: "Client report", hint: "the readable document - 11 pages, not 833" },
-  { name: "workbook", label: "Workbook (XLSX)", hint: "9 sheets, every occurrence, filterable" },
-  { name: "bundle", label: "Full pack (ZIP)", hint: "workbook + every CSV" },
-  { name: "instances.csv", label: "Every occurrence (CSV)", hint: "uncapped - the complete record" },
-  { name: "findings.csv", label: "Findings (CSV)", hint: "one row per problem" },
-  { name: "roadmap.csv", label: "Roadmap (CSV)", hint: "the plan, in order" },
-  { name: "coverage.csv", label: "Coverage (CSV)", hint: "every check, incl. what did not run" },
-  { name: "pages.csv", label: "Pages (CSV)", hint: "every crawled URL" },
+/** The downloadable pack, mirroring the backend allow-list.
+ *
+ * `file` carries the EXTENSION. Without one the browser saves an extensionless
+ * blob that the OS cannot open, which is how the HTML report became unreachable:
+ * it downloaded as `audit-<id>-report` and nothing would render it.
+ *
+ * `view` marks the artefacts a browser renders natively. Those open in a tab
+ * instead of prompting a save - a report you have to find on disk and rename is
+ * a report nobody reads. */
+export const DOWNLOADS: {
+  name: string;
+  label: string;
+  hint: string;
+  file: string;
+  view?: boolean;
+}[] = [
+  {
+    // DOWNLOADS rather than opens. `openFile` calls `window.open` after an await,
+    // which is no longer a user gesture by the time it runs, so a popup blocker
+    // eats it and the button appears to do nothing. A PDF is a deliverable to
+    // keep, not a page to glance at - the web-page entry below is for glancing.
+    name: "report.pdf",
+    label: "Client report (PDF)",
+    hint: "the deliverable - scores, charts, the plan, every pillar, every issue",
+    file: "report.pdf",
+  },
+  {
+    name: "report",
+    label: "Client report (web page)",
+    hint: "the same document, as a page - opens anywhere, prints the same",
+    file: "report.html",
+    view: true,
+  },
+  { name: "workbook", label: "Workbook (XLSX)", hint: "9 sheets, every occurrence, filterable", file: "workbook.xlsx" },
+  { name: "bundle", label: "Full pack (ZIP)", hint: "workbook + every CSV", file: "pack.zip" },
+  { name: "instances.csv", label: "Every occurrence (CSV)", hint: "uncapped - the complete record", file: "instances.csv" },
+  { name: "findings.csv", label: "Findings (CSV)", hint: "one row per problem", file: "findings.csv" },
+  { name: "roadmap.csv", label: "Roadmap (CSV)", hint: "the plan, in order", file: "roadmap.csv" },
+  { name: "coverage.csv", label: "Coverage (CSV)", hint: "every check, incl. what did not run", file: "coverage.csv" },
+  { name: "pages.csv", label: "Pages (CSV)", hint: "every crawled URL", file: "pages.csv" },
 ];

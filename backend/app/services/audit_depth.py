@@ -30,7 +30,6 @@ observables, not two independent guesses that can drift apart.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import get_args
 
 from app.config import Settings
@@ -50,14 +49,16 @@ METERED_DEPTHS: frozenset[str] = frozenset({"standard", "deep"})
 # before it runs. Standard is a routine check-in and does not interrupt.
 CONFIRM_REQUIRED_DEPTHS: frozenset[str] = frozenset({"deep"})
 
-# The audit types the engine understands, and which of them switch the AI agent
-# fan-out on. This MIRRORS `integrations.audit_engine.build_argv` - the estimate
-# is only honest if it prices the run that will actually be launched, so the two
-# are pinned together by `tests/test_audit_depth.py::test_agent_fanout_mirrors_build_argv`.
-_ENGINE_TYPES: frozenset[str] = frozenset(
-    {"onpage", "offpage", "technical", "local", "geo", "strategy"}
-)
-_AGENT_TYPES: frozenset[str] = frozenset({"geo", "strategy"})
+# The depths that switch the AI agent fan-out on. This MIRRORS
+# `integrations.audit_engine.DEPTH_SCOPE` - the estimate is only honest if it
+# prices the run that will actually be launched, so the two are pinned together
+# by `tests/test_audit_depth.py::test_agent_fanout_mirrors_build_argv`.
+#
+# It replaced a per-type rule. The audit-type picker could not deliver what its
+# labels promised (the deterministic crawl always ran in full, so "on-page +
+# technical" still returned GEO and strategy findings), so the axis it priced
+# was not one the engine could honour.
+_AGENT_DEPTHS: frozenset[str] = frozenset({"deep"})
 
 
 def depth_ceiling(settings: Settings, depth: AuditDepth) -> int:
@@ -97,18 +98,14 @@ def planned_pages(
     return max(min(ceiling, measured), min(floor, ceiling))
 
 
-def agent_fanout_enabled(types: Sequence[str] | None) -> bool:
-    """Whether the engine's 21-agent fan-out fires for this type selection.
+def agent_fanout_enabled(depth: str | None) -> bool:
+    """Whether the engine's 21-agent fan-out fires at this depth.
 
-    Mirrors ``build_argv``: an EMPTY selection is the full audit and runs every
-    agent; a subset runs them only when it includes ``geo`` or ``strategy``. The
-    fan-out is the dominant cost term, so pricing it wrong is what made the flat
-    estimate useless in both directions.
+    Mirrors ``build_argv``: only ``deep`` buys the specialists. The fan-out is the
+    dominant cost term, so pricing it wrong is what made the flat estimate useless
+    in both directions.
     """
-    selected = {t for t in (types or []) if t in _ENGINE_TYPES}
-    if not selected:
-        return True
-    return bool(selected & _AGENT_TYPES)
+    return (depth or "standard") in _AGENT_DEPTHS
 
 
 def estimate_audit_cost(
@@ -116,14 +113,13 @@ def estimate_audit_cost(
     *,
     mode: str,
     depth: AuditDepth,
-    types: Sequence[str] | None = None,
     pages: int | None = None,
 ) -> float:
     """The UPFRONT cost estimate for a run, in USD.
 
     Derived through ``pricing.audit_cost`` with the PLANNED observables (the
-    depth's page budget, the agent count this type selection will actually
-    trigger) where the committed cost passes the REAL ones. Same arithmetic, so
+    depth's page budget, the agent count this depth will actually trigger) where
+    the committed cost passes the REAL ones. Same arithmetic, so
     an estimate and its bill can be compared meaningfully.
 
     A ``free`` mode run returns 0.0 for the same reason the committed cost does:
@@ -141,5 +137,5 @@ def estimate_audit_cost(
         settings,
         pages_crawled=pages if pages is not None and pages > 0 else planned_pages(settings, depth),
         mode="paid",
-        agent_calls=settings.audit_agent_calls if agent_fanout_enabled(types) else 0,
+        agent_calls=settings.audit_agent_calls if agent_fanout_enabled(depth) else 0,
     )

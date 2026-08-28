@@ -75,7 +75,7 @@ def _ok_runner(score: int) -> Any:
         url: str,
         tier: str,
         comprehensive: bool = False,
-        types: list[str] | None = None,
+        depth: str | None = None,
         max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(
@@ -116,7 +116,7 @@ def test_engine_failure_marks_failed_never_running() -> None:
         url: str,
         tier: str,
         comprehensive: bool = False,
-        types: list[str] | None = None,
+        depth: str | None = None,
         max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(ok=False, run_uuid="u-9", runtime_seconds=5, error="engine timed out after 1500s")
@@ -180,7 +180,7 @@ def _tracking_runner(ran: list[bool], score: int = 90) -> Any:
         url: str,
         tier: str,
         comprehensive: bool = False,
-        types: list[str] | None = None,
+        depth: str | None = None,
         max_pages: int | None = None,
     ) -> AuditRunResult:
         ran.append(True)  # records that the (paid) engine actually executed
@@ -251,7 +251,7 @@ class _FakeArtifacts:
 def _pdf_runner(score: int) -> Any:
     def _run(
         cfg: AuditEngineConfig, *, url: str, tier: str,
-        comprehensive: bool = False, types: list[str] | None = None,
+        comprehensive: bool = False, depth: str | None = None,
         max_pages: int | None = None,
     ) -> AuditRunResult:
         return AuditRunResult(
@@ -307,3 +307,54 @@ def test_task_is_registered() -> None:
     celery_import = __import__("workers.celery_app", fromlist=["celery_app"])
     celery_import.celery_app.loader.import_default_modules()
     assert "run_audit" in celery_import.celery_app.tasks
+
+
+# ------------------------------------------------- a free run is billed as free
+#
+# The dashboard cost commit passed `mode="paid"` unconditionally, on the reasoning
+# that a dashboard audit is always the comprehensive run. That stopped being true
+# when depth replaced the audit-type picker: `free` depth runs `--mode free`,
+# which the engine enforces by clearing every provider - so the hardcoded mode
+# would bill a real figure against a run that provably spent nothing. The public
+# funnel already read the engine's own reported mode; both paths now agree.
+
+def _runner_reporting(mode: str) -> Any:
+    def _run(cfg, *, url, tier, comprehensive=False, depth=None, max_pages=None):
+        return AuditRunResult(
+            ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=70,
+            scores={"overall": 70}, runtime_seconds=10, exit_code=0,
+            pages_crawled=40, mode=mode,
+        )
+    return _run
+
+
+def _cost_mode_for(monkeypatch: Any, *, depth: str, engine_mode: str) -> str:
+    from workers.tasks import audit as A
+
+    captured: dict[str, str] = {}
+    real = A.pricing.audit_cost
+
+    def spy(settings: Any, **kw: Any) -> float:
+        captured["mode"] = kw["mode"]
+        return real(settings, **kw)
+
+    monkeypatch.setattr(A.pricing, "audit_cost", spy)
+    store = FakeStore(_row(tier="paid", depth=depth))
+    execute_audit(store, _settings(), "aud-1", runner=_runner_reporting(engine_mode))
+    return captured["mode"]
+
+
+def test_a_basic_depth_run_is_priced_off_the_engines_own_free_mode(monkeypatch: Any) -> None:
+    assert _cost_mode_for(monkeypatch, depth="free", engine_mode="free") == "free"
+
+
+def test_a_paid_depth_run_is_still_priced_as_paid(monkeypatch: Any) -> None:
+    assert _cost_mode_for(monkeypatch, depth="deep", engine_mode="paid") == "paid"
+
+
+def test_a_run_that_wrote_no_mode_falls_back_to_what_we_invoked(monkeypatch: Any) -> None:
+    # Fail-closed on money: a deep run that died before writing run.json is still
+    # billed, because it could have spent. The other direction under-reports.
+    assert _cost_mode_for(monkeypatch, depth="deep", engine_mode="") == "paid"
+    # ... and a free-depth run that wrote no mode is not invented into a bill.
+    assert _cost_mode_for(monkeypatch, depth="free", engine_mode="") == "free"

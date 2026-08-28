@@ -82,29 +82,21 @@ async def create_client_audit(
     RLS-scoped ``PortalRepo`` (used only to read the caller's own client row for
     the name snapshot + delivery-tier gate).
     """
-    # Free tier makes zero paid-provider spend: reject paid audit types up front
-    # (same base rule as the staff endpoint).
-    if body.tier == "Free" and body.paid_types():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Paid audit types require the Paid tier: {', '.join(body.paid_types())}",
-        )
-    # ... and an EMPTY selection is the FULL comprehensive run, not a cheap one.
-    # See `routers/audits.py` for the measured bypass this closes. It matters more
-    # here than there: this path is reachable by a CLIENT, and a portal request of
-    # `{"url": ..., "types": []}` defaulted to tier Free, which skipped the paid
-    # gating below AND the worker's cost gate, while the engine ran every paid
-    # provider and all 21 agents against the agency's own keys.
-    if body.tier == "Free" and body.runs_paid_providers():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "An audit with no types selected is the full comprehensive run "
-                "(every paid provider + the AI agents) and requires the Paid tier. "
-                "Select specific free types, or run it as Paid."
-            ),
-        )
-
+    # NO paid-provider gate here, and none is needed: depth is not client-
+    # selectable on this path (`default_depth_for_tier` below decides it from the
+    # tier alone), and `free` depth runs `--mode free`, which the engine enforces
+    # by hard-clearing every provider after parsing.
+    #
+    # THE BYPASS THIS REPLACED (measured, not reasoned). The gate used to read an
+    # audit-TYPE selection, and an EMPTY selection meant "the full comprehensive
+    # run" while `paid_types()` returned [] for it. A portal request of
+    # `{"url": ..., "types": []}` therefore defaulted to tier Free, skipped the
+    # paid gating AND the worker's cost gate, and then reached the engine with
+    # `comprehensive=True` - which forced `mode="paid"` regardless of the stored
+    # tier and ran every paid provider and all 21 agents against the agency's own
+    # keys. On a path a CLIENT can reach. Keyed on depth the shape cannot recur:
+    # the value that names the request is the value that picks the engine mode, so
+    # there is no value meaning "free to ask for and paid to run".
     # The caller's OWN client row via the portal_client view (RLS-scoped).
     client_row = await asyncio.to_thread(reader.get_client)
     if client_row is None:  # pragma: no cover - client_id is FK-guaranteed
@@ -137,12 +129,12 @@ async def create_client_audit(
             "client_id": scoped.client_id,  # pinned server-side; never from the body
             "client_name": client_row.get("name", ""),
             "url": body.url,
-            "types": body.types,
+            "types": [],
             "tier": tier_to_db(body.tier),
             "depth": depth,
             "max_pages": planned_pages(settings, depth),
             "estimated_cost": estimate_audit_cost(
-                settings, mode=tier_to_db(body.tier), depth=depth, types=list(body.types)
+                settings, mode=tier_to_db(body.tier), depth=depth
             ),
             "status": "queued",
         },

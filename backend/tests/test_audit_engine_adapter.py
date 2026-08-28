@@ -88,77 +88,62 @@ def test_build_argv_paid_enables_providers() -> None:
     assert argv[argv.index("--profile") + 1] == "local"
 
 
-def test_build_argv_comprehensive_empty_is_full_audit() -> None:
-    # Empty selection = the FULL comprehensive run: every provider + all agents.
+def test_build_argv_deep_is_the_full_audit() -> None:
+    # `deep` = every provider + all agents + the narrative.
     argv = build_argv(
         domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=[],
+        comprehensive=True, depth="deep",
     )
     assert argv[argv.index("--mode") + 1] == "paid"
     for flag in ("--serper", "--places", "--citations"):
         assert flag in argv
     assert argv[argv.index("--agents") + 1] == "on"
     assert argv[argv.index("--ai-narrative") + 1] == "on"
-
-
-def test_build_argv_scoped_local_forces_profile_and_places() -> None:
-    # Local SEO selected -> profile local + Places/citations on; no Serper; agents off.
-    argv = build_argv(
-        domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=["local"],
-    )
+    # Places/citations are gated behind the profile, not the flag: passing
+    # `--places` under `--profile general` is accepted and then does nothing.
     assert argv[argv.index("--profile") + 1] == "local"
-    for flag in ("--places", "--citations"):
-        assert flag in argv
-    assert "--no-serper" in argv
-    assert argv[argv.index("--agents") + 1] == "off"
-    assert argv[argv.index("--ai-narrative") + 1] == "off"
 
 
-def test_build_argv_scoped_offpage_enables_serper_only() -> None:
+def test_build_argv_standard_buys_corroboration_not_agents() -> None:
     argv = build_argv(
         domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=["offpage"],
+        comprehensive=True, depth="standard",
     )
+    assert "--psi" in argv and "--no-psi" not in argv
     assert "--serper" in argv and "--no-serper" not in argv
     assert "--no-places" in argv and "--no-citations" in argv
     assert argv[argv.index("--profile") + 1] == "general"  # not forced to local
     assert argv[argv.index("--agents") + 1] == "off"
+    assert argv[argv.index("--ai-narrative") + 1] == "off"
 
 
-def test_build_argv_scoped_geo_turns_agents_on() -> None:
+def test_build_argv_free_depth_fires_no_paid_work_at_all() -> None:
+    argv = build_argv(
+        domain="example.com", mode="free", max_pages=15, profile="general",
+        comprehensive=True, depth="free",
+    )
+    # The mode the caller resolved, NOT a hardcoded "paid". This branch used to
+    # pin it, so a run described to the operator as free was handed to the engine
+    # as paid - the asked-for-free-got-paid shape WU-7 removed from the funnel.
+    assert argv[argv.index("--mode") + 1] == "free"
+    for flag in ("--no-psi", "--no-serper", "--no-places", "--no-citations"):
+        assert flag in argv
+    assert argv[argv.index("--agents") + 1] == "off"
+    assert argv[argv.index("--ai-narrative") + 1] == "off"
+
+
+def test_build_argv_defaults_an_unknown_depth_to_standard() -> None:
+    # A row written before the depth axis carries NULL. Standard is what those
+    # runs already did; inventing `deep` would spend money retroactively.
     argv = build_argv(
         domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=["geo"],
+        comprehensive=True, depth=None,
     )
-    assert argv[argv.index("--agents") + 1] == "on"
-    assert "--no-serper" in argv  # geo needs agents, not Serper
+    assert argv[argv.index("--agents") + 1] == "off"
+    assert "--serper" in argv
 
 
-def test_build_argv_scoped_strategy_serper_agents_and_narrative() -> None:
-    argv = build_argv(
-        domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=["strategy"],
-    )
-    assert "--serper" in argv and "--no-serper" not in argv
-    assert argv[argv.index("--agents") + 1] == "on"
-    assert argv[argv.index("--ai-narrative") + 1] == "on"
-
-
-def test_build_argv_scoped_technical_toggles_psi() -> None:
-    with_tech = build_argv(
-        domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=["technical"],
-    )
-    assert "--psi" in with_tech and "--no-psi" not in with_tech
-    without_tech = build_argv(
-        domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, types=["onpage"],
-    )
-    assert "--no-psi" in without_tech
-
-
-def test_run_audit_forwards_types_to_argv(
+def test_run_audit_forwards_depth_to_argv(
     engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     url = "https://example.com"
@@ -169,10 +154,10 @@ def test_run_audit_forwards_types_to_argv(
         _write_artifacts(engine.engine_dir, url, _UUID, scores={"overall": 70})
 
     _fake_run_factory(monkeypatch, returncode=0, stdout=f"Run UUID: {_UUID}\n", side=_side)
-    res = run_audit(engine, url=url, tier="paid", comprehensive=True, types=["local"])
+    res = run_audit(engine, url=url, tier="paid", comprehensive=True, depth="deep")
     assert res.ok is True
     argv = captured["argv"]
-    assert argv[argv.index("--profile") + 1] == "local"  # local scoping reached the engine
+    assert argv[argv.index("--profile") + 1] == "local"
     assert "--places" in argv
 
 

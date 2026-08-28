@@ -422,11 +422,22 @@ def _write_sheet(
     # A table needs at least one body row; a header-only range is invalid and
     # Excel repairs the file by silently discarding it.
     if table and rows:
-        ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
-        t = Table(displayName=_safe_table_name(name), ref=ref)
-        t.tableStyleInfo = _TABLE_STYLE
-        ws.add_table(t)
+        _add_table(ws, _safe_table_name(name),
+                   f"A1:{get_column_letter(len(headers))}{len(rows) + 1}")
     return ws
+
+
+def _add_table(ws: Worksheet, display_name: str, ref: str) -> None:
+    """Turn one rectangular range into a real Excel table.
+
+    Split out of `_write_sheet` because a sheet may hold more than one: the
+    executive summary carries a KPI block and a severity block, and Excel offers
+    "Format as Table" on any range that is not already one. Every rectangular
+    block in this workbook is one, so that prompt never appears on our output.
+    """
+    t = Table(displayName=display_name, ref=ref)
+    t.tableStyleInfo = _TABLE_STYLE
+    ws.add_table(t)
 
 
 def _add_score_chart(ws: Worksheet, n_rows: int) -> None:
@@ -590,7 +601,7 @@ def build(
             ["03_Subpoint_Scorecard", "The same, one level down"],
             ["05_Roadmap", "What to do first, in relative windows (no dates)"],
             ["10_Issues", "One row per PROBLEM. This is the fix list."],
-            ["20_Occurrences", "One row per OCCURRENCE. Join on 'Issue Ref'."],
+            ["20_Occurrences", "One row per OCCURRENCE. Join on 'Instances Ref'."],
             ["21_Pages", "Every crawled page, with its issue counts"],
             ["22_Coverage", "Every check in the registry - including what did NOT run"],
             ["", ""],
@@ -621,12 +632,26 @@ def build(
             ["Checks run", site.get("checks_ran", 0), f"of {site.get('checks_applicable', 0)} in the registry"],
         ]
         sev_counts = Counter((f["severity"] or "info").lower() for f in findings)
-        sev_start = len(exec_rows) + 3
-        exec_rows += [["", "", ""], ["Issues by severity", "", ""]]
+        # Two rectangular blocks, each its own real table: Excel only offers
+        # "Format as Table" on a range that is not one already. The severity block
+        # gets its own header row so it can be one - which is also why it carries a
+        # share column, since a count with no denominator is the thing this
+        # workbook refuses to print everywhere else.
+        n_kpi = len(exec_rows)
+        sev_start = n_kpi + 3
+        exec_rows += [["", "", ""], ["Issues by severity", "Count", "Share of issues"]]
+        total_sev = sum(sev_counts.values())
         for sev in _SEVERITY_ORDER:
-            exec_rows.append([sev.capitalize(), sev_counts.get(sev, 0), ""])
+            n = sev_counts.get(sev, 0)
+            share = f"{n / total_sev:.0%}" if total_sev else "-"
+            exec_rows.append([sev.capitalize(), n, share])
         ws = _write_sheet(wb, "01_Executive_Summary", EXEC_HEADERS, exec_rows, table=False)
         ws.cell(row=sev_start, column=1).font = _TITLE_FONT_SHEET
+        for col in (2, 3):
+            c = ws.cell(row=sev_start, column=col)
+            c.font, c.fill, c.alignment = _HEADER_FONT, _HEADER_FILL, _HEADER_ALIGN
+        _add_table(ws, "t_01_Summary", f"A1:C{n_kpi + 1}")
+        _add_table(ws, "t_01_Severity", f"A{sev_start}:C{sev_start + len(_SEVERITY_ORDER)}")
         _add_severity_chart(ws, sev_start + 1, len(_SEVERITY_ORDER))
 
         # --- 02 Pillar scorecard + chart --------------------------------------

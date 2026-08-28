@@ -1,11 +1,11 @@
 "use client";
 
 // ============================================================
-// AIOS · ReportViewer — the in-dashboard audit-report page-viewer
+// AIOS · ReportViewer - the in-dashboard audit-report page-viewer
 // Renders the SAME self-contained report.html the backend delivers as a PDF
 // (the PDF is rendered from this exact HTML), so what the operator/client reads
 // on screen matches the download page for page. Shared by the staff audit view,
-// the public free-audit funnel, and the client portal — the three differ only in
+// the public free-audit funnel, and the client portal - the three differ only in
 // how they obtain the HTML string (the `load` prop) and how the PDF downloads.
 //
 // Pagination: the report is a print-CSS (A4 @page) flowing document, so there are
@@ -13,7 +13,7 @@
 // srcdoc iframe (no scripts; `allow-same-origin` only, so the report can do
 // nothing but the parent can measure it), then WINDOW it: the iframe is laid out
 // at full height and scaled to fit, and Next/Prev shift it by exactly one A4 page
-// height inside a clipping stage — a PDF-style flip through the report's pages.
+// height inside a clipping stage - a PDF-style flip through the report's pages.
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +38,7 @@ export type ReportViewerProps = {
   onClose?: () => void;
   /** When set, shows a "Download PDF" button wired to this handler (bearer-authed callers). */
   onDownloadPdf?: () => void;
-  /** A direct PDF href (public funnel) — an alternative to onDownloadPdf. */
+  /** A direct PDF href (public funnel) - an alternative to onDownloadPdf. */
   pdfHref?: string;
   /** Re-run `load` when this value changes (e.g. the selected audit id). */
   reloadKey?: string;
@@ -89,7 +89,7 @@ export default function ReportViewer({
     const frame = frameRef.current;
     const doc = frame?.contentDocument;
     if (!doc) return;
-    // Lock the inner document's own scroll — we window it from the parent.
+    // Lock the inner document's own scroll - we window it from the parent.
     doc.documentElement.style.overflow = "hidden";
     const h = Math.max(
       doc.documentElement.scrollHeight,
@@ -172,7 +172,7 @@ export default function ReportViewer({
             </span>
           </button>
           <span className={styles.pgLabel}>
-            {state.kind === "ready" ? `Page ${page + 1} / ${pageCount}` : "—"}
+            {state.kind === "ready" ? `Page ${page + 1} / ${pageCount}` : "-"}
           </span>
           <button
             type="button"

@@ -1,14 +1,17 @@
 """Module 01 Audit endpoints. Reads require any provisioned staff; running an
 audit requires ``run_audits``. Responses match the frontend ``AuditRow`` shape.
 
-POST /audits SSRF-guards the URL (off the event loop), gates paid audit types
+POST /audits SSRF-guards the URL (off the event loop), gates paid DEPTH
 off the Free tier, inserts a ``queued`` row (RLS-scoped), and enqueues the
 Celery worker that runs the external engine. The worker owns the run lifecycle.
 
 It also resolves the run's DEPTH (recovery plan §3.2): ``free`` | ``standard`` |
-``deep``, a breadth axis distinct from ``tier`` (which authorises spend) and from
-``types`` (which scopes dimensions). ``deep`` must be confirmed against a cost
-estimate before it runs; ``POST /audits/estimate`` produces that quote and
+``deep``. Depth is now the ONLY scope axis and it subsumes ``tier``: ``free``
+runs ``--mode free`` and spends nothing, the other two buy paid corroboration.
+The audit-TYPE picker that used to sit alongside it is gone - it promised
+per-dimension scoping the engine cannot do, since the deterministic crawl has no
+per-dimension flag and always runs in full. ``deep`` must be confirmed against a
+cost estimate before it runs; ``POST /audits/estimate`` produces that quote and
 spends nothing to do it.
 """
 
@@ -43,6 +46,7 @@ from app.schemas.audits import (
 from app.services.activity import record_activity
 from app.services.audit_artifacts import (
     REPORT_HTML_VIEW_HEADERS,
+    REPORT_PDF_NAME,
     LocalArtifactStore,
     honest_artifact_flags,
     local_store_from_settings,
@@ -220,6 +224,27 @@ async def get_audit(
 async def download_audit_pdf(
     audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
 ) -> FileResponse:
+    """The client-facing PDF.
+
+    PREFERS the platform's own report over the engine's. They are two documents:
+    the engine writes a narrative built from agent-written markdown, and the ingest
+    step writes one built from the same stored rows as the workbook. Only the
+    second can reconcile with the workbook, because it is the same query - which
+    is the whole complaint the platform report exists to answer ("it was not
+    giving the confidence that the pdf is representing the same audit that is
+    present in the xlsx").
+
+    Falls back to the engine's PDF, so every run that could be downloaded before
+    still can, including ones that predate the platform report.
+    """
+    if store is not None:
+        row = await asyncio.to_thread(repo.get_audit, audit_id)
+        if row is None:
+            raise _AUDIT_NOT_FOUND
+        path = await asyncio.to_thread(store.resolve_sheet, audit_id, REPORT_PDF_NAME)
+        if path is not None:
+            return FileResponse(path, media_type="application/pdf",
+                                filename=f"audit-{audit_id}.pdf")
     return await _serve_artifact(
         repo, store, audit_id, "pdf_path", "application/pdf", f"audit-{audit_id}.pdf"
     )
@@ -310,7 +335,6 @@ async def estimate_audit(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Depth '{depth}' requires the Paid tier; Free audits run at 'free' depth",
         )
-    types = list(body.types)
 
     # Measure the site only where the answer can change the quote: `deep` is the
     # one depth that scales to site size. Free and standard are small fixed reads,
@@ -333,9 +357,9 @@ async def estimate_audit(
         tier=body.tier,
         depth=depth,
         pages=pages,
-        agents=body.tier == "Paid" and agent_fanout_enabled(types),
+        agents=body.tier == "Paid" and agent_fanout_enabled(depth),
         estimated_cost=estimate_audit_cost(
-            settings, mode=tier_to_db(body.tier), depth=depth, types=types, pages=pages
+            settings, mode=tier_to_db(body.tier), depth=depth, pages=pages
         ),
         confirmation_required=depth in CONFIRM_REQUIRED_DEPTHS,
         measured_pages=size.pages,
@@ -359,58 +383,34 @@ async def create_audit(
     settings: SettingsDep,
     actor: RunAudits,
 ) -> AuditResponse:
-    # Free tier makes zero paid-provider spend: reject paid audit types up front.
-    if body.tier == "Free":
-        paid = body.paid_types()
-        if paid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Paid audit types require the Paid tier: {', '.join(paid)}",
-            )
-        # An EMPTY selection is the FULL comprehensive run, and this check used to
-        # miss it entirely - `paid_types()` returns [] for an empty list, so a
-        # request for every dimension read as the cheapest possible one.
-        #
-        # THE BYPASS THIS CLOSES (measured, not reasoned):
-        #   frontend sends types=[] -> tier "Free" (`types.some(isPaid)` is false
-        #   for an empty array) -> this endpoint's gate is skipped (`if body.tier
-        #   == "Paid"`) -> row stored tier=free -> the worker's re-check is skipped
-        #   for the same reason -> `execute_audit` calls the engine with
-        #   `comprehensive=True`, which forces `mode="paid"` REGARDLESS of the
-        #   stored tier -> `--serper --places --citations --agents on
-        #   --ai-narrative on`.
-        # So the platform's single largest spend ran with neither the cost dial,
-        # nor the client budget cap, nor the global spend halt applied. The money
-        # was still LOGGED afterwards (the commit hardcodes mode="paid"), so this
-        # was never invisible spend - it was ungated spend, which is what a
-        # pre-flight gate exists to prevent.
-        #
-        # Refused rather than silently upgraded to Paid. Silent upgrade is the
-        # exact mistake WU-7 removed from the public funnel ("the caller asked for
-        # free and got auto with every provider on"); doing it here would be that
-        # mistake mirrored, and would spend a client's budget on a request that
-        # said Free.
-        if body.runs_paid_providers():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "An audit with no types selected is the full comprehensive run "
-                    "(every paid provider + the AI agents) and requires the Paid tier. "
-                    "Select specific free types, or run it as Paid."
-                ),
-            )
-        # ... and a Free run may not buy extra BREADTH either. `--mode free` clears
-        # every paid provider at the engine, so a `standard`/`deep` free crawl
-        # returns more pages of the same two deterministic dimensions while
-        # multiplying the load on an UNMETERED path - the exact shape of the
-        # denial-of-wallet vector WU-7 closed on the public funnel. Refused
-        # explicitly rather than silently downgraded: a caller that asked for 300
-        # pages and got 15 without being told would report the wrong thing.
-        if body.depth is not None and body.depth != "free":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Depth '{body.depth}' requires the Paid tier; Free audits run at 'free' depth",
-            )
+    # Free tier makes zero paid-provider spend, and DEPTH is now the only axis
+    # that can buy any. `free` depth runs `--mode free`, which the engine enforces
+    # by hard-clearing every provider after parsing - so a Free run cannot spend
+    # whatever flags a future change adds.
+    #
+    # THE BYPASS THIS REPLACED (measured, not reasoned). The gate used to read an
+    # audit-TYPE selection, and an EMPTY selection meant "the full comprehensive
+    # run". `paid_types()` returned [] for an empty list, so:
+    #   frontend sends types=[] -> tier "Free" -> the paid gate is skipped -> row
+    #   stored tier=free -> the worker's re-check is skipped for the same reason
+    #   -> `execute_audit` calls the engine with `comprehensive=True`, which forced
+    #   `mode="paid"` REGARDLESS of the stored tier -> every provider + agents on.
+    # The platform's single largest spend ran with neither the cost dial, nor the
+    # client budget cap, nor the global spend halt applied. Keyed on depth the
+    # shape cannot recur: there is no value of `depth` that means "free to ask for
+    # and paid to run", because the same value picks the engine mode.
+    #
+    # Refused rather than silently downgraded. A caller that asked for 300 pages
+    # and got 15 without being told would report the wrong thing - and silent
+    # upgrade is the mistake WU-7 removed from the public funnel.
+    if body.tier == "Free" and body.depth is not None and body.depth != "free":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Depth '{body.depth}' runs paid providers and requires the Paid "
+                "tier; Free audits run at 'free' depth"
+            ),
+        )
 
     depth = body.resolved_depth()
     ceiling = depth_ceiling(settings, depth)
@@ -430,7 +430,7 @@ async def create_audit(
         )
     pages = body.max_pages or planned_pages(settings, depth)
     estimate = estimate_audit_cost(
-        settings, mode=tier_to_db(body.tier), depth=depth, types=list(body.types), pages=pages
+        settings, mode=tier_to_db(body.tier), depth=depth, pages=pages
     )
 
     # "Estimated and confirmed before running" (plan §3.2) for the depths that
@@ -500,7 +500,10 @@ async def create_audit(
             "client_id": body.client_id,
             "client_name": client.get("name", ""),
             "url": body.url,
-            "types": body.types,
+            # Always empty: the audit-type picker is gone and every run is the
+            # full audit. Historical rows keep whatever they were created with, so
+            # the column stays and old audits still render their scope truthfully.
+            "types": [],
             "tier": tier_to_db(body.tier),
             "depth": depth,
             # Snapshotted so this run's breadth and quoted price survive a later

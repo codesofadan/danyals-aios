@@ -3,7 +3,7 @@
 A fake inserter stands in for the privileged (service_role) audit insert, with
 fakes for the portal_client read and the enqueuer. Proves: client_id is
 server-pinned (a body field is ignored), the free delivery tier blocks paid
-audits, paid types need the Paid tier, and the SSRF guard rejects private URLs
+audits, paid DEPTH needs the Paid tier, and the SSRF guard rejects private URLs
 before any insert/enqueue.
 """
 
@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.auth import CurrentClient, CurrentUser
-from app.schemas.audits import PortalAuditCreate
+from app.schemas.audits import PortalAuditCreate, default_depth_for_tier
 from app.services.client_audits import create_client_audit
 
 pytestmark = pytest.mark.unit
@@ -59,7 +59,7 @@ async def test_create_pins_client_id_ignoring_body_spoof() -> None:
     # A hostile body carrying client_id: PortalAuditCreate has no such field, so
     # it is dropped; the insert must use the scoped tenant, not "cl-EVIL".
     body = PortalAuditCreate.model_validate(
-        {"url": _PUBLIC_URL, "tier": "Free", "types": ["technical"], "client_id": "cl-EVIL"}
+        {"url": _PUBLIC_URL, "tier": "Free", "client_id": "cl-EVIL"}
     )
     row = await create_client_audit(
         insert_audit=inserter, reader=_FakeReader(), scoped=_scoped("cl-A"),  # type: ignore[arg-type]
@@ -73,7 +73,7 @@ async def test_create_pins_client_id_ignoring_body_spoof() -> None:
 
 async def test_free_delivery_tier_blocks_paid_audit() -> None:
     inserter = _FakeInserter()
-    body = PortalAuditCreate(url=_PUBLIC_URL, tier="Paid", types=["technical"])
+    body = PortalAuditCreate(url=_PUBLIC_URL, tier="Paid")
     with pytest.raises(HTTPException) as exc:
         await create_client_audit(
             insert_audit=inserter, reader=_FakeReader(delivery_tier="free"), scoped=_scoped(),  # type: ignore[arg-type]
@@ -83,22 +83,25 @@ async def test_free_delivery_tier_blocks_paid_audit() -> None:
     assert inserter.inserted == []
 
 
-async def test_free_tier_rejects_paid_types() -> None:
-    inserter = _FakeInserter()
-    body = PortalAuditCreate(url=_PUBLIC_URL, tier="Free", types=["technical", "local"])
-    with pytest.raises(HTTPException) as exc:
-        await create_client_audit(
-            insert_audit=inserter, reader=_FakeReader(delivery_tier="fully"), scoped=_scoped(),  # type: ignore[arg-type]
-            body=body, enqueue=[].append,
-        )
-    assert exc.value.status_code == 400
-    assert inserter.inserted == []
+async def test_a_portal_client_cannot_choose_a_paid_depth_at_all() -> None:
+    """Not refused - unreachable. Depth is decided from the tier, server-side.
+
+    Under the old audit-type picker this path had to REFUSE a request, and the
+    refusal had a hole: an empty selection meant the full comprehensive run while
+    reading as the cheapest one, so a client could trigger every paid provider and
+    all 21 agents against the agency's own keys. There is now no field on the body
+    that can ask for spend.
+    """
+    assert "depth" not in PortalAuditCreate.model_fields
+    assert "types" not in PortalAuditCreate.model_fields
+    assert default_depth_for_tier("Free") == "free"
+    assert default_depth_for_tier("Paid") == "standard"
 
 
 async def test_paid_delivery_tier_allows_paid_audit() -> None:
     inserter = _FakeInserter()
     enqueued: list[str] = []
-    body = PortalAuditCreate(url=_PUBLIC_URL, tier="Paid", types=["technical", "local"])
+    body = PortalAuditCreate(url=_PUBLIC_URL, tier="Paid")
     await create_client_audit(
         insert_audit=inserter, reader=_FakeReader(delivery_tier="fully"), scoped=_scoped(),  # type: ignore[arg-type]
         body=body, enqueue=enqueued.append,
@@ -110,7 +113,7 @@ async def test_paid_delivery_tier_allows_paid_audit() -> None:
 async def test_ssrf_private_url_blocks_before_insert() -> None:
     inserter = _FakeInserter()
     enqueued: list[str] = []
-    body = PortalAuditCreate(url="http://127.0.0.1/admin", tier="Free", types=["technical"])
+    body = PortalAuditCreate(url="http://127.0.0.1/admin", tier="Free")
     with pytest.raises(HTTPException) as exc:
         await create_client_audit(
             insert_audit=inserter, reader=_FakeReader(), scoped=_scoped(),  # type: ignore[arg-type]

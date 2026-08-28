@@ -1,12 +1,12 @@
 // ============================================================
 // AIOS · Audit module data layer
-// Grounded in the platform docs — Module 01 (Audit):
+// Grounded in the platform docs - Module 01 (Audit):
 //   • The audit engine runs on a URL alone (no logins) as an
-//     async job. Every audit is Free or Paid tier — tier decides
+//     async job. Every audit is Free or Paid tier - tier decides
 //     which paid data sources run behind a cost gate.
 //   • Coverage: On-Page, Technical, Off-Page, Local SEO, AI
 //     Analysis (GEO), and Strategy. Financial audit is Phase-2 (locked).
-//   • Outputs: 20–30+ page house-styled PDF + JSON + numeric
+//   • Outputs: 20-30+ page house-styled PDF + JSON + numeric
 //     scores, a live web version, stored to the client's Google
 //     Sheet; on completion the milestone auto-advances + notify.
 //   • Job states: queued → running → done (plus failed/retry).
@@ -16,7 +16,7 @@
 import { SERIES } from "@/lib/data";
 
 export type Tier = "Free" | "Paid";
-// Crawl BREADTH — a separate axis from `Tier` (which authorises spend) and from
+// Crawl BREADTH - a separate axis from `Tier` (which authorises spend) and from
 // `AuditTypeKey[]` (which scopes dimensions). Backend enum `audit_depth`.
 export type AuditDepth = "free" | "standard" | "deep";
 export type JobStatus = "queued" | "running" | "done" | "failed";
@@ -103,7 +103,7 @@ export const auditTypes: AuditType[] = [
 export const financialAudit = {
   label: "Financial audit",
   icon: "payments",
-  blurb: "Market capacity & revenue estimate — quantifies the upside behind every fix.",
+  blurb: "Market capacity & revenue estimate - quantifies the upside behind every fix.",
   checks: ["Market capacity", "Revenue estimate", "Opportunity sizing", "Competitor share"],
 };
 
@@ -124,26 +124,26 @@ export type AuditRow = {
   tier: Tier;
   status: JobStatus;
   // null on runs created before the depth axis existed (migration 0084). That is
-  // "breadth unknown", NOT "free" — those runs took their page budget from a
+  // "breadth unknown", NOT "free" - those runs took their page budget from a
   // process-wide setting that no row recorded. Render it as unknown, never as a
   // default, or the table will assert a fact the database does not hold.
   depth: AuditDepth | null;
   maxPages: number | null; // the --max-pages ceiling this run was given
   estimatedCost: number | null; // USD quoted pre-flight; compare against the bill
   // The committed USD cost, runtime-derived from the engine's observables. null
-  // until the engine actually started — "not yet spent", not "free". The column
+  // until the engine actually started - "not yet spent", not "free". The column
   // defaults to 0, so rendering it for a queued row would show $0.00 for work
   // that simply has not happened.
   cost: number | null;
-  score: number | null; // 0–100 composite site score; null while pending
-  runtime: string; // wall-clock turnaround, or "—" while pending
+  score: number | null; // 0-100 composite site score; null while pending
+  runtime: string; // wall-clock turnaround, or "-" while pending
   when: string; // display timestamp
   pdf: boolean;
   json: boolean;
   // Is this audit shared into the client's own portal?
   //
   // It was settable when an audit was created and readable nowhere, so an
-  // operator could share a run and then had no way to see that they had — or to
+  // operator could share a run and then had no way to see that they had - or to
   // undo it. Migration 0096 additionally backfilled `true` for every audit that
   // already had a client, so the shared set is historical rather than chosen.
   // Render it wherever an audit is listed: exposure a reviewer cannot see is
@@ -152,7 +152,7 @@ export type AuditRow = {
 };
 
 // The three depths an operator can pick, with what each one buys. `pages` is
-// indicative for the picker only — the authoritative budget comes back from
+// indicative for the picker only - the authoritative budget comes back from
 // POST /audits/estimate, which reads the server's live settings. Never price a
 // run from these numbers.
 export type AuditDepthOption = {
@@ -173,21 +173,21 @@ export const auditDepths: AuditDepthOption[] = [
   {
     key: "free",
     label: "Basic",
-    blurb: "The free public audit. Zero paid providers, enforced at the engine — this is what a stranger gets from the landing page.",
+    blurb: "Every dimension, from the crawl alone. Zero paid providers, enforced at the engine - this is what a stranger gets from the landing page.",
     paidOnly: false,
     confirms: false,
   },
   {
     key: "standard",
     label: "Standard",
-    blurb: "The routine client check-in — a macro health read across the main pages, with paid providers on.",
+    blurb: "Every dimension, corroborated with page-speed data and a live SERP + competitor read. The routine client check-in.",
     paidOnly: true,
     confirms: false,
   },
   {
     key: "deep",
     label: "Advanced",
-    blurb: "The full consulting run across the whole site, with every dimension and the AI specialists. Costed and confirmed before it starts.",
+    blurb: "Everything Standard covers, across the whole site, plus Google Business data, citation discovery and the 21 AI specialists. Costed and confirmed before it starts.",
     paidOnly: true,
     confirms: true,
   },
