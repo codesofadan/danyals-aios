@@ -518,6 +518,9 @@ def make_context(
     platform: str,
     client_id: str,
     catchall_domain: str,
+    ownership: str = "house",
+    handle: str = "",
+    email: str = "",
     mailbox: MailboxLike | None = None,
     http: HttpJson | None = httpx_json,
     page: Any = None,
@@ -525,16 +528,39 @@ def make_context(
     business_name: str = "",
     verify_timeout_s: int = 120,
 ) -> SignupContext:
-    """Build a :class:`SignupContext` with the deterministic per-(platform, client)
-    alias + a strong password. The alias is
-    ``alias_for(directory=platform, client_id=client_id, domain=catchall_domain)`` so a
-    retry REUSES the same account (never fans one client into many) and the platform's
-    confirmation email lands in the catch-all under that address."""
-    email = alias_for(directory=platform, client_id=client_id, domain=catchall_domain)
+    """Build a :class:`SignupContext`.
+
+    ``ownership='house'`` (the default) keeps the deterministic per-(platform, client)
+    catch-all alias: a retry REUSES the same account (never fans one client into many)
+    and the confirmation email lands in the catch-all under that address. That is
+    legitimate for a house account, which is openly agency-owned and impersonates
+    nobody.
+
+    ``ownership='per_client'`` REFUSES to generate an identity and requires an explicit
+    ``handle`` + ``email`` (R2-08). The generated alias is
+    ``{platform-slug}-{sha1(client_id)[:10]}@{one shared domain}``, which emits three
+    joinable keys at once - a shared prefix per platform, a shared suffix per client,
+    and one registrant domain across the whole client base - so a platform that
+    suspends ONE account can enumerate the rest. No content-level check can see that,
+    which is why it is refused here rather than warned about."""
+    if ownership == "per_client":
+        if not handle.strip() or not email.strip():
+            raise ValueError(
+                "a per_client signup needs an explicit brand handle and a registration "
+                "email on the client's own domain; the generated catch-all alias is a "
+                "cross-client footprint (R2-08)"
+            )
+        alias_email = email.strip()
+        username = handle.strip()
+    else:
+        alias_email = email.strip() or alias_for(
+            directory=platform, client_id=client_id, domain=catchall_domain
+        )
+        username = handle.strip() or _username_from_alias(alias_email)
     return SignupContext(
         platform=platform,
-        alias_email=email,
-        username=_username_from_alias(email),
+        alias_email=alias_email,
+        username=username,
         password=password or generate_password(),
         business_name=business_name,
         mailbox=mailbox,

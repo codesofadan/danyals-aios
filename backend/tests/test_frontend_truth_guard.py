@@ -44,6 +44,27 @@ def _source_files() -> list[Path]:
     return files
 
 
+def _shipped_files() -> list[Path]:
+    """The authored files a BROWSER is actually served.
+
+    Rule 1 (no unit price) is a claim about what a user can be shown, and a test
+    file is not shipped: vitest specs are never bundled. A currency FORMATTER
+    cannot be unit-tested without currency literals in its assertions -
+    `usd(1234) === "$1,234"` is a formatting contract, not a price - so scanning
+    them makes the rule un-satisfiable for the one file that most needs tests.
+
+    Deliberately NOT used by the credential rules below. A realistic fake key in a
+    spec is still a realistic fake key in the repository, and that guard's whole
+    point is that a fake is indistinguishable from a leak during triage.
+    """
+    return [p for p in _source_files() if not _is_spec(p)]
+
+
+def _is_spec(path: Path) -> bool:
+    return any(path.name.endswith(suffix) for suffix in (".test.ts", ".test.tsx",
+                                                         ".spec.ts", ".spec.tsx"))
+
+
 def _rel(path: Path) -> str:
     return str(path.relative_to(_REPO_ROOT))
 
@@ -93,8 +114,38 @@ def _price_offenders(path: Path) -> list[str]:
     return hits
 
 
+def test_the_spec_exclusion_is_narrow_and_stays_narrow() -> None:
+    """Only the PRICE rule skips specs. The credential rules must not.
+
+    Rule 1 asks "could a user be shown a made-up price", and a spec is never
+    served. Rule 2 asks "is a realistic fake credential sitting in this
+    repository", and a spec is exactly as much of a triage hazard as any other
+    file. Widening the exclusion to the secret scan would be how a plausible
+    `sk-ant-...` gets parked in a fixture and read as a live leak six months later.
+    """
+    everything = set(_source_files())
+    shipped = set(_shipped_files())
+    specs = everything - shipped
+
+    # The guard only means something if specs actually exist to be excluded.
+    assert specs, "no spec files found; the exclusion is scanning nothing"
+    assert all(_is_spec(p) for p in specs)
+    assert shipped < everything
+
+    # And the secret scan must still READ every one of them. Asserting that specs
+    # currently contain no secrets proves nothing - they contain none either way,
+    # so that version of this test passed with the exclusion widened. What has to
+    # be pinned is which file list the credential rule walks.
+    import inspect
+    secret_rule = inspect.getsource(test_no_credential_shaped_literal_ships_to_the_browser)
+    assert "_source_files()" in secret_rule, (
+        "the credential scan must walk EVERY authored file, specs included"
+    )
+    assert "_shipped_files()" not in secret_rule
+
+
 def test_no_hardcoded_unit_price_anywhere_in_the_frontend() -> None:
-    offenders = [hit for path in _source_files() for hit in _price_offenders(path)]
+    offenders = [hit for path in _shipped_files() for hit in _price_offenders(path)]
     assert not offenders, (
         "A price literal was written into the frontend. Unit prices come from "
         "GET /cost/pricing (see useProviderPricing), which reads the same Settings "

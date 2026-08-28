@@ -115,11 +115,11 @@ x-app-env: &app-env
   CITATION_IMAP_USER: ${CITATION_IMAP_USER:-}
   CITATION_IMAP_PASSWORD: ${CITATION_IMAP_PASSWORD:-}
   CITATION_MAIL_DOMAIN: ${CITATION_MAIL_DOMAIN:-}
-  # House Web 2.0 publishing credentials (JSON: platform -> credential fields).
-  # NOT read at runtime — runtime reads the VAULT. This feeds the one-shot
-  # `python -m app.cli.seed_web2_vault --yes` seeder (run it inside the api
-  # container after adding a client) which writes the per-client vault rows.
-  WEB2_HOUSE_CREDENTIALS_JSON: ${WEB2_HOUSE_CREDENTIALS_JSON:-}
+  # (WEB2_HOUSE_CREDENTIALS_JSON was REMOVED 2026-08-25 with `app.cli.seed_web2_vault`
+  # (R2-06). It held shared HOUSE logins the seeder copied into every client's vault
+  # row — one shared login is one shared failure domain, and the copies made clients
+  # mutually identifiable. Register accounts with `python -m app.cli.web2_accounts
+  # register` instead; each credential is sealed once under its web2_accounts id.)
   # Reports: Google Sheets operational store (service-account credential JSON).
   GOOGLE_SHEETS_SA_JSON: ${GOOGLE_SHEETS_SA_JSON:-}
   SENTRY_DSN: ${SENTRY_DSN:-}

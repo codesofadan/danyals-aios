@@ -18,6 +18,7 @@ import pytest
 
 from app.config import Settings
 from app.services.cost_gate import CostGate, DialMode, GateContext
+from app.services.web2_pipeline import Web2Outcome
 from integrations.backlinks import BacklinkProvider, BacklinkRecord, FakeBacklinkProvider
 from integrations.citations import CitationRecord, FakeCitationProvider
 from integrations.llm import LLMResult
@@ -367,6 +368,102 @@ def test_web2_write_worker_wiring_and_redelivery(monkeypatch: pytest.MonkeyPatch
 
     second = wk.execute_web2_write(store, _settings(), "w2-1")  # type: ignore[arg-type]
     assert second.state == "unchanged"  # redelivery is a no-op (no double-spend)
+
+
+def test_client_geo_is_carried_from_the_joined_business_profile() -> None:
+    """`Web2Client.geo` was declared and consumed but NEVER populated, so it was None in
+    production. That is two defects at once: the writer generated every local-business
+    article with no geo signal, and the similarity gate could not mask the city - the
+    exact token whose presence lets two templated articles score as distinct. The store
+    now joins it in as `client_geo`; this pins that it reaches the client object."""
+    client = wk._client_from_row(_draft_row(client_geo="Leeds"))
+    assert client.geo == "Leeds"
+
+
+def test_a_missing_business_profile_leaves_geo_none_not_blank() -> None:
+    """A client with no profile must degrade to None (the generator's 'no geo' path),
+    never to an empty string that would mask nothing and read as a real value."""
+    assert wk._client_from_row(_draft_row()).geo is None
+    assert wk._client_from_row(_draft_row(client_geo="   ")).geo is None
+
+
+def test_web2_write_celery_task_never_auto_publishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CELERY TASK - not just the pure core - must park a clean draft at review.
+
+    This covers the wrapper, which is where an auto-publish branch previously lived and
+    where no test reached it: ``execute_web2_write`` never published, so the pure-core
+    tests above stayed green while the task shipped a cleanly-drafted property straight
+    to ``publishing`` with no lead approval. The only legal path out of ``needs_review``
+    is a lead's approve call, so a publish enqueue from here is a defect by definition.
+    """
+    store = FakeOffpageStore(web2={"w2-1": _draft_row(status="needs_review")})
+    enqueued: list[str] = []
+
+    # Stub the pure core (tested above) so this test drives the WRAPPER against the
+    # exact outcome the removed branch keyed on: a clean, non-degraded 'drafted' write.
+    # Without pinning that outcome the branch never fires and the guard is vacuous.
+    monkeypatch.setattr(
+        wk,
+        "execute_web2_write",
+        lambda store, settings, web2_id: Web2Outcome(
+            web2_id, "write", "needs_review", degraded=False, reason="drafted"
+        ),
+    )
+    monkeypatch.setattr(wk, "service_offpage_store", lambda: store)
+    monkeypatch.setattr(wk, "get_settings", _settings)
+    monkeypatch.setattr(wk.web2_publish_job, "delay", lambda web2_id: enqueued.append(web2_id))
+
+    outcome = wk.web2_write_job.run("w2-1")
+
+    assert outcome["state"] == "needs_review"
+    assert store.web2["w2-1"]["status"] == "needs_review"  # NOT flipped to 'publishing'
+    assert enqueued == []  # the publish job was never enqueued
+    assert store.web2["w2-1"]["post_url"] == ""  # nothing went live
+
+
+def test_the_release_tick_publishes_due_rows_and_defers_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The drip in one test: several properties come due together, the pacing caps
+    permit one, and the rest are RESCHEDULED rather than published or dropped.
+
+    Releasing all of them is the obvious implementation and it turns a carefully paced
+    campaign into a burst at exactly the moment the caps were meant to bite.
+    """
+    due = [
+        {
+            "id": f"w2-{i}", "client_id": "cl-1", "platform": "Blogger",
+            "status": "publishing", "account_id": None, "ownership": "per_client",
+        }
+        for i in range(4)
+    ]
+    store = FakeOffpageStore(web2={d["id"]: dict(d) for d in due})
+    store.pacing_caps_row = lambda: {"publish_jitter_max_hours": 0}  # type: ignore[method-assign]
+    store.recent_web2_publishes = lambda **_kw: []  # type: ignore[method-assign]
+    enqueued: list[str] = []
+
+    monkeypatch.setattr(wk, "claim_due_web2_releases", lambda: due)
+    monkeypatch.setattr(wk.web2_publish_job, "delay", lambda web2_id: enqueued.append(web2_id))
+
+    result = wk.execute_web2_release(store, _settings())  # type: ignore[arg-type]
+
+    assert result["claimed"] == 4
+    assert len(result["released"]) == 1  # the per-client daily cap bites inside the tick
+    assert len(result["deferred"]) == 3
+    assert enqueued == result["released"]
+    # A released row's slot is CLEARED so a redelivered tick cannot claim it again;
+    # a deferred row's slot MOVES so it is still going out, just later.
+    assert store.web2[result["released"][0]]["scheduled_for"] is None
+    for web2_id in result["deferred"]:
+        assert store.web2[web2_id]["scheduled_for"] is not None
+
+
+def test_the_release_tick_is_a_no_op_when_nothing_is_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(wk, "claim_due_web2_releases", lambda: [])
+    result = wk.execute_web2_release(FakeOffpageStore(), _settings())  # type: ignore[arg-type]
+    assert result == {"claimed": 0, "released": [], "deferred": []}
 
 
 def test_web2_publish_worker_never_raises_on_store_failure(monkeypatch: pytest.MonkeyPatch) -> None:

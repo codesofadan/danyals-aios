@@ -25,6 +25,12 @@ import type {
   Directory,
   DirectoryTier,
   OffpageKpis,
+  Web2Campaign,
+  Web2CampaignApproval,
+  Web2CampaignEstimate,
+  Web2Placement,
+  Web2CampaignInput,
+  Web2PlatformStatusRow,
   Web2Property,
   Web2Status,
 } from "@/lib/offpage";
@@ -279,8 +285,124 @@ export function usePlanWeb2() {
 export function useApproveWeb2() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, action }: { id: string; action: "approve" | "reject" }) =>
-      api.post<Web2Property>(`/offpage/web2/${id}/approve`, { action }),
+    // `acknowledgeSimilarity` is only sent when the operator has actually seen a
+    // similarity finding and confirmed the article is distinct. A plain approve
+    // deliberately does not carry it, so a collision cannot be clicked past by habit.
+    mutationFn: ({ id, action, acknowledgeSimilarity }: {
+      id: string;
+      action: "approve" | "reject";
+      acknowledgeSimilarity?: boolean;
+    }) =>
+      api.post<Web2Property>(`/offpage/web2/${id}/approve`, {
+        action,
+        ...(acknowledgeSimilarity ? { acknowledgeSimilarity: true } : {}),
+      }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: WEB2_KEY }),
+  });
+}
+
+// --- Web 2.0 campaigns --------------------------------------------------------
+
+export const WEB2_CAMPAIGNS_KEY = ["offpage", "web2", "campaigns"] as const;
+export const WEB2_BOARD_KEY = ["offpage", "web2", "platform-board"] as const;
+
+/**
+ * The three-state platform board for ONE client.
+ *
+ * This replaces reading a hard-coded platform list on the client: which platforms a
+ * client may use is a server-side judgement (their own topical scope against each
+ * platform's published terms), so the UI asks rather than assumes. Every catalogue row
+ * comes back — the ineligible ones carry the platform's own reason — which is what lets
+ * the board show the system's full reach instead of a silently shorter list.
+ */
+export function useWeb2PlatformBoard(clientId: string | undefined) {
+  return useQuery({
+    queryKey: [...WEB2_BOARD_KEY, clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2PlatformStatusRow[]>(
+        `/offpage/web2/platform-board?clientId=${encodeURIComponent(clientId ?? "")}`,
+      ),
+    enabled: !!clientId,
+  });
+}
+
+/** Campaigns for the board (optionally narrowed to one client). */
+export function useWeb2Campaigns(clientId?: string) {
+  return useQuery({
+    queryKey: [...WEB2_CAMPAIGNS_KEY, clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2Campaign[]>(
+        `/offpage/web2/campaigns${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
+      ),
+    refetchInterval: 30_000,
+  });
+}
+
+/**
+ * Price and schedule a campaign WITHOUT creating anything.
+ *
+ * Separate from create on purpose: thirty articles is thirty metered drafting runs and,
+ * at the default pacing, about a month of publishing. Both belong in front of the
+ * operator at the moment they decide, not afterwards.
+ */
+export function useEstimateWeb2Campaign() {
+  return useMutation({
+    mutationFn: (body: Web2CampaignInput) =>
+      api.post<Web2CampaignEstimate>("/offpage/web2/campaigns/estimate", body),
+  });
+}
+
+/** Every placement in one campaign — the report behind the rollup. */
+export function useCampaignPlacements(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["web2-placements", campaignId ?? ""],
+    queryFn: () =>
+      api.get<Web2Placement[]>(
+        `/offpage/web2/campaigns/${encodeURIComponent(campaignId ?? "")}/placements`,
+      ),
+    enabled: Boolean(campaignId),
+    refetchInterval: 20_000,
+  });
+}
+
+/** The cross-campaign ledger: everything ever built, newest first. */
+export function useWeb2Placements(clientId?: string) {
+  return useQuery({
+    queryKey: ["web2-placements-all", clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2Placement[]>(
+        `/offpage/web2/placements${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
+      ),
+    refetchInterval: 30_000,
+  });
+}
+
+/** ONE operator decision for the whole campaign. The server still transitions each
+ *  property individually (Tumblr requires a per-post human action), so this is a single
+ *  click over structurally-individual approvals - not a batch write. */
+export function useApproveWeb2Campaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ campaignId, action }: { campaignId: string; action: "approve" | "reject" }) =>
+      api.post<Web2CampaignApproval>(
+        `/offpage/web2/campaigns/${encodeURIComponent(campaignId)}/approve`,
+        { action },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: WEB2_CAMPAIGNS_KEY });
+      void qc.invalidateQueries({ queryKey: WEB2_KEY });
+    },
+  });
+}
+
+export function useCreateWeb2Campaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Web2CampaignInput) =>
+      api.post<Web2Campaign>("/offpage/web2/campaigns", body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: WEB2_CAMPAIGNS_KEY });
+      void qc.invalidateQueries({ queryKey: WEB2_KEY });
+    },
   });
 }

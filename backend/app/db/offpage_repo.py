@@ -15,6 +15,7 @@ column lists come from server-built dicts quoted via ``psycopg.sql.Identifier``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from typing import Annotated, Any
 
@@ -332,6 +333,187 @@ class OffpageRepo:
             )
             return cur.fetchone()
 
+    # --- campaigns (the operator's unit of work) ---------------------------------- #
+
+    def eligible_catalog(self) -> _Rows:
+        """The automation-ready catalogue rows the eligibility service classifies."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select name, platform_enum, ownership_tier, topical_scope, "
+                "       automation_ready, authority_tier, terms_position "
+                "from public.web2_platforms order by authority_tier, name"
+            )
+            return list(cur.fetchall())
+
+    def client_web2_scope(self, client_id: str) -> str:
+        """The client's declared topical scope (defaults to the safe agnostic set)."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select web2_topical_scope from public.clients where id = %s", (client_id,)
+            )
+            row = cur.fetchone()
+        return str(row["web2_topical_scope"]) if row else "agnostic"
+
+    def pacing_caps_row(self) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute("select * from public.web2_pacing_settings where id = 1")
+            return cur.fetchone()
+
+    def client_publish_history(self, client_id: str, *, days: int = 120) -> _Rows:
+        """Recent placements, for pacing. A campaign does not start from zero for a
+        client who published yesterday."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, client_id, platform, account_id, published_at, scheduled_for "
+                "from public.web2_properties "
+                "where client_id = %s "
+                "  and coalesce(published_at::timestamptz, scheduled_for) is not null "
+                "  and coalesce(published_at::timestamptz, scheduled_for) "
+                "      > now() - make_interval(days => %s) "
+                "order by coalesce(published_at::timestamptz, scheduled_for) desc",
+                (client_id, days),
+            )
+            return list(cur.fetchall())
+
+    def create_campaign(
+        self,
+        *,
+        client_id: str,
+        client_name: str,
+        title: str,
+        article_count: int,
+        platforms: list[str],
+        pacing: str,
+        drip_window_days: int,
+        target_url: str,
+        cost_ceiling_usd: float,
+        created_by: str | None,
+    ) -> dict[str, Any] | None:
+        """Insert the campaign row (lead-only by RLS) at status ``planning``."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "insert into public.web2_campaigns "
+                "(client_id, client_name, title, article_count, platforms, pacing, "
+                " drip_window_days, target_url, cost_ceiling_usd, created_by, status) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'planning') returning *",
+                (
+                    client_id, client_name, title, article_count, platforms, pacing,
+                    drip_window_days, target_url, cost_ceiling_usd, created_by,
+                ),
+            )
+            return cur.fetchone()
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.web2_campaigns where id = %s limit 1", (campaign_id,)
+            )
+            return cur.fetchone()
+
+    def list_campaigns(self, *, client_id: str | None = None, limit: int = 50) -> _Rows:
+        with rls_connection(self._user_id) as cur:
+            if client_id:
+                cur.execute(
+                    "select * from public.web2_campaigns where client_id = %s "
+                    "order by created_at desc limit %s",
+                    (client_id, limit),
+                )
+            else:
+                cur.execute(
+                    "select * from public.web2_campaigns order by created_at desc limit %s",
+                    (limit,),
+                )
+            return list(cur.fetchall())
+
+    def campaign_properties(self, campaign_id: str) -> _Rows:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, platform, topic, anchor, status, post_url, verified, "
+                "       scheduled_for, error "
+                "from public.web2_properties where campaign_id = %s order by scheduled_for",
+                (campaign_id,),
+            )
+            return list(cur.fetchall())
+
+    def campaign_placements(self, campaign_id: str) -> _Rows:
+        """The full per-placement record behind a campaign - the operator's audit trail.
+
+        Separate from `campaign_properties` (which feeds the rollup and stays lean)
+        because this is the DELIVERABLE view: every fact needed to answer "what did we
+        actually build, where is it, and is the link really live". All of it was already
+        stored and none of it was reachable, which is why a finished campaign could not
+        be shown to a client.
+
+        The account handle is joined in so the row says WHICH identity published it -
+        without that, a shared-account placement is indistinguishable from a client-owned
+        one on screen, which is exactly the distinction that matters.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select p.id, p.client_name, p.platform, p.topic, p.framework, p.anchor, "
+                "       p.target_url, p.post_url, p.status, p.verified, p.error, "
+                "       p.link_rel, p.link_found, p.link_checked_at, p.scheduled_for, "
+                "       p.published_at, p.created_at, p.updated_at, p.shared_origin, "
+                "       coalesce(a.handle, '') as account_handle, "
+                "       coalesce(a.ownership::text, '') as account_ownership "
+                "from public.web2_properties p "
+                "left join public.web2_accounts a on a.id = p.account_id "
+                "where p.campaign_id = %s "
+                "order by coalesce(p.published_at::timestamptz, p.scheduled_for), p.platform",
+                (campaign_id,),
+            )
+            return list(cur.fetchall())
+
+    def client_placements(self, client_id: str | None = None, *, limit: int = 500) -> _Rows:
+        """Every placement, newest first - the cross-campaign ledger.
+
+        A client's Web 2.0 history is not one campaign: it is everything ever published
+        for them, including the single-property builds that predate campaigns. Scoping by
+        campaign alone would hide those.
+        """
+        where = "where p.client_id = %s" if client_id else ""
+        params: tuple[Any, ...] = (client_id, limit) if client_id else (limit,)
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select p.id, p.client_name, p.platform, p.topic, p.framework, p.anchor, "
+                "       p.target_url, p.post_url, p.status, p.verified, p.error, "
+                "       p.link_rel, p.link_found, p.link_checked_at, p.scheduled_for, "
+                "       p.published_at, p.created_at, p.updated_at, p.shared_origin, "
+                "       p.campaign_id, "
+                "       coalesce(a.handle, '') as account_handle, "
+                "       coalesce(a.ownership::text, '') as account_ownership "
+                "from public.web2_properties p "
+                "left join public.web2_accounts a on a.id = p.account_id "
+                f"{where} "
+                "order by p.created_at desc limit %s",
+                params,
+            )
+            return list(cur.fetchall())
+
+    def update_campaign(self, campaign_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+        if not fields:
+            return self.get_campaign(campaign_id)
+        cols = list(fields.keys())
+        assignments = sql.SQL(", ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(c)) for c in cols
+        )
+        stmt = sql.SQL(
+            "update public.web2_campaigns set {} where id = %s returning *"
+        ).format(assignments)
+        with rls_connection(self._user_id) as cur:
+            cur.execute(stmt, (*[fields[c] for c in cols], campaign_id))
+            return cur.fetchone()
+
+    def attach_property_to_campaign(
+        self, web2_id: str, campaign_id: str, scheduled_for: Any
+    ) -> None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.web2_properties set campaign_id = %s, scheduled_for = %s "
+                "where id = %s",
+                (campaign_id, scheduled_for, web2_id),
+            )
+
     def update_web2_status(
         self, web2_id: str, changes: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -373,9 +555,23 @@ class ServiceOffpageStore:
 
     # --- web 2.0 (the publish pipeline's Web2Store) ---------------------------
     def load_web2(self, web2_id: str) -> dict[str, Any] | None:
+        """The placement row, plus the client's city as ``client_geo``.
+
+        The LEFT JOIN carries the one fact the row itself cannot: ``web2_properties``
+        has no geo column, but the writer wants a geo signal (``Web2Client.geo`` feeds
+        the research brief and the generation context) and the similarity gate MUST
+        mask the city before shingling - the varying city token is precisely what hides
+        templating from a raw comparison. ``p.*`` is preserved, so every existing key is
+        unchanged and this is additive for all callers; a client with no business
+        profile yields ``''`` rather than a missing key.
+        """
         with privileged_connection() as cur:
             cur.execute(
-                "select * from public.web2_properties where id = %s limit 1", (web2_id,)
+                "select p.*, coalesce(b.city, '') as client_geo "
+                "from public.web2_properties p "
+                "left join public.client_business_profiles b on b.client_id = p.client_id "
+                "where p.id = %s limit 1",
+                (web2_id,),
             )
             return cur.fetchone()
 
@@ -476,6 +672,217 @@ class ServiceOffpageStore:
                 "where id = %s",
                 (nap_status, action, note, citation_id),
             )
+
+
+    # --- the cross-property similarity gate (WEB2-007 / R2-09..R2-11) ------------- #
+    #
+    # These two methods are the ONLY place the platform reads across tenants on purpose.
+    # They return hashes and ids - never another client's text - so a collision can be
+    # reported ("this duplicates property X on the same house account") without exposing
+    # what X says. Both run on the privileged pool for exactly that reason.
+
+    def web2_similarity_candidates(
+        self,
+        *,
+        sampled_hashes: Sequence[int],
+        body_sha256: str,
+        client_id: str | None,
+        account_id: str | None,
+        platform: str,
+        exclude_web2_id: str,
+        platform_window_days: int = 90,
+        min_shared: int = 2,
+        limit: int = 200,
+    ) -> _Rows:
+        """Prior fingerprints that could plausibly collide with this draft.
+
+        TWO queries deliberately, unioned, because they fail in different ways:
+
+        1. An EXACT `body_sha256` match, looked up directly on its index. This must not
+           depend on the shingle sample: a short draft yields very few sampled hashes
+           (measured: a 35-shingle document samples 3), so it can be arithmetically
+           impossible for it to share `min_shared` with anything - and an identical copy
+           of a short article would then sail through a sample-only search. The exact
+           check is cheap and has no such blind spot.
+        2. Broder MOD_16 candidate generation - prior documents sharing at least
+           `min_shared` SAMPLED hashes. Narrows the field; scoring then runs on the full
+           arrays, so the sample can never change a verdict, only what gets scored.
+
+        Scope (R2-10) is applied in SQL rather than in Python so a cross-tenant read is
+        never wider than the three scopes justify: S1 the client's own set, S2 everyone
+        sharing this house ACCOUNT, S3 the same platform in a rolling window.
+        """
+        scope_sql = [
+            "(f.client_id = %(client_id)s)",
+            "(f.platform = %(platform)s and f.created_at > now() - make_interval(days => %(win)s))",
+        ]
+        params: dict[str, Any] = {
+            "client_id": client_id,
+            "platform": platform,
+            "win": platform_window_days,
+            "exclude": exclude_web2_id,
+            "sha": body_sha256,
+            "hashes": list(sampled_hashes),
+            "min_shared": min_shared,
+            "limit": limit,
+            "account_id": account_id,
+        }
+        # S2 only exists for a property with a known account. A NULL account_id must not
+        # widen into "every property whose account is also unknown" - that would compare
+        # unrelated clients under a scope label that claims they share a login.
+        if account_id:
+            scope_sql.append("(f.account_id = %(account_id)s)")
+        scopes = " or ".join(scope_sql)
+
+        # NOTE ON THE SHAPE, because two earlier versions of this query were WRONG in
+        # ways that made the gate look installed while missing the thing it exists to
+        # catch. Both were reproduced on a real corpus before being fixed:
+        #
+        #  * `exact` reads the BASE TABLE, not the `scoped` CTE. `scoped` is referenced
+        #    twice, so Postgres materializes it and an equality filter over the CTE can
+        #    never use `web2_doc_fp_sha_idx` - it scans every scoped row instead.
+        #  * The outer LIMIT is ordered by `shared`, NOT by `id`. `distinct on (id)`
+        #    forces `id` to lead the INNER order, so ordering the whole thing by `id`
+        #    made `limit` keep the 200 lowest UUIDs - i.e. an arbitrary subset. An exact
+        #    duplicate with a high uuid was silently discarded and the gate returned
+        #    `pass`, and it degraded as the corpus grew: worst exactly where it matters.
+        sql_text = f"""
+            with scoped as (
+                select f.id, f.web2_id, f.client_id, f.account_id, f.platform,
+                       f.body_sha256, f.shingle_hashes, f.heading_hashes, f.anchor_norm,
+                       f.created_at
+                from public.web2_doc_fingerprints f
+                where f.web2_id <> %(exclude)s and ({scopes})
+            ),
+            exact as (
+                select f.id, f.web2_id, f.client_id, f.account_id, f.platform,
+                       f.body_sha256, f.shingle_hashes, f.heading_hashes, f.anchor_norm,
+                       f.created_at, 2147483647 as shared
+                from public.web2_doc_fingerprints f
+                where f.body_sha256 = %(sha)s and f.web2_id <> %(exclude)s and ({scopes})
+            ),
+            sampled as (
+                select s.*, count(*)::int as shared
+                from scoped s
+                join public.web2_shingle_index i on i.fingerprint_id = s.id
+                where i.shingle_hash = any(%(hashes)s)
+                group by s.id, s.web2_id, s.client_id, s.account_id, s.platform,
+                         s.body_sha256, s.shingle_hashes, s.heading_hashes, s.anchor_norm,
+                         s.created_at
+                having count(*) >= %(min_shared)s
+            )
+            select * from (
+                select distinct on (id) * from (
+                    select * from exact union all select * from sampled
+                ) u
+                order by id, shared desc
+            ) d
+            order by d.shared desc, d.created_at desc
+            limit %(limit)s
+        """
+        with privileged_connection() as cur:
+            cur.execute(sql_text, params)
+            return list(cur.fetchall())
+
+    def record_web2_fingerprint(
+        self,
+        *,
+        web2_id: str,
+        client_id: str,
+        account_id: str | None,
+        platform: str,
+        body_sha256: str,
+        shingle_hashes: Sequence[int],
+        heading_hashes: Sequence[int],
+        sampled_hashes: Sequence[int],
+        anchor_norm: str,
+        status_at_capture: str,
+    ) -> str | None:
+        """Persist (or replace) one property's fingerprint and its MOD_16 sample.
+
+        Called on APPROVAL, never on draft (R2-11): a rejected or redrafted article must
+        not become part of the corpus that later drafts are measured against, or a bad
+        draft would permanently poison its own client's remaining properties.
+
+        Replace-not-append: the unique index on `web2_id` means a re-approval overwrites,
+        and the sample rows cascade with it, so a redraft cannot leave its old shingles
+        behind to collide with its own replacement.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "delete from public.web2_doc_fingerprints where web2_id = %s", (web2_id,)
+            )
+            cur.execute(
+                "insert into public.web2_doc_fingerprints "
+                "(web2_id, client_id, account_id, platform, body_sha256, shingle_hashes, "
+                " shingle_count, heading_hashes, anchor_norm, status_at_capture) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id",
+                (
+                    web2_id, client_id, account_id, platform, body_sha256,
+                    list(shingle_hashes), len(shingle_hashes), list(heading_hashes),
+                    anchor_norm, status_at_capture,
+                ),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            fingerprint_id = str(row["id"] if isinstance(row, dict) else row[0])
+            if sampled_hashes:
+                cur.executemany(
+                    "insert into public.web2_shingle_index (shingle_hash, fingerprint_id) "
+                    "values (%s, %s) on conflict do nothing",
+                    [(h, fingerprint_id) for h in sampled_hashes],
+                )
+            return fingerprint_id
+
+    def pacing_caps_row(self) -> dict[str, Any] | None:
+        """The agency-global pacing caps (privileged read for the release tick)."""
+        with privileged_connection() as cur:
+            cur.execute("select * from public.web2_pacing_settings where id = 1")
+            return cur.fetchone()
+
+    def recent_web2_publishes(self, *, days: int = 45) -> _Rows:
+        """Recent LIVE placements across all clients, for the release tick's cap checks.
+
+        Cross-client on purpose: the house-account ceilings are a property of the shared
+        account, not of any one client, so a per-client view could not enforce them.
+        Bounded to a window because the caps only ever look back 30 days.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select p.id as web2_id, p.client_id, p.platform, p.account_id, "
+                "       p.published_at::timestamptz as published_at, "
+                "       coalesce(a.ownership::text, 'per_client') as ownership "
+                "from public.web2_properties p "
+                "left join public.web2_accounts a on a.id = p.account_id "
+                "where p.published_at is not null "
+                "  and p.published_at::timestamptz > now() - make_interval(days => %s)",
+                (days,),
+            )
+            return list(cur.fetchall())
+
+    def known_web2_urls(self) -> set[str]:
+        """Every published property URL plus every account's property URL.
+
+        R2-15 bans inter-property linking outright: a graph with edges between our own
+        properties is the clearest network tell available to a platform or to Google, and
+        unlike prose similarity it is trivially machine-detectable from the open web.
+        """
+        urls: set[str] = set()
+        with privileged_connection() as cur:
+            cur.execute(
+                "select post_url from public.web2_properties "
+                "where post_url is not null and post_url <> ''"
+            )
+            for row in cur.fetchall():
+                urls.add(str(row["post_url"] if isinstance(row, dict) else row[0]))
+            cur.execute(
+                "select property_url from public.web2_accounts "
+                "where property_url is not null and property_url <> ''"
+            )
+            for row in cur.fetchall():
+                urls.add(str(row["property_url"] if isinstance(row, dict) else row[0]))
+        return urls
 
 
 def service_offpage_store() -> ServiceOffpageStore:

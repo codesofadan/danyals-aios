@@ -165,6 +165,28 @@ def test_make_context_alias_is_deterministic_per_platform_and_client() -> None:
     assert a.username and "@" not in a.username
 
 
+def test_a_per_client_signup_refuses_the_generated_identity() -> None:
+    """R2-08. The generated alias is ``{platform}-{sha1(client_id)[:10]}@{one domain}``,
+    which hands a platform three joinable keys - a shared prefix per platform, a shared
+    suffix per client, one registrant domain across the whole base. Refusing (not
+    warning) is the point: a warning would be ignored and the footprint would ship."""
+    with pytest.raises(ValueError, match="footprint"):
+        make_context(
+            platform=PLATFORM_WRITEAS, client_id=_CLIENT, catchall_domain=_DOMAIN,
+            ownership="per_client",
+        )
+
+
+def test_a_per_client_signup_uses_the_supplied_brand_identity() -> None:
+    ctx = make_context(
+        platform=PLATFORM_WRITEAS, client_id=_CLIENT, catchall_domain=_DOMAIN,
+        ownership="per_client", handle="acmeroofing", email="web@acmeroofing.co.uk",
+    )
+    assert ctx.username == "acmeroofing"
+    assert ctx.alias_email == "web@acmeroofing.co.uk"
+    assert _DOMAIN not in ctx.alias_email  # never the shared catch-all
+
+
 # --------------------------------------------------------------------------- #
 # Telegra.ph anonymous provider.
 # --------------------------------------------------------------------------- #

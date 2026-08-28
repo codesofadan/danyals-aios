@@ -200,6 +200,130 @@ export type Web2Property = {
   status: Web2PipelineStatus;
 };
 
+// --- Web 2.0 campaigns + the per-client platform board -------------------------
+
+/**
+ * One row of the three-state platform board.
+ *
+ * `not_connected` and `not_eligible` are deliberately different states: the first is a
+ * missing credential an operator can go and fix, the second is a judgement about this
+ * client that no credential changes. Collapsing them into one "unavailable" would send
+ * someone hunting for a token that could not help.
+ */
+export type Web2PlatformStatusRow = {
+  name: string;
+  platform: string | null;
+  status: "eligible" | "not_connected" | "not_eligible";
+  reason: string;
+  authorityTier: string;
+};
+
+export type Web2CampaignStatus =
+  | "draft" | "planning" | "needs_approval" | "scheduled"
+  | "running" | "completed" | "degraded" | "cancelled";
+
+export type Web2PacingMode = "immediate" | "drip";
+
+/** One property a campaign approval refused to wave through, named so the operator can
+ *  redraft that one rather than being told "something failed". */
+/** One Web 2.0 placement in full — the deliverable record.
+ *
+ *  `linkFound` / `linkRel` are the honest part: "published" only means the platform
+ *  accepted the post. Whether OUR link is actually on the page, and whether it is
+ *  followed, is a separate measured fact — reporting a placement as delivered without
+ *  it is how an agency invoices for a link a platform quietly stripped.
+ */
+export type Web2Placement = {
+  id: string;
+  client: string;
+  platform: string;
+  topic: string;
+  framework: string;
+  anchor: string;
+  targetUrl: string;
+  postUrl: string;
+  status: Web2PipelineStatus;
+  verified: string;
+  linkRel: string;
+  linkFound: boolean | null;
+  linkChecked: string;
+  scheduledFor: string;
+  published: string;
+  created: string;
+  account: string;
+  accountOwnership: string;
+  sharedOrigin: boolean;
+  note: string;
+};
+
+export type Web2CampaignHold = {
+  web2Id: string;
+  topic: string;
+  platform: string;
+  reason: string;
+};
+
+/** What one campaign-level decision actually did. Approved / held / rejected are kept
+ *  separate on purpose: an approval that published 27 of 30 and held 3 is not a clean
+ *  approval, and collapsing it to "ok" is the partial-delivery-as-success defect. */
+export type Web2CampaignApproval = {
+  campaignId: string;
+  status: Web2CampaignStatus;
+  approved: number;
+  held: Web2CampaignHold[];
+  rejected: number;
+};
+
+export type Web2Campaign = {
+  id: string;
+  client: string;
+  title: string;
+  status: Web2CampaignStatus;
+  articleCount: number;
+  platforms: string[];
+  pacing: Web2PacingMode;
+  estimatedCostUsd: number;
+  spentUsd: number;
+  /** How many properties have actually gone live. */
+  published: number;
+  total: number;
+  nextPublish: string;
+};
+
+export type Web2PlannedProperty = {
+  platform: string;
+  topic: string;
+  anchor: string;
+  framework: string;
+  scheduledFor: string;
+};
+
+/** The pre-commit quote: what it would create, what it costs, when it finishes. */
+export type Web2CampaignEstimate = {
+  count: number;
+  estimatedCostUsd: number;
+  projectedCompletion: string;
+  properties: Web2PlannedProperty[];
+  /** Human-readable caveats: dropped platforms with reasons, cap notes, the timeline. */
+  notes: string[];
+};
+
+export type Web2CampaignInput = {
+  clientId: string;
+  title?: string;
+  articleCount: number;
+  /** ONE DISTINCT TOPIC PER ARTICLE. The server refuses a campaign that reuses a topic:
+   *  one topic across N platforms produces N identical articles. */
+  topics: string[];
+  platforms: string[];
+  anchors: string[];
+  targetUrl: string;
+  pacing: Web2PacingMode;
+  dripWindowDays?: number;
+  costCeilingUsd?: number;
+  proofPoints?: string[];
+};
+
 // The publish PIPELINE's state machine (0028) — distinct from `verified`, which is
 // the live/indexable check on an ALREADY-published row. Drives the plan/approve UI:
 // `needs_review` rows get an Approve/Reject action, everything else is read-only.

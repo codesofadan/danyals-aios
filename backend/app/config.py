@@ -597,12 +597,32 @@ class Settings(BaseSettings):
     # publisher factory degrades to 'hold at the review gate' until that wiring lands. ---
     web2_publish_cost_estimate: float = 0.0  # marginal cost of one blog-API publish
     offpage_monitor_cost_estimate: float = 0.05  # one backlink/citation provider pull
-    # House Web 2.0 publishing accounts (JSON: platform -> credential fields). NOT a
-    # runtime seam — the publish pipeline reads the VAULT (one row per client x
-    # platform). This only feeds the one-shot `app.cli.seed_web2_vault` seeder that
-    # writes those vault rows for every client; a SecretStr because it carries live
-    # tokens (never logged / never in a repr). Optional, never required in prod.
-    web2_house_credentials_json: SecretStr | None = None
+    # (`web2_house_credentials_json` was REMOVED with `app.cli.seed_web2_vault` (R2-06).
+    # It held one set of HOUSE logins that the seeder copied into every client's vault
+    # row, which is the shared-footprint pattern being retired: one shared login is one
+    # shared failure domain, and the copies made clients mutually identifiable. An
+    # account is now a row in `public.web2_accounts` whose credential is sealed ONCE
+    # under `label=<web2_accounts.id>` — see `app.cli.web2_accounts`.)
+
+    # --- The cross-property similarity gate (WEB2-007 / R2-11) --------------------
+    # The gate ALWAYS runs and its verdict is ALWAYS recorded. This switch decides only
+    # whether a `block` verdict actually REFUSES approval.
+    #
+    # It defaults to False — warn + visible acknowledgement, never hard — because the
+    # block thresholds are agency policy with no published source behind them (R2 O-1),
+    # and calibration against a graded golden set is a stated precondition to hardening.
+    # A gate switched to hard before it is calibrated blocks legitimate work, and an
+    # operator who learns to override it has switched it off in practice. This mirrors
+    # how the content module already treats its QA scorecard (advisory first, D-4).
+    web2_similarity_enforce: bool = False
+    # Resemblance above which a draft is BLOCKED (Broder r over 5-word masked shingles).
+    # Half of Broder's 0.50 duplicate line: a safety gate must trip well before
+    # 'duplicate', because the harm is a detectable PATTERN, not a copy.
+    web2_similarity_body_block: float = 0.25
+    web2_similarity_body_warn: float = 0.15
+    # Heading-skeleton Jaccard: catches same-outline/different-words templating.
+    web2_similarity_heading_block: float = 0.60
+    web2_similarity_heading_warn: float = 0.45
 
     # --- Shared catch-all IMAP mailbox (web2 + citation house-account signup, 7B-5).
     # The off-page automation auto-CREATES house accounts on web2 platforms with a

@@ -1,12 +1,16 @@
 """Auto-create HOUSE Web 2.0 accounts (API signup) and print a credential block.
 
-The web2 publish pipeline reads a per-client vault row per (client, platform); those
-rows are fanned out from the agency's HOUSE accounts by ``app.cli.seed_web2_vault``.
-This CLI creates the house accounts for the platforms that expose a real, no-browser
+This CLI creates HOUSE accounts for the platforms that expose a real, no-browser
 signup/token API (Telegra.ph's anonymous ``createAccount``, Write.as/WriteFreely's
-``/api/auth/signup``) and prints the resulting ``WEB2_HOUSE_CREDENTIALS_JSON`` block --
-so an operator can paste it into the env (or a ``--file``) and then run
-``seed_web2_vault`` to seal every client's rows.
+``/api/auth/signup``) and prints the resulting credential block to stdout.
+
+Register what it prints with ``app.cli.web2_accounts register --ownership house``,
+which creates the ``public.web2_accounts`` row and seals the credential ONCE under
+``label=<web2_accounts.id>``. (It used to feed ``WEB2_HOUSE_CREDENTIALS_JSON`` and the
+``seed_web2_vault`` fan-out, which copied one house login into every client's vault
+row; both were removed under R2-06 - that duplication WAS the cross-client footprint.)
+House accounts remain legitimate only where publishing implies no durable identity;
+a per-client platform needs a per-client account, not this.
 
 It NEVER writes a secret to disk or to the repo -- it prints the block to stdout for the
 operator to place in the secret store. The catch-all mailbox
@@ -61,8 +65,9 @@ def _run(platforms: list[str], catchall_domain: str) -> list[Web2SignupResult]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Create HOUSE web2 accounts via API signup and print a "
-        "WEB2_HOUSE_CREDENTIALS_JSON block (paste it into the env, then run seed_web2_vault)."
+        description="Create HOUSE web2 accounts via API signup and print their "
+        "credential block (register it with `python -m app.cli.web2_accounts register "
+        "--ownership house`)."
     )
     parser.add_argument(
         "--platforms",

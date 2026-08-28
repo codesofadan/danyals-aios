@@ -1221,12 +1221,12 @@ def test_vault_provider_naming_convention() -> None:
 
 
 def test_build_publisher_degrades_to_none_without_a_vault_row() -> None:
-    publisher = build_publisher(client_id="cl-1", platform=PLATFORM_DEVTO, lookup=lambda **_k: None)
+    publisher = build_publisher(vault_label="acct-1", platform=PLATFORM_DEVTO, lookup=lambda **_k: None)
     assert publisher is None
 
 
 def test_build_publisher_degrades_to_none_on_malformed_json() -> None:
-    publisher = build_publisher(client_id="cl-1", platform=PLATFORM_DEVTO, lookup=lambda **_k: "{not json")
+    publisher = build_publisher(vault_label="acct-1", platform=PLATFORM_DEVTO, lookup=lambda **_k: "{not json")
     assert publisher is None
 
 
@@ -1234,14 +1234,14 @@ def test_build_publisher_degrades_to_none_on_incomplete_credential() -> None:
     # api_key is required; an empty one raises inside DevToClient.__init__, which the
     # factory catches (not lets crash the worker).
     publisher = build_publisher(
-        client_id="cl-1", platform=PLATFORM_DEVTO, lookup=lambda **_k: json.dumps({"api_key": ""})
+        vault_label="acct-1", platform=PLATFORM_DEVTO, lookup=lambda **_k: json.dumps({"api_key": ""})
     )
     assert publisher is None
 
 
 def test_build_publisher_degrades_to_none_for_medium() -> None:
     # Medium has no builder at all - draft-only, no live publisher can exist.
-    publisher = build_publisher(client_id="cl-1", platform="Medium", lookup=lambda **_k: "{}")
+    publisher = build_publisher(vault_label="acct-1", platform="Medium", lookup=lambda **_k: "{}")
     assert publisher is None
 
 
@@ -1252,23 +1252,23 @@ def test_build_publisher_constructs_the_real_client_when_the_vault_row_is_comple
         seen["provider"], seen["label"] = provider, label
         return json.dumps({"api_key": "real-key"})
 
-    publisher = build_publisher(client_id="cl-42", platform=PLATFORM_DEVTO, lookup=lookup)
+    publisher = build_publisher(vault_label="acct-42", platform=PLATFORM_DEVTO, lookup=lookup)
     assert isinstance(publisher, DevToClient)
-    assert seen == {"provider": "web2:dev.to", "label": "cl-42"}
+    assert seen == {"provider": "web2:dev.to", "label": "acct-42"}
 
 
 def test_build_publisher_wires_a_batch4_platform_end_to_end() -> None:
     # Proves the factory correctly wires one of the 10 new platforms, not just the
     # pre-existing dev.to case above.
     publisher = build_publisher(
-        client_id="cl-7", platform=PLATFORM_ZENODO, lookup=lambda **_k: json.dumps({"access_token": "real"})
+        vault_label="acct-7", platform=PLATFORM_ZENODO, lookup=lambda **_k: json.dumps({"access_token": "real"})
     )
     assert isinstance(publisher, ZenodoClient)
 
 
 def test_build_publisher_degrades_to_none_for_an_incomplete_batch4_credential() -> None:
     publisher = build_publisher(
-        client_id="cl-7", platform=PLATFORM_CODEBERG_PAGES,
+        vault_label="acct-7", platform=PLATFORM_CODEBERG_PAGES,
         lookup=lambda **_k: json.dumps({"token": "", "owner": "acme", "repo": "site"}),
     )
     assert publisher is None

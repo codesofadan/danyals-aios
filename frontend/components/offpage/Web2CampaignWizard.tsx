@@ -1,0 +1,340 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useClients } from "@/lib/hooks/clients";
+import {
+  useCreateWeb2Campaign,
+  useEstimateWeb2Campaign,
+  useWeb2PlatformBoard,
+} from "@/lib/hooks/offpage";
+import { PLATFORM_META, type Web2PacingMode, type Web2Platform } from "@/lib/offpage";
+
+/**
+ * Build a whole Web 2.0 campaign in one pass: client -> topics -> platforms -> pacing
+ * -> QUOTE -> create.
+ *
+ * Two things about this screen are deliberate and are the reason it replaced the old
+ * "plan property" modal.
+ *
+ * ONE DISTINCT TOPIC PER ARTICLE. The old modal fanned a single anchor across every
+ * platform, which produces byte-identical articles (measured: resemblance 1.000) - the
+ * duplicate-content behaviour the similarity gate now blocks one property at a time. So
+ * topics are entered as a list and the count is derived from it; the operator cannot
+ * accidentally ask for thirty copies of one article.
+ *
+ * THE QUOTE COMES BEFORE THE COMMIT. Thirty articles is thirty metered drafting runs and,
+ * at the default pacing, about a month of publishing. Both facts are shown before the
+ * create button does anything, because an operator who learns the timeline afterwards has
+ * been misled by the tool.
+ */
+export default function Web2CampaignWizard({ onClose }: { onClose: () => void }) {
+  const clientsQ = useClients();
+  const clientOptions = useMemo(() => clientsQ.data ?? [], [clientsQ.data]);
+
+  const [clientId, setClientId] = useState("");
+  const [title, setTitle] = useState("");
+  const [topicsText, setTopicsText] = useState("");
+  const [anchorsText, setAnchorsText] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
+  const [pacing, setPacing] = useState<Web2PacingMode>("drip");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [proof, setProof] = useState("");
+  const [created, setCreated] = useState<{ id: string; total: number } | null>(null);
+  const [error, setError] = useState("");
+  // The inputs AS THEY WERE when the quote was taken. Without this the operator can
+  // quote three articles, add seven more topics, press Create, and get ten - while the
+  // screen still shows the three-article price and finish date. The thing they approved
+  // must be the thing that gets created, so a quote is invalidated the moment any input
+  // that shaped it changes.
+  const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
+
+  const boardQ = useWeb2PlatformBoard(clientId || undefined);
+  const estimate = useEstimateWeb2Campaign();
+  const create = useCreateWeb2Campaign();
+
+  const board = boardQ.data ?? [];
+  const eligible = board.filter((r) => r.status === "eligible");
+  const blocked = board.filter((r) => r.status !== "eligible");
+
+  const topics = lines(topicsText);
+  const anchors = lines(anchorsText);
+  const proofLines = lines(proof);
+  const canQuote =
+    !!clientId && topics.length > 0 && selected.size > 0 && targetUrl.trim().startsWith("http");
+
+  function toggle(platform: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(platform)) next.delete(platform);
+      else next.add(platform);
+      return next;
+    });
+  }
+
+  function body() {
+    return {
+      clientId,
+      title: title.trim(),
+      // The count IS the number of topics. Deriving it rather than asking separately is
+      // what makes "thirty copies of one article" unrepresentable in this UI.
+      articleCount: topics.length,
+      topics,
+      platforms: Array.from(selected),
+      anchors,
+      targetUrl: targetUrl.trim(),
+      pacing,
+      proofPoints: proofLines.slice(0, 12),
+    };
+  }
+
+  async function quote() {
+    setError("");
+    try {
+      const payload = body();
+      await estimate.mutateAsync(payload);
+      setQuotedSignature(JSON.stringify(payload));
+    } catch (e) {
+      setQuotedSignature(null);
+      setError(messageOf(e));
+    }
+  }
+
+  async function commit() {
+    setError("");
+    try {
+      const campaign = await create.mutateAsync(body());
+      setCreated({ id: campaign.id, total: campaign.total });
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  }
+
+  // A quote only counts while the inputs still match the ones it was taken from.
+  const quoteIsCurrent = quotedSignature !== null && quotedSignature === JSON.stringify(body());
+  const quoted = quoteIsCurrent ? estimate.data : undefined;
+  const quoteWentStale = quotedSignature !== null && !quoteIsCurrent;
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-h">
+          <div>
+            <div className="modal-t">New Web 2.0 campaign</div>
+            <div className="modal-s">
+              One distinct article per topic, each carrying a single editorial backlink.
+              Nothing publishes until a lead approves.
+            </div>
+          </div>
+          <button type="button" className="modal-x" onClick={onClose} aria-label="Close">
+            <span className="material-symbols-rounded">close</span>
+          </button>
+        </div>
+
+        {created ? (
+          <div className="wiz-body">
+            <div className="op-flash" style={{ position: "static" }}>
+              <span className="material-symbols-rounded">task_alt</span>
+              Campaign created — {created.total} propert{created.total === 1 ? "y" : "ies"} queued.
+              The write worker is drafting; each one parks at &ldquo;needs review&rdquo; for approval.
+            </div>
+            <div className="modal-f">
+              <button className="primary-btn" onClick={onClose}>Done</button>
+            </div>
+          </div>
+        ) : (
+          <div className="wiz-body">
+            <div className="fld">
+              <label>Client</label>
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setSelected(new Set()); }}>
+                <option value="">Choose a client…</option>
+                {clientOptions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.cn}</option>
+                ))}
+              </select>
+              <div className="fld-hint">
+                The client decides which platforms are available. Eligibility is computed from
+                their industry against each platform&rsquo;s own posting rules — a local trade and a
+                software company do not get the same list.
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Campaign name</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Autumn authority push" />
+              <div className="fld-hint">
+                Your own label for this batch, so it is findable later in the campaign list. It is
+                never shown to the client and never published.
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Topics — one per line, one article each</label>
+              <textarea
+                rows={6}
+                value={topicsText}
+                onChange={(e) => setTopicsText(e.target.value)}
+                placeholder={"emergency drain unblocking\ngutter cleaning in winter\nwhat a CCTV drain survey shows"}
+              />
+              <div className="fld-hint">
+                <b>{topics.length}</b> article{topics.length === 1 ? "" : "s"}. Each topic becomes its
+                own article — reusing a topic across platforms produces identical articles, which is
+                refused.
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Anchor text options — one per line</label>
+              <textarea
+                rows={3}
+                value={anchorsText}
+                onChange={(e) => setAnchorsText(e.target.value)}
+                placeholder={"Leeds Drainage\nthe drainage team\nour emergency callout"}
+              />
+              <div className="fld-hint">
+                Rotated across the campaign. Keep them branded and natural — an exact-match
+                commercial anchor repeated across properties is the clearest footprint there is.
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Target URL</label>
+              <input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} placeholder="https://client.example/services" />
+              <div className="fld-hint">
+                The page on the client&rsquo;s own site that every article links to — one editorial
+                link each. Point it at the page you actually want to rank, not the homepage, unless
+                the homepage is the target.
+              </div>
+            </div>
+
+            {/* Platform board — server-computed per client, nothing hidden. */}
+            <div className="fld">
+              <label style={{ margin: 0 }}>Platforms</label>
+              {!clientId ? (
+                <div className="fld-hint">Choose a client to see which platforms they may publish to.</div>
+              ) : boardQ.isLoading ? (
+                <div className="fld-hint">Loading the platform board…</div>
+              ) : (
+                <>
+                  <div className="w2-plat-grid">
+                    {eligible.map((row) => {
+                      const key = row.platform ?? row.name;
+                      const on = selected.has(key);
+                      const meta = PLATFORM_META[key as Web2Platform];
+                      return (
+                        <button type="button" key={key} onClick={() => toggle(key)}
+                          className={`w2-plat${on ? " on" : ""}`} aria-pressed={on}>
+                          <span className="op-plat-ic" style={{ background: meta?.c ?? "#64748b" }}>
+                            <span className="material-symbols-rounded" style={{ fontSize: 14 }}>
+                              {meta?.icon ?? "public"}
+                            </span>
+                          </span>
+                          <span className="w2-plat-name">{row.name}</span>
+                          <span className="material-symbols-rounded w2-plat-check">
+                            {on ? "check_circle" : "radio_button_unchecked"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="fld-hint">
+                    <b>{selected.size}</b> of {eligible.length} eligible selected. Spreading across
+                    more platforms finishes sooner <em>and</em> leaves a lighter footprint.
+                  </div>
+
+                  {blocked.length > 0 && (
+                    <details className="fld-hint" style={{ marginTop: 8 }}>
+                      <summary>{blocked.length} platform(s) not available for this client — why</summary>
+                      <ul style={{ margin: "8px 0 0 16px" }}>
+                        {blocked.map((row) => (
+                          <li key={row.name} style={{ marginBottom: 4 }}>
+                            <b>{row.name}</b> — {row.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="fld">
+              <label>Publishing pace</label>
+              <select value={pacing} onChange={(e) => setPacing(e.target.value as Web2PacingMode)}>
+                <option value="drip">Drip — spread out (recommended)</option>
+                <option value="immediate">As fast as the safety caps allow</option>
+              </select>
+              <div className="fld-hint">
+                Either way the pacing caps apply — they are what keeps a client&rsquo;s properties
+                looking like real, low-volume blogs. The quote below shows the real finish date.
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>Proof &amp; first-hand experience — one per line</label>
+              <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)}
+                placeholder={"Cleared 400 blocked drains across Leeds in 2025\n24-hour callout, no weekend surcharge"} />
+              <div className="fld-hint">
+                Without real proof the writer leaves <code>[NEEDS:]</code> gaps and the draft holds at
+                review, un-publishable.
+              </div>
+            </div>
+
+            {error && (
+              <div className="op-flash" style={{ position: "static", background: "#fee2e2", color: "#991b1b" }}>
+                <span className="material-symbols-rounded">error</span>
+                {error}
+              </div>
+            )}
+
+            {quoted && (
+              <div className="fld" style={{ borderTop: "1px solid var(--line, #e5e7eb)", paddingTop: 12 }}>
+                <label>Quote</label>
+                <div className="fld-hint">
+                  <b>{quoted.count}</b> propert{quoted.count === 1 ? "y" : "ies"} · about{" "}
+                  <b>${quoted.estimatedCostUsd.toFixed(2)}</b> in drafting ·{" "}
+                  {quoted.projectedCompletion
+                    ? <>last one publishes <b>{new Date(quoted.projectedCompletion).toLocaleDateString()}</b></>
+                    : "no schedule yet"}
+                </div>
+                {quoted.notes.length > 0 && (
+                  <ul style={{ margin: "8px 0 0 16px" }} className="fld-hint">
+                    {quoted.notes.map((n, i) => <li key={i} style={{ marginBottom: 4 }}>{n}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="modal-f">
+              <button type="button" className="ghost-btn" onClick={quote}
+                disabled={!canQuote || estimate.isPending}>
+                {estimate.isPending ? "Pricing…" : "Get quote"}
+              </button>
+              <button type="button" className="primary-btn" onClick={commit}
+                disabled={!quoted || create.isPending}>
+                {create.isPending ? "Creating…" : `Create ${quoted?.count ?? ""} propert${quoted?.count === 1 ? "y" : "ies"}`}
+              </button>
+            </div>
+            {!quoted && (
+              <div className="fld-hint" style={{ textAlign: "right" }}>
+                {quoteWentStale
+                  ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
+                  : "Get a quote first — it shows the cost and the finish date before anything is created."}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function lines(value: string): string[] {
+  return value.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+/** Surface the server's own refusal text - it explains WHAT to change. */
+function messageOf(e: unknown): string {
+  const detail = (e as { body?: { error?: { message?: string } } })?.body?.error?.message;
+  if (detail) return detail;
+  return e instanceof Error ? e.message : "Something went wrong.";
+}

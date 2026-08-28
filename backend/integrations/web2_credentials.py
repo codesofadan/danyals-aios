@@ -3,10 +3,17 @@
 ``web2_publisher_from_settings`` stub that always returned ``None`` -- the gap
 ``web2_publishers.py`` itself used to flag as "a later chunk".
 
-Convention: a Web 2.0 OAuth token / API key is ONE vault row per (client, platform):
+Convention: a Web 2.0 OAuth token / API key is ONE vault row per ACCOUNT:
 
 * ``provider`` = ``f"web2:{platform}"`` (e.g. ``"web2:WordPress.com"``)
-* ``label``    = the client id
+* ``label``    = the ``public.web2_accounts.id`` that owns the credential (R2-06).
+  It was the CLIENT id until 0100/0101 landed, which is precisely the defect being
+  retired: keying by client meant one shared house login was COPIED into every
+  client's vault row, so a single suspension took every client's property down at
+  once and the copies made the clients mutually identifiable. One account is now one
+  credential, stored once. Properties written before the reconciliation
+  (``app/cli/web2_migrate_house.py``) still carry a client-id label, so the CALLER
+  passes the label rather than this factory guessing it.
 * ``secret``   = a JSON object whose keys match
   ``web2_publishers.PLATFORM_CREDENTIAL_FIELDS[platform]`` (e.g. WordPress.com wants
   ``{"oauth_token": "...", "site": "clientblog.wordpress.com"}``)
@@ -23,7 +30,7 @@ vault entry must not take a worker down.
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol, cast
+from typing import Any, Final, Protocol, cast
 
 from app.logging_setup import get_logger
 from integrations.errors import ProviderNotConfiguredError
@@ -139,7 +146,9 @@ from integrations.web2_publishers import (
 
 logger = get_logger("integrations.web2_credentials")
 
-VAULT_KIND_CLIENT_ACCESS = "client_access"
+# Final so the type narrows to Literal["client_access"] - app.services.vault.add_key
+# takes a VaultKind literal, and a plain `str` here would force every caller to cast.
+VAULT_KIND_CLIENT_ACCESS: Final = "client_access"
 
 
 def vault_provider_for(platform: str) -> str:
@@ -304,26 +313,32 @@ _BUILDERS: dict[str, Any] = {
 }
 
 
-def build_publisher(*, client_id: str, platform: str, lookup: SecretLookup) -> Web2Publisher | None:
-    """Build the real, per-account ``Web2Publisher`` for ``client_id`` + ``platform``,
-    or ``None`` when there is no vault credential yet (the caller HOLDS the placement
-    at review, exactly as if the platform were entirely unconfigured). Medium (and
-    any platform with no registered builder) always returns ``None`` -- draft-only
-    platforms have no live publisher to build."""
+def build_publisher(*, vault_label: str, platform: str, lookup: SecretLookup) -> Web2Publisher | None:
+    """Build the real ``Web2Publisher`` for the credential stored at ``(web2:<platform>,
+    vault_label)``, or ``None`` when there is no usable credential (the caller HOLDS the
+    placement at review, exactly as if the platform were entirely unconfigured). Medium
+    (and any platform with no registered builder) always returns ``None`` -- draft-only
+    platforms have no live publisher to build.
+
+    ``vault_label`` is passed in rather than derived, because WHICH account a placement
+    publishes through is a fact about the placement, not something this factory can
+    infer. It is a ``web2_accounts.id`` for a property attributed to an account, and a
+    legacy ``client_id`` for a property that predates the accounts table (R2-06). Both
+    are opaque ids, safe to log; neither is a secret."""
     builder = _BUILDERS.get(platform)
     if builder is None:
         return None
-    raw = lookup(provider=vault_provider_for(platform), label=client_id)
+    raw = lookup(provider=vault_provider_for(platform), label=vault_label)
     if raw is None:
-        logger.info("web2_credential_missing", client_id=client_id, platform=platform)
+        logger.info("web2_credential_missing", vault_label=vault_label, platform=platform)
         return None
     try:
         creds = json.loads(raw)
     except (TypeError, ValueError):
-        logger.warning("web2_credential_malformed", client_id=client_id, platform=platform)
+        logger.warning("web2_credential_malformed", vault_label=vault_label, platform=platform)
         return None
     if not isinstance(creds, dict):
-        logger.warning("web2_credential_malformed", client_id=client_id, platform=platform)
+        logger.warning("web2_credential_malformed", vault_label=vault_label, platform=platform)
         return None
     try:
         # _BUILDERS is dict[str, Any] (the lambdas construct many unrelated client
@@ -331,5 +346,5 @@ def build_publisher(*, client_id: str, platform: str, lookup: SecretLookup) -> W
         # rather than let `Any` silently widen the function's real contract.
         return cast("Web2Publisher | None", builder(creds))
     except ProviderNotConfiguredError:
-        logger.warning("web2_credential_incomplete", client_id=client_id, platform=platform)
+        logger.warning("web2_credential_incomplete", vault_label=vault_label, platform=platform)
         return None

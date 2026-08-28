@@ -320,6 +320,89 @@ class FakeOffpageRepo:
         self.web2_by_id: dict[str, dict[str, Any]] = {}
         self.client_names: dict[str, str] = {}
         self.created_web2: list[dict[str, Any]] = []
+        # --- campaigns ---
+        self.campaigns: dict[str, dict[str, Any]] = {}
+        self.client_scope = "agnostic"
+        self.catalog_rows: list[dict[str, Any]] = [
+            {
+                "name": "Blogger", "platform_enum": "Blogger", "ownership_tier": "per_client",
+                "topical_scope": "agnostic", "automation_ready": True,
+                "authority_tier": "high", "terms_position": "",
+            },
+            {
+                "name": "WordPress.com", "platform_enum": "WordPress.com",
+                "ownership_tier": "per_client", "topical_scope": "agnostic",
+                "automation_ready": True, "authority_tier": "high", "terms_position": "",
+            },
+            {
+                "name": "dev.to", "platform_enum": "dev.to", "ownership_tier": "per_client",
+                "topical_scope": "developer", "automation_ready": True,
+                "authority_tier": "medium",
+                "terms_position": "Content Policy bans promotional posts.",
+            },
+        ]
+        self.attached: list[tuple[str, str]] = []
+
+    # --- campaign surface ---
+    def eligible_catalog(self) -> list[dict[str, Any]]:
+        return list(self.catalog_rows)
+
+    def client_web2_scope(self, client_id: str) -> str:
+        return self.client_scope
+
+    def pacing_caps_row(self) -> dict[str, Any] | None:
+        # Jitter off and the campaign cap lifted so these tests assert the ROUTER's
+        # contract rather than re-testing the pacing service.
+        return {"publish_jitter_max_hours": 0, "max_properties_per_client_campaign": 0}
+
+    def client_publish_history(self, client_id: str, *, days: int = 120) -> list[dict[str, Any]]:
+        return []
+
+    def create_campaign(self, **kw: Any) -> dict[str, Any]:
+        row = {
+            "id": f"cmp-{len(self.campaigns) + 1}", "status": "planning",
+            "spent_usd": 0.0, **kw,
+        }
+        self.campaigns[str(row["id"])] = row
+        return row
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
+        return self.campaigns.get(campaign_id)
+
+    def list_campaigns(self, *, client_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        rows = list(self.campaigns.values())
+        if client_id:
+            rows = [r for r in rows if r.get("client_id") == client_id]
+        return rows
+
+    def campaign_properties(self, campaign_id: str) -> list[dict[str, Any]]:
+        return [r for r in self.created_web2 if r.get("campaign_id") == campaign_id]
+
+    def campaign_placements(self, campaign_id: str) -> list[dict[str, Any]]:
+        return [
+            {**r, "account_handle": "aios-house-devto", "account_ownership": "house"}
+            for r in self.created_web2 if r.get("campaign_id") == campaign_id
+        ]
+
+    def client_placements(self, client_id: str | None = None, *, limit: int = 500) -> list[dict[str, Any]]:
+        rows = self.created_web2
+        if client_id:
+            rows = [r for r in rows if r.get("client_id") == client_id]
+        return [{**r, "account_handle": "", "account_ownership": ""} for r in rows]
+
+    def update_campaign(self, campaign_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+        row = self.campaigns.get(campaign_id)
+        if row is None:
+            return None
+        row.update(fields)
+        return row
+
+    def attach_property_to_campaign(self, web2_id: str, campaign_id: str, scheduled_for: Any) -> None:
+        self.attached.append((web2_id, campaign_id))
+        for row in self.created_web2:
+            if str(row.get("id")) == web2_id:
+                row["campaign_id"] = campaign_id
+                row["scheduled_for"] = scheduled_for
 
     def list_backlinks(
         self, *, status: str | None = None, client_id: str | None = None,
@@ -601,14 +684,37 @@ async def test_kpis_assemble_from_counts(
 
 @pytest.fixture
 def web2_enqueues(app: FastAPI) -> tuple[list[str], list[str]]:
-    """Override the two Web 2.0 enqueuer deps with recorders (no Celery)."""
-    from app.routers.offpage import get_web2_publish_enqueuer, get_web2_write_enqueuer
+    """Override the two Web 2.0 enqueuer deps with recorders (no Celery).
+
+    Also stubs the similarity re-check to "clean". These tests exercise the ROUTER's
+    contract, not the gate; the real re-check needs the privileged store and a corpus,
+    and is covered directly in ``tests/test_web2_gate.py``. Stubbing it to ``""`` means
+    a test that wants a gate verdict must say so explicitly (see ``web2_sim_code``),
+    which keeps the gate's effect visible in the test that relies on it.
+    """
+    from app.routers.offpage import (
+        get_web2_publish_enqueuer,
+        get_web2_similarity_rechecker,
+        get_web2_write_enqueuer,
+    )
 
     writes: list[str] = []
     publishes: list[str] = []
     app.dependency_overrides[get_web2_write_enqueuer] = lambda: writes.append
     app.dependency_overrides[get_web2_publish_enqueuer] = lambda: publishes.append
+    app.dependency_overrides[get_web2_similarity_rechecker] = lambda: (lambda _id: "")
     return writes, publishes
+
+
+@pytest.fixture
+def web2_sim_code(app: FastAPI) -> Callable[[str], None]:
+    """Make the approval-time similarity re-check return a chosen code."""
+    from app.routers.offpage import get_web2_similarity_rechecker
+
+    def _set(code: str) -> None:
+        app.dependency_overrides[get_web2_similarity_rechecker] = lambda: (lambda _id: code)
+
+    return _set
 
 
 def _plan_body(**over: Any) -> dict[str, Any]:
@@ -694,6 +800,283 @@ async def test_web2_approve_transitions_to_publishing_and_enqueues(
     assert publishes == ["w2-1"]  # the publish worker was enqueued
 
 
+# --- web 2.0 CAMPAIGNS ---------------------------------------------------------
+
+
+def _campaign_body(**over: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "clientId": "cl-1",
+        "title": "Autumn push",
+        "articleCount": 3,
+        "topics": ["drain unblocking", "gutter cleaning", "cctv drain survey"],
+        "platforms": ["Blogger", "WordPress.com"],
+        "anchors": ["Leeds Drainage", "the team"],
+        "targetUrl": "https://leedsdrainage.co.uk/drains",
+        "pacing": "drip",
+    }
+    body.update(over)
+    return body
+
+
+async def test_the_estimate_prices_and_schedules_without_creating_anything(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """The screen where an operator sees the real cost and the real timeline BEFORE
+    committing. Nothing may be queued and nothing spent."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    writes, _publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/campaigns/estimate", json=_campaign_body())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 3
+    assert data["estimatedCostUsd"] > 0
+    assert data["projectedCompletion"]
+    assert len(data["properties"]) == 3
+    # Nothing was created and no drafting was queued.
+    assert repo.created_web2 == []
+    assert repo.campaigns == {}
+    assert writes == []
+
+
+async def test_a_campaign_reusing_one_topic_is_refused_before_any_spend(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """Measured: one topic across N platforms produces N byte-identical articles. The
+    refusal has to land here, not after N metered drafting runs."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    writes, _publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/campaigns",
+        json=_campaign_body(articleCount=3, topics=["drain unblocking"]),
+    )
+    assert resp.status_code == 422
+    # The app wraps errors in its own envelope ({"error": {...}}), not FastAPI's `detail`.
+    assert "distinct topics" in resp.json()["error"]["message"]
+    assert repo.created_web2 == []
+    assert writes == []
+
+
+async def test_creating_a_campaign_fans_out_properties_and_starts_drafting(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """ONE operator request becomes N properties, each on the existing pipeline."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["total"] == 3
+    assert data["published"] == 0
+    assert len(repo.created_web2) == 3
+    assert len(writes) == 3  # every property queued for DRAFTING
+    assert publishes == []  # and NOTHING queued to publish
+    assert {t for _w, t in repo.attached} == {data["id"]}
+
+
+async def test_each_campaign_property_gets_a_distinct_topic_and_a_schedule(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    topics = [r["topic"] for r in repo.created_web2]
+    assert len(set(topics)) == 3
+    assert all(r.get("scheduled_for") for r in repo.created_web2)
+
+
+async def test_an_ineligible_platform_is_dropped_and_the_reason_is_reported(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """A selection quietly shrunk is a lie the operator discovers weeks later. dev.to is
+    developer-scope, so a local-business client may not use it - and is told why."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/campaigns/estimate",
+        json=_campaign_body(platforms=["Blogger", "dev.to"]),
+    )
+    assert resp.status_code == 200
+    notes = " ".join(resp.json()["notes"])
+    assert "dev.to" in notes
+    assert "developer" in notes
+    assert all(p["platform"] != "dev.to" for p in resp.json()["properties"])
+
+
+async def test_campaign_creation_is_lead_only(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("specialist", "u-staff")
+    resp = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    assert resp.status_code == 403
+    assert repo.created_web2 == []
+
+
+async def test_an_unknown_client_is_404_not_an_empty_campaign(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    assert resp.status_code == 404
+
+
+async def test_the_campaign_board_reports_degraded_when_not_everything_published(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """A campaign that claimed three and delivered two is DEGRADED, never completed -
+    the same rule the content dispatcher enforces."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    rows = repo.campaign_properties(campaign_id)
+    rows[0]["status"] = "published"
+    rows[1]["status"] = "published"
+    rows[2]["status"] = "failed"
+
+    resp = await client.get(f"/api/v1/offpage/web2/campaigns/{campaign_id}")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "degraded"
+    assert resp.json()["published"] == 2
+
+
+async def test_the_campaign_board_reports_completed_only_when_all_published(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    for row in repo.campaign_properties(campaign_id):
+        row["status"] = "published"
+    resp = await client.get(f"/api/v1/offpage/web2/campaigns/{campaign_id}")
+    assert resp.json()["status"] == "completed"
+
+
+async def test_the_platform_board_shows_every_row_with_a_reason(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """Nothing is hidden: the full catalogue is visible and the excluded rows carry the
+    platform's own policy. That is what makes offering 50+ platforms honest."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("specialist", "u-staff")  # a read, so any staff may see it
+    resp = await client.get("/api/v1/offpage/web2/platform-board?clientId=cl-1")
+    assert resp.status_code == 200
+    board = resp.json()
+    assert len(board) == 3
+    devto = next(r for r in board if r["name"] == "dev.to")
+    assert devto["status"] == "not_eligible"
+    assert "developer" in devto["reason"]
+    assert any(r["status"] == "eligible" for r in board)
+
+
+async def test_web2_approve_refuses_when_the_similarity_gate_could_not_run(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
+) -> None:
+    """FAIL-CLOSED at approval, the mirror of run_write's fail-open.
+
+    A draft parks at review whether the gate passed or could not run, so drafting stays
+    unblocked during an outage. This endpoint is the last step before the article goes
+    LIVE under a client's name, and 'we could not check' is not 'it is fine' - approving
+    on it publishes something that may duplicate another property.
+    """
+    repo.web2_by_id = {
+        "w2-1": _web2_row(
+            id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review",
+        )
+    }
+    web2_sim_code("sim_unavailable:error")
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={"action": "approve"})
+    assert resp.status_code == 409
+    assert repo.web2_by_id["w2-1"]["status"] == "needs_review"  # unchanged
+    assert publishes == []  # nothing was queued to publish
+
+
+async def test_web2_approve_needs_an_explicit_acknowledgement_after_a_warn(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
+) -> None:
+    """A plain approve must NOT carry the acknowledgement. If it did, the gate would
+    decay into a click-through and an operator would pass collisions by habit."""
+    repo.web2_by_id = {
+        "w2-1": _web2_row(
+            id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review",
+        )
+    }
+    web2_sim_code("sim_warn:body_resemblance:client:w2-9")
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={"action": "approve"})
+    assert resp.status_code == 409
+    assert publishes == []
+
+    ok = await client.post(
+        "/api/v1/offpage/web2/w2-1/approve",
+        json={"action": "approve", "acknowledgeSimilarity": True},
+    )
+    assert ok.status_code == 200
+    assert repo.web2_by_id["w2-1"]["status"] == "publishing"
+    assert publishes == ["w2-1"]
+
+
+async def test_a_similarity_block_is_acknowledgeable_while_enforcement_is_off(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
+) -> None:
+    """The gate ships warn-only (settings.web2_similarity_enforce=False) because its
+    thresholds are agency policy with no published source and calibration is a stated
+    precondition to hardening. Until then a block is loud and acknowledgeable, not fatal
+    - a gate switched to hard before it is calibrated blocks real work, and an operator
+    who learns to route around it has switched it off in practice."""
+    repo.web2_by_id = {
+        "w2-1": _web2_row(
+            id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review",
+        )
+    }
+    web2_sim_code("sim_block:heading_skeleton:client:w2-9")
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/w2-1/approve",
+        json={"action": "approve", "acknowledgeSimilarity": True},
+    )
+    assert resp.status_code == 200
+    assert publishes == ["w2-1"]
+
+
+async def test_a_reject_never_needs_a_similarity_acknowledgement(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
+) -> None:
+    """Rejecting a flagged draft is the SAFE action; gating it behind an extra field
+    would push operators toward approving instead."""
+    repo.web2_by_id = {
+        "w2-1": _web2_row(
+            id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review",
+        )
+    }
+    web2_sim_code("sim_block:body_sha256:client:w2-9")
+    wire("manager", "u-lead")
+    resp = await client.post("/api/v1/offpage/web2/w2-1/approve", json={"action": "reject"})
+    assert resp.status_code == 200
+    assert repo.web2_by_id["w2-1"]["status"] == "rejected"
+
+
 async def test_web2_approve_reject_does_not_publish(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]],
@@ -734,3 +1117,263 @@ async def test_web2_approve_missing_is_404(
     wire("manager", "u-lead")
     resp = await client.post("/api/v1/offpage/web2/nope/approve", json={})
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Campaign approval: ONE operator decision, still one transition per property.
+#
+# The distinction these tests defend: reviewing thirty drafts individually is the
+# workflow the campaign layer exists to remove, but a BATCH write is not the answer -
+# Tumblr's API License requires a per-post human action before an application posts on
+# an account holder's behalf. So the route iterates and re-checks each row; what it must
+# never become is a single UPDATE that waves thirty rows past the gate at once.
+# --------------------------------------------------------------------------- #
+async def test_one_approval_publishes_every_property_in_the_campaign(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    props = repo.campaign_properties(campaign_id)
+    for row in props:
+        row["status"] = "needs_review"
+    repo.campaigns[campaign_id]["status"] = "needs_approval"
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "approve"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["approved"] == len(props)
+    assert body["held"] == []
+    assert body["status"] == "scheduled"
+    # Every property transitioned individually - none left behind at review.
+    assert all(r["status"] == "publishing" for r in repo.campaign_properties(campaign_id))
+
+
+async def test_a_property_the_gate_blocks_is_held_not_waved_through_with_the_batch(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+    web2_sim_code: Callable[[str], None],
+) -> None:
+    """The whole value of the gate is that a bulk action cannot bypass it. A blocked
+    property stays at needs_review and is named in `held`, so the operator can redraft
+    that one and approve the rest rather than being told 'something failed'."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    for row in repo.campaign_properties(campaign_id):
+        row["status"] = "needs_review"
+    repo.campaigns[campaign_id]["status"] = "needs_approval"
+    web2_sim_code("sim_block:body_sha256:client:w2-other")
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "approve"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["approved"] == 0
+    assert len(body["held"]) == len(repo.campaign_properties(campaign_id))
+    assert body["held"][0]["web2Id"]
+    assert "sim_block" in body["held"][0]["reason"] or body["held"][0]["reason"]
+    # A campaign with holds is NOT reported as scheduled - that would be the
+    # partial-delivery-as-success defect.
+    assert body["status"] == "needs_approval"
+    assert all(r["status"] == "needs_review" for r in repo.campaign_properties(campaign_id))
+
+
+async def test_rejecting_a_campaign_rejects_its_properties_and_publishes_nothing(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    for row in repo.campaign_properties(campaign_id):
+        row["status"] = "needs_review"
+    repo.campaigns[campaign_id]["status"] = "needs_approval"
+    _, publishes = web2_enqueues
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "reject"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "cancelled"
+    assert all(r["status"] == "rejected" for r in repo.campaign_properties(campaign_id))
+    assert publishes == []
+
+
+async def test_campaign_approval_is_lead_only(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    repo.campaigns["cmp-x"] = {
+        "id": "cmp-x", "status": "needs_approval", "client_id": "cl-1",
+        "client_name": "Leeds Drainage", "article_count": 1, "platforms": [], "pacing": "drip",
+    }
+    wire("specialist", "u-staff")
+    resp = await client.post(
+        "/api/v1/offpage/web2/campaigns/cmp-x/approve", json={"action": "approve"}
+    )
+    assert resp.status_code == 403
+
+
+async def test_approving_a_campaign_twice_is_a_409_not_a_second_publish(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    for row in repo.campaign_properties(campaign_id):
+        row["status"] = "needs_review"
+    repo.campaigns[campaign_id]["status"] = "needs_approval"
+    first = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "approve"}
+    )
+    assert first.status_code == 200
+    second = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "approve"}
+    )
+    assert second.status_code == 409
+
+
+async def test_approving_an_unknown_campaign_is_404(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/campaigns/nope/approve", json={"action": "approve"}
+    )
+    assert resp.status_code == 404
+
+
+async def test_a_campaign_level_acknowledgement_cannot_wave_a_collision_through(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+    web2_sim_code: Callable[[str], None],
+) -> None:
+    """One checkbox must not acknowledge every collision in a campaign sight-unseen.
+
+    The named acknowledgement exists to stop the gate degrading into a click-through: an
+    operator who must state they read THIS collision cannot approve past it by habit.
+    A campaign-level acknowledgement would hand that guarantee back, so the campaign
+    route hands the per-property guard a request carrying no acknowledgement at all -
+    a collision is acknowledged on the property it belongs to, or not at all.
+    """
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    for row in repo.campaign_properties(campaign_id):
+        row["status"] = "needs_review"
+    repo.campaigns[campaign_id]["status"] = "needs_approval"
+    web2_sim_code("sim_block:body_sha256:client:w2-other")
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve",
+        json={"action": "approve", "acknowledgeSimilarity": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["approved"] == 0, "a campaign-level acknowledgement must not pass a block"
+    assert len(body["held"]) == len(repo.campaign_properties(campaign_id))
+    assert all(r["status"] == "needs_review" for r in repo.campaign_properties(campaign_id))
+
+
+# --------------------------------------------------------------------------- #
+# The placement report — the "where are my links?" answer.
+#
+# Every fact here was already stored on the row and none of it was reachable, so a
+# finished campaign could not be shown to anyone. These pin the two things that make
+# the report trustworthy: it carries the whole record, and it never claims a link is
+# live when nobody has looked.
+# --------------------------------------------------------------------------- #
+async def test_the_placement_report_carries_the_whole_record(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    row = repo.campaign_properties(campaign_id)[0]
+    row.update({"post_url": "https://x.example/p/1", "status": "published",
+                "link_rel": "", "link_found": True, "target_url": "https://leeds.example/drains"})
+
+    resp = await client.get(f"/api/v1/offpage/web2/campaigns/{campaign_id}/placements")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == len(repo.campaign_properties(campaign_id))
+    live = next(p for p in body if p["postUrl"])
+    # The facts an operator needs to answer a client, all present.
+    assert live["topic"] and live["platform"] and live["anchor"]
+    assert live["targetUrl"] == "https://leeds.example/drains"
+    assert live["postUrl"] == "https://x.example/p/1"
+    assert live["linkFound"] is True
+    assert live["account"] == "aios-house-devto"
+    assert live["accountOwnership"] == "house"
+    # and the internal tenant id is still not on the wire
+    assert "client_id" not in live and "clientId" not in live
+
+
+async def test_an_unchecked_link_is_null_not_false(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """`null` (nobody looked) and `false` (we looked and it was gone) are different
+    facts. Collapsing them would let a placement nobody has verified render with the
+    same confidence as one that was measured — which is how an agency invoices for a
+    link a platform quietly stripped."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+
+    resp = await client.get(f"/api/v1/offpage/web2/campaigns/{campaign_id}/placements")
+    assert all(p["linkFound"] is None for p in resp.json())
+
+    repo.campaign_properties(campaign_id)[0]["link_found"] = False
+    again = await client.get(f"/api/v1/offpage/web2/campaigns/{campaign_id}/placements")
+    assert any(p["linkFound"] is False for p in again.json())
+
+
+async def test_the_report_for_an_unknown_campaign_is_404(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    wire("manager", "u-lead")
+    resp = await client.get("/api/v1/offpage/web2/campaigns/nope/placements")
+    assert resp.status_code == 404
+
+
+async def test_the_cross_campaign_ledger_includes_properties_with_no_campaign(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """A client's Web 2.0 history is not one campaign — the single-property builds that
+    predate campaigns are part of the record and a campaign-scoped view would hide them."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+    repo.created_web2.append({
+        "id": "w2-legacy", "client_id": "cl-1", "client_name": "Leeds Drainage",
+        "platform": "Tumblr", "topic": "older one-off build", "anchor": "a",
+        "status": "published", "post_url": "https://old.example/p", "verified": "verified",
+        "campaign_id": None,
+    })
+    resp = await client.get("/api/v1/offpage/web2/placements?clientId=cl-1")
+    assert resp.status_code == 200
+    assert any(p["topic"] == "older one-off build" for p in resp.json())
+
+
+async def test_the_placement_report_is_readable_by_any_staff_not_just_leads(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """Reporting is a read. A specialist assembling a client update must not need the
+    lead permission that exists to gate SPENDING and PUBLISHING."""
+    wire("specialist", "u-staff")
+    resp = await client.get("/api/v1/offpage/web2/placements")
+    assert resp.status_code == 200

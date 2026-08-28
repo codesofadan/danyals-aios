@@ -12,18 +12,25 @@ Responses are the frontend ``Backlink`` / ``Citation`` / ``Web2Property`` shapes
 (``lib/offpage.ts``); the internal ``client_id`` never leaks. Every mutation offloads
 the blocking psycopg call with ``asyncio.to_thread`` and records an activity entry
 (kind=content, entity=client) so the off-page work keeps each client's context fresh.
-The Web 2.0 PUBLISH pipeline is a later chunk - only the read endpoints exist now.
+The Web 2.0 surface is complete here: the property ledger and platform board (reads),
+the single-property plan/approve pair, and the CAMPAIGN routes - estimate (prices and
+schedules a request without creating anything), create (fans one request out into N
+properties and starts drafting), and the campaign board. Nothing on this router
+publishes: every path ends at the review gate, and only a lead's approve releases a
+placement to the publish worker.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime, time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
+from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
 from app.core.pagination import PageDep
 from app.db.offpage_repo import OffpageRepoDep
@@ -38,9 +45,18 @@ from app.schemas.offpage import (
     OffpageKpisResponse,
     Web2AuthorityTier,
     Web2AuthType,
+    Web2CampaignApprovalResponse,
+    Web2CampaignEstimateResponse,
+    Web2CampaignHold,
+    Web2CampaignRequest,
+    Web2CampaignResponse,
+    Web2CampaignStatus,
     Web2CatalogResponse,
+    Web2PlacementResponse,
+    Web2PlannedPropertyResponse,
     Web2PlanRequest,
     Web2PlatformCatalogResponse,
+    Web2PlatformStatusResponse,
     Web2PropertyResponse,
     Web2ReviewRequest,
     action_for,
@@ -92,8 +108,56 @@ def get_web2_publish_enqueuer() -> Callable[[str], None]:
     return _enqueue
 
 
+def get_web2_similarity_rechecker() -> Callable[[str], str]:
+    """Dependency: re-run the cross-property similarity gate for one property NOW.
+
+    A dependency rather than a direct call so it is overridable in tests (mirroring the
+    enqueuers) and so this router keeps no hard import of the privileged store. Returns
+    the machine-readable code (``""`` when clean, ``sim_unavailable:`` on any failure).
+    """
+
+    def _recheck(web2_id: str) -> str:
+        if not web2_id:
+            return "sim_unavailable:error"
+        try:
+            from app.db.offpage_repo import service_offpage_store
+            from app.services import web2_gate
+
+            store = service_offpage_store()
+            # RE-LOAD through the PRIVILEGED store rather than scoring the RLS row the
+            # endpoint already holds. Not defensive duplication: `load_web2` LEFT JOINs
+            # the client's city in as `client_geo` and `OffpageRepo.get_web2` does not.
+            # The gate MASKS the city before hashing, so scoring here with geo='' while
+            # the corpus was fingerprinted with geo='Leeds' yields two different masks -
+            # the hashes never line up, every comparison scores ~0, and the gate reports
+            # a confident `pass` on an identical article while LOOKING fully wired. Both
+            # sides must fingerprint through identical inputs or neither measures anything.
+            row = store.load_web2(web2_id)
+            if row is None:
+                return "sim_unavailable:error"
+            body_md = str(row.get("body_md") or "")
+            if not body_md.strip():
+                return ""  # nothing drafted yet; the status check already rejects this
+            return web2_gate.evaluate_draft(
+                store,
+                get_settings(),
+                web2_id=web2_id,
+                row=row,
+                body_md=body_md,
+                client_name=str(row.get("client_name") or ""),
+                geo=str(row.get("client_geo") or ""),
+            ).code
+        except Exception:
+            return "sim_unavailable:error"
+
+    return _recheck
+
+
 Web2WriteEnqueuerDep = Annotated[Callable[[str], None], Depends(get_web2_write_enqueuer)]
 Web2PublishEnqueuerDep = Annotated[Callable[[str], None], Depends(get_web2_publish_enqueuer)]
+Web2SimilarityRecheckDep = Annotated[
+    Callable[[str], str], Depends(get_web2_similarity_rechecker)
+]
 
 
 class FlagToxicResponse(BaseModel):
@@ -349,6 +413,82 @@ async def plan_web2(
     return Web2PropertyResponse.from_row(row)
 
 
+def _is_scheduled_later(row: dict[str, Any]) -> bool:
+    """True when this property's pacing slot is still in the future.
+
+    A missing or past slot means "publish now" - the default and the immediate path. Only
+    a genuinely future slot defers, so a row that never went through campaign planning
+    behaves exactly as it did before campaigns existed.
+    """
+    slot = row.get("scheduled_for")
+    if slot is None:
+        return False
+    stamp = slot if isinstance(slot, datetime) else None
+    if stamp is None:
+        return False
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp > datetime.now(UTC)
+
+
+def _guard_similarity(row: dict[str, Any], body: Web2ReviewRequest, live_code: str) -> None:
+    """Refuse an approval the cross-property similarity gate does not support.
+
+    FAIL-CLOSED here, deliberately - the mirror of ``run_write``'s fail-open. At draft
+    time a collision and a clean draft land in the same place, so a gate outage must not
+    stop drafting. But this endpoint is the last step before a placement goes LIVE under
+    a client's name, so an outage here means we do not know whether it duplicates
+    something, and publishing on 'we could not check' is precisely the harm the gate
+    exists to prevent.
+
+    A recorded `warn` or `block` is passable only with an explicit
+    ``acknowledge_similarity`` - and a `block` only while the enforcement switch is off
+    (``settings.web2_similarity_enforce``), which is where it ships until the thresholds
+    are calibrated against a graded golden set (R2 O-1).
+    """
+    # The LIVE verdict wins over the one recorded at draft time.
+    #
+    # Re-running at approval is the load-bearing check for campaigns, not a repeat of the
+    # draft-time one. A campaign drafts N properties before a human approves any, so when
+    # each was written none of its siblings was in the corpus and every one scored clean.
+    # Fingerprints enter the corpus as properties go live, so the duplicate only becomes
+    # visible HERE. Enforcing the frozen draft-time verdict would wave through an entire
+    # campaign of identical articles, each honestly "clean" at the moment it was written.
+    code = live_code or str(row.get("error") or "")
+    if not code.startswith(("sim_warn:", "sim_block:", "sim_unavailable:")):
+        return  # no similarity finding on this row (or a plain grounding-gap message)
+
+    if code.startswith("sim_unavailable:"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The cross-property similarity gate could not run for this placement "
+                f"({code}). Re-draft it once the gate is available - approving now would "
+                "publish without knowing whether it duplicates another property."
+            ),
+        )
+
+    settings = get_settings()
+    if code.startswith("sim_block:") and settings.web2_similarity_enforce:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This draft duplicates an existing property ({code}). Re-draft it with "
+                "different structure and wording; it cannot be approved as it stands."
+            ),
+        )
+
+    if not body.acknowledge_similarity:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"The similarity gate flagged this placement ({code}). Review the "
+                "colliding property, then re-submit with acknowledgeSimilarity=true to "
+                "confirm this article is genuinely distinct."
+            ),
+        )
+
+
 @router.post("/offpage/web2/{web2_id}/approve", response_model=Web2PropertyResponse)
 async def approve_web2(
     web2_id: str,
@@ -356,6 +496,7 @@ async def approve_web2(
     repo: OffpageRepoDep,
     actor: Lead,
     enqueue: Web2PublishEnqueuerDep,
+    recheck_similarity: Web2SimilarityRecheckDep,
 ) -> Web2PropertyResponse:
     """The human quality gate (lead-only). ``approve`` moves a ``needs_review`` draft to
     ``publishing`` and enqueues the publish worker (publish -> verify -> track);
@@ -372,6 +513,9 @@ async def approve_web2(
         )
 
     ent_type, ent_id = _client_entity(row)
+    if body.action == "approve":
+        live_code = await asyncio.to_thread(recheck_similarity, web2_id)
+        _guard_similarity(row, body, live_code)
     if body.action == "reject":
         updated = await asyncio.to_thread(
             repo.update_web2_status, web2_id, {"status": "rejected"}
@@ -387,12 +531,468 @@ async def approve_web2(
     )
     if updated is None:
         raise _WEB2_NOT_FOUND
-    enqueue(web2_id)
+    # Approval always moves the row to `publishing`; whether it goes out NOW depends on
+    # its pacing slot. A future `scheduled_for` means the lead has said "yes, and on the
+    # drip" - so the immediate enqueue is skipped and the release tick claims it when due.
+    # This is exactly the content module's scheduled-publish shape (0072), reused rather
+    # than reinvented so the drip inherits machinery that is already proven.
+    if not _is_scheduled_later(updated):
+        enqueue(web2_id)
     await record_activity(
         actor, kind="content", action="approved a Web 2.0 property",
         target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
     )
     return Web2PropertyResponse.from_row(updated)
+
+
+# --- Web 2.0 CAMPAIGNS ---------------------------------------------------------
+#
+# The unit of work the module was missing. Everything underneath already worked - 53
+# publishers, a grounded generator, the similarity gate, pacing - but there was no way
+# to ASK for thirty properties, so it meant thirty separate calls with no shared budget,
+# no shared schedule, no single approval, and nothing that could answer "how is it
+# going?". These four routes are that.
+
+
+# The request the campaign path hands the per-property guard: an approve that carries NO
+# acknowledgement, so a campaign-level decision can never acknowledge a collision on a
+# property the operator has not looked at individually.
+_CAMPAIGN_REVIEW = Web2ReviewRequest(action="approve")
+
+
+def _pacing_caps(repo: Any) -> Any:
+    from app.services.web2_pacing import PacingCaps
+
+    return PacingCaps.from_row(repo.pacing_caps_row())
+
+
+def _history(repo: Any, client_id: str) -> list[Any]:
+    """Recent placements for pacing. A client who published yesterday does not start
+    a new campaign from zero."""
+    from app.services.web2_pacing import Placement
+
+    out: list[Any] = []
+    for row in repo.client_publish_history(client_id):
+        when = row.get("scheduled_for") or row.get("published_at")
+        if when is None:
+            continue
+        stamp = when if isinstance(when, datetime) else datetime.combine(when, time.min, tzinfo=UTC)
+        out.append(
+            Placement(
+                published_at=stamp,
+                web2_id=str(row.get("id") or ""),
+                client_id=client_id,
+                platform=str(row.get("platform") or ""),
+                account_id=str(row.get("account_id") or "") or None,
+            )
+        )
+    return out
+
+
+def _eligible_for(repo: Any, client_id: str, selected: list[str]) -> tuple[list[str], list[str]]:
+    """Narrow the operator's selection to what this client may lawfully publish to.
+
+    Returns (allowed, refusals). Refusals are RETURNED rather than silently dropped: a
+    selection quietly shrunk from thirty platforms to four is a lie the operator would
+    discover weeks later, and the platform's own reason is what teaches the rule.
+    """
+    from app.services.web2_eligibility import evaluate_catalog, refuse_reason
+
+    scope = repo.client_web2_scope(client_id)
+    board = evaluate_catalog(
+        repo.eligible_catalog(), client_scope=scope, connected_platforms=set(selected)
+    )
+    allowed: list[str] = []
+    refusals: list[str] = []
+    for platform in selected:
+        reason = refuse_reason(board, platform)
+        if reason:
+            refusals.append(f"{platform}: {reason}")
+        else:
+            allowed.append(platform)
+    return allowed, refusals
+
+
+def _build_plan(repo: Any, body: Web2CampaignRequest, client_name: str) -> Any:
+    from app.services.web2_campaign import CampaignRefusedError, plan_campaign
+
+    allowed, refusals = _eligible_for(repo, body.client_id, list(body.platforms))
+    settings = get_settings()
+    try:
+        plan = plan_campaign(
+            now=datetime.now(UTC),
+            client_id=body.client_id,
+            client_name=client_name,
+            requested_count=body.article_count,
+            topics=body.topics,
+            platforms=allowed,
+            anchors=body.anchors,
+            target_url=body.target_url,
+            caps=_pacing_caps(repo),
+            per_article_cost=settings.content_generate_cost_estimate,
+            history=_history(repo, body.client_id),
+            cost_ceiling_usd=body.cost_ceiling_usd,
+        )
+    except CampaignRefusedError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
+        ) from refused
+    plan.notes.extend(refusals)
+    return plan
+
+
+def _estimate_response(plan: Any) -> Web2CampaignEstimateResponse:
+    return Web2CampaignEstimateResponse(
+        count=plan.count,
+        estimated_cost_usd=plan.estimated_cost_usd,
+        projected_completion=(
+            plan.projected_completion.isoformat() if plan.projected_completion else ""
+        ),
+        properties=[
+            Web2PlannedPropertyResponse(
+                platform=p.platform, topic=p.topic, anchor=p.anchor, framework=p.framework,
+                scheduled_for=p.scheduled_for.isoformat() if p.scheduled_for else "",
+            )
+            for p in plan.properties
+        ],
+        notes=list(plan.notes),
+    )
+
+
+@router.get("/offpage/web2/platform-board", response_model=list[Web2PlatformStatusResponse])
+async def web2_platform_board(
+    repo: OffpageRepoDep,
+    actor: ViewReports,
+    client_id: Annotated[str, Query(alias="clientId", min_length=1)],
+) -> list[Web2PlatformStatusResponse]:
+    """The three-state platform board for one client (WEB2-012).
+
+    Every catalogue row is returned, with a reason on the ones this client may not use.
+    Hiding them would make the product look smaller than it is AND leave the operator
+    guessing; showing them with the platform's own policy attached is what lets a
+    50+ platform catalogue be offered honestly.
+    """
+    from app.services.web2_eligibility import evaluate_catalog
+
+    name = await asyncio.to_thread(repo.client_name_for, client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    scope = await asyncio.to_thread(repo.client_web2_scope, client_id)
+    rows = await asyncio.to_thread(repo.eligible_catalog)
+    connected = {str(r.get("platform_enum")) for r in rows if r.get("platform_enum")}
+    board = evaluate_catalog(rows, client_scope=scope, connected_platforms=connected)
+    return [
+        Web2PlatformStatusResponse(
+            name=v.name, platform=v.platform_enum, status=v.status, reason=v.reason,
+            authority=v.authority_tier,
+        )
+        for v in board
+    ]
+
+
+@router.post("/offpage/web2/campaigns/estimate", response_model=Web2CampaignEstimateResponse)
+async def estimate_web2_campaign(
+    body: Web2CampaignRequest, repo: OffpageRepoDep, actor: Lead
+) -> Web2CampaignEstimateResponse:
+    """Price and schedule a campaign WITHOUT creating anything.
+
+    Nothing is queued and nothing is spent. This is the screen where the operator sees
+    that thirty articles is thirty metered drafting runs and about a month of publishing
+    - both facts belong in front of them at the moment they decide.
+    """
+    name = await asyncio.to_thread(repo.client_name_for, body.client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    plan = await asyncio.to_thread(_build_plan, repo, body, name)
+    return _estimate_response(plan)
+
+
+@router.post(
+    "/offpage/web2/campaigns",
+    response_model=Web2CampaignResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_web2_campaign(
+    body: Web2CampaignRequest,
+    repo: OffpageRepoDep,
+    actor: Lead,
+    enqueue: Web2WriteEnqueuerDep,
+) -> Web2CampaignResponse:
+    """Create the campaign and its properties, and start drafting (lead-only).
+
+    Each property is created exactly as a single planned placement is, so it inherits
+    the whole existing pipeline unchanged: grounded drafting, the cost gate per call,
+    the similarity gate, and the review hold. Nothing publishes here - the campaign
+    parks at ``needs_approval`` for ONE operator decision.
+    """
+    name = await asyncio.to_thread(repo.client_name_for, body.client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    plan = await asyncio.to_thread(_build_plan, repo, body, name)
+
+    def _lines(items: list[str]) -> list[str]:
+        return [s.strip() for s in items if isinstance(s, str) and s.strip()]
+
+    source_pack: dict[str, Any] = {"client_name": name}
+    for key, values in (
+        ("proof_points", body.proof_points), ("testimonials", body.testimonials),
+        ("unique_data", body.unique_data), ("services", body.services),
+    ):
+        if _lines(values):
+            source_pack[key] = _lines(values)
+
+    campaign = await asyncio.to_thread(
+        repo.create_campaign,
+        client_id=body.client_id, client_name=name, title=body.title or "Web 2.0 campaign",
+        article_count=plan.count, platforms=[p.platform for p in plan.properties],
+        pacing=body.pacing, drip_window_days=body.drip_window_days,
+        target_url=body.target_url, cost_ceiling_usd=body.cost_ceiling_usd,
+        created_by=actor.id,
+    )
+    if campaign is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Could not create the campaign"
+        )
+    campaign_id = str(campaign["id"])
+
+    for planned in plan.properties:
+        row = await asyncio.to_thread(
+            repo.create_web2,
+            client_id=body.client_id, client_name=name, platform=planned.platform,
+            anchor=planned.anchor, target_url=body.target_url, topic=planned.topic,
+            page_type="blog", framework=planned.framework, source_pack=source_pack,
+        )
+        if row is None:
+            continue
+        await asyncio.to_thread(
+            repo.attach_property_to_campaign, str(row["id"]), campaign_id,
+            planned.scheduled_for,
+        )
+        enqueue(str(row["id"]))
+
+    await record_activity(
+        actor, kind="content", action=f"planned a {plan.count}-property Web 2.0 campaign",
+        target=name, entity_type="client", entity_id=body.client_id,
+    )
+    return Web2CampaignResponse.from_row(campaign, published=0, total=plan.count)
+
+
+@router.post(
+    "/offpage/web2/campaigns/{campaign_id}/approve",
+    response_model=Web2CampaignApprovalResponse,
+)
+async def approve_web2_campaign(
+    campaign_id: str,
+    body: Web2ReviewRequest,
+    repo: OffpageRepoDep,
+    actor: Lead,
+    enqueue: Web2PublishEnqueuerDep,
+    recheck_similarity: Web2SimilarityRecheckDep,
+) -> Web2CampaignApprovalResponse:
+    """ONE operator decision for the whole campaign - and still one state transition per
+    property underneath.
+
+    The distinction is the point. Reviewing thirty drafts one at a time is the workflow
+    this module was built to remove, but a BATCH publish is not the answer either:
+    Tumblr's API License requires a per-post human action before an application posts on
+    an account holder's behalf, so there is deliberately no endpoint that flips many rows
+    with one write. This route iterates, re-running the similarity gate for each row
+    exactly as the single-property route does, and every property that publishes does so
+    through its own checked transition. The operator clicks once; the guarantees are
+    unchanged.
+
+    A property whose gate now BLOCKS is left at ``needs_review`` and reported in ``held``
+    rather than silently approved with the rest - the whole value of the gate is that a
+    bulk action cannot wave work past it.
+    """
+    campaign = await asyncio.to_thread(repo.get_campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    current = str(campaign.get("status") or "")
+    if current not in ("needs_approval", "planning"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Campaign is not awaiting approval (status={current})",
+        )
+
+    props = await asyncio.to_thread(repo.campaign_properties, campaign_id)
+    pending = [p for p in props if str(p.get("status") or "") == "needs_review"]
+
+    approved: list[str] = []
+    held: list[Web2CampaignHold] = []
+    rejected: list[str] = []
+
+    for prop in pending:
+        web2_id = str(prop["id"])
+        if body.action == "reject":
+            await asyncio.to_thread(repo.update_web2_status, web2_id, {"status": "rejected"})
+            rejected.append(web2_id)
+            continue
+
+        # Per-property re-check: the corpus may have grown since this draft was written
+        # (its own campaign siblings were approved moments ago), so a collision that did
+        # not exist at draft time can exist now.
+        live_code = await asyncio.to_thread(recheck_similarity, web2_id)
+        try:
+            # NOTE the deliberately un-acknowledged request. A bulk acknowledgement would
+            # let one checkbox wave every collision in the campaign through sight-unseen,
+            # which is exactly the click-through the named acknowledgement exists to stop.
+            # A collision must be acknowledged on the property it belongs to, through the
+            # single-property route, after the operator has read THAT property's reason.
+            _guard_similarity(prop, _CAMPAIGN_REVIEW, live_code)
+        except HTTPException as blocked:
+            held.append(
+                Web2CampaignHold(
+                    web2_id=web2_id,
+                    topic=str(prop.get("topic") or ""),
+                    platform=str(prop.get("platform") or ""),
+                    reason=str(blocked.detail),
+                )
+            )
+            continue
+
+        updated = await asyncio.to_thread(
+            repo.update_web2_status, web2_id, {"status": "publishing"}
+        )
+        if updated is None:
+            continue
+        if not _is_scheduled_later(updated):
+            enqueue(web2_id)
+        approved.append(web2_id)
+
+    # The campaign's own status follows what actually happened, never the intent. If any
+    # property is still held, the campaign is NOT simply "scheduled" - saying so would be
+    # the partial-delivery-reported-as-success defect this module keeps guarding against.
+    next_status: Web2CampaignStatus
+    if body.action == "reject":
+        next_status = "cancelled"
+    elif held:
+        next_status = "needs_approval"
+    else:
+        next_status = "scheduled"
+    now = datetime.now(UTC)
+    await asyncio.to_thread(
+        repo.update_campaign,
+        campaign_id,
+        {"status": next_status, "approved_by": actor.id, "approved_at": now},
+    )
+    await record_activity(
+        actor,
+        kind="content",
+        action=(
+            f"rejected a Web 2.0 campaign ({len(rejected)} properties)"
+            if body.action == "reject"
+            else f"approved a Web 2.0 campaign ({len(approved)} properties)"
+        ),
+        target=str(campaign.get("client_name") or ""),
+        entity_type="client",
+        entity_id=str(campaign.get("client_id") or "") or None,
+    )
+    return Web2CampaignApprovalResponse(
+        campaign_id=campaign_id,
+        status=next_status,
+        approved=len(approved),
+        held=held,
+        rejected=len(rejected),
+    )
+
+
+@router.get("/offpage/web2/campaigns", response_model=list[Web2CampaignResponse])
+async def list_web2_campaigns(
+    repo: OffpageRepoDep,
+    actor: ViewReports,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+) -> list[Web2CampaignResponse]:
+    rows = await asyncio.to_thread(repo.list_campaigns, client_id=client_id)
+    out: list[Web2CampaignResponse] = []
+    for row in rows:
+        props = await asyncio.to_thread(repo.campaign_properties, str(row["id"]))
+        out.append(_campaign_response(row, props))
+    return out
+
+
+@router.get("/offpage/web2/campaigns/{campaign_id}", response_model=Web2CampaignResponse)
+async def get_web2_campaign(
+    campaign_id: str, repo: OffpageRepoDep, actor: ViewReports
+) -> Web2CampaignResponse:
+    row = await asyncio.to_thread(repo.get_campaign, campaign_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    props = await asyncio.to_thread(repo.campaign_properties, campaign_id)
+    return _campaign_response(row, props)
+
+
+@router.get(
+    "/offpage/web2/campaigns/{campaign_id}/placements",
+    response_model=list[Web2PlacementResponse],
+)
+async def list_campaign_placements(
+    campaign_id: str, repo: OffpageRepoDep, actor: ViewReports
+) -> list[Web2PlacementResponse]:
+    """Every placement in a campaign, in full - what was built, where it lives, and
+    whether the link is genuinely on the page.
+
+    This is the report the module was missing. A campaign could be planned, drafted,
+    approved and published, and there was still no way to answer a client asking "so
+    where are my links?" - the facts were all in the row and none of them were reachable.
+    """
+    campaign = await asyncio.to_thread(repo.get_campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    rows = await asyncio.to_thread(repo.campaign_placements, campaign_id)
+    return [Web2PlacementResponse.from_row(r) for r in rows]
+
+
+@router.get("/offpage/web2/placements", response_model=list[Web2PlacementResponse])
+async def list_placements(
+    repo: OffpageRepoDep,
+    actor: ViewReports,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+) -> list[Web2PlacementResponse]:
+    """The cross-campaign placement ledger, newest first.
+
+    Scoped by campaign alone would hide the single-property builds that predate
+    campaigns, so a client's Web 2.0 history would look shorter than it is.
+    """
+    rows = await asyncio.to_thread(repo.client_placements, client_id)
+    return [Web2PlacementResponse.from_row(r) for r in rows]
+
+
+def _campaign_response(row: dict[str, Any], props: list[dict[str, Any]]) -> Web2CampaignResponse:
+    """Roll the property ledger into the campaign's honest status.
+
+    A campaign that claimed thirty and delivered twenty-eight is DEGRADED, never
+    completed - the same rule the content dispatcher enforces, and the same defect P0-4
+    removed elsewhere: a green tick over work that reached nobody.
+    """
+    from app.services.web2_campaign import campaign_status_for
+
+    total = len(props)
+    published = sum(1 for p in props if str(p.get("status")) == "published")
+    failed = sum(1 for p in props if str(p.get("status")) in ("failed", "rejected"))
+    stored = str(row.get("status") or "")
+    # The LEDGER is authoritative for delivery; the stored column only carries the
+    # pre-delivery lifecycle. An earlier version let any of draft/planning/needs_approval
+    # win outright, which pinned a campaign at "planning" forever - it published all
+    # thirty properties and still reported itself as still being planned. So the stored
+    # value holds only while NOTHING has been delivered yet; the moment a property has a
+    # terminal outcome, what actually happened wins.
+    if stored == "cancelled":
+        rolled = "cancelled"  # an operator decision outranks the ledger
+    elif published or failed:
+        rolled = campaign_status_for(total=total, published=published, failed=failed)
+    elif stored in ("draft", "planning", "needs_approval"):
+        rolled = stored
+    else:
+        rolled = campaign_status_for(total=total, published=published, failed=failed)
+    upcoming = sorted(
+        (p["scheduled_for"] for p in props
+         if p.get("scheduled_for") and str(p.get("status")) != "published"),
+    )
+    return Web2CampaignResponse.from_row(
+        {**row, "status": rolled}, published=published, total=total,
+        next_publish=upcoming[0].isoformat() if upcoming else "",
+    )
 
 
 # --- KPIs ---------------------------------------------------------------------

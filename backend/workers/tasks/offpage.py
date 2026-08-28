@@ -30,19 +30,29 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from app.config import Settings, get_settings
+from app.db.database import privileged_connection
 from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
 from app.schemas.offpage import action_for
-from app.services import pricing
+from app.services import pricing, web2_gate
 from app.services.content_generator import SourcePack
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
 from app.services.vault import find_secret
-from app.services.web2_pipeline import Web2Client, Web2Outcome, run_publish, run_write
+from app.services.web2_pacing import PacingCaps, Placement
+from app.services.web2_pipeline import (
+    SimilarityOutcome,
+    Web2Client,
+    Web2Outcome,
+    run_publish,
+    run_write,
+)
+from app.services.web2_release import plan_release
 from integrations.backlinks import BacklinkProvider, BacklinkRecord, backlink_provider_from_settings
 from integrations.citations import CitationProvider, CitationRecord, citation_provider_from_settings
 from integrations.content_providers import content_providers_from_settings
@@ -354,10 +364,16 @@ def _client_from_row(row: dict[str, Any]) -> Web2Client:
     ``source_pack`` seeded at plan time. With an empty pack the generator degrades
     ungrounded facts to ``[NEEDS:]`` gaps that HOLD at review."""
     client_id = row.get("client_id")
+    # `client_geo` is joined in by ServiceOffpageStore.load_web2 from the client's
+    # business profile. It is load-bearing twice over: the writer uses it to ground a
+    # local article, and the similarity gate masks it before shingling (an unmasked city
+    # token is what lets two templated articles score as distinct). Absent profile -> ''.
+    geo = str(row.get("client_geo") or "").strip()
     return Web2Client(
         client_id=str(client_id) if client_id else None,
         name=str(row.get("client_name") or ""),
         source_pack=_source_pack_from_web2_row(row),
+        geo=geo or None,
     )
 
 
@@ -371,7 +387,28 @@ def execute_web2_write(store: ServiceOffpageStore, settings: Settings, web2_id: 
     writer, model = _writer_for(settings)
     return run_write(
         store, web2_id, client=client, writer=writer, gate=_gate(), settings=settings, model=model,
+        similarity=_similarity_checker(store, settings),
     )
+
+
+def _similarity_checker(
+    store: ServiceOffpageStore, settings: Settings
+) -> Callable[..., SimilarityOutcome]:
+    """The DB-backed similarity gate the pure pipeline calls at draft time.
+
+    A thin adapter over :mod:`app.services.web2_gate`, which the approval endpoint also
+    uses - the two callers MUST score identically, so the logic lives in one place.
+    """
+
+    def check(
+        *, web2_id: str, row: dict[str, Any], body_md: str, client: Web2Client
+    ) -> SimilarityOutcome:
+        return web2_gate.evaluate_draft(
+            store, settings, web2_id=web2_id, row=row, body_md=body_md,
+            client_name=client.name, geo=client.geo or "",
+        )
+
+    return check
 
 
 def execute_web2_publish(store: ServiceOffpageStore, settings: Settings, web2_id: str) -> Web2Outcome:
@@ -380,23 +417,100 @@ def execute_web2_publish(store: ServiceOffpageStore, settings: Settings, web2_id
     store error, missing/malformed vault credential) - never raises, so it can never
     bypass ``run_publish``'s own never-raise guarantee below."""
     publisher = _publisher_for(store, web2_id)
-    return run_publish(store, web2_id, publisher=publisher, gate=_gate(), settings=settings)
+    outcome = run_publish(
+        store, web2_id, publisher=publisher, gate=_gate(), settings=settings,
+        fetch_page=_fetch_page,
+    )
+    if outcome.state == "published":
+        _record_fingerprint(store, web2_id)
+    return outcome
+
+
+def _fetch_page(url: str) -> str | None:
+    """Fetch a published page so the pipeline can confirm our link is really on it.
+
+    Deliberately tolerant and non-raising: a verification failure must never fail the
+    publish it is verifying, and "could not read the page" has to stay distinguishable
+    from "the link was not there" - so every failure returns None, which the checker
+    records as `unknown` rather than `missing`.
+
+    A browser-ish User-Agent because several of these platforms serve a bot-blocking
+    interstitial to a bare client, which would otherwise read as a stripped link.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(
+            timeout=20.0,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; AIOS-linkcheck/1.0)"},
+        ) as client:
+            resp = client.get(url)
+        if resp.status_code >= 400:
+            logger.info("web2_linkcheck_http_error", url=url, status=resp.status_code)
+            return None
+        return resp.text
+    except Exception:
+        logger.info("web2_linkcheck_unreachable", url=url)
+        return None
+
+
+def _record_fingerprint(store: ServiceOffpageStore, web2_id: str) -> None:
+    """Enter a LIVE property into the similarity corpus. Best-effort by design.
+
+    Recorded here rather than at approval because this is the first moment the article
+    is actually public - a property that was approved but whose publish then failed is
+    not out there, and seeding the corpus with it would block a later, better draft of
+    the same placement for no reason.
+
+    NEVER raises: the article is already live, so failing the job now would redeliver it
+    (``acks_late``) and attempt a SECOND publish of the same post. A missing fingerprint
+    degrades the gate's recall by exactly one document and is logged; a double publish is
+    a real duplicate on a client's property.
+    """
+    try:
+        row = store.load_web2(web2_id)
+        if row is None:
+            return
+        body_md = str(row.get("body_md") or "")
+        if not body_md.strip():
+            return
+        web2_gate.record_fingerprint(
+            store, web2_id=web2_id, row=row, body_md=body_md,
+            client_name=str(row.get("client_name") or ""),
+            geo=str(row.get("client_geo") or ""),
+            status_at_capture="published",
+        )
+    except Exception:
+        logger.warning("web2_fingerprint_not_recorded", web2_id=web2_id)
 
 
 def _publisher_for(store: ServiceOffpageStore, web2_id: str) -> Web2Publisher | None:
-    """Best-effort vault lookup for the row's ``(client_id, platform)``. Any failure
-    here (a store error, a missing row, no vault credential yet, Medium/an
-    unrecognised platform) degrades to ``None`` - ``run_publish`` then HOLDS the
-    placement at ``needs_review`` exactly as if the platform were unconfigured."""
+    """Best-effort vault lookup for the row's publishing account. Any failure here (a
+    store error, a missing row, no vault credential yet, Medium/an unrecognised
+    platform) degrades to ``None`` - ``run_publish`` then HOLDS the placement at
+    ``needs_review`` exactly as if the platform were unconfigured.
+
+    The vault label is the property's ``account_id`` where it has one. A property
+    created before ``web2_accounts`` (0100/0101) has none until the reconciliation
+    (``app/cli/web2_migrate_house.py``) attributes it, so it falls back to the legacy
+    client-id label - otherwise every pre-existing placement would lose its credential
+    the moment accounts shipped. The fallback is logged so the remaining un-migrated
+    rows are visible rather than silently permanent."""
     try:
         row = store.load_web2(web2_id)
         if row is None:
             return None
-        client_id = str(row.get("client_id") or "")
         platform = str(row.get("platform") or "")
-        if not client_id or not platform:
+        if not platform:
             return None
-        return build_publisher(client_id=client_id, platform=platform, lookup=find_secret)
+        vault_label = str(row.get("account_id") or "")
+        if not vault_label:
+            vault_label = str(row.get("client_id") or "")
+            if not vault_label:
+                return None
+            logger.info("web2_publisher_legacy_client_label", web2_id=web2_id, platform=platform)
+        return build_publisher(vault_label=vault_label, platform=platform, lookup=find_secret)
     except Exception:
         logger.warning("web2_publisher_lookup_failed", web2_id=web2_id)
         return None
@@ -444,23 +558,20 @@ from workers.celery_app import celery_app  # noqa: E402 - after the pure core, p
 
 @celery_app.task(name="web2_write")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
 def web2_write_job(web2_id: str) -> dict[str, Any]:
-    """Entry point: draft one planned Web 2.0 property, then AUTO-PUBLISH it.
+    """Entry point: draft one planned Web 2.0 property and PARK it at ``needs_review``.
 
-    The human review gate is intentionally removed: a cleanly drafted property
-    (``state='needs_review'``, ``reason='drafted'``, not degraded) is transitioned
-    straight to ``publishing`` and the publish job is enqueued — no lead approval.
-    ``run_publish`` still HOLDS a draft that has unresolved ``[NEEDS:]`` gaps, so a
-    gappy/degraded draft is never force-published.
+    The draft is NEVER auto-published. The ONLY path from ``needs_review`` to
+    ``publishing`` is a lead's explicit approval (``POST /offpage/web2/{id}/approve``,
+    or the campaign approve service, which calls that same per-property primitive once
+    per ``web2_id``).
+
+    That gate is load-bearing, not ceremonial. It is where the anchor, the footprint
+    and the article body are judged before anything is posted under a client's name -
+    and Tumblr's API License requires a per-post human action before an application
+    posts on an account holder's behalf, so a batch/auto path would breach it.
     """
     settings = get_settings()
-    store = service_offpage_store()
-    outcome = execute_web2_write(store, settings, web2_id)
-    if outcome.state == "needs_review" and not outcome.degraded and outcome.reason == "drafted":
-        try:
-            store.update_web2(web2_id, {"status": "publishing"})
-            web2_publish_job.delay(web2_id)
-        except Exception:  # never let auto-publish enqueue failure re-raise (acks_late)
-            logger.exception("web2_autopublish_enqueue_failed", web2_id=web2_id)
+    outcome = execute_web2_write(service_offpage_store(), settings, web2_id)
     return outcome.as_dict()
 
 
@@ -470,6 +581,95 @@ def web2_publish_job(web2_id: str) -> dict[str, Any]:
     settings = get_settings()
     outcome = execute_web2_publish(service_offpage_store(), settings, web2_id)
     return outcome.as_dict()
+
+
+def claim_due_web2_releases() -> list[dict[str, Any]]:
+    """Claim every APPROVED property whose pacing slot has arrived.
+
+    ``for update ... skip locked`` so two concurrent ticks never claim the same row - the
+    claim is the mutex, and it lives at the database, which is the right place for it.
+    Mirrors ``_claim_due_scheduled_codes`` in the content worker.
+
+    ``of p`` is required, not stylistic: Postgres refuses ``FOR UPDATE`` over the nullable
+    side of an outer join ("FeatureNotSupported"), and the account join is a LEFT JOIN
+    because a property need not have an attributed account yet. Naming the properties
+    table locks the rows we actually claim and leaves the account rows unlocked, which is
+    also what we want - the tick reads an account's ownership, it does not modify it.
+    """
+    with privileged_connection() as cur:
+        cur.execute(
+            "select p.id, p.client_id, p.platform, p.status, p.account_id, "
+            "       coalesce(a.ownership::text, 'per_client') as ownership "
+            "from public.web2_properties p "
+            "left join public.web2_accounts a on a.id = p.account_id "
+            "where p.status = 'publishing' "
+            "  and p.scheduled_for is not null and p.scheduled_for <= now() "
+            "for update of p skip locked"
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def execute_web2_release(
+    store: ServiceOffpageStore, settings: Settings, *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Release the due properties whose pacing caps still allow it.
+
+    A PARTIAL RELEASE IS NOT A FAILURE HERE - deferring is a normal, expected outcome
+    (the caps are re-checked at release because a schedule laid weeks ago cannot know
+    what has happened since). What would be dishonest is reporting a deferral as a
+    publish, so the two are counted separately and both are returned.
+    """
+    moment = now or datetime.now(UTC)
+    due = claim_due_web2_releases()
+    if not due:
+        return {"claimed": 0, "released": [], "deferred": []}
+
+    caps = PacingCaps.from_row(store.pacing_caps_row())
+    history = [
+        Placement(
+            published_at=r["published_at"],
+            web2_id=str(r["web2_id"]),
+            client_id=str(r["client_id"]),
+            platform=str(r["platform"]),
+            account_id=str(r["account_id"]) if r.get("account_id") else None,
+            ownership=str(r.get("ownership") or "per_client"),
+        )
+        for r in store.recent_web2_publishes()
+    ]
+    plan = plan_release(now=moment, caps=caps, due_rows=due, history=history)
+
+    for decision in plan.decisions:
+        if decision.action == "release":
+            # Clearing the slot BEFORE enqueueing means a redelivered tick cannot claim
+            # the same row again: the claim query requires a non-null scheduled_for.
+            store.update_web2(decision.web2_id, {"scheduled_for": None})
+            web2_publish_job.delay(decision.web2_id)
+        elif decision.action == "defer" and decision.defer_until is not None:
+            store.update_web2(decision.web2_id, {"scheduled_for": decision.defer_until})
+    return {
+        "claimed": len(due),
+        "released": plan.released,
+        "deferred": plan.deferred,
+        "next_tick_at": plan.next_tick_at.isoformat() if plan.next_tick_at else "",
+    }
+
+
+@celery_app.task(name="web2_release_due")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
+def web2_release_due_job() -> dict[str, Any]:
+    """Entry point: publish the approved properties whose drip slots have arrived.
+
+    Un-keyed and idempotent by construction: the claim requires a non-null
+    ``scheduled_for`` and the release clears it, so a redelivery finds nothing to redo.
+
+    HOW IT IS DRIVEN. Celery beat is intentionally empty in this deployment, so this task
+    is not scheduled by default - it is safe to call on demand and is designed to be
+    driven either by a re-enabled beat entry or by a self-rescheduling chain. Until one
+    of those is switched on, an IMMEDIATE campaign publishes normally (approval enqueues
+    directly) and a DRIP campaign queues correctly but waits. That is a deliberate,
+    visible state rather than a silent failure, and it is called out in the plan.
+    """
+    settings = get_settings()
+    return execute_web2_release(service_offpage_store(), settings)
 
 
 @celery_app.task(name="monitor_offpage")  # type: ignore[untyped-decorator]  # celery's decorator is untyped

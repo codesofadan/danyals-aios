@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Verified } from "@/lib/offpage";
-import { useApproveWeb2, useWeb2 } from "@/lib/hooks/offpage";
+import { useApproveWeb2, useWeb2, useWeb2Placements } from "@/lib/hooks/offpage";
+import Web2CampaignBoard from "./Web2CampaignBoard";
+import Web2PlacementTable from "./Web2PlacementTable";
+import Web2CampaignWizard from "./Web2CampaignWizard";
 import Web2PlanModal from "./Web2PlanModal";
 import Web2StatusBoard from "./Web2StatusBoard";
 import ReadMore from "@/components/ui/ReadMore";
@@ -26,11 +29,12 @@ const PIPELINE_META: Record<Web2PipelineStatus, { label: string; cls: string }> 
 
 export default function Web2Tab() {
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [view, setView] = useState<"ledger" | "status">("ledger");
+  const [view, setView] = useState<"ledger" | "campaigns" | "links" | "status">("ledger");
   const web2Q = useWeb2();
   const web2Properties = web2Q.data ?? [];
   const approve = useApproveWeb2();
   const [showPlan, setShowPlan] = useState(false);
+  const [showCampaign, setShowCampaign] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
   const rows = useMemo(
@@ -62,27 +66,41 @@ export default function Web2Tab() {
           <span className="material-symbols-rounded">rocket_launch</span>
           Branded articles published via official platform APIs — link verified live.
         </div>
+        {/* ACTIONS only. The view tabs moved to their own row below: navigation and
+            actions were sharing one flex line with two segmented controls and two
+            buttons, which crowded on any laptop-width screen. */}
         <div className="op-toolset">
-          <div className="seg">
-            <button className={view === "ledger" ? "on" : undefined} onClick={() => setView("ledger")}>Placements</button>
-            <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>API status</button>
-          </div>
-          {view === "ledger" && (
-            <div className="seg">
-              {FILTERS.map((f) => (
-                <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          )}
-          <button className="primary-btn" onClick={() => setShowPlan(true)}>
+          <button className="ghost-btn" onClick={() => setShowPlan(true)}>
             <span className="material-symbols-rounded">add</span>
-            Plan property
+            Single property
+          </button>
+          <button className="primary-btn" onClick={() => setShowCampaign(true)}>
+            <span className="material-symbols-rounded">campaign</span>
+            New campaign
           </button>
         </div>
       </div>
 
+      <div className="w2-tabs">
+        <div className="seg">
+          <button className={view === "ledger" ? "on" : undefined} onClick={() => setView("ledger")}>Placements</button>
+          <button className={view === "campaigns" ? "on" : undefined} onClick={() => setView("campaigns")}>Campaigns</button>
+          <button className={view === "links" ? "on" : undefined} onClick={() => setView("links")}>Links built</button>
+          <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>API status</button>
+        </div>
+        {view === "ledger" && (
+          <div className="seg w2-tabs-right">
+            {FILTERS.map((f) => (
+              <button key={f.key} className={filter === f.key ? "on" : undefined} onClick={() => setFilter(f.key)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {view === "campaigns" && <Web2CampaignBoard />}
+      {view === "links" && <LinksBuilt />}
       {view === "status" && <Web2StatusBoard />}
 
       {view === "ledger" && needsReviewCount > 0 && (
@@ -92,6 +110,7 @@ export default function Web2Tab() {
         </div>
       )}
       {showPlan && <Web2PlanModal onClose={() => setShowPlan(false)} />}
+      {showCampaign && <Web2CampaignWizard onClose={() => setShowCampaign(false)} />}
       {flash && (
         <div className="op-flash">
           <span className="material-symbols-rounded">task_alt</span>{flash}
@@ -195,5 +214,27 @@ export default function Web2Tab() {
       </div>
       )}
     </div>
+  );
+}
+
+/** Every link ever built, across every campaign and client.
+ *
+ *  Separate from the campaign board because a client's Web 2.0 history is not one
+ *  campaign — it includes the single-property builds that predate campaigns, and those
+ *  would be invisible in a campaign-scoped view. */
+function LinksBuilt() {
+  const q = useWeb2Placements();
+  const rows = q.data ?? [];
+  const live = rows.filter((r) => r.postUrl).length;
+  const followed = rows.filter((r) => r.linkFound === true && !r.linkRel.includes("nofollow")).length;
+  return (
+    <>
+      <div className="fld-hint" style={{ marginBottom: 8 }}>
+        <b>{rows.length}</b> placement(s) · <b>{live}</b> with a live post ·{" "}
+        <b>{followed}</b> with a confirmed followed link. &ldquo;Confirmed&rdquo; means the page was
+        fetched and our link was found on it — not merely that the platform accepted the post.
+      </div>
+      <Web2PlacementTable placements={rows} loading={q.isLoading} />
+    </>
   );
 }

@@ -39,6 +39,7 @@ the (paid) stage, so they always mark a terminal state and return a small outcom
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -67,6 +68,7 @@ from app.services.content_research import (
     build_registry,
 )
 from app.services.cost_gate import CostGate, GateContext, GateDecision
+from app.services.web2_linkcheck import PageFetcher, check_link
 from integrations.llm import LLMResult, SystemSummarizer
 from integrations.web2_publishers import (
     DRAFT_ONLY_PLATFORMS,
@@ -370,7 +372,14 @@ def write(
         model=model,
         tuning=tuning,
     )
-    body_md = _append_backlink(generated.draft_md, plan.anchor, plan.target_url)
+    # Seeded on the property's own identity so the placement is stable for THIS draft
+    # (a redraft puts the link in the same place) but differs across properties.
+    body_md = _place_backlink(
+        generated.draft_md,
+        plan.anchor,
+        plan.target_url,
+        seed=f"{plan.client_name}|{plan.platform}|{plan.topic}|{plan.anchor}",
+    )
     needs = list(generated.needs)
     publishable = _NEEDS_MARKER not in body_md
     return Web2Article(
@@ -384,17 +393,123 @@ def write(
     )
 
 
-def _append_backlink(draft_md: str, anchor: str, target_url: str) -> str:
-    """Append the branded backlink section - the whole point of a Web 2.0 property is
-    one on-topic editorial link back to the client's page."""
+def _place_backlink(draft_md: str, anchor: str, target_url: str, *, seed: str = "") -> str:
+    """Place the ONE editorial link the property exists to carry - CONTEXTUALLY.
+
+    This replaced an ``_append_backlink`` that emitted a byte-identical trailing block on
+    every property of every client::
+
+        ## More about {anchor}
+
+        Learn more about [{anchor}]({target_url}).
+
+    That was three problems in four lines. It was a **cross-client footprint** - every
+    article we had ever published ended with the same two lines, so one suspended
+    property fingerprinted the rest. It was an obviously bolted-on link rather than the
+    in-sentence editorial reference both R2-14 and current practice require. And its
+    fixed ``## More about`` heading sat in **every** document's heading skeleton, which
+    would drag the heading-Jaccard gate (:mod:`app.services.web2_similarity`) toward its
+    block line on legitimately distinct articles - a safety control defeated by the very
+    text it was meant to inspect.
+
+    The strategy, in order of preference:
+
+    1. **Link a mention that is already there.** If the anchor (or the client's brand)
+       occurs in ordinary prose, the first such occurrence becomes the link. This adds
+       NO new text at all, so there is no template to fingerprint and the placement
+       varies exactly as much as the articles do. This is the path that should normally
+       win, because the generator grounds the draft in the client's name.
+    2. **Otherwise, extend an existing paragraph** with one short sentence, chosen
+       deterministically from a small family and attached to a paragraph chosen by the
+       same seed - never a new heading, never the same slot twice across properties.
+
+    Exactly one link to ``target_url`` is produced in both paths. An empty
+    ``target_url`` yields the draft unchanged (a property with no link is a held draft,
+    not a silent no-op link to nowhere).
+    """
     anchor = anchor.strip() or "our services"
     if not target_url.strip():
         return draft_md.rstrip() + "\n"
-    return (
-        draft_md.rstrip()
-        + f"\n\n## More about {anchor}\n\n"
-        + f"Learn more about [{anchor}]({target_url}).\n"
+
+    linked = _link_existing_mention(draft_md, anchor, target_url)
+    if linked is not None:
+        return linked.rstrip() + "\n"
+    return _extend_paragraph_with_link(draft_md, anchor, target_url, seed=seed).rstrip() + "\n"
+
+
+def _is_prose(line: str) -> bool:
+    """A body paragraph line: not a heading, list item, quote, code fence, or table."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    return not stripped.startswith(("#", ">", "-", "*", "+", "|", "```", "    "))
+
+
+def _link_existing_mention(draft_md: str, anchor: str, target_url: str) -> str | None:
+    """Turn the first prose occurrence of ``anchor`` into the editorial link.
+
+    Skips lines that already contain a markdown link, so the anchor can never be nested
+    inside another link, and skips the H1/headings so the link lands in a sentence.
+    Returns ``None`` when the anchor is not present in prose, which hands the caller the
+    fallback.
+    """
+    pattern = re.compile(rf"(?<!\[)(?<!\w){re.escape(anchor)}(?!\w)(?!\])", re.IGNORECASE)
+    out = draft_md.splitlines()
+    for i, line in enumerate(out):
+        if not _is_prose(line) or "](" in line:
+            continue
+        match = pattern.search(line)
+        if match is None:
+            continue
+        # Keep the prose's own casing - rewriting it to the anchor's casing would be a
+        # visible tell and would read as machine-edited.
+        found = match.group(0)
+        out[i] = line[: match.start()] + f"[{found}]({target_url})" + line[match.end() :]
+        return "\n".join(out)
+    return None
+
+
+# One short closing sentence per property. A FAMILY, not a template: the member is
+# chosen by seed, so two properties do not share a line, and none of them is a heading.
+_LINK_SENTENCES: tuple[str, ...] = (
+    "Full details of the work are on [{anchor}]({url}).",
+    "More on how this is handled is at [{anchor}]({url}).",
+    "The service pages at [{anchor}]({url}) cover the specifics.",
+    "There is a fuller breakdown at [{anchor}]({url}).",
+    "See [{anchor}]({url}) for the current details.",
+)
+
+
+def _extend_paragraph_with_link(draft_md: str, anchor: str, target_url: str, *, seed: str) -> str:
+    """Append one seeded sentence to an existing LATE paragraph.
+
+    A late paragraph rather than a new trailing section: the link then sits inside the
+    body's own prose instead of announcing itself as an appendix. If the draft has no
+    prose at all (a ``[NEEDS:]`` skeleton), the sentence becomes its own final line -
+    such a draft cannot publish anyway, so it never reaches a real page in that shape.
+    """
+    sentence = _LINK_SENTENCES[_seed_index(seed or anchor, len(_LINK_SENTENCES))].format(
+        anchor=anchor, url=target_url
     )
+    lines = draft_md.rstrip().splitlines()
+    prose_idx = [i for i, line in enumerate(lines) if _is_prose(line)]
+    if not prose_idx:
+        return draft_md.rstrip() + "\n\n" + sentence
+    # Choose among the last few prose lines, seeded, so the slot itself varies too.
+    tail = prose_idx[-3:]
+    target = tail[_seed_index(seed or anchor, len(tail))]
+    lines[target] = lines[target].rstrip() + " " + sentence
+    return "\n".join(lines)
+
+
+def _seed_index(seed: str, modulo: int) -> int:
+    """A stable index from a seed - deterministic across processes (``hash()`` is not,
+    because PYTHONHASHSEED is randomised per process, so two workers would place the
+    link differently for the same property)."""
+    if modulo <= 0:
+        return 0
+    digest = hashlib.blake2b(seed.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % modulo
 
 
 def _degraded_article(plan: Web2Plan, reason: str) -> Web2Article:
@@ -407,7 +522,12 @@ def _degraded_article(plan: Web2Plan, reason: str) -> Web2Article:
         f"{_NEEDS_MARKER} article copy - the content writer (Anthropic) is not "
         "configured; a lead should draft or re-run once the key lands]\n"
     )
-    body_md = _append_backlink(body_md, plan.anchor, plan.target_url)
+    body_md = _place_backlink(
+        body_md,
+        plan.anchor,
+        plan.target_url,
+        seed=f"{plan.client_name}|{plan.platform}|{plan.topic}|{plan.anchor}",
+    )
     return Web2Article(
         plan=plan,
         title=title,
@@ -470,6 +590,9 @@ def track(
     published_at: date | None = None,
     body_md: str | None = None,
     error: str | None = None,
+    link_rel: str | None = None,
+    link_found: bool | None = None,
+    link_checked_at: Any = None,
 ) -> None:
     """Write one placement's new state back to ``web2_properties`` (only the given
     fields; ``updated_at`` is trigger-maintained)."""
@@ -486,7 +609,72 @@ def track(
         fields["body_md"] = body_md
     if error is not None:
         fields["error"] = error[:_ERROR_MAX]
+    # The MEASURED link facts. `link_found` is deliberately tri-state: None means nobody
+    # looked, which must stay distinguishable from False ("we looked and it was gone").
+    if link_rel is not None:
+        fields["link_rel"] = link_rel
+    if link_found is not None:
+        fields["link_found"] = link_found
+    if link_checked_at is not None:
+        fields["link_checked_at"] = link_checked_at
     store.update_web2(web2_id, fields)
+
+
+# --------------------------------------------------------------------------- #
+# The cross-property similarity seam (WEB2-007 / R2-11)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class SimilarityOutcome:
+    """What the gate decided about one draft. ``code`` is the machine-readable string
+    persisted on the row (``sim_block:<check>:<scope>:<web2_id>``), so the UI and the
+    approval endpoint both read a verdict rather than parse prose."""
+
+    verdict: Literal["pass", "warn", "block", "unavailable"] = "pass"
+    code: str = ""
+    detail: str = ""
+
+    @property
+    def blocked(self) -> bool:
+        return self.verdict == "block"
+
+
+class Web2SimilarityChecker(Protocol):
+    """Injected seam: fingerprint this draft and score it against the corpus.
+
+    A Protocol rather than a direct import so the pure pipeline keeps its no-DB
+    guarantee - the worker supplies the DB-backed implementation, tests supply a fake,
+    and ``None`` means 'not wired' (which is NOT the same as 'passed', see below)."""
+
+    def __call__(
+        self, *, web2_id: str, row: dict[str, Any], body_md: str, client: Web2Client
+    ) -> SimilarityOutcome: ...
+
+
+def check_similarity(
+    checker: Web2SimilarityChecker | None,
+    *,
+    web2_id: str,
+    row: dict[str, Any],
+    body_md: str,
+    client: Web2Client,
+) -> SimilarityOutcome:
+    """Run the gate, converting any failure into an honest ``unavailable`` verdict.
+
+    FAIL-OPEN HERE, FAIL-CLOSED AT APPROVAL - and the asymmetry is the whole point. At
+    draft time a block and a pass land in the SAME place (``needs_review``); refusing to
+    draft because the corpus is unreachable would stop all work to prevent nothing, since
+    nothing publishes from here anyway. What must never happen is a placement going LIVE
+    unchecked, so the approval endpoint treats ``unavailable`` as a refusal. The verdict
+    is recorded either way, so 'the gate could not run' is visible rather than silently
+    indistinguishable from 'the gate approved it'.
+    """
+    if checker is None:
+        return SimilarityOutcome("unavailable", "sim_unavailable:not_wired", "gate not wired")
+    try:
+        return checker(web2_id=web2_id, row=row, body_md=body_md, client=client)
+    except Exception as exc:  # never raise out of run_write (acks_late => double spend)
+        logger.warning("web2_similarity_unavailable", web2_id=web2_id, error=repr(exc))
+        return SimilarityOutcome("unavailable", "sim_unavailable:error", f"{exc!r}"[:_ERROR_MAX])
 
 
 # --------------------------------------------------------------------------- #
@@ -502,6 +690,7 @@ def run_write(
     settings: Settings,
     model: str = "content-writer",
     tuning: GeneratorTuning = DEFAULT_TUNING,
+    similarity: Web2SimilarityChecker | None = None,
 ) -> Web2Outcome:
     """Draft one planned property and HOLD it at the review gate. Never raises.
 
@@ -563,13 +752,29 @@ def run_write(
             the_plan, writer=gated_writer, model=model,
             source_pack=client.source_pack, context=client.context, tuning=tuning,
         )
-        track(
-            store, web2_id, status="needs_review", body_md=article.body_md,
-            error="" if article.publishable else "draft has unresolved [NEEDS:] gaps",
+
+        # The cross-property similarity gate (R2-11): AFTER the draft exists, BEFORE the
+        # row is parked at review. It runs on every draft and its verdict is always
+        # recorded; whether a `block` actually refuses APPROVAL is decided at the
+        # approval endpoint by `settings.web2_similarity_enforce`, so the recorded fact
+        # stays honest whatever the enforcement posture is.
+        sim = check_similarity(
+            similarity, web2_id=web2_id, row=row, body_md=article.body_md, client=client
         )
+
+        gap_error = "" if article.publishable else "draft has unresolved [NEEDS:] gaps"
+        # BOTH findings are kept. An earlier version wrote `gap_error or sim.code`, which
+        # silently DISCARDED the similarity verdict whenever a draft also had a grounding
+        # gap - so a duplicate that happened to be gappy carried no similarity code at
+        # all, and the approval guard (which matches on the `sim_` prefix) skipped it
+        # entirely. The similarity code leads so that prefix match still works, and the
+        # gap is appended rather than replacing it.
+        error = "; ".join(part for part in (sim.code, gap_error) if part)
+        track(store, web2_id, status="needs_review", body_md=article.body_md, error=error)
         logger.info(
             "web2_write_drafted", web2_id=web2_id, words=article.word_count,
             publishable=article.publishable, spent=gated_writer.spent,
+            similarity=sim.verdict,
         )
         return Web2Outcome(
             web2_id, "write", "needs_review",
@@ -601,6 +806,7 @@ def run_publish(
     gate: CostGate,
     settings: Settings,
     now: date | None = None,
+    fetch_page: PageFetcher | None = None,
 ) -> Web2Outcome:
     """Publish an APPROVED property, verify it, and track it. Never raises.
 
@@ -630,6 +836,23 @@ def run_publish(
         if platform not in WEB2_PLATFORMS:
             track(store, web2_id, status="failed", error=f"unknown platform: {platform}")
             return Web2Outcome(web2_id, "publish", "failed", reason="unknown platform")
+
+        # R2-07: a property published through a credential later found to be SHARED
+        # across clients receives no further posts. The article already live is left
+        # alone deliberately - deleting a live page is a larger, stranger signal than
+        # letting it sit - but continuing to post to it keeps extending a correlation
+        # between clients that we can no longer defend. Until this migration ran, the
+        # flag was set by the reconciliation, read by the reports, and enforced nowhere.
+        if bool(row.get("shared_origin")):
+            track(
+                store, web2_id, status="needs_review",
+                error="frozen: shared_origin (published through a credential shared "
+                      "across clients; re-point it at a client-owned account first)",
+            )
+            logger.info("web2_publish_frozen_shared_origin", web2_id=web2_id, platform=platform)
+            return Web2Outcome(
+                web2_id, "publish", "needs_review", degraded=True, reason="shared_origin_frozen"
+            )
 
         if _NEEDS_MARKER in body_md or not body_md.strip():
             # A draft with unresolved gaps (or no body) must never go live: hold it.
@@ -669,12 +892,22 @@ def run_publish(
 
         gate.commit(ctx, ctx.estimated_cost)
         verified, why = verify_live_and_indexable(result, platform)
+        # Fetch the page we were just given and look for our own link. A 201 from the
+        # platform means it accepted the post, NOT that the link survived on the page -
+        # platforms strip links, wrap them in redirectors, and add rel="nofollow"
+        # server-side, and none of that comes back in the create response.
+        link = check_link(result.post_url, target_url, fetch_page)
         track(
             store, web2_id, status="published", post_url=result.post_url,
             verified="verified" if verified else "pending", external_id=result.external_id,
             published_at=(now or _utcnow().date()), error="" if verified else why,
+            link_rel=link.rel, link_found=link.found,
+            link_checked_at=_utcnow() if link.state != "unknown" else None,
         )
-        logger.info("web2_published", web2_id=web2_id, verified=verified, url=result.post_url)
+        logger.info(
+            "web2_published", web2_id=web2_id, verified=verified, url=result.post_url,
+            link=link.state, link_rel=link.rel or "-",
+        )
         return Web2Outcome(
             web2_id, "publish", "published", verified=verified, post_url=result.post_url,
             reason=why,

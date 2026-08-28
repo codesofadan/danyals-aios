@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from app.services import web2_pipeline as pipeline_mod
 from app.services.content_generator import SourcePack
 from app.services.cost_gate import CostGate, DialMode, GateContext
 from app.services.web2_pipeline import (
@@ -219,6 +220,139 @@ def test_write_produces_grounded_article_with_backlink() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The backlink is placed CONTEXTUALLY, not as a fixed trailing block.
+#
+# The previous implementation appended a byte-identical two-line section to EVERY
+# property of EVERY client. That was a cross-client fingerprint in its own right, and
+# its fixed `## More about` heading sat in every document's heading skeleton - which
+# would drag the heading-Jaccard similarity gate toward its block line on articles that
+# are genuinely distinct, defeating the control with the text it was meant to inspect.
+# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# The similarity seam: fail-OPEN at draft, fail-CLOSED at approval.
+#
+# The asymmetry is deliberate. At draft time a block and a pass land in the SAME place
+# (needs_review), so refusing to draft because the corpus is unreachable would stop all
+# work to prevent nothing. What must never happen is a placement going LIVE unchecked,
+# so "unavailable" is recorded honestly and the approval endpoint refuses on it.
+# --------------------------------------------------------------------------- #
+def test_a_similarity_block_is_recorded_but_still_parks_at_review() -> None:
+    store = FakeWeb2Store({"w2-1": _draft_row()})
+
+    def checker(**_kw: Any) -> pipeline_mod.SimilarityOutcome:
+        return pipeline_mod.SimilarityOutcome("block", "sim_block:body_sha256:client:w2-9")
+
+    out = run_write(
+        store, "w2-1", client=_client(), writer=FakeWriter(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(), similarity=checker,
+    )
+    assert out.state == "needs_review"  # a block HOLDS; it never publishes and never crashes
+    assert store.rows["w2-1"]["status"] == "needs_review"
+    assert store.rows["w2-1"]["error"] == "sim_block:body_sha256:client:w2-9"
+
+
+def test_a_checker_that_raises_records_unavailable_and_does_not_break_the_draft() -> None:
+    """A gate that cannot reach the corpus must not take the worker down - run_write
+    never raises, because acks_late would redeliver and re-spend on Claude."""
+    store = FakeWeb2Store({"w2-1": _draft_row()})
+
+    def boom(**_kw: Any) -> pipeline_mod.SimilarityOutcome:
+        raise RuntimeError("db down")
+
+    out = run_write(
+        store, "w2-1", client=_client(), writer=FakeWriter(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(), similarity=boom,
+    )
+    assert out.state == "needs_review"
+    assert store.rows["w2-1"]["error"].startswith("sim_unavailable:")
+
+
+def test_an_unwired_gate_is_unavailable_not_a_silent_pass() -> None:
+    """'Not wired' must be distinguishable from 'approved'. Recording a pass here is how
+    a safety control silently covers nothing while looking installed."""
+    store = FakeWeb2Store({"w2-1": _draft_row()})
+    run_write(
+        store, "w2-1", client=_client(), writer=FakeWriter(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(), similarity=None,
+    )
+    assert store.rows["w2-1"]["error"] == "sim_unavailable:not_wired"
+
+
+def test_the_backlink_no_longer_emits_the_fixed_more_about_section() -> None:
+    the_plan = plan(_client(), PLATFORM_WORDPRESS, "roof repair", "https://acme.example/roof-repair")
+    body = write(the_plan, writer=FakeWriter(), source_pack=_source_pack()).body_md
+    assert "## More about" not in body
+    assert "Learn more about [" not in body
+
+
+def test_an_existing_prose_mention_is_linked_rather_than_a_sentence_appended() -> None:
+    """The best placement adds NO new text: if the anchor is already in the prose, that
+    occurrence becomes the link. Nothing is appended, so there is no template at all."""
+    draft = "# Roof Repair Guide\n\nGood roof repair starts with a survey of the deck.\n"
+    out = pipeline_mod._place_backlink(draft, "roof repair", "https://acme.example/x", seed="s")
+    assert "[roof repair](https://acme.example/x)" in out
+    assert out.count("https://acme.example/x") == 1  # exactly ONE editorial link
+    assert len(out.splitlines()) == len(draft.splitlines())  # no line was added
+
+
+def test_the_existing_mention_keeps_the_prose_casing() -> None:
+    """Rewriting 'Roof Repair' to the anchor's lowercase would be a visible tell and
+    would read as machine-edited."""
+    draft = "# Guide\n\nProfessional Roof Repair begins with a survey.\n"
+    out = pipeline_mod._place_backlink(draft, "roof repair", "https://acme.example/x", seed="s")
+    assert "[Roof Repair](https://acme.example/x)" in out
+
+
+def test_the_anchor_is_never_linked_inside_a_heading_or_an_existing_link() -> None:
+    draft = (
+        "# Roof Repair\n\n"
+        "See [roof repair](https://other.example/elsewhere) for context.\n\n"
+        "A later paragraph mentions roof repair plainly.\n"
+    )
+    out = pipeline_mod._place_backlink(draft, "roof repair", "https://acme.example/x", seed="s")
+    assert out.splitlines()[0] == "# Roof Repair"  # the H1 is untouched
+    assert "[[" not in out and "]](" not in out  # never nested inside the other link
+    assert out.count("https://acme.example/x") == 1
+
+
+def test_a_draft_with_no_mention_gets_one_sentence_inside_an_existing_paragraph() -> None:
+    """The fallback must extend a paragraph, never open a new trailing section - a new
+    heading is what put the old template into every heading skeleton."""
+    draft = "# Gutters\n\nSeasonal clearing prevents overflow damage to the fascia.\n"
+    out = pipeline_mod._place_backlink(draft, "Acme Roofing", "https://acme.example/x", seed="s")
+    assert "https://acme.example/x" in out
+    assert not any(line.startswith("#") for line in out.splitlines()[1:])
+    assert out.count("https://acme.example/x") == 1
+
+
+def test_the_fallback_sentence_differs_across_properties() -> None:
+    """Two properties must not share a closing line. A single fixed sentence would just
+    be the old fingerprint one line shorter."""
+    draft = "# Gutters\n\nSeasonal clearing prevents overflow damage to the fascia.\n"
+    variants = {
+        pipeline_mod._place_backlink(draft, "Acme Roofing", "https://acme.example/x", seed=s)
+        for s in ("a", "b", "c", "d", "e", "f", "g", "h")
+    }
+    assert len(variants) > 1, "the closing sentence must vary across properties"
+
+
+def test_placement_is_stable_for_the_same_property() -> None:
+    """Deterministic per seed: a redraft puts the link in the same place, so a diff is
+    about the prose rather than about link churn. blake2b, not hash() - PYTHONHASHSEED
+    randomises the builtin per process, so two workers would disagree."""
+    draft = "# Gutters\n\nSeasonal clearing prevents overflow damage to the fascia.\n"
+    a = pipeline_mod._place_backlink(draft, "Acme Roofing", "https://acme.example/x", seed="p1")
+    b = pipeline_mod._place_backlink(draft, "Acme Roofing", "https://acme.example/x", seed="p1")
+    assert a == b
+
+
+def test_an_empty_target_url_places_no_link_at_all() -> None:
+    draft = "# Gutters\n\nSeasonal clearing prevents overflow damage.\n"
+    out = pipeline_mod._place_backlink(draft, "Acme Roofing", "", seed="s")
+    assert "](" not in out
+
+
+# --------------------------------------------------------------------------- #
 # run_write: HOLDS at needs_review, never publishes
 # --------------------------------------------------------------------------- #
 def test_run_write_holds_at_needs_review_without_publishing() -> None:
@@ -242,7 +376,7 @@ def test_run_write_idempotent_on_redelivery() -> None:
     store = FakeWeb2Store({"w2-1": _draft_row(status="needs_review", body_md="# Done\n")})
     writer = FakeWriter()
     outcome = run_write(
-        store, "w2-1", client=_client(), writer=writer, gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", client=_client(), writer=writer, gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "unchanged"
     assert writer.calls == 0  # no re-draft, no re-spend
@@ -251,7 +385,7 @@ def test_run_write_idempotent_on_redelivery() -> None:
 def test_run_write_missing_row_is_error_not_crash() -> None:
     store = FakeWeb2Store({})
     outcome = run_write(
-        store, "nope", client=_client(), writer=FakeWriter(), gate=_gate(FakeCostStore()),
+        store, "nope", client=_client(), writer=FakeWriter(), gate=_gate(FakeCostStore(mode="api")),
         settings=_settings(),
     )
     assert outcome.state == "error"
@@ -263,7 +397,7 @@ def test_run_write_missing_row_is_error_not_crash() -> None:
 def test_run_write_degraded_without_writer_holds_at_review() -> None:
     store = FakeWeb2Store({"w2-1": _draft_row()})
     outcome = run_write(
-        store, "w2-1", client=_client(), writer=None, gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", client=_client(), writer=None, gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "needs_review"  # holds at review
     assert outcome.degraded is True
@@ -337,7 +471,7 @@ def test_run_publish_idempotent_when_already_published() -> None:
             raise AssertionError("must not re-publish an already-published row")
 
     outcome = run_publish(
-        store, "w2-1", publisher=BoomPublisher(), gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", publisher=BoomPublisher(), gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "unchanged"
 
@@ -345,7 +479,7 @@ def test_run_publish_idempotent_when_already_published() -> None:
 def test_run_publish_skips_when_not_approved() -> None:
     store = FakeWeb2Store({"w2-1": _written_row(status="needs_review")})
     outcome = run_publish(
-        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "skipped"  # not approved -> never published
 
@@ -353,7 +487,7 @@ def test_run_publish_skips_when_not_approved() -> None:
 def test_run_publish_degraded_without_publisher_holds_at_review() -> None:
     store = FakeWeb2Store({"w2-1": _written_row()})
     outcome = run_publish(
-        store, "w2-1", publisher=None, gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", publisher=None, gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "needs_review"  # holds at the review gate
     assert outcome.degraded is True
@@ -363,7 +497,7 @@ def test_run_publish_degraded_without_publisher_holds_at_review() -> None:
 def test_run_publish_refuses_a_draft_with_unresolved_gaps() -> None:
     store = FakeWeb2Store({"w2-1": _written_row(body_md="# Draft\n\n[NEEDS: real copy]\n")})
     outcome = run_publish(
-        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "needs_review"  # never publishes an incomplete draft
     assert store.rows["w2-1"]["status"] == "needs_review"
@@ -388,7 +522,7 @@ def test_run_publish_provider_error_marks_failed_never_raises() -> None:
             raise RuntimeError("provider down")
 
     outcome = run_publish(
-        store, "w2-1", publisher=BoomPublisher(), gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", publisher=BoomPublisher(), gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "failed"  # never stuck 'publishing', never re-raised
     assert store.rows["w2-1"]["status"] == "failed"
@@ -400,7 +534,7 @@ def test_run_publish_provider_error_marks_failed_never_raises() -> None:
 def test_medium_publish_is_draft_only_pending() -> None:
     store = FakeWeb2Store({"w2-1": _written_row(platform=PLATFORM_MEDIUM)})
     outcome = run_publish(
-        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore()), settings=_settings()
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")), settings=_settings()
     )
     assert outcome.state == "published"
     assert outcome.verified is False  # Medium is draft-only, never 'live/verified'
@@ -473,3 +607,88 @@ def test_markdown_to_html_renders_subset() -> None:
     assert "<h2>Heading</h2>" in html
     assert '<a href="https://x">link</a>' in html
     assert "<ul><li>one</li><li>two</li></ul>" in html
+
+
+# --------------------------------------------------------------------------- #
+# The measured link. "Published" is the platform accepting the post; whether OUR
+# link survived on the page is a separate fact, and the one a client is paying for.
+# --------------------------------------------------------------------------- #
+def test_publishing_records_the_measured_link_and_its_rel() -> None:
+    store = FakeWeb2Store({"w2-1": _written_row()})
+    page = '<a href="https://acme.example/roof-repair" rel="nofollow">roof repair</a>'
+    outcome = run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(), fetch_page=lambda url: page,
+    )
+    assert outcome.state == "published"
+    row = store.rows["w2-1"]
+    assert row["link_found"] is True
+    assert row["link_rel"] == "nofollow"      # found, but passes no equity
+    assert row["link_checked_at"] is not None
+
+
+def test_a_page_missing_our_link_is_recorded_as_missing() -> None:
+    """The finding that matters commercially: the platform accepted the post and then
+    stripped the link. Without this the placement reports as delivered."""
+    store = FakeWeb2Store({"w2-1": _written_row()})
+    outcome = run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(), fetch_page=lambda url: "<p>no links here</p>",
+    )
+    assert outcome.state == "published"
+    assert store.rows["w2-1"]["link_found"] is False
+
+
+def test_an_unreachable_page_leaves_the_link_unchecked_not_failed() -> None:
+    """`unknown` must not be written as False. A network problem is not evidence that a
+    platform removed our link, and recording it as one would send someone chasing a
+    defect that does not exist."""
+    store = FakeWeb2Store({"w2-1": _written_row()})
+    outcome = run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(), fetch_page=lambda url: None,
+    )
+    assert outcome.state == "published"           # the publish still succeeded
+    assert store.rows["w2-1"].get("link_found") is None
+    assert store.rows["w2-1"].get("link_checked_at") is None
+
+
+def test_publishing_without_a_fetcher_still_publishes() -> None:
+    """The check is additive. A deployment with no outbound access must still publish."""
+    store = FakeWeb2Store({"w2-1": _written_row()})
+    outcome = run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(),
+    )
+    assert outcome.state == "published"
+    assert store.rows["w2-1"].get("link_found") is None
+
+
+# --------------------------------------------------------------------------- #
+# R2-07: a shared-origin property is frozen, not published to again.
+# --------------------------------------------------------------------------- #
+def test_a_shared_origin_property_is_frozen_before_any_provider_call() -> None:
+    """The flag was set by the reconciliation, shown in the reports, and enforced
+    nowhere - so a property known to sit on a credential shared across clients would
+    happily keep publishing, extending exactly the correlation the flag records."""
+    store = FakeWeb2Store({"w2-1": _written_row(shared_origin=True)})
+    publisher = FakeWeb2Publisher()
+    outcome = run_publish(
+        store, "w2-1", publisher=publisher, gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(),
+    )
+    assert outcome.state == "needs_review"
+    assert outcome.reason == "shared_origin_frozen"
+    row = store.rows["w2-1"]
+    assert row["status"] == "needs_review"
+    assert "shared_origin" in row["error"]
+    assert row["post_url"] == ""          # nothing went live
+
+
+def test_the_freeze_does_not_touch_a_normal_property() -> None:
+    store = FakeWeb2Store({"w2-1": _written_row()})
+    outcome = run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(),
+    )
+    assert outcome.state == "published"
