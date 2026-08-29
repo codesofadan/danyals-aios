@@ -1,0 +1,130 @@
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SelfStorage",
+      "@id": "https://www.anchorselfstorage.example/#localbusiness-round-rock",
+      "name": "Anchor Self Storage",
+      "url": "https://www.anchorselfstorage.example/round-rock/",
+      "image": "https://www.anchorselfstorage.example/img/round-rock-climate-hallway-2026-06.jpg",
+      "telephone": "(512) 555-0148",
+      "priceRange": "$29-$249/mo",
+      "currenciesAccepted": "USD",
+      "paymentAccepted": "Credit Card, Debit Card, ACH",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "2100 N Mays St",
+        "addressLocality": "Round Rock",
+        "addressRegion": "TX",
+        "postalCode": "78664",
+        "addressCountry": "US"
+      },
+      "geo": {
+        "@type": "GeoCoordinates",
+        "latitude": 30.5266,
+        "longitude": -97.6789
+      },
+      "hasMap": "https://www.google.com/maps/anchorselfstorage-roundrock.example",
+      "areaServed": [
+        { "@type": "City", "name": "Round Rock" },
+        { "@type": "City", "name": "Wells Branch" }
+      ],
+      "openingHoursSpecification": [
+        {
+          "@type": "OpeningHoursSpecification",
+          "name": "Office hours",
+          "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "opens": "09:00",
+          "closes": "18:00"
+        },
+        {
+          "@type": "OpeningHoursSpecification",
+          "name": "Office hours",
+          "dayOfWeek": "Saturday",
+          "opens": "09:00",
+          "closes": "17:00"
+        }
+      ],
+      "amenityFeature": [
+        { "@type": "LocationFeatureSpecification", "name": "Climate-controlled units (55-80F, dehumidified)", "value": true },
+        { "@type": "LocationFeatureSpecification", "name": "Drive-up access", "value": true },
+        { "@type": "LocationFeatureSpecification", "name": "24-hour gate access", "value": false },
+        { "@type": "LocationFeatureSpecification", "name": "Gate access 6am-10pm daily", "value": true },
+        { "@type": "LocationFeatureSpecification", "name": "Video surveillance (28 cameras, recorded 24/7)", "value": true },
+        { "@type": "LocationFeatureSpecification", "name": "Individually alarmed climate units", "value": true }
+      ],
+      "sameAs": [
+        "https://www.google.com/maps/anchorselfstorage-roundrock.example",
+        "https://www.facebook.com/anchorselfstorage.example"
+      ]
+    },
+    {
+      "@type": "Product",
+      "@id": "https://www.anchorselfstorage.example/round-rock/climate-controlled-storage/#unit-10x10-climate",
+      "name": "10x10 Climate-Controlled Storage Unit - Round Rock",
+      "description": "100 sq ft climate-controlled unit held at 55-80F with dehumidification, at the Round Rock facility.",
+      "offers": {
+        "@type": "Offer",
+        "priceCurrency": "USD",
+        "availability": "https://schema.org/InStock",
+        "businessFunction": "http://purl.org/goodrelations/v1#LeaseOut",
+        "url": "https://www.anchorselfstorage.example/round-rock/climate-controlled-storage/",
+        "priceSpecification": {
+          "@type": "UnitPriceSpecification",
+          "price": "129.00",
+          "priceCurrency": "USD",
+          "unitCode": "MON",
+          "billingDuration": 1,
+          "billingIncrement": 1
+        }
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://www.anchorselfstorage.example/round-rock/climate-controlled-storage/#breadcrumb",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://www.anchorselfstorage.example/" },
+        { "@type": "ListItem", "position": 2, "name": "Round Rock", "item": "https://www.anchorselfstorage.example/round-rock/" },
+        { "@type": "ListItem", "position": 3, "name": "Climate Controlled Storage", "item": "https://www.anchorselfstorage.example/round-rock/climate-controlled-storage/" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://www.anchorselfstorage.example/round-rock/climate-controlled-storage/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Do you have climate units open in Round Rock right now?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The live board on our site shows current climate availability by size at the Round Rock building. Because it updates from our management software, it is accurate to the day rather than a printed rate that drifts."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is a 10x10 climate unit big enough for a one-bedroom apartment?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. A 10x10 holds a one-bedroom apartment's furniture plus about 100 boxes. If you have a two-bedroom or a lot of larger furniture, a 10x15 is the safer size."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What temperature do the climate units hold, and do they control humidity?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The Round Rock climate units are held between 55 and 80 degrees, with dehumidifiers running to control humidity, not just temperature. Dana checks the thermostats weekly."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is there really no charge for the first month?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Your first month of rent is free. A one-time $25 admin fee applies at move-in, and a protection plan or your own renters or homeowners policy is required. There is no deposit and the lease is month to month."
+          }
+        }
+      ]
+    }
+  ]
+}

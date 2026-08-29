@@ -1,0 +1,175 @@
+# ============================================================================
+# DEMONSTRATION CLIENT - FICTIONAL. Built 2026-07-20 PKT to test the pipeline.
+# Every specific below (business name, providers, license numbers, review counts,
+# implant totals, warranties) is SAMPLE data standing in for what a real SME
+# interview would supply. License numbers are placeholder format, not real CA
+# licenses. In production, experience_gate.py + the medical-dental overlay require
+# these to be the client's real, externally-verifiable values. Do not publish.
+# ============================================================================
+
+client:
+  slug: "sample-dental"
+  legal_name: "Sunbridge Dental Group, P.C. [SAMPLE]"
+  brand_name: "Sunbridge Dental"
+  founded_year: "2009"          # [SAMPLE]
+  primary_url: "https://www.sunbridgedental.example"   # placeholder domain
+
+# --- NAP: three real LA-area cities; street/phone are SAMPLE placeholders. ---
+locations:
+  - name: "Sunbridge Dental - Santa Monica [SAMPLE]"
+    phone: "(310) 555-0140"
+    street: "1234 Wilshire Blvd, Suite 300"
+    city: "Santa Monica"
+    state_region: "CA"
+    postal_code: "90403"
+    geo: { lat: "34.0195", lng: "-118.4912" }
+  - name: "Sunbridge Dental - Pasadena [SAMPLE]"
+    phone: "(626) 555-0177"
+    street: "45 South Lake Ave, Suite 210"
+    city: "Pasadena"
+    state_region: "CA"
+    postal_code: "91101"
+    geo: { lat: "34.1445", lng: "-118.1320" }
+  - name: "Sunbridge Dental - Glendale [SAMPLE]"
+    phone: "(818) 555-0193"
+    street: "500 North Brand Blvd, Suite 120"
+    city: "Glendale"
+    state_region: "CA"
+    postal_code: "91203"
+    geo: { lat: "34.1553", lng: "-118.2550" }
+
+nap:                            # canonical NAP for the brand-wide service page footer
+  name: "Sunbridge Dental"
+  phone: "(310) 555-0140"       # Santa Monica main line [SAMPLE]
+  street: "1234 Wilshire Blvd, Suite 300"
+  city: "Santa Monica"
+  state_region: "CA"
+  postal_code: "90403"
+  country: "USA"
+  geo: { lat: "34.0195", lng: "-118.4912" }
+
+schema:
+  local_business_type: "Dentist"
+  price_range: "$$$"
+  opening_hours: ["Mo-Fr 08:00-17:00", "Sa 09:00-14:00"]
+  same_as:
+    - "https://www.google.com/maps/sunbridgedental-santamonica.example"   # placeholder
+    - "https://www.facebook.com/sunbridgedental.example"
+
+services:
+  - "General and preventive dentistry"
+  - "Dental implants (single, multiple, All-on-4, implant-supported dentures)"
+  - "Cosmetic dentistry (veneers, teeth whitening, bonding)"
+  - "Invisalign and clear aligners"
+  - "Root canal therapy"
+  - "Crowns, bridges, and restorative dentistry"
+  - "Emergency dentistry"
+  - "Periodontal (gum) care"
+
+service_areas: ["Santa Monica", "Pasadena", "Glendale", "West Los Angeles", "Brentwood", "Eagle Rock", "Burbank"]
+primary_city: "Santa Monica"    # anchor office city (main NAP line); in service_areas. Not "Los Angeles" (metro, not a served-area node).
+
+# --- Google Business Profile (SAMPLE; category is a real ranking lever; posts are not). ---
+gbp:
+  primary_category: "Dentist"                   # [SAMPLE] GBP primary category
+  secondary_categories:                          # [SAMPLE]
+    - "Dental implants provider"
+    - "Cosmetic dentist"
+    - "Emergency dental service"
+  services:                                      # [SAMPLE, mirrors the GBP service list]
+    - "Dental implants"
+    - "All-on-4 implants"
+    - "Invisalign"
+    - "Teeth whitening"
+    - "Root canal therapy"
+    - "Emergency dentistry"
+
+brand_terms: ["Sunbridge Dental", "Sunbridge Dental Group", "Sunbridge implants"]   # [SAMPLE]
+
+# --- Entity: the disambiguation layer and the root of the topical map (multi-location). ---
+entity:
+  central_entity: "Sunbridge Dental dental implants"   # brand + hero service (6,000+ implants placed) [SAMPLE]
+  source_context: "Three-office LA-area dental group, implant-focused; revenue from implant, restorative, and cosmetic treatment [SAMPLE]"
+  canonical_description: "Sunbridge Dental is a three-location Los Angeles-area dental group whose in-house board-certified periodontist and prosthodontist place and restore dental implants under one roof. [SAMPLE]"
+  same_as:
+    - "https://www.google.com/maps/sunbridgedental-santamonica.example"
+    - "https://www.facebook.com/sunbridgedental.example"
+  kgmid: ""
+  parent_org: ""
+  memberships: []
+
+# --- Competitive set (SAMPLE): drives the map's information-gain theses. Never strawman. ---
+competitive_set:
+  - name: "Westside Implant Studio [SAMPLE]"
+    url: "https://westside-implant.example"
+    strength: "Strong Santa Monica review velocity; single-surgeon implant focus"
+    gap_we_fill: "They refer the restorative crown out; Sunbridge places AND restores in-house with a staff prosthodontist"
+  - name: "Pasadena Family Dental [SAMPLE]"
+    url: "https://pasadena-family-dental.example"
+    strength: "Broad general-dentistry footprint, established Pasadena presence"
+    gap_we_fill: "General practice that outsources complex implant / All-on-4 cases; Sunbridge does full-arch in-house with CBCT guided surgery"
+
+# --- E-E-A-T assets (SAMPLE; production values come from the SME interview). ---
+eeat:
+  credentials:
+    - "In-house board-certified periodontist and prosthodontist for implant cases [SAMPLE]"
+    - "CBCT 3D imaging and guided-surgery workflow at all three locations [SAMPLE]"
+  team: []                      # summarized in providers[] below
+  proof:
+    - "4.8 average across 1,900+ Google reviews across three locations [SAMPLE]"
+    - "6,000+ implants placed since 2009 [SAMPLE]"
+  differentiators:
+    - "Single-team implant care: the periodontist who places the implant and the prosthodontist who restores it are in the same practice [SAMPLE]"
+    - "Same-week emergency implant consults across all three LA-area offices [SAMPLE]"
+  media:                        # [SAMPLE] - production requires real geotagged photos of real cases
+    - { url: "sample-implant-case-1.jpg", caption: "Single implant, Santa Monica [SAMPLE]", geotag: "Santa Monica, CA", date: "2026-05" }
+  reviews:
+    - { platform: "Google", count: 1900, rating: 4.8, profile_url: "https://maps.google.com/sunbridge.example" }   # [SAMPLE]
+
+  # --- medical-dental overlay required fields ---
+  providers:
+    - name: "Dr. Elena Marquez [SAMPLE]"
+      credential: "DDS, Board-Certified Periodontist"
+      license_number: "CA-DDS-[SAMPLE-00000]"      # placeholder, not a real CA license
+      license_state: "CA"
+      board_certifications: ["American Board of Periodontology [SAMPLE]"]
+      npi: ""
+    - name: "Dr. David Chen [SAMPLE]"
+      credential: "DMD, Prosthodontist"
+      license_number: "CA-DDS-[SAMPLE-00001]"      # placeholder
+      license_state: "CA"
+      board_certifications: ["American Board of Prosthodontics [SAMPLE]"]
+      npi: ""
+  reviewer: "Dr. Elena Marquez [SAMPLE], DDS, Board-Certified Periodontist, CA-DDS-[SAMPLE-00000]"
+  consents: []                  # NONE on file for this demo -> MED-4 forbids any patient testimonial / before-after on the page
+  health_claims:
+    - claim: "Dental implants have a high long-term survival rate"
+      substantiation: "Peer-reviewed implant survival literature; ~90-95% 10-year survival reported in systematic reviews (verify + cite the specific source at write time)"
+    - claim: "Implants help prevent the jawbone loss that follows tooth loss"
+      substantiation: "Established resorption/osseointegration literature (verify + cite specific source at write time)"
+
+# --- Voice ---
+voice:
+  one_line_direction: "Warm, plain-spoken, reassuring clinician who respects the reader's intelligence and their nerves. Explains, does not hype."
+  reading_level: "Grade 7-8"
+  tone_by_context:
+    pricing: "transparent and matter-of-fact"
+    procedure: "calm, step-by-step, honest about what to expect"
+    emergency: "fast and steadying"
+  banned_phrases: ["painless", "guaranteed", "#1", "best in LA", "perfect smile", "world-class", "state-of-the-art"]
+  good_examples:
+    - "An implant is a small titanium post that takes the place of the tooth root, so the new tooth is anchored the way a real one is."
+    - "Most patients tell us the procedure was easier than the toothache that brought them in."
+  off_brand_examples:
+    - "Transform your smile with our world-class, painless, guaranteed implant solutions!"
+    - "We are the #1 trusted implant experts for all your dental needs."
+
+guardrails:
+  banned_competitor_mentions: []
+  compliance_notes: "Dental = YMYL. medical-dental overlay applies. No guarantees (MED-2). Every clinical claim needs a reviewed-by byline (MED-1) + substantiation (MED-3). NO patient testimonial or before/after on any page: zero HIPAA consents on file (MED-4)."
+  review_pii_rule: "Never publish a patient name or identifying detail; no consent on file."
+
+vertical: "medical-dental"    # the overlay filename token (knowledge/verticals/medical-dental.md); not "dental"
+trade_is_ymyl: true
+
+case_log: []
