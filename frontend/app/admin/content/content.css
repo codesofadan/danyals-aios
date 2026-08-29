@@ -263,3 +263,14 @@
   .co-gate-actions .primary-btn,
   .co-gate-actions .ghostbtn { flex: 1; }
 }
+
+/* A degraded research is actionable, so it reads as an alert with a fix - not a
+   grey aside carrying a machine token. */
+.co-degrade {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: 10px 0 4px; padding: 12px 14px;
+  border: 1px solid var(--warn); border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.co-degrade > .material-symbols-rounded { color: var(--warn); font-size: 20px; }
+.co-degrade b { display: block; font-size: 13.5px; color: var(--ink); margin-bottom: 2px; }

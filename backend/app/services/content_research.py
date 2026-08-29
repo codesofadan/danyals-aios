@@ -1082,6 +1082,30 @@ _RECOMMEND_JOB_TYPE = "content_research"  # groups the cost-log rows for this fl
 # Stable, machine-branchable degrade reasons surfaced on the response.
 DEGRADE_NO_ANTHROPIC = "anthropic_unconfigured"
 DEGRADE_RESEARCH_FAILED = "research_failed"
+DEGRADE_NO_CREDIT = "provider_out_of_credit"
+DEGRADE_PROVIDER_AUTH = "provider_key_rejected"
+DEGRADE_PROVIDER_BUSY = "provider_rate_limited"
+
+
+def classify_provider_failure(exc: BaseException) -> str:
+    """Name WHY a provider call failed, for an operator who must act on it.
+
+    This exists because the reason used to be discarded: the caller caught every
+    exception, logged a bare "content_research_failed" and returned the opaque
+    token ``research_failed``, which the wizard printed verbatim. An operator
+    staring at "Research degraded - research_failed" cannot tell an unfunded
+    account from a network blip, and neither could we from the logs. The three
+    named causes below are the ones the operator can actually fix; anything else
+    keeps the generic token.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if "credit balance is too low" in text or "insufficient_quota" in text:
+        return DEGRADE_NO_CREDIT
+    if "authentication" in text or "invalid x-api-key" in text or "unauthorized" in text:
+        return DEGRADE_PROVIDER_AUTH
+    if "rate limit" in text or "overloaded" in text or "429" in text:
+        return DEGRADE_PROVIDER_BUSY
+    return DEGRADE_RESEARCH_FAILED
 
 _RECOMMEND_CONTENT_TYPES: frozenset[str] = frozenset(
     {"service", "location", "service_location", "service_area", "blog", "faq"}
@@ -1358,9 +1382,14 @@ def run_content_research(
             max_searches=max_searches,
             system=build_recommend_system(ctype),
         )
-    except Exception:  # transport / SDK / model-not-web-search-capable: degrade, don't crash
-        logger.info("content_research_failed")
-        return _recommend_degraded(clean_site, ctype, DEGRADE_RESEARCH_FAILED)
+    except Exception as exc:  # transport / SDK / billing / model: degrade, don't crash
+        # Degrading is right (a failed research must not 500 the wizard), but the
+        # REASON must survive: log the exception class and let the operator see a
+        # cause they can act on. The message is not echoed - a provider error body
+        # can carry request context - only the classified cause travels.
+        reason = classify_provider_failure(exc)
+        logger.info("content_research_failed", reason=reason, error=type(exc).__name__)
+        return _recommend_degraded(clean_site, ctype, reason)
 
     # Commit the ACTUAL spend: the Anthropic TOKEN cost + the WEB-SEARCH cost. The number
     # of searches is read from usage when the SDK surfaces it, else estimated at max_uses.

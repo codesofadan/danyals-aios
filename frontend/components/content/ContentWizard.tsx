@@ -49,6 +49,47 @@ const PH = {
   services: "e.g. Consultation\ne.g. Installation\ne.g. Ongoing maintenance",
 } as const;
 
+// A degraded research is not a shrug: the operator has to DO something, and the
+// thing to do differs completely per cause. The backend used to return the single
+// token "research_failed" for every provider error, so this screen printed that
+// word and the real cause (most often an unfunded provider account) never
+// surfaced. Each reason now names what happened and what fixes it.
+function degradeCopy(reason?: string): { title: string; fix: string } {
+  switch (reason) {
+    case "provider_out_of_credit":
+      return {
+        title: "Research didn't run — the AI provider account is out of credit",
+        fix: "Anthropic rejected the call for a low credit balance. Top up the account, then run research again. Nothing was charged and no pages were lost.",
+      };
+    case "provider_key_rejected":
+      return {
+        title: "Research didn't run — the AI provider key was rejected",
+        fix: "The configured Anthropic key is invalid or revoked. Replace it in the key vault, then run research again.",
+      };
+    case "provider_rate_limited":
+      return {
+        title: "Research didn't run — the AI provider is rate-limiting us",
+        fix: "Too many calls in a short window, or the model is overloaded. Wait a minute and run research again.",
+      };
+    case "anthropic_unconfigured":
+      return {
+        title: "Research didn't run — no AI provider key is configured",
+        fix: "Add an Anthropic key in the key vault to enable research. You can still add pages by hand below.",
+      };
+    default:
+      if (reason?.startsWith("cost_gate:")) {
+        return {
+          title: "Research was blocked by your own spend controls",
+          fix: `The cost gate refused the call (${reason.replace("cost_gate:", "")}). Check the content dial and the client's budget on Cost Controls, or lift the API spend halt.`,
+        };
+      }
+      return {
+        title: "Research didn't run",
+        fix: `The provider call failed${reason ? ` (${reason})` : ""}. You can retry, or add pages by hand below.`,
+      };
+  }
+}
+
 const STEP_LABELS = ["Pick pages", "Design", "Details", "Preview", "Approve"] as const;
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -343,9 +384,12 @@ export default function ContentWizard({
               </div>
             )}
             {researchDegraded && (
-              <div className="cs" role="status" style={{ color: "var(--warn)" }}>
-                <span className="material-symbols-rounded" style={{ verticalAlign: "middle", fontSize: 16 }}>info</span>{" "}
-                Research degraded — {research.data?.reason || "no key or the dial/budget blocked the call"}.
+              <div role="alert" className="co-degrade">
+                <span className="material-symbols-rounded">warning</span>
+                <div>
+                  <b>{degradeCopy(research.data?.reason).title}</b>
+                  <div className="cs">{degradeCopy(research.data?.reason).fix}</div>
+                </div>
               </div>
             )}
 
