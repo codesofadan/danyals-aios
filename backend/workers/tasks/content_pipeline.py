@@ -41,7 +41,12 @@ import structlog
 from app.config import Settings, get_settings
 from app.services.content_pipeline.assembly import build_page_stages
 from app.services.content_pipeline.context import PipelineContext, StageResult
-from app.services.content_pipeline.runner import PipelineRun, run_page
+from app.services.content_pipeline.runner import (
+    EDIT_STAGES,
+    PAGE_STAGES,
+    PipelineRun,
+    run_page,
+)
 from app.services.content_pipeline.writer import DoctrineWriter
 from app.services.content_research import GatedResearcher, SsrfSafePageFetcher
 from app.services.cost_gate import CostGate
@@ -60,6 +65,7 @@ logger = structlog.get_logger(__name__)
 #: stage that is bound and streamed, so a UI stepper built from this list has no
 #: steps that can never light up.
 STAGE_LABEL: dict[str, str] = {
+    "guided_edit": "Applying your edits",
     "sme": "Experience",
     "research": "Research",
     "outline": "Outline",
@@ -331,7 +337,8 @@ def _persist_hold(
 
 
 def _persist_success(
-    store: ContentStore, code: str, ctx: PipelineContext, run: PipelineRun
+    store: ContentStore, code: str, ctx: PipelineContext, run: PipelineRun,
+    *, applied_edit: bool = False,
 ) -> ContentJobOutcome:
     """Write everything the page produced and hand it to the human gate."""
     # The stages put their output at the TOP of StageResult.data - there is no
@@ -352,9 +359,13 @@ def _persist_success(
     )
     degraded = run.outcome == "degraded"
 
+    unscored = not qa
     fields: dict[str, Any] = {
         "status": "needs_review",
-        "stage": "Review" + (f" — degraded ({run.reason})" if degraded else ""),
+        "stage": (
+            "Review — not re-scored after your edits" if unscored and applied_edit
+            else "Review" + (f" — degraded ({run.reason})" if degraded else "")
+        ),
         "cost": round(run.cost, 4),
         "words": len(ctx.draft_md.split()),
         "draft_md": ctx.draft_md,
@@ -372,11 +383,23 @@ def _persist_success(
         fields["schema_type"] = schema_data["primary_type"]
     if qa.get("weighted_total") is not None:
         fields["qa_weighted_total"] = qa["weighted_total"]
+    else:
+        # The gate produced no verdict this run - it degrades to nothing when it has
+        # no research brief, which is exactly the case on the EDIT path, where
+        # research deliberately does not re-run. Leaving the previous number in place
+        # would show a score for a draft that no longer exists: measured on a real
+        # edit, the scorecard emptied while the headline still read 84 from before
+        # the change. Unscored has to look unscored.
+        fields["qa_weighted_total"] = None
     # NOT internal_links: this pipeline does not produce them yet - gate.py passes
     # `internal_links=[]` and no stage fills it. Writing an empty {"links": []}
     # would present "we checked and there are none" where the truth is "nothing
     # looked", which is the distinction the whole job contract turns on.
 
+    if applied_edit:
+        # Clear it, or the next run reads the same instruction and re-applies an
+        # edit the lead already got - and the job becomes un-redeliverable.
+        fields["edit_instruction"] = ""
     store.update(code, fields)
     logger.info(
         "content_pipeline_done", code=code, outcome=run.outcome,
@@ -414,7 +437,15 @@ def execute_pipeline_job(
         return ContentJobOutcome(code=code, status="unknown", state="noop",
                                  reason="no such job")
     status = str(row.get("status") or "")
-    resumable = resume and status == "drafting"
+    # A REVIEWER'S EDIT is a third legitimate way in, and it arrives looking exactly
+    # like a redelivery: status `drafting`, not `queued`. Reproduced through the real
+    # API before this existed - a lead clicked "Request edits", the instruction was
+    # stored, the pipeline was re-enqueued, this returned `noop - job is drafting,
+    # not queued`, and the page sat at "Edit requested" forever. The reviewer's only
+    # feedback channel was a dead end.
+    edit_instruction = str(row.get("edit_instruction") or "").strip()
+    editing = bool(edit_instruction) and status == "drafting"
+    resumable = (resume and status == "drafting") or editing
     if status != "queued" and not resumable:
         # A redelivery of an already-running or finished job is a no-op, not a
         # second run: the broker is at-least-once and drafting costs real money.
@@ -423,15 +454,20 @@ def execute_pipeline_job(
 
     # A resume is already `drafting`; writing the status again would be a no-op
     # transition, and the guard trigger only needs the stage stream.
+    first_label = STAGE_LABEL["guided_edit"] if editing else STAGE_LABEL["sme"]
     deps.store.update(
         code,
-        {"stage": STAGE_LABEL["sme"]} if resumable
-        else {"status": "drafting", "stage": STAGE_LABEL["sme"]},
+        {"stage": first_label} if resumable
+        else {"status": "drafting", "stage": first_label},
     )
     row["engagement_id"] = _ensure_engagement(deps, row)
     ctx = _context_for(row, settings)
+    if editing:
+        # The edit works on the page the lead actually read, not a fresh one.
+        ctx.draft_md = str(row.get("draft_md") or "")
 
     stages = build_page_stages(
+        edit_instruction=edit_instruction,
         writer=deps.writer,
         researcher=deps.researcher,
         store=deps.planning,
@@ -443,7 +479,10 @@ def execute_pipeline_job(
         pack = row.get("source_pack") if isinstance(row.get("source_pack"), dict) else None
         stages["sme"] = _sme_with_client_facts(stages["sme"], deps.nap, pack)
     try:
-        run = run_page(ctx, _with_progress(stages, deps.store, code))
+        run = run_page(
+            ctx, _with_progress(stages, deps.store, code),
+            order=EDIT_STAGES if editing else PAGE_STAGES,
+        )
     except Exception as exc:  # a bug in the sequence itself, not a stage outcome
         logger.warning("content_pipeline_crashed", code=code, error=type(exc).__name__)
         deps.store.update(code, {"status": "failed", "stage": "Failed"})
@@ -469,7 +508,7 @@ def execute_pipeline_job(
             deps.store, code, run,
             run.reason or f"{run.stopped_at or 'the pipeline'} produced no draft",
         )
-    return _persist_success(deps.store, code, ctx, run)
+    return _persist_success(deps.store, code, ctx, run, applied_edit=editing)
 
 
 @celery_app.task(name="run_content_pipeline_job")  # type: ignore[untyped-decorator]  # celery's decorator is untyped

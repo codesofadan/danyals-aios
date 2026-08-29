@@ -30,6 +30,7 @@ from app.services.content_pipeline.convert import run_convert
 from app.services.content_pipeline.draft import run_draft
 from app.services.content_pipeline.gate import run_gate
 from app.services.content_pipeline.grounding import run_grounding
+from app.services.content_pipeline.guided_edit import run_guided_edit
 from app.services.content_pipeline.outline import run_outline
 from app.services.content_pipeline.research import run_research
 from app.services.content_pipeline.schema_links import run_schema_links
@@ -60,6 +61,7 @@ class PageStores(Protocol):
 
 def build_page_stages(
     *,
+    edit_instruction: str = "",
     writer: DoctrineWriter | None = None,
     researcher: Any | None = None,
     store: PageStores | None = None,
@@ -108,6 +110,9 @@ def build_page_stages(
         stages["convert"] = lambda ctx: run_convert(ctx, writer=writer, model=model)
         stages["voice"] = lambda ctx: run_voice(ctx, writer=writer, model=model)
         stages["grounding"] = lambda ctx: run_grounding(ctx, writer=writer, model=model)
+        stages["guided_edit"] = lambda ctx: run_guided_edit(
+            ctx, writer=writer, instruction=edit_instruction, model=model
+        )
         stages["title_meta"] = lambda ctx: run_title_meta(ctx, writer=writer, model=model)
 
     stages["schema_links"] = lambda ctx: run_schema_links(

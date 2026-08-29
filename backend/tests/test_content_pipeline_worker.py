@@ -175,12 +175,26 @@ class TestTheRowSaysWhatIsRunningWhileItRuns:
         assert order == [STAGE_LABEL["sme"], STAGE_LABEL["gate"]]
 
     def test_every_declared_label_belongs_to_a_real_stage(self) -> None:
-        from app.services.content_pipeline.runner import PAGE_STAGES
+        """There are two sequences now - a full page and a reviewer's edit - and
+        every label must belong to one of them. A label with no stage is a step
+        that can never light up, which is the exact defect v1's fourteen-key
+        table has; a stage with no label streams a raw key at the operator."""
+        from app.services.content_pipeline.runner import EDIT_STAGES, PAGE_STAGES
 
-        assert set(STAGE_LABEL) == set(PAGE_STAGES), (
-            "a label with no stage is a step that can never light up - the exact "
-            "defect v1's fourteen-key table has"
-        )
+        real = set(PAGE_STAGES) | set(EDIT_STAGES)
+        assert set(STAGE_LABEL) == real
+
+    def test_the_edit_sequence_reuses_the_page_instead_of_redrafting(self) -> None:
+        """An edit is not a redraft. Re-running research, outline and draft would
+        throw away the page the lead just read and bill a full page to ignore
+        what they asked for."""
+        from app.services.content_pipeline.runner import EDIT_STAGES
+
+        assert EDIT_STAGES[0] == "guided_edit"
+        for skipped in ("sme", "research", "outline", "draft"):
+            assert skipped not in EDIT_STAGES, f"{skipped} must not re-run on an edit"
+        for kept in ("voice", "grounding", "title_meta", "schema_links", "gate"):
+            assert kept in EDIT_STAGES, f"{kept} must see the edited text"
 
 
 class TestAFinishedPageGoesToTheHumanGate:
@@ -497,3 +511,110 @@ class TestTheDefaultEngineIsTheDoctrinePipeline:
 
         monkeypatch.setenv("CONTENT_ENGINE", "v1")
         assert Settings(_env_file=None).content_engine == "v1"  # type: ignore[call-arg]
+
+
+class TestAReviewersEditIsNotADeadEnd:
+    """Reproduced through the real API before this worked: a lead clicked
+    "Request edits", typed what they wanted, and the page sat at "Edit requested"
+    forever. The row moved to `drafting`, the instruction was stored, the pipeline
+    was re-enqueued, and the engine returned `noop - job is drafting, not queued`.
+    The reviewer's only feedback channel was a dead end."""
+
+    def _edit_row(self, **kw: Any) -> dict[str, Any]:
+        return _row(
+            status="drafting", stage="Edit requested",
+            edit_instruction="Cut the second section and add pricing.",
+            draft_md="# The page\n\nAs the reviewer read it.",
+            **kw,
+        )
+
+    def test_an_edit_request_runs_instead_of_no_opping(self) -> None:
+        store = _Store(self._edit_row())
+        seen: dict[str, Any] = {}
+
+        def edit(ctx: PipelineContext) -> StageResult:
+            seen["instruction_seen"] = True
+            seen["draft_in"] = ctx.draft_md
+            ctx.draft_md = "# The page\n\nEdited as asked, with pricing."
+            return ctx.record(StageResult("guided_edit", outcome="ok"))
+
+        outcome = _run(store, {"guided_edit": edit, "gate": _stage("gate", "ok")})
+        assert outcome.state != "noop", "an edit request must not be mistaken for a redelivery"
+        assert seen.get("instruction_seen") is True
+
+    def test_the_edit_works_on_the_page_the_lead_actually_read(self) -> None:
+        store = _Store(self._edit_row())
+        seen: dict[str, Any] = {}
+
+        def edit(ctx: PipelineContext) -> StageResult:
+            seen["draft_in"] = ctx.draft_md
+            ctx.draft_md = "# Edited"
+            return ctx.record(StageResult("guided_edit", outcome="ok"))
+
+        _run(store, {"guided_edit": edit, "gate": _stage("gate", "ok")})
+        assert "As the reviewer read it." in seen["draft_in"], (
+            "the stored draft must be loaded, or the edit rewrites a blank page"
+        )
+
+    def test_the_instruction_is_cleared_once_applied(self) -> None:
+        """Otherwise the next run re-applies an edit the lead already received,
+        and the job can never be redelivered safely."""
+        store = _Store(self._edit_row())
+
+        def edit(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# Edited page\n\nWith the change."
+            return ctx.record(StageResult("guided_edit", outcome="ok"))
+
+        _run(store, {"guided_edit": edit, "gate": _stage("gate", "ok")})
+        assert store.final("edit_instruction") == ""
+
+    def test_a_drafting_job_with_no_instruction_is_still_a_no_op(self) -> None:
+        """The redelivery guard must not be weakened into nothing."""
+        store = _Store(_row(status="drafting", edit_instruction=""))
+        outcome = _run(store, {"gate": _stage("gate", "ok")})
+        assert outcome.state == "noop"
+
+    def test_the_row_says_it_is_applying_edits_while_it_does(self) -> None:
+        store = _Store(self._edit_row())
+
+        def edit(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# Edited"
+            return ctx.record(StageResult("guided_edit", outcome="ok"))
+
+        _run(store, {"guided_edit": edit, "gate": _stage("gate", "ok")})
+        assert any("edit" in s.lower() for s in store.stages)
+
+
+class TestAnUnscoredPageDoesNotShowAnOldScore:
+    """Measured on a real edit run: the gate degrades to NO verdict when it has no
+    research brief - exactly the case on the edit path, where research does not
+    re-run. The scorecard emptied while `qa_weighted_total` still read 84 from
+    before the change, so the headline number described a draft that no longer
+    existed."""
+
+    def _run_editing(self, gate_data: dict[str, Any]) -> _Store:
+        store = _Store(_row(
+            status="drafting", stage="Edit requested",
+            edit_instruction="Cut the second section.",
+            draft_md="# Page\n\nOriginal text.",
+            qa_weighted_total=84,
+        ))
+
+        def edit(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# Page\n\nEdited text."
+            return ctx.record(StageResult("guided_edit", outcome="ok"))
+
+        _run(store, {"guided_edit": edit, "gate": _stage("gate", "degraded", **gate_data)})
+        return store
+
+    def test_a_gate_with_no_verdict_clears_the_previous_number(self) -> None:
+        store = self._run_editing({})
+        assert store.final("qa_weighted_total") is None, "a stale score is a false claim"
+
+    def test_the_row_says_it_was_not_re_scored(self) -> None:
+        store = self._run_editing({})
+        assert "not re-scored" in store.final("stage")
+
+    def test_a_gate_that_did_score_still_writes_its_number(self) -> None:
+        store = self._run_editing({"weighted_total": 91.0, "passed": True})
+        assert store.final("qa_weighted_total") == 91.0

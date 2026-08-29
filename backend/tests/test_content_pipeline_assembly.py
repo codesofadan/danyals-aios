@@ -130,11 +130,15 @@ class TestAMissingDependencyOmitsItsStageRatherThanFakingIt:
         assert writing & set(build_page_stages(store=_Store())) == set()
         assert writing <= set(build_page_stages(writer=_Writer(), store=_Store()))  # type: ignore[arg-type]
 
-    def test_fully_bound_covers_every_declared_page_stage(self) -> None:
+    def test_fully_bound_covers_every_declared_stage(self) -> None:
+        """Both sequences: a full page, and a reviewer's edit. A declared stage
+        that cannot be bound is a step `run_page` silently skips."""
+        from app.services.content_pipeline.runner import EDIT_STAGES
+
         stages = build_page_stages(
             writer=_Writer(), researcher=object(), store=_Store(),  # type: ignore[arg-type]
         )
-        assert set(stages) == set(PAGE_STAGES), "a declared stage is not bindable"
+        assert set(stages) == set(PAGE_STAGES) | set(EDIT_STAGES)
 
 
 # --- what the sequence then does --------------------------------------------- #
