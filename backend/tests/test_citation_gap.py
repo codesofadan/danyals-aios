@@ -55,7 +55,17 @@ def test_derive_tolerates_empty_nap() -> None:
     fields = derive_business_profile_fields({})
     assert fields["business_name"] == ""
     assert fields["categories"] == []
-    assert fields["market"] == "US"
+    # CHANGED with 0113, and this line is the point of that migration. It asserted "US":
+    # a client whose market was never recorded was ASSERTED to be American, and the
+    # campaign then selected US-only directories for them. Measured with a Lahore client
+    # on 2026-08-30 - the queue offered an operator YellowPages.com, Chamber of Commerce
+    # and BBB for a business in Pakistan.
+    #
+    # A wrong listing is NAP pollution, which is the exact harm a citation campaign
+    # exists to prevent and is often unremovable; a missing one is visible in the gap
+    # report and recoverable. So an unknown market resolves to the directories that
+    # legitimately serve anyone.
+    assert fields["market"] == "GLOBAL"
 
 
 # --------------------------------------------------------------------------- #
