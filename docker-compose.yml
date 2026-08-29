@@ -129,7 +129,7 @@ x-backend-build: &backend-build
   build:
     context: .
     dockerfile: backend/Dockerfile
-  image: aios-backend:${TAG:-local}
+  image: aios-backend:20260829-fix-compilation
 
 services:
   # ------------------------------------------------------------------ Postgres
