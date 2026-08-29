@@ -47,7 +47,7 @@ import { describe, expect, it } from "vitest";
 const DIR = join(process.cwd(), "components", "content");
 
 /** Dispatches the review action rather than merely declaring its type. */
-const DISPATCHES_APPROVE = /\b(?:onAction|onReview|review\.mutate|decide\.mutate)\s*\(\s*[^)]*"approve"/s;
+const DISPATCHES_APPROVE = /\b(?:onAction|onReview|review\.mutate|decide\.mutate)\s*\(\s*[^)]*"approve"/;
 
 /** Renders the shared gate — not merely mentions it in prose. */
 const RENDERS_GATE = /<ApproveGate\b/;
