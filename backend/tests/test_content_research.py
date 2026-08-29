@@ -1040,3 +1040,45 @@ async def test_generate_route_requires_publish_content(
         json={"clientId": "cl-1", "items": [{"title": "X", "pageType": "service"}]},
     )
     assert resp.status_code == 403
+
+
+class TestWhyATeardownCandidateWasRefused:
+    """Observed on the first paid run: all ten ranking entries for one query
+    arrived as Google tracking tokens rather than links. The guard refused every
+    one - correctly - and the brief said only "teardown fetched no pages", which
+    reads as "the pages were empty" rather than "the SERP gave us nothing to
+    fetch". Four attempts could not reproduce it, so it has to name itself."""
+
+    def _researcher(self, urls: list[str]) -> Any:
+        from app.config import get_settings
+        from app.services.content_research import GatedResearcher
+
+        class _Gate:
+            def evaluate(self, ctx: Any) -> Any:
+                from app.services.cost_gate import GateDecision
+                return GateDecision(outcome="call")
+
+            def commit(self, ctx: Any, cost: float, *, cache_value: Any = None) -> None:
+                return None
+
+        class _Fetcher:
+            def fetch(self, url: str, *, timeout: float) -> Any:
+                return None
+
+        return GatedResearcher(
+            object(), _Fetcher(), _Gate(), settings=get_settings(),
+            client_id=None, job_id="t",
+        )
+
+    def test_a_non_url_and_a_blocked_host_are_both_refused(self) -> None:
+        r = self._researcher([])
+        out = r._fetch_teardown(["CAESdwHrOzAVnotaurl", "http://127.0.0.1/admin"])
+        assert len(out.refused) == 2, "both are unusable, whatever the reason"
+        assert out.pages == []
+
+    def test_a_real_public_url_is_not_refused_by_shape(self) -> None:
+        """The malformed check must not become a second, stricter gate."""
+        r = self._researcher([])
+        out = r._fetch_teardown(["https://example.com/page"])
+        # The fake fetcher returns None, so no page - but it was NOT refused.
+        assert out.refused == []

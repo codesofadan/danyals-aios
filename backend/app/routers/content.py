@@ -34,7 +34,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg.types.json import Jsonb
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
 from app.core.deps import HttpClientDep, SettingsDep
 from app.core.pagination import PageDep
@@ -121,9 +121,29 @@ _NOT_DONE = HTTPException(
 # so the API process never pulls in Celery task modules just to import the router).
 # --------------------------------------------------------------------------- #
 def get_content_enqueuer() -> Callable[[str], None]:
-    """Dependency: enqueue the content PIPELINE worker for a job code."""
+    """Dependency: enqueue the content PIPELINE worker for a job code.
+
+    ``settings.content_engine`` picks which engine a NEW job runs on:
+
+    * ``v1`` - ``workers/tasks/content.py``, the generator that has always
+      produced this platform's content.
+    * ``v2`` - the staged doctrine pipeline: an Experience gate that refuses to
+      draft a page nobody supplied first-party facts for, a uniqueness gate, a
+      conversion and voice pass, and a QA gate with the judge connected.
+
+    The flag existed and was READ BY NOTHING for a day - documented in two
+    places, implemented in none, so every job ran v1 whatever it said. An
+    unknown value falls back to v1 rather than failing the request: a typo in
+    config must not stop an agency creating content.
+    """
 
     def _enqueue(code: str) -> None:
+        engine = (get_settings().content_engine or "v1").strip().lower()
+        if engine == "v2":
+            from workers.tasks.content_pipeline import run_content_pipeline_job
+
+            run_content_pipeline_job.delay(code)
+            return
         from workers.tasks.content import run_content_job
 
         run_content_job.delay(code)

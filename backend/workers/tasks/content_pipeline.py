@@ -197,20 +197,51 @@ def nap_facts(profile: dict[str, Any] | None) -> tuple[str, ...]:
     return tuple(f"{k}: {v}" for k, v in parts if v)
 
 
-def _sme_with_nap(
-    stage: Callable[[PipelineContext], StageResult], profile: dict[str, Any] | None
-) -> Callable[[PipelineContext], StageResult]:
-    """Append the client's NAP to the facts the Experience stage collected.
+def brief_facts(pack: dict[str, Any] | None) -> tuple[str, ...]:
+    """The facts the OPERATOR supplied when they ordered the pages.
 
-    Wrapped around `sme` rather than folded into it because the SME stage owns
-    the Experience DOSSIER - a governed, question-and-answer store - and a NAP is
-    not one of its slots. Appending after it runs keeps the dossier's contract
-    intact while still giving the writer the number it is required to publish.
+    The content flow asks for proof points, services, testimonials and anything
+    only this client knows, and stores them on the job's `source_pack`. The v1
+    generator reads them. This pipeline did not: it grounded a page solely on the
+    Experience dossier, so everything typed on the brief screen was collected and
+    silently ignored - and the QA gate then scored fact_grounding against facts
+    the writer had never been given.
+    """
+    if not pack:
+        return ()
+    out: list[str] = []
+    for key, label in (
+        ("proof_points", "proof"),
+        ("unique_data", "only we know"),
+        ("services", "service"),
+        ("testimonials", "testimonial"),
+    ):
+        values = pack.get(key) or []
+        if isinstance(values, (list, tuple)):
+            out.extend(f"{label}: {str(v).strip()}" for v in values if str(v).strip())
+    return tuple(out)
+
+
+def _sme_with_client_facts(
+    stage: Callable[[PipelineContext], StageResult],
+    profile: dict[str, Any] | None,
+    pack: dict[str, Any] | None,
+) -> Callable[[PipelineContext], StageResult]:
+    """Add the client's NAP and the operator's brief to the Experience facts.
+
+    Wrapped around `sme` rather than folded into it because that stage owns the
+    Experience DOSSIER - a governed question-and-answer store - and neither a NAP
+    nor a free-text brief is one of its slots. Appending after it runs keeps the
+    dossier's contract intact while still giving the writer everything the
+    operator actually supplied.
+
+    Only on `ok`: a halted page is not being written, so there is nothing to
+    ground, and a re-run collects them again anyway.
     """
 
     def run(ctx: PipelineContext) -> StageResult:
         result = stage(ctx)
-        extra = nap_facts(profile)
+        extra = (*nap_facts(profile), *brief_facts(pack))
         if extra and result.outcome == "ok":
             ctx.facts = (*ctx.facts, *extra)
         return result
@@ -408,7 +439,8 @@ def execute_pipeline_job(
         model=deps.model,
     )
     if "sme" in stages:
-        stages["sme"] = _sme_with_nap(stages["sme"], deps.nap)
+        pack = row.get("source_pack") if isinstance(row.get("source_pack"), dict) else None
+        stages["sme"] = _sme_with_client_facts(stages["sme"], deps.nap, pack)
     try:
         run = run_page(ctx, _with_progress(stages, deps.store, code))
     except Exception as exc:  # a bug in the sequence itself, not a stage outcome

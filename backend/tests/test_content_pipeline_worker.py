@@ -78,7 +78,10 @@ def _row(**kw: Any) -> dict[str, Any]:
         "client_name": "Dallas Plumbing", "page_type": "service",
         "topic": "Emergency plumbing in Dallas", "framework": "PAS",
         "engagement_id": "eng-1",
-        "source_pack": {"primary_keyword": "emergency plumber dallas", "geo": "Dallas"},
+        "source_pack": {
+            "primary_keyword": "emergency plumber dallas", "geo": "Dallas",
+            "proof_points": ["412 callouts in 2025, from our dispatch log"],
+        },
     }
     base.update(kw)
     return base
@@ -279,6 +282,30 @@ class TestTheClientsOwnPhoneNumberReachesThePage:
 
         assert nap_facts(None) == () and nap_facts({}) == ()
 
+    def test_the_operators_brief_reaches_the_writer(self) -> None:
+        """The flow asks for proof points, services and unique data and stores
+        them on source_pack. This pipeline grounded a page solely on the
+        Experience dossier, so everything typed on the brief screen was collected
+        and silently ignored - and the QA gate then scored fact_grounding against
+        facts the writer had never been given."""
+        from workers.tasks.content_pipeline import brief_facts
+
+        facts = brief_facts({
+            "proof_points": ["412 callouts in 2025, from our dispatch log"],
+            "services": ["Emergency leak repair"],
+            "unique_data": ["Median on-site 47 minutes"],
+            "testimonials": [""],
+        })
+        assert "proof: 412 callouts in 2025, from our dispatch log" in facts
+        assert "service: Emergency leak repair" in facts
+        assert "only we know: Median on-site 47 minutes" in facts
+        assert not any(f.endswith(": ") for f in facts), "blank entries must not travel"
+
+    def test_a_job_with_no_brief_adds_nothing(self) -> None:
+        from workers.tasks.content_pipeline import brief_facts
+
+        assert brief_facts(None) == () and brief_facts({}) == ()
+
     def test_the_facts_are_appended_to_what_the_experience_gate_collected(self) -> None:
         store = _Store(_row())
         seen: dict[str, Any] = {}
@@ -299,6 +326,8 @@ class TestTheClientsOwnPhoneNumberReachesThePage:
         execute_pipeline_job(deps, "CJ-4200", settings=get_settings(), gate=_Gate())
         assert "count_source: 412 callouts in 2025" in seen["facts"]
         assert "phone: 214-555-0142" in seen["facts"]
+        # _row() seeds a source_pack, so the operator's brief rides too.
+        assert "proof: 412 callouts in 2025, from our dispatch log" in seen["facts"]
 
     def test_a_halted_experience_gate_does_not_get_nap_facts_appended(self) -> None:
         """Nothing is being written, so there is nothing to ground."""
@@ -403,3 +432,47 @@ class TestWhatTheStagesProduceActuallyReachesTheRow:
         store = _Store(_row())
         self._run_with(store, {}, {})
         assert store.final("qa_weighted_total") is None, "absent is not zero"
+
+
+class TestTheEngineFlagActuallyRoutes:
+    """The flag was documented in two places and read by nothing for a day, so
+    every job ran v1 whatever the config said. A setting that does not do what it
+    says is worse than no setting: it makes the wrong engine look chosen."""
+
+    def _enqueued(self, engine: str, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        import app.routers.content as router_mod
+        import workers.tasks.content as v1
+        import workers.tasks.content_pipeline as v2
+
+        seen: list[str] = []
+
+        class _T:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def delay(self, code: str) -> None:
+                seen.append(self.name)
+
+        settings = get_settings().model_copy(update={"content_engine": engine})
+        monkeypatch.setattr(router_mod, "get_settings", lambda: settings)
+        monkeypatch.setattr(v1, "run_content_job", _T("v1"))
+        monkeypatch.setattr(v2, "run_content_pipeline_job", _T("v2"))
+        router_mod.get_content_enqueuer()("CJ-4200")
+        return seen
+
+    def test_v2_routes_to_the_doctrine_pipeline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._enqueued("v2", monkeypatch) == ["v2"]
+
+    def test_v1_routes_to_the_original_generator(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._enqueued("v1", monkeypatch) == ["v1"]
+
+    def test_an_unknown_value_falls_back_rather_than_failing_the_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A typo in config must not stop an agency creating content."""
+        assert self._enqueued("V2-beta-typo", monkeypatch) == ["v1"]
+
+    def test_the_value_is_case_and_whitespace_tolerant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._enqueued("  V2  ", monkeypatch) == ["v2"]

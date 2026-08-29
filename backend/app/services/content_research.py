@@ -477,7 +477,22 @@ class GatedResearcher:
             # N2: the SSRF guard is the ONLY door to a fetch - a private / loopback
             # / metadata host never reaches the fetcher.
             if not self._url_gate(url):
-                logger.info("teardown_url_refused", url=str(url).split("?", 1)[0])
+                # WHY a candidate was refused matters, and these two are not the
+                # same problem. A real URL the guard blocks is the guard working on
+                # a private/loopback/metadata host. A value that is not a URL at all
+                # means the SERP payload handed us something else - observed once on
+                # 2026-08-29, when all ten candidates for one query arrived as Google
+                # tracking tokens ("CAES...") rather than links, and the run reported
+                # only "teardown fetched no pages". Four attempts could not reproduce
+                # it, so it was transient - which is exactly the kind of thing that
+                # has to name itself in the log, because nobody will be watching when
+                # it next happens.
+                malformed = not str(url).lower().startswith(("http://", "https://"))
+                logger.info(
+                    "teardown_url_refused",
+                    reason="not_a_url" if malformed else "blocked_by_ssrf_guard",
+                    url=str(url).split("?", 1)[0][:80],
+                )
                 refused.append(url)
                 continue
             fetched = self._fetcher.fetch(url, timeout=timeout)
@@ -967,7 +982,20 @@ def build_research_brief(
         notes.append(f"teardown blocked by cost gate ({blocked.outcome})")
     teardown = analyze_teardown(fetch.pages, fetch.refused)
     if teardown.fetched == 0:
-        notes.append("teardown fetched no pages")
+        malformed = sum(
+            1 for u in fetch.refused
+            if not str(u).lower().startswith(("http://", "https://"))
+        )
+        if malformed and malformed == len(fetch.refused):
+            # Every candidate was unusable, so the page is being written with NO
+            # competitive teardown at all. "fetched no pages" reads like the pages
+            # were empty; this says the SERP never gave us anything to fetch.
+            notes.append(
+                f"teardown fetched nothing: all {malformed} ranking entries came back "
+                "as non-URL values, so the SERP payload carried no links to read"
+            )
+        else:
+            notes.append("teardown fetched no pages")
 
     # Step 6: winnability over the primary + secondary terms (each a gated,
     # cached metrics call). A block drops the section but does not crash.
