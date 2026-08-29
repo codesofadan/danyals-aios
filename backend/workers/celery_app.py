@@ -49,6 +49,10 @@ celery_app = Celery(
         "workers.tasks.ping",
         "workers.tasks.audit",
         "workers.tasks.content",
+        # The doctrine engine's entry point. Registered so it is dispatchable;
+        # `settings.content_engine` decides which engine a new job is routed to,
+        # and it defaults to v1 until the pipeline has had a real end-to-end run.
+        "workers.tasks.content_pipeline",
         "workers.tasks.context",
         "workers.tasks.context_reconcile",
         # Part 7 Module 05: the Policy-Radar tasks. DEFAULT = generate_policy_daily (the

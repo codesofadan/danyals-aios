@@ -295,6 +295,14 @@ class Settings(BaseSettings):
     # `content_research` money-dial (committed spend = Anthropic token cost + web-search
     # cost); keyless / a dial-block / a research failure all DEGRADE (200, status=
     # 'degraded'), never crash - exactly like POST /policy/ask. All additive + optional. ---
+    # Which content engine a new job runs on. "v1" is the shipped generator
+    # (workers/tasks/content.py); "v2" is the staged doctrine pipeline
+    # (app/services/content_pipeline/ via workers/tasks/content_pipeline.py).
+    # Defaults to v1 deliberately: v2 has never completed a run against a real
+    # provider, and defaulting a live agency onto an unverified engine is the
+    # kind of assumed-success this codebase keeps removing. Flip to "v2" only
+    # after an end-to-end run has been observed.
+    content_engine: str = "v1"
     content_research_model: str = "claude-sonnet-5"  # web-search Claude for the page-set recommender
     content_research_count: int = 12  # recommended pages returned per research call (default cap)
     content_research_max_searches: int = 6  # web_search tool max_uses per recommend lookup
