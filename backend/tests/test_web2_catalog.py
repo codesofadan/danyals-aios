@@ -91,7 +91,12 @@ _CATALOG_ITEM_KEYS = {
     "id", "name", "homepageUrl", "signupUrl", "publishMethod", "authType",
     "authorityTier", "market", "automationReady", "notes",
 }
-_CATALOG_KEYS = {"total", "automationReady", "byAuthType", "platforms"}
+# `credentialFields` is served rather than duplicated in the frontend so the
+# registration form cannot drift from what the publisher actually validates
+# (app/schemas/offpage.py). It is part of the contract, so it belongs here -
+# this set is the guard that a response key is never added or removed silently.
+_CATALOG_KEYS = {"total", "automationReady", "byAuthType", "platforms",
+                 "credentialFields"}
 
 _VALID_AUTH_TYPES = {"api", "oauth", "automation", "anonymous"}
 _VALID_TIERS = {"high", "medium", "low"}
