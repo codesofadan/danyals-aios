@@ -82,7 +82,9 @@ export const PARKED: ParkedEntry[] = [
   // preserved from a removal - nothing unmounted them; their mounts are next.
   ...(
     [
-      ["ui/Modal.tsx", "any screen migrating off a hand-rolled modal (11 exist)"],
+      // ui/Modal.tsx graduated: ContentJobDetail's "request edits" dialog mounts it,
+      // which is exactly the migration this entry was waiting for. The reachability
+      // guard fails on a registry that still calls a mounted component parked.
       ["ui/PageHeader.tsx", "the first LIST-archetype screen migration"],
       ["ui/useCountUp.ts", "the first KPI strip migrated off its local copy (11 exist)"],
     ] as const

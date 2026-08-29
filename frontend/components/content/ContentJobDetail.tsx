@@ -35,6 +35,7 @@ import {
 import DetailShell from "@/components/ui/DetailShell";
 import StageTimeline, { type Stage } from "@/components/ui/StageTimeline";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import Modal from "@/components/ui/Modal";
 import QueryGuard from "@/components/ui/QueryGuard";
 import { qaVerdict } from "@/lib/content";
 import ExperiencePanel from "./ExperiencePanel";
@@ -327,41 +328,74 @@ export default function ContentJobDetail({ code }: { code: string }) {
         }
       />
 
-      {editing && (
-        <ConfirmDialog
-          open
-          tone="normal"
-          title="Request edits"
-          body={
-            <div className="fld">
-              <label htmlFor="edit-note">What should change? The writer re-drafts under this instruction.</label>
-              <textarea
-                id="edit-note"
-                rows={4}
-                value={editNote}
-                onChange={(e) => setEditNote(e.target.value)}
-                style={{ width: "100%", marginTop: "var(--s-2)" }}
-              />
-            </div>
-          }
-          confirmLabel="Send back for edits"
-          pending={review.isPending}
-          onCancel={() => setEditing(false)}
-          onConfirm={() =>
-            review.mutate(
-              { code, action: "edit", note: editNote.trim() || undefined },
-              {
-                onSuccess: () => {
-                  setEditing(false);
-                  setEditNote("");
-                  toast.success(`${code} sent back with your instruction`);
-                },
-                onError: (e) => toast.fromError(`Couldn't request edits on ${code}`, e),
-              },
-            )
-          }
-        />
-      )}
+      {/* THE INSTRUCTION IS REQUIRED, and the button says so by staying disabled.
+          This prompt asked for a note but sent `note: editNote.trim() || undefined`
+          on a ConfirmDialog whose confirm button is always armed, so an empty
+          textarea sent a note-less edit: the job left needs_review, landed in
+          `drafting` with a blank `edit_instruction`, and the pipeline's guided-edit
+          entry then correctly declined to guess - leaving the page at "Edit
+          requested" with the review gate gone. The server refuses it now
+          (routers/content.py, 400), and this is the matching client half so the
+          reviewer is stopped BEFORE the request rather than by a toast.
+
+          Modal, not ConfirmDialog: this is a form, not a confirmation, and
+          ConfirmDialog deliberately exposes no way to disable its confirm button
+          (its `typeToConfirm` is for irreversible platform-wide actions, and
+          borrowing `pending` would render a false "Working…"). Modal shares the
+          same focus trap, Escape and focus-restore. */}
+      <Modal
+        open={editing}
+        title="Request edits"
+        onClose={() => setEditing(false)}
+        footer={
+          <>
+            <button type="button" className="ghostbtn" onClick={() => setEditing(false)} disabled={review.isPending}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={!editNote.trim() || review.isPending}
+              title={editNote.trim() ? undefined : "Write what the re-draft should change"}
+              onClick={() => {
+                const instruction = editNote.trim();
+                // Belt and braces with the disabled button above: the mutation must
+                // never carry a blank instruction even if a future edit re-arms the
+                // button, because the server 400s and the reviewer learns nothing.
+                if (!instruction) return;
+                review.mutate(
+                  { code, action: "edit", note: instruction },
+                  {
+                    onSuccess: () => {
+                      setEditing(false);
+                      setEditNote("");
+                      toast.success(`${code} sent back with your instruction`);
+                    },
+                    onError: (e) => toast.fromError(`Couldn't request edits on ${code}`, e),
+                  },
+                );
+              }}
+            >
+              {review.isPending ? "Working…" : "Send back for edits"}
+            </button>
+          </>
+        }
+      >
+        <div className="fld">
+          <label htmlFor="edit-note">
+            What should change? The writer re-drafts under this instruction — it is required,
+            because a blank one gives the pipeline nothing to act on.
+          </label>
+          <textarea
+            id="edit-note"
+            rows={4}
+            value={editNote}
+            onChange={(e) => setEditNote(e.target.value)}
+            placeholder="e.g. cut the second section, add pricing, tighten the H2s"
+            style={{ width: "100%", marginTop: "var(--s-2)" }}
+          />
+        </div>
+      </Modal>
     </>
   );
 }

@@ -536,9 +536,14 @@ async def test_review_reject_still_works_on_failing_qa(
 async def test_review_edit_to_drafting_no_publish(
     client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
 ) -> None:
+    # Carries a real note: the blank-note request this used to send is now a 400
+    # (see test_review_edit_with_blank_note_is_400_not_a_stranded_job), and the
+    # transition under test here is edit -> drafting without a publish enqueue.
     repo.seed(code="CJ-1", status="needs_review")
     wire("admin")
-    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "edit"})
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review", json={"action": "edit", "note": "tighten the H2s"}
+    )
     assert resp.json()["status"] == "drafting"
     assert published == []
 
@@ -562,16 +567,77 @@ async def test_review_edit_persists_note_and_reenqueues_pipeline(
     assert published == []
 
 
-async def test_review_edit_without_note_persists_empty_instruction(
-    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str], wire: Callable[..., None],
+@pytest.mark.parametrize("body", [
+    {"action": "edit"},                    # note omitted entirely
+    {"action": "edit", "note": ""},        # note present but empty
+    {"action": "edit", "note": "   \n\t "},  # whitespace only - .strip() makes it empty
+])
+async def test_review_edit_with_blank_note_is_400_not_a_stranded_job(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str],
+    published: list[str], wire: Callable[..., None], body: dict[str, Any],
 ) -> None:
+    """This test previously ASSERTED THE DEFECT: it was named
+    ``test_review_edit_without_note_persists_empty_instruction`` and asserted
+    200 + ``edit_instruction == ""`` with the comment "empty note -> unsteered
+    re-draft". No unsteered re-draft ever happened. Traced from the worker
+    backwards: ``workers/tasks/content_pipeline.py`` treats a ``drafting``
+    redelivery as resumable only when the instruction is non-empty (``editing =
+    bool(edit_instruction) and status == "drafting"``), so a blank note produced
+    "noop - job is drafting, not queued" and the job sat at "Edit requested"
+    forever, out of the reviewer's reach - the review gate was already gone.
+
+    Non-vacuous: restore ``changes["edit_instruction"] = (body.note or "").strip()``
+    without the guard and every assertion below fails - 200 instead of 400, the
+    status moves to drafting, and the pipeline is enqueued for a run that no-ops."""
     repo.seed(code="CJ-1", status="needs_review")
     wire("admin")
-    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "edit"})
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json=body)
+    assert resp.status_code == 400
+    assert "instruction" in resp.json()["error"]["message"].lower()
+    # The job KEPT the review gate: nothing moved and nothing was queued, so the
+    # reviewer can retry with a real note instead of hunting for a stuck job.
+    assert repo.jobs["CJ-1"]["status"] == "needs_review"
+    assert repo.jobs["CJ-1"].get("edit_instruction", "") == ""
+    assert enqueued == []
+    assert published == []
+
+
+async def test_review_edit_note_is_stripped_before_it_is_persisted(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str], wire: Callable[..., None],
+) -> None:
+    """Guards the OTHER half of the blank-note fix: the value persisted must be the
+    same stripped string the guard judged. Found while writing the guard - checking
+    a stripped copy but storing the raw ``body.note`` would let " x " pass the
+    check and store padding the worker then strips again, so the column and the
+    validation could disagree about what the reviewer asked for."""
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("admin")
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review",
+        json={"action": "edit", "note": "  add an FAQ section  \n"},
+    )
     assert resp.status_code == 200
-    assert resp.json()["status"] == "drafting"
-    assert repo.jobs["CJ-1"]["edit_instruction"] == ""  # empty note -> unsteered re-draft
+    assert repo.jobs["CJ-1"]["edit_instruction"] == "add an FAQ section"
     assert enqueued == ["CJ-1"]
+
+
+async def test_review_reject_with_blank_note_still_succeeds(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str],
+    enqueued: list[str], wire: Callable[..., None],
+) -> None:
+    """Pins the deliberate ASYMMETRY between edit and reject, so the blank-note
+    guard is not later "made consistent" by copying it onto reject. Reject is
+    terminal: it enqueues nothing, so there is no worker to strand and no
+    downstream consumer of a note (``content_jobs`` has no rejection-reason
+    column - checked against the built schema, not the CREATE TABLE). A blank
+    edit note breaks a promise the UI made; a blank rejection breaks nothing."""
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("admin")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "reject"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "rejected"
+    assert published == []
+    assert enqueued == []
 
 
 async def test_review_reject_to_rejected_no_publish(

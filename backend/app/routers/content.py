@@ -115,6 +115,19 @@ _NOT_DONE = HTTPException(
     status_code=status.HTTP_409_CONFLICT,
     detail="Only a published or degraded job can be re-pushed",
 )
+# A note-less `edit` STRANDED the job. The endpoint accepted an empty note, wrote an
+# empty `edit_instruction`, moved the job to `drafting` and re-enqueued it - but the
+# pipeline's guided-edit entry requires a non-empty instruction to treat a `drafting`
+# redelivery as resumable (workers/tasks/content_pipeline.py: `editing = bool(
+# edit_instruction) and status == "drafting"`), so the run returned `noop - job is
+# drafting, not queued` and the page sat at "Edit requested" with no signal to the
+# reviewer that their click did nothing. Refusing at the edge is the fix, NOT making
+# the worker regenerate blindly on an empty note: a blind regen spends real money to
+# produce a different draft that answers no question the reviewer asked.
+_EDIT_NEEDS_INSTRUCTION = HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    detail="An edit needs an instruction: say what the re-draft should change.",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -929,7 +942,8 @@ async def review_content_job(
     """The human review gate (owner/admin/manager only). ``approve`` -> publishing
     (and enqueue the publish worker, unless ``publishAt`` schedules it for later),
     ``edit`` -> drafting (persist the reviewer's guided-edit note + RE-ENQUEUE the
-    pipeline for a GUIDED re-draft), ``reject`` -> rejected. 409 unless the job is in
+    pipeline for a GUIDED re-draft; 400 when that note is blank - see
+    ``_EDIT_NEEDS_INSTRUCTION``), ``reject`` -> rejected. 409 unless the job is in
     needs_review (optimistic ``expect_status``). All three transitions run on the
     RLS path, where the DB guard recognises the lead (its lead branch allows the
     status change + the ``edit_instruction`` column edit together).
@@ -955,8 +969,14 @@ async def review_content_job(
     schedule_for_later = False
     if body.action == "edit":
         # Persist the reviewer's guided-edit instruction so the worker's re-draft
-        # targets exactly what was asked (not a blind regen). Empty note is allowed.
-        changes["edit_instruction"] = (body.note or "").strip()
+        # targets exactly what was asked (not a blind regen). Checked BEFORE the
+        # status write: a blank note here is the stranding defect (_EDIT_NEEDS_
+        # INSTRUCTION), and once the row has moved to `drafting` the reviewer has
+        # lost the review gate they would need to retry from.
+        instruction = (body.note or "").strip()
+        if not instruction:
+            raise _EDIT_NEEDS_INSTRUCTION
+        changes["edit_instruction"] = instruction
         changes["stage"] = "Edit requested"
     elif body.action == "approve":
         publish_at = body.publish_at

@@ -24,11 +24,22 @@ export default function ReviewGate({
 }) {
   const gateTitle = canReview ? undefined : "Only a lead (owner, admin or manager) can review";
   // "Request edit" needs a free-text instruction, which lives in the full SEO
-  // preview. So the row-level edit button OPENS the preview (where the reviewer
-  // writes the note) rather than firing a blind, note-less edit; it only falls back
-  // to a direct edit if no preview handler is wired.
-  const requestEdit = (id: string) =>
-    onPreview ? onPreview(id) : onAction(id, "edit");
+  // preview. So the row-level edit button OPENS the preview, where the reviewer
+  // writes the note.
+  //
+  // THERE IS NO NOTE-LESS FALLBACK. This used to read `onPreview ? onPreview(id) :
+  // onAction(id, "edit")`, i.e. with no preview wired it fired an edit carrying no
+  // instruction. The server now refuses that with a 400 (routers/content.py,
+  // _EDIT_NEEDS_INSTRUCTION) because a blank instruction stranded the job at
+  // "Edit requested". Sending it anyway would just turn a silent dead end into a
+  // toast the reviewer can do nothing about, so the button is disabled instead and
+  // says why - the row has nowhere to type a note.
+  const canRequestEdit = canReview && Boolean(onPreview);
+  const editTitle = !canReview
+    ? gateTitle
+    : onPreview
+      ? undefined
+      : "Open the draft preview to request edits — an edit needs an instruction";
   // D-4: approving publishes to a client's live site, so the QA verdict is shown
   // and acknowledged HERE rather than living on a preview tab nobody must open.
   const [approving, setApproving] = useState<ContentJob | null>(null);
@@ -93,9 +104,9 @@ export default function ReviewGate({
                   </button>
                   <button
                     className="ghostbtn"
-                    onClick={() => requestEdit(j.id)}
-                    disabled={!canReview}
-                    title={gateTitle}
+                    onClick={() => onPreview?.(j.id)}
+                    disabled={!canRequestEdit}
+                    title={editTitle}
                   >
                     <span className="material-symbols-rounded">edit</span>Request edit
                   </button>

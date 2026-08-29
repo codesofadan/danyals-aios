@@ -14,11 +14,24 @@ Auth mirrors the 0026 RLS boundary:
 Responses are the frontend ``Snapshot`` / ``ProtectedStore`` / ``StorageSeg`` /
 ``backupConfig`` shapes (``lib/backups.ts``). Every mutation records an ``access``
 activity entry.
+
+THE MANUAL DOORS. Cron is parked platform-wide by the owner's instruction (2026-08-19),
+so ``celery_app.conf.beat_schedule`` is empty and nothing fires on a timer. Both of the
+platform's maintenance sweeps therefore need a way to be run by hand, and both live here:
+
+* ``POST /backups/run`` - take a snapshot now (it predates the parking; it is the manual
+  door for ``run_nightly_backup``, which is registered and beat-ready but parked).
+* ``POST /maintenance/reap-stuck-jobs`` - run the stuck-run reaper now (owner-only).
+
+The reaper is not a backup, and this is not really its namespace. It is here because it
+is the OTHER thing an operator has to be able to trigger by hand while cron is off, and
+splitting the two manual doors across two routers is how one of them gets forgotten.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -63,6 +76,23 @@ def get_backup_service(repo: BackupsRepoDep, settings: SettingsDep) -> BackupSer
 
 
 BackupServiceDep = Annotated[BackupService, Depends(get_backup_service)]
+
+
+def get_job_reaper() -> Callable[[], dict[str, Any]]:
+    """Dependency: the stuck-run reaper's pure core.
+
+    Imported INSIDE the function, like the audits router's enqueuer: the reaper module
+    pulls in ``workers.celery_app`` to register its task, and the API process should not
+    build the Celery app (and import every task module in ``include``) just because this
+    router was imported. Being a dependency rather than a direct call also makes the
+    endpoint overridable in tests without a broker or a database.
+    """
+    from workers.tasks.job_maintenance import execute_reap
+
+    return execute_reap
+
+
+JobReaperDep = Annotated[Callable[[], dict[str, Any]], Depends(get_job_reaper)]
 
 
 async def _config_response(repo: BackupsRepoDep) -> BackupConfigResponse:
@@ -141,6 +171,36 @@ async def restore_backup(
         actor, kind="access", action="restored a backup snapshot", target=snapshot_id
     )
     return {"restored": True, "id": snapshot_id}
+
+
+# --- Platform maintenance (owner-only) ---------------------------------------
+@router.post("/maintenance/reap-stuck-jobs", tags=["maintenance"])
+async def reap_stuck_jobs(reaper: JobReaperDep, actor: OwnerOnly) -> dict[str, Any]:
+    """Fail every job run whose worker died without writing an outcome (OWNER-ONLY).
+
+    ``JobRunsStore.start`` counts ``running`` rows against the per-client concurrency
+    cap, so a run left ``running`` by an OOM kill or a host reboot permanently removes a
+    slot from that client. The reaper is the only thing that clears one, and with cron
+    parked this endpoint is the only thing that calls the reaper.
+
+    Runs INLINE rather than enqueueing: the whole point is an operator unblocking a queue
+    right now, and dispatching the repair onto the very worker pool that may be wedged is
+    how "I pressed the button and nothing happened" happens. The sweep is a handful of
+    indexed UPDATEs, so it is short enough to answer in the request.
+
+    A 503 - not a 200 with a zero count - when the ledger is unreachable: "reaped 0" and
+    "could not look" are different answers, and only one of them means the queue is fine.
+    """
+    result = await asyncio.to_thread(reaper)
+    if str(result.get("status")) == "error":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"the job ledger could not be swept: {result.get('detail') or 'unknown error'}",
+        )
+    await record_activity(
+        actor, kind="access", action="reaped stuck job runs", target="Jobs"
+    )
+    return result
 
 
 # --- Config (owner/admin) ----------------------------------------------------

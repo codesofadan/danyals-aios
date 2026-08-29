@@ -175,7 +175,15 @@ export default function ReviewPreview({
   const qa = qaQ.data?.qa ?? null;
 
   function sendEdit() {
-    onAction(job.id, "edit", note.trim());
+    const instruction = note.trim();
+    // The Send button below is already disabled while this is blank; this repeats
+    // the check because a note-less edit is not a cosmetic slip - it moved the job
+    // out of needs_review into a `drafting` state the pipeline refuses to act on
+    // (blank `edit_instruction`), stranding the page at "Edit requested". The
+    // server now 400s it (routers/content.py); this keeps the reviewer from ever
+    // seeing that error via a form the button state alone stopped guarding.
+    if (!instruction) return;
+    onAction(job.id, "edit", instruction);
     setEditOpen(false);
     setNote("");
   }
@@ -442,7 +450,8 @@ export default function ReviewPreview({
         <div style={{ marginTop: 12, padding: 14, borderRadius: 12,
           border: "1px solid var(--line, #e8d2d7)", background: "var(--blush, #F8ECEE)" }}>
           <label htmlFor="co-edit-note" className="cs" style={{ display: "block", marginBottom: 6 }}>
-            What should the re-draft change? The pipeline re-drafts targeting exactly this note.
+            What should the re-draft change? The pipeline re-drafts targeting exactly this note,
+            and cannot run without one — so this is required.
           </label>
           <textarea
             id="co-edit-note"
@@ -455,7 +464,12 @@ export default function ReviewPreview({
           />
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
             <button className="ghostbtn" onClick={() => { setEditOpen(false); setNote(""); }}>Cancel</button>
-            <button className="primary-btn" onClick={sendEdit} disabled={!note.trim()}>
+            <button
+              className="primary-btn"
+              onClick={sendEdit}
+              disabled={!note.trim()}
+              title={note.trim() ? undefined : "Write what the re-draft should change"}
+            >
               <span className="material-symbols-rounded">send</span>Send edit request
             </button>
           </div>
