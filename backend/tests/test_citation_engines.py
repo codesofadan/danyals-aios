@@ -5,13 +5,15 @@ browser. Mirrors ``test_content_providers.py``'s ``httpx.MockTransport`` pattern
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 import pytest
 
+from app.config import get_settings
+from app.modules.citations.service import submitter_for
+from app.modules.citations.tasks import _api_submitters
 from integrations.captcha_solver import (
     CapSolverClient,
     CaptchaChallenge,
@@ -19,7 +21,6 @@ from integrations.captcha_solver import (
     FakeCaptchaSolver,
     captcha_solver_from_settings,
 )
-from integrations.citation_apis import BingPlacesSubmitter, FoursquareSubmitter
 from integrations.citation_bot import (
     FORM_SPECS,
     CaptchaWidget,
@@ -82,46 +83,37 @@ def test_fake_citation_submitter_echoes_external_ref_on_update() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 2. Direct-API submitters (Bing Places / Foursquare).
+# 2. The direct-API submitters that were DELETED, and the guard that keeps them gone.
 # --------------------------------------------------------------------------- #
-def test_bing_places_refuses_a_blank_key() -> None:
-    with pytest.raises(ProviderNotConfiguredError):
-        BingPlacesSubmitter(api_key="")
+# `integrations/citation_apis.py` held BingPlacesSubmitter + FoursquareSubmitter and was
+# deleted in the 0106 pass. Both wrote to endpoints that do not exist - probed
+# unauthenticated 2026-08-23:
+#
+#     POST https://api.foursquare.com/v3/places                     -> 404
+#     POST https://places-api.foursquare.com/places                 -> 404
+#     POST https://ssl.bing.com/webmaster/places/api/v1/locations   -> 301 -> 404
+#
+# with a Foursquare READ endpoint returning 401 as the control, so these were missing
+# routes and not auth failures. Foursquare routes place additions to a community-
+# moderated Placemaker queue; Bing Places API access is a partner programme. There was
+# no endpoint to repair, so the code went rather than being "fixed".
+def test_the_dead_direct_api_submitters_stay_deleted() -> None:
+    """A guard, not a formality. Both submitters looked entirely plausible - typed,
+    key-gated, unit-tested against a mock transport that happily returned 200 for a
+    route the vendor does not serve. That is exactly how they survived so long. If
+    someone re-adds the module from git history, this fails and points at the probes."""
+    with pytest.raises(ModuleNotFoundError):
+        import integrations.citation_apis  # noqa: F401
 
 
-def test_bing_places_creates_a_listing() -> None:
-    client = BingPlacesSubmitter(api_key="k")
-    seen: dict[str, Any] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["header"] = request.headers.get("Ocp-Apim-Subscription-Key")
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(200, json={"id": "loc-1"})
-
-    _with_mock(client, handler)
-    result = client.submit(_job())
-    assert result.status == "submitted" and result.external_ref == "loc-1"
-    assert seen["header"] == "k"
-    assert seen["body"]["businessName"] == "Acme Dental"
-
-
-def test_bing_places_failure_is_a_clean_failed_result_not_a_raise() -> None:
-    client = BingPlacesSubmitter(api_key="k")
-    _with_mock(client, lambda req: httpx.Response(500, json={}))
-    result = client.submit(_job())
-    assert result.status == "failed" and result.error
-
-
-def test_foursquare_refuses_a_blank_key() -> None:
-    with pytest.raises(ProviderNotConfiguredError):
-        FoursquareSubmitter(api_key="")
-
-
-def test_foursquare_creates_a_place() -> None:
-    client = FoursquareSubmitter(api_key="k")
-    _with_mock(client, lambda req: httpx.Response(200, json={"fsq_id": "fsq-1"}))
-    result = client.submit(_job())
-    assert result.status == "submitted" and result.external_ref == "fsq-1"
+def test_no_api_submitter_is_configured_so_an_api_row_blocks_cleanly() -> None:
+    """With the engines gone, an `api:` directory must BLOCK with an honest reason -
+    never fall through to the Playwright bot, and never look like a success."""
+    submitter, reason = submitter_for(
+        "api:bing_places", api_submitters=_api_submitters(get_settings()), bot=object()
+    )
+    assert submitter is None
+    assert "no API submitter configured" in reason
 
 
 # --------------------------------------------------------------------------- #

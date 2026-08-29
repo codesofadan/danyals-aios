@@ -49,6 +49,8 @@ export const ADMIN_NAV: NavGroup[] = [
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads free audits public prospects funnel pipeline" },
       { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard" },
       { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections replicate replica design elementor sites cms plugin" },
+      { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "citations nap directories listings local business profile aggregator yelp" },
+      { icon: "assignment_turned_in", label: "Citation queue", href: "/admin/citations/queue", keywords: "citation queue work items operator finish listing by hand manual" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "web2 properties placements platforms articles anchors", badge: "test" },
       { icon: "radar", label: "Google Updates", href: "/admin/policy-radar", keywords: "google updates algorithm policy radar changes core update guidance" },
     ],

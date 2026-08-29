@@ -34,7 +34,7 @@ from __future__ import annotations
 import hashlib
 import random
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,11 +90,30 @@ _LOCALES = (
     ("en-AU", "Australia/Sydney"),
 )
 # Injected BEFORE any page script runs: erase the headless/automation tells.
+# MEASURED, not assumed (app/services/browser_fingerprint.py, 2026-08-29). Raw headless
+# Chromium leaks 4 high signals; with the first four lines below it leaks ONE - the WebGL
+# renderer, which reports "SwiftShader". That string is the software rasteriser a headless
+# container falls back to, and no consumer machine reports it, so it identifies the session
+# as a datacentre bot on its own. The mimeTypes list is the same class of tell as plugins
+# (empty in headless, never empty in a real browser) and was simply missed.
+#
+# What this canNOT reach: TLS fingerprint, IP reputation and behavioural scoring are
+# decided by the defender off-page. A clean fingerprint is necessary, not sufficient.
 _STEALTH_INIT_JS = (
     "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
     "Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});"
     "Object.defineProperty(navigator,'languages',{get:()=>['en-US','en']});"
     "window.chrome=window.chrome||{runtime:{}};"
+    # mimeTypes: length is what gets read, so a plausible non-empty list is enough.
+    "Object.defineProperty(navigator,'mimeTypes',{get:()=>[1,2,3,4]});"
+    # WebGL: answer the two debug-renderer parameters with a common consumer GPU.
+    # 37445/37446 are UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL - the pair every
+    # fingerprinting script reads - so they are spoofed on BOTH webgl and webgl2.
+    "(()=>{const V='Intel Inc.',R='Intel Iris OpenGL Engine';"
+    "for(const C of [window.WebGLRenderingContext,window.WebGL2RenderingContext]){"
+    "if(!C)continue;const g=C.prototype.getParameter;"
+    "C.prototype.getParameter=function(p){"
+    "if(p===37445)return V;if(p===37446)return R;return g.apply(this,arguments);};}})();"
 )
 _TYPE_DELAY_MS = (40, 140)  # per-character human typing cadence
 _FIELD_PAUSE_MS = (250, 900)  # pause between fields / before submit
@@ -156,6 +175,44 @@ class FormSpec:
     captcha: CaptchaWidget | None = None
 
 
+# A spec source that is CONSULTED PER JOB rather than held as a dict. This is what lets
+# the whitelist live in Postgres (`directory_specs`, 0108) instead of in this module: the
+# bot asks for one directory's spec at submit time and gets it only if that row is active,
+# verified, proven live and un-drifted. Returning None means "not earned yet", which is a
+# refusal to submit - never a fallback to the module catalogue below.
+SpecLoader = Callable[["CitationJob"], "FormSpec | None"]
+
+
+def form_spec_from_json(directory_name: str, payload: Mapping[str, Any]) -> FormSpec:
+    """Rebuild a :class:`FormSpec` from a ``directory_specs.spec`` jsonb payload.
+
+    Pure and DB-free so it is unit-testable without Postgres, and so the JSON shape has
+    exactly one reader. The DB already enforced the shape (0108's `directory_specs_shape`
+    CHECK: https url, >=1 field, a submit selector, a success indicator), so this does not
+    re-validate it - a KeyError here would mean the constraint was bypassed.
+    """
+    cap = payload.get("captcha")
+    return FormSpec(
+        directory_name=directory_name,
+        url=str(payload["url"]),
+        fields=tuple(
+            FormField(str(f["selector"]), str(f["value_key"])) for f in payload["fields"]
+        ),
+        submit_selector=str(payload["submit_selector"]),
+        success_indicator=str(payload["success_indicator"]),
+        captcha=(
+            CaptchaWidget(
+                kind=str(cap["kind"]),
+                site_key_selector=str(cap["site_key_selector"]),
+                site_key_attr=str(cap.get("site_key_attr", "data-sitekey")),
+                response_field_name=str(cap.get("response_field_name", "g-recaptcha-response")),
+            )
+            if isinstance(cap, Mapping)
+            else None
+        ),
+    )
+
+
 def _job_value(job: CitationJob, key: str) -> str:
     if key.startswith("literal:"):
         return key.split(":", 1)[1]
@@ -186,12 +243,22 @@ def _job_value(job: CitationJob, key: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# A bot_fillable slice spanning every market (US/UK/CA/AU + the GLOBAL layer); the
-# shape extends unchanged to the rest of the catalog - see the module docstring. All
-# plain web forms, no CAPTCHA, per db/migrations/0046_directories_seed.sql. The dict
-# key + `directory_name` are the EXACT seed `name` strings so a queued row lines up.
-# EVERY selector below is a best-effort starting spec, NOT hand-verified against the
-# live DOM (the reference doc's "reconfirm before automating" caution, per site).
+# THE IMPORT SEED - NOT THE RUNTIME WHITELIST. Since 0108 the bot drives only rows in
+# `public.directory_specs` that a human verified against the live DOM and that produced
+# a real listing URL. This dict is no longer consulted at submit time; it is the corpus
+# `app.cli.citation_specs_import` loads into that table as `active = false` candidates,
+# so the operator's verification queue starts from the work already done here.
+#
+# It is kept because the selectors are a genuine starting point, and DELIBERATELY not
+# treated as coverage: R1 §3 measured these 50 URLs and found 29 x 403, 8 x 404, 6 dead
+# hosts and 7 x 2xx, with zero ever proven to produce a listing. That is why importing
+# every entry below yields exactly ZERO bot-drivable directories until each is earned.
+#
+# A bot_fillable slice spanning every market (US/UK/CA/AU + the GLOBAL layer), all plain
+# web forms, no CAPTCHA, per db/migrations/0046_directories_seed.sql. The dict key +
+# `directory_name` are the EXACT seed `name` strings so a queued row lines up - note 7 of
+# them (Cybo, EnrollBusiness, n49, Opendi, Storeboard, Tupalo, Tuugo) match TWO catalogue
+# rows each on different markets, so the importer requires a market to disambiguate.
 # --------------------------------------------------------------------------- #
 FORM_SPECS: dict[str, FormSpec] = {
     "Brownbook": FormSpec(
@@ -878,8 +945,15 @@ FORM_SPECS: dict[str, FormSpec] = {
 class PlaywrightCitationSubmitter:
     """Real ``CitationSubmitter`` driving a headless Chromium session per submit.
 
-    ``specs`` defaults to the module's ``FORM_SPECS`` catalog but is overridable
-    (tests inject a tiny fixture spec). ``captcha_solver`` is required only for
+    Spec resolution has TWO mutually exclusive sources and NO default catalogue:
+    ``specs`` is an explicit in-memory dict (tests inject a tiny fixture spec; the signup
+    engine passes ``{}``), and ``spec_loader`` is the production source - a per-job
+    callable backed by `public.directory_specs` (0108) that returns a spec only for a
+    directory that has EARNED the automated route. With neither set the bot has no specs
+    and submits nothing, which is the correct fail-closed default: an unconfigured bot
+    must refuse, never fall back to the unverified ``FORM_SPECS`` seed.
+
+    ``captcha_solver`` is required only for
     ``captcha_assisted`` directories (a spec with ``captcha`` set) - a
     ``bot_fillable`` job never needs one. ``proxy_url`` is optional (budget-tier
     residential proxy, per the reference plan's cost model); ``screenshot_dir`` is
@@ -891,6 +965,7 @@ class PlaywrightCitationSubmitter:
         self,
         *,
         specs: dict[str, FormSpec] | None = None,
+        spec_loader: SpecLoader | None = None,
         captcha_solver: CaptchaSolver | None = None,
         proxy_url: str | None = None,
         screenshot_dir: str | None = None,
@@ -901,7 +976,10 @@ class PlaywrightCitationSubmitter:
             import playwright.sync_api  # noqa: F401
         except ImportError as exc:
             raise ProviderNotConfiguredError(f"Playwright citation bot unavailable: {_INSTALL_HINT}") from exc
-        self._specs = specs if specs is not None else FORM_SPECS
+        # NOT `specs or FORM_SPECS`: the signup engine passes {} deliberately, and an
+        # empty dict must stay empty rather than silently inherit 50 unverified specs.
+        self._specs = specs
+        self._spec_loader = spec_loader
         self._captcha_solver = captcha_solver
         self._proxy_url = proxy_url
         self._screenshot_dir = Path(screenshot_dir) if screenshot_dir else None
@@ -912,9 +990,14 @@ class PlaywrightCitationSubmitter:
         self._rng = random.Random(rng_seed)
 
     def submit(self, job: CitationJob) -> CitationSubmitResult:
-        spec = self._specs.get(job.directory_name)
+        spec = self._spec_for(job)
         if spec is None:
-            return CitationSubmitResult(status="failed", error=f"no FormSpec for {job.directory_name!r}")
+            # Deliberately NOT retried and NOT a crash: there is no verified spec for this
+            # directory, so there is nothing to attempt. R1 req 29 renders this to the
+            # client as skip_reason='no_verified_spec' rather than a silent absence.
+            return CitationSubmitResult(
+                status="failed", error=f"no active verified FormSpec for {job.directory_name!r}"
+            )
         if spec.captcha is not None and self._captcha_solver is None:
             return CitationSubmitResult(
                 status="blocked", error="captcha_assisted directory but no CAPTCHA solver configured"
@@ -926,6 +1009,24 @@ class PlaywrightCitationSubmitter:
         except Exception as exc:  # a form/selector drift must fail cleanly, never crash the worker
             logger.warning("citation_bot_submit_failed", directory=job.directory_name, error=str(exc))
             return CitationSubmitResult(status="failed", error=str(exc)[:500])
+
+    def can_submit(self, job: CitationJob) -> bool:
+        """Whether an EARNED spec exists for this job, WITHOUT submitting anything.
+
+        The worker asks this before the cost gate. With the whitelist starting empty,
+        "no spec" is the common answer, and discovering it after the gate had charged
+        would bill a client for a submission that could not physically happen."""
+        return self._spec_for(job) is not None
+
+    def _spec_for(self, job: CitationJob) -> FormSpec | None:
+        """The one place a spec is resolved. An injected ``specs`` dict wins (tests and
+        the signup engine); otherwise the DB whitelist is consulted per job. There is no
+        third fallback - if neither source has it, the bot does not submit."""
+        if self._specs is not None:
+            return self._specs.get(job.directory_name)
+        if self._spec_loader is not None:
+            return self._spec_loader(job)
+        return None
 
     @contextmanager
     def _browser_session(self, directory: str) -> Iterator[Any]:
@@ -1046,15 +1147,28 @@ class PlaywrightCitationSubmitter:
         )
 
     def _screenshot(self, page: Any, job: CitationJob) -> str:
+        """Capture the proof screenshot and return a RELATIVE KEY, never a path.
+
+        This used to `return str(path)` - an absolute server path like
+        /var/lib/aios/citations/ab12....png - which the worker writes straight into
+        `citations.proof_url`. Two defects came out of that one line: a column named
+        `*_url` held a filesystem path (so anything rendering it produced a dead link),
+        and serialising that row to a dashboard response leaked the server's directory
+        layout. The reporting layer then compounded it by publishing those strings to
+        operators as "Live listings already earned".
+
+        A key is resolved back to a path server-side by the guarded download route, the
+        way the audit artifact routes already do it. The path itself never crosses the
+        wire."""
         if self._screenshot_dir is None:
             return ""
         self._screenshot_dir.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(
             f"{job.directory_name}|{job.business_name}|{time.time()}".encode()
         ).hexdigest()[:16]
-        path = self._screenshot_dir / f"{digest}.png"
-        page.screenshot(path=str(path))
-        return str(path)
+        key = f"{digest}.png"
+        page.screenshot(path=str(self._screenshot_dir / key))
+        return key
 
     def _check_success(self, page: Any, indicator: str) -> bool:
         if indicator.startswith("text="):
@@ -1066,18 +1180,128 @@ class PlaywrightCitationSubmitter:
 
 
 def citation_bot_from_settings(
-    settings: Settings, *, captcha_solver: CaptchaSolver | None
+    settings: Settings,
+    *,
+    captcha_solver: CaptchaSolver | None,
+    spec_loader: SpecLoader | None = None,
+    route: str = "",
 ) -> PlaywrightCitationSubmitter | None:
     """The self-hosted bot, or ``None`` when Playwright is not installed (degraded -
     a bot_fillable/captcha_assisted job HOLDS rather than crashing the worker).
     ``captcha_solver`` is passed in (built once per worker call by the caller, which
-    already knows whether a key is configured) rather than resolved here."""
+    already knows whether a key is configured) rather than resolved here.
+
+    ``spec_loader`` is the 0108 whitelist reader. Left None the bot has NO specs and
+    submits nothing - the fail-closed default, so a caller that forgets to wire the
+    whitelist gets zero submissions rather than 50 unverified ones.
+
+    ``route`` suppresses the proxy on Route B (R1 req 17). Route B is by definition an
+    undefended open form: if it starts answering 403 or presenting a CAPTCHA it has
+    BECOME Route C, and that is a route change to record, not proxy bandwidth to buy.
+    Spending residential-proxy budget on Route B would also quietly break the ~$0.002
+    compute-only cost model that justifies the route."""
+    proxy = settings.citation_proxy_url.get_secret_value() if settings.citation_proxy_url else None
+    if route == "B" and proxy:
+        logger.info("citation_bot_proxy_ignored_on_route_b", reason="route_b_is_undefended")
+        proxy = None
     try:
         return PlaywrightCitationSubmitter(
             captcha_solver=captcha_solver,
-            proxy_url=settings.citation_proxy_url.get_secret_value() if settings.citation_proxy_url else None,
+            spec_loader=spec_loader,
+            proxy_url=proxy,
             screenshot_dir=settings.citation_artifact_dir,
         )
     except ProviderNotConfiguredError:
         logger.info("citation_bot_degraded", reason="playwright_not_installed")
         return None
+
+
+def db_spec_loader(job: CitationJob) -> FormSpec | None:
+    """A ``SpecLoader`` over the 0108 whitelist: the ACTIVE spec for one directory.
+
+    Per-job rather than a snapshot loaded at factory time, so activating or deactivating
+    a spec takes effect on the next submission instead of the next worker restart - which
+    matters because deactivation is how drift is contained.
+
+    NEVER RAISES. An unreachable database, or a schema predating 0108, yields ``None`` -
+    the bot then submits nothing. That is the correct direction to fail; the alternative
+    is a worker that crashes on every citation, and the alternative to THAT is falling
+    back to the unverified in-code catalogue, which is the behaviour this whitelist
+    exists to end."""
+    specs = active_form_specs(directory_name=job.directory_name)
+    return specs.get(job.directory_name)
+
+
+def active_form_specs(*, directory_name: str | None = None) -> dict[str, FormSpec]:
+    """The EARNED whitelist: every directory with an active, verified spec.
+
+    Reads `directory_specs` (0108) joined to the catalogue, keyed by directory name
+    because that is what a `CitationJob` carries. Runs on the privileged connection: the
+    worker has no user identity, and the whitelist is reference data rather than tenant
+    data.
+
+    NEVER RAISES. A database that is unreachable, or a schema that predates 0108, yields
+    an EMPTY whitelist - which means the bot submits nothing. That is the correct
+    direction to fail: the alternative is a worker that crashes on every citation, and
+    the alternative to *that* is falling back to the unverified in-code catalogue, which
+    is the exact behaviour this whitelist exists to end.
+    """
+    try:
+        from app.db.database import privileged_connection
+    except Exception:  # pragma: no cover - import-time environment problem
+        return {}
+    try:
+        with privileged_connection() as cur:
+            if directory_name is None:
+                cur.execute(
+                    "select d.name as directory_name, s.spec "
+                    "from public.directory_specs s "
+                    "join public.directories d on d.id = s.directory_id "
+                    "where s.active"
+                )
+            else:
+                cur.execute(
+                    "select d.name as directory_name, s.spec "
+                    "from public.directory_specs s "
+                    "join public.directories d on d.id = s.directory_id "
+                    "where s.active and d.name = %s",
+                    (directory_name,),
+                )
+            rows = list(cur.fetchall())
+    except Exception:
+        logger.info("citation_specs_unavailable", reason="whitelist read failed; submitting nothing")
+        return {}
+
+    out: dict[str, FormSpec] = {}
+    for row in rows:
+        try:
+            name = str(row["directory_name"])
+            out[name] = _spec_from_json(dict(row["spec"]), name)
+        except Exception:
+            # One malformed row must not deny every other directory its verified spec.
+            logger.warning("citation_spec_malformed", directory=str(row.get("directory_name")))
+    return out
+
+
+def _spec_from_json(raw: dict[str, Any], directory_name: str = "") -> FormSpec:
+    """Rehydrate a stored spec into the dataclass the bot drives."""
+    captcha_raw = raw.get("captcha")
+    return FormSpec(
+        directory_name=directory_name,
+        url=str(raw["url"]),
+        fields=tuple(
+            FormField(selector=str(f["selector"]), value_key=str(f["value_key"]))
+            for f in raw.get("fields", [])
+        ),
+        submit_selector=str(raw["submit_selector"]),
+        success_indicator=str(raw.get("success_indicator", "")),
+        captcha=(
+            CaptchaWidget(
+                kind=str(captcha_raw["kind"]),
+                site_key_selector=str(captcha_raw.get("site_key_selector", "")),
+                response_field_name=str(captcha_raw.get("response_field_name", "")),
+            )
+            if isinstance(captcha_raw, dict)
+            else None
+        ),
+    )

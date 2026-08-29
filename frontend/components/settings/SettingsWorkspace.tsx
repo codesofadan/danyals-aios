@@ -9,6 +9,7 @@
 import TabBar, { useUrlTab } from "@/components/ui/TabBar";
 import AccountSettings from "./AccountSettings";
 import WorkspaceTab from "./WorkspaceTab";
+import ExtensionTab from "./ExtensionTab";
 import SecurityTab from "./SecurityTab";
 import DangerTab from "./DangerTab";
 
@@ -16,6 +17,7 @@ const TABS = [
   { key: "account", label: "My account", icon: "person" },
   { key: "workspace", label: "Workspace", icon: "corporate_fare" },
   { key: "security", label: "Security", icon: "shield_lock" },
+  { key: "extension", label: "Extension", icon: "extension" },
   { key: "danger", label: "Danger zone", icon: "report" },
 ];
 
@@ -31,6 +33,7 @@ export default function SettingsWorkspace() {
             {tab === "account" && "Your profile & notification preferences."}
             {tab === "workspace" && "Agency-wide identity and defaults (owner/admin)."}
             {tab === "security" && "The agency's stored security policy (owner/admin)."}
+            {tab === "extension" && "Pair the Citation Assistant browser extension."}
             {tab === "danger" && "Irreversible platform actions (owner only)."}
           </div>
         </div>
@@ -40,6 +43,7 @@ export default function SettingsWorkspace() {
         {tab === "account" && <AccountSettings />}
         {tab === "workspace" && <WorkspaceTab />}
         {tab === "security" && <SecurityTab />}
+        {tab === "extension" && <ExtensionTab />}
         {tab === "danger" && <DangerTab />}
       </div>
     </section>

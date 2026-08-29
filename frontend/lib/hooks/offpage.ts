@@ -24,8 +24,16 @@ import type {
   CitationGap,
   Directory,
   DirectoryTier,
+  QueueBlockReason,
+  Web2AccountCreate,
+  Web2Catalog,
+  QueueBoard,
+  QueueCompleteResult,
+  QueueItem,
   OffpageKpis,
   Web2Campaign,
+  Web2Account,
+  Web2AccountCheck,
   Web2CampaignApproval,
   Web2CampaignEstimate,
   Web2Placement,
@@ -352,6 +360,60 @@ export function useEstimateWeb2Campaign() {
   });
 }
 
+/** The connection board: which accounts exist and whether their credential is usable. */
+export function useWeb2Accounts(clientId?: string) {
+  return useQuery({
+    queryKey: ["web2-accounts", clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2Account[]>(
+        `/offpage/web2/accounts${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
+      ),
+    refetchInterval: 60_000,
+  });
+}
+
+/** The platform catalogue, including the credential shape each platform needs. */
+export function useWeb2Catalog() {
+  return useQuery({
+    queryKey: ["web2-catalog"],
+    queryFn: () => api.get<Web2Catalog>("/offpage/web2/catalog"),
+    staleTime: 10 * 60_000,
+  });
+}
+
+/** Register a publishing account and seal its credential.
+ *
+ *  The credential travels once, in this request body, and is never read back: no query
+ *  caches it, no response carries it. A refusal names the RULE (R2-08 identity hygiene,
+ *  the shared catch-all domain) rather than echoing the value. */
+export function useRegisterWeb2Account() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Web2AccountCreate) =>
+      api.post<Web2Account>("/offpage/web2/accounts", body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["web2-accounts"] });
+      void qc.invalidateQueries({ queryKey: WEB2_BOARD_KEY });
+    },
+  });
+}
+
+/** Ask the platform, right now, whether this credential still authenticates.
+ *  Turns "we find out when a campaign fails" into "we know before it runs". */
+export function useCheckWeb2Account() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (accountId: string) =>
+      api.post<Web2AccountCheck>(
+        `/offpage/web2/accounts/${encodeURIComponent(accountId)}/check`,
+        {},
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["web2-accounts"] });
+    },
+  });
+}
+
 /** Every placement in one campaign — the report behind the rollup. */
 export function useCampaignPlacements(campaignId: string | null) {
   return useQuery({
@@ -403,6 +465,109 @@ export function useCreateWeb2Campaign() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: WEB2_CAMPAIGNS_KEY });
       void qc.invalidateQueries({ queryKey: WEB2_KEY });
+    },
+  });
+}
+
+// --- citation work queue (0110) ----------------------------------------------
+
+/** The queue at a glance, including the median minutes per finished item. */
+export function useCitationQueue() {
+  return useQuery({
+    queryKey: ["citation-queue"],
+    queryFn: () => api.get<QueueBoard>("/citation-builder/queue"),
+    refetchInterval: 30_000,
+  });
+}
+
+/** Take the next available item. Resolves to `null` when the queue is empty. */
+export function useClaimQueueItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clientId?: string) =>
+      api.post<QueueItem | null>("/citation-builder/queue/claim", clientId ? { clientId } : {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["citation-queue"] });
+    },
+  });
+}
+
+/** Extend the lease and bank the seconds worked. Time accumulates server-side, so a
+ *  dropped heartbeat costs one interval of measurement, not the whole session. */
+export function useQueueHeartbeat() {
+  return useMutation({
+    mutationFn: ({ citationId, workedSeconds }: { citationId: string; workedSeconds: number }) =>
+      api.post<{ ok: boolean }>(`/citation-builder/queue/${citationId}/heartbeat`, {
+        workedSeconds,
+      }),
+  });
+}
+
+/** Close an item with the listing's public URL. The server FETCHES that URL and refuses
+ *  the completion if the business is not on the page — so `accepted: false` is a normal,
+ *  expected outcome and must be shown to the operator, not treated as an error. */
+export function useCompleteQueueItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      citationId,
+      liveUrl,
+      workedSeconds,
+      note,
+    }: {
+      citationId: string;
+      liveUrl: string;
+      workedSeconds: number;
+      note?: string;
+    }) =>
+      api.post<QueueCompleteResult>(`/citation-builder/queue/${citationId}/complete`, {
+        liveUrl,
+        workedSeconds,
+        note: note ?? "",
+      }),
+    onSuccess: (result) => {
+      if (result.accepted) {
+        qc.invalidateQueries({ queryKey: ["citation-queue"] });
+        qc.invalidateQueries({ queryKey: ["citations"] });
+      }
+    },
+  });
+}
+
+/** Report an item as not done, with a reason. A first-class outcome, not a failure. */
+export function useBlockQueueItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      citationId,
+      reason,
+      detail,
+      workedSeconds,
+    }: {
+      citationId: string;
+      reason: QueueBlockReason;
+      detail?: string;
+      workedSeconds: number;
+    }) =>
+      api.post<void>(`/citation-builder/queue/${citationId}/blocked`, {
+        reason,
+        detail: detail ?? "",
+        workedSeconds,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["citation-queue"] });
+    },
+  });
+}
+
+/** Hand an item back without finishing it. The attempt still counts. */
+export function useReleaseQueueItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ citationId, workedSeconds }: { citationId: string; workedSeconds: number }) =>
+      api.post<void>(`/citation-builder/queue/${citationId}/release`, { workedSeconds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["citation-queue"] });
     },
   });
 }

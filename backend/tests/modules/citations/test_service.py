@@ -31,8 +31,8 @@ def _dir(**over: Any) -> dict[str, Any]:
     return row
 
 
-def _settings() -> Settings:
-    return Settings(_env_file=None, app_env="dev")
+def _settings(**over: object) -> Settings:
+    return Settings(_env_file=None, app_env="dev", **over)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------- #
@@ -66,12 +66,30 @@ def test_cost_estimate_sums_per_tier() -> None:
     rows = [_dir(tier="api"), _dir(tier="bot_fillable"), _dir(tier="captcha_assisted")]
     total = estimate_campaign_cost(rows, settings)
     expected = round(
-        settings.citation_api_cost_estimate
+        # `citation_api_cost_estimate` was deleted with the Bing/Foursquare submitters -
+        # it priced calls to endpoints that return 404. An api/aggregator row now prices
+        # at the Data Axle Add rate, which is 0.0 until a real rate card is on file.
+        settings.data_axle_add_cost_estimate
         + settings.citation_bot_cost_estimate
         + settings.citation_captcha_cost_estimate,
         4,
     )
     assert total == expected
+
+
+def test_an_unpriced_aggregator_row_contributes_nothing_because_it_cannot_run() -> None:
+    """The 0.0 must never be read as "aggregator submissions are free".
+
+    They are BLOCKED: `data_axle_submits_enabled` is False while the estimate is 0.0, and
+    the worker refuses the row before the cost gate sees it. The estimate becomes real
+    the moment a price is configured, and the batch total moves with it."""
+    settings = _settings()
+    assert settings.data_axle_submits_enabled is False
+    assert estimate_campaign_cost([_dir(tier="aggregator")], settings) == 0.0
+
+    priced = _settings(data_axle_add_cost_estimate=10.0)
+    assert priced.data_axle_submits_enabled is True
+    assert estimate_campaign_cost([_dir(tier="aggregator")], priced) == 10.0
 
 
 def test_cost_estimate_of_empty_batch_is_zero() -> None:

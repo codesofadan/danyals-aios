@@ -1,0 +1,35 @@
+-- 0113_market_defaults_to_global.sql - an unset market is not a US business.
+--
+-- MEASURED, with a real client. A Lahore business ("Zain Tape Printers", Pakistan) was
+-- run end to end on 2026-08-30. `client_business_profiles.market` defaults to 'US', so the
+-- derived submission profile came out as US, the campaign selected 138 US+GLOBAL
+-- directories, and the queue offered an operator YellowPages.com, Chamber of Commerce,
+-- Manta and BBB - US-only directories - for a business in Pakistan.
+--
+-- That is the same defect class as reporting a screenshot as a live listing: asserting a
+-- fact nothing established. Nobody ever said this client was American; a column default
+-- did.
+--
+-- WHY GLOBAL AND NOT A REQUIRED FIELD. Requiring it is the better long-term answer and it
+-- needs the onboarding wizard to ask, which is a separate change. Until then the question
+-- is which default does less harm, and the two are not symmetric:
+--
+--   * defaulting to US   -> a WRONG listing on a US directory for a foreign business,
+--                           which is NAP pollution: exactly the harm a citation campaign
+--                           exists to prevent, and expensive to undo (see
+--                           citation_removals - removability is a property of the route).
+--   * defaulting to GLOBAL -> FEWER listings for a US client whose market was never
+--                           recorded. Visible immediately in the gap report, and fixed by
+--                           setting the market.
+--
+-- A missing listing is recoverable. A wrong one on someone else's website often is not.
+--
+-- The enum itself is unchanged: it holds US/UK/CA/AU/GLOBAL and there is no PK, so a
+-- Pakistani business is honestly served by the GLOBAL set (28 route-C directories) and
+-- nothing else. Adding real market coverage is a catalogue question, not a schema one.
+--
+-- EXISTING ROWS ARE NOT TOUCHED. A row that already says 'US' may well be a US business;
+-- silently rewriting it would be the same sin in the other direction.
+
+alter table public.client_business_profiles alter column market set default 'GLOBAL';
+alter table public.business_profiles        alter column market set default 'GLOBAL';

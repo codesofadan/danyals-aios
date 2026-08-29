@@ -46,6 +46,12 @@ CitationAction = Literal["Submit", "Update"]
 CitationSubmitStatus = Literal[
     "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked",
     "ready_for_human",  # account created + listing prepared; a human finishes at handoff_url
+    # 0106. `submitted` STOPS meaning done: every write path we have returns it honestly
+    # and none can promise more (Data Axle runs teleresearch for up to three business
+    # days, Apple returns state SUBMITTED, GBP needs verification before it appears).
+    "live",  # fetched live_url and found the business on the page - the ONLY earned one
+    "drifted",  # the listing exists but its NAP no longer matches ours: correct, don't rebuild
+    "delisted",  # it was live and now it is gone
 ]
 Web2Platform = Literal[
     "WordPress.com", "Blogger", "Tumblr", "Medium",
@@ -290,6 +296,14 @@ class Web2CatalogResponse(BaseModel):
     automation_ready: int = Field(serialization_alias="automationReady")
     by_auth_type: dict[str, int] = Field(serialization_alias="byAuthType")
     platforms: list[Web2PlatformCatalogResponse]
+    #: platform -> the credential fields it needs, straight from the publishers' own map.
+    #: Served rather than duplicated in the frontend so the registration form cannot
+    #: drift from what the publisher actually validates: a hand-copied list would fall
+    #: out of date the first time a platform changed its auth, and the operator would
+    #: fill in fields that seal into a credential the publisher then rejects.
+    credential_fields: dict[str, list[str]] = Field(
+        default_factory=dict, serialization_alias="credentialFields"
+    )
 
 
 # --- Request models -----------------------------------------------------------
@@ -378,6 +392,19 @@ class Web2PlatformStatusResponse(BaseModel):
     status: Literal["eligible", "not_connected", "not_eligible"]
     reason: str = ""
     authority: str = Field(default="", serialization_alias="authorityTier")
+    #: HOW TO CONNECT IT, carried on the row that says it is not connected. Telling an
+    #: operator a platform is unconnected without telling them what to do about it is
+    #: what left provisioning an engineer's errand and clients sitting at zero platforms.
+    #: `cost` and `blocker` are load-bearing: a teammate sent to fetch a token that needs
+    #: a paid plan, or that expires in seven days, has been sent on an uncosted errand.
+    setup_url: str = Field(default="", serialization_alias="setupUrl")
+    setup_steps: str = Field(default="", serialization_alias="setupSteps")
+    setup_cost: str = Field(default="", serialization_alias="setupCost")
+    setup_blocker: str = Field(default="", serialization_alias="setupBlocker")
+    account_needed: str = Field(default="", serialization_alias="accountNeeded")
+    credential_fields: list[str] = Field(
+        default_factory=list, serialization_alias="credentialFields"
+    )
 
 
 class Web2CampaignRequest(BaseModel):
@@ -464,6 +491,88 @@ class Web2CampaignResponse(BaseModel):
             total=total,
             next_publish=next_publish,
         )
+
+
+class Web2AccountCreateRequest(BaseModel):
+    """Register one publishing account (lead-only).
+
+    ``credential`` is field -> value for THIS platform's shape (the board already tells
+    the UI which fields it needs). It is sealed into the vault and never read back: no
+    response, no log, no error message ever carries it.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    platform: str
+    ownership: str = "per_client"
+    client_id: str = Field(default="", alias="clientId")
+    handle: str
+    email: str = ""
+    property_url: str = Field(default="", alias="propertyUrl")
+    max_properties: int = Field(default=1, alias="maxProperties", ge=1, le=500)
+    credential: dict[str, str] = Field(default_factory=dict)
+
+
+class Web2AccountResponse(BaseModel):
+    """One publishing account on the operator's connection board.
+
+    Carries the vault COORDINATES but never the secret: the board's job is to say where
+    a credential lives and whether it works, not what it is. `client_id` never leaks —
+    the client NAME is joined for display.
+    """
+
+    id: str
+    platform: Web2Platform
+    ownership: str
+    client: str = ""
+    handle: str = ""
+    property_url: str = Field(default="", serialization_alias="propertyUrl")
+    email: str = ""
+    health: str = "unverified"
+    checked: str = ""
+    properties: int = 0
+    max_properties: int = Field(default=1, serialization_alias="maxProperties")
+    #: Which credential fields this platform needs — drives the form, so a new platform
+    #: needs no frontend change.
+    required: list[str] = Field(default_factory=list)
+    #: True when the sealed credential is structurally complete (a publisher builds).
+    complete: bool = False
+
+    @classmethod
+    def from_row(
+        cls, row: dict[str, Any], *, required: list[str], complete: bool
+    ) -> Web2AccountResponse:
+        platform = row.get("platform")
+        return cls(
+            id=str(row["id"]),
+            platform=platform if platform in _WEB2_PLATFORMS else "WordPress.com",
+            ownership=str(row.get("ownership") or ""),
+            client=str(row.get("client_name") or ""),
+            handle=str(row.get("handle") or ""),
+            property_url=str(row.get("property_url") or ""),
+            email=str(row.get("registration_email") or ""),
+            health=str(row.get("health") or "unverified"),
+            checked=format_date(row.get("health_checked_at"), empty=""),
+            properties=int(row.get("property_count") or 0),
+            max_properties=int(row.get("max_properties") or 1),
+            required=required,
+            complete=complete,
+        )
+
+
+class Web2AccountCheckResponse(BaseModel):
+    """What a live verification found.
+
+    `state` is tri-state on purpose — ok / bad / unknown. "We could not ask" must stay
+    distinguishable from "the platform said no", or the board starts reporting outages
+    as revoked tokens and sends people to re-issue credentials that were fine.
+    """
+
+    account_id: str = Field(serialization_alias="accountId")
+    state: str
+    detail: str = ""
+    identity: str = ""
+    health: str = "unverified"
 
 
 class Web2PlacementResponse(BaseModel):

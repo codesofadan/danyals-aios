@@ -24,17 +24,41 @@ from integrations.citation_submitters import CitationJob, CitationSubmitter
 _TIER_RANK: dict[str, int] = {"core": 0, "tier1": 1, "tier2": 2}
 
 
+def is_prohibited(row: dict[str, Any]) -> bool:
+    """Whether this directory may NEVER be submitted to by us.
+
+    ``route = 'F'`` is the decision; ``tos_position`` is the evidence behind it. They
+    are deliberately separate fields, because Google Business Profile and Apple are
+    ``tos_position = 'prohibits'`` as BOT targets while remaining perfectly legitimate
+    over their own authenticated APIs - those rows are route 'A' and must stay
+    reachable. Blocking on `route` and not on `tos_position` is what keeps both true.
+
+    Yelp, Trustpilot and Houzz publish clauses banning automated ACCESS and RETRIEVAL,
+    and a form-filling bot must GET the form before it can fill it - so the clause binds
+    us. This is a hard block in the worker, never a warning in the UI.
+
+    Accepts either a catalog row (``route``) or the worker's joined citation row, where
+    the directory's route is aliased ``directory_route`` because ``select c.*`` already
+    supplies the CITATION's own ``route`` column. Reading a bare ``route`` off the joined
+    row would read the citation's copy - which defaults to 'C' - and the guard would
+    never fire. ``directory_route`` is preferred whenever it is present."""
+    route = row.get("directory_route") if row.get("directory_route") is not None else row.get("route")
+    return str(route or "").upper() == "F"
+
+
 def automatable_directories(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Every catalog row a campaign COULD queue - ``manual_only`` is filtered out
     here, once, so no caller has to remember the exclusion. A row fed by another
     aggregator (``submit_method`` starting ``aggregator:fed_by_``) is ALSO excluded:
     there is nothing to submit, it is already covered by seeding the core
-    aggregator(s) it is fed from."""
+    aggregator(s) it is fed from. A ``route = 'F'`` row is excluded because its terms
+    forbid automated access outright (see ``is_prohibited``)."""
     return [
         r
         for r in rows
         if r.get("tier") in AUTOMATABLE_TIERS
         and not str(r.get("submit_method") or "").startswith("aggregator:fed_by_")
+        and not is_prohibited(r)
     ]
 
 
@@ -49,6 +73,11 @@ class DirectorySelection:
     excluded_low_authority: int = 0
     excluded_marketplace: int = 0
     capped: int = 0
+    # One record per row NOT selected: {"directory", "reason", "detail"}. The counts
+    # above say HOW MANY; this says WHICH and WHY, which is what a client reads when
+    # they compare "100 promised" against "45 delivered". A count alone cannot answer
+    # "so what happened to Yelp?".
+    skipped: list[dict[str, str]] = field(default_factory=list)
 
 
 def _serves_vertical(row: dict[str, Any], vertical: str | None) -> bool:
@@ -80,16 +109,25 @@ def select_campaign_directories(
     """
     result = DirectorySelection()
     kept: list[dict[str, Any]] = []
+
+    def _skip(row: dict[str, Any], reason: str, detail: str = "") -> None:
+        result.skipped.append(
+            {"directory": str(row.get("name") or ""), "reason": reason, "detail": detail}
+        )
+
     for row in rows:
         if not _serves_vertical(row, vertical):
             result.excluded_off_vertical += 1
+            _skip(row, "off_vertical", f"serves {', '.join(row.get('verticals') or [])}")
             continue
         if not include_marketplaces and bool(row.get("is_marketplace")):
             result.excluded_marketplace += 1
+            _skip(row, "marketplace_not_opted_in", "lead-gen marketplace; operator must opt in")
             continue
         da = row.get("authority")
         if min_authority is not None and da is not None and int(da) < min_authority:
             result.excluded_low_authority += 1
+            _skip(row, "below_authority_floor", f"authority {da} < {min_authority}")
             continue
         kept.append(row)
 
@@ -105,10 +143,84 @@ def select_campaign_directories(
 
     if cap and cap > 0 and len(kept) > cap:
         result.capped = len(kept) - cap
+        for row in kept[cap:]:
+            _skip(row, "over_campaign_cap", f"batch capped at {cap}; queued in a later campaign")
         kept = kept[:cap]
 
     result.selected = kept
     return result
+
+
+# The reasons a catalog row never reaches a campaign. `select_campaign_directories`
+# emits the client-specific ones; `catalog_skips` below emits the ones that are true of
+# the directory itself, whoever the client is.
+SKIP_REASON_LABELS: dict[str, str] = {
+    "prohibited_by_terms": "the directory's terms forbid automated submission",
+    "fed_by_aggregator": "covered by an aggregator we already submit to - no separate listing",
+    "not_automatable": "no automated submission path; handled by a human",
+    "off_vertical": "serves industries this client is not in",
+    "marketplace_not_opted_in": "a paid lead-gen marketplace; not built without opt-in",
+    "below_authority_floor": "authority below the floor we build to",
+    "over_campaign_cap": "beyond this campaign's size cap; queued in a later one",
+}
+
+
+# The upstream sources a `aggregator:fed_by_*` row is fed from. Matched LONGEST-FIRST,
+# because the source names contain underscores themselves - a naive
+# `replace("_", ", ")` turns `fed_by_data_axle_foursquare` into the nonsense
+# "data, axle, foursquare", which is what a client would then read in their report.
+_FED_BY_SOURCES: tuple[tuple[str, str], ...] = (
+    ("data_axle", "Data Axle"),
+    ("foursquare", "Foursquare"),
+    ("neustar", "Neustar"),
+)
+
+
+def _fed_by_label(submit_method: str) -> str:
+    """"aggregator:fed_by_data_axle_foursquare" -> "Data Axle, Foursquare"."""
+    rest = submit_method.replace("aggregator:fed_by_", "")
+    found = [label for token, label in _FED_BY_SOURCES if token in rest]
+    return ", ".join(found) if found else rest.replace("_", " ")
+
+
+def catalog_skips(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Why each catalog row is not automatable, for rows `automatable_directories`
+    drops. These reasons belong to the DIRECTORY, not to the client, so they are the
+    same in every client's report - and every one of them must still be REPORTED, or a
+    client comparing a promised count against a delivered one has nowhere to look.
+
+    A prohibited row is reported WITH its clause and source URL: "we did not submit to
+    Yelp, here is the sentence that says we must not" is a far better answer than a
+    silently shorter list."""
+    out: list[dict[str, str]] = []
+    for row in rows:
+        name = str(row.get("name") or "")
+        if is_prohibited(row):
+            out.append(
+                {
+                    "directory": name,
+                    "reason": "prohibited_by_terms",
+                    "detail": str(row.get("tos_source_url") or ""),
+                    "clause": str(row.get("tos_clause") or ""),
+                }
+            )
+        elif str(row.get("submit_method") or "").startswith("aggregator:fed_by_"):
+            out.append(
+                {
+                    "directory": name,
+                    "reason": "fed_by_aggregator",
+                    "detail": f"fed by {_fed_by_label(str(row.get('submit_method') or ''))}",
+                }
+            )
+        elif row.get("tier") not in AUTOMATABLE_TIERS:
+            out.append(
+                {
+                    "directory": name,
+                    "reason": "not_automatable",
+                    "detail": f"tier={row.get('tier')}",
+                }
+            )
+    return out
 
 
 def is_live_directory_response(status_code: int | None) -> bool:
@@ -130,14 +242,20 @@ def is_live_directory_response(status_code: int | None) -> bool:
 def estimate_campaign_cost(rows: list[dict[str, Any]], settings: Settings) -> float:
     """The R5 pre-check total for a batch of directory rows, BEFORE any submit runs -
     a lead reviews this (the ``citations`` dial defaults to ``byhand``) rather than
-    discovering the spend after the fact. Sums each row's own tier estimate; an
-    ``api``/``aggregator`` row is a plain call, a ``bot_fillable`` row is Playwright
-    compute only, a ``captcha_assisted`` row additionally carries one CAPTCHA solve."""
+    discovering the spend after the fact.
+
+    An ``api``/``aggregator`` row prices at the Data Axle Add estimate, which is **0.0
+    until a real rate card is on file**. That is not a claim those submissions are free -
+    it is that they are BLOCKED (``settings.data_axle_submits_enabled`` is False), so
+    they contribute nothing because they will not run. The moment a price is configured
+    the estimate becomes real and the batch total moves with it. The old
+    ``citation_api_cost_estimate`` was deleted with the Bing/Foursquare submitters: it
+    priced calls to endpoints that return 404."""
     total = 0.0
     for row in rows:
         tier = row.get("tier")
         if tier in ("api", "aggregator"):
-            total += settings.citation_api_cost_estimate
+            total += settings.data_axle_add_cost_estimate
         elif tier == "bot_fillable":
             total += settings.citation_bot_cost_estimate
         elif tier == "captcha_assisted":
@@ -215,7 +333,21 @@ def derive_business_profile_fields(client_nap: dict[str, Any]) -> dict[str, Any]
         "city": str(client_nap.get("city") or ""),
         "region": str(client_nap.get("region") or ""),
         "postal_code": str(client_nap.get("postal_code") or ""),
-        "market": str(client_nap.get("market") or "US"),
+        # GLOBAL, not US, when the market was never set.
+        #
+        # MEASURED 2026-08-30 with a Lahore business: an unset market defaulted to US, so
+        # the campaign selected 138 US+GLOBAL directories and queued an operator to submit
+        # a Pakistani business to YellowPages.com, Chamber of Commerce and BBB. That is
+        # the fabrication class this module exists to remove - asserting a fact (this is a
+        # US business) that nothing established.
+        #
+        # The asymmetry decides it: a WRONG listing is worse than a missing one. A US
+        # directory entry for a Lahore business is NAP pollution - precisely the harm a
+        # citation campaign is supposed to prevent - whereas GLOBAL-only is merely less
+        # coverage, and the gap report says so by name. A US client whose market was never
+        # recorded now sees a shorter list and an operator sets the market; a non-US client
+        # no longer gets listings that should never have existed.
+        "market": str(client_nap.get("market") or "GLOBAL"),
         "phone": str(client_nap.get("phone") or ""),
         "website_url": str(client_nap.get("website_url") or ""),
         "categories": categories,
@@ -230,8 +362,18 @@ def derive_business_profile_fields(client_nap: dict[str, Any]) -> dict[str, Any]
 # --------------------------------------------------------------------------- #
 # A citation row COVERS its directory when it is in-flight or live; a blocked/failed/
 # never-started+missing row does NOT (it is retryable - still a gap to close).
-_COVERING_SUBMIT: frozenset[str] = frozenset({"queued", "submitting", "submitted", "verified"})
-_LIVE_SUBMIT: frozenset[str] = frozenset({"submitted", "verified"})
+# `drifted` covers: the listing EXISTS, its NAP has merely gone stale, so the fix is a
+# correction and not a fresh build. `delisted` does NOT cover: the listing is gone, and
+# that directory is an open gap again.
+_COVERING_SUBMIT: frozenset[str] = frozenset(
+    {"queued", "submitting", "submitted", "verified", "live", "drifted"}
+)
+# ONLY `live` earns a place in `live_urls`. `submitted` means a form was sent and nothing
+# has confirmed a listing came back: Data Axle runs teleresearch for up to three business
+# days, Apple returns state SUBMITTED, GBP needs verification before it appears at all,
+# and a form bot only ever knows that a page changed. A row reaches `live` when
+# services/citation_liveness.py has FETCHED live_url and found the business in it.
+_LIVE_SUBMIT: frozenset[str] = frozenset({"live"})
 _COVERING_NAP: frozenset[str] = frozenset({"consistent", "inconsistent"})
 
 
@@ -262,6 +404,10 @@ class CitationGap:
     live_urls: list[dict[str, str]] = field(default_factory=list)
     by_submit_status: dict[str, int] = field(default_factory=dict)
     by_nap_status: dict[str, int] = field(default_factory=dict)
+    # Every catalog row NOT in `missing` and NOT already covered, each with a reason.
+    # This is a required output, not a nicety: without it a shorter-than-promised list
+    # is indistinguishable from a system that quietly failed.
+    skipped: list[dict[str, str]] = field(default_factory=list)
 
 
 def compute_citation_gap(
@@ -293,10 +439,15 @@ def compute_citation_gap(
         nap = str(row.get("nap_status") or "unknown")
         gap.by_submit_status[submit] = gap.by_submit_status.get(submit, 0) + 1
         gap.by_nap_status[nap] = gap.by_nap_status.get(nap, 0) + 1
-        proof = str(row.get("proof_url") or "")
-        if submit in _LIVE_SUBMIT and proof:
+        # live_url ONLY. `proof_url` is a screenshot key (0045 documents it as
+        # "screenshot/receipt") and the Playwright bot used to return an absolute server
+        # filesystem path for it, so reading it here published /var/lib/... strings to
+        # operators under the heading "Live listings already earned". The two columns are
+        # different facts and NEITHER may ever be populated from the other.
+        live = str(row.get("live_url") or "")
+        if submit in _LIVE_SUBMIT and live:
             gap.live_urls.append(
-                {"directory": str(row.get("directory") or ""), "url": proof, "status": submit}
+                {"directory": str(row.get("directory") or ""), "url": live, "status": submit}
             )
         if _row_covers(row):
             gap.covered_count += 1
@@ -320,6 +471,14 @@ def compute_citation_gap(
         for d in selection.selected
         if str(d.get("id")) not in covered_ids
         and _norm_directory(str(d.get("name") or "")) not in covered_names
+    ]
+    # The full "why not" ledger: directory-level reasons (prohibited / fed by an
+    # aggregator / not automatable) plus the client-specific ones the selection made.
+    # A row already covered is not a skip - it was built, so it is not missing either.
+    gap.skipped = [
+        s
+        for s in (*catalog_skips(directories), *selection.skipped)
+        if _norm_directory(s.get("directory", "")) not in covered_names
     ]
     return gap
 
@@ -424,3 +583,62 @@ def job_from_row(row: dict[str, Any]) -> CitationJob:
         service_area=str(row.get("bp_service_area") or ""),
         hours=dict(hours) if isinstance(hours, dict) else {},
     )
+
+
+# --------------------------------------------------------------------------- #
+# NAP change fan-out: when the canonical record moves, the listings are stale.
+# PURE - the caller does the reads and writes.
+# --------------------------------------------------------------------------- #
+# The canonical fields a listing actually asserts. Editing any of these makes every
+# already-built listing disagree with us; editing `description` or `logo_url` does not,
+# so those are recorded as history but flag nothing. Flagging on every field would train
+# operators to ignore the flag, which is the same as not having one.
+NAP_CRITICAL_FIELDS: tuple[str, ...] = (
+    "business_name",
+    "address_line1",
+    "address_line2",
+    "city",
+    "region",
+    "postal_code",
+    "phone",
+    "website_url",
+)
+
+# A listing can only go stale if it EXISTS. `live` and `drifted` are the two states in
+# which we believe there is a real listing out there carrying the old value; everything
+# else is either not built yet, already known-gone, or still in flight.
+_STALEABLE_SUBMIT: frozenset[str] = frozenset({"live", "drifted"})
+
+
+def diff_nap_fields(
+    before: dict[str, Any], after: dict[str, Any]
+) -> list[dict[str, str]]:
+    """Which canonical fields actually changed, as change-event rows.
+
+    Compares only the fields a listing asserts, and only reports a REAL change: a value
+    that arrives as ``None`` where it was ``""`` (or the reverse) is the same absence
+    expressed differently, and raising a correction for every citation over that would
+    be noise indistinguishable from a real move."""
+    events: list[dict[str, str]] = []
+    for field_name in NAP_CRITICAL_FIELDS:
+        if field_name not in after:
+            continue
+        old = str(before.get(field_name) or "").strip()
+        new = str(after.get(field_name) or "").strip()
+        if old != new:
+            events.append({"field": field_name, "old_value": old, "new_value": new})
+    return events
+
+
+def citations_needing_correction(rows: list[dict[str, Any]]) -> list[str]:
+    """The ids of citations that are now stale because our canonical NAP moved.
+
+    Only listings we believe EXIST are flagged. A `submitted` row is not flagged: nothing
+    has confirmed a listing came back, so there may be nothing out there to correct - and
+    if one does appear it will be checked against the NEW canonical NAP anyway, which is
+    the right comparison. Flagging it now would invent work that may never exist."""
+    return [
+        str(r.get("id"))
+        for r in rows
+        if str(r.get("submit_status") or "") in _STALEABLE_SUBMIT and r.get("id")
+    ]

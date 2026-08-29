@@ -66,7 +66,7 @@ def test_gap_missing_excludes_covered_by_id_and_name() -> None:
     existing = [
         # covered by directory_id (in-flight submission)
         {"id": "c1", "directory": "Yelp", "directory_id": "d1", "submit_status": "submitted",
-         "nap_status": "missing", "proof_url": "https://proof/1"},
+         "nap_status": "missing", "proof_url": "screenshots/ab12.png"},
         # covered by NAME only (legacy monitoring row, no directory_id), consistent NAP
         {"id": "c2", "directory": "Bing Places", "directory_id": None,
          "submit_status": "not_started", "nap_status": "consistent", "proof_url": ""},
@@ -76,8 +76,14 @@ def test_gap_missing_excludes_covered_by_id_and_name() -> None:
     assert missing_names == {"Hotfrog"}  # Yelp + Bing already covered
     assert gap.existing_count == 2
     assert gap.covered_count == 2
-    # the submitted row with a proof url surfaces as a live URL
-    assert gap.live_urls == [{"directory": "Yelp", "url": "https://proof/1", "status": "submitted"}]
+    # CHANGED with 0106, and this is the point of that migration. This used to assert
+    # that a `submitted` row with a `proof_url` "surfaces as a live URL" - i.e. it pinned
+    # the defect in place: `proof_url` is a SCREENSHOT key, and `submitted` means a form
+    # was sent and nothing has confirmed a listing came back. Neither fact is a live
+    # listing, and rendering them as one is what put /var/lib/... paths on an operator's
+    # screen under "Live listings already earned". Only a `live` row with a real
+    # `live_url` may appear here; see tests/modules/citations/test_liveness.py.
+    assert gap.live_urls == []
     assert gap.by_submit_status == {"submitted": 1, "not_started": 1}
 
 
@@ -182,17 +188,35 @@ def test_engine_status_all_missing_on_keyless_settings(
     engines = {e.key: e for e in citation_engine_status(settings)}
     assert engines["bing_places"].connected is False
     assert engines["playwright_bot"].connected is False  # optional extra, never a key
-    # every engine names its required config + carries an honest reason
+    # every engine carries an honest reason
     for e in engines.values():
         assert e.reason
-        assert e.required_config
+    # A RETIRED engine names NO required config, on purpose: listing a key implies
+    # "set this and it works", and no key can enable an endpoint that returns 404.
+    for key in ("bing_places", "foursquare"):
+        assert engines[key].required_config == ()
+        assert "RETIRED" in engines[key].label
+    for key, e in engines.items():
+        if key not in ("bing_places", "foursquare"):
+            assert e.required_config
 
 
-def test_engine_status_reflects_configured_keys() -> None:
+def test_a_key_cannot_reconnect_a_retired_engine() -> None:
+    """Bing Places and Foursquare are RETIRED, not merely unconfigured.
+
+    This test used to assert that setting BING_PLACES_API_KEY flips the board to
+    CONNECTED. It must not: the coded write endpoints return 404 to a live probe
+    (2026-08-23), so a key buys nothing. Reporting CONNECTED would tell an operator a
+    submission path exists when the submitter has been deleted."""
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None, app_env="dev",
         bing_places_api_key="k",
+        foursquare_api_key="k",
     )
     engines = {e.key: e for e in citation_engine_status(settings)}
-    assert engines["bing_places"].connected is True
-    assert engines["foursquare"].connected is False  # still unset
+    assert engines["bing_places"].connected is False
+    assert engines["foursquare"].connected is False
+    assert "404" in engines["bing_places"].reason
+    # FOURSQUARE_API_KEY is still live for DISCOVERY (a read path) - the reason says so,
+    # so nobody deletes the key while something still depends on it.
+    assert "DISCOVERY" in engines["foursquare"].reason

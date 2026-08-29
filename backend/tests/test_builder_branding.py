@@ -135,26 +135,35 @@ def test_the_outbound_email_footer_names_the_product_not_the_builder() -> None:
 # --------------------------------------------------------------------------- #
 # P0-10 · no real client contact data may live in the tree
 # --------------------------------------------------------------------------- #
-# `tools/finish_citation.py` hardcoded one client's full NAP — a real street
-# address and a real phone number — in version control. It was also a per-client
-# hardcode in a script meant for every client: reused as-is it would stamp the
-# WRONG business onto another client's directory listings, which is precisely the
-# NAP inconsistency a citation campaign exists to remove.
+# `tools/finish_citation.py` was a desktop Playwright script that read
+# `tools/citation_handoffs.json` - an export of every directory login for a campaign -
+# and printed "Password for all: ..." (:46). It carried three defects at once: client
+# credentials left the platform as a file, ONE password covered every account so a single
+# compromise was total, and the work it did was invisible (nothing recorded who worked
+# what, how long it took, or whether it succeeded).
+#
+# RETIRED 2026-08-29, replaced by the server-side work queue (0110,
+# `/citation-builder/queue`, `/admin/citations/queue`): per-item claims with a lease,
+# pre-computed field values, measured minutes, and a completion that is CHECKED rather
+# than asserted. The tests below no longer describe a script - they make sure it stays
+# gone, and that the credentials export it depended on is never committed.
 
 
-def test_the_citation_handoff_script_carries_no_hardcoded_client_nap() -> None:
-    src = (_REPO_ROOT / "tools" / "finish_citation.py").read_text(encoding="utf-8")
-
-    # A bare digit run long enough to be a phone number, inside a string literal.
-    phone_like = re.findall(r"[\"'](\+?\d[\d\s().-]{8,}\d)[\"']", src)
-    assert not phone_like, f"a phone-number-shaped literal is in the script: {phone_like}"
-
-    assert "NAP = {" not in src, "the NAP is hardcoded again; it must come from the export"
-    assert "_nap(" in src, "the script must resolve the NAP from the handoff export"
+def test_the_desktop_handoff_script_stays_retired() -> None:
+    """It is replaced, not merely deleted. Restoring it from git history would restore
+    the shared-password credential export with it, which is why this is a guard and not
+    just an absence."""
+    for name in ("finish_citation.py", "Finish-Citations.bat"):
+        assert not (_REPO_ROOT / "tools" / name).exists(), (
+            f"tools/{name} is back. The human handoff is the server-side queue now - "
+            "see db/migrations/0110_citation_operator_queue.sql and "
+            "backend/app/modules/citations/router.py's /queue endpoints."
+        )
 
 
 def test_the_citation_handoff_export_is_not_committed() -> None:
-    """The export carries live directory logins and a shared password."""
+    """The export carried live directory logins and one shared password. Nothing writes
+    it any more, and nothing may commit it."""
     assert not (_REPO_ROOT / "tools" / "citation_handoffs.json").exists(), (
         "tools/citation_handoffs.json is in the working tree. It holds real "
         "directory account credentials; it must never be committed."

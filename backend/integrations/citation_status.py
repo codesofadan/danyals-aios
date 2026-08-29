@@ -84,8 +84,6 @@ def _has_secret(value: object) -> bool:
 
 def citation_engine_status(settings: Settings) -> list[EngineStatus]:
     """The per-engine CONNECTED/MISSING board for the citation-builder, honestly."""
-    bing = _has_secret(settings.bing_places_api_key)
-    foursquare = _has_secret(settings.foursquare_api_key)
     captcha = (
         _has_secret(settings.captcha_solver_api_key)
         and settings.captcha_solver_provider not in ("", "none")
@@ -93,30 +91,38 @@ def citation_engine_status(settings: Settings) -> list[EngineStatus]:
     proxy = _has_secret(settings.citation_proxy_url)
 
     statuses: list[EngineStatus] = [
+        # RETIRED, and reported as retired rather than removed - an operator who set
+        # BING_PLACES_API_KEY or expected a Foursquare submit deserves to be told WHY it
+        # stopped, not to find the row silently gone. `connected` is hard-False: no key
+        # can enable an endpoint that does not exist, so this must never read as MISSING
+        # (a missing key implies "set it and it works", which is the lie being removed).
         EngineStatus(
             key="bing_places",
-            label="Bing Places for Business (direct API)",
-            connected=bing,
+            label="Bing Places for Business (direct API) - RETIRED",
+            connected=False,
             reason=(
-                "API key configured - direct-API submits are enabled."
-                if bing
-                else "No BING_PLACES_API_KEY set - Bing Places direct submits HOLD as "
-                "'blocked' until the key is set; they are not force-failed."
+                "Retired 2026-08-23: the coded write endpoint "
+                "POST ssl.bing.com/webmaster/places/api/v1/locations 301s to www.bing.com "
+                "and returns 404. Bing Places API access is a partner programme reached "
+                "via placesfeedback@microsoft.com, not a public write path. Setting a key "
+                "cannot enable this; Bing listings are a human-queue item."
             ),
-            required_config=("BING_PLACES_API_KEY",),
+            required_config=(),
             external_note=_EXTERNAL,
         ),
         EngineStatus(
             key="foursquare",
-            label="Foursquare Places (direct API)",
-            connected=foursquare,
+            label="Foursquare Places (direct API) - RETIRED",
+            connected=False,
             reason=(
-                "API key configured - direct-API submits are enabled."
-                if foursquare
-                else "No FOURSQUARE_API_KEY set - Foursquare direct submits HOLD as "
-                "'blocked' until the key is set; they are not force-failed."
+                "Retired 2026-08-23: POST api.foursquare.com/v3/places returns 404 "
+                "\"Endpoint '/v3/places' not found\", and the current host has no write "
+                "path either (a READ endpoint returning 401 is the control, so this is a "
+                "missing route, not an auth failure). Foursquare routes place additions "
+                "to community-moderated Placemaker review. FOURSQUARE_API_KEY is still "
+                "used - by citation DISCOVERY, which reads."
             ),
-            required_config=("FOURSQUARE_API_KEY",),
+            required_config=(),
             external_note=_EXTERNAL,
         ),
         EngineStatus(
