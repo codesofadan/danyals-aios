@@ -245,7 +245,10 @@ class TestAJobWithoutAnEngagementGetsOne:
     def test_an_engagement_that_cannot_be_created_does_not_crash_the_job(self) -> None:
         store = _Store(_row(engagement_id=None))
         outcome = _run(store, {"gate": _stage("gate")}, _Planning(fails=True))
-        assert outcome.state in ("advanced", "deferred"), "must degrade, not raise"
+        # Any terminal verdict is fine; the point is that an unavailable
+        # engagements table degrades the run instead of raising out of the task.
+        assert outcome.state in ("advanced", "deferred", "degraded"), "must degrade, not raise"
+        assert outcome.status != "failed"
 
 
 class TestTheClientsOwnPhoneNumberReachesThePage:
@@ -311,3 +314,34 @@ class TestTheClientsOwnPhoneNumberReachesThePage:
         deps = PipelineDeps(store=store, planning=_Planning(), nap={"phone": "214-555-0142"})
         execute_pipeline_job(deps, "CJ-4200", settings=get_settings(), gate=_Gate())
         assert captured["facts"] == ()
+
+
+class TestAPageThatWasNeverWrittenDoesNotReachAHuman:
+    """Found by running a real job: a degraded outline stops the pipeline before a
+    word exists, and that used to persist as `needs_review` - putting an EMPTY
+    draft in front of a lead and asking them to approve it onto a client's site.
+    `needs_review` must mean a human has something to read."""
+
+    def test_a_run_with_no_draft_holds_instead_of_queueing_for_review(self) -> None:
+        store = _Store(_row())
+        outcome = _run(store, {
+            "outline": _stage("outline", "degraded"),
+        })
+        assert outcome.status == "drafting", "an empty page must not reach the review queue"
+        assert store.final("status") != "needs_review"
+        assert "Held" in store.final("stage")
+
+    def test_the_hold_says_why_on_the_row(self) -> None:
+        store = _Store(_row())
+        _run(store, {"outline": _stage("outline", "degraded")})
+        assert "outline" in store.final("stage").lower()
+
+    def test_a_run_that_produced_a_page_still_reaches_review(self) -> None:
+        store = _Store(_row())
+
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# A real page\n\nWith real words in it."
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        outcome = _run(store, {"draft": draft, "gate": _stage("gate", "ok", qa={})})
+        assert outcome.status == "needs_review"

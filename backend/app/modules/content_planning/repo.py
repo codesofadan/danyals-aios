@@ -603,6 +603,85 @@ class ContentPlanningRepo:
             )
             return list(cur.fetchall())
 
+    # --- the Experience dossier, through the staff door -------------------- #
+    #
+    # The pipeline writes these tables as service_role because a Celery worker has
+    # no user JWT. An operator ANSWERING the questionnaire is the opposite case: a
+    # real signed-in staff member, so it goes through RLS like every other route.
+
+    def dossier_for_job(self, code: str) -> tuple[_Row, list[_Row]] | None:
+        """The Experience dossier behind one content job, with its slots.
+
+        Returns None when the job has no engagement yet - which is the normal
+        state before the job has run once, not an error. The caller reports
+        "nothing to answer yet" rather than 404ing a job that plainly exists.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, code, engagement_id, topic, client_name, status, stage "
+                "from public.content_jobs where code = %s limit 1",
+                (code,),
+            )
+            job = cur.fetchone()
+            if job is None or not job.get("engagement_id"):
+                return None
+            cur.execute(
+                "select * from public.sme_dossiers where engagement_id = %s "
+                "order by created_at limit 1",
+                (job["engagement_id"],),
+            )
+            dossier = cur.fetchone()
+            if dossier is None:
+                return None
+            cur.execute(
+                "select * from public.sme_slots where dossier_id = %s order by slot_key",
+                (dossier["id"],),
+            )
+            return dossier, list(cur.fetchall())
+
+    def answer_slots(self, dossier_id: str, answers: list[dict[str, Any]]) -> str:
+        """Record operator answers and recompute the dossier status, atomically.
+
+        UPDATE-only, never insert: the slots are created by the SME stage, which
+        owns which proof categories this page type requires. Letting a client body
+        create rows would let a caller invent a slot key and mark the dossier
+        complete without answering what was actually asked.
+
+        Status is recomputed in the same transaction because it is what the halt
+        reads - a status written a moment later is a window where a complete
+        dossier still blocks drafting.
+        """
+        with rls_connection(self._user_id) as cur:
+            for answer in answers:
+                cur.execute(
+                    "update public.sme_slots set answer = %s, artifact_url = %s, "
+                    "  source = 'operator' "
+                    "where dossier_id = %s and slot_key = %s",
+                    (
+                        str(answer.get("answer") or ""),
+                        str(answer.get("artifact_url") or ""),
+                        dossier_id,
+                        str(answer.get("slot_key") or ""),
+                    ),
+                )
+            cur.execute(
+                "select count(*) as total, "
+                "  count(*) filter (where answer <> '' or artifact_url <> '') as answered "
+                "from public.sme_slots where dossier_id = %s",
+                (dossier_id,),
+            )
+            row = cur.fetchone() or {"total": 0, "answered": 0}
+            total, answered = int(row["total"]), int(row["answered"])
+            status = (
+                "complete" if total and answered == total
+                else ("partial" if answered else "empty")
+            )
+            cur.execute(
+                "update public.sme_dossiers set status = %s where id = %s",
+                (status, dossier_id),
+            )
+        return status
+
     def has_brand_kit(self, client_id: str | None) -> bool:
         if not client_id:
             return False

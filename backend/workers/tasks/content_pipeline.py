@@ -277,6 +277,27 @@ def _persist_halt(store: ContentStore, code: str, run: PipelineRun) -> ContentJo
     )
 
 
+def _persist_hold(
+    store: ContentStore, code: str, run: PipelineRun, reason: str
+) -> ContentJobOutcome:
+    """Hold a run that produced no page, instead of queueing nothing for review.
+
+    Found by running a real job: a degraded outline stops the pipeline before a
+    word is written, and this used to persist that as `needs_review` - putting an
+    EMPTY draft in front of a lead and asking them to approve it. `needs_review`
+    means a human has something to read. Held at `drafting` with the reason on the
+    row: the operator can see why, and a re-run resumes rather than approving a
+    blank page onto a client's site.
+    """
+    stage = f"Held — {reason}"
+    store.update(code, {"stage": stage[:300], "cost": round(run.cost, 4)})
+    logger.info("content_pipeline_held", code=code, stage=run.stopped_at, reason=reason)
+    return ContentJobOutcome(
+        code=code, status="drafting", state="degraded", stage=stage,
+        cost=round(run.cost, 4), reason=reason,
+    )
+
+
 def _persist_success(
     store: ContentStore, code: str, ctx: PipelineContext, run: PipelineRun
 ) -> ContentJobOutcome:
@@ -324,25 +345,42 @@ def _persist_success(
 
 
 def execute_pipeline_job(
-    deps: PipelineDeps, code: str, *, settings: Settings, gate: CostGate
+    deps: PipelineDeps, code: str, *, settings: Settings, gate: CostGate,
+    resume: bool = False,
 ) -> ContentJobOutcome:
     """Run one content job through the doctrine pipeline. Never raises.
 
     Never re-raising is not tidiness: `task_acks_late` would redeliver a raised
     task and the page would be written - and paid for - twice.
+
+    ``resume`` is how a HALTED page comes back. The Experience gate holds the job
+    at `drafting`, and the ordinary guard below refuses anything that is not
+    `queued` - correctly, because that guard is what stops an at-least-once broker
+    drafting the same page twice. Without an explicit resume the questionnaire
+    would be a dead end: the operator answers every question and nothing happens,
+    forever. Only the answer path sets this, and it is not a bypass - the SME gate
+    still runs first and will halt again if the answers did not actually complete
+    the dossier.
     """
     row = deps.store.load(code)
     if row is None:
         return ContentJobOutcome(code=code, status="unknown", state="noop",
                                  reason="no such job")
     status = str(row.get("status") or "")
-    if status != "queued":
+    resumable = resume and status == "drafting"
+    if status != "queued" and not resumable:
         # A redelivery of an already-running or finished job is a no-op, not a
         # second run: the broker is at-least-once and drafting costs real money.
         return ContentJobOutcome(code=code, status=status, state="noop",
                                  reason=f"job is {status}, not queued")
 
-    deps.store.update(code, {"status": "drafting", "stage": STAGE_LABEL["sme"]})
+    # A resume is already `drafting`; writing the status again would be a no-op
+    # transition, and the guard trigger only needs the stage stream.
+    deps.store.update(
+        code,
+        {"stage": STAGE_LABEL["sme"]} if resumable
+        else {"status": "drafting", "stage": STAGE_LABEL["sme"]},
+    )
     row["engagement_id"] = _ensure_engagement(deps, row)
     ctx = _context_for(row, settings)
 
@@ -374,11 +412,20 @@ def execute_pipeline_job(
         logger.warning("content_pipeline_failed", code=code, stage=run.stopped_at)
         return ContentJobOutcome(code=code, status="failed", state="failed",
                                  stage="Failed", cost=round(run.cost, 4), reason=reason)
+    if not ctx.draft_md.strip():
+        # Nothing broke and nothing was refused - but no page came out, so there
+        # is nothing for a human to read. Checked AFTER the failure branch on
+        # purpose: a failed run must stay recorded as failed, not softened into
+        # a hold because it also happened to produce no text.
+        return _persist_hold(
+            deps.store, code, run,
+            run.reason or f"{run.stopped_at or 'the pipeline'} produced no draft",
+        )
     return _persist_success(deps.store, code, ctx, run)
 
 
 @celery_app.task(name="run_content_pipeline_job")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def run_content_pipeline_job(code: str) -> dict[str, Any]:
+def run_content_pipeline_job(code: str, resume: bool = False) -> dict[str, Any]:
     """Entry point: build the real seams and run the doctrine pipeline."""
     from app.modules.content_planning.repo import ContentPlanningStore
     from integrations.content_providers import content_providers_from_settings
@@ -424,7 +471,9 @@ def run_content_pipeline_job(code: str) -> dict[str, Any]:
         page_url=str((profile or {}).get("website_url") or ""),
         model=providers.model_writer if providers else None,
     )
-    return execute_pipeline_job(deps, code, settings=settings, gate=gate).as_dict()
+    return execute_pipeline_job(
+        deps, code, settings=settings, gate=gate, resume=resume
+    ).as_dict()
 
 
 def _load_nap(client_id: str | None) -> dict[str, Any] | None:
