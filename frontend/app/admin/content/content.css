@@ -274,3 +274,16 @@
 }
 .co-degrade > .material-symbols-rounded { color: var(--warn); font-size: 20px; }
 .co-degrade b { display: block; font-size: 13.5px; color: var(--ink); margin-bottom: 2px; }
+
+/* A page waiting on a person, not on the machine. */
+.co-stage-blocked { color: var(--warn); font-weight: 600; }
+.co-stage-blocked .material-symbols-rounded { color: var(--warn); }
+.co-blocked-cta {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 7px; padding: 5px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn); text-decoration: none;
+}
+.co-blocked-cta:hover { background: color-mix(in srgb, var(--warn) 24%, transparent); }
+.co-blocked-cta .material-symbols-rounded { font-size: 15px; }

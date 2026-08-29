@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { COLUMNS, PAGE_TYPE_LABELS, type ContentJob, type ColumnKey } from "@/lib/content";
+import { COLUMNS, PAGE_TYPE_LABELS, operatorBlock, type ContentJob, type ColumnKey } from "@/lib/content";
 import ReadMore from "@/components/ui/ReadMore";
 
 const PAGE_ICON: Record<ContentJob["pageType"], string> = {
@@ -14,6 +14,7 @@ const PAGE_ICON: Record<ContentJob["pageType"], string> = {
 
 function JobCard({ job, onSelect }: { job: ContentJob; onSelect?: (id: string) => void }) {
   const clickable = !!onSelect;
+  const block = operatorBlock(job);
   return (
     <article
       className={`co-card${clickable ? " co-card-clickable" : ""}`}
@@ -59,11 +60,22 @@ function JobCard({ job, onSelect }: { job: ContentJob; onSelect?: (id: string) =
         <span className="co-fw">{job.framework}{job.auto && <i>auto</i>}</span>
         <span className="co-cost">${job.cost}</span>
       </div>
-      <div className="co-stage">
-        <span className="material-symbols-rounded">bolt</span>
+      {/* A page waiting on a PERSON must not read as a page the machine is
+          working on - same status, same column, same "in progress" glance. */}
+      <div className={`co-stage${block ? " co-stage-blocked" : ""}`}>
+        <span className="material-symbols-rounded">{block ? "pan_tool" : "bolt"}</span>
         {job.stage}
         <span className="co-target">{job.target === "WordPress" ? "WP" : "PDF/MD"}</span>
       </div>
+      {block?.kind === "experience" && (
+        <Link
+          className="co-blocked-cta"
+          href={`/admin/content/${job.id}?tab=experience`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="material-symbols-rounded">quiz</span>Answer its questions
+        </Link>
+      )}
     </article>
   );
 }
