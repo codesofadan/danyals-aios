@@ -192,7 +192,7 @@ class TestAFinishedPageGoesToTheHumanGate:
 
         outcome = _run(store, {
             "draft": draft,
-            "gate": _stage("gate", "ok", qa={"weighted_total": 88.5, "passed": True}),
+            "gate": _stage("gate", "ok", weighted_total=88.5, passed=True),
         })
         assert outcome.status == "needs_review" and outcome.state == "advanced"
         assert store.final("draft_md").startswith("# Emergency plumbing")
@@ -211,7 +211,7 @@ class TestAFinishedPageGoesToTheHumanGate:
         outcome = _run(store, {
             "research": _stage("research", "degraded"),
             "draft": draft,
-            "gate": _stage("gate", "ok", qa={}),
+            "gate": _stage("gate", "ok"),
         })
         assert outcome.status == "needs_review"
         assert outcome.state == "degraded"
@@ -343,5 +343,63 @@ class TestAPageThatWasNeverWrittenDoesNotReachAHuman:
             ctx.draft_md = "# A real page\n\nWith real words in it."
             return ctx.record(StageResult("draft", outcome="ok"))
 
-        outcome = _run(store, {"draft": draft, "gate": _stage("gate", "ok", qa={})})
+        outcome = _run(store, {"draft": draft, "gate": _stage("gate", "ok")})
         assert outcome.status == "needs_review"
+
+
+class TestWhatTheStagesProduceActuallyReachesTheRow:
+    """The first paid run wrote an empty qa_score and no JSON-LD onto a job whose
+    gate had scored it and whose schema stage had validated it. The work was done
+    and dropped on the floor between the pipeline and the row, because this code
+    read for keys the stages do not emit - a nested "qa", a "schema_type".
+
+    Nothing failed. The run reported success. That is the failure mode these
+    assertions exist to prevent: silent loss between two working halves."""
+
+    def _run_with(self, store: _Store, gate_data: dict[str, Any], schema_data: dict[str, Any]) -> Any:
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# A page\n\nWith real words."
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        return _run(store, {
+            "draft": draft,
+            "schema_links": _stage("schema_links", "ok", **schema_data),
+            "gate": _stage("gate", "ok", **gate_data),
+        })
+
+    def test_the_gate_verdict_lands_whole(self) -> None:
+        store = _Store(_row())
+        self._run_with(
+            store,
+            {"weighted_total": 91.5, "passed": True, "dimensions": {"voice": 9},
+             "blocked_by": [], "provisional": True},
+            {},
+        )
+        qa = store.final("qa_score")
+        assert qa["weighted_total"] == 91.5
+        assert qa["passed"] is True
+        assert qa["dimensions"] == {"voice": 9}, "the per-dimension scores must survive"
+        assert store.final("qa_weighted_total") == 91.5
+
+    def test_the_schema_graph_and_its_settled_type_land(self) -> None:
+        store = _Store(_row())
+        self._run_with(
+            store, {},
+            {"json_ld": {"@type": "Service", "name": "Emergency plumbing"},
+             "primary_type": "Service", "valid": True},
+        )
+        assert store.final("json_ld")["@type"] == "Service"
+        assert store.final("schema_type") == "Service"
+
+    def test_internal_links_are_not_invented_as_empty(self) -> None:
+        """This pipeline does not produce internal links - no stage fills them.
+        Writing {"links": []} would say "we looked and found none" where the truth
+        is that nothing looked."""
+        store = _Store(_row())
+        self._run_with(store, {}, {"json_ld": {"@type": "Service"}, "primary_type": "Service"})
+        assert store.final("internal_links") is None
+
+    def test_a_gate_that_produced_nothing_writes_no_score_rather_than_a_zero(self) -> None:
+        store = _Store(_row())
+        self._run_with(store, {}, {})
+        assert store.final("qa_weighted_total") is None, "absent is not zero"

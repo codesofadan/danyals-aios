@@ -302,10 +302,22 @@ def _persist_success(
     store: ContentStore, code: str, ctx: PipelineContext, run: PipelineRun
 ) -> ContentJobOutcome:
     """Write everything the page produced and hand it to the human gate."""
+    # The stages put their output at the TOP of StageResult.data - there is no
+    # nested "qa" or "schema_type" key. Reading for ones that do not exist meant
+    # the FIRST paid run wrote an empty qa_score and no JSON-LD onto a job whose
+    # gate had actually scored it: the work was done and silently dropped on the
+    # floor between the pipeline and the row.
     gate_result = ctx.result_for("gate")
-    qa = dict(gate_result.data.get("qa", {})) if gate_result else {}
+    qa = dict(gate_result.data) if gate_result else {}
     schema_result = ctx.result_for("schema_links")
     schema_data = dict(schema_result.data) if schema_result else {}
+    logger.info(
+        "content_pipeline_persist",
+        code=code,
+        gate_keys=sorted(qa),
+        schema_keys=sorted(schema_data),
+        words=len(ctx.draft_md.split()),
+    )
     degraded = run.outcome == "degraded"
 
     fields: dict[str, Any] = {
@@ -323,12 +335,15 @@ def _persist_success(
         fields["outline"] = outline
     if schema_data.get("json_ld"):
         fields["json_ld"] = schema_data["json_ld"]
-    if schema_data.get("schema_type"):
-        fields["schema_type"] = schema_data["schema_type"]
-    if schema_data.get("internal_links") is not None:
-        fields["internal_links"] = {"links": schema_data["internal_links"]}
+    # `primary_type` is what the schema stage calls the @type it settled on.
+    if schema_data.get("primary_type"):
+        fields["schema_type"] = schema_data["primary_type"]
     if qa.get("weighted_total") is not None:
         fields["qa_weighted_total"] = qa["weighted_total"]
+    # NOT internal_links: this pipeline does not produce them yet - gate.py passes
+    # `internal_links=[]` and no stage fills it. Writing an empty {"links": []}
+    # would present "we checked and there are none" where the truth is "nothing
+    # looked", which is the distinction the whole job contract turns on.
 
     store.update(code, fields)
     logger.info(
