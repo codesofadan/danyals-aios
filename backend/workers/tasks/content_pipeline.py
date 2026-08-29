@@ -85,6 +85,8 @@ class PipelineDeps:
     writer: DoctrineWriter | None = None
     researcher: Any | None = None
     business: Any | None = None
+    #: The client's stored NAP row (`client_business_profiles`), or None.
+    nap: dict[str, Any] | None = None
     page_url: str = ""
     model: str | None = None
 
@@ -162,6 +164,58 @@ def _ensure_engagement(deps: PipelineDeps, row: dict[str, Any]) -> str | None:
         # second one and asking the operator the same questions again.
         deps.store.update(str(row.get("code") or ""), {"engagement_id": engagement_id})
     return engagement_id or None
+
+
+def nap_facts(profile: dict[str, Any] | None) -> tuple[str, ...]:
+    """The client's own NAP, as first-party facts the page is allowed to state.
+
+    Found by running the engine: the conversion stage requires a tappable
+    `tel:` link ("mobile local intent converts by phone") and the draft stage is
+    told it may state NOTHING outside the supplied facts. The client's phone
+    number was in neither place - `client_business_profiles` holds it, and no
+    part of the pipeline ever read it. So the writer was asked to produce a
+    click-to-call for a number it had not been given, leaving it a choice
+    between inventing one and failing the check on every page forever.
+
+    A stored NAP is first-party by definition: the operator entered it about
+    their own business. Only non-empty fields travel, so a half-filled profile
+    contributes what it has instead of asserting blanks.
+    """
+    if not profile:
+        return ()
+    parts: list[tuple[str, str]] = [
+        ("phone", str(profile.get("phone") or "")),
+        ("website", str(profile.get("website_url") or "")),
+        ("address", ", ".join(
+            x for x in (
+                str(profile.get("address_line1") or ""),
+                str(profile.get("city") or ""),
+                str(profile.get("postal_code") or ""),
+            ) if x
+        )),
+    ]
+    return tuple(f"{k}: {v}" for k, v in parts if v)
+
+
+def _sme_with_nap(
+    stage: Callable[[PipelineContext], StageResult], profile: dict[str, Any] | None
+) -> Callable[[PipelineContext], StageResult]:
+    """Append the client's NAP to the facts the Experience stage collected.
+
+    Wrapped around `sme` rather than folded into it because the SME stage owns
+    the Experience DOSSIER - a governed, question-and-answer store - and a NAP is
+    not one of its slots. Appending after it runs keeps the dossier's contract
+    intact while still giving the writer the number it is required to publish.
+    """
+
+    def run(ctx: PipelineContext) -> StageResult:
+        result = stage(ctx)
+        extra = nap_facts(profile)
+        if extra and result.outcome == "ok":
+            ctx.facts = (*ctx.facts, *extra)
+        return result
+
+    return run
 
 
 def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
@@ -300,6 +354,8 @@ def execute_pipeline_job(
         page_url=deps.page_url,
         model=deps.model,
     )
+    if "sme" in stages:
+        stages["sme"] = _sme_with_nap(stages["sme"], deps.nap)
     try:
         run = run_page(ctx, _with_progress(stages, deps.store, code))
     except Exception as exc:  # a bug in the sequence itself, not a stage outcome
@@ -357,11 +413,58 @@ def run_content_pipeline_job(code: str) -> dict[str, Any]:
             job_id=code,
         )
 
+    profile = _load_nap(client_id)
     deps = PipelineDeps(
         store=store,
         planning=ContentPlanningStore(),
         writer=writer,
         researcher=researcher,
+        business=_business_for(row, profile),
+        nap=profile,
+        page_url=str((profile or {}).get("website_url") or ""),
         model=providers.model_writer if providers else None,
     )
     return execute_pipeline_job(deps, code, settings=settings, gate=gate).as_dict()
+
+
+def _load_nap(client_id: str | None) -> dict[str, Any] | None:
+    """Read the client's NAP on the privileged connection.
+
+    The worker has no user identity, so it cannot use the RLS-scoped clients
+    repo; it reads the one row directly. A missing profile is not an error - the
+    add-client wizard allows skipping it - so this returns None and the page is
+    written without a phone number rather than failing.
+    """
+    if not client_id:
+        return None
+    try:
+        from app.db.database import privileged_connection
+
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.client_business_profiles "
+                "where client_id = %s limit 1",
+                (client_id,),
+            )
+            row = cur.fetchone()
+        return dict(row) if row else None
+    except Exception as exc:
+        logger.warning("content_pipeline_nap_unavailable", error=type(exc).__name__)
+        return None
+
+
+def _business_for(row: dict[str, Any], profile: dict[str, Any] | None) -> Any:
+    """The Business entity the JSON-LD is built from.
+
+    Built from the client's stored NAP so the markup names a real phone and a
+    real area. schema_links validates every marked-up value against the visible
+    text, so a wrong value here does not silently ship - it fails the page.
+    """
+    from app.services.content_schema import Business
+
+    profile = profile or {}
+    return Business(
+        name=str(profile.get("client_name") or row.get("client_name") or ""),
+        url=str(profile.get("website_url") or ""),
+        telephone=str(profile.get("phone") or ""),
+    )

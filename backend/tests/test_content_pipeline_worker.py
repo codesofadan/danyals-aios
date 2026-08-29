@@ -246,3 +246,68 @@ class TestAJobWithoutAnEngagementGetsOne:
         store = _Store(_row(engagement_id=None))
         outcome = _run(store, {"gate": _stage("gate")}, _Planning(fails=True))
         assert outcome.state in ("advanced", "deferred"), "must degrade, not raise"
+
+
+class TestTheClientsOwnPhoneNumberReachesThePage:
+    """Found by running the engine: the conversion stage requires a tappable
+    `tel:` link, the draft stage may state nothing outside the supplied facts, and
+    the client's phone number was in neither - so the writer had to invent a
+    number or fail that check on every page, forever."""
+
+    def test_the_stored_nap_becomes_first_party_facts(self) -> None:
+        from workers.tasks.content_pipeline import nap_facts
+
+        facts = nap_facts({
+            "phone": "214-555-0142", "website_url": "https://ortizplumbing.com",
+            "address_line1": "1820 Greenville Ave", "city": "Dallas",
+            "postal_code": "75206",
+        })
+        assert "phone: 214-555-0142" in facts
+        assert any(f.startswith("address: 1820 Greenville Ave, Dallas, 75206") for f in facts)
+
+    def test_a_half_filled_profile_contributes_only_what_it_has(self) -> None:
+        from workers.tasks.content_pipeline import nap_facts
+
+        facts = nap_facts({"phone": "214-555-0142", "website_url": "", "city": ""})
+        assert facts == ("phone: 214-555-0142",), "blank fields must not be asserted"
+
+    def test_no_profile_adds_nothing_rather_than_blank_facts(self) -> None:
+        from workers.tasks.content_pipeline import nap_facts
+
+        assert nap_facts(None) == () and nap_facts({}) == ()
+
+    def test_the_facts_are_appended_to_what_the_experience_gate_collected(self) -> None:
+        store = _Store(_row())
+        seen: dict[str, Any] = {}
+
+        def sme(ctx: PipelineContext) -> StageResult:
+            ctx.facts = ("count_source: 412 callouts in 2025",)
+            return ctx.record(StageResult("sme", outcome="ok"))
+
+        def draft(ctx: PipelineContext) -> StageResult:
+            seen["facts"] = ctx.facts       # what the WRITER would be given
+            ctx.draft_md = "body"
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        _SCRIPT["stages"] = {"sme": sme, "draft": draft}
+        deps = PipelineDeps(
+            store=store, planning=_Planning(), nap={"phone": "214-555-0142"},
+        )
+        execute_pipeline_job(deps, "CJ-4200", settings=get_settings(), gate=_Gate())
+        assert "count_source: 412 callouts in 2025" in seen["facts"]
+        assert "phone: 214-555-0142" in seen["facts"]
+
+    def test_a_halted_experience_gate_does_not_get_nap_facts_appended(self) -> None:
+        """Nothing is being written, so there is nothing to ground."""
+        store = _Store(_row())
+        captured: dict[str, Any] = {}
+
+        def sme(ctx: PipelineContext) -> StageResult:
+            result = ctx.record(StageResult("sme", outcome="halted", data={"missing": ["photo"]}))
+            captured["facts"] = ctx.facts
+            return result
+
+        _SCRIPT["stages"] = {"sme": sme}
+        deps = PipelineDeps(store=store, planning=_Planning(), nap={"phone": "214-555-0142"})
+        execute_pipeline_job(deps, "CJ-4200", settings=get_settings(), gate=_Gate())
+        assert captured["facts"] == ()
