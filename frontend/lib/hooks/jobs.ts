@@ -218,3 +218,44 @@ export function useResolveDeadLetter() {
     },
   });
 }
+
+export type ReapResult = {
+  /** `ok` (nothing to do) or `degraded` (rows were reaped — real work was lost). */
+  status: string;
+  reaped: number;
+  /** Human-readable: "no stale runs", or "reaped run_audit_job x3, run_content_job x1". */
+  detail: string;
+};
+
+/**
+ * Fail every job run whose worker died without writing an outcome
+ * (POST /maintenance/reap-stuck-jobs). OWNER ONLY.
+ *
+ * `JobRunsStore.start` counts `running` rows against the per-client concurrency cap,
+ * so a run left `running` by an OOM kill or a host reboot permanently removes a slot
+ * from that client — their queue gets quietly narrower and nothing reports it. The
+ * reaper is the only thing that clears one.
+ *
+ * With cron parked (`beat_schedule = {}`), the `reap-stale-job-runs` schedule does not
+ * fire, so THIS is the only caller. That is why it needs a button: until this hook
+ * existed, unwedging a client's queue meant an owner-token curl.
+ *
+ * The endpoint runs the sweep INLINE rather than enqueueing it, because dispatching
+ * the repair onto the very worker pool that may be wedged is how "I pressed the button
+ * and nothing happened" happens. It answers 503 rather than a 200 with a zero count
+ * when the ledger is unreachable: "reaped 0" and "could not look" are different
+ * answers and only one of them means the queue is healthy.
+ */
+export function useReapStuckJobs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<ReapResult>("/maintenance/reap-stuck-jobs"),
+    onSuccess: () => {
+      // Reaping writes terminal outcomes onto runs the board is showing as running,
+      // and frees concurrency slots, so all three of these moved.
+      void qc.invalidateQueries({ queryKey: JOB_RUNS_KEY });
+      void qc.invalidateQueries({ queryKey: JOB_SUMMARY_KEY });
+      void qc.invalidateQueries({ queryKey: IN_FLIGHT_KEY });
+    },
+  });
+}

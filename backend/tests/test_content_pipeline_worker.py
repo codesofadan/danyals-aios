@@ -974,6 +974,49 @@ class TestTheClusterMapFinallyBecomesInternalLinks:
         links = plan_internal_links(ctx, internal_urls={target: "https://acme.test/x"})
         assert links[0].url == "https://acme.test/x"
 
+    def test_the_budget_goes_to_topically_related_pages_first(self) -> None:
+        """The registry used to be walked FIRST and unconditionally, so a page spent
+        its whole cap on whichever siblings were published most recently
+        (`_published_sibling_urls` orders by `updated_at DESC`) and the cluster
+        targets - the only pages topically related to this one - got what was left,
+        which for an established client is nothing. An internal link is a topical
+        signal: linking a plumbing page to the six newest posts on the site is not a
+        weaker right answer, it is a different and worse one."""
+        from app.services.content_pipeline.schema_links import (
+            MAX_INTERNAL_LINKS,
+            plan_internal_links,
+        )
+
+        ctx = _briefed_ctx()
+        cluster = ctx.brief["research"].cluster
+        related = cluster.supporting[0]
+
+        # A registry that looks like a real client's: one page that IS in this page's
+        # cluster, and enough unrelated recent pages to swallow the entire budget.
+        registry = {f"unrelated topic {i}": f"https://acme.test/u{i}"
+                    for i in range(MAX_INTERNAL_LINKS + 3)}
+        registry[related] = "https://acme.test/related"
+
+        links = plan_internal_links(ctx, internal_urls=registry)
+        assert links, "a registry this size must produce links"
+        # The topical page wins the budget, and wins it FIRST.
+        assert links[0].keyword == related
+        assert links[0].url == "https://acme.test/related"
+
+    def test_an_unrelated_real_page_still_beats_a_target_with_no_url(self) -> None:
+        """Ordering topical-first must not flip the original rule it sits on top of:
+        an unresolved target renders nothing, so letting it consume the cap while a
+        real page waits costs the reader an actual link."""
+        from app.services.content_pipeline.schema_links import plan_internal_links
+
+        ctx = _briefed_ctx()
+        links = plan_internal_links(
+            ctx, internal_urls={"a wholly unrelated page": "https://acme.test/u"})
+        resolved = [x for x in links if x.url]
+        assert resolved, "the real page must appear"
+        assert resolved[0].url == "https://acme.test/u"
+        assert links.index(resolved[0]) < len([x for x in links if not x.url]) + 1
+
     def test_only_a_link_with_a_url_is_written_into_the_page(self) -> None:
         """`- [anchor]()` renders as unclickable text: markup that looks like a link
         and is not, which is the exact "looks done, is not" outcome to avoid."""

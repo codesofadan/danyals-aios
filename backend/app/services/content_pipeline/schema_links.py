@@ -173,20 +173,48 @@ def plan_internal_links(
 
     links: list[InternalLink] = []
     seen: set[str] = set()
-    # The registry first: a link with a real URL is worth more than a planned one, and
-    # the cap must not spend its budget on unresolved targets while real pages wait.
-    for keyword, url in registry.items():
-        key = keyword.lower()
-        if key == own or key in seen or len(links) >= limit:
-            continue
-        seen.add(key)
-        links.append(InternalLink(anchor=keyword, url=url, keyword=keyword))
+    by_key = {k.lower(): (k, v) for k, v in registry.items()}
+
+    def _take(anchor: str, url: str) -> None:
+        seen.add(anchor.lower())
+        links.append(InternalLink(anchor=anchor, url=url, keyword=anchor))
+
+    # ORDER MATTERS, and it used to be wrong. The registry was walked FIRST and
+    # unconditionally, so a page spent its whole budget on whichever siblings happened
+    # to be published most recently - `_published_sibling_urls` orders by `updated_at
+    # DESC` - and the pillar/cluster targets, the only ones topically related to this
+    # page, got whatever was left, which for an established client was nothing. An
+    # internal link is a topical signal, so linking a plumbing page to the six newest
+    # pages on the site is not a weaker version of the right answer, it is a different
+    # and worse one.
+    #
+    # So the budget is spent in this order:
+    #   1. cluster targets that HAVE a real URL - topical and clickable, the whole point
+    #   2. other registry entries - real pages, off-topic, better than a dead end
+    #   3. cluster targets with no URL yet - recorded unresolved so the operator sees
+    #      which sibling pages have not been published
+    # 2 still precedes 3 for the original reason, which remains correct: an unresolved
+    # target renders nothing, so letting it consume the cap while a real page waits
+    # costs the reader an actual link.
     for target in targets:
         key = target.strip().lower()
         if not key or key == own or key in seen or len(links) >= limit:
             continue
-        seen.add(key)
-        links.append(InternalLink(anchor=target.strip(), url="", keyword=target.strip()))
+        hit = by_key.get(key)
+        if hit is not None:
+            _take(hit[0], hit[1])
+
+    for keyword, url in registry.items():
+        key = keyword.lower()
+        if key == own or key in seen or len(links) >= limit:
+            continue
+        _take(keyword, url)
+
+    for target in targets:
+        key = target.strip().lower()
+        if not key or key == own or key in seen or len(links) >= limit:
+            continue
+        _take(target.strip(), "")
     return links
 
 

@@ -212,3 +212,8 @@
   .ops-flight-i { min-width: 0; flex: 1 1 100%; }
   .ops-dl-acts { margin-left: 0; width: 100%; }
 }
+
+/* The reaper control, under the in-flight strip. Right-aligned and quiet: it is a
+   repair for an uncommon failure, not a routine action, so it should be findable
+   without competing with the board it sits on. */
+.ops-reap { display: flex; justify-content: flex-end; margin-top: 8px; }
