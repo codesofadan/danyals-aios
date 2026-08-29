@@ -12,7 +12,7 @@ in front of native PostgreSQL 16 + native Redis, behind Caddy (auto-TLS).
 |---|---|---|
 | `aios-api` | uvicorn (`app.main:app`) | `infra/systemd/aios-api.service` |
 | `aios-worker` | celery worker | `infra/systemd/aios-worker.service` |
-| `aios-beat` | celery beat (scheduler / Policy Radar + context dispatch) | `infra/systemd/aios-beat.service` |
+| `aios-beat` | celery beat — **fires nothing today**, see below | `infra/systemd/aios-beat.service` |
 
 - **All config in one root-owned file** `/etc/aios/aios.env` (`EnvironmentFile`); template
   at `infra/deploy/aios.env.example`.

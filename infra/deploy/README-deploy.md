@@ -185,7 +185,7 @@ PY
 | `redis-server` | (distro package) | cache `/0` + broker `/1` + results `/2`; loopback |
 | `aios-api` | `uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2` | behind Caddy; liveness independent of Redis |
 | `aios-worker` | `celery -A workers.celery_app worker --concurrency=4` | warm shutdown; acks_late-safe redelivery; writes artifacts to `/var/lib/aios` |
-| `aios-beat` | `celery -A workers.celery_app beat` | **exactly one** cluster-wide; enqueues the context dispatch + reconcile schedules (and future policy/report/backup schedules) |
+| `aios-beat` | `celery -A workers.celery_app beat` | **exactly one** cluster-wide. **Its schedule is empty by owner instruction — it currently fires nothing.** See *Nothing runs on a timer* below |
 | `aios-web` | `next start -H 127.0.0.1 -p $AIOS_WEB_PORT` | the dashboard; behind Caddy; proxies `/api/v1/*` to the API same-origin; not bound to `aios-api` |
 
 All four app units are hardened (`NoNewPrivileges`, `ProtectSystem=strict`,
@@ -196,6 +196,46 @@ systemd **refuses to start** a unit whose `ReadWritePaths` entry does not exist,
 `StateDirectory=/var/lib/aios` for the beat schedule and the
 audit/content/backup artifacts - keep those artifact dirs under `/var/lib/aios`
 (as the template does) so `ProtectSystem=strict` still covers them.
+
+## Nothing runs on a timer
+
+`aios-beat` is installed, running and healthy, and **it fires nothing**. This is a
+deliberate owner instruction (2026-08-19), not a misconfiguration and not a bug to
+fix: `workers/celery_app.py` sets
+
+```python
+celery_app.conf.beat_schedule = {}
+```
+
+Do not read a quiet beat log as a broken scheduler. The consequences are worth
+stating plainly, because each one is a thing an operator would otherwise expect
+to happen by itself and would not be told had stopped:
+
+- **Citation liveness is never re-swept.** A directory listing that was deleted,
+  merged or silently edited keeps its last observed status until someone re-checks
+  it by hand. `live` ages from an observation into a claim.
+- **Policy Radar is on-demand only.** No daily brief is generated. A brief is
+  fetched and stored only when a user asks (the Google Updates page, `POST
+  /policy/ask`, and the lead "generate brief" path all write into the same tables
+  the page reads) - so the page is accurate, it is just never ahead of you.
+- **Nothing reconciles, compacts or snapshots on a schedule**, backups included.
+  Run those from the API on demand (see *Backup & restore* below) or drive them
+  from system cron.
+
+The full schedule is preserved verbatim in `_BEAT_SCHEDULE_DISABLED` in the same
+file, and every task stays registered and callable on demand via `.delay()`. To
+turn scheduling back on, restore one assignment and restart the unit:
+
+```python
+celery_app.conf.beat_schedule = _BEAT_SCHEDULE_DISABLED
+```
+```bash
+sudo systemctl restart aios-beat && journalctl -u aios-beat -f   # ticks appear
+```
+
+Re-enable it only as a decision, not as cleanup: several of those jobs spend money
+(they call paid APIs), so switching them on changes the monthly bill as well as the
+freshness of the data.
 
 ## Backup & restore
 
