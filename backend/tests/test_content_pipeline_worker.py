@@ -476,3 +476,24 @@ class TestTheEngineFlagActuallyRoutes:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         assert self._enqueued("  V2  ", monkeypatch) == ["v2"]
+
+
+class TestTheDefaultEngineIsTheDoctrinePipeline:
+    """Switched 2026-08-29 after six paid runs took fact_grounding from 40 to 100
+    and cleared every hard block. This asserts the DEFAULT, not the mechanism -
+    the routing itself is covered above - because a silent revert to v1 would
+    look identical from the outside: jobs would still be created, still reach
+    review, and quietly skip the Experience gate, the uniqueness gate and the
+    grounding repair."""
+
+    def test_a_fresh_settings_object_selects_v2(self) -> None:
+        from app.config import Settings
+
+        assert Settings(_env_file=None).content_engine == "v2"  # type: ignore[call-arg]
+
+    def test_the_environment_can_still_pin_v1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The revert path has to keep working, or the switch is one-way."""
+        from app.config import Settings
+
+        monkeypatch.setenv("CONTENT_ENGINE", "v1")
+        assert Settings(_env_file=None).content_engine == "v1"  # type: ignore[call-arg]

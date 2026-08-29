@@ -295,14 +295,33 @@ class Settings(BaseSettings):
     # `content_research` money-dial (committed spend = Anthropic token cost + web-search
     # cost); keyless / a dial-block / a research failure all DEGRADE (200, status=
     # 'degraded'), never crash - exactly like POST /policy/ask. All additive + optional. ---
-    # Which content engine a new job runs on. "v1" is the shipped generator
+    # Which content engine a new job runs on. "v1" is the older generator
     # (workers/tasks/content.py); "v2" is the staged doctrine pipeline
     # (app/services/content_pipeline/ via workers/tasks/content_pipeline.py).
-    # Defaults to v1 deliberately: v2 has never completed a run against a real
-    # provider, and defaulting a live agency onto an unverified engine is the
-    # kind of assumed-success this codebase keeps removing. Flip to "v2" only
-    # after an end-to-end run has been observed.
-    content_engine: str = "v1"
+    #
+    # Switched to v2 on 2026-08-29, by the owner, on measured evidence. It sat on
+    # v1 until the pipeline had completed real provider runs, because defaulting a
+    # live agency onto an unverified engine is the assumed-success this codebase
+    # keeps removing. Six paid runs later:
+    #
+    #   fact_grounding  40 -> 100      (the writer stopped inventing figures)
+    #   hard blocks     one -> none
+    #   QA weighted     72 -> 84
+    #
+    # 84 sits just under the 85 threshold, and that is not the reason to hold
+    # back: the threshold and its weight vector are explicitly PROVISIONAL,
+    # uncalibrated against ranking outcomes or a human SEO grade (P7A-11). What
+    # decided it is that v2 has gates v1 has none of - Experience, uniqueness,
+    # conversion, voice, grounding, and a QA judge that actually runs - and v1
+    # produces the same invented figures with no detection at all.
+    #
+    # WHAT CHANGES OPERATIONALLY: v2 HALTS every page until its first-party facts
+    # are supplied (Law 16). New jobs stop at "Waiting on your experience answers"
+    # and resume when the questions are answered. That is the gate, not a fault.
+    #
+    # To revert: CONTENT_ENGINE=v1 in the environment. Nothing else changes - both
+    # engines land a job at `needs_review` and share the publish path.
+    content_engine: str = "v2"
     content_research_model: str = "claude-sonnet-5"  # web-search Claude for the page-set recommender
     content_research_count: int = 12  # recommended pages returned per research call (default cap)
     content_research_max_searches: int = 6  # web_search tool max_uses per recommend lookup
@@ -669,17 +688,34 @@ class Settings(BaseSettings):
     # the anchor. Keys are SecretStr (never logged / never in a repr). ---
     google_places_api_key: SecretStr | None = None  # Google Places API (New) anchor lookup
     google_maps_api_key: SecretStr | None = None  # legacy alias, fallback for the Places anchor
-    captcha_solver_provider: str = "capsolver"  # capsolver | capmonster | none
+    # DEFAULTS TO OFF, deliberately changed from "capsolver" 2026-08-29. Paying a solver
+    # to clear a CAPTCHA IS the anti-abuse evasion this project has ruled out, and a live
+    # solver as the DEFAULT meant the policy and the code disagreed - the policy said
+    # "CAPTCHA is a workflow boundary", the shipped default said "pay to cross it".
+    # A CAPTCHA is now what routes a directory to the human queue, where a person clears
+    # it. Set this explicitly if that is ever reversed as a deliberate owner decision.
+    captcha_solver_provider: str = "none"  # capsolver | capmonster | none
     captcha_solver_api_key: SecretStr | None = None
+    # Residential proxy. Same reasoning: a directory that needs a proxy to look human is
+    # DEFENDED, and a defended directory is a human-queue item, not a bandwidth purchase.
     citation_proxy_url: SecretStr | None = None  # http(s)://user:pass@host:port
-    # Per-call/per-submit cost estimates for the `citations` money-dial. Figures are
-    # the reference plan's own directional numbers (self-hosted route): a solve is
-    # ~$0.0006 (CapMonster reCAPTCHA v2), a submit's proxy bandwidth is ~$0.002-0.005,
-    # and Playwright compute is ~$0.001 — summing to the bot_fillable estimate below;
-    # captcha_assisted adds one solve; api/aggregator calls carry no CAPTCHA/proxy.
-    citation_api_cost_estimate: float = 0.01  # one direct-API submit (Bing/Foursquare)
+    # Per-submit cost estimates for the `citations` money-dial.
+    #
+    # `citation_api_cost_estimate` was DELETED with the Bing/Foursquare submitters - it
+    # priced a call to endpoints that return 404. Do not reintroduce it as a generic
+    # "api" figure: the three write paths that verified (Data Axle, Apple, GBP) have
+    # wildly different costs, and one blended number would hide that.
     citation_bot_cost_estimate: float = 0.005  # one Playwright bot_fillable submit (no CAPTCHA)
     citation_captcha_cost_estimate: float = 0.006  # one Playwright captcha_assisted submit
+    # Route B is compute only - no proxy, no solve - because a directory needing either
+    # is by definition Route C. This is the ONLY route the "under 10c marginal"
+    # commitment has ever been true for.
+    citation_route_b_cost_estimate: float = 0.002
+    # Data Axle Local Listings Premium, per Add/Renewal. UNKNOWN: the price is published
+    # nowhere reachable and www.data-axle.com 403s every client tried (R1 O-2). It stays
+    # 0.0, and 0.0 BLOCKS the route rather than enabling a free one - see
+    # `data_axle_submits_enabled`. No run may ever spend against an invented price.
+    data_axle_add_cost_estimate: float = 0.0
     # Controlled root a bot_fillable/captcha_assisted submission's proof screenshot is
     # written under. Unset -> no screenshot is captured (an honest empty proof_url,
     # never a crash) - mirrors audit_artifact_dir's key-gating.
@@ -849,6 +885,20 @@ class Settings(BaseSettings):
         Blank/absent -> ``None`` (falsiness, mirroring ``validate_settings``).
         """
         return raw.replace("\\n", "\n") if raw else None
+
+    @property
+    def data_axle_submits_enabled(self) -> bool:
+        """Whether a Data Axle submission may run at all.
+
+        FALSE while `data_axle_add_cost_estimate` is 0.0, and that is the point: the
+        price is genuinely unknown (published nowhere reachable; the vendor's own site
+        403s every client tried), and an unpriced Add is the one thing that can breach a
+        written per-citation commitment without anyone noticing. A 0.0 estimate would
+        otherwise sail through the cost gate as free.
+
+        This is a HARD block, not a warning. It lifts when someone puts a real rate card
+        on file - a phone call, not a code change."""
+        return self.data_axle_add_cost_estimate > 0.0
 
     @property
     def jwt_private_key_pem(self) -> str | None:
