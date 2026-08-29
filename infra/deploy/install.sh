@@ -294,9 +294,17 @@ fi
 
 # --- 8. systemd units ----------------------------------------------------------
 log "installing systemd units (aios-api, aios-worker, aios-beat)"
-install -m 0644 "${UNIT_SRC}/aios-api.service" /etc/systemd/system/aios-api.service
-install -m 0644 "${UNIT_SRC}/aios-worker.service" /etc/systemd/system/aios-worker.service
-install -m 0644 "${UNIT_SRC}/aios-beat.service" /etc/systemd/system/aios-beat.service
+# The units are written against the default /opt/aios. DEPLOY_ROOT is advertised
+# as configurable at the top of this script, and installing them verbatim made
+# that a lie: any other root produced three units pointing at a directory that
+# does not exist, so all three failed to start with no obvious cause. Substitute
+# the real root on the way in rather than hardcoding it in the unit files, which
+# would just move the problem.
+for unit in aios-api aios-worker aios-beat; do
+  sed "s|/opt/aios|${DEPLOY_ROOT}|g" "${UNIT_SRC}/${unit}.service" \
+    > "/etc/systemd/system/${unit}.service"
+  chmod 0644 "/etc/systemd/system/${unit}.service"
+done
 
 log "reloading systemd + enabling/starting services"
 systemctl daemon-reload
