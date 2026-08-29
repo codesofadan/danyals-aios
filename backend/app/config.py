@@ -786,7 +786,15 @@ class Settings(BaseSettings):
     # emailed. NOT a per-user notification (no prefs / no DB user row) - it targets one
     # standing inbox. Overridable via ADMIN_NOTIFY_EMAIL; key-gated exactly like every
     # email leg (no RESEND_API_KEY -> the send is skipped, the mutation still succeeds).
-    admin_notify_email: str = "business.zainsaeed@gmail.com"  # operator inbox for portal alerts
+    # The ONE operator inbox that receives client-portal alerts. Blank by design.
+    #
+    # This defaulted to a named individual's personal Gmail. On any deployment that
+    # did not override it - a handover to another agency, most obviously - that
+    # person would silently receive another company's client notifications. The
+    # sender already skips cleanly on a blank address (`notify_admin` returns before
+    # building a sender), so an unset value costs a missed alert, not a leak, and
+    # missing an alert is the far cheaper failure.
+    admin_notify_email: str = ""  # operator inbox for portal alerts; blank -> no send
     # Base URL of the admin dashboard, used to build a deep link into an email alert
     # (e.g. the client directory where a new portal request surfaces). Not a secret.
     admin_base_url: str = "http://localhost:3000"
