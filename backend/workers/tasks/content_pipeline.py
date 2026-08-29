@@ -76,6 +76,7 @@ STAGE_LABEL: dict[str, str] = {
     "convert": "Conversion",
     "voice": "Voice",
     "grounding": "Fact-check",
+    "images": "AI images",
     "title_meta": "Titles & meta",
     "schema_links": "Schema & links",
     "gate": "QA",
@@ -94,7 +95,13 @@ class PipelineDeps:
     planning: Any  # ContentPlanningStore | double (see assembly.PageStores)
     writer: DoctrineWriter | None = None
     researcher: Any | None = None
+    #: The image seam. `None` (not a fake) when the provider bundle is absent, so the
+    #: assembly OMITS the image stage rather than binding a placeholder generator.
+    images: Any | None = None
     business: Any | None = None
+    #: keyword -> a REAL url on the client's site, for internal links. Merged from the
+    #: operator's `source_pack.internal_urls` and the client's published sibling pages.
+    internal_urls: dict[str, str] | None = None
     #: The client's stored NAP row (`client_business_profiles`), or None.
     nap: dict[str, Any] | None = None
     page_url: str = ""
@@ -359,6 +366,7 @@ def _persist_success(
         qa["notes"] = list(gate_result.notes)
     schema_result = ctx.result_for("schema_links")
     schema_data = dict(schema_result.data) if schema_result else {}
+    image_result = ctx.result_for("images")
     logger.info(
         "content_pipeline_persist",
         code=code,
@@ -436,10 +444,33 @@ def _persist_success(
         # edit, the scorecard emptied while the headline still read 84 from before
         # the change. Unscored has to look unscored.
         fields["qa_weighted_total"] = None
-    # NOT internal_links: this pipeline does not produce them yet - gate.py passes
-    # `internal_links=[]` and no stage fills it. Writing an empty {"links": []}
-    # would present "we checked and there are none" where the truth is "nothing
-    # looked", which is the distinction the whole job contract turns on.
+    # THE IMAGE COUNT. Written only when the stage actually ran: an absent result means
+    # no image seam was bound at all, and on the EDIT path the stage is deliberately not
+    # in EDIT_STAGES. Writing 0 in either case would overwrite a real count from the
+    # first run with "we looked and there are none" - the distinction the job contract
+    # turns on. A stage that RAN and produced nothing does write 0, honestly.
+    if image_result is not None:
+        fields["images"] = int(image_result.data.get("images", 0))
+
+    # THE INTERNAL LINKS. Same rule: only when the stage produced a link plan. `links`
+    # is the FULL plan (what the page should point at, which is what the reviewer's link
+    # panel is for); `on_page` is how many of them are real hrefs in the body. Two
+    # separate numbers so a plan can never be read as coverage.
+    planned_links = schema_data.get("internal_links")
+    if planned_links is not None:
+        unresolved = int(schema_data.get("internal_links_unresolved", 0))
+        links_field: dict[str, Any] = {
+            "links": planned_links,
+            "on_page": int(schema_data.get("internal_links_on_page", 0)),
+            "unresolved": unresolved,
+        }
+        if unresolved:
+            links_field["note"] = (
+                f"{unresolved} of these have no url and are NOT in the page: no published "
+                "sibling page is known for them. The anchor and target keyword are the "
+                "plan; a url here would have been invented."
+            )
+        fields["internal_links"] = links_field
 
     if applied_edit:
         # Clear it, or the next run reads the same instruction and re-applies an
@@ -542,6 +573,12 @@ def execute_pipeline_job(
         business=deps.business,
         page_url=deps.page_url,
         model=deps.model,
+        images=deps.images,
+        # The image stage spends OUTSIDE the metered writer seam, so it needs the same
+        # gate this job already runs on and the price table the gate commits against.
+        cost_gate=gate,
+        settings=settings,
+        internal_urls=deps.internal_urls,
     )
     if "sme" in stages:
         pack = row.get("source_pack") if isinstance(row.get("source_pack"), dict) else None
@@ -594,6 +631,11 @@ def run_content_pipeline_job(code: str, resume: bool = False) -> dict[str, Any]:
     providers = content_providers_from_settings(settings)
     writer: DoctrineWriter | None = None
     researcher: Any | None = None
+    # The image seam stays None when the whole bundle is degraded. The bundle's own
+    # `images` is `FakeImageGenerator` on a deploy with no IMAGE_GEN_API_KEY, and
+    # `run_images` refuses that generator by identity - so a keyless deployment gets a
+    # stage that runs, produces nothing, charges nothing, and names the missing key.
+    images: Any | None = None
     if providers is not None:
         writer = DoctrineWriter(
             _ContentGatedWriter(
@@ -614,6 +656,7 @@ def run_content_pipeline_job(code: str, resume: bool = False) -> dict[str, Any]:
             client_id=client_id,
             job_id=code,
         )
+        images = providers.images
 
     profile = _load_nap(client_id)
     deps = PipelineDeps(
@@ -621,14 +664,86 @@ def run_content_pipeline_job(code: str, resume: bool = False) -> dict[str, Any]:
         planning=ContentPlanningStore(),
         writer=writer,
         researcher=researcher,
+        images=images,
         business=_business_for(row, profile),
         nap=profile,
         page_url=str((profile or {}).get("website_url") or ""),
+        internal_urls=_internal_url_registry(row, client_id),
         model=providers.model_writer if providers else None,
     )
     return execute_pipeline_job(
         deps, code, settings=settings, gate=gate, resume=resume
     ).as_dict()
+
+
+def published_sibling_urls(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """keyword -> url for the client's pages that are ACTUALLY on the live site.
+
+    THE ONLY HONEST SOURCE OF AN INTERNAL-LINK URL in this platform. `content_jobs.wp_url`
+    is written at the publish push (migration 0057) and is the post's real permalink, so
+    a row that has one is a page a reader can reach. A row WITHOUT one is a draft, and a
+    draft's slug is not a URL - guessing `/{slug}` (which v1 does) puts a 404 in a
+    client's own body copy, which is worse than the missing link.
+
+    Split out from the query so the mapping rule is testable without a database.
+    """
+    out: dict[str, str] = {}
+    seen: set[str] = set()
+    for row in rows:
+        url = str(row.get("wp_url") or "").strip()
+        keyword = str(row.get("kw") or "").strip()
+        # First writer wins: the query orders newest-first, so the most recently
+        # published page for a keyword is the one linked, not a stale permalink.
+        if url and keyword and keyword.lower() not in seen:
+            seen.add(keyword.lower())
+            out[keyword] = url
+    return out
+
+
+def _internal_url_registry(row: dict[str, Any], client_id: str | None) -> dict[str, str]:
+    """The operator's own keyword->URL registry, plus the client's published pages.
+
+    The operator's registry wins on a collision: they typed a specific URL for that
+    keyword, which is a stronger statement than "some job pushed a post about it".
+    """
+    registry = dict(_published_sibling_urls(client_id, exclude_code=str(row.get("code") or "")))
+    pack = row.get("source_pack")
+    supplied = pack.get("internal_urls") if isinstance(pack, dict) else None
+    if isinstance(supplied, dict):
+        registry.update({
+            str(k).strip(): str(v).strip()
+            for k, v in supplied.items()
+            if str(k).strip() and str(v).strip()
+        })
+    return registry
+
+
+def _published_sibling_urls(client_id: str | None, *, exclude_code: str) -> dict[str, str]:
+    """Read this client's published pages on the privileged connection.
+
+    Same shape and the same reasoning as `_load_nap`: the worker has no user identity,
+    so it cannot use an RLS-scoped repo. A failure here loses INTERNAL LINKS, never the
+    page - the stage then records every cluster target as unresolved and says so.
+    """
+    if not client_id:
+        return {}
+    try:
+        from app.db.database import privileged_connection
+
+        with privileged_connection() as cur:
+            cur.execute(
+                "select keyword_map->>'primary' as kw, wp_url "
+                "from public.content_jobs "
+                "where client_id = %s and wp_url is not null and wp_url <> '' "
+                "and code <> %s "
+                "order by updated_at desc limit 100",
+                (client_id, exclude_code),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+        return published_sibling_urls(rows)
+    except Exception as exc:
+        logger.warning("content_pipeline_siblings_unavailable", error=type(exc).__name__)
+        return {}
 
 
 def _load_nap(client_id: str | None) -> dict[str, Any] | None:

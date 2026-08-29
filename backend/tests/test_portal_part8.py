@@ -316,6 +316,22 @@ async def test_portal_request_emails_admin_and_never_breaks_on_send_failure(
 
     monkeypatch.setattr(cr, "record_activity", _noop_activity)
 
+    # The operator inbox is CONFIGURED, never defaulted. This test used to pass on a
+    # default baked into config.py - a named individual's personal Gmail - so it
+    # quietly depended on the defect that any deployment which did not override it
+    # emailed that person another company's client requests. Blank is the default
+    # now, so a test that wants a send must supply an address, exactly as a real
+    # deployment does. get_settings is lru_cached, so the env var alone is not enough.
+    _real_settings = get_settings
+    get_settings.cache_clear()
+    monkeypatch.setenv("ADMIN_NOTIFY_EMAIL", "ops@agency.example.com")
+    monkeypatch.setattr(
+        "app.services.notifications.get_settings",
+        lambda: _real_settings().model_copy(
+            update={"admin_notify_email": "ops@agency.example.com"}
+        ),
+    )
+
     reader = SimpleNamespace(get_client=lambda: {"id": "cl-A", "name": "Acme Dental"})
     scoped = SimpleNamespace(client_id="cl-A", user=SimpleNamespace(id="u-1"))
     body = PortalRequestCreate(kind="Access", subject="Unlock backlinks", detail="please")
@@ -331,7 +347,7 @@ async def test_portal_request_emails_admin_and_never_breaks_on_send_failure(
     assert row["code"] == "T-1"
     assert len(sender.sent) == 1
     sent = sender.sent[0]
-    assert sent.to == get_settings().admin_notify_email
+    assert sent.to == "ops@agency.example.com"
     assert "Acme Dental" in sent.subject and "Unlock backlinks" in sent.subject
 
     # A raising provider is swallowed: the request the client made still succeeds.

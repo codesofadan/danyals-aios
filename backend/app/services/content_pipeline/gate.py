@@ -38,6 +38,7 @@ from app.services.content_generator import (
     GeneratedContent,
     GroundedClaim,
     Heading,
+    InternalLink,
     SourcePack,
 )
 from app.services.content_lint import analyse_density, strip_markdown
@@ -54,6 +55,13 @@ from app.services.content_research import ResearchBrief
 STAGE = "gate"
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+# A line that is nothing but an image. The IMAGES stage injects the hero photo directly
+# under the H1, which is INSIDE the direct-answer block, so `![alt](url)` lands in the
+# text `_score_structure_readability` counts against its 40-55 WORD band (ANSWER_MIN_
+# WORDS / ANSWER_MAX_WORDS). The alt is the H1, so the markup adds roughly as many
+# "words" as the band has slack - enough to fail a correct answer on markup alone.
+# An image is not prose.
+_IMAGE_LINE_RE = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")
 
 
 def headings_of(draft_md: str) -> list[Heading]:
@@ -79,8 +87,11 @@ def answer_block_of(draft_md: str) -> str:
         return "\n".join(lines[:4]).strip()
     body: list[str] = []
     for line in lines[start + 1:]:
-        if _HEADING_RE.match(line.strip()):
+        text = line.strip()
+        if _HEADING_RE.match(text):
             break
+        if _IMAGE_LINE_RE.match(text):
+            continue
         body.append(line)
     return "\n".join(body).strip()
 
@@ -92,9 +103,15 @@ def _content_for(ctx: PipelineContext, brief: ResearchBrief) -> GeneratedContent
     pipeline uses - a zero passed to `primary_density` would score the keyword-handling
     dimension against a number nobody computed.
 
-    Fields the staged pipeline genuinely does not produce - images, internal links -
-    stay EMPTY rather than plausible. A fabricated internal-link list would score the
-    linking dimension on links that do not exist.
+    `internal_links` is what the SCHEMA_LINKS stage actually wrote into the page, never
+    what it merely planned: a target with no known URL is not on the page, and scoring
+    the linking dimension on it would report link coverage a reader cannot click. The
+    plan travels separately (`internal_links_planned`) so `run_gate` can explain a low
+    score instead of leaving it unexplained.
+
+    `images_plan` stays EMPTY: the IMAGES stage injects finished `![alt](url)` blocks
+    into the draft and keeps no ImagePlanItem list here, and no QA dimension reads this
+    field - a reconstructed one would be decoration.
     """
     facts = tuple(ctx.facts)
     angle_kind = "first_hand_experience" if facts else "none"
@@ -126,7 +143,9 @@ def _content_for(ctx: PipelineContext, brief: ResearchBrief) -> GeneratedContent
             grounded=bool(facts),
             derived_from=["sme_slots"] if facts else [],
         ),
-        internal_links=[],
+        internal_links=[
+            x for x in (ctx.brief.get("internal_links") or []) if isinstance(x, InternalLink)
+        ],
         images_plan=[],
         grounding=[GroundedClaim(claim=f, source="sme_slots") for f in facts],
         needs=[],
@@ -198,6 +217,20 @@ def run_gate(
 
     if verdict is None:
         verdict = score(content, brief, schema_result, pack, judge=None)
+
+    planned_links = [
+        x for x in (ctx.brief.get("internal_links_planned") or []) if isinstance(x, InternalLink)
+    ]
+    unresolved = len(planned_links) - len(content.internal_links)
+    if unresolved > 0:
+        # Without this the internal_linking dimension reports a bare 40 and the reviewer
+        # has no way to tell "nobody built a link plan" from "the plan exists and the
+        # sibling pages are not published yet". They need different actions.
+        notes.append(
+            f"internal_linking is scored on the {len(content.internal_links)} link(s) the "
+            f"page carries; {unresolved} more are PLANNED but have no url yet (no "
+            "published sibling page is known for them)"
+        )
 
     notes.extend(verdict.notes[:8])
     if verdict.blocked_by:

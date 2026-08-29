@@ -43,6 +43,22 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "prod"] = "dev"
     log_level: LogLevel = "INFO"
     api_cors_origins: str = "http://localhost:3000"
+    # Chrome extension origins allowed to call the API, comma-separated, each exactly
+    # `chrome-extension://<32-char id>`.
+    #
+    # STRICTLY THIS MAY NOT BE NEEDED: the extension makes every backend call from its
+    # SERVICE WORKER, and a service-worker fetch to a host in `host_permissions` is made
+    # with extension privileges rather than being page-CORS-checked. That architecture is
+    # required anyway - the content script must never see the operator token, so it talks
+    # to the worker instead of the API - and it happens to sidestep CORS. This knob is
+    # belt-and-braces, and it weakens nothing: exact-string origins with credentials
+    # remain legal (only `*` plus credentials is not).
+    #
+    # `validate_settings` REFUSES a wildcard here in production. A wildcard would let ANY
+    # extension installed in ANY user's browser call this API with credentials, which is
+    # the one way to get this badly wrong - so it is made unrepresentable rather than
+    # documented.
+    extension_origins: str = ""
     trusted_hosts: str = "*"
     # Public origin the API is reachable at (e.g. https://app.qanry.com), used to
     # build ABSOLUTE URLs for server-hosted files that must load with NO auth header
@@ -269,6 +285,13 @@ class Settings(BaseSettings):
     # Card/feature GLYPHS are inline SVG icons (never PNGs). Flip off to drop the photos and
     # run icon-only.
     content_images_enabled: bool = True
+    # How many images ONE page gets from the DOCTRINE engine (v2). Deliberately far
+    # below v1's MAX_IMAGES=5: v2 became the default engine without ever having had a
+    # paid image run, and a hero image is the smallest change that stops a page
+    # shipping with no featured image at all. Raise it per deployment once the
+    # per-image spend has been watched on a real job. 0 disables images on v2 while
+    # leaving v1's photos alone; content_images_enabled=false disables BOTH.
+    content_pipeline_max_images: int = 1
     # Per-call cost estimates for the money-dial (a later chunk wires these in).
     content_research_cost_estimate: float = 0.01
     content_generate_cost_estimate: float = 0.15
@@ -716,6 +739,11 @@ class Settings(BaseSettings):
     # 0.0, and 0.0 BLOCKS the route rather than enabling a free one - see
     # `data_axle_submits_enabled`. No run may ever spend against an invented price.
     data_axle_add_cost_estimate: float = 0.0
+    # Route A credentials. All optional and NOT in _REQUIRED_IN_PROD: absent, the
+    # submitter simply is not built and the row blocks with an honest reason.
+    data_axle_api_key: SecretStr | None = None
+    apple_business_api_key: SecretStr | None = None
+    apple_business_org_id: str = ""
     # Controlled root a bot_fillable/captcha_assisted submission's proof screenshot is
     # written under. Unset -> no screenshot is captured (an honest empty proof_url,
     # never a crash) - mirrors audit_artifact_dir's key-gating.
@@ -925,7 +953,13 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
+        """Dashboard origins plus any configured extension origins.
+
+        The extension entries are additional EXACT strings, never a wildcard and never a
+        regex, so the browser app's posture is unchanged by their presence."""
+        origins = [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
+        origins += [o.strip() for o in self.extension_origins.split(",") if o.strip()]
+        return origins
 
     @property
     def trusted_hosts_list(self) -> list[str]:
@@ -970,6 +1004,24 @@ def validate_settings(settings: Settings) -> None:
     Uses falsiness, not ``is None``: a blank env value arrives as ``""`` /
     ``SecretStr("")`` (present but empty) and must still count as missing.
     """
+    # A wildcard extension origin in production would let ANY extension installed in ANY
+    # user's browser call this API with credentials. Refuse it outright rather than
+    # documenting it - this check runs before the missing-secrets check because it is a
+    # misconfiguration that is actively dangerous rather than merely incomplete.
+    for origin in (o.strip() for o in settings.extension_origins.split(",")):
+        if not origin:
+            continue
+        ident = origin.removeprefix("chrome-extension://")
+        if "*" in origin or not (len(ident) == 32 and ident.isalpha() and ident.islower()):
+            message = (
+                f"EXTENSION_ORIGINS entry {origin!r} is not a specific extension. Each "
+                "entry must be exactly chrome-extension://<32 lowercase letters>; a "
+                "wildcard would admit every extension in every user's browser."
+            )
+            if settings.is_prod:
+                raise ConfigError(message)
+            logging.getLogger("app.config").warning(message)
+
     missing = [name for name in _REQUIRED_IN_PROD if not getattr(settings, name)]
     if not missing:
         return

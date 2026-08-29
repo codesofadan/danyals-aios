@@ -38,6 +38,7 @@ PAGE_STAGES: tuple[str, ...] = (
     "convert",       # 7
     "voice",         # 8
     "grounding",     # 8b - cut figures no supplied fact supports
+    "images",        # 8c - the hero/section photos, after the text is final
     "title_meta",    # 9
     "schema_links",  # 10 - free
     "gate",          # 11

@@ -435,18 +435,133 @@ class TestWhatTheStagesProduceActuallyReachesTheRow:
         assert store.final("schema_type") == "Service"
 
     def test_internal_links_are_not_invented_as_empty(self) -> None:
-        """This pipeline does not produce internal links - no stage fills them.
-        Writing {"links": []} would say "we looked and found none" where the truth
-        is that nothing looked."""
+        """A schema stage that emitted no link data means nothing looked. Writing
+        {"links": []} would say "we looked and found none" instead - the distinction
+        the whole job contract turns on, and the reason this column is only written
+        when the stage actually produced a plan."""
         store = _Store(_row())
         self._run_with(store, {}, {"json_ld": {"@type": "Service"}, "primary_type": "Service"})
         assert store.final("internal_links") is None
+
+    def test_the_link_plan_lands_with_its_unresolved_count_beside_it(self) -> None:
+        """Until this ran, gate.py passed `internal_links=[]`, no stage filled it, and
+        the QA internal_linking dimension scored the same 40 on every page the doctrine
+        engine wrote. The plan now reaches the reviewer's link panel."""
+        store = _Store(_row())
+        self._run_with(store, {}, {
+            "internal_links": [
+                {"anchor": "burst pipe repair", "url": "https://acme.test/burst-pipe",
+                 "keyword": "burst pipe repair"},
+                {"anchor": "water heater repair", "url": "", "keyword": "water heater repair"},
+            ],
+            "internal_links_on_page": 1,
+            "internal_links_unresolved": 1,
+        })
+        stored = store.final("internal_links")
+        assert [x["anchor"] for x in stored["links"]] == [
+            "burst pipe repair", "water heater repair",
+        ]
+        assert stored["on_page"] == 1, "only the one with a url is actually in the page"
+        assert stored["unresolved"] == 1
+        assert "invented" in stored["note"], "the gap must name itself, not read as coverage"
+
+    def test_a_fully_resolved_plan_carries_no_unresolved_note(self) -> None:
+        store = _Store(_row())
+        self._run_with(store, {}, {
+            "internal_links": [{"anchor": "a", "url": "https://acme.test/a", "keyword": "a"}],
+            "internal_links_on_page": 1,
+            "internal_links_unresolved": 0,
+        })
+        assert "note" not in store.final("internal_links")
 
     def test_a_gate_that_produced_nothing_writes_no_score_rather_than_a_zero(self) -> None:
         store = _Store(_row())
         self._run_with(store, {}, {})
         assert store.final("qa_weighted_total") is None, "absent is not zero"
 
+
+class TestTheImageCountIsWhatWasActuallyGenerated:
+    """The doctrine engine shipped as the default with no image stage at all, so every
+    page it wrote left `content_jobs.images` at 0 while its v1-written siblings carried
+    photos. Found by reading PAGE_STAGES against v1's `_generate_images`."""
+
+    def _run_with(self, store: _Store, stages: dict[str, Any]) -> Any:
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# A page\n\nWith real words."
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        return _run(store, {"draft": draft, **stages})
+
+    def test_the_generated_count_reaches_the_row(self) -> None:
+        store = _Store(_row())
+        self._run_with(store, {"images": _stage("images", "ok", images=2, planned=2)})
+        assert store.final("images") == 2
+
+    def test_a_stage_that_ran_and_produced_nothing_writes_an_honest_zero(self) -> None:
+        """A keyless deployment generates nothing. That IS zero, and saying so is
+        different from never having looked."""
+        store = _Store(_row())
+        self._run_with(store, {"images": _stage("images", "skipped", images=0, planned=0)})
+        assert store.final("images") == 0
+
+    def test_a_run_with_no_image_stage_leaves_the_previous_count_alone(self) -> None:
+        """No image seam bound, or a reviewer's EDIT (images are deliberately not in
+        EDIT_STAGES). Writing 0 would erase a real count from the first run."""
+        store = _Store(_row())
+        self._run_with(store, {})
+        assert store.final("images") is None
+
+
+class TestAReviewersEditDoesNotBuyASecondSetOfPhotos:
+    def test_images_are_not_in_the_edit_sequence(self) -> None:
+        """The edited page already carries the images the first run paid for. Running
+        the stage again would generate and CHARGE for a second set, then inject them
+        alongside the first."""
+        from app.services.content_pipeline.runner import EDIT_STAGES
+
+        assert "images" not in EDIT_STAGES
+
+    def test_images_run_after_the_text_is_final_and_before_the_meta(self) -> None:
+        """Placement is load-bearing twice over: planning reads the FINISHED headings
+        (grounding rewrites them), and the gate must score the page as the reader gets
+        it - photos included."""
+        from app.services.content_pipeline.runner import PAGE_STAGES
+
+        order = list(PAGE_STAGES)
+        assert order.index("grounding") < order.index("images") < order.index("title_meta")
+        assert order.index("images") < order.index("gate")
+
+
+class TestOnlyAPublishedSiblingIsALinkTarget:
+    """v1 maps a cluster spoke to `/{slug}`, which is a guess at a path that may not
+    exist - a 404 in a client's own body copy. `content_jobs.wp_url` (migration 0057)
+    is written at the publish push, so a row that has one is a page a reader can reach.
+    """
+
+    def test_a_draft_with_no_published_url_contributes_nothing(self) -> None:
+        from workers.tasks.content_pipeline import published_sibling_urls
+
+        assert published_sibling_urls([
+            {"kw": "water heater repair", "wp_url": None},
+            {"kw": "burst pipe repair", "wp_url": ""},
+        ]) == {}
+
+    def test_a_published_page_becomes_a_real_target(self) -> None:
+        from workers.tasks.content_pipeline import published_sibling_urls
+
+        assert published_sibling_urls([
+            {"kw": "burst pipe repair", "wp_url": "https://acme.test/burst"},
+        ]) == {"burst pipe repair": "https://acme.test/burst"}
+
+    def test_the_most_recent_publication_wins_for_a_repeated_keyword(self) -> None:
+        """The query orders newest-first; a stale permalink for the same keyword must
+        not overwrite the current one."""
+        from workers.tasks.content_pipeline import published_sibling_urls
+
+        assert published_sibling_urls([
+            {"kw": "burst pipe repair", "wp_url": "https://acme.test/new"},
+            {"kw": "Burst Pipe Repair", "wp_url": "https://acme.test/old"},
+        ]) == {"burst pipe repair": "https://acme.test/new"}
 
 class TestTheEngineFlagActuallyRoutes:
     """The flag was documented in two places and read by nothing for a day, so
@@ -772,3 +887,182 @@ class TestTheEntityPictureIsKept:
             "gate": _stage("gate", "ok", weighted_total=80.0, entity_coverage={"covered": []}),
         })
         assert "entity_coverage" not in store.final("qa_score")
+
+
+# --------------------------------------------------------------------------- #
+# The two STAGES the worker now threads data through. They live here rather than
+# beside the other stage suites because this package's link and image data only
+# means anything once it reaches the row, and that path is this module's subject.
+# --------------------------------------------------------------------------- #
+class _SerpPort:
+    """`FakeSerpResearcher` covers serp + metrics; the teardown needs a page fetcher,
+    which is stubbed - that is also the real degraded-teardown path."""
+
+    def __init__(self) -> None:
+        from integrations.content_research import FakeSerpResearcher
+
+        self._inner = FakeSerpResearcher()
+
+    def serp(self, keyword: str, geo: str | None = None) -> Any:
+        return self._inner.serp(keyword, geo)
+
+    def keyword_metrics(self, keyword: str) -> Any:
+        return self._inner.keyword_metrics(keyword)
+
+    def teardown(self, urls: list[str], keyword: str, geo: str | None) -> Any:
+        from app.services.content_research import TeardownFetch
+
+        return TeardownFetch(pages=[], refused=[])
+
+
+_LINK_DRAFT = (
+    "# Emergency plumber in Dallas\n\n"
+    "We answer the phone at 2am, every night of the year, and we get there fast.\n\n"
+    "## What a burst pipe costs\n\nWater spreads fast through a slab.\n"
+)
+
+
+def _briefed_ctx(**kw: Any) -> PipelineContext:
+    """A context carrying a REAL ResearchBrief, so the cluster map is the real one."""
+    from app.services.content_pipeline.research import run_research
+
+    base: dict[str, Any] = {
+        "client_name": "Dallas Plumbing",
+        "primary_keyword": "emergency plumber dallas",
+        "geo": "Dallas", "page_type": "service",
+        "title": "Emergency Plumber in Dallas - Dallas Plumbing",
+        "meta_description": "We answer at 2am.",
+    }
+    base.update(kw)
+    ctx = PipelineContext(**base)
+    ctx.draft_md = _LINK_DRAFT
+    run_research(ctx, researcher=_SerpPort())
+    return ctx
+
+
+class TestTheClusterMapFinallyBecomesInternalLinks:
+    """`gate.py`'s `_content_for` hard-coded `internal_links=[]` and no stage filled it, so
+    content_qa's internal_linking dimension scored the same 40 - "pillar<->cluster map
+    not applied" - on every page this engine has ever written. The map it needed was
+    already in the context. Found by reading the dimension's own note against the
+    stage list."""
+
+    def test_a_page_never_links_to_itself(self) -> None:
+        """On a pillar page `cluster.pillar` IS the primary keyword, so without this
+        the page's most prominent internal link points at the page you are on."""
+        from app.services.content_pipeline.schema_links import plan_internal_links
+
+        ctx = _briefed_ctx()
+        links = plan_internal_links(ctx)
+        assert all(x.keyword.lower() != "emergency plumber dallas" for x in links)
+
+    def test_a_target_with_no_published_page_gets_no_invented_url(self) -> None:
+        """v1 maps a spoke to `/{slug}` - a guess at a path that may not exist. An
+        anchor with no href is a smaller defect than a 404 in a client's body copy."""
+        from app.services.content_pipeline.schema_links import plan_internal_links
+
+        links = plan_internal_links(_briefed_ctx())
+        assert links, "the cluster map must produce targets"
+        assert all(x.url == "" for x in links)
+        assert all(x.anchor and x.keyword for x in links), "the plan still states both"
+
+    def test_the_registry_supplies_the_only_real_urls(self) -> None:
+        from app.services.content_pipeline.schema_links import plan_internal_links
+
+        ctx = _briefed_ctx()
+        target = plan_internal_links(ctx)[0].keyword
+        links = plan_internal_links(ctx, internal_urls={target: "https://acme.test/x"})
+        assert links[0].url == "https://acme.test/x"
+
+    def test_only_a_link_with_a_url_is_written_into_the_page(self) -> None:
+        """`- [anchor]()` renders as unclickable text: markup that looks like a link
+        and is not, which is the exact "looks done, is not" outcome to avoid."""
+        from app.services.content_pipeline.schema_links import run_schema_links
+
+        ctx = _briefed_ctx()
+        run_schema_links(ctx, internal_urls=None)
+        assert "Related resources" not in ctx.draft_md
+        assert "]()" not in ctx.draft_md
+
+        real = _briefed_ctx()
+        target = real.brief["research"].cluster.supporting[0]
+        run_schema_links(real, internal_urls={target: "https://acme.test/x"})
+        assert f"- [{target}](https://acme.test/x)" in real.draft_md
+
+    def test_a_reviewers_edit_does_not_append_a_second_link_block(self) -> None:
+        """schema_links is in EDIT_STAGES, so it re-runs on a draft that already
+        carries the block. A twice-edited page would carry three copies of its own
+        link list."""
+        from app.services.content_pipeline.schema_links import run_schema_links
+
+        ctx = _briefed_ctx()
+        target = ctx.brief["research"].cluster.supporting[0]
+        for _ in range(3):
+            run_schema_links(ctx, internal_urls={target: "https://acme.test/x"})
+        assert ctx.draft_md.count("## Related resources") == 1
+
+    def test_the_gate_scores_the_links_the_page_carries_not_the_plan(self) -> None:
+        """Handing the gate the PLAN would score a page 100 for links a reader cannot
+        click. The plan is reported separately so the low score has a stated cause."""
+        from app.services.content_pipeline.gate import run_gate
+        from app.services.content_pipeline.schema_links import run_schema_links
+
+        ctx = _briefed_ctx()
+        run_schema_links(ctx, internal_urls=None)
+        assert ctx.brief["internal_links"] == [], "nothing resolved, so nothing on page"
+        assert ctx.brief["internal_links_planned"], "the plan still exists"
+
+        result = run_gate(ctx, writer=None)
+        assert result.data["dimensions"]["internal_linking"] == 40
+        assert any("PLANNED but have no url" in n for n in result.notes)
+
+    def test_a_resolved_plan_lifts_the_dimension_off_its_floor(self) -> None:
+        from app.services.content_pipeline.gate import run_gate
+        from app.services.content_pipeline.schema_links import run_schema_links
+
+        ctx = _briefed_ctx()
+        cluster = ctx.brief["research"].cluster
+        registry = {k: f"https://acme.test/{i}" for i, k in enumerate(cluster.supporting[:3])}
+        run_schema_links(ctx, internal_urls=registry)
+        result = run_gate(ctx, writer=None)
+        assert result.data["dimensions"]["internal_linking"] > 40
+
+    def test_a_business_profile_post_is_not_part_of_a_cluster_scheme(self) -> None:
+        """A gbp_post is a standalone business update - the same early return
+        content_qa's own _score_internal_linking makes."""
+        from app.services.content_pipeline.schema_links import plan_internal_links
+
+        assert plan_internal_links(_briefed_ctx(page_type="gbp_post")) == []
+
+
+class TestAHeroPhotoIsNotPartOfTheAnswerBlock:
+    def test_an_injected_image_line_is_not_counted_as_answer_prose(self) -> None:
+        """The image stage injects the hero directly under the H1, which is inside the
+        direct-answer block, and `_score_structure_readability` measures that block
+        against a 40-55 WORD band. Counting `![alt](url)` as four words pushes a
+        correct answer out of the band and loses the dimension to markup."""
+        from app.services.content_pipeline.gate import answer_block_of
+
+        with_image = (
+            "# Emergency plumber in Dallas\n\n"
+            "![Emergency plumber in Dallas](https://cdn.example/hero.png)\n\n"
+            "We answer the phone at 2am.\n\n## Next\n"
+        )
+        assert answer_block_of(with_image).strip() == "We answer the phone at 2am."
+
+    def test_the_meta_writer_is_shown_prose_not_image_markup(self) -> None:
+        """title_meta shows the writer the page's first twelve lines for tone. With the
+        hero injected two lines under the H1, two of those twelve were spent on
+        `![alt](url)` - the writer should see how the page READS."""
+        from app.services.content_pipeline.title_meta import opening_prose
+
+        excerpt = opening_prose(
+            "# Emergency plumber in Dallas\n\n"
+            "![Emergency plumber in Dallas](https://cdn.example/hero.png)\n\n"
+            "We answer the phone at 2am.\n",
+            # Four, because the blank lines that carry the paragraph structure still
+            # count - dropping those would run the whole excerpt together.
+            lines=4,
+        )
+        assert "cdn.example" not in excerpt
+        assert "We answer the phone at 2am." in excerpt

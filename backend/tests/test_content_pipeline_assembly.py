@@ -14,9 +14,12 @@ from typing import Any
 
 import pytest
 
+from app.config import get_settings
 from app.services.content_pipeline.assembly import build_page_stages
 from app.services.content_pipeline.context import PipelineContext
 from app.services.content_pipeline.runner import PAGE_STAGES, run_page
+from app.services.cost_gate import GateContext, GateDecision
+from integrations.images import GeneratedImage
 
 pytestmark = pytest.mark.unit
 
@@ -99,6 +102,23 @@ class _Writer:
         return "{}"
 
 
+class _Images:
+    """A non-fake image generator, so the binding is exercised, not the keyless skip."""
+
+    def generate(self, prompt: str, alt: str) -> GeneratedImage:
+        return GeneratedImage(url="https://cdn.example/x.png", alt=alt)
+
+
+class _CostGate:
+    """Refuses every image: the binding is under test here, not the spend path."""
+
+    def evaluate(self, ctx: GateContext) -> GateDecision:
+        return GateDecision(outcome="skip", reason="dial off in this test")
+
+    def commit(self, ctx: GateContext, cost: float, *, cache_value: Any | None = None) -> None:
+        raise AssertionError("a skipped decision must never be committed")
+
+
 def _ctx(**kw: Any) -> PipelineContext:
     base: dict[str, Any] = {
         "job_code": "CJ-4200", "engagement_id": "eng-1",
@@ -130,6 +150,17 @@ class TestAMissingDependencyOmitsItsStageRatherThanFakingIt:
         assert writing & set(build_page_stages(store=_Store())) == set()
         assert writing <= set(build_page_stages(writer=_Writer(), store=_Store()))  # type: ignore[arg-type]
 
+    def test_the_image_stage_needs_a_generator_and_something_to_meter_it(self) -> None:
+        """Images are the one stage that spends outside the metered writer seam. A
+        generator bound without the cost gate would generate unbilled, uncapped
+        images that the agency-wide spend halt could not stop."""
+        assert "images" not in build_page_stages(writer=_Writer(), store=_Store())  # type: ignore[arg-type]
+        assert "images" not in build_page_stages(images=_Images(), settings=get_settings())
+        assert "images" not in build_page_stages(images=_Images(), cost_gate=_CostGate())  # type: ignore[arg-type]
+        assert "images" in build_page_stages(
+            images=_Images(), cost_gate=_CostGate(), settings=get_settings(),  # type: ignore[arg-type]
+        )
+
     def test_fully_bound_covers_every_declared_stage(self) -> None:
         """Both sequences: a full page, and a reviewer's edit. A declared stage
         that cannot be bound is a step `run_page` silently skips."""
@@ -137,6 +168,7 @@ class TestAMissingDependencyOmitsItsStageRatherThanFakingIt:
 
         stages = build_page_stages(
             writer=_Writer(), researcher=object(), store=_Store(),  # type: ignore[arg-type]
+            images=_Images(), cost_gate=_CostGate(), settings=get_settings(),  # type: ignore[arg-type]
         )
         assert set(stages) == set(PAGE_STAGES) | set(EDIT_STAGES)
 
