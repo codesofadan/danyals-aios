@@ -397,6 +397,11 @@ def _persist_success(
         outline = dict(ctx.outline)
         outline["meta"] = {"title": ctx.title, "description": ctx.meta_description}
         fields["outline"] = outline
+    # The gate computes the entity picture on its way to a score; persist it so the
+    # reviewer's entity tab has the coverage v1 always gave them.
+    entities = qa.pop("entity_coverage", None)
+    if isinstance(entities, dict) and entities:
+        fields["entity_coverage"] = entities
     if schema_data.get("json_ld"):
         fields["json_ld"] = schema_data["json_ld"]
     # `primary_type` is what the schema stage calls the @type it settled on.

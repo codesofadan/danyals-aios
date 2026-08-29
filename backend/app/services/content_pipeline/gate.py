@@ -209,6 +209,20 @@ def run_gate(
         )
 
     data: dict[str, Any] = {
+        # The entity picture the gate already computed on its way to a score. It
+        # was thrown away with the local `content` object, so the `entities`
+        # column stayed empty for every page this engine wrote and the reviewer's
+        # entity tab had nothing in it - while the numbers existed, right here.
+        "entity_coverage": {
+            "table_stakes": list(getattr(brief.teardown, "table_stakes_entities", []) or []),
+            "differentiators": list(
+                getattr(brief.teardown, "differentiator_entities", []) or []
+            ),
+            "covered": list(content.entities_covered),
+            "missing": list(content.entities_missing),
+            "primary_density": content.primary_density,
+            "local_uniqueness": content.local_uniqueness,
+        },
         "dimensions": dict(verdict.dimensions),
         "weighted_total": verdict.weighted_total,
         "passed": verdict.passed,

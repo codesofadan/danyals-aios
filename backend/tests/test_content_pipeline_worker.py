@@ -728,3 +728,47 @@ class TestTheStoredDraftCarriesNoMachineDashes:
     def test_a_numeric_range_collapses_rather_than_becoming_spaced(self) -> None:
         store = self._persisted(f"Most repairs run 5{self.EN}10 hours.")
         assert "5-10" in store.final("draft_md")
+
+
+class TestTheEntityPictureIsKept:
+    """The gate computes entity coverage on its way to a score and used to throw
+    it away with its local content object - so the `entities` column stayed empty
+    for every page this engine wrote, and the reviewer's entity tab had nothing in
+    it, while the numbers existed inside the stage that had just run."""
+
+    def test_the_coverage_is_persisted(self) -> None:
+        store = _Store(_row())
+
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# Page\n\nWords."
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        _run(store, {
+            "draft": draft,
+            "gate": _stage(
+                "gate", "ok", weighted_total=80.0, passed=False,
+                entity_coverage={
+                    "table_stakes": ["licence"], "differentiators": ["night crew"],
+                    "covered": ["licence"], "missing": ["night crew"],
+                    "primary_density": 1.4, "local_uniqueness": {},
+                },
+            ),
+        })
+        ec = store.final("entity_coverage")
+        assert ec["covered"] == ["licence"]
+        assert ec["missing"] == ["night crew"]
+
+    def test_it_does_not_pollute_the_qa_scorecard(self) -> None:
+        """It travels on the gate's data to get here; it must not end up stored as
+        a QA dimension, where it would read as an unscored criterion."""
+        store = _Store(_row())
+
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "words"
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        _run(store, {
+            "draft": draft,
+            "gate": _stage("gate", "ok", weighted_total=80.0, entity_coverage={"covered": []}),
+        })
+        assert "entity_coverage" not in store.final("qa_score")
