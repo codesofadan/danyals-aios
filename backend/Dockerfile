@@ -20,6 +20,7 @@ COPY backend/pyproject.toml backend/README.md ./
 COPY backend/app ./app
 COPY backend/workers ./workers
 COPY backend/integrations ./integrations
+COPY backend/seo-content-os ./seo-content-os
 # `.[ai,automation]` bakes the Context/Content/ai-assist provider SDKs (anthropic,
 # voyageai, pinecone) so a supplied ANTHROPIC_API_KEY actually activates, PLUS
 # playwright for the citation-submission bot (bot_fillable/captcha_assisted
