@@ -914,3 +914,95 @@ class TestRepublishingADegradedJob:
 
 def _actor() -> Any:
     return type("U", (), {"id": "u1", "role": "owner", "client_id": None, "email": "o@x.com"})()
+
+
+# --------------------------------------------------------------------------- #
+# The QA acknowledgement survives the request (D-4).
+#
+# `ApproveGate` puts the scorecard in front of the approver and composes a note
+# recording what they were shown ("QA acknowledged: 61/100 weighted, did not
+# pass; below floor: eeat_experience"). That note was being posted and then
+# silently dropped: the approve branch read `body.note` only under `action ==
+# "edit"`, and `record_activity` was called with no `meta`.
+#
+# The consequence was that D-4's acknowledgement half could not be audited after
+# the fact. The dialog appeared, the reviewer clicked through it, and nothing
+# anywhere remembered which score they had accepted - so "who approved a 61, and
+# did they know?" was unanswerable. Until R3A-36's `qa_acknowledged_*` columns
+# exist, this activity note IS the audit trail.
+# --------------------------------------------------------------------------- #
+
+class TestTheReviewNoteIsRecorded:
+    @pytest.fixture
+    def activity(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        """Capture every record_activity call the review endpoint makes."""
+        calls: list[dict[str, Any]] = []
+
+        async def _spy(_actor: Any, **kw: Any) -> None:
+            calls.append(kw)
+
+        monkeypatch.setattr("app.routers.content.record_activity", _spy)
+        return calls
+
+    async def test_an_approval_records_the_qa_acknowledgement(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+    ) -> None:
+        repo.seed(code="CJ-1", status="needs_review",
+                  qa_score={"passed": False, "weighted_total": 61})
+        wire("manager")
+        ack = "QA acknowledged: 61/100 weighted, did not pass; below floor: eeat_experience"
+        resp = await client.post(
+            "/api/v1/content/jobs/CJ-1/review",
+            json={"action": "approve", "note": ack},
+        )
+        assert resp.status_code == 200
+        # The score the approver was shown is now answerable from the activity log.
+        assert activity[0]["meta"] == ack
+        assert activity[0]["action"] == "approved content for publishing"
+
+    async def test_a_rejection_records_its_reason(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+    ) -> None:
+        repo.seed(code="CJ-1", status="needs_review")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/content/jobs/CJ-1/review",
+            json={"action": "reject", "note": "the case study is not ours"},
+        )
+        assert resp.status_code == 200
+        assert activity[0]["meta"] == "the case study is not ours"
+
+    async def test_an_edit_does_not_duplicate_its_instruction_into_the_log(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+    ) -> None:
+        # The edit instruction is already persisted on the row, where the worker
+        # reads it. Repeating it as activity meta would duplicate, not add.
+        repo.seed(code="CJ-1", status="needs_review")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/content/jobs/CJ-1/review",
+            json={"action": "edit", "note": "tighten the H2s"},
+        )
+        assert resp.status_code == 200
+        assert activity[0]["meta"] is None
+        assert repo.jobs["CJ-1"]["edit_instruction"] == "tighten the H2s"
+
+    @pytest.mark.parametrize("note", [None, "", "   \n\t "])
+    async def test_an_absent_note_records_nothing_rather_than_an_empty_string(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+        note: str | None,
+    ) -> None:
+        # An empty meta would read in the activity feed as "acknowledged nothing",
+        # which is a different and worse claim than recording no meta at all.
+        repo.seed(code="CJ-1", status="needs_review")
+        wire("manager")
+        body: dict[str, Any] = {"action": "approve"}
+        if note is not None:
+            body["note"] = note
+        resp = await client.post("/api/v1/content/jobs/CJ-1/review", json=body)
+        assert resp.status_code == 200
+        assert activity[0]["meta"] is None

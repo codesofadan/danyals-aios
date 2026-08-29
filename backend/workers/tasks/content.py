@@ -2199,11 +2199,17 @@ def publish_content_job(
     # already advisory at the audited commit, and `PublishBlocked` is raised nowhere
     # in the codebase. What the plan asks for is therefore already true.
     #
-    # What is NOT yet built is D-4's other half: "advisory + MANDATORY
-    # ACKNOWLEDGEMENT until calibrated". The verdict is written to the server log
-    # only - the reviewer approving the draft is never shown it and never has to
-    # acknowledge a sub-threshold score. Closing that needs a decision on the
-    # acknowledgement's shape, so it is recorded as open rather than guessed at.
+    # D-4's other half - "advisory + MANDATORY ACKNOWLEDGEMENT until calibrated" - is
+    # now built, but it lives entirely on the REVIEW side, not here: every approve
+    # button routes through `frontend/components/content/ApproveGate.tsx`, which
+    # fetches the scorecard, shows the weighted total and each sub-floor dimension,
+    # and requires an "Acknowledge & approve" click (typing PUBLISH on the detail
+    # screen when the draft actually failed). The acknowledgement it composes is
+    # recorded as the activity entry's `meta` by the approve endpoint.
+    #
+    # So the log line below is no longer the only record of the verdict, and it is
+    # deliberately kept anyway: it is the WORKER's own observation at push time, which
+    # is a different fact from what a human was shown minutes earlier at approval.
     qa = _as_dict(row.get("qa_score"))
     logger.info(
         "content_publish_qa_advisory",

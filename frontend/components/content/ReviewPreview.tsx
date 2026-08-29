@@ -28,6 +28,7 @@ import {
 } from "@/lib/hooks/content";
 import type { ContentJob } from "@/lib/content";
 import type { ReviewAction } from "./ReviewGate";
+import ApproveGate from "./ApproveGate";
 
 const PAGE_LABEL: Record<ContentJob["pageType"], string> = {
   service: "Service", blog: "Blog", local: "Local", gbp_post: "GMB Post",
@@ -150,6 +151,11 @@ export default function ReviewPreview({
 
   const [tab, setTab] = useState<TabKey>("article");
   const [editOpen, setEditOpen] = useState(false);
+  // Approving from the preview goes through the SAME acknowledgement gate as the
+  // queue. It used to publish straight from this button - and because the QA
+  // scorecard is the fifth tab and "article" is the default, a reviewer could sign
+  // off on a client's live page having never opened the score at all.
+  const [approveOpen, setApproveOpen] = useState(false);
   const [note, setNote] = useState("");
 
   const md = draftQ.data?.draft ?? "";
@@ -414,7 +420,7 @@ export default function ReviewPreview({
         <div className="co-gate-actions" style={{ marginTop: 14 }}>
           <button
             className="primary-btn co-approve"
-            onClick={() => onAction(job.id, "approve")}
+            onClick={() => setApproveOpen(true)}
             disabled={!canReview}
             title={reviewGateTitle}
           >
@@ -439,6 +445,16 @@ export default function ReviewPreview({
           </button>
         </div>
       )}
+      <ApproveGate
+        code={approveOpen ? job.id : null}
+        title={job.topic}
+        onCancel={() => setApproveOpen(false)}
+        onConfirm={(note) => {
+          setApproveOpen(false);
+          onAction(job.id, "approve", note);
+        }}
+      />
+
       {inReview && !hideActions && !canReview && (
         <div className="cs" style={{ marginTop: 8 }}>
           Ask a lead (owner, admin or manager) to approve, edit or reject this draft.

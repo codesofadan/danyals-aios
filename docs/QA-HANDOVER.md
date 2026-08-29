@@ -58,37 +58,55 @@ that is itself worth reporting.
 | Suite | Command (from that folder) | Expected |
 |---|---|---|
 | Audit engine | `./.venv/bin/python -m pytest tests -q` | **859 passed**, 0 failed (~6s) |
-| Backend | `./.venv/bin/python -m pytest tests -q` | **6,816 passed · 9 failed · 144 skipped** (~10 min) |
+| Backend | `./.venv/bin/python -m pytest tests -q -n 8` | **7,177 passed · 0 failed · 148 skipped** (~40 min) |
 | Frontend types | `npx tsc --noEmit` | clean, exit 0 |
-| Frontend units | `npx vitest run` | green |
+| Frontend units | `npx vitest run --no-file-parallelism` | **260 passed**, 37 files |
+| Frontend build | `npx next build` | succeeds |
 
-The backend suite takes **>3 hours single-process**. Use `pytest -n 8` (pytest-xdist)
-or budget the time. This is defect **D-4** below.
+The backend suite takes **>3 hours single-process** - `-n 0` is not a realistic way to
+run it. Use `-n 8` (pytest-xdist).
+
+**Run the two suites one at a time.** Both are pool-parallel, and on a laptop they
+will fight: running them concurrently pushed load average past 28 here and produced
+**9 phantom frontend failures** that all passed on a serial re-run. If you see
+failures, re-run the suite alone before believing them - and prefer
+`--no-file-parallelism` for vitest when you want a number you can trust.
+
+**Run against a clean checkout.** A test failure in a shared or dirty tree may be
+true of no commit at all. The four failures measured here
+(`test_builder_branding`, `test_citation_gap`, `test_web2_catalog` x2) came entirely
+from another session's uncommitted edits; the same tests pass on a `git worktree` of
+the same HEAD. `git status` before you file anything.
+
+`npx next build` is a separate gate from `tsc` and catches things `tsc` does not - an
+unused import failed the build here while types, units and a live HTTP 200 were all
+green. A deployable frontend is not implied by a passing test suite.
 
 ---
 
-## 4 · The 9 backend failures are EXPECTED — do not file them
+## 4 · Nothing runs on a timer
 
-All nine assert that Celery's periodic schedule is populated. It is deliberately empty:
-`celery_app.conf.beat_schedule = {}` in `backend/workers/celery_app.py`. Cron was
-switched off by owner instruction on 2026-08-19 and the full schedule is preserved
-verbatim in `_BEAT_SCHEDULE_DISABLED` right below it.
+Cron was switched off by owner instruction on 2026-08-19:
+`celery_app.conf.beat_schedule = {}` in `backend/workers/celery_app.py`. The full
+schedule is preserved verbatim in `_BEAT_SCHEDULE_DISABLED` right below it, and every
+task stays registered and callable on demand via `.delay()`.
 
-```
-tests/modules/billing/test_tasks.py::test_the_beat_schedule_wires_the_sweep
-tests/modules/local_seo/test_tasks.py::test_the_beat_task_is_wired_into_the_schedule_and_the_include_list
-tests/modules/rank_tracker/test_tasks.py::test_the_beat_schedule_registers_both_scheduled_tasks
-tests/test_celery.py::test_context_dispatch_is_on_the_beat_schedule
-tests/test_reports.py::test_scheduled_jobs_endpoint_lists_live_beat_schedule
-tests/test_scheduled_jobs.py::test_scheduled_jobs_reflects_live_beat_schedule
-tests/test_scheduled_jobs.py::test_beat_schedule_includes_the_autonomous_report_jobs
-tests/test_scheduled_jobs.py::test_scheduled_jobs_surfaces_last_run_and_status
-tests/test_scheduled_jobs.py::test_scheduled_jobs_flags_waiting_on_absent_provider_key
-```
+**Consequence for you: every job is event-driven or on-demand.** Do not write test
+cases that wait for a scheduled run. Concretely, nothing re-sweeps citation liveness,
+Policy Radar produces a brief only when a user asks for one, and no backup or
+reconcile happens by itself.
 
-They are left red on purpose — they are the acceptance suite for restoring the
-schedule. **Consequence for you: nothing in this system runs on a timer.** Every job is
-event-driven or on-demand. Do not write test cases that wait for a scheduled run.
+`aios-beat` still starts and stays green under `systemctl status` while firing
+nothing, so a quiet beat log is correct here rather than broken. See *Nothing runs on
+a timer* in `infra/deploy/README-deploy.md` for the consequences in full and the
+two-line re-enable - note that several parked jobs call paid APIs, so switching them
+on moves the bill as well as the freshness.
+
+*(An earlier revision of this document listed 9 expected beat-schedule failures. Those
+tests were since repaired to assert the PRESERVED schedule instead of the live one -
+strictly better, because the wiring is now checked even while cron is parked, so
+turning it back on cannot silently skip a job. They pass. There are no expected
+failures.)*
 
 ---
 
@@ -100,11 +118,11 @@ Full detail in `docs/implementation/KNOWN_LIMITATIONS.md`. The headlines:
 |---|---|
 | **Scheduling** | Nothing runs autonomously (§4 above) |
 | **Citations** | Submission is being rebuilt around data aggregators + a human work queue. The old DOM-spec approach is not the target |
-| **Content → WordPress** | Design *capture* is real. Translating a captured design into a live page-builder block tree is **not built** |
-| **QA gate on publish** | Advisory only. `PublishBlocked` is raised nowhere. The mandatory-acknowledgement half (D-4) is not built — a lead can approve a sub-threshold draft and is never shown the score |
-| **Backups / restore** | Not started. Needs real infrastructure |
+| **Content → WordPress** | Built end to end: capture → design system → layout → Elementor tree → oracle validation → push. `POST /replica` queues a job that publishes a **draft** Elementor page onto the client's connected site and returns a preview link; driven from the Design Replicator on `/admin/wordpress`. Needs the AIOS Publisher plugin (xmlrpc / app-password connections come back `blocked`) and `owner_confirmed_source: true` (copyright gate, 400 otherwise). Two real gaps: images are **hot-linked from the source** rather than sideloaded into the client's media library, and only the navbar is wired to the target's widget-capability probe - forms, sliders, galleries, tabs, price tables and post lists still take the free-tier fallback |
+| **QA gate on publish** | Advisory **by design** - `PublishBlocked` is defined and caught but raised nowhere, and the approve endpoint never consults the score, so a lead *can* still approve a sub-threshold draft. The human sign-off is the gate. D-4's acknowledgement half is now built: all four approve surfaces show the weighted total and every sub-70 dimension before publishing (three via `ApproveGate`, and `ContentJobDetail` requires typing PUBLISH over a **failed** scorecard), and the acknowledgement is recorded as the activity entry's `meta`. Still missing: R3A-36's durable `qa_acknowledged_by/_at/_override_reason` columns - the activity note is the audit trail until they exist. The threshold itself is **uncalibrated** (P7A-11: the golden set holds 2 cases against the 30-50 asked for), which is why it must not become a hard gate yet |
+| **Backups / restore** | Built and working, 47 tests green. `POST /backups/run` takes a real `pg_dump -Fc` snapshot; `POST /backups/{id}/restore` runs `pg_restore --clean --if-exists` and is doubly guarded - owner-only at the router *and* the request body's `confirm` must echo the snapshot id. Ledger in `backup_snapshots` / `backup_config` (migration 0026, RLS forced); UI at **Platform → Integrations → Backups**. Set `BACKUP_ARTIFACT_DIR` (install.sh creates it); the B2 offsite copy is optional and a missing credential does not fail the local snapshot. **The nightly snapshot does not fire** - same reason as everything else, see §4. No restore has been rehearsed on real data yet; do that before go-live |
 | **`TaskResponse.due`** | Served as a year-less string (`"Jul 12"`); the frontend infers the year |
-| **Flaky under load** | `test_ready.py::test_ready_is_bounded_and_reports_sibling` and `test_context_worker.py::test_full_pipeline_activity_to_summarized_context` pass in isolation, flake under CPU contention |
+| **Flaky under load** | `test_ready.py::test_ready_is_bounded_and_reports_sibling` and `test_context_worker.py::test_full_pipeline_activity_to_summarized_context` pass in isolation and flake under CPU contention. The frontend suite flakes the same way - 9 failures under load, 0 serially. See §3: run one suite at a time, on a clean tree |
 | **Free audit** | `--mode free` hard-clears PageSpeed, so the free tier loses Core Web Vitals even though PSI has a free tier |
 | **Migration numbering** | `0070_` and `0072_` each name **two** files. Apply migrations in full-filename sort order |
 

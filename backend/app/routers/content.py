@@ -1007,8 +1007,27 @@ async def review_content_job(
         "reject": "rejected content",
     }[body.action]
     client_id = job.get("client_id")
+    # The reviewer's note is the audit trail for the two actions that do not otherwise
+    # persist it, and it was being dropped on the floor for both.
+    #
+    # On APPROVE it carries the QA acknowledgement that `ApproveGate` composes from the
+    # scorecard it just put in front of the approver ("QA acknowledged: 61/100
+    # weighted, did not pass; below floor: experience, specificity"). That string is
+    # currently the ONLY durable record of what the approver was shown - R3A-36's
+    # `qa_acknowledged_by` / `qa_acknowledged_at` / `qa_override_reason` columns do not
+    # exist yet - so discarding it made the acknowledgement half of D-4 unfalsifiable
+    # after the fact: the dialog was shown, and nothing anywhere remembered it.
+    #
+    # On REJECT it carries the reason, which is the only explanation the client-facing
+    # side of a dropped draft ever gets.
+    #
+    # EDIT is excluded deliberately: its note is already stored as `edit_instruction`
+    # on the row above, where the worker reads it, so repeating it here would duplicate
+    # rather than add.
+    note = (body.note or "").strip()
     await record_activity(
         actor, kind="content", action=action, target=job.get("client_name", ""),
+        meta=note if note and body.action != "edit" else None,
         entity_type="client" if client_id is not None else None,
         entity_id=str(client_id) if client_id is not None else None,
     )

@@ -33,6 +33,7 @@ import { useClients } from "@/lib/hooks/clients";
 import ReviewPreview from "./ReviewPreview";
 import TemplateGallery from "./TemplateGallery";
 import type { ReviewAction } from "./ReviewGate";
+import ApproveGate from "./ApproveGate";
 
 // One item per non-blank line — how the grounding textareas map to the API arrays.
 const _lines = (s: string): string[] => s.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -151,6 +152,11 @@ export default function ContentWizard({
   // Step 4/5 — the queued job codes + which one is previewed
   const [codes, setCodes] = useState<string[] | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  // Step 5's "Approve & push to WordPress" published with no score in front of the
+  // approver. It now opens the same acknowledgement gate as every other approve
+  // surface - this one matters most, because it is the button furthest from the
+  // scorecard: the wizard never shows QA at all.
+  const [approving, setApproving] = useState<{ id: string; topic: string } | null>(null);
 
   const research = useContentResearch();
   const generate = useGenerateFromResearch();
@@ -747,7 +753,7 @@ export default function ContentWizard({
                         <span className="material-symbols-rounded">open_in_new</span>Open in WordPress
                       </a>
                     ) : j.status === "needs_review" ? (
-                      <button className="primary-btn co-approve" onClick={() => onReview(j.id, "approve")}>
+                      <button className="primary-btn co-approve" onClick={() => setApproving({ id: j.id, topic: j.topic })}>
                         <span className="material-symbols-rounded">cloud_upload</span>Approve &amp; push to WordPress
                       </button>
                     ) : j.status === "publishing" ? (
@@ -812,6 +818,17 @@ export default function ContentWizard({
           </button>
         )}
       </div>
+
+      <ApproveGate
+        code={approving?.id ?? null}
+        title={approving?.topic ?? ""}
+        onCancel={() => setApproving(null)}
+        onConfirm={(note) => {
+          const j = approving;
+          setApproving(null);
+          if (j) onReview(j.id, "approve", note);
+        }}
+      />
     </section>
   );
 }

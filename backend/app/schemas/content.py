@@ -238,12 +238,20 @@ class ContentReviewRequest(BaseModel):
 
     ``approve`` -> publishing, ``reject`` -> rejected, ``edit`` -> back to drafting.
 
-    ``note`` is the reviewer's free-text GUIDED-EDIT instruction (e.g. "make the
-    intro punchier, add an FAQ, tighten the H2s"). It is only meaningful for the
-    ``edit`` action: the endpoint persists it on the job (``edit_instruction``) so
-    the worker re-drafts targeting exactly what the reviewer asked instead of
-    blind-regenerating. Ignored (harmless) for approve/reject; optional for edit (an
-    empty note simply re-runs the pipeline without steering).
+    ``note`` carries the reviewer's free text, and all three actions use it:
+
+    * ``edit`` - the GUIDED-EDIT instruction (e.g. "make the intro punchier, add an
+      FAQ, tighten the H2s"). Persisted on the job as ``edit_instruction`` so the
+      worker re-drafts targeting exactly what was asked instead of blind-regenerating.
+      REQUIRED: a blank instruction is rejected (422), because a job sent back with no
+      steering has already left the review gate the reviewer would need to retry from.
+    * ``approve`` - the QA ACKNOWLEDGEMENT composed by the frontend's ``ApproveGate``
+      from the scorecard it showed ("QA acknowledged: 61/100 weighted, did not pass").
+      Recorded on the activity entry. Until R3A-36's ``qa_acknowledged_*`` columns
+      exist this note is the only durable evidence of what the approver was shown.
+    * ``reject`` - the reason, likewise recorded on the activity entry.
+
+    Optional for approve and reject; an absent note simply records nothing extra.
     """
 
     model_config = ConfigDict(populate_by_name=True)
