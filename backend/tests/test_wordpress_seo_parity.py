@@ -22,12 +22,15 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from integrations.errors import ProviderCallError
 from integrations.wordpress import (
+    STRUCTURAL_SEO_LIMITS,
     PostDraft,
     PublishResult,
     SeoFields,
     WordPressClient,
     XmlRpcWordPressPublisher,
+    seo_limit_note,
     seo_meta,
 )
 from workers.tasks.content import WpTarget, publish_content_job
@@ -484,3 +487,115 @@ def test_seo_meta_never_writes_an_empty_value_over_a_human_edit() -> None:
         _RANK_MATH_TITLE: "Only the title",
     }
     assert seo_meta(SeoFields()) == {}
+
+
+# --------------------------------------------------------------------------- #
+# 5. Connection time: the same limits, disclosed BEFORE anything is published.
+# --------------------------------------------------------------------------- #
+# The publish-time drop list above closes the silent half of the defect, but it only
+# speaks once a post is already live on a client's site. The operator DECIDES the
+# transport on the connection screen, and a bare green "connected" there reads as a
+# promise that the SEO package will ship. These pin the disclosure to that moment.
+class _VerifySpy(WordPressClient):
+    """A ``WordPressClient`` whose ``request_json`` answers the ``users/me`` probe (or
+    raises, to stand in for a rejected credential)."""
+
+    def __init__(self, *, ok: bool = True) -> None:
+        super().__init__(username="editor", app_password="pw")
+        self.ok = ok
+
+    def request_json(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        if not self.ok:
+            raise ProviderCallError("401 unauthorized")
+        return {"name": "Danyal"}
+
+
+def test_app_password_connection_test_names_the_seo_it_will_drop() -> None:
+    """A green connection test used to say only that the credential worked. An operator
+    reads that as "this client is wired up", books the SEO package, and finds out what
+    app-password publishing actually delivers only from a post already on a live site."""
+    ok, detail = _VerifySpy().verify("https://verde.example")
+
+    assert ok
+    assert "Application Password accepted for Danyal" in detail
+    assert "featured image" in detail
+    assert "schema JSON-LD" in detail
+    # And NOT the XML-RPC-only drop. Every field this seam names is also named by the
+    # xmlrpc note, so asserting presence alone leaves `verify` free to look up the WRONG
+    # auth method and still pass - which would tell an app-password operator the Yoast
+    # keys are lost when section 2 proves REST writes both plugin families' meta. A
+    # false drop is as costly as a silent one: it argues a client off the transport
+    # that would have served them.
+    assert "Yoast" not in detail
+
+
+def test_xmlrpc_connection_test_also_names_the_yoast_keys_it_cannot_write() -> None:
+    """XML-RPC drops MORE than REST - core refuses its protected `_yoast_wpseo_*` meta -
+    so a Yoast-only client site shows no SEO title no matter how cleanly the credential
+    verifies. That is precisely the fact a connection verdict has to carry."""
+    pub = _xmlrpc(_XmlRpcTransport())
+    ok, detail = pub.verify("https://hostile.test")
+
+    assert ok
+    assert "the credentials were accepted" in detail
+    assert "the Yoast meta keys" in detail
+    assert "featured image" in detail and "schema JSON-LD" in detail
+
+
+def test_a_failed_connection_test_is_not_buried_under_seo_limits() -> None:
+    """A rejected credential publishes nothing, so its SEO reach is not the operator's
+    problem yet - the reason it failed is. The note rides success only."""
+    ok, detail = _VerifySpy(ok=False).verify("https://verde.example")
+
+    assert not ok
+    assert "REST verify failed" in detail
+    assert "cannot carry" not in detail
+
+
+def test_the_plugin_transport_has_nothing_to_disclose() -> None:
+    """The plugin path carries the whole package. An empty note (rather than a cheerful
+    "carries everything") is what keeps the caller's ``if note`` branch honest."""
+    assert seo_limit_note("plugin") == ""
+    assert seo_limit_note("some_method_added_later") == ""
+
+
+def _publish_where_nothing_situational_can_go_wrong(method: str) -> PublishResult:
+    """Publish through ``method`` against a site where every SEO meta key is registered
+    and every tag already exists, so the only drops that can survive are structural.
+
+    Called from inside the test rather than built in the ``parametrize`` list: a publish
+    evaluated at import time turns any breakage in it into a COLLECTION error for the
+    whole module, which reports as 26 errors and hides which assertion actually broke.
+    """
+    if method == "app_password":
+        return _RestSpy(
+            existing_tags={"Best Brunch": 11, "brunch spots": 12},
+            registered_meta=(
+                _YOAST_TITLE, "_yoast_wpseo_metadesc", "_yoast_wpseo_focuskw",
+                _RANK_MATH_TITLE, "rank_math_description", "rank_math_focus_keyword",
+            ),
+        ).publish("https://verde.example", _rest_draft())
+    return _xmlrpc(_XmlRpcTransport()).publish("https://hostile.test", _rest_draft())
+
+
+@pytest.mark.parametrize("method", ["app_password", "xmlrpc"])
+def test_connection_warning_lists_exactly_what_publish_drops(method: str) -> None:
+    """THE ANTI-DRIFT GUARD, and the reason the note is derived rather than written out.
+
+    On a site with every SEO meta key registered and every tag already existing, the ONLY
+    drops left are the structural ones - so what ``publish`` reports here must be exactly
+    what ``STRUCTURAL_SEO_LIMITS`` promised at connect time. Teaching a transport to carry
+    one of these, or discovering a fourth it cannot, fails this until both surfaces agree.
+    """
+    result = _publish_where_nothing_situational_can_go_wrong(method)
+    assert set(result.dropped) == set(STRUCTURAL_SEO_LIMITS[method])
+
+    # And every one of them reaches the operator's connection verdict by NAME.
+    note = seo_limit_note(method)
+    for reason in STRUCTURAL_SEO_LIMITS[method]:
+        assert reason.split(" (", 1)[0].strip() in note
+    # By name and NOTHING MORE. Each reason carries a parenthetical explaining the
+    # protocol limit, which is the publish-time drop list's job; letting it through here
+    # inflates a connection verdict from 113 characters to 299, and the screen that
+    # renders it already clips one line.
+    assert "(" not in note

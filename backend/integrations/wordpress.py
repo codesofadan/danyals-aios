@@ -47,6 +47,14 @@ with its reason. That list is the point: two of these three transports used to d
 the entire SEO half in silence, so an operator had no way to learn that a client on
 ``app_password`` or ``xmlrpc`` was getting a bare HTML post.
 
+The drops that are STRUCTURAL - true of the method itself rather than of one site or
+one job - are also disclosed BEFORE anything is published: ``STRUCTURAL_SEO_LIMITS``
+names them per auth method and ``verify`` appends ``seo_limit_note`` to a successful
+connection test. A green "connected" that says nothing else reads as "the SEO package
+will ship", which on these two transports is false, and the operator choosing the
+method is standing on the connection screen at that moment. Both surfaces are built
+from the same constants so neither can quietly go stale.
+
 CREDENTIALS ARE PASSED IN, NEVER READ HERE. A WordPress application password is
 per-site + per-user and lives in the vault; the SERVICE layer decrypts it and
 constructs ``WordPressClient(username=..., app_password=...)``. This seam never
@@ -254,6 +262,46 @@ _DROP_XMLRPC_META_ON_UPDATE = (
     "writing them blind APPENDS duplicate rows the plugin then ignores)"
 )
 
+#: The SEO fields a transport structurally CANNOT put on a site - whatever the site,
+#: whatever the job - keyed by the ``wp_connections`` auth method that selects it.
+#:
+#: These are the drops knowable BEFORE anything is published, which is what makes them
+#: the connection test's business rather than only the publish path's: an operator
+#: wiring up a client's LIVE site chooses the method on that screen, and should not have
+#: to publish a post to find out what the method will not carry. Situational drops (a
+#: tag this credential may not create, meta no SEO plugin on the site registered with
+#: the REST API) depend on the site or the job, cannot be known here, and are reported
+#: at publish time on ``PublishResult.dropped``.
+#:
+#: The values are the SAME reason strings ``publish`` reports, so the warning shown at
+#: connect time cannot drift from what actually happens at push time. ``plugin`` is
+#: absent deliberately: it carries the whole package, so it has nothing to disclose.
+STRUCTURAL_SEO_LIMITS: dict[str, tuple[str, ...]] = {
+    "app_password": (_DROP_REST_FEATURED_IMAGE, _DROP_REST_SCHEMA),
+    "xmlrpc": (
+        _DROP_XMLRPC_FEATURED_IMAGE,
+        _DROP_XMLRPC_SCHEMA,
+        _DROP_XMLRPC_PROTECTED_META,
+    ),
+    "plugin": (),
+}
+
+
+def seo_limit_note(auth_method: str) -> str:
+    """One clause naming the SEO fields ``auth_method`` will drop; ``""`` at full parity.
+
+    Only the field NAME is shown - explaining WHY each drop happens is the publish-time
+    drop list's job, and a connection verdict has to stay readable. The name is SLICED
+    off the same constant rather than written out a second time, because a hand-copied
+    field list is exactly the thing that goes stale when a transport later learns to
+    carry one of these.
+    """
+    limits = STRUCTURAL_SEO_LIMITS.get(auth_method, ())
+    if not limits:
+        return ""
+    fields = ", ".join(reason.split(" (", 1)[0].strip() for reason in limits)
+    return f"SEO fields this transport cannot carry: {fields}"
+
 
 def _unlanded_seo_meta(sent: dict[str, str], returned: Any) -> list[str]:
     """The SEO fields whose meta was SILENTLY DROPPED by WordPress, one per field.
@@ -322,7 +370,15 @@ class WordPressClient(HttpProviderClient):
         """Non-raising credential probe for the connectivity test: read the current
         user (``GET /wp-json/wp/v2/users/me?context=edit``) under HTTP Basic. Returns
         ``(ok, detail)`` so the UI shows a clean red/green without a 500. The detail
-        never contains the credential (auth rides the Basic header, kept out of logs)."""
+        never contains the credential (auth rides the Basic header, kept out of logs).
+
+        A SUCCESSFUL probe also names what this transport structurally cannot publish.
+        "Connected" otherwise reads as "this client's SEO package will ship", which for
+        an app-password connection is not true, and the operator who picked the method
+        is on this screen now - not at 2am reading a drop note on a post already live.
+        The warning rides the existing detail string, so no caller has to change to
+        stop shipping a false all-clear.
+        """
         try:
             data = self.request_json(
                 "GET",
@@ -333,7 +389,9 @@ class WordPressClient(HttpProviderClient):
         except ProviderCallError as exc:
             return False, f"REST verify failed: {exc}"
         who = data.get("name") or data.get("slug") or "the account"
-        return True, f"Application Password accepted for {who}"
+        detail = f"Application Password accepted for {who}"
+        note = seo_limit_note("app_password")
+        return True, f"{detail} - {note}" if note else detail
 
     def _post_endpoint(self, site_url: str, post_id: int) -> str:
         return f"{site_url.rstrip('/')}/wp-json/wp/v2/posts/{post_id}"
@@ -691,14 +749,22 @@ class XmlRpcWordPressPublisher:
 
     def verify(self, site_url: str) -> tuple[bool, str]:
         """Non-raising probe: ``wp.getUsersBlogs(username, password)`` lists the sites
-        the credential may post to. Returns ``(ok, detail)`` for a clean red/green."""
+        the credential may post to. Returns ``(ok, detail)`` for a clean red/green.
+
+        As on the REST seam, a SUCCESSFUL probe also names what this transport cannot
+        carry - and it matters more here, because XML-RPC additionally loses the Yoast
+        meta keys, so a Yoast-only client site shows no SEO title however well the
+        credential verifies.
+        """
         try:
             self._call(site_url, "wp.getUsersBlogs", [self._username, self._password])
         except ProviderCallError as exc:
             return False, f"XML-RPC verify failed: {exc}"
         except Exception:  # transport error / unreachable host
             return False, "XML-RPC verify failed: the site could not be reached"
-        return True, "XML-RPC reachable and the credentials were accepted"
+        detail = "XML-RPC reachable and the credentials were accepted"
+        note = seo_limit_note("xmlrpc")
+        return True, f"{detail} - {note}" if note else detail
 
 
 class FakeWordPressPublisher:
