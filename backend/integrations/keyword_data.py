@@ -171,7 +171,19 @@ class DataForSeoProvider(HttpProviderClient):
         return [_metric_from_dfs(item) for item in _dfs_items(data)]
 
     def related_keywords(self, keyword: str, *, geo: str | None = None, limit: int = 50) -> list[KeywordMetric]:
-        body = [_dfs_request_body([keyword], geo, limit)]
+        # THIS ENDPOINT IS THE ODD ONE OUT: `related_keywords/live` takes a SINGULAR
+        # `keyword`, while `keyword_ideas`, `keyword_overview` and `search_intent` all
+        # take a `keywords` ARRAY. Sharing `_dfs_request_body` here sent the array form
+        # and DataForSEO rejected every call with 40501 "Invalid Field: 'keyword'" -
+        # measured against the live API 2026-08-29, where the singular form returns rows
+        # and the array form returns none. Related-keyword expansion is the first call
+        # `execute_research` makes, so the whole keyword bank stayed empty.
+        body = [{
+            "keyword": keyword,
+            "limit": max(1, min(limit, 1000)),
+            "location_code": resolve_location_code(geo),
+            "language_code": "en",
+        }]
         data = self.request_json(
             "POST", "/v3/dataforseo_labs/google/related_keywords/live", json_body=body, auth=self._auth
         )
@@ -187,7 +199,11 @@ class DataForSeoProvider(HttpProviderClient):
         return [_metric_from_dfs(item) for item in _dfs_items(data)]
 
     def search_intent(self, keyword: str) -> str | None:
-        body = [{"keywords": [keyword]}]
+        # `language_code` is REQUIRED here. Sending only `keywords` was rejected with
+        # 40501 "Invalid Field: 'language_name'" on every call - measured against the
+        # live API 2026-08-29 - so intent never came from the provider and always fell
+        # through to the SERP heuristic, silently.
+        body = [{"keywords": [keyword], "language_code": "en"}]
         data = self.request_json(
             "POST", "/v3/dataforseo_labs/google/search_intent/live", json_body=body, auth=self._auth
         )
@@ -284,7 +300,13 @@ def resolve_location_code(geo: str | None) -> int:
 
 
 def _dfs_request_body(keywords: list[str], geo: str | None, limit: int) -> dict[str, Any]:
-    """One DataForSEO Labs task body (keywords + resolved location + bounded limit)."""
+    """One DataForSEO Labs task body (keywords + resolved location + bounded limit).
+
+    Used by the endpoints that take a `keywords` ARRAY - keyword_ideas,
+    keyword_overview, search_intent. `related_keywords` does NOT: it takes a
+    singular `keyword` and builds its own body. Do not "tidy" that call onto this
+    helper; doing so is what made every related-keywords request fail with 40501.
+    """
     return {
         "keywords": keywords,
         "limit": max(1, min(limit, 1000)),
@@ -321,15 +343,28 @@ def _dfs_items(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _metric_from_dfs(item: dict[str, Any]) -> KeywordMetric:
     """Map one DataForSEO Labs item to a ``KeywordMetric`` (defensive; nested info
-    blocks are read best-effort)."""
-    info = item.get("keyword_info") or {}
-    props = item.get("keyword_properties") or {}
+    blocks are read best-effort).
+
+    TWO ENVELOPE SHAPES. `keyword_ideas` and `keyword_overview` put `keyword`,
+    `keyword_info` and `keyword_properties` at the TOP of each item.
+    `related_keywords` wraps all three inside `keyword_data` and puts only
+    `depth` / `related_keywords` / `se_type` at the top. Reading only the flat
+    shape returned a full-length list of COMPLETELY EMPTY metrics for every
+    related-keywords call - measured 2026-08-29: five items in, five rows out
+    with keyword='', volume=0, difficulty=0. Empty strings are not an error
+    anywhere downstream, so the expansion contributed nothing and said nothing.
+    """
+    source = item.get("keyword_data")
+    if not isinstance(source, dict):
+        source = item
+    info = source.get("keyword_info") or {}
+    props = source.get("keyword_properties") or {}
     if not isinstance(info, dict):
         info = {}
     if not isinstance(props, dict):
         props = {}
     return KeywordMetric(
-        keyword=str(item.get("keyword") or ""),
+        keyword=str(source.get("keyword") or item.get("keyword") or ""),
         volume=_to_int(info.get("search_volume")),
         difficulty=_to_float(props.get("keyword_difficulty"), hi=100.0),
         cpc=_to_float(info.get("cpc")),
