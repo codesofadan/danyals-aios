@@ -36,6 +36,7 @@ import DetailShell from "@/components/ui/DetailShell";
 import StageTimeline, { type Stage } from "@/components/ui/StageTimeline";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import QueryGuard from "@/components/ui/QueryGuard";
+import ExperiencePanel from "./ExperiencePanel";
 import { useToast } from "@/components/ui/Toast";
 import ReviewPreview from "./ReviewPreview";
 
@@ -200,10 +201,15 @@ export default function ContentJobDetail({ code }: { code: string }) {
         tabs={[
           { key: "draft", label: "Draft & data", icon: "article" },
           { key: "process", label: "Process", icon: "route" },
+          // The gate that holds this page. Placed beside Process because that is
+          // where an operator looks when they want to know why nothing is moving.
+          { key: "experience", label: "Experience", icon: "quiz" },
         ]}
       >
         {(tab) =>
-          tab === "process" ? (
+          tab === "experience" ? (
+            <ExperiencePanel code={code} />
+          ) : tab === "process" ? (
             <section className="card" style={{ padding: "var(--s-7)" }}>
               <div className="cs" style={{ marginBottom: "var(--s-6)", maxWidth: 560 }}>
                 The pipeline, against this job&apos;s live stage
