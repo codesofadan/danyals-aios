@@ -13,7 +13,7 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_process_init
 
-from app.config import get_settings
+from app.config import get_settings, validate_settings
 from app.jobs.celery_task import route_task
 from app.jobs.status import BROKER_VISIBILITY_TIMEOUT
 
@@ -33,6 +33,13 @@ def _init_worker_db_pools(**_kwargs: object) -> None:
     from app.db.database import build_admin_pool, build_rls_pool, set_pools
 
     s = get_settings()
+    # The documented fail-fast on missing production secrets ran in the API's
+    # lifespan and NOWHERE ELSE - so the process that actually spends money started
+    # blind. A worker with, say, no VAULT_MASTER_KEY or no provider key came up
+    # healthy, accepted jobs, and failed them one at a time at runtime instead of
+    # refusing to start. In prod this raises and the unit stops; in dev it warns,
+    # exactly as it does for the API.
+    validate_settings(s)
     rls = build_rls_pool(s.database_url)
     admin = build_admin_pool(s.database_admin_url)
     if rls is not None:
@@ -224,6 +231,25 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {}
 
 _BEAT_SCHEDULE_DISABLED = {
+    # Citation liveness re-check (0106). A listing is not a fact you establish once:
+    # directories delete listings, merge duplicates, expire unclaimed entries and quietly
+    # change a phone number, and none of that notifies us. Without this sweep `live`
+    # decays from an observation into a claim - the same defect class as the
+    # screenshot-as-live-URL this module was recovering from.
+    #
+    # Hourly is not a cadence choice, it is a POLLING choice: the actual cadence lives per
+    # row in `citations.next_recheck_at` (+3d, +14d, +60d for a new listing, then monthly
+    # for route A / core and quarterly for the rest). This sweep just asks "is anything
+    # due?" and does nothing when the answer is no. It makes NO provider call - plain HTTP
+    # GETs against listing URLs - so it is not metered and needs no dial.
+    #
+    # NOTE: beat is OFF (see above), so this does not run today. Until it is switched on,
+    # the same task is reachable on demand at POST /citation-builder/recheck, which is how
+    # the feature is usable without reversing the owner's decision about cron.
+    "citation-liveness-recheck": {
+        "task": "citation_liveness_recheck",
+        "schedule": 3600.0,
+    },
     # Scheduled content publishing (spec section 46). A lead's approve already moved
     # the job to `publishing` (the human gate is unchanged); this sweep only fires
     # the already-approved push once its publish_at is due. 5-minute cadence is

@@ -62,3 +62,20 @@ def test_context_dispatch_is_on_the_beat_schedule() -> None:
     entry = PARKED["dispatch-context"]
     assert entry["task"] == "dispatch_context"
     assert entry["schedule"] > 0
+
+
+@pytest.mark.unit
+def test_the_worker_validates_its_own_configuration() -> None:
+    """The documented fail-fast on missing production secrets ran in the API's
+    lifespan and NOWHERE ELSE, so the process that actually SPENDS MONEY started
+    blind: a worker with no vault key or no provider key came up healthy, accepted
+    jobs, and failed them one at a time at runtime instead of refusing to start."""
+    import inspect
+
+    import workers.celery_app as mod
+
+    source = inspect.getsource(mod._init_worker_db_pools)
+    assert "validate_settings" in source, (
+        "the worker process init must validate config, or prod misconfiguration "
+        "is only discovered one failed job at a time"
+    )
