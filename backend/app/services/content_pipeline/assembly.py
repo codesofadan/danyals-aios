@@ -29,6 +29,7 @@ from app.services.content_pipeline.context import PipelineContext, StageResult
 from app.services.content_pipeline.convert import run_convert
 from app.services.content_pipeline.draft import run_draft
 from app.services.content_pipeline.gate import run_gate
+from app.services.content_pipeline.grounding import run_grounding
 from app.services.content_pipeline.outline import run_outline
 from app.services.content_pipeline.research import run_research
 from app.services.content_pipeline.schema_links import run_schema_links
@@ -106,6 +107,7 @@ def build_page_stages(
         stages["draft"] = lambda ctx: run_draft(ctx, writer=writer, model=model)
         stages["convert"] = lambda ctx: run_convert(ctx, writer=writer, model=model)
         stages["voice"] = lambda ctx: run_voice(ctx, writer=writer, model=model)
+        stages["grounding"] = lambda ctx: run_grounding(ctx, writer=writer, model=model)
         stages["title_meta"] = lambda ctx: run_title_meta(ctx, writer=writer, model=model)
 
     stages["schema_links"] = lambda ctx: run_schema_links(

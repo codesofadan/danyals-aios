@@ -333,6 +333,16 @@ def _concrete_claim_digits(draft_md: str) -> list[str]:
     return [t for t in tokens if t]
 
 
+#: The fact-grounding audit set, under a PUBLIC name.
+#:
+#: The grounding repair stage has to measure exactly what this gate measures. It
+#: did not at first - it skipped bare integers under 100 to avoid mangling prose,
+#: while this counts every standalone 2+ digit number - so the repair could clear
+#: its own check and still leave the gate blocking on "24", "50", "90". A repair
+#: that measures less than the gate can never satisfy it, by construction.
+concrete_claim_digits = _concrete_claim_digits
+
+
 def _grounded_corpus_digits(content: GeneratedContent, source_pack: SourcePack) -> str:
     """The digit string of everything the draft is ALLOWED to claim: the grounding
     trace values + the whole source pack. A concrete number not in here is

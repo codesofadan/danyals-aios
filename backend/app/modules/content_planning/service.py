@@ -36,11 +36,11 @@ from typing import Literal
 
 from app.modules.content_planning.schemas import Engagement, EngagementShape, MapNode
 
-# Per-page stages, from `content_pipeline.runner.PAGE_STAGES`.
-PAGE_STAGES: tuple[str, ...] = (
-    "sme", "research", "outline", "draft", "convert", "voice",
-    "title_meta", "schema_links", "gate",
-)
+# Per-page stages. IMPORTED, not re-typed: this was a hand-written copy of
+# `content_pipeline.runner.PAGE_STAGES` with a comment pointing at the original,
+# which is a copy that drifts the first time the sequence changes - and it did,
+# the moment a grounding stage was added between voice and title_meta.
+from app.services.content_pipeline.runner import PAGE_STAGES
 
 # Engagement-level stages. These run ONCE for a batch, not once per page - which is
 # the single biggest cost difference between this and v1. Keyword discovery is roughly

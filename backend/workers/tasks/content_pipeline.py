@@ -66,6 +66,7 @@ STAGE_LABEL: dict[str, str] = {
     "draft": "Draft",
     "convert": "Conversion",
     "voice": "Voice",
+    "grounding": "Fact-check",
     "title_meta": "Titles & meta",
     "schema_links": "Schema & links",
     "gate": "QA",
