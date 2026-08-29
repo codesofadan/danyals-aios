@@ -53,6 +53,12 @@ def test_context_worker_tasks_are_registered() -> None:
 def test_context_dispatch_is_on_the_beat_schedule() -> None:
     # the debounced dispatcher runs every context_debounce_seconds (config only;
     # no beat process is started here)
-    entry = celery_app.conf.beat_schedule["dispatch-context"]
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+
+    # Cron is PARKED platform-wide (owner instruction 2026-08-19), so the LIVE
+    # beat table is empty and this asserts the preserved one: the wiring must
+    # survive the parking, or switching cron back on would silently skip this
+    # job. The policy itself is asserted once, in tests/test_scheduled_jobs.py.
+    entry = PARKED["dispatch-context"]
     assert entry["task"] == "dispatch_context"
     assert entry["schedule"] > 0

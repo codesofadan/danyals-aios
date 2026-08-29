@@ -246,9 +246,13 @@ def test_the_task_is_explicitly_name_pinned() -> None:
 
 
 def test_the_beat_schedule_wires_the_sweep() -> None:
-    from workers.celery_app import celery_app
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
 
-    entry = celery_app.conf.beat_schedule.get("mark-past-due-invoices")
+    # Cron is PARKED platform-wide (owner instruction 2026-08-19), so the LIVE
+    # beat table is empty and this asserts the preserved one: the wiring must
+    # survive the parking, or switching cron back on would silently skip this
+    # job. The policy itself is asserted once, in tests/test_scheduled_jobs.py.
+    entry = PARKED.get("mark-past-due-invoices")
     assert entry is not None, "the past-due sweep is not on the beat schedule"
     assert entry["task"] == "mark_past_due"
     assert entry["schedule"] > 0

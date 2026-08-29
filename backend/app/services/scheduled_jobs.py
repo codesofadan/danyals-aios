@@ -201,6 +201,7 @@ def scheduled_jobs(
     last_runs: dict[str, dict[str, Any]] | None = None,
     settings: Settings | None = None,
     now: datetime | None = None,
+    schedule: dict[str, Any] | None = None,
 ) -> list[ScheduledJob]:
     """The live beat schedule as a sorted list of humanized, enriched jobs.
 
@@ -209,12 +210,21 @@ def scheduled_jobs(
     optional so the pure schedule (name/task/description/cadence) is derivable with no
     DB. Blocking only in that it constructs the Celery app on first import; the caller
     offloads it with ``asyncio.to_thread``.
+
+    ``schedule`` overrides which beat table is read. Production never passes it - the
+    live table is the point. It exists because cron is PARKED platform-wide (the live
+    table is deliberately empty), and without it every test of this function's real
+    work - humanizing a cadence, computing a next run, flagging a job waiting on an
+    absent provider key - could only assert emptiness. Nine tests were failing for
+    exactly that reason, which trained everyone to ignore a red suite.
     """
     from workers.celery_app import celery_app
 
     now = now or datetime.now(UTC)
     last_runs = last_runs or {}
-    schedule: dict[str, Any] = dict(celery_app.conf.beat_schedule or {})
+    if schedule is None:
+        schedule = dict(celery_app.conf.beat_schedule or {})
+    schedule = dict(schedule)
     jobs: list[ScheduledJob] = []
     for name, entry in schedule.items():
         task = str(entry.get("task", ""))

@@ -644,7 +644,13 @@ def test_the_beat_task_is_wired_into_the_schedule_and_the_include_list() -> None
     from workers.celery_app import celery_app
 
     assert "app.modules.local_seo.tasks" in celery_app.conf.include
-    entry = celery_app.conf.beat_schedule["refresh-local-ranks"]
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+
+    # Cron is PARKED platform-wide (owner instruction 2026-08-19), so the LIVE
+    # beat table is empty and this asserts the preserved one: the wiring must
+    # survive the parking, or switching cron back on would silently skip this
+    # job. The policy itself is asserted once, in tests/test_scheduled_jobs.py.
+    entry = PARKED["refresh-local-ranks"]
     assert entry["task"] == "refresh_local_ranks"
     assert entry["schedule"] == float(_settings().local_rank_refresh_seconds)
 

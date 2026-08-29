@@ -828,9 +828,14 @@ def test_every_task_is_registered_under_its_stable_name(task: Any, name: str) ->
 
 
 def test_the_beat_schedule_registers_both_scheduled_tasks() -> None:
-    from workers.celery_app import celery_app
 
-    schedule = celery_app.conf.beat_schedule
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+
+    # Cron is PARKED platform-wide (owner instruction 2026-08-19), so the LIVE
+    # beat table is empty and this asserts the preserved one: the wiring must
+    # survive the parking, or switching cron back on would silently skip this
+    # job. The policy itself is asserted once, in tests/test_scheduled_jobs.py.
+    schedule = PARKED
     assert schedule["dispatch-rank-checks"]["task"] == "dispatch_rank_checks"
     assert schedule["rollup-rank-history"]["task"] == "rollup_rank_history"
 
