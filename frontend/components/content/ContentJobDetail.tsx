@@ -36,6 +36,7 @@ import DetailShell from "@/components/ui/DetailShell";
 import StageTimeline, { type Stage } from "@/components/ui/StageTimeline";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import QueryGuard from "@/components/ui/QueryGuard";
+import { qaVerdict } from "@/lib/content";
 import ExperiencePanel from "./ExperiencePanel";
 import { useToast } from "@/components/ui/Toast";
 import ReviewPreview from "./ReviewPreview";
@@ -100,6 +101,8 @@ export default function ContentJobDetail({ code }: { code: string }) {
 
   const job = jobQ.data;
   const qa = qaQ.data?.qa ?? null;
+  // Scored only when a real number came back; see qaVerdict.
+  const verdict = qaVerdict(qa);
 
   // The CSV the operator asked for: the job's keyword map + internal links +
   // entity coverage, one file, built from data already on screen.
@@ -145,7 +148,10 @@ export default function ContentJobDetail({ code }: { code: string }) {
   const inReview = job.status === "needs_review";
   const republishable = job.status === "done" || job.status === "degraded";
   const url = liveUrl(job);
-  const qaFailed = qa !== null && qa.passed === false;
+  // Only a REAL verdict can fail. An unscored page is not a failed one, and
+  // making the operator type PUBLISH for a failure nobody measured is the
+  // over-confirmation that trains people to click through the dialogs that matter.
+  const qaFailed = verdict !== null && !verdict.passed;
 
   return (
     <>
@@ -165,7 +171,11 @@ export default function ContentJobDetail({ code }: { code: string }) {
           { label: "Cost", value: `$${job.cost.toFixed(2)}` },
           {
             label: "QA",
-            value: qa ? `${Math.round(qa.weighted_total)} · ${qa.passed ? "passed" : "failed"} (advisory)` : "—",
+            // Unscored is not "failed". `qa_score` is `{}` when the gate produced
+            // no verdict, and `{}` is truthy - this used to render "NaN · failed".
+            value: verdict
+              ? `${Math.round(verdict.total)} · ${verdict.passed ? "passed" : "failed"} (advisory)`
+              : "not scored",
           },
         ]}
         actions={
@@ -233,11 +243,11 @@ export default function ContentJobDetail({ code }: { code: string }) {
         title="Approve and publish this draft?"
         body={
           <QueryGuard queries={[qaQ]} label="the QA verdict" minHeight={60}>
-            {qa ? (
+            {verdict ? (
               <>
-                The QA scorecard reads <b>{Math.round(qa.weighted_total)} / 100</b> —{" "}
-                <b>{qa.passed ? "passed" : "FAILED"}</b>
-                {qa.provisional ? " (provisional weights)" : ""}. It is advisory: your
+                The QA scorecard reads <b>{Math.round(verdict.total)} / 100</b> —{" "}
+                <b>{verdict.passed ? "passed" : "FAILED"}</b>
+                {qa?.provisional ? " (provisional weights)" : ""}. It is advisory: your
                 approval is the gate, and the page publishes to{" "}
                 <b>{job.client}</b>&apos;s live site.
               </>

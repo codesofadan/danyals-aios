@@ -381,3 +381,27 @@ export function operatorBlock(job: Pick<ContentJob, "status" | "stage">): Operat
   }
   return null;
 }
+
+// --- Has this page actually been scored? --------------------------------------
+// `qa_score` is a jsonb column and an unscored page carries `{}` - which is
+// TRUTHY in JavaScript. Every surface that read `qa ? ... : "—"` therefore took
+// the scored branch on an unscored page and rendered `Math.round(undefined)`
+// beside `qa.passed ? "passed" : "failed"`:
+//
+//     QA: NaN · failed (advisory)
+//
+// A fabricated verdict on a decision screen, claiming a page FAILED when nothing
+// had scored it - and a lead could reject good work on the strength of it. The
+// gate legitimately produces no verdict quite often: it degrades to nothing
+// without a research brief, which is exactly the case after a reviewer's edit.
+//
+// One predicate, used by every surface, so a scorecard is "present" only when it
+// carries a real number.
+export type QaVerdict = { total: number; passed: boolean };
+
+export function qaVerdict(qa: { weighted_total?: unknown; passed?: unknown } | null | undefined):
+  QaVerdict | null {
+  const total = qa?.weighted_total;
+  if (typeof total !== "number" || !Number.isFinite(total)) return null;
+  return { total, passed: qa?.passed === true };
+}

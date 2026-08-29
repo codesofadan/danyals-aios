@@ -22,6 +22,7 @@
 
 import { useContentQa } from "@/lib/hooks/content";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { qaVerdict } from "@/lib/content";
 
 /** The floor a single dimension must clear (doctrine §11). */
 const DIMENSION_FLOOR = 70;
@@ -45,6 +46,7 @@ export default function ApproveGate({
 }: ApproveGateProps) {
   const qaQ = useContentQa(code);
   const qa = qaQ.data?.qa ?? null;
+  const verdict = qaVerdict(qa);
 
   const weak = qa
     ? Object.entries(qa.dimensions)
@@ -55,7 +57,7 @@ export default function ApproveGate({
   // The note is the audit trail. It states the score the approver was shown, so
   // "approved at 61" is answerable later without re-deriving anything.
   const note = qa
-    ? `QA acknowledged: ${qa.weighted_total}/100 weighted, ${qa.passed ? "passed" : "did not pass"}` +
+    ? `QA acknowledged: ${verdict ? `${verdict.total}/100 weighted, ${verdict.passed ? "passed" : "did not pass"}` : "not scored"}` +
       (qa.provisional ? " (provisional weights)" : "") +
       (weak.length ? `; below floor: ${weak.map(([d]) => d).join(", ")}` : "")
     : qaQ.isError
@@ -91,7 +93,7 @@ export default function ApproveGate({
                     color: qa.passed ? "var(--ok)" : "var(--crit)",
                   }}
                 >
-                  {qa.weighted_total}/100
+                  {verdict ? `${verdict.total}/100` : "not scored"}
                 </span>{" "}
                 weighted — {qa.passed ? "passes" : "does not pass"} the advisory
                 threshold

@@ -554,7 +554,11 @@ function QaTab({ loading, error, qa }: {
           <span className="material-symbols-rounded">{qa.passed ? "check_circle" : "gpp_maybe"}</span>
           {qa.passed ? "Meets the quality bar" : "Below the quality bar"}
         </span>
-        <span className="pill-tag"><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</span>
+        <span className="pill-tag">
+          {Number.isFinite(qa.weighted_total)
+            ? <><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</>
+            : <strong>not scored</strong>}
+        </span>
         {qa.provisional && <span className="pill-tag" style={{ opacity: 0.8 }}>provisional weights</span>}
         <span className="cs" style={{ flexBasis: "100%" }}>
           Advisory — this score does not block publishing. Your approval does.

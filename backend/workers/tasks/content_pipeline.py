@@ -57,6 +57,7 @@ from workers.tasks.content import (
     PrivilegedContentStore,
     _build_gate,
     _ContentGatedWriter,
+    _keyword_map,
 )
 
 logger = structlog.get_logger(__name__)
@@ -381,6 +382,25 @@ def _persist_success(
     # `primary_type` is what the schema stage calls the @type it settled on.
     if schema_data.get("primary_type"):
         fields["schema_type"] = schema_data["primary_type"]
+    # THE KEYWORD MAP. The publish leg reads this column for the WordPress focus
+    # keyword and the post's tags (workers/tasks/content.py:2006, :1953), and the
+    # reviewer's keyword panel is `GET /content/jobs/{code}/keywords`, which maps
+    # to it. v1 wrote it; this engine did not, so from the moment it became the
+    # default every page it drafted pushed to WordPress with no focus keyword and
+    # no tags, and showed the reviewer an empty keyword panel. The guard test did
+    # not catch it because it seeds a v1-shaped row.
+    #
+    # Only when research actually ran: the EDIT path deliberately skips it, and the
+    # map already stored from the first run is the right one. Overwriting it with
+    # an empty object would strip the SEO fields off a page for being edited.
+    brief = ctx.brief.get("research")
+    if brief is not None and getattr(brief, "terms", None) is not None:
+        try:
+            fields["keyword_map"] = _keyword_map(brief)
+        except Exception as exc:  # a shape change here must not lose the page
+            logger.warning(
+                "content_pipeline_keyword_map_failed", code=code, error=type(exc).__name__
+            )
     if qa.get("weighted_total") is not None:
         fields["qa_weighted_total"] = qa["weighted_total"]
     else:

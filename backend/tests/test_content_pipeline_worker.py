@@ -10,7 +10,7 @@ which stage is running while it is running rather than after it finished.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -618,3 +618,68 @@ class TestAnUnscoredPageDoesNotShowAnOldScore:
     def test_a_gate_that_did_score_still_writes_its_number(self) -> None:
         store = self._run_editing({"weighted_total": 91.0, "passed": True})
         assert store.final("qa_weighted_total") == 91.0
+
+
+class TestTheKeywordMapReachesTheRow:
+    """The publish leg reads `keyword_map` for the WordPress focus keyword and the
+    post's tags, and the reviewer's keyword panel is that same column. v1 wrote it
+    and this engine did not - so from the moment it became the default, every page
+    it drafted pushed with no focus keyword, no tags, and an empty keyword panel.
+
+    The existing WordPress guard test seeds a v1-shaped row, so the suite stayed
+    green with the defect live. These assert the WRITE."""
+
+    class _Terms:
+        primary = "emergency plumber dallas"
+        secondary: ClassVar[list[str]] = ["24 hour plumber dallas"]
+        semantic_entities: ClassVar[list[str]] = ["slab leak"]
+        questions: ClassVar[list[str]] = ["who do I call at night?"]
+
+    class _Brief:
+        intent = "transactional"
+        intent_confidence = 0.9
+        fanout: ClassVar[list[str]] = []
+        low_confidence = False
+        degraded = False
+        notes: ClassVar[list[str]] = []
+
+        def __init__(self, terms: Any) -> None:
+            self.terms = terms
+            self.content_format = type("F", (), {"recommended": "service", "confidence": 0.8})()
+            self.cluster = type("C", (), {"pillar": "emergency plumbing", "supporting": []})()
+            self.winnability = type(
+                "W", (), {"client_da": None, "neutral_da_assumed": 30.0, "targets": []},
+            )()
+
+    def _run_with_brief(self, brief: Any) -> _Store:
+        store = _Store(_row())
+
+        def research(ctx: PipelineContext) -> StageResult:
+            if brief is not None:
+                ctx.brief["research"] = brief
+            return ctx.record(StageResult("research", outcome="ok"))
+
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = "# Page\n\nWords."
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        _run(store, {"research": research, "draft": draft, "gate": _stage("gate", "ok")})
+        return store
+
+    def test_the_operators_keyword_reaches_the_column_publish_reads(self) -> None:
+        store = self._run_with_brief(self._Brief(self._Terms()))
+        km = store.final("keyword_map")
+        assert km["primary"] == "emergency plumber dallas"
+        assert km["secondary"] == ["24 hour plumber dallas"]
+        assert km["intent"] == "transactional"
+
+    def test_a_run_without_research_does_not_wipe_the_stored_map(self) -> None:
+        """The EDIT path deliberately skips research. Writing an empty map there
+        would strip the SEO fields off a page for the crime of being edited."""
+        store = self._run_with_brief(None)
+        assert store.final("keyword_map") is None
+
+    def test_a_malformed_brief_loses_the_map_not_the_page(self) -> None:
+        store = self._run_with_brief(object())   # no .terms
+        assert store.final("keyword_map") is None
+        assert store.final("status") == "needs_review", "the page must still land"
