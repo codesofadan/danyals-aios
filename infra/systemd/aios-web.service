@@ -1,0 +1,78 @@
+[Unit]
+Description=AIOS dashboard (Next.js production server)
+Documentation=file:///opt/aios/infra/deploy/README-deploy.md
+# DELIBERATELY NOT `Requires=aios-api.service`. The dashboard is the only thing an
+# operator can look at, and the app already has an honest backend-down state
+# (`BackendUnavailableError` in frontend/lib/api.ts renders a banner). Binding the
+# two would mean a backend outage ALSO takes the login page down, so the operator
+# sees the browser's "connection refused" instead of the product telling them which
+# dependency failed - strictly less information at the exact moment they need more.
+# `After=` only orders the start so a boot lands the API first.
+After=network-online.target aios-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios/frontend
+# Port the Next server listens on (loopback; Caddy publishes it). Set BEFORE
+# EnvironmentFile so aios.env can override it - the same ordering the worker unit
+# uses for PLAYWRIGHT_BROWSERS_PATH. It also means an aios.env that predates this
+# unit still starts on the documented default instead of expanding to an empty
+# `-p` argument.
+Environment=AIOS_WEB_PORT=3000
+Environment=NODE_ENV=production
+# Next phones home on start and writes its telemetry config next to the app. Under
+# ProtectSystem=strict that write is on a read-only filesystem, so leaving telemetry
+# on buys a recurring EROFS in the journal and nothing else.
+Environment=NEXT_TELEMETRY_DISABLED=1
+# Same root-owned env file as the API (see aios-api.service for the inline-comment
+# footgun). NOTE: the frontend reads almost nothing from here at RUNTIME -
+# BACKEND_ORIGIN and every NEXT_PUBLIC_* are baked into the bundle by `npm run
+# build` (install.sh exports them for that build). This file is loaded so
+# AIOS_WEB_PORT is overridable and so the unit's environment matches the other
+# three; changing a NEXT_PUBLIC_* here and restarting changes NOTHING.
+EnvironmentFile=/etc/aios/aios.env
+# Invoked as `node <next-bin> start`, NOT as `npm run start`, for one load-bearing
+# reason: a bare `next start` binds 0.0.0.0, which publishes the dashboard on the
+# VPS's public interface on port 3000 - plain HTTP, no TLS, Caddy bypassed. The
+# `-H 127.0.0.1` below is what prevents that, and `npm run start` cannot carry it
+# without `--` argument forwarding that is easy to drop on the next edit. Calling
+# node directly also keeps MainPID on the server itself, so systemd's restart and
+# exit-status handling sees the real process rather than npm's exit-code mapping,
+# and needs no writable HOME for npm's cache/log directory under ProtectHome=true.
+#
+# `next start` (not `node .next/standalone/server.js`): the standalone bundle does
+# NOT include `.next/static` or `public/`, which have to be copied in by hand, and a
+# deploy that forgets the copy serves a page with no CSS or JS. `next start` runs
+# against the complete build tree that is already on disk. Next prints a warning
+# recommending standalone (frontend/next.config.mjs sets output: "standalone" for
+# the Docker image) - that warning is expected here, and `next start` still serves
+# the normal build correctly.
+ExecStart=/usr/bin/node /opt/aios/frontend/node_modules/next/dist/bin/next start -H 127.0.0.1 -p ${AIOS_WEB_PORT}
+Restart=always
+RestartSec=3
+# The Next server closes its listener and drains in-flight requests on SIGTERM.
+TimeoutStopSec=30
+
+# --- Hardening --------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The ONE path the production server writes: Next's incremental/fetch cache. This
+# app uses no ISR, no `next/image` optimizer and no cached server `fetch`, so today
+# it writes nothing - but the cache is constructed unconditionally in production,
+# and the first feature that does use it would fail on a read-only mount with an
+# EROFS that surfaces as a 500, not as a cache miss. install.sh creates and chowns
+# this directory; ProtectSystem=strict makes systemd REFUSE TO START the unit if a
+# ReadWritePaths entry does not exist, so the two must stay in step.
+ReadWritePaths=/opt/aios/frontend/.next/cache
+
+[Install]
+WantedBy=multi-user.target

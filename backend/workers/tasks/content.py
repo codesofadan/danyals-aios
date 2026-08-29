@@ -123,6 +123,7 @@ from integrations.llm import LLMResult, SystemSummarizer
 from integrations.wordpress import (
     PostDraft,
     PublishResult,
+    SeoFields,
     WordPressPublisher,
 )
 from integrations.wordpress_publisher import (
@@ -1987,6 +1988,39 @@ def _derive_cta(row: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _seo_fields(row: dict[str, Any], draft_md: str, title: str) -> SeoFields:
+    """The SEO half of a WordPress push, derived from the finished job ONCE.
+
+    THE DEFECT THIS EXISTS TO PREVENT: this derivation used to live inline in
+    :func:`_plugin_payload`, so it reached the AIOS Publisher plugin and nothing else.
+    The REST and XML-RPC transports built a five-field ``PostDraft`` and a client on
+    ``app_password`` or ``xmlrpc`` received a bare HTML post - no meta title, no meta
+    description, no focus keyword, no tags. Both paths now read this one function, so
+    a field added here reaches every transport (or is reported dropped by the ones that
+    cannot carry it) instead of silently reaching only the plugin.
+
+    Every value is best-effort and may be empty - nothing is fabricated. ``meta_title``
+    falls back to the post title because a missing SEO title is worse than a duplicate
+    one; the description, focus keyword, tags, hero image and JSON-LD are simply absent
+    when the job produced none.
+    """
+    outline = _as_dict(row.get("outline"))
+    meta = _as_dict(outline.get("meta"))
+    keyword_map = _as_dict(row.get("keyword_map"))
+    json_ld = row.get("json_ld")
+    schema = (
+        json.dumps(json_ld) if isinstance(json_ld, dict) and json_ld.get("@graph") else ""
+    )
+    return SeoFields(
+        meta_title=str(meta.get("title") or title),
+        meta_description=str(meta.get("description") or ""),
+        focus_keyword=str(keyword_map.get("primary") or ""),
+        tags=tuple(_derive_tags(row)),
+        featured_image_url=_first_image_url(draft_md),
+        schema_jsonld=schema,
+    )
+
+
 def _plugin_payload(
     row: dict[str, Any], draft_md: str, title: str, *, settings: Settings | None = None
 ) -> dict[str, Any]:
@@ -2001,32 +2035,30 @@ def _plugin_payload(
     (drag-and-drop) in Elementor. The flat ``content`` HTML is ALWAYS sent too (the
     fallback for a site without Elementor). With the flag OFF the payload is
     byte-identical to the pre-Elementor behaviour (no extra keys)."""
-    outline = _as_dict(row.get("outline"))
-    meta = _as_dict(outline.get("meta"))
-    keyword_map = _as_dict(row.get("keyword_map"))
+    # The SEO half is derived by the SHARED helper (see its docstring) and only
+    # RENAMED here into the plugin's own field names; the REST/XML-RPC path reads the
+    # same struct, so the two can no longer drift apart.
+    seo = _seo_fields(row, draft_md, title)
     payload: dict[str, Any] = {
         "title": title,
         "content": _shape_body_html(row, draft_md),
         "status": "draft",  # push as a DRAFT - a human publishes it on WordPress
         "post_type": "post",
         "slug": _slug(title),
-        "meta_title": str(meta.get("title") or title),
-        "meta_description": str(meta.get("description") or ""),
-        "focus_keyword": str(keyword_map.get("primary") or ""),
+        "meta_title": seo.meta_title,
+        "meta_description": seo.meta_description,
+        "focus_keyword": seo.focus_keyword,
     }
     # WordPress post tags (the post_tag taxonomy the theme displays/links) - the same
     # keyword research every job already ran, never a second AI call.
-    tags = _derive_tags(row)
-    if tags:
-        payload["tags"] = tags
+    if seo.tags:
+        payload["tags"] = list(seo.tags)
     # Featured image: the draft's hero image, sideloaded by the plugin into the
     # WordPress media library (never left hotlinked to the AIOS content-image host).
-    featured_image_url = _first_image_url(draft_md)
-    if featured_image_url:
-        payload["featured_image_url"] = featured_image_url
-    json_ld = row.get("json_ld")
-    if isinstance(json_ld, dict) and json_ld.get("@graph"):
-        payload["schema_jsonld"] = json.dumps(json_ld)
+    if seo.featured_image_url:
+        payload["featured_image_url"] = seo.featured_image_url
+    if seo.schema_jsonld:
+        payload["schema_jsonld"] = seo.schema_jsonld
     # Article-template components (each optional; the plugin styles them theme-native).
     takeaways = _derive_takeaways(draft_md)
     if takeaways:
@@ -2293,9 +2325,17 @@ def _publish_via_rest(
     """Publish (idempotent UPDATE-or-CREATE) through a ``WordPressPublisher`` - the REST
     app-password client OR the XML-RPC client, which share the Protocol - and record
     the live URL. Shared by the per-client connection path (xmlrpc / app_password) and
-    the legacy vault path so both record the post identically."""
+    the legacy vault path so both record the post identically.
+
+    The draft carries the SAME :func:`_seo_fields` the AIOS Publisher plugin payload is
+    built from. Anything the chosen transport could not put on the site comes back on
+    ``result.dropped`` and is written into the wire-visible ``stage`` and the outcome
+    reason: the post IS live, so this is not a failed publish, but a client silently
+    receiving a page with no SEO metadata is exactly what this path used to do.
+    """
     existing = row.get("wp_post_id")
     wp_post_id = int(existing) if existing is not None and str(existing).isdigit() else None
+    seo = _seo_fields(row, draft_md, title)
     post = PostDraft(
         title=title,
         content=_shape_body_html(row, draft_md),
@@ -2305,7 +2345,13 @@ def _publish_via_rest(
         # the agency wants fully-automated go-live.
         status="draft",
         slug=_slug(title),
+        # The excerpt was a PostDraft field both transports already sent and no caller
+        # ever filled. The meta description is the right value for it: WordPress uses a
+        # hand-written excerpt for archive/preview blurbs, and several themes fall back
+        # to it for og:description when no SEO plugin is installed.
+        excerpt=seo.meta_description or None,
         wp_post_id=wp_post_id,  # set -> idempotent UPDATE, else CREATE
+        seo=seo,
     )
     result: PublishResult = publisher.publish(site_url, post)
     # Surface the WordPress post URL on the wire-visible `stage` field so the dashboard's
@@ -2313,11 +2359,18 @@ def _publish_via_rest(
     # ContentJob has no dedicated url column; the stage label carries it). It lands as a
     # DRAFT in wp-admin for the client to publish.
     stage = f"Draft on WordPress: {result.url}" if result.url else "Draft on WordPress"
+    note = result.dropped_note()
+    if note:
+        # On the stage line rather than only in the log: the operator deciding whether
+        # this client's delivery is complete reads the dashboard, not the worker log.
+        stage = f"{stage} — {note}"
+        logger.warning("content_wp_seo_fields_dropped", code=code, dropped=list(result.dropped))
     store.update(code, {"status": "done", "stage": stage, "wp_post_id": str(result.post_id)})
     _emit_content_deliverable(row, artifact_key=None)  # pushed to WP; no local artifact
     logger.info("content_drafted_wp", code=code, wp_post_id=result.post_id)
+    reason = "drafted to WordPress" if not note else f"drafted to WordPress; {note}"
     return PublishOutcome(
-        code, "done", "published", reason="drafted to WordPress", wp_post_id=result.post_id, url=result.url
+        code, "done", "published", reason=reason, wp_post_id=result.post_id, url=result.url
     )
 
 
