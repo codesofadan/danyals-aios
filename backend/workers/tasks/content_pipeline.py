@@ -50,6 +50,7 @@ from app.services.content_pipeline.runner import (
 from app.services.content_pipeline.writer import DoctrineWriter
 from app.services.content_research import GatedResearcher, SsrfSafePageFetcher
 from app.services.cost_gate import CostGate
+from app.services.notifications import notify_leads_sync
 from workers.celery_app import celery_app
 from workers.tasks.content import (
     ContentJobOutcome,
@@ -366,7 +367,10 @@ def _persist_success(
     )
     degraded = run.outcome == "degraded"
 
-    unscored = not qa
+    # Scored means a NUMBER came back - not merely that the gate returned a dict.
+    # `qa` always carries the stage's notes now, so emptiness stopped being the
+    # test the moment those were added. This mirrors the frontend's qaVerdict().
+    unscored = qa.get("weighted_total") is None
     fields: dict[str, Any] = {
         "status": "needs_review",
         "stage": (
@@ -427,6 +431,29 @@ def _persist_success(
         # edit the lead already got - and the job becomes un-redeliverable.
         fields["edit_instruction"] = ""
     store.update(code, fields)
+
+    # A page reaching the human gate has to TELL the humans. v1 notified the leads
+    # who own the sign-off; this engine did not, so a draft could sit in the review
+    # queue indefinitely with nobody aware it was waiting - a gate is only a gate if
+    # someone knows to walk up to it.
+    #
+    # Best-effort, and the try/except is around the CALL, not the import: each
+    # lead's notification prefs govern the email leg, and a mail provider being
+    # down must never lose a page that is already written and stored.
+    subject = ctx.title or ctx.primary_keyword or "A draft"
+    try:
+        notify_leads_sync(
+            "content_review",
+            f"Content ready for review: {subject}",
+            f'"{subject}" for {ctx.client_name or "a client"} has been drafted and '
+            "is awaiting review. Approve it or send it back from the content "
+            "review queue.",
+        )
+    except Exception as exc:
+        logger.warning(
+            "content_pipeline_review_notice_failed", code=code, error=type(exc).__name__
+        )
+
     logger.info(
         "content_pipeline_done", code=code, outcome=run.outcome,
         cost=round(run.cost, 4), llm_calls=run.llm_calls,

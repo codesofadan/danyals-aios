@@ -7,6 +7,7 @@ Repo + clients + both enqueuers are faked (no Postgres, no broker). The DB-trigg
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -797,3 +798,53 @@ class TestTheSiteTheOperatorChose:
 
         site = await _chosen_site(_Clients(), "c-1", None)  # type: ignore[arg-type]
         assert site is not None and site["domain"] == "first.com"
+
+
+class TestRepublishingADegradedJob:
+    """A degraded publish means the artifact rendered but NOTHING reached the
+    client's site - a missing WordPress connection, an exhausted transport
+    cascade. Re-pushing is exactly the remedy, and the UI offered the button for
+    precisely these jobs while the API answered 409 every time: the one recovery
+    path an operator had was a dead control."""
+
+    @pytest.mark.asyncio
+    async def test_a_degraded_job_can_be_re_pushed(self) -> None:
+        from app.routers.content import republish_content_job
+
+        pushed: list[str] = []
+
+        class _Repo:
+            def get_job_by_code(self, code: str) -> dict[str, Any]:
+                return {"code": code, "status": "degraded", "client_name": "C", "client_id": "c1"}
+
+            def update_job_by_code(
+                self, code: str, changes: dict[str, Any], expect: str
+            ) -> dict[str, Any] | None:
+                assert expect == "degraded", "must expect the status it actually found"
+                return {"code": code, **changes, "client_name": "C"}
+
+        # Only the transition + enqueue are under test; the activity write and
+        # response serialisation beyond it need seams this double does not carry.
+        with contextlib.suppress(Exception):
+            await republish_content_job(
+                "CJ-1", _Repo(), pushed.append, _actor(),  # type: ignore[arg-type]
+            )
+        assert pushed == ["CJ-1"], "the publish worker must be enqueued"
+
+    @pytest.mark.asyncio
+    async def test_a_drafting_job_is_still_refused(self) -> None:
+        from fastapi import HTTPException
+
+        from app.routers.content import republish_content_job
+
+        class _Repo:
+            def get_job_by_code(self, code: str) -> dict[str, Any]:
+                return {"code": code, "status": "drafting"}
+
+        with pytest.raises(HTTPException) as exc:
+            await republish_content_job("CJ-1", _Repo(), lambda c: None, _actor())  # type: ignore[arg-type]
+        assert exc.value.status_code == 409
+
+
+def _actor() -> Any:
+    return type("U", (), {"id": "u1", "role": "owner", "client_id": None, "email": "o@x.com"})()

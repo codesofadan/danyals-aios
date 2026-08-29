@@ -112,7 +112,8 @@ _NOT_IN_REVIEW = HTTPException(
     status_code=status.HTTP_409_CONFLICT, detail="Content job is not awaiting review"
 )
 _NOT_DONE = HTTPException(
-    status_code=status.HTTP_409_CONFLICT, detail="Content job has not completed its first publish yet"
+    status_code=status.HTTP_409_CONFLICT,
+    detail="Only a published or degraded job can be re-pushed",
 )
 
 
@@ -1007,19 +1008,24 @@ async def republish_content_job(
     ``done -> publishing`` is a NEW transition for the app, but NOT a new one for
     the DB guard: the trigger's lead branch already permits any status change from
     a lead ("any other legal edit"), so no migration/trigger change was needed -
-    only this endpoint. 409 unless the job has actually finished a first publish
-    (optimistic ``expect_status``). The re-push itself reuses the EXISTING publish
-    worker unchanged - its update-or-create-by ``wp_post_id`` logic is already
-    idempotent, so a re-push updates the SAME WordPress post rather than
-    duplicating it, and the hard QA gate applies exactly as it does on a first
-    publish."""
+    only this endpoint. The re-push reuses the EXISTING publish worker unchanged -
+    its update-or-create-by ``wp_post_id`` logic is already idempotent, so a
+    re-push updates the SAME WordPress post rather than duplicating it.
+
+    ``degraded`` IS ACCEPTED, and it is the case that matters most. A degraded
+    publish means the artifact rendered but nothing reached the client's site -
+    a missing WordPress connection, an exhausted transport cascade. Re-pushing is
+    precisely the remedy for it, and refusing was worse than useless: the UI
+    offered the button for exactly these jobs and the API answered 409 every
+    time, so the one recovery path the operator had was a dead control."""
     job = await asyncio.to_thread(repo.get_job_by_code, code)
     if job is None:
         raise _JOB_NOT_FOUND
-    if job.get("status") != "done":
+    current = str(job.get("status") or "")
+    if current not in ("done", "degraded"):
         raise _NOT_DONE
     updated = await asyncio.to_thread(
-        repo.update_job_by_code, code, {"status": "publishing", "stage": "Republishing"}, "done"
+        repo.update_job_by_code, code, {"status": "publishing", "stage": "Republishing"}, current
     )
     if updated is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Content job changed concurrently")

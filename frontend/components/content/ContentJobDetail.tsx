@@ -146,6 +146,10 @@ export default function ContentJobDetail({ code }: { code: string }) {
   }
 
   const inReview = job.status === "needs_review";
+  // Both are re-pushable, and `degraded` is the one that matters: the artifact
+  // rendered but nothing reached the site, so a re-push IS the remedy. The
+  // backend refused degraded until 2026-08-29, which made this a dead control
+  // offered on exactly the jobs that needed it.
   const republishable = job.status === "done" || job.status === "degraded";
   const url = liveUrl(job);
   // Only a REAL verdict can fail. An unscored page is not a failed one, and
