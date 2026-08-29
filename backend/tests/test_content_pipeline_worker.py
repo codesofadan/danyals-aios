@@ -683,3 +683,48 @@ class TestTheKeywordMapReachesTheRow:
         store = self._run_with_brief(object())   # no .terms
         assert store.final("keyword_map") is None
         assert store.final("status") == "needs_review", "the page must still land"
+
+
+class TestTheStoredDraftCarriesNoMachineDashes:
+    """v1 GUARANTEED a stored draft had no em or en dash - the clearest
+    machine-writing tell and the one a client notices. This engine dropped the
+    guarantee, so its pages shipped with them. The strip is pure, deterministic
+    and free, so it applies to everything the reader sees."""
+
+    def _persisted(self, text: str, title: str = "", meta: str = "") -> _Store:
+        store = _Store(_row())
+
+        def draft(ctx: PipelineContext) -> StageResult:
+            ctx.draft_md = text
+            ctx.title = title
+            ctx.meta_description = meta
+            return ctx.record(StageResult("draft", outcome="ok"))
+
+        _run(store, {"draft": draft, "gate": _stage("gate", "ok")})
+        return store
+
+    #: Written as code points, not literals: ruff flags an ambiguous dash in
+    #: source, and a test about dashes should not smuggle one in invisibly.
+    EM = "\u2014"
+    EN = "\u2013"
+
+    def test_the_body_is_stripped(self) -> None:
+        store = self._persisted(f"We answer fast {self.EM} usually within the hour.")
+        body = store.final("draft_md")
+        assert self.EM not in body and self.EN not in body
+        assert "-" in body, "the sentence must survive, not just the dash"
+
+    def test_the_title_and_meta_are_stripped_too(self) -> None:
+        """They are what shows in the SERP, so a dash there is the most visible
+        place it could possibly appear."""
+        store = self._persisted(
+            "body",
+            title=f"Plumber {self.EM} Dallas",
+            meta=f"Fast help {self.EM} any hour",
+        )
+        assert self.EM not in store.final("outline")["meta"]["title"]
+        assert self.EM not in store.final("outline")["meta"]["description"]
+
+    def test_a_numeric_range_collapses_rather_than_becoming_spaced(self) -> None:
+        store = self._persisted(f"Most repairs run 5{self.EN}10 hours.")
+        assert "5-10" in store.final("draft_md")

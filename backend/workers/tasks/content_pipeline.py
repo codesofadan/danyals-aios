@@ -39,6 +39,7 @@ from typing import Any
 import structlog
 
 from app.config import Settings, get_settings
+from app.services.content_guard import strip_dashes
 from app.services.content_pipeline.assembly import build_page_stages
 from app.services.content_pipeline.context import PipelineContext, StageResult
 from app.services.content_pipeline.runner import (
@@ -371,6 +372,15 @@ def _persist_success(
     # `qa` always carries the stage's notes now, so emptiness stopped being the
     # test the moment those were added. This mirrors the frontend's qaVerdict().
     unscored = qa.get("weighted_total") is None
+    # THE DASH STRIP. v1 guaranteed a stored draft carried no em or en dash - the
+    # single clearest machine-writing tell, and the one a client notices. This
+    # engine dropped that guarantee, so its pages shipped with them. It is a pure,
+    # deterministic, free string pass, so there is no reason it is not applied to
+    # everything the reader will actually see: the body, the title and the meta.
+    ctx.draft_md = strip_dashes(ctx.draft_md)
+    ctx.title = strip_dashes(ctx.title)
+    ctx.meta_description = strip_dashes(ctx.meta_description)
+
     fields: dict[str, Any] = {
         "status": "needs_review",
         "stage": (
