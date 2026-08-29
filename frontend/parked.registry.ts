@@ -51,6 +51,29 @@ export type ParkedEntry = {
 };
 
 export const PARKED: ParkedEntry[] = [
+  // --- The wizard the content flow replaced -----------------------------------
+  // SUPERSEDED, not merely unmounted. `components/content/flow/` is the same job
+  // done as four screens with the step in the URL; this was five steps mounted
+  // INLINE on the board, so one scrolling page carried making, watching and
+  // approving at once. The owner's verdict on that shape was explicit.
+  //
+  // Kept rather than deleted for one reason: it is the only remaining record of
+  // two behaviours the flow has not re-implemented - the queued-jobs preview
+  // strip on its final step, and its "start another" reset. If neither is
+  // missed, delete it; nothing imports it.
+  {
+    path: "content/ContentWizard.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-08-29 content flow (components/content/flow/)",
+    reason:
+      "Replaced by a four-screen flow at /admin/content/new. The inline five-step " +
+      "wizard is the shape the owner rejected: creating, watching and approving " +
+      "stacked on one scrolling page.",
+    reEnableWhen:
+      "Never as-is. Salvage its queued-jobs preview strip into StepLaunch if that " +
+      "turns out to be missed, then delete the file.",
+  },
+
   // --- Phase-1 screen grammar: built ahead of the screens that mount them ----
   // The approved Screen & Hierarchy Specification (plan of 2026-08-27) builds the
   // shared vocabulary FIRST, then migrates screens onto it phase by phase. These
@@ -93,21 +116,30 @@ export const PARKED: ParkedEntry[] = [
       "not as a tab, and needs server pagination first (the hook fetches unbounded).",
   },
 
-  // --- Citations: ACTIVE work, locked pending a data source -------------------
-  // `app/admin/citations/page.tsx` renders a lock card that says so in plain words:
-  // "Re-enable by restoring the CitationsTab render below (see git history) once the
-  // engine is ready." Edited 2026-08-20. Do not touch these while the lock stands.
-  ...(
-    ["offpage/CitationsTab.tsx", "offpage/CitationCampaignModal.tsx", "offpage/AuditPlanPanel.tsx"] as const
-  ).map((path): ParkedEntry => ({
-    path,
-    status: "active-parked",
-    unmountedBy: "fd1bf2a -> 5ba93b7 -> the lock card in app/admin/citations/page.tsx",
-    reason:
-      "Directory auto-submission is blocked by captcha/dead forms and does not produce " +
-      "dependable live listings; the module is locked rather than shipping misleading data.",
-    reEnableWhen: "A verified citation data aggregator is wired in.",
-  })),
+  // --- Citations: UNPARKED 2026-08-29 -----------------------------------------
+  // CitationsTab / CitationCampaignModal / AuditPlanPanel were parked here with the
+  // reason: "Directory auto-submission is blocked by captcha/dead forms and does not
+  // produce dependable live listings; the module is locked rather than shipping
+  // misleading data." That was the right call, and it is worth recording WHY it no
+  // longer applies rather than deleting the entry silently:
+  //
+  //   * The specific misleading data was one mis-wired field. `CitationGap.live_urls`
+  //     was populated from `proof_url` - a screenshot key, and for a while the absolute
+  //     server path the Playwright bot returned - and rendered under a KPI tile reading
+  //     "Live listing URLs". Migration 0106 gave a listing a real `live_url`, and
+  //     `service.py` now reads that and only for `submit_status = 'live'`.
+  //   * "Does not produce dependable live listings" is still TRUE of the automated
+  //     route, and the module no longer claims otherwise: `submitted` is labelled
+  //     "Sent - unconfirmed", only a fetched-and-matched listing reaches `live`, and
+  //     every directory we do not build is listed with the reason.
+  //   * The 16 directories whose terms forbid automated submission are route F and
+  //     cannot be queued at all (0106), so the captcha/dead-form problem is now data
+  //     the module reports rather than a trap it walks into.
+  //
+  // The page is `app/admin/citations/page.tsx` (created 2026-08-29 - the earlier
+  // "lock card" this comment used to describe had itself been deleted, so the note was
+  // pointing at a file that did not exist). Route B - real automated submission at
+  // volume - is still gated on a verified aggregator; that is Phase 4, not this page.
 
   // --- The 158c204 batch: six admin tabs removed, components kept -------------
   // "fix(admin): remove Milestones/Upsells/Backups/Service Tiers/Off-page/GMB tabs"

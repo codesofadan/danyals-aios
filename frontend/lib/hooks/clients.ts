@@ -251,3 +251,19 @@ export function useDeleteClient() {
     },
   });
 }
+
+/** A client's registered sites (GET /clients/{id}/sites).
+ *
+ * The content flow asked the operator to TYPE a site URL, on a screen shown
+ * before they had even chosen the client - and then dropped it: `site` was never
+ * in the generate payload, so the backend silently used the client's first site
+ * anyway. The sites were in the database the whole time and nothing read them. */
+export type ClientSite = { id: string; clientId: string; domain: string; cms: string };
+
+export function useClientSites(clientId: string | null) {
+  return useQuery({
+    queryKey: ["clients", clientId, "sites"] as const,
+    queryFn: () => api.get<ClientSite[]>(`/clients/${clientId}/sites`),
+    enabled: Boolean(clientId),
+  });
+}
