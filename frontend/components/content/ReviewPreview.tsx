@@ -534,7 +534,7 @@ function SchemaTab({ loading, error, data, fallbackType }: {
 function QaTab({ loading, error, qa }: {
   loading: boolean; error: Error | null;
   qa: { dimensions: Record<string, number>; weighted_total: number; passed: boolean;
-    blocked_by: string[]; provisional: boolean; notes: string[] } | null;
+    blocked_by: string[]; provisional: boolean; notes?: string[] } | null;
 }) {
   if (loading) return <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span><div>Loading QA…</div></div>;
   if (error) return <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span><div>Couldn&apos;t load the QA scorecard — {error.message}.</div></div>;
@@ -591,11 +591,15 @@ function QaTab({ loading, error, qa }: {
         })}
       </div>
 
-      {qa.notes.length > 0 && (
+      {/* `qa_score` is a jsonb column: its shape is whatever the engine that wrote
+          it happened to include, not a contract. The doctrine engine omitted
+          `notes`, so this threw a TypeError and took the whole QA tab down on
+          every page it drafted. Read defensively. */}
+      {(qa.notes ?? []).length > 0 && (
         <details style={{ marginTop: 12 }}>
-          <summary className="cs" style={{ cursor: "pointer" }}>Why ({qa.notes.length} note{qa.notes.length === 1 ? "" : "s"})</summary>
+          <summary className="cs" style={{ cursor: "pointer" }}>Why ({(qa.notes ?? []).length} note{(qa.notes ?? []).length === 1 ? "" : "s"})</summary>
           <ul style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13, opacity: 0.85 }}>
-            {qa.notes.map((n, i) => <li key={i}>{n}</li>)}
+            {(qa.notes ?? []).map((n, i) => <li key={i}>{n}</li>)}
           </ul>
         </details>
       )}

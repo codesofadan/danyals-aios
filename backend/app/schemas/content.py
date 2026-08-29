@@ -196,6 +196,10 @@ class ContentJobCreate(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # The site the operator chose, when the client has more than one. Absent ->
+    # the client's first site, which is what always happened before there was
+    # a choice to make.
+    site_domain: str | None = Field(default=None, alias="siteDomain", max_length=2048)
     client_id: str = Field(min_length=1)
     page_type: PageType = Field(alias="pageType")
     topic: str = Field(min_length=1)
@@ -479,6 +483,9 @@ class ContentBulkGenerateRequest(BaseModel):
     supplies its own ``title`` (-> the job topic) and ``pageType``. The per-site
     WordPress publish target is resolved server-side from the client's site + vault
     (exactly like ``POST /content/jobs``), so no wpConnection field is needed here."""
+    # The site the operator chose, when the client has more than one. Absent -> the
+    # client's first site, which is what always happened before there was a choice.
+    site_domain: str | None = Field(default=None, alias="siteDomain", max_length=2048)
 
     model_config = ConfigDict(populate_by_name=True)
 

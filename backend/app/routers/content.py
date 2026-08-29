@@ -264,11 +264,43 @@ async def _first_site(clients: ClientsRepoDep, client_id: str) -> dict[str, Any]
     return sites[0] if sites else None
 
 
+async def _chosen_site(
+    clients: ClientsRepoDep, client_id: str, domain: str | None
+) -> dict[str, Any] | None:
+    """The site the operator PICKED, verified to belong to this client.
+
+    A client with several sites had no way to say which one a page was for: the
+    creation path always took the first, so the flow's site picker changed what
+    was researched and nothing else. The page then published to whichever site
+    happened to be first.
+
+    The domain is matched against the client's OWN sites and never trusted from
+    the wire - a domain that does not belong to them is refused, not silently
+    replaced with the first site, because publishing a page to a site the
+    operator did not choose is the failure this exists to prevent.
+    """
+    wanted = (domain or "").strip().lower()
+    if not wanted:
+        return await _first_site(clients, client_id)
+    wanted = wanted.removeprefix("https://").removeprefix("http://").rstrip("/")
+    sites = await asyncio.to_thread(clients.list_sites, client_id, limit=200, offset=0)
+    for site in sites:
+        owned = str(site.get("domain") or "").strip().lower()
+        owned = owned.removeprefix("https://").removeprefix("http://").rstrip("/")
+        if owned == wanted:
+            return site
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"'{domain}' is not a registered site for this client",
+    )
+
+
 async def _seed_and_insert_job(
     repo: ContentRepo,
     clients: ClientsRepo,
     enqueue: Callable[[str], None],
     *,
+    site_domain: str | None = None,
     client: dict[str, Any],
     client_id: str,
     page_type: str,
@@ -297,7 +329,10 @@ async def _seed_and_insert_job(
         framework_resolved = framework
         auto = False
 
-    site = await _first_site(clients, client_id) if target == "WordPress" else None
+    site = (
+        await _chosen_site(clients, client_id, site_domain)
+        if target == "WordPress" else None
+    )
     source_pack = _seed_source_pack(
         client,
         site,
@@ -507,6 +542,7 @@ async def create_content_job(
         repo,
         clients,
         enqueue,
+        site_domain=body.site_domain,
         client=client,
         client_id=body.client_id,
         page_type=body.page_type,
@@ -619,6 +655,7 @@ async def generate_from_research(
             repo,
             clients,
             enqueue,
+            site_domain=body.site_domain,
             client=client,
             client_id=body.client_id,
             page_type=job_page_type_for(item.page_type),

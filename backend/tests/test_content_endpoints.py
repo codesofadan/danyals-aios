@@ -740,3 +740,60 @@ async def test_patch_missing_job_404(
 ) -> None:
     wire("manager")
     assert (await client.patch("/api/v1/content/jobs/CJ-nope", json={"topic": "x"})).status_code == 404
+
+
+class TestTheSiteTheOperatorChose:
+    """A client with several sites had no way to say which one a page was for: the
+    creation path always took the FIRST, so the flow's site picker changed what was
+    researched and nothing else - and the page then published to whichever site
+    happened to be first."""
+
+    @pytest.mark.asyncio
+    async def test_an_unowned_domain_is_refused_not_silently_replaced(self) -> None:
+        """Falling back to the first site would publish a page to a site the
+        operator did not choose - the exact failure this guards."""
+        from fastapi import HTTPException
+
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "theirs.com"}, {"domain": "also-theirs.com"}]
+
+        with pytest.raises(HTTPException) as exc:
+            await _chosen_site(_Clients(), "c-1", "somebody-elses.com")  # type: ignore[arg-type]
+        assert exc.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_a_chosen_domain_resolves_to_that_site(self) -> None:
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "first.com"}, {"domain": "second.com"}]
+
+        site = await _chosen_site(_Clients(), "c-1", "second.com")  # type: ignore[arg-type]
+        assert site is not None and site["domain"] == "second.com"
+
+    @pytest.mark.asyncio
+    async def test_the_scheme_and_trailing_slash_do_not_defeat_the_match(self) -> None:
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "https://second.com/"}]
+
+        site = await _chosen_site(_Clients(), "c-1", "second.com")  # type: ignore[arg-type]
+        assert site is not None
+
+    @pytest.mark.asyncio
+    async def test_no_choice_still_takes_the_first_site(self) -> None:
+        """Every existing caller omits it; they must keep working unchanged."""
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "first.com"}]
+
+        site = await _chosen_site(_Clients(), "c-1", None)  # type: ignore[arg-type]
+        assert site is not None and site["domain"] == "first.com"

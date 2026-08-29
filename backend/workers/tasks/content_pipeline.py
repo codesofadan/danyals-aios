@@ -349,6 +349,12 @@ def _persist_success(
     # floor between the pipeline and the row.
     gate_result = ctx.result_for("gate")
     qa = dict(gate_result.data) if gate_result else {}
+    if gate_result is not None and "notes" not in qa:
+        # The gate's REASONS live on the StageResult's notes, not in its data, so a
+        # straight copy of `data` produced a scorecard with scores and no
+        # explanations - and the review screen, which read `qa.notes.length`
+        # unguarded, threw a TypeError and took the whole QA tab down with it.
+        qa["notes"] = list(gate_result.notes)
     schema_result = ctx.result_for("schema_links")
     schema_data = dict(schema_result.data) if schema_result else {}
     logger.info(

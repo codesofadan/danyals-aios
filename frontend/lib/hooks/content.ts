@@ -172,6 +172,9 @@ export function useContentResearch() {
 export type BulkGenerateInput = {
   items: ResearchItem[];
   clientId: string;
+  /** The client's OWN site the pages publish to. Omitted -> the backend takes their
+   *  first site, which is what happened before the flow offered a choice. */
+  siteDomain?: string;
   framework?: Framework | "Auto";
   // The page-layout template shared across every fanned-out job ("Auto" derives it
   // per-item from each item's page type; an analyzed design profile still wins).

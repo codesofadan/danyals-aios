@@ -39,6 +39,10 @@ export default function StepLaunch({
       {
         items: state.picks,
         clientId: state.clientId,
+        // The site chosen on screen 1. Without this the backend takes the client's
+        // FIRST site, so the picker changed what was researched and nothing else -
+        // the page then published wherever happened to be first.
+        siteDomain: state.siteDomain,
         framework: state.framework,
         // An explicit template wins over the kind's default blueprint; "Auto"
         // falls back to the blueprint the chosen page kind derives.
