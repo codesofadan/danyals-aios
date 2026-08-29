@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "AIOS Citation Assistant",
+  "version": "0.1.0",
+  "description": "Fills a directory listing form from the canonical business profile, and records what actually happened.",
+  "minimum_chrome_version": "114",
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "action": { "default_title": "AIOS Citation Assistant" },
+  "side_panel": { "default_path": "panel.html" },
+  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "alarms"],
+  "host_permissions": ["http://localhost:8000/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

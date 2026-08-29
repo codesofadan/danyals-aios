@@ -1,0 +1,35 @@
+name: extension-ci
+
+# Path-filtered, exactly like frontend-ci.yml and backend-ci.yml — so adding this
+# workflow cannot slow down or affect either of the existing ones.
+on:
+  push:
+    paths: ["extension/**", ".github/workflows/extension-ci.yml"]
+  pull_request:
+    paths: ["extension/**", ".github/workflows/extension-ci.yml"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # The build must run BEFORE the tests: tests/isolation.test.ts asserts the
+      # credential boundary against the built bundles, because a bundler is exactly the
+      # thing that can silently pull a shared import into two chunks.
+      - run: npx vite build
+      - run: npx vitest run
+      - name: dist/ is a loadable extension
+        run: |
+          for f in manifest.json panel.html panel.js service-worker.js filler.js; do
+            test -f "dist/$f" || { echo "missing dist/$f"; exit 1; }
+          done
