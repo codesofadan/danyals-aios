@@ -4,7 +4,7 @@
 // ClientResponse[] ≡ ClientRecord[]) backs the audit "run new" picker AND the
 // admin Client Directory. The report-grant hooks back the Directory's Report-Access
 // view + the Add-Client wizard.
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
   type ClientRecord,
