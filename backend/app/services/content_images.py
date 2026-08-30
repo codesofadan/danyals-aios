@@ -35,6 +35,34 @@ from app.config import Settings
 CONTENT_IMAGE_ROUTE = "/api/v1/public/content-images"
 
 
+def _trim_overlap(base_url: str, route: str) -> str:
+    """Drop any leading part of ``route`` that ``base_url`` already ends with.
+
+    ``PUBLIC_FILE_BASE_URL`` is documented as an ORIGIN (``https://api.example.com``),
+    but ``/api/v1`` is the most natural thing in the world to paste onto the end of an
+    API base - and the route below ALREADY carries it. Concatenating blindly then mints
+    ``https://host/api/v1/api/v1/public/content-images/<sha>.png``, which 404s.
+
+    That failure is invisible where it happens. The bytes are hosted correctly, the
+    stage reports success, the cost is real, the draft passes QA - and the broken URL
+    is only discovered as a missing image on the client's published page, by the
+    client. MEASURED on this deploy: every generated page carried the doubled path.
+
+    So an overlap is trimmed rather than trusted. It is not silent about it either:
+    a wrong-but-plausible base still round-trips to a working URL, and the operator
+    keeps the value they meant.
+    """
+    if not base_url or not route:
+        return base_url
+    segments = [s for s in route.strip("/").split("/") if s]
+    # Longest overlap first: "/api/v1" must win over "/api".
+    for depth in range(len(segments), 0, -1):
+        suffix = "/" + "/".join(segments[:depth])
+        if base_url.endswith(suffix):
+            return base_url[: -len(suffix)]
+    return base_url
+
+
 class LocalContentImageStore:
     """Host a generated PNG under a controlled root and mint its served URL.
 
@@ -49,8 +77,8 @@ class LocalContentImageStore:
         self, root: str | Path, *, base_url: str = "", route: str = CONTENT_IMAGE_ROUTE
     ) -> None:
         self._root = Path(root)
-        self._base_url = base_url.rstrip("/")
         self._route = "/" + route.strip("/")
+        self._base_url = _trim_overlap(base_url.rstrip("/"), self._route)
 
     def host_png(self, data: bytes) -> str:
         """Persist ``data`` (PNG bytes) and return its served URL. Raises on empty
