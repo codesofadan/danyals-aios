@@ -242,3 +242,35 @@ def test_units_split_headings_whole_and_prose_by_sentence() -> None:
     units = split_units("## A heading. With a stop\n\nOne. Two. Three.\n")
     assert units[0] == "## A heading. With a stop"
     assert units[1:] == ["One.", "Two.", "Three."]
+
+
+class TestCitationFormsTheWriterActuallyEmits:
+    """MEASURED on a live run: told it "may cite more than one" without being shown
+    how, the writer invented "[[a9], [a10]]". The strict single-id pattern neither
+    recognised it (so the sentence counted as unsourced and was queued for deletion)
+    nor stripped it (so the marker reached the published page). Both halves of that
+    are worse than accepting a loose format, so every plural form is parsed."""
+
+    @pytest.mark.parametrize(("text", "ids"), [
+        ("Founded 2013 [[a1]].", ["a1"]),
+        ("Founded 2013 [[a1]][[a2]].", ["a1", "a2"]),
+        ("Founded 2013 [[a1, a2]].", ["a1", "a2"]),
+        ("Founded 2013 [[a9], [a10]].", ["a9", "a10"]),   # the real one
+        ("Nothing cited here.", []),
+    ])
+    def test_every_plural_form_is_read(self, text: str, ids: list[str]) -> None:
+        from app.services.content_pipeline.claims import cited_ids
+
+        assert cited_ids(text) == ids
+
+    @pytest.mark.parametrize("text", [
+        "Founded 2013 [[a1]].",
+        "Founded 2013 [[a9], [a10]].",
+        "Founded 2013 [[a1, a2]].",
+    ])
+    def test_no_marker_form_survives_to_the_reader(self, text: str) -> None:
+        assert "[[" not in strip_citations(text)
+
+    def test_a_markdown_link_is_not_mistaken_for_a_citation(self) -> None:
+        text = "See the [pricing page](https://example.com/pricing) [[a1]]."
+        assert strip_citations(text) == "See the [pricing page](https://example.com/pricing)."

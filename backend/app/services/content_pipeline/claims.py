@@ -68,9 +68,31 @@ from dataclasses import dataclass
 # Atoms - the supplied facts, given identities so a sentence can point at one.
 # --------------------------------------------------------------------------- #
 
-#: How a citation appears in the draft. Deliberately unlikely to occur in prose,
-#: and stripped before anything is published.
-CITATION_RE = re.compile(r"\[\[(a\d+)\]\]")
+#: A citation MARKER GROUP: the whole "[[...]]" bracket, whatever is inside it.
+#: Deliberately unlikely to occur in prose, and stripped before publication.
+#:
+#: Tolerant on purpose. The prompt asks for "[[a2]]" and a writer told it may cite
+#: more than one will invent its own plural form - MEASURED, a real run emitted
+#: "[[a9], [a10]]", which the strict single-id pattern neither recognised as a
+#: citation (so the sentence counted as unsourced) nor stripped (so the marker
+#: reached the published page). Both halves of that failure are worse than
+#: accepting a loose format, so the group is matched first and the ids are read
+#: out of it afterwards.
+#: Non-greedy from "[[" to the first "]]" on the same line - the only form that
+#: survives every plural the writer has invented. Markdown has no "[[ ]]"
+#: construct, so the collision risk against real prose is nil.
+CITATION_GROUP_RE = re.compile(r"\[\[[^\n]*?\]\]")
+
+#: The atom ids inside a marker group.
+_ATOM_ID_RE = re.compile(r"\ba(\d+)\b")
+
+
+def cited_ids(text: str) -> list[str]:
+    """Every atom id cited anywhere in ``text``, in order, however it was written."""
+    ids: list[str] = []
+    for group in CITATION_GROUP_RE.findall(text):
+        ids.extend(f"a{n}" for n in _ATOM_ID_RE.findall(group))
+    return ids
 
 
 @dataclass(frozen=True)
@@ -119,7 +141,7 @@ def render_atoms(atoms: Iterable[Atom]) -> str:
 
 def strip_citations(markdown: str) -> str:
     """Remove every citation marker. Runs before the draft is shown or published."""
-    cleaned = CITATION_RE.sub("", markdown)
+    cleaned = CITATION_GROUP_RE.sub("", markdown)
     # A marker usually sits before the full stop, leaving " ." behind.
     cleaned = re.sub(r"[ \t]+([.,;:!?])", r"\1", cleaned)
     return re.sub(r"[ \t]{2,}", " ", cleaned)
@@ -506,7 +528,7 @@ def audit_draft(
         if not fired:
             continue
         claim_units += 1
-        cited = tuple(c for c in CITATION_RE.findall(unit) if c in valid)
+        cited = tuple(c for c in cited_ids(unit) if c in valid)
         if cited:
             cited_units += 1
             lane = "cited"

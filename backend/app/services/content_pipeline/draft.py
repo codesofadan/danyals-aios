@@ -89,7 +89,8 @@ def _batch_prompt(
             "CITE THEM. Any sentence that states a number, a credential, a customer or "
             "deployment, a named third-party system, a guarantee, or an absolute "
             "('never', 'zero', 'no data leaves') must end with the id of the fact it "
-            "rests on, like [[a2]]. A sentence may cite more than one.",
+            "rests on, like [[a2]]. To cite two, write them together as [[a2]][[a5]] "
+            "- exactly that shape, one bracket pair per id.",
             "If no fact supports the sentence you were about to write, DO NOT WRITE IT. "
             "Do not soften it, do not hedge it, do not write it without the id - a "
             "sentence with no id is deleted before the page is reviewed, so an "
