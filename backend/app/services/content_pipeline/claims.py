@@ -590,9 +590,20 @@ def run_claims(
 ) -> StageResult:
     """Delete the uncited claims the machine is reliably right about; report the rest.
 
-    Runs AFTER grounding, so it audits the text that will actually ship rather than
-    a draft three rewrites away from it, and BEFORE images and schema_links, which
-    only append blocks and carry no claims of their own.
+    Runs IMMEDIATELY AFTER the draft, and the position is the whole design.
+
+    The obvious place is at the end, auditing the text that actually ships. That was
+    tried and it does not work: `convert`, `voice` and `grounding` each rewrite the
+    document wholesale through an LLM, and MEASURED over six real pages, the citation
+    markers did not survive them - 5 of 6 finished pages carried none. With no
+    markers every claim looks unsourced, the fail-safe correctly refuses to delete,
+    and the stage becomes a no-op that reports. Fabrications on that run: 43, against
+    a baseline of 44.
+
+    So it runs where the evidence still exists. The cost is real and worth naming:
+    a later stage could introduce a claim this never saw. Those stages are instructed
+    not to add facts, and the QA gate still scores the finished page - but the honest
+    statement is that this check covers the DRAFT, not the final text.
 
     It never fails the page. A page whose fabrications were removed is a shorter,
     truer page; a page whose markers were lost is reported and left alone. Neither
@@ -607,11 +618,20 @@ def run_claims(
     )
 
     cleaned, removed = apply_deletions(ctx.draft_md, audit)
+    # Markdown only honours "##" at the start of a line, so a heading left mid-
+    # paragraph publishes as literal hash characters and its keyword intent never
+    # becomes a heading at all. Repaired here because it is a formatting invariant
+    # with one correct answer.
+    cleaned, moved = normalise_headings(cleaned)
     # The markers are the pipeline's private bookkeeping and must never reach a
     # reader, whether or not anything was deleted.
     ctx.draft_md = strip_citations(cleaned)
 
     notes: list[str] = []
+    if moved:
+        notes.append(f"moved {moved} heading(s) back onto their own line")
+    for heading in overlong_headings(ctx.draft_md):
+        notes.append(f"heading appears to have swallowed its paragraph: {heading}")
     if removed:
         notes.append(
             f"removed {removed} sentence(s) making a compliance, third-party, "
@@ -627,7 +647,10 @@ def run_claims(
     for finding in audit.to_delete if not audit.deletable else ():
         notes.append(f"unsourced claim, NOT removed: {finding.sentence[:160]}")
 
-    outcome: StageOutcome = "ok" if (audit.deletable and not audit.for_review) else "degraded"
+    structural = bool(overlong_headings(ctx.draft_md))
+    outcome: StageOutcome = (
+        "ok" if (audit.deletable and not audit.for_review and not structural) else "degraded"
+    )
     return ctx.record(StageResult(
         STAGE,
         outcome=outcome,
@@ -640,3 +663,79 @@ def run_claims(
             "unsourced_kept": [f.sentence for f in audit.to_delete] if not audit.deletable else [],
         },
     ))
+
+
+#: A markdown ATX heading that has ended up mid-line. Requires whitespace before
+#: the hashes and a space after them, so a URL fragment ("...#section"), a hex
+#: colour and a "C# developer" are all left alone.
+_INLINE_HEADING_RE = re.compile(r"(?<=\S)[ \t]+(\#{2,6})[ \t]+(?=\S)")
+
+_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+
+
+def normalise_headings(markdown: str) -> tuple[str, int]:
+    """Put every heading back on its own line. Returns the text and the count moved.
+
+    MEASURED: a real run produced a 4,176-character line holding an H2 and roughly
+    900 words of prose, with two more H2s buried inside it. Markdown only treats
+    "##" as a heading at the START of a line, so those render as literal hash
+    characters in the middle of a wall of text on the client's published page -
+    and the section headings that carry the page's keyword intent never become
+    headings at all.
+
+    This is done mechanically rather than by asking the writer again, because it is
+    a formatting invariant with one correct answer, and a stage that spends money to
+    re-request compliance can still come back wrong. Fenced code blocks are skipped:
+    inside one, "## " is content.
+    """
+    out: list[str] = []
+    moved = 0
+    in_fence = False
+    for line in markdown.split("\n"):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        if in_fence or "#" not in line:
+            out.append(line)
+            continue
+        pieces = _INLINE_HEADING_RE.split(line)
+        if len(pieces) == 1:
+            out.append(line)
+            continue
+        # split() yields [text, hashes, text, hashes, text...]
+        rebuilt = [pieces[0]]
+        for i in range(1, len(pieces), 2):
+            moved += 1
+            rebuilt.append("")
+            rebuilt.append(f"{pieces[i]} {pieces[i + 1].lstrip()}")
+        out.extend(x for x in rebuilt)
+    return "\n".join(out), moved
+
+
+#: A heading longer than this has almost certainly swallowed the paragraph that
+#: should follow it. Measured: a real run produced an H2 carrying ~900 words.
+MAX_HEADING_CHARS = 120
+
+
+def overlong_headings(markdown: str) -> list[str]:
+    """Headings that appear to have absorbed their own body text.
+
+    Moving a buried heading onto its own line is unambiguous and done. Deciding
+    WHERE the heading ends and the prose begins is not - "(Beyond Chat) AI
+    automation for real estate goes..." has no reliable boundary - and a wrong
+    split produces a different silent defect in place of this one. So these are
+    reported for a human instead of guessed at.
+    """
+    found: list[str] = []
+    in_fence = False
+    for line in markdown.split("\n"):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        stripped = line.strip()
+        if in_fence or not stripped.startswith("#"):
+            continue
+        if len(stripped) > MAX_HEADING_CHARS:
+            found.append(stripped[:160])
+    return found

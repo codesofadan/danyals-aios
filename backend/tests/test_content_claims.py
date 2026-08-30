@@ -274,3 +274,42 @@ class TestCitationFormsTheWriterActuallyEmits:
     def test_a_markdown_link_is_not_mistaken_for_a_citation(self) -> None:
         text = "See the [pricing page](https://example.com/pricing) [[a1]]."
         assert strip_citations(text) == "See the [pricing page](https://example.com/pricing)."
+
+
+class TestHeadingsThatEndedUpMidParagraph:
+    """MEASURED on a live run: a 4,176-character line holding an H2 and ~900 words,
+    with two more H2s buried inside it. Markdown only honours "##" at the START of a
+    line, so those publish as literal hash characters in a wall of text and the
+    headings carrying the page's keyword intent never become headings at all."""
+
+    def test_a_buried_heading_is_moved_onto_its_own_line(self) -> None:
+        from app.services.content_pipeline.claims import normalise_headings
+
+        out, moved = normalise_headings("Intro prose. ## A Heading And more prose.")
+        assert moved == 1
+        assert out.startswith("Intro prose.\n\n## A Heading")
+
+    @pytest.mark.parametrize("text", [
+        "See https://example.com/page#section for more.",   # a URL fragment
+        "A hex colour #fff and a C# note.",                 # not a heading
+        "## Already correct",                               # already fine
+    ])
+    def test_it_leaves_everything_that_is_not_a_buried_heading_alone(self, text: str) -> None:
+        from app.services.content_pipeline.claims import normalise_headings
+
+        assert normalise_headings(text) == (text, 0)
+
+    def test_a_fenced_code_block_is_not_touched(self) -> None:
+        from app.services.content_pipeline.claims import normalise_headings
+
+        fenced = "```\nrun ## this is shell, not a heading\n```"
+        assert normalise_headings(fenced) == (fenced, 0)
+
+    def test_a_heading_that_swallowed_its_paragraph_is_reported_not_guessed_at(self) -> None:
+        # Moving a heading onto its own line is unambiguous. Deciding WHERE the
+        # heading ends and the prose begins is not, and a wrong split trades this
+        # defect for a different silent one - so it is surfaced to a human.
+        from app.services.content_pipeline.claims import overlong_headings
+
+        assert overlong_headings("## " + "word " * 60)
+        assert not overlong_headings("## A normal length heading")
