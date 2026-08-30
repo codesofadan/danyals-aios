@@ -157,3 +157,88 @@ class TestTheTwoLanes:
     def test_numbers_and_customer_claims_go_to_a_human(self) -> None:
         # Too noisy to delete silently; a reviewer settles them in seconds.
         assert {"T1-NUMERIC", "T2-CUSTOMER", "T5-GUARANTEE"} == REVIEW_TRIGGERS
+
+
+# --------------------------------------------------------------------------- #
+# The audit and the deletion pass
+# --------------------------------------------------------------------------- #
+
+from app.services.content_pipeline.claims import (  # noqa: E402
+    apply_deletions,
+    audit_draft,
+    split_units,
+)
+
+_ATOMS = build_atoms(["founded 2013", "used across 7 client accounts"])
+
+
+class TestTheAudit:
+    def test_a_cited_claim_is_kept(self) -> None:
+        audit = audit_draft("We have served 7 client accounts [[a2]].", _ATOMS)
+        assert [f.lane for f in audit.findings] == ["cited"]
+
+    def test_an_uncited_compliance_claim_goes_to_the_delete_lane(self) -> None:
+        audit = audit_draft("Our platform is HIPAA compliant.", _ATOMS)
+        assert [f.lane for f in audit.findings] == ["delete"]
+
+    def test_an_uncited_number_goes_to_a_human_not_the_bin(self) -> None:
+        # 19.8% false positives on this lane: too noisy to delete silently.
+        audit = audit_draft("We handle 40 intakes a week.", _ATOMS)
+        assert [f.lane for f in audit.findings] == ["review"]
+
+    def test_an_invented_atom_id_does_not_count_as_a_citation(self) -> None:
+        # Otherwise the writer buys immunity by inventing a reference too.
+        audit = audit_draft("Our platform is HIPAA compliant [[a99]].", _ATOMS)
+        assert [f.lane for f in audit.findings] == ["delete"]
+
+
+class TestDeletion:
+    _DRAFT = (
+        "## What we do\n\n"
+        "We were founded in 2013 [[a1]]. Our platform is HIPAA compliant. "
+        "We have served 7 client accounts [[a2]].\n"
+    )
+
+    def test_it_removes_the_uncited_claim_and_keeps_the_cited_ones(self) -> None:
+        audit = audit_draft(self._DRAFT, _ATOMS)
+        out, removed = apply_deletions(self._DRAFT, audit)
+        assert removed == 1
+        assert "HIPAA" not in out
+        assert "founded in 2013" in out
+        assert "7 client accounts" in out
+
+    def test_a_heading_is_reported_but_never_removed(self) -> None:
+        # Deleting a heading orphans its section: a sentence-level defect becomes a
+        # structural one.
+        draft = "## Real workflows we have automated for clients\n\nSome prose.\n"
+        audit = audit_draft(draft, _ATOMS)
+        out, removed = apply_deletions(draft, audit)
+        assert removed == 0
+        assert "## Real workflows" in out
+
+    def test_nothing_is_deleted_when_the_markers_were_lost(self) -> None:
+        """THE IMPORTANT ONE. convert/voice/grounding rewrite the draft wholesale
+        through an LLM. A model that drops the markers would leave every claim
+        looking unsourced - and deleting on that signal removes the page rather
+        than its fabrications. A collapse means the markers were lost, not that
+        the writer invented everything."""
+        stripped = self._DRAFT.replace("[[a1]]", "").replace("[[a2]]", "")
+        audit = audit_draft(stripped, _ATOMS)
+        assert audit.deletable is False
+        out, removed = apply_deletions(stripped, audit)
+        assert removed == 0
+        assert out == stripped
+
+    def test_a_real_draft_with_no_markers_survives_untouched(self) -> None:
+        # Measured against the six pages generated before citations existed: 78
+        # claim-sentences flagged, 31 in the delete lane, zero removed.
+        draft = "\n".join(f"Our system is HIPAA compliant in case {i}." for i in range(20))
+        audit = audit_draft(draft, _ATOMS)
+        assert len(audit.to_delete) == 20
+        assert apply_deletions(draft, audit)[1] == 0
+
+
+def test_units_split_headings_whole_and_prose_by_sentence() -> None:
+    units = split_units("## A heading. With a stop\n\nOne. Two. Three.\n")
+    assert units[0] == "## A heading. With a stop"
+    assert units[1:] == ["One.", "Two.", "Three."]

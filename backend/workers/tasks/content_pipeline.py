@@ -76,6 +76,7 @@ STAGE_LABEL: dict[str, str] = {
     "convert": "Conversion",
     "voice": "Voice",
     "grounding": "Fact-check",
+    "claims": "Claims check",
     "images": "AI images",
     "title_meta": "Titles & meta",
     "schema_links": "Schema & links",
@@ -579,6 +580,8 @@ def execute_pipeline_job(
         cost_gate=gate,
         settings=settings,
         internal_urls=deps.internal_urls,
+        allowed_contacts=_allowed_contacts(deps.nap, row),
+        vendor_terms=_vendor_terms(deps.nap, row),
     )
     if "sme" in stages:
         pack = row.get("source_pack") if isinstance(row.get("source_pack"), dict) else None
@@ -745,6 +748,45 @@ def _published_sibling_urls(client_id: str | None, *, exclude_code: str) -> dict
         logger.warning("content_pipeline_siblings_unavailable", error=type(exc).__name__)
         return {}
 
+
+
+def _allowed_contacts(nap: dict[str, Any] | None, row: dict[str, Any]) -> frozenset[str]:
+    """Every contact detail the operator actually supplied.
+
+    Anything ELSE that looks like an email, phone number or domain in the finished
+    page is treated as invented and removed. That check has no false positives worth
+    the name and one very expensive failure mode: a page that reads perfectly and
+    routes every lead it generates to an address nobody owns. Measured on a real run
+    - the drafts offered "hello@xegents.com", which does not exist.
+    """
+    values: list[str] = []
+    for key in ("phone", "email", "website", "site_url", "domain"):
+        value = (nap or {}).get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    pack = row.get("source_pack")
+    if isinstance(pack, dict):
+        site = pack.get("siteDomain") or pack.get("site_domain")
+        if isinstance(site, str) and site.strip():
+            values.append(site.strip())
+    return frozenset(values)
+
+
+def _vendor_terms(nap: dict[str, Any] | None, row: dict[str, Any]) -> tuple[str, ...]:
+    """The names this page might use for the client in the third person.
+
+    The compliance trigger only fires when the vendor is the SUBJECT, which keeps
+    "clinics must comply with HIPAA" from being flagged. A page that says "Acme
+    Dental is HIPAA compliant" names the client instead of saying "we", so the
+    client's own names have to be part of that gate or the check is blind to it.
+    """
+    terms: list[str] = []
+    for source in (nap or {}, row):
+        for key in ("business_name", "client_name", "name"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                terms.append(value.strip())
+    return tuple(dict.fromkeys(terms))
 
 def _load_nap(client_id: str | None) -> dict[str, Any] | None:
     """Read the client's NAP on the privileged connection.

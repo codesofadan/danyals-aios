@@ -22,10 +22,11 @@ the "faking success" failure the job contract exists to prevent.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol
 
 from app.config import Settings
+from app.services.content_pipeline.claims import run_claims
 from app.services.content_pipeline.context import PipelineContext, StageResult
 from app.services.content_pipeline.convert import run_convert
 from app.services.content_pipeline.draft import run_draft
@@ -79,6 +80,8 @@ def build_page_stages(
     cost_gate: CostGate | None = None,
     settings: Settings | None = None,
     internal_urls: Mapping[str, str] | None = None,
+    allowed_contacts: frozenset[str] = frozenset(),
+    vendor_terms: Iterable[str] = (),
 ) -> dict[str, StageFn]:
     """Bind the per-page stages to the dependencies they actually need.
 
@@ -132,6 +135,15 @@ def build_page_stages(
         stages["images"] = lambda ctx: run_images(
             ctx, generator=images, gate=cost_gate, settings=settings
         )
+
+    # DELIBERATELY OUTSIDE the writer block. Every other stage above is bound only
+    # when its provider exists, so a deployment missing a key simply omits it - the
+    # honest-degrade rule. This one is deterministic and free, and it is the check
+    # that stops an invented certification reaching a client's live page, so there
+    # is no dependency whose absence should be allowed to skip it.
+    stages["claims"] = lambda ctx: run_claims(
+        ctx, allowed_contacts=allowed_contacts, vendor_terms=vendor_terms,
+    )
 
     stages["schema_links"] = lambda ctx: run_schema_links(
         ctx, business=business, url=page_url, internal_urls=internal_urls,

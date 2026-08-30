@@ -32,6 +32,7 @@ import re
 from typing import Any
 
 from app.services.content_generator import _MAX_TOKENS_PER_WORD, _bound_words
+from app.services.content_pipeline.claims import build_atoms, render_atoms
 from app.services.content_pipeline.context import PipelineContext, StageResult
 from app.services.content_pipeline.writer import DoctrineWriter, WriteAccounting
 
@@ -74,10 +75,29 @@ def _batch_prompt(
         f"Client: {ctx.client_name or 'the client'}.",
     ]
     if ctx.facts:
+        # NUMBERED, and citable. The old form was an unnumbered bullet list under the
+        # instruction "the ONLY facts you may state" - a rule with no way to check
+        # whether it was followed, and measured on six real pages, it was not: the
+        # writer invented 44 claims the operator had explicitly said were false.
+        # An id per fact makes compliance mechanical instead of hopeful.
+        atoms = build_atoms(ctx.facts)
         lines += [
             "",
-            "The ONLY facts you may state. Anything not here must be cut, not softened:",
-            *(f"  - {f}" for f in ctx.facts),
+            "THE ONLY FACTS YOU MAY STATE. Each carries an id:",
+            render_atoms(atoms),
+            "",
+            "CITE THEM. Any sentence that states a number, a credential, a customer or "
+            "deployment, a named third-party system, a guarantee, or an absolute "
+            "('never', 'zero', 'no data leaves') must end with the id of the fact it "
+            "rests on, like [[a2]]. A sentence may cite more than one.",
+            "If no fact supports the sentence you were about to write, DO NOT WRITE IT. "
+            "Do not soften it, do not hedge it, do not write it without the id - a "
+            "sentence with no id is deleted before the page is reviewed, so an "
+            "uncited claim costs you the paragraph it was in.",
+            "Saying less is correct here. A short page that is entirely true is the "
+            "goal; a long one carrying an invented certification is a liability for "
+            "the client whose name is on it.",
+            "Never cite an id for a fact it does not contain, and never invent an id.",
         ]
     else:
         lines.append("State no figures, prices, dates, names or credentials at all.")

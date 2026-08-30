@@ -138,8 +138,17 @@ class TestAMissingDependencyOmitsItsStageRatherThanFakingIt:
 
     def test_with_nothing_bound_only_the_free_stages_exist(self) -> None:
         stages = build_page_stages()
-        # schema_links is deterministic and free; gate scores without a judge.
-        assert set(stages) == {"schema_links", "gate"}
+        # schema_links is deterministic and free; gate scores without a judge; and
+        # claims is BOTH free and the check that stops an invented certification
+        # reaching a client's page, so no missing dependency may omit it.
+        assert set(stages) == {"claims", "schema_links", "gate"}
+
+    def test_the_claims_check_is_bound_even_with_no_providers_at_all(self) -> None:
+        """The honest-degrade rule omits a stage whose provider is absent. That rule
+        must not reach this one: a deployment with no keys still publishes pages,
+        and a page that skipped the claims check is exactly the one nobody knows to
+        re-read."""
+        assert "claims" in build_page_stages()
 
     def test_the_experience_gate_needs_the_dossier_store(self) -> None:
         assert "sme" not in build_page_stages(writer=_Writer())  # type: ignore[arg-type]

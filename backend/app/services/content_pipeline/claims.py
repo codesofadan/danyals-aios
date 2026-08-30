@@ -58,6 +58,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # circular at runtime: context imports nothing from here
+    from app.services.content_pipeline.context import PipelineContext, StageResult
 from dataclasses import dataclass
 
 # --------------------------------------------------------------------------- #
@@ -419,3 +423,198 @@ def needs_citation(
     if sentence.rstrip().endswith("?") or _is_disclaimer(sentence, subject) or navigational:
         return {}
     return fired
+
+
+# --------------------------------------------------------------------------- #
+# The audit: what the draft claims, and what it is allowed to keep.
+# --------------------------------------------------------------------------- #
+
+#: Below this share of claim-sentences carrying a marker, deletion is ABANDONED.
+#: The repair stages rewrite the draft wholesale through an LLM, and a model that
+#: drops the markers would leave every claim looking unsourced - deleting the page
+#: rather than its fabrications. A collapse means the markers were lost, not that
+#: the writer invented everything, and the two must never be confused.
+MIN_CITED_SHARE = 0.15
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_ABBREVIATION = re.compile(r"\b(?:e\.g|i\.e|etc|vs|Mr|Mrs|Dr|Inc|Ltd|Co|U\.S|approx|No)\.$")
+
+
+def split_units(markdown: str) -> list[str]:
+    """Split into the units the triggers were measured on: headings whole, prose by sentence."""
+    units: list[str] = []
+    for raw in markdown.split("\n"):
+        line = " ".join(raw.split())
+        if not line:
+            continue
+        if line.startswith("#") or line.startswith("!["):
+            units.append(line)
+            continue
+        buffer = ""
+        for part in _SENTENCE_SPLIT.split(line):
+            buffer = f"{buffer} {part}".strip() if buffer else part
+            if not _ABBREVIATION.search(buffer):
+                units.append(buffer)
+                buffer = ""
+        if buffer:
+            units.append(buffer)
+    return units
+
+
+@dataclass(frozen=True)
+class ClaimFinding:
+    """One sentence that makes a checkable claim, and what backs it."""
+
+    sentence: str
+    triggers: tuple[str, ...]
+    cited: tuple[str, ...]
+    lane: str  # "delete" | "review" | "cited"
+
+
+@dataclass(frozen=True)
+class ClaimAudit:
+    findings: tuple[ClaimFinding, ...]
+    units: int
+    #: True when the markers survived well enough to trust a deletion.
+    deletable: bool
+
+    @property
+    def to_delete(self) -> tuple[ClaimFinding, ...]:
+        return tuple(f for f in self.findings if f.lane == "delete")
+
+    @property
+    def for_review(self) -> tuple[ClaimFinding, ...]:
+        return tuple(f for f in self.findings if f.lane == "review")
+
+
+def audit_draft(
+    markdown: str,
+    atoms: Iterable[Atom],
+    *,
+    allowed_contacts: frozenset[str] = frozenset(),
+    vendor: re.Pattern[str] | None = None,
+) -> ClaimAudit:
+    """Classify every claim-bearing sentence as cited, deletable, or for review."""
+    valid = {a.id for a in atoms}
+    findings: list[ClaimFinding] = []
+    units = split_units(markdown)
+    claim_units = 0
+    cited_units = 0
+
+    for unit in units:
+        fired = needs_citation(unit, allowed_contacts=allowed_contacts, vendor=vendor)
+        if not fired:
+            continue
+        claim_units += 1
+        cited = tuple(c for c in CITATION_RE.findall(unit) if c in valid)
+        if cited:
+            cited_units += 1
+            lane = "cited"
+        elif fired.keys() & AUTO_DELETE_TRIGGERS:
+            lane = "delete"
+        else:
+            lane = "review"
+        findings.append(
+            ClaimFinding(sentence=unit, triggers=tuple(sorted(fired)), cited=cited, lane=lane)
+        )
+
+    deletable = claim_units == 0 or (cited_units / claim_units) >= MIN_CITED_SHARE
+    return ClaimAudit(findings=tuple(findings), units=len(units), deletable=deletable)
+
+
+def apply_deletions(markdown: str, audit: ClaimAudit) -> tuple[str, int]:
+    """Remove the auto-delete lane's sentences. Returns the draft and the count removed.
+
+    A heading is never removed even when it fires, because deleting a heading
+    orphans the section under it - the sentence-level defect becomes a structural
+    one. A flagged heading is reported instead.
+    """
+    if not audit.deletable:
+        return markdown, 0
+    targets = {f.sentence for f in audit.to_delete if not f.sentence.startswith("#")}
+    if not targets:
+        return markdown, 0
+    removed = 0
+    out: list[str] = []
+    for raw in markdown.split("\n"):
+        line = " ".join(raw.split())
+        if not line or line.startswith("#") or line.startswith("!["):
+            out.append(raw)
+            continue
+        kept = []
+        for unit in split_units(raw):
+            if unit in targets:
+                removed += 1
+                continue
+            kept.append(unit)
+        out.append(" ".join(kept) if kept else "")
+    # A paragraph emptied by deletion leaves a blank line; collapse the runs.
+    text = "\n".join(out)
+    return re.sub(r"\n{3,}", "\n\n", text), removed
+
+
+# --------------------------------------------------------------------------- #
+# The stage
+# --------------------------------------------------------------------------- #
+
+STAGE = "claims"
+
+
+def run_claims(
+    ctx: PipelineContext,
+    *,
+    allowed_contacts: frozenset[str] = frozenset(),
+    vendor_terms: Iterable[str] = (),
+) -> StageResult:
+    """Delete the uncited claims the machine is reliably right about; report the rest.
+
+    Runs AFTER grounding, so it audits the text that will actually ship rather than
+    a draft three rewrites away from it, and BEFORE images and schema_links, which
+    only append blocks and carry no claims of their own.
+
+    It never fails the page. A page whose fabrications were removed is a shorter,
+    truer page; a page whose markers were lost is reported and left alone. Neither
+    is an error, so the outcome is "ok" or "degraded", never "failed".
+    """
+    from app.services.content_pipeline.context import StageOutcome, StageResult
+
+    atoms = build_atoms(ctx.facts)
+    vendor = vendor_pattern([*vendor_terms, ctx.client_name] if ctx.client_name else vendor_terms)
+    audit = audit_draft(
+        ctx.draft_md, atoms, allowed_contacts=allowed_contacts, vendor=vendor
+    )
+
+    cleaned, removed = apply_deletions(ctx.draft_md, audit)
+    # The markers are the pipeline's private bookkeeping and must never reach a
+    # reader, whether or not anything was deleted.
+    ctx.draft_md = strip_citations(cleaned)
+
+    notes: list[str] = []
+    if removed:
+        notes.append(
+            f"removed {removed} sentence(s) making a compliance, third-party, "
+            "absolute or contact claim that cited no supplied fact"
+        )
+    if not audit.deletable and audit.findings:
+        notes.append(
+            "citation markers did not survive the rewrite stages, so NOTHING was "
+            "deleted - the claims below are reported, not removed"
+        )
+    for finding in audit.for_review:
+        notes.append(f"unverified claim, needs a human: {finding.sentence[:160]}")
+    for finding in audit.to_delete if not audit.deletable else ():
+        notes.append(f"unsourced claim, NOT removed: {finding.sentence[:160]}")
+
+    outcome: StageOutcome = "ok" if (audit.deletable and not audit.for_review) else "degraded"
+    return ctx.record(StageResult(
+        STAGE,
+        outcome=outcome,
+        notes=tuple(notes),
+        data={
+            "removed": removed,
+            "deletable": audit.deletable,
+            "claims": len(audit.findings),
+            "for_review": [f.sentence for f in audit.for_review],
+            "unsourced_kept": [f.sentence for f in audit.to_delete] if not audit.deletable else [],
+        },
+    ))

@@ -38,7 +38,8 @@ PAGE_STAGES: tuple[str, ...] = (
     "convert",       # 7
     "voice",         # 8
     "grounding",     # 8b - cut figures no supplied fact supports
-    "images",        # 8c - the hero/section photos, after the text is final
+    "claims",        # 8c - delete uncited compliance/third-party/absolute claims
+    "images",        # 8d - the hero/section photos, after the text is final
     "title_meta",    # 9
     "schema_links",  # 10 - free
     "gate",          # 11
@@ -54,6 +55,7 @@ EDIT_STAGES: tuple[str, ...] = (
     "guided_edit",
     "voice",
     "grounding",
+    "claims",
     "title_meta",
     "schema_links",
     "gate",

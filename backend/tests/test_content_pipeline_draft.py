@@ -49,12 +49,27 @@ def test_each_batch_after_the_first_sees_the_previous_tail() -> None:
     assert "do not restate it" in writer.prompts[1][0]
 
 
-def test_only_supplied_facts_are_offered_and_the_rule_is_absolute() -> None:
+def test_only_supplied_facts_are_offered_and_each_one_is_citable() -> None:
+    """The rule was always "state only these facts". What was missing was any way to
+    CHECK it - an unnumbered bullet list cannot be audited, and measured on six real
+    pages the writer invented 44 claims straight through it. Each fact now carries an
+    id, and the prompt says what happens to a sentence that does not cite one."""
     writer = _Writer()
     run_draft(_ctx(sections=3, facts=("1,284 emergency calls in 2025",)), writer=writer)
     prompt = writer.prompts[0][0]
-    assert "1,284 emergency calls in 2025" in prompt
-    assert "must be cut, not softened" in prompt
+    assert "[[a1]] 1,284 emergency calls in 2025" in prompt
+    assert "must end with the id of the fact it rests on" in prompt
+    # The consequence has to be stated, or "cite it" reads as a style note.
+    assert "deleted before the page is reviewed" in prompt
+
+
+def test_the_writer_is_told_that_saying_less_is_the_correct_outcome() -> None:
+    """Without this the model treats the word target as the goal and fills the gap
+    with invention - which is exactly how a 2,000-word page about a vertical the
+    client has never worked in gets written."""
+    writer = _Writer()
+    run_draft(_ctx(sections=3, facts=("founded 2013",)), writer=writer)
+    assert "Saying less is correct here" in writer.prompts[0][0]
 
 
 def test_with_no_facts_the_model_is_told_to_state_none() -> None:
