@@ -57,10 +57,26 @@ async function fillActiveTab(item: QueueItem): Promise<unknown> {
   });
   void results;
 
-  return chrome.tabs.sendMessage(tab.id, {
-    type: "aios-fill",
-    plan: item.fields.map((f) => ({ selector: "", valueKey: f.key, value: f.value })),
-  });
+  // ONLY the fields that carry a selector. This used to send `selector: ""` for every
+  // field — the backend's QueueFieldValue had no selector at all — so
+  // `document.querySelector("")` matched nothing and every field came back
+  // `selector_not_found`. The extension filled nothing, and the read-back that catches a
+  // React revert was unreachable because there was never anything to read back.
+  const plan = item.fields
+    .filter((f) => f.selector)
+    .map((f) => ({ selector: f.selector, valueKey: f.key, value: f.value }));
+
+  // No earned spec for this directory means no selectors, which is the NORMAL case while
+  // the whitelist is empty. Say so plainly rather than reporting nine fields not found —
+  // the operator copies the values by hand instead, which is a smaller feature, not a
+  // broken one.
+  if (plan.length === 0) {
+    return {
+      filled: [],
+      failed: [{ key: "*", reason: "no_verified_spec_for_this_directory" }],
+    };
+  }
+  return chrome.tabs.sendMessage(tab.id, { type: "aios-fill", plan });
 }
 
 async function handle(request: PanelRequest): Promise<PanelResponse> {

@@ -77,12 +77,14 @@ from app.modules.citations.service import (
     compute_citation_gap,
     diff_nap_fields,
     estimate_campaign_cost,
+    job_from_row,
     select_campaign_directories,
     submit_method_label,
 )
 from app.modules.citations.verticals import normalize_vertical
 from app.services.activity import record_activity
 from app.services.citation_liveness import http_liveness_probe, judge_liveness
+from integrations.citation_bot import db_spec_loader
 from integrations.citation_status import citation_engine_board
 from integrations.web2_status import web2_status_board
 
@@ -708,6 +710,24 @@ _QUEUE_BLOCK_LABELS: dict[str, str] = {
 }
 
 
+def _spec_selectors(row: dict[str, Any]) -> dict[str, str]:
+    """`{value_key: selector}` from this directory's ACTIVE spec, or empty.
+
+    Empty is the normal case and must stay honest: the whitelist starts empty, and a
+    directory with no earned spec has no selectors to offer. The panel then shows
+    copy-buttons instead of a Fill action, which is a smaller feature rather than a
+    broken one."""
+    spec_loader = db_spec_loader
+    try:
+        job = job_from_row(row)
+        spec = spec_loader(job)
+    except Exception:
+        return {}
+    if spec is None:
+        return {}
+    return {f.value_key: f.selector for f in spec.fields}
+
+
 def _queue_fields(row: dict[str, Any]) -> list[QueueFieldValue]:
     """Every value the operator needs, pre-computed and labelled.
 
@@ -727,15 +747,19 @@ def _queue_fields(row: dict[str, Any]) -> list[QueueFieldValue]:
         ("email", "Email", row.get("bp_email")),
         ("description", "Description", row.get("bp_description")),
     ]
+    selectors = _spec_selectors(row)
     out = [
-        QueueFieldValue(key=k, label=label, value=str(v).strip())
+        QueueFieldValue(key=k, label=label, value=str(v).strip(), selector=selectors.get(k, ""))
         for k, label, v in pairs
         if str(v or "").strip()
     ]
     categories = row.get("bp_categories") or []
     if categories:
         out.append(
-            QueueFieldValue(key="categories", label="Categories", value=", ".join(categories))
+            QueueFieldValue(
+                key="categories", label="Categories", value=", ".join(categories),
+                selector=selectors.get("categories", ""),
+            )
         )
     return out
 

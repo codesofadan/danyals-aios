@@ -123,7 +123,22 @@ function renderItem(): void {
     root.append(el("p", { className: "muted", textContent: "No verified add-listing URL on file — start from the directory's home page." }));
   }
 
-  const fill = el("button", { className: "primary", textContent: "Fill this page" });
+  const fillable = item.fields.filter((f) => f.selector).length;
+  if (fillable === 0) {
+    root.append(
+      el("p", { className: "muted",
+        textContent:
+          "No verified form spec for this directory yet, so there is nothing to fill " +
+          "automatically — copy the values below instead. Finishing one by hand is how a " +
+          "spec earns its way onto the list.",
+      }),
+    );
+  }
+  const fill = el("button", {
+    className: "primary",
+    textContent: fillable ? `Fill ${fillable} field${fillable === 1 ? "" : "s"}` : "Fill this page",
+    disabled: fillable === 0,
+  });
   fill.onclick = async () => {
     fill.disabled = true;
     const res = await send({ type: "fill" });

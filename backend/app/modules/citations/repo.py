@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import DatabaseNotConfiguredError, privileged_connection, rls_connection
+from app.modules.citations.operator_auth import OperatorOrUserDep
 from app.modules.citations.service import derive_business_profile_fields
 
 
@@ -564,7 +565,19 @@ def get_citations_repo(user: CurrentUserDep) -> CitationsRepo:
     return CitationsRepo(user.id)
 
 
-def get_citation_queue_repo(user: CurrentUserDep) -> CitationQueueRepo:
+def get_citation_queue_repo(user: OperatorOrUserDep) -> CitationQueueRepo:
+    """The queue repo, scoped to whoever is calling — dashboard session OR extension.
+
+    THIS DEPENDENCY IS WHY THE EXTENSION COULD NOT REACH A SINGLE ENDPOINT. It used to
+    take `CurrentUserDep`, which resolves `get_current_user`, which reads
+    `Authorization: Bearer` and validates an EdDSA signature. FastAPI resolves every
+    declared dependency, and this one is declared FIRST on all seven queue routes — so an
+    operator token was rejected here before `resolve_operator` was ever consulted.
+    `verify_operator_token` was called zero times.
+
+    It was invisible because the tests override this exact dependency, so no test ever
+    exercised a queue route through the real graph: 226 green while the extension reached
+    nothing."""
     return CitationQueueRepo(user.id)
 
 

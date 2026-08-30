@@ -393,15 +393,28 @@ class EngineStatusBoardResponse(BaseModel):
 
 
 class QueueFieldValue(BaseModel):
-    """One pre-computed field the operator pastes into the directory's form.
+    """One pre-computed field the operator pastes — or the extension types — into the
+    directory's form.
 
     Pre-computing every value server-side is the entire point of the queue: the two
     levers on cost per live citation are the aggregator price and MINUTES PER ITEM, and
-    the minutes are spent hunting for values, not typing them."""
+    the minutes are spent hunting for values, not typing them.
+
+    `selector` is where that value goes on the live form, taken from the directory's
+    ACTIVE spec. It was missing, and the omission made the extension inert: the service
+    worker had nothing to send, so it shipped `selector: ""`, `document.querySelector("")`
+    matched nothing, and every field came back `selector_not_found`. The read-back logic
+    that catches a React revert was unreachable because nothing was ever filled.
+
+    EMPTY IS THE HONEST DEFAULT and it is common: a directory with no earned spec has no
+    selectors, and the panel then falls back to copy-buttons for a human to paste. A
+    fabricated selector would be worse than none - it would type a client's phone number
+    into whatever field happened to match."""
 
     key: str
     label: str
     value: str
+    selector: str = ""
 
 
 class QueueItemResponse(BaseModel):

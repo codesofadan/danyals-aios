@@ -1,6 +1,13 @@
 /** The message contract between the side panel, the service worker and the page. */
 
-export type QueueFieldValue = { key: string; label: string; value: string };
+export type QueueFieldValue = {
+  key: string;
+  label: string;
+  value: string;
+  /** Where this value goes on the live form, from the directory's ACTIVE spec. Empty
+   *  when no spec has been earned — the panel then offers copy-buttons, not a Fill. */
+  selector: string;
+};
 
 export type QueueItem = {
   citationId: string;
