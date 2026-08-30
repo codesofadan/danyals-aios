@@ -137,12 +137,18 @@ def test_no_verified_spec_blocks_before_the_cost_gate_so_nothing_is_charged(
     store = _FakeStore(_row())
     out = execute_citation_submit(store, Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[call-arg]
 
-    assert out["state"] == "blocked"
-    assert out["reason"] == "no_verified_spec"
+    # The guarantee this test exists for - NOTHING IS CHARGED - is unchanged.
     assert gate_calls == [], "nothing may be charged when there is no spec to run"
+    assert out["reason"] == "no_verified_spec"
     assert store.updates["blocked_reason"] == "no_verified_spec"
     assert "nothing was sent, nothing charged" in store.updates["error"]
-    assert store.updates["submit_status"] == "blocked"
+    # The DESTINATION changed 2026-08-30 and is the point of the change: a bot with no
+    # earned spec cannot submit, but a PERSON can - so the row becomes queue work rather
+    # than parking in `blocked` where nothing ever picked it up. `ready_for_human` had no
+    # writer anywhere in the repo before this, which left the operator queue, its routes
+    # and the extension all reading a status nothing produced.
+    assert out["state"] == "ready_for_human"
+    assert store.updates["submit_status"] == "ready_for_human"
 
 
 def test_the_row_never_reaches_submitting_when_there_is_no_spec(
@@ -166,7 +172,8 @@ def test_the_row_never_reaches_submitting_when_there_is_no_spec(
     )
     execute_citation_submit(_Store(_row()), Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[call-arg]
     assert "submitting" not in seen
-    assert seen == ["blocked"]
+    # Straight to the operator queue, without ever implying a browser was driving.
+    assert seen == ["ready_for_human"]
 
 
 def test_the_worker_passes_the_whitelist_loader_and_the_route() -> None:

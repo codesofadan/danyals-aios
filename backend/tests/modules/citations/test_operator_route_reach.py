@@ -107,7 +107,7 @@ async def test_a_token_without_the_queue_scope_is_refused(
     assert set(codes) == {401}, codes
 
 
-async def test_an_operator_token_is_rejected_on_a_NON_queue_route(
+async def test_an_operator_token_is_rejected_on_a_non_queue_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The containment. The token is not a JWT, so `get_current_user` rejects it

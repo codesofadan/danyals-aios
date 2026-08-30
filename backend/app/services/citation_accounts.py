@@ -134,6 +134,25 @@ def create_account_with_credential(
         logger.warning("citation_account_seal_failed", account_id=account.id)
         with rls_connection(user_id) as cur:
             cur.execute("delete from public.citation_accounts where id = %s", (account.id,))
+            removed = cur.rowcount or 0
+        if removed == 0:
+            # MEASURED 2026-08-30: 0111 gave this table SELECT, INSERT and UPDATE policies
+            # and no DELETE policy. Under FORCE ROW LEVEL SECURITY a DELETE with no policy
+            # is not an error - it matches nothing and reports success - so this rollback
+            # deleted nothing and left behind exactly the credential-less row the comment
+            # above calls "worse than no row at all", with the unique
+            # (client_id, directory_id) constraint then blocking the retry it existed to
+            # enable. 0115 adds the policy, scoped to rows that never sealed.
+            #
+            # The check stays because a policy can be dropped again, and a rollback that
+            # silently does nothing is the failure mode that hid this for a week. If the
+            # row survives, say which one, so the operator can clear it by hand.
+            logger.error(
+                "citation_account_rollback_deleted_nothing",
+                account_id=account.id,
+                client_id=client_id,
+                directory_id=directory_id,
+            )
         raise
 
     with rls_connection(user_id) as cur:

@@ -305,7 +305,72 @@ def submitter_for(
         if bot is not None:
             return bot, ""
         return None, "Playwright bot not installed/configured"
+    # `manual` and `closed` are DECISIONS, not gaps, and they read differently to an
+    # operator: the first means a human submits this one, the second means the directory
+    # takes no submissions at all. Before 0115 both fell through to "no automatable
+    # engine for submit_method='manual'", which reads as a bug in the dispatcher rather
+    # than the catalogue saying what it meant.
+    if submit_method == "manual":
+        return None, "manual submission only - queued for an operator"
+    if submit_method == "closed":
+        return None, "directory is closed to new submissions"
     return None, f"no automatable engine for submit_method={submit_method!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Where a row goes when the machine cannot submit it.
+#
+# THE DEFECT THIS CLOSES. `ready_for_human` has existed since 0064, 0110 indexed it, and
+# `CitationQueueRepo.claim` selects on it - but MEASURED 2026-08-30, no code path in this
+# repo ever wrote it. Every unautomatable row went to `blocked` and stopped there, so the
+# operator queue, its seven routes, the Chrome extension and the pairing page all read a
+# status that nothing produced. The human path - the ONLY path that works today, with zero
+# earned specs and no aggregator credentials - had no input.
+#
+# `blocked` and `ready_for_human` are genuinely different facts and the distinction is the
+# product: `blocked` means NOBODY should act, `ready_for_human` means a machine cannot but
+# a person can, in their own browser, in their own session. Collapsing them loses the
+# 176 bot-tier directories that a human can work by hand today.
+# --------------------------------------------------------------------------- #
+
+# Reasons where a human in a real browser is exactly the right answer. Each one means the
+# ENGINE is missing or unverified - never that the submission itself is unwanted.
+_HUMAN_WORKABLE_REASONS: frozenset[str] = frozenset({
+    "no_engine",         # no dispatcher for this method, or the engine is unconfigured
+    "no_verified_spec",  # the bot has no earned spec; a person does not need one
+    "captcha",           # a workflow boundary by policy - the operator solves it themselves
+    "waf_403",           # the site refused a scripted client; a real session is not scripted
+    "account_gated",     # the form needs a login the operator holds
+})
+
+# Reasons where handing the row to a person would be wrong, not merely unhelpful.
+_NOT_HUMAN_WORKABLE_REASONS: frozenset[str] = frozenset({
+    "tos_prohibits",   # route F. A human retrieving the form is the same prohibited act.
+    "fed_by_aggregator",  # nothing to submit - the listing arrives via the core feed
+    "no_nap",          # there is no business profile to submit; fix the data, not the row
+    "price_unknown",   # an unpriced Add is a SPEND decision for a lead, not queue work
+})
+
+# ONE KNOWN AMBIGUOUS ROW, left as human work deliberately. `BuildZoom`
+# (`aggregator:contractor_license_autogen`) says "Profiles auto-created from public
+# contractor-license records", which MIGHT mean there is nothing to submit - or might mean
+# a profile can be claimed. R1 hand-verified 12 directories and this was not one of them,
+# so calling it `closed` here would be a guess dressed as a fact, which is the failure this
+# module was rebuilt to remove. An operator opening it once and finding out costs about
+# thirty seconds and produces a real answer to record.
+
+
+def disposition_for_block(reason_code: str) -> str:
+    """``'ready_for_human'`` or ``'blocked'`` for a row the machine could not submit.
+
+    Unknown reasons fall to ``blocked``, deliberately. A new failure mode should not
+    silently start generating human work whose value nobody has assessed - and a row
+    sitting in `blocked` with an honest reason is visible, whereas a queue full of items
+    an operator cannot actually complete destroys trust in the queue itself.
+    """
+    if reason_code in _HUMAN_WORKABLE_REASONS:
+        return "ready_for_human"
+    return "blocked"
 
 
 # --------------------------------------------------------------------------- #

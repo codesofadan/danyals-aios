@@ -44,15 +44,20 @@ The token lives in `chrome.storage.local`, which is **plaintext on disk** and re
 anything with filesystem access to the browser profile. That is inherent to an extension
 and cannot be engineered away. It is why the token:
 
-- reaches the **citation queue and nothing else** — the scope vocabulary is closed, so no
-  scope exists that reaches the vault, the client roster or the cost dials;
+- reaches the **citation queue and nothing else** — the scope vocabulary is closed, and
+  since 0115 it is closed *in the database*, by a CHECK constraint, so no scope exists
+  that reaches the vault, the client roster or the cost dials even if a future route
+  forgets to ask;
 - is **not a JWT**, so the dashboard's auth rejects it on every other route by
   construction rather than by remembering to check;
-- **expires in twelve hours** — one shift.
+- **expires in twelve hours** — one shift, and not adjustable from the pairing request.
 
-**Do not lengthen the TTL for convenience.** The short life is the mitigation for a
-storage medium we do not control. Revoke a device from the same settings page; a password
-change or a suspension already kills every token that person ever paired.
+**The TTL is not a knob.** It used to be: the pairing endpoint accepted a `ttlSeconds` up
+to seven days, on a self-service route, which made the twelve hours above a default rather
+than a fact and made this paragraph unenforceable. The field is gone; changing the
+lifetime takes a deploy, which is what this warning always assumed. The short life is the
+mitigation for a storage medium we do not control. Revoke a device from the same settings
+page; a password change or a suspension already kills every token that person ever paired.
 
 The directory password is never sent here. The operator signs into the directory once, in
 their own browser, and the session lives in their own cookie jar.

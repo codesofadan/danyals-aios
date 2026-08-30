@@ -78,7 +78,10 @@ def test_the_backslash_bypasses_are_refused(payload: str) -> None:
         "https://brownbook.net\t/add",                # tab: stripped by WHATWG, not by us
         "https://brownbook.net\n/add",                # newline: same
         "https://brownb%6fok.net/add",                # percent-encoding in the authority
-        "https://brownbο ok.net/add",                  # non-ASCII: IDN homograph
+        # The suppression below is load-bearing: the Greek omicron IS the test. RUF001
+        # flags exactly the confusion an IDN homograph attack relies on, which is why
+        # the guard refuses non-ASCII outright instead of telling the two apart.
+        "https://brownbο ok.net/add",  # noqa: RUF001 - non-ASCII: IDN homograph
         "https://brown​book.net/add",            # zero-width: invisible in review
     ],
 )
@@ -144,7 +147,7 @@ def test_changing_a_directorys_url_voids_its_specs() -> None:
     assert "directory_url_changed" in sql
 
 
-def test_the_binding_is_rechecked_on_ACTIVATION_not_merely_at_insert() -> None:
+def test_the_binding_is_rechecked_on_activation_not_merely_at_insert() -> None:
     """A hole opened by the first version of this very fix, and measured: scoping the
     check to INSERT let a url-change-voided spec be re-armed with a plain
     `set active = true` while its directory had become 169.254.169.254.

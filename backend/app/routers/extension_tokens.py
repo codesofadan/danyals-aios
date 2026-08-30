@@ -24,7 +24,6 @@ from app.services.activity import record_activity
 from app.services.operator_tokens import (
     DEFAULT_TTL_SECONDS,
     EXTENSION_SCOPES,
-    MAX_TTL_SECONDS,
     cap_scopes,
     list_operator_tokens,
     mint_operator_token,
@@ -42,7 +41,13 @@ class ExtensionTokenRequest(BaseModel):
 
     device_label: str = Field(default="", alias="deviceLabel", max_length=120)
     scopes: list[str] = Field(default_factory=lambda: ["citation_queue"])
-    ttl_seconds: int = Field(default=DEFAULT_TTL_SECONDS, ge=60, le=MAX_TTL_SECONDS, alias="ttlSeconds")
+    # NO ttl FIELD, DELIBERATELY. It used to be `ge=60, le=MAX_TTL_SECONDS`, which let any
+    # operator self-mint a SEVEN-DAY token on a self-service endpoint - while the
+    # extension README states "expires in twelve hours" as a fact and says in bold not to
+    # lengthen the TTL for convenience. A policy that every holder can opt out of is not a
+    # policy, and convenience is the only reason anyone would have set this field. The
+    # lifetime is now DEFAULT_TTL_SECONDS for everyone, and changing it takes a deploy -
+    # which is what the README's warning already assumed was true.
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -99,7 +104,7 @@ async def mint_extension_token(body: ExtensionTokenRequest, actor: Staff) -> Ext
         actor_id=actor.id,
         scopes=capped,
         device_label=body.device_label,
-        ttl_seconds=body.ttl_seconds,
+        ttl_seconds=DEFAULT_TTL_SECONDS,
     )
     await record_activity(
         actor, kind="access", action="paired a citation extension",

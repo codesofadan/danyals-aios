@@ -398,7 +398,15 @@ class CitationQueueRepo:
             cur.execute(
                 "with candidate as ( "
                 "  select c.id from public.citations c "
+                "  left join public.directories d on d.id = c.directory_id "
                 "  where c.submit_status = 'ready_for_human' "
+                # The claim is the LAST moment before a person acts, so the terms check
+                # belongs here too. 0115's trigger stops a route-F row ENTERING an acting
+                # status, but a directory can be flipped to F after a row is already
+                # waiting - the ToS position is researched over time, which is the whole
+                # point of `tos_checked_at`. Without this, the queue would keep handing
+                # out a directory we have since learned forbids the submission.
+                "    and coalesce(d.route, 'C') <> 'F' "
                 "    and (c.claimed_by is null or c.claim_expires_at < now()) "
                 "    and (%(client_id)s::uuid is null or c.client_id = %(client_id)s::uuid) "
                 "  order by c.created_at "

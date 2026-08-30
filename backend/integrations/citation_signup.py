@@ -174,6 +174,21 @@ class SignupCitationSubmitter(PlaywrightCitationSubmitter):
         self._mail_domain = mail_domain
         self._signup_specs = signup_specs if signup_specs is not None else SIGNUP_SPECS
 
+    def can_submit(self, job: CitationJob) -> bool:
+        """Overridden because this engine dispatches on a DIFFERENT dictionary.
+
+        The base implementation asks whether `self._specs` has the directory, and the
+        ctor above passes `specs={}` on purpose - so the inherited answer was always
+        False and every `bot:signup` row blocked as "no verified spec", whatever
+        SIGNUP_SPECS held. The worker asks this before the cost gate, so the failure was
+        silent rather than loud: the row simply never ran.
+
+        A signup spec is not on the 0108 earned whitelist and does not need to be. That
+        whitelist gates the PUBLIC-FORM path, where an unverified selector means posting
+        a client's NAP into an unknown form. A signup spec creates an account first and
+        is gated by the mailbox and mail-domain checks in `submit` instead."""
+        return job.directory_name in self._signup_specs
+
     def submit(self, job: CitationJob) -> CitationSubmitResult:
         spec = self._signup_specs.get(job.directory_name)
         if spec is None:

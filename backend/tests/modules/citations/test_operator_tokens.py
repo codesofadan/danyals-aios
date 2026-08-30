@@ -171,3 +171,44 @@ def test_bearer_auth_is_delegated_not_reimplemented() -> None:
 
     src = inspect.getsource(resolve_operator)
     assert "get_current_user(request, settings, redis, credentials)" in src
+
+
+# --------------------------------------------------------------------------- #
+# The lifetime is not negotiable at the HTTP surface (0115).
+#
+# `ExtensionTokenRequest` used to carry `ttl_seconds: Field(ge=60, le=MAX_TTL_SECONDS)` on
+# a SELF-SERVICE endpoint - so any operator could mint themselves a seven-day token, while
+# the extension README stated "expires in twelve hours" as a fact and said in bold not to
+# lengthen the TTL for convenience. A policy every holder can opt out of is not a policy,
+# and convenience was the only reason to set the field. Nothing sent it: no caller in
+# `frontend/` or `extension/` referenced ttlSeconds.
+# --------------------------------------------------------------------------- #
+def test_the_pairing_route_exposes_no_lifetime_knob() -> None:
+    from app.routers.extension_tokens import ExtensionTokenRequest
+
+    assert "ttl_seconds" not in ExtensionTokenRequest.model_fields
+    aliases = {f.alias for f in ExtensionTokenRequest.model_fields.values()}
+    assert "ttlSeconds" not in aliases
+
+
+def test_a_ttl_smuggled_into_the_body_is_ignored_not_honoured() -> None:
+    """Pydantic drops unknown keys, so an old client (or a curious operator) sending
+    ttlSeconds gets the 12-hour token, not a seven-day one."""
+    from app.routers.extension_tokens import ExtensionTokenRequest
+
+    body = ExtensionTokenRequest.model_validate(
+        {"deviceLabel": "laptop", "scopes": ["citation_queue"], "ttlSeconds": 604_800}
+    )
+    assert not hasattr(body, "ttl_seconds")
+
+
+def test_the_route_mints_at_the_default_lifetime() -> None:
+    """Reads the call site, because the assertion that matters is what is PASSED - a
+    request model with no field would still mint a long token if the route hard-coded one."""
+    import inspect
+
+    from app.routers import extension_tokens as mod
+
+    src = inspect.getsource(mod.mint_extension_token)
+    assert "ttl_seconds=DEFAULT_TTL_SECONDS" in src
+    assert "body.ttl_seconds" not in src

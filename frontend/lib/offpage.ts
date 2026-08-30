@@ -56,8 +56,16 @@ export type CitationAction = "Submit" | "Update";
 // guess at a live result).
 export type CitationSubmitStatus =
   | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked"
-  // ready_for_human: the bot created the account + prepared the listing - a human
-  // finishes with one click in the browser at handoffUrl.
+  // ready_for_human: an operator's queue item. TWO paths reach it, and since 2026-08-30
+  // the second is by far the common one:
+  //   1. the bot created the account and prepared the listing, and a human finishes at
+  //      handoffUrl (the original 0064 handoff);
+  //   2. the machine could not act at all - no engine, or no EARNED form spec - so the
+  //      row becomes human work instead of parking in `blocked`. With zero active specs
+  //      in the catalogue this is nearly every bot-tier directory, and it is what gives
+  //      the operator queue and the browser extension anything to read.
+  // `blocked` now means the opposite: nobody should act (terms prohibit it, an aggregator
+  // already feeds it, there is no NAP, or a lead must approve an unpriced spend).
   | "ready_for_human"
   // 0106. `submitted` STOPS meaning done — every write path returns it honestly and none
   // can promise more, so only `live` means a listing exists.

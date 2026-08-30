@@ -357,3 +357,124 @@ def test_normalize_vertical(industry: str | None, expected: str | None) -> None:
 )
 def test_is_live_directory_response(code: int | None, alive: bool) -> None:
     assert is_live_directory_response(code) is alive
+
+
+# --------------------------------------------------------------------------- #
+# `manual` and `closed` are decisions, not missing engines (0115).
+#
+# The catalogue carried TWO vocabularies for one concept - `bot:playwright` (127 rows) and
+# a bare `playwright` (70) - and `submitter_for` dispatches on the prefix, so 70 rows fell
+# through to the catch-all. 0115 normalised them by `tier`, leaving `manual` as the only
+# legitimate non-prefixed value; this pins the reason it renders with.
+# --------------------------------------------------------------------------- #
+def test_manual_reads_as_a_decision_not_a_dispatcher_bug() -> None:
+    from app.modules.citations.service import submitter_for
+
+    sub, reason = submitter_for("manual", api_submitters={}, bot=object())  # type: ignore[arg-type]
+    assert sub is None
+    assert "operator" in reason
+    assert "no automatable engine" not in reason, (
+        "an operator reading this needs to know a human submits it, not that the "
+        "dispatcher failed to recognise the value"
+    )
+
+
+def test_closed_says_the_directory_takes_no_submissions() -> None:
+    from app.modules.citations.service import submitter_for
+
+    sub, reason = submitter_for("closed", api_submitters={}, bot=object())  # type: ignore[arg-type]
+    assert sub is None
+    assert "closed" in reason
+
+
+def test_an_actually_unknown_method_still_reads_as_unknown() -> None:
+    """The negative control. Naming two known values must not turn the catch-all into a
+    reassuring message for a value nobody has ever handled."""
+    from app.modules.citations.service import submitter_for
+
+    sub, reason = submitter_for("selenium", api_submitters={}, bot=object())  # type: ignore[arg-type]
+    assert sub is None
+    assert "no automatable engine" in reason
+
+
+# --------------------------------------------------------------------------- #
+# The price guard names the vendor whose price is unknown - and only that one.
+#
+# It used to fire for the whole `api`/`aggregator` TIER, which holds three directories:
+# Data Axle (per-Add price unknown), Apple Business Connect (free) and Google Business
+# Profile (free). So obtaining Apple or GBP credentials - the one thing that opens route A
+# without a rate card - would still have produced a blocked row quoting
+# DATA_AXLE_ADD_COST_ESTIMATE, a rate card for a vendor with no involvement.
+# --------------------------------------------------------------------------- #
+def test_only_data_axle_is_priced_by_the_missing_rate_card() -> None:
+    from app.modules.citations.tasks import _is_priced_by_data_axle
+
+    assert _is_priced_by_data_axle("api:data_axle") is True
+    assert _is_priced_by_data_axle("api:apple_business") is False, (
+        "Apple Business Connect is free per submission; blocking it on Data Axle's rate "
+        "card would strand the route A path that credentials alone can open"
+    )
+    assert _is_priced_by_data_axle("api:gbp") is False
+    assert _is_priced_by_data_axle("bot:playwright") is False
+
+
+def test_a_free_api_row_is_estimated_at_zero_not_at_the_unknown_rate() -> None:
+    """Priced at zero because it IS zero - not because the price is unknown. The two are
+    different states and only one of them should block."""
+    from app.config import Settings
+    from app.modules.citations.tasks import _cost_estimate_for
+
+    s = Settings(data_axle_add_cost_estimate=10.0)
+    assert _cost_estimate_for("api", s, "api:apple_business") == 0.0
+    assert _cost_estimate_for("api", s, "api:data_axle") == 10.0
+
+
+# --------------------------------------------------------------------------- #
+# The human queue had no input path.
+#
+# MEASURED 2026-08-30: `ready_for_human` has existed since 0064, 0110 indexed it, and
+# `CitationQueueRepo.claim` selects on it - and NOTHING in the repository ever wrote it.
+# Every unautomatable row went to `blocked` and stopped. So the queue, its seven routes,
+# the Chrome extension and the pairing page all read a status no code path produced: the
+# human path, which with zero earned specs and no aggregator credentials is the ONLY path
+# that works today, had nothing in it.
+# --------------------------------------------------------------------------- #
+def test_a_missing_engine_becomes_human_work_not_a_dead_end() -> None:
+    from app.modules.citations.service import disposition_for_block
+
+    assert disposition_for_block("no_engine") == "ready_for_human"
+    assert disposition_for_block("no_verified_spec") == "ready_for_human", (
+        "176 bot-tier directories have no earned spec; a person does not need one"
+    )
+    assert disposition_for_block("captcha") == "ready_for_human"
+    assert disposition_for_block("waf_403") == "ready_for_human"
+
+
+def test_a_prohibited_directory_is_never_offered_as_human_work() -> None:
+    """Route F is the whole reason this is a classifier and not a rename. A human
+    retrieving the form is the same prohibited act the bot was blocked for - the ToS
+    clauses bind 'automated technologies' AND the person driving them."""
+    from app.modules.citations.service import disposition_for_block
+
+    assert disposition_for_block("tos_prohibits") == "blocked"
+
+
+def test_nothing_to_submit_is_not_queued_as_something_to_submit() -> None:
+    from app.modules.citations.service import disposition_for_block
+
+    # The listing arrives through the core aggregator feed; there is no form to fill.
+    assert disposition_for_block("fed_by_aggregator") == "blocked"
+    # No NAP is a data problem, not queue work.
+    assert disposition_for_block("no_nap") == "blocked"
+    # An unpriced Add is a SPEND decision for a lead, not something an operator resolves.
+    assert disposition_for_block("price_unknown") == "blocked"
+
+
+def test_an_unrecognised_reason_does_not_silently_generate_work() -> None:
+    """Fails to `blocked` on purpose. A new failure mode must not start filling an
+    operator's queue with items nobody has judged completable - a queue full of
+    impossible work is worse than an empty one, because it teaches operators to skip."""
+    from app.modules.citations.service import disposition_for_block
+
+    assert disposition_for_block("some_future_reason") == "blocked"
+    assert disposition_for_block("") == "blocked"
