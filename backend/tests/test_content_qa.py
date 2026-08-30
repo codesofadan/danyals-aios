@@ -16,6 +16,8 @@ in isolation, and proves the doctrine's enforceable publish rules:
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from app.services.content_generator import (
@@ -632,3 +634,65 @@ def test_the_experience_gate_names_what_the_sme_interview_must_collect() -> None
     )
     joined = " ".join(result.notes)
     assert "SME interview should collect" in joined
+
+
+# --------------------------------------------------------------------------- #
+# WHO SUPPLIES THE H1.
+#
+# MEASURED 2026-08-30 on six real generated pages: every one carried
+# "expected exactly one H1, found 0" and lost 40 points of
+# structure_readability. The drafts were correct. A WordPress publish sends
+# `title` as its own field and the theme renders it as the page's H1, so the body
+# starts at H2 by design - nothing in the pipeline injects an H1 into the
+# markdown. The gate was scoring the body when what ships is the rendered page,
+# which made the deduction permanent and unearnable on the default target.
+#
+# It is a real defect on PDF/Markdown, where there is no CMS to supply one.
+# --------------------------------------------------------------------------- #
+
+_NO_H1 = [h for h in _GOOD_HEADINGS if h.level != 1]
+
+
+def test_a_wordpress_page_is_not_charged_for_the_h1_its_theme_renders() -> None:
+    from app.services import content_qa
+
+    content = dataclasses.replace(_content(headings=list(_NO_H1)), target="WordPress")
+    _s, notes = content_qa._score_structure_readability(content)
+    assert not any("H1" in n for n in notes), notes
+    # The real property: it scores IDENTICALLY to a page that carries its own H1.
+    # A partial exemption would still leave an unearnable deduction in place.
+    with_h1 = dataclasses.replace(_content(), target="WordPress")
+    assert _s == content_qa._score_structure_readability(with_h1)[0]
+
+
+def test_a_markdown_deliverable_still_needs_its_own_h1() -> None:
+    # No CMS renders this one: the body IS the artifact.
+    from app.services import content_qa
+
+    content = dataclasses.replace(_content(headings=list(_NO_H1)), target="PDF/Markdown")
+    _s, notes = content_qa._score_structure_readability(content)
+    assert any("H1" in n for n in notes), notes
+    wp = dataclasses.replace(_content(headings=list(_NO_H1)), target="WordPress")
+    assert _s < content_qa._score_structure_readability(wp)[0]
+
+
+def test_a_wordpress_page_with_no_title_is_still_charged() -> None:
+    # The exemption is that the TITLE supplies the H1. No title, no exemption -
+    # otherwise a blank title would silently buy a free pass.
+    from app.services import content_qa
+
+    content = dataclasses.replace(
+        _content(headings=list(_NO_H1)), target="WordPress", title="   "
+    )
+    _s, notes = content_qa._score_structure_readability(content)
+    assert any("H1" in n for n in notes), notes
+
+
+def test_two_h1s_are_still_wrong_everywhere() -> None:
+    # The exemption covers a MISSING H1 only; duplicates remain a real defect.
+    from app.services import content_qa
+
+    two = [Heading(1, "One"), Heading(1, "Two"), *_NO_H1]
+    content = dataclasses.replace(_content(headings=two), target="WordPress")
+    _s, notes = content_qa._score_structure_readability(content)
+    assert any("found 2" in n for n in notes), notes
