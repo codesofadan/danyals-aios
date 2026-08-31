@@ -205,9 +205,18 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------- Celery worker
+  # -Q IS REQUIRED, for the same reason it is on aios-worker.service (whose comment
+  # explains it at length). A worker started without it consumes ONLY the default
+  # queue "celery", so every job the contract routes to a duration class -
+  # interactive, standard, long, browser - sits in Redis with nothing reading it.
+  # This stack ran without it: the design replicator (browser) and every other
+  # @aios_job task were published to queues no process consumed, so jobs stayed
+  # "queued" forever and the platform looked idle rather than broken.
+  # The queues are declared in app/jobs/status.py (JobQueue) and this line is
+  # asserted against them by backend/tests/test_job_queues.py.
   worker:
     <<: *backend-build
-    command: ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    command: ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "celery,interactive,standard,long,browser"]
     environment: *app-env
     volumes:
       - aios_state:/var/lib/aios

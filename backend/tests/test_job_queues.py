@@ -140,11 +140,50 @@ def test_the_deployed_worker_consumes_every_queue_the_router_can_publish_to() ->
     )
     match = re.search(r"-Q\s+([\w,]+)", exec_line)
     assert match is not None, "the worker unit must pass -Q, or it consumes only the default queue"
-    consumed = set(match.group(1).split(","))
+    _assert_consumes_every_queue(set(match.group(1).split(",")), "infra/systemd/aios-worker.service")
 
+
+def _assert_consumes_every_queue(consumed: set[str], source: str) -> None:
     missing = {q.value for q in JobQueue} - consumed
-    assert not missing, f"the deployed worker never consumes: {sorted(missing)}"
-    assert "celery" in consumed, "the legacy default queue must still be consumed"
+    assert not missing, f"the worker in {source} never consumes: {sorted(missing)}"
+    assert "celery" in consumed, f"the legacy default queue must still be consumed in {source}"
+
+
+@pytest.mark.unit
+def test_the_compose_worker_consumes_every_queue_the_router_can_publish_to() -> None:
+    """The systemd unit was correct and the compose stack was not - and the compose
+    stack is what app.qanry.com actually runs.
+
+    The unit test above pinned ONE of the two deployment definitions, so the -Q that
+    its own comment calls required was missing from the other for as long as both
+    existed. Every @aios_job task in the deployed stack - the design replicator
+    included - was published to a queue no process consumed, and the jobs sat
+    "queued" indefinitely with the platform reporting no error at all.
+
+    Parsed by regex rather than a YAML load because pyyaml is not a backend
+    dependency, and the assert-before-use below fails loudly on a reformat instead
+    of vacuously passing on a command it could not find.
+    """
+    compose = (Path(__file__).resolve().parents[2] / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    worker_commands = [
+        line
+        for line in compose.splitlines()
+        if line.lstrip().startswith("command:") and '"celery"' in line and '"worker"' in line
+    ]
+    assert len(worker_commands) == 1, (
+        "expected exactly one celery worker command in docker-compose.yml; "
+        f"found {len(worker_commands)}. A second worker service must ALSO pass -Q "
+        "for every queue, so extend this test rather than relaxing it."
+    )
+
+    match = re.search(r'"-Q",\s*"([\w,]+)"', worker_commands[0])
+    assert match is not None, (
+        "the compose worker must pass -Q, or it consumes only the default queue "
+        "and every duration-class job sits unread"
+    )
+    _assert_consumes_every_queue(set(match.group(1).split(",")), "docker-compose.yml")
 
 
 @pytest.mark.unit

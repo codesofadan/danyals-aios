@@ -109,6 +109,51 @@ If you later expose the API on its OWN subdomain instead of the one-domain proxy
   redeploy** (enable *re-pull image* / *re-build*). `migrate` re-runs safely.
 - **Env change:** edit the stack's Environment variables → **Update the stack.**
 
+### One-time: the worker now consumes every queue
+
+The `worker` service used to start **without `-Q`**, which means it consumed only the
+default `celery` queue. Every job the job contract routes to a duration class —
+`interactive`, `standard`, `long`, `browser` — was published to a queue no process was
+reading. Those jobs were accepted, shown as **Queued**, and never ran. The design
+replicator (`browser`) is the most visible case; it is why replication jobs sat queued
+indefinitely with no error anywhere.
+
+The compose file now passes the full `-Q` list, so this takes effect on the next stack
+update. **The worker container must be recreated**, not just restarted: use *Update the
+stack* with re-pull/re-build so the new `command` is applied.
+
+Verify afterwards, from the worker container:
+
+```bash
+celery -A workers.celery_app inspect active_queues
+```
+
+Expect all five: `celery`, `interactive`, `standard`, `long`, `browser`.
+
+**Before you update, decide what to do with the backlog.** Redis lists persist, so every
+message published to those four queues while nothing was consuming them is still there
+and will all be delivered at once when the worker starts reading them. Some of that work
+spends money (audits, content drafting). Check the depth first:
+
+```bash
+# in the redis container; Celery's broker is db 1
+redis-cli -n 1 llen browser
+redis-cli -n 1 llen long
+redis-cli -n 1 llen standard
+redis-cli -n 1 llen interactive
+```
+
+Then choose deliberately:
+
+- **Let them drain** if the queues are short and the work is still wanted. Idempotency
+  keys mean a job that already completed will not run twice.
+- **Discard them** (`redis-cli -n 1 del browser long standard interactive`) if they are
+  stale. These messages have **no `job_runs` rows** — they were never claimed — so
+  deleting them loses no ledger history and orphans nothing. This is usually the right
+  choice for anything queued days ago.
+
+Do this **before** the update, while nothing is consuming them.
+
 ## Data & backups
 
 - Postgres data → `pgdata` volume. Redis AOF → `redisdata`. Artifacts + beat schedule →

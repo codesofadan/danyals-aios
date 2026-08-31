@@ -48,6 +48,7 @@ import functools
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Final
+from uuid import uuid4
 
 from celery.exceptions import SoftTimeLimitExceeded
 
@@ -69,6 +70,11 @@ _KEY_KW: Final[str] = "_aios_idempotency_key"
 #: a job's queue is declared once, next to the job, rather than in a routing table
 #: that drifts away from it.
 TASK_QUEUES: Final[dict[str, str]] = {}
+
+#: task name -> (spec, target). The same declarations, kept whole, so ``enqueue`` can
+#: write the run row at SEND time rather than leaving "queued" to be inferred from the
+#: absence of one. Populated at decoration time beside TASK_QUEUES.
+TASK_SPECS: Final[dict[str, tuple[JobSpec, Callable[..., JobTarget] | None]]] = {}
 
 
 def route_task(
@@ -140,6 +146,7 @@ def aios_job(
         from workers.celery_app import celery_app
 
         TASK_QUEUES[name] = queue.value
+        TASK_SPECS[name] = (spec, target)
 
         @celery_app.task(  # type: ignore[untyped-decorator]  # celery's decorator is untyped
             name=name,
@@ -198,6 +205,52 @@ def aios_job(
     return decorator
 
 
+def _precreate_run(
+    task_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    correlation_id: str | None,
+    parent_run_id: str | None,
+    idempotency_key: str | None,
+    celery_task_id: str,
+) -> str | None:
+    """Write the ``queued`` run row at SEND time. Returns the key actually used.
+
+    ``None`` means this task is not under the contract (a legacy ``@celery_app.task``),
+    and the send proceeds exactly as before.
+
+    A key is SYNTHESISED when the job opts out of idempotency, because a NULL key does
+    not conflict: the worker's own claim would insert a SECOND row rather than adopt
+    this one. The synthesised key is unique per send, so "no key" still means "always
+    runs" - it only gives the worker something to rendezvous on. It is returned so the
+    caller can put it in the payload, where the task wrapper applies it as an override.
+    """
+    entry = TASK_SPECS.get(task_name)
+    if entry is None:
+        return None
+    spec, target = entry
+
+    job_target = target(*args, **kwargs) if target is not None else JobTarget()
+    key = idempotency_key or job_target.idempotency_key or f"enq:{uuid4()}"
+
+    job_runs_store().claim(
+        job_name=spec.job_name,
+        task=task_name,
+        queue=spec.queue.value,
+        idempotency_key=key,
+        correlation_id=correlation_id or str(uuid4()),
+        parent_run_id=parent_run_id,
+        celery_task_id=celery_task_id,
+        client_id=job_target.client_id,
+        client_name=job_target.client_name,
+        scope_type=spec.scope_type,
+        scope_id=job_target.scope_id,
+        max_attempts=spec.max_attempts,
+    )
+    return key
+
+
 def enqueue(
     task_name: str,
     *args: Any,
@@ -209,19 +262,61 @@ def enqueue(
 ) -> str:
     """Send a job, propagating the correlation id so a fan-out stays reassemblable.
 
-    Returns the Celery message id. The DURABLE identifier is the ``job_runs.id`` the
-    runner creates - a Celery id lives only as long as the result backend, which is
-    an hour. Anything that needs to refer to a job later must use the run id.
+    Returns the Celery message id. The DURABLE identifier is the ``job_runs.id`` - a
+    Celery id lives only as long as the result backend, which is an hour. Anything
+    that needs to refer to a job later must use the run id.
+
+    THE ROW IS WRITTEN HERE, NOT AT THE WORKER. It used to be created by the runner's
+    CLAIM, which meant a job had no ledger row at all until a worker picked it up -
+    so "queued" was not a stored fact but the absence of one, inferred by each caller.
+    ``GET /replica/{id}`` did exactly that, and reported a fabricated
+    ``{status: "queued", everything: null}`` for a job that no worker would ever
+    consume. A queue nothing is reading and a queue that is merely busy looked
+    identical, from the API and from Operations alike.
+
+    Now the row exists the moment the work is accepted, and the worker's claim ADOPTS
+    it (``runner`` falls through on an existing queued row; ``start()`` re-stamps the
+    task id and attempt budget, which is what that path was already written for). So
+    a queued job is visible in ``GET /jobs/runs`` with no worker running at all, and
+    the UI can show what is really true: accepted, not yet started.
+
+    A ledger failure DEGRADES to the old behaviour - the message is still sent and the
+    worker still claims on arrival. Enqueueing is on the API's request path, and
+    refusing to accept work because the ledger blinked would be a worse outcome than
+    briefly not being able to show it.
     """
     from workers.celery_app import celery_app
+
+    # Generated here so the row can carry it from birth. Celery accepts a
+    # caller-supplied id and the worker sees the same value as `self.request.id`,
+    # which is what lets `get_run_by_celery_task_id` find a not-yet-started run.
+    task_id = str(uuid4())
+
+    try:
+        applied_key = _precreate_run(
+            task_name,
+            args,
+            kwargs,
+            correlation_id=correlation_id,
+            parent_run_id=parent_run_id,
+            idempotency_key=idempotency_key,
+            celery_task_id=task_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "job.enqueue_ledger_unavailable",
+            task=task_name,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        applied_key = idempotency_key
 
     payload = dict(kwargs)
     if correlation_id is not None:
         payload[_CORRELATION_KW] = correlation_id
     if parent_run_id is not None:
         payload[_PARENT_KW] = parent_run_id
-    if idempotency_key is not None:
-        payload[_KEY_KW] = idempotency_key
+    if applied_key is not None:
+        payload[_KEY_KW] = applied_key
 
     result = celery_app.send_task(
         task_name,
@@ -229,6 +324,7 @@ def enqueue(
         kwargs=payload,
         countdown=countdown,
         queue=TASK_QUEUES.get(task_name),
+        task_id=task_id,
     )
     return str(result.id)
 
@@ -262,4 +358,4 @@ def enqueue_child(
     )
 
 
-__all__ = ["TASK_QUEUES", "aios_job", "enqueue", "enqueue_child", "route_task"]
+__all__ = ["TASK_QUEUES", "TASK_SPECS", "aios_job", "enqueue", "enqueue_child", "route_task"]
