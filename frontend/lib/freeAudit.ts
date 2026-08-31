@@ -28,7 +28,7 @@ export function cleanDomain(url: string): string {
 }
 
 export const VERDICT: Record<ScoreBand, string> = {
-  ok: "Strong foundations — a few refinements will push you further ahead.",
+  ok: "Strong foundations. A few refinements will push you further ahead.",
   warn: "A solid start, but several issues are holding your rankings back.",
   crit: "Significant gaps are limiting your search visibility right now.",
 };

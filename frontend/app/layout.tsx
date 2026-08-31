@@ -21,7 +21,7 @@ const bricolage = localFont({
 
 export const metadata: Metadata = {
   title: "AIOS",
-  description: "SEO automation platform for the agency — audits, content, clients and Policy Radar.",
+  description: "SEO automation platform for the agency: audits, content, clients and Policy Radar.",
 };
 
 // WITHOUT this the dashboard rendered at a ~980px desktop width on phones/tablets and

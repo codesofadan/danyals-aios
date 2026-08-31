@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 import { SERIES } from "@/lib/data";
 import { initialsOf } from "@/lib/initials";
 import { type ClientRequest, type ReportViz, type RequestKind } from "@/lib/client";
@@ -33,16 +33,12 @@ type ClientState = {
   latestScore: number | null;
   latestAuditWhen: string;
   totalAudits: number;
-  // The report keys the admin granted this client (what CAN be unlocked).
+  // The report keys the admin granted this client (what they can see).
   grants: Set<string>;
   // key → its live visualization — only GRANTED keys are present (an ungranted
   // report's data is never sent by the backend, so it never appears here).
   reportViz: Record<string, ReportViz>;
-  // The report keys the client has actually popped open this session.
-  unlocked: Set<string>;
-  unlock: (key: string) => void;
   isGranted: (key: string) => boolean;
-  isUnlocked: (key: string) => boolean;
   // True when the backend flagged this report's series as representative sample
   // data (`placeholder`) — the card must badge it "Sample", never "Live".
   isPlaceholder: (key: string) => boolean;
@@ -60,7 +56,6 @@ type ClientState = {
 
 const Ctx = createContext<ClientState | null>(null);
 
-const EMPTY: Set<string> = new Set();
 const EMPTY_REPORTS: { key: string; viz: ReportViz; placeholder: boolean }[] = [];
 const EMPTY_REQUESTS: ClientRequest[] = [];
 const ACCENTS = [SERIES.c1, SERIES.c2, SERIES.c3, SERIES.c4, SERIES.c5] as const;
@@ -74,67 +69,23 @@ function accentOf(name: string): string {
   return ACCENTS[h % ACCENTS.length];
 }
 
-// Holds the signed-in client's identity + granted report viz + which graphs
-// they've unlocked this session + their requests, so state survives navigation
-// between the dashboard, reports, milestones and requests pages. Every field is
-// sourced from the RLS-scoped /portal/* endpoints — no seed, no store, no
-// cross-tenant fallback.
+// Holds the signed-in client's identity + granted report viz + their requests,
+// so state survives navigation between the dashboard, reports, milestones and
+// requests pages. Every field is sourced from the RLS-scoped /portal/* endpoints
+// — no seed, no store, no cross-tenant fallback.
 export function ClientProvider({ children }: { children: React.ReactNode }) {
   const dashboardQ = useClientDashboard();
   const reportsQ = useClientReports();
   const requestsQ = useClientRequests();
   const createRequest = useCreateRequest();
 
-  // Which granted graphs this client has popped open. The reveal is a cosmetic
-  // expand over data the admin already GRANTED (real access lives in `grants`),
-  // so it is persisted PER-TENANT in localStorage rather than the DB: once a
-  // client reveals a graph it stays open across refreshes and revisits, while
-  // remaining cheap and requiring no server round-trip. Keyed by a STABLE tenant
-  // id (the primary site's UUID, unique per tenant) rather than the display name,
-  // so two different tenants that happen to share a company name on one browser
-  // never collide on this cosmetic state. (Underlying data is RLS-scoped server
-  // side regardless — this key only guards which cards render already-expanded.)
-  const [unlocked, setUnlocked] = useState<Set<string>>(EMPTY);
-
+  // NOTE: there is deliberately no per-card "unlocked" state here any more. A
+  // granted report renders its data straight away. The old version kept a
+  // localStorage set (`aios:portal:unlocked:{tenantId}`) recording which graphs
+  // the client had tapped open, which made the portal gate data the admin had
+  // already shared behind a reveal animation. Access is `grants`, decided
+  // server-side; the backend never sends viz for an ungranted key.
   const dash = dashboardQ.data;
-  const tenantId = dash?.sites?.[0]?.id || dash?.client || "";
-  const storageKey = tenantId ? `aios:portal:unlocked:${tenantId}` : "";
-
-  // Hydrate the persisted unlock set once the tenant identity resolves. Runs
-  // client-side only (the provider gates children behind `dash`, so by the time
-  // a card can be tapped this has already loaded). A re-sync effect in
-  // LockableChart promotes any hydrated card straight to "unlocked" (no replay
-  // of the pop animation), so a refresh simply shows the graphs already open.
-  const hydratedFor = useRef<string>("");
-  useEffect(() => {
-    if (!storageKey || hydratedFor.current === storageKey) return;
-    hydratedFor.current = storageKey;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const arr = JSON.parse(raw) as unknown;
-        if (Array.isArray(arr)) setUnlocked(new Set(arr.filter((k): k is string => typeof k === "string")));
-      }
-    } catch {
-      /* private-mode / disabled storage — fall back to session-only unlocking */
-    }
-  }, [storageKey]);
-
-  const unlock = useCallback((key: string) => {
-    setUnlocked((prev) => {
-      if (prev.has(key)) return prev;
-      const next = new Set(prev);
-      next.add(key);
-      if (storageKey) {
-        try {
-          window.localStorage.setItem(storageKey, JSON.stringify([...next]));
-        } catch {
-          /* storage unavailable — the unlock still holds for this session */
-        }
-      }
-      return next;
-    });
-  }, [storageKey]);
 
   const client = useMemo<PortalClient>(() => {
     const name = dash?.client ?? "";
@@ -171,7 +122,6 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
   }, [refetchRequestsFn]);
 
   const isGranted = useCallback((key: string) => grants.has(key), [grants]);
-  const isUnlocked = useCallback((key: string) => unlocked.has(key), [unlocked]);
   const isPlaceholder = useCallback((key: string) => placeholders.has(key), [placeholders]);
 
   const addRequest = useCallback(
@@ -195,10 +145,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
       totalAudits: dash?.totalAudits ?? 0,
       grants,
       reportViz,
-      unlocked,
-      unlock,
       isGranted,
-      isUnlocked,
       isPlaceholder,
       requests,
       requestsLoading,
@@ -207,7 +154,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
       addRequest,
     }),
     [
-      client, dash, grants, reportViz, unlocked, unlock, isGranted, isUnlocked, isPlaceholder,
+      client, dash, grants, reportViz, isGranted, isPlaceholder,
       requests, requestsLoading, requestsError, refetchRequests, addRequest,
     ],
   );

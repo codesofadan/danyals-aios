@@ -143,21 +143,22 @@
   background: var(--card-2);
 }
 
+/* The full scaled document. The wrapper above scrolls it; clipping this to one
+ * page is what previously made the report unscrollable past page 1. */
 .stage {
   position: relative;
   flex-shrink: 0;
-  overflow: hidden;
   background: #ffffff;
   box-shadow: 0 4px 18px rgba(33, 27, 41, 0.16);
 }
 
 .frame {
   position: absolute;
+  top: 0;
   left: 0;
   display: block;
   border: 0;
   background: #ffffff;
-  transition: top 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .note {
@@ -185,9 +186,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame {
-    transition: none;
-  }
   .spin {
     animation: none;
   }

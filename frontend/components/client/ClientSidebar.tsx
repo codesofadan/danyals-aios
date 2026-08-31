@@ -48,9 +48,9 @@ export default function ClientSidebar() {
         <div>
           <div className="sec">Access</div>
           <div className="cl-side-access">
-            <span className="material-symbols-rounded">lock_open</span>
+            <span className="material-symbols-rounded">visibility</span>
             <span className="lbl">
-              <b>{grants.size}</b> graphs unlocked for you
+              <b>{grants.size}</b> graphs shared with you
             </span>
           </div>
         </div>

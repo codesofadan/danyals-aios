@@ -5,7 +5,7 @@
 // admin Client Directory. The report-grant hooks back the Directory's Report-Access
 // view + the Add-Client wizard.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import {
   type ClientRecord,
   type NewClient,
@@ -231,14 +231,24 @@ export function useUpdateClient() {
   });
 }
 
-/** A client's stored NAP (GET /clients/{id}/business-profile). 404 (no profile yet) is
- * surfaced as an error the caller treats as "empty", never a crash. */
+/** A client's stored NAP (GET /clients/{id}/business-profile).
+ *
+ * "No NAP captured yet" is a 404, and it is a true statement about the client
+ * rather than a fault, so it resolves to `null`. Anything else (5xx, network)
+ * still throws and lands as `isError`, so a caller can tell "this client has no
+ * profile" apart from "we could not find out". */
 export function useClientBusinessProfile(clientId: string | null) {
-  return useQuery({
+  return useQuery<ClientBusinessProfile | null>({
     queryKey: clientBusinessProfileKey(clientId ?? ""),
-    queryFn: () => api.get<ClientBusinessProfile>(`/clients/${clientId}/business-profile`),
+    queryFn: async () => {
+      try {
+        return await api.get<ClientBusinessProfile>(`/clients/${clientId}/business-profile`);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
+    },
     enabled: !!clientId,
-    retry: false, // a 404 (no NAP captured yet) is an expected state, not a transient fault
   });
 }
 

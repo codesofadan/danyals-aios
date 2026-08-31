@@ -11,7 +11,7 @@
 // ============================================================
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import type { AuditRow } from "@/lib/audit";
 import type { ClientDeliverable, ClientRequest, ReportViz, RequestKind } from "@/lib/client";
 import type { ClientProject } from "@/lib/milestones";
@@ -90,13 +90,24 @@ export function useClientDeliverables() {
 
 /**
  * The client's engagement timeline (its ClientProject + 5 lifecycle stages).
- * A client with no project yet gets a 404 — a terminal 4xx (no retry) that the
- * caller renders as its "no milestones" empty state.
+ *
+ * A client with no project yet gets a 404, which is a true statement about the
+ * engagement, not a failure: it resolves to `null` so the caller renders its
+ * "no milestones yet" empty state. Every OTHER failure (5xx, network, auth)
+ * still throws, so a real outage stays visible as an error instead of being
+ * reported to the client as "onboarding hasn't begun".
  */
 export function useClientMilestones() {
-  return useQuery({
+  return useQuery<ClientProject | null>({
     queryKey: PORTAL_MILESTONES_KEY,
-    queryFn: () => api.get<ClientProject>("/portal/milestones"),
+    queryFn: async () => {
+      try {
+        return await api.get<ClientProject>("/portal/milestones");
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
+    },
   });
 }
 

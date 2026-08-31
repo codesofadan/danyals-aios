@@ -41,7 +41,7 @@ export default function FiverrUpsells({ fiverrUrl }: { fiverrUrl?: string }) {
         <span className="fa-fiverr-badge"><span className="material-symbols-rounded">verified</span></span>
         <div>
           <h2 className="fa-upsell-t">Want more hands-on help?</h2>
-          <p className="fa-upsell-s">Optional — if you&apos;d like a hand fixing what this audit surfaced, explore our SEO services on Fiverr.</p>
+          <p className="fa-upsell-s">Optional: if you&apos;d like a hand fixing what this audit surfaced, explore our SEO services on Fiverr.</p>
         </div>
         {fiverrUrl && (
           <a className="fa-upsell-all" href={fiverrUrl} target="_blank" rel="noopener noreferrer">

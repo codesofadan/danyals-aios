@@ -1,59 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DashboardReport } from "@/lib/client";
 import { reportColor } from "@/lib/client";
 import MiniChart from "./MiniChart";
 import { useClient } from "./ClientContext";
 
-type Phase = "locked" | "unlockable" | "unlocking" | "unlocked";
-const UNLOCK_MS = 1500;
-
-// A single dashboard report card with three faces. NOTE: the reveal is a
-// cosmetic EXPAND over data the admin already granted and the backend already
-// sent — tapping never grants new access (the access decision is the admin's
-// grant, already made), it only draws the card open. Copy reads "reveal", not
-// "unlock access", so a client is never misled into thinking a tap unlocks data.
-//   · locked      — not granted by the admin. Grayed out behind a padlock;
-//                   the client can only request access from their manager.
-//   · unlockable  — granted but not yet opened. A glowing padlock the client
-//                   pops to reveal the data.
-//   · unlocking   — the transition: the padlock springs open, a green success
-//                   wash sweeps the card, then the real chart draws in.
-//   · unlocked    — the live, themed visualization.
+// A single dashboard report card with TWO faces:
+//   · granted   - the live, themed visualization, shown immediately.
+//   · ungranted - not included in this client's plan. A padlock that links to
+//                 the requests page so they can ask their account manager.
+//
+// There used to be a third and fourth face: a granted card started closed behind
+// a padlock the client had to tap, played a 1.5s reveal animation, and remembered
+// per-tenant in localStorage which cards had been popped. That was a game, not a
+// portal. It also read as an access decision it never was - the grant is the
+// admin's, already made server-side, and the backend only ever sends viz data for
+// keys it has granted. Making the client tap a lock to see data they were already
+// entitled to added a step and implied a permission that had already been given.
 export default function LockableChart({ report }: { report: DashboardReport }) {
   const router = useRouter();
-  const { isGranted, isUnlocked, isPlaceholder, unlock } = useClient();
+  const { isGranted, isPlaceholder } = useClient();
   const granted = isGranted(report.key);
-  const unlockedNow = isUnlocked(report.key);
   const sample = isPlaceholder(report.key);
   const accent = reportColor(report);
 
-  const initial: Phase = !granted ? "locked" : unlockedNow ? "unlocked" : "unlockable";
-  const [phase, setPhase] = useState<Phase>(initial);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Re-sync when the grant/unlock state changes — the reports query may resolve
-  // AFTER this card first mounts (grants start empty → the card starts locked),
-  // so this promotes it to unlockable once its grant arrives.
-  useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-    setPhase(!granted ? "locked" : unlockedNow ? "unlocked" : "unlockable");
-  }, [granted, unlockedNow, report.key]);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  function startUnlock() {
-    if (phase !== "unlockable") return;
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) { unlock(report.key); setPhase("unlocked"); return; }
-    setPhase("unlocking");
-    timer.current = setTimeout(() => { unlock(report.key); setPhase("unlocked"); }, UNLOCK_MS);
-  }
-
   return (
     <section
-      className={`cl-chart ${phase}`}
+      className={`cl-chart ${granted ? "unlocked" : "locked"}`}
       style={{ ["--accent" as string]: accent }}
       aria-label={report.label}
     >
@@ -63,10 +37,10 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
           <div className="cl-chart-t">{report.label}</div>
           <div className="cl-chart-grp">{report.group}</div>
         </div>
-        <ChartBadge phase={phase} sample={sample} />
+        <ChartBadge granted={granted} sample={sample} />
       </header>
 
-      {phase === "unlocked" ? (
+      {granted ? (
         <div className="cl-chart-live">
           <div className="cl-chart-read">
             <div className="cl-chart-num">{report.viz.headline}{report.viz.unit && <span className="u">{report.viz.unit}</span>}</div>
@@ -90,59 +64,37 @@ export default function LockableChart({ report }: { report: DashboardReport }) {
           <button
             type="button"
             className="cl-lock"
-            onClick={granted ? startUnlock : () => router.push("/client/requests")}
-            disabled={phase === "unlocking"}
-            title={granted ? "Tap to reveal this graph" : "Locked — request access from your account manager"}
+            onClick={() => router.push("/client/requests")}
+            title="Not included in your plan - request access from your account manager"
           >
             <span className="cl-lock-badge">
-              <span className="cl-lock-icon material-symbols-rounded">
-                {phase === "unlocking" ? "lock_open" : "lock"}
-              </span>
+              <span className="cl-lock-icon material-symbols-rounded">lock</span>
             </span>
-            <span className="cl-lock-txt">
-              {phase === "unlocking" ? "Revealing…" : granted ? "Tap to reveal" : "Locked"}
-            </span>
-            <span className="cl-lock-sub">
-              {granted ? report.desc : "Not included in your plan — request access"}
-            </span>
+            <span className="cl-lock-txt">Not in your plan</span>
+            <span className="cl-lock-sub">Request access from your account manager</span>
           </button>
-
-          {/* green success wash that sweeps across on unlock */}
-          {phase === "unlocking" && (
-            <div className="cl-unlock-fx" aria-hidden>
-              <span className="cl-unlock-ring" />
-              <span className="cl-unlock-ring d2" />
-              <span className="cl-unlock-check material-symbols-rounded">check</span>
-            </div>
-          )}
         </div>
       )}
     </section>
   );
 }
 
-function ChartBadge({ phase, sample }: { phase: Phase; sample?: boolean }) {
-  if (phase === "unlocked") {
-    // A backend-flagged placeholder series is representative sample data — it
-    // must never be presented to a paying client as "Live".
-    if (sample) {
-      return (
-        <span className="cl-chart-badge sample" title="Representative preview — live data appears as this service ramps up" style={{ background: "rgba(255,180,60,.12)", color: "#c8871a", borderColor: "rgba(200,135,26,.35)" }}>
-          <span className="material-symbols-rounded" style={{ fontSize: "0.85em" }}>science</span>Preview
-        </span>
-      );
-    }
+function ChartBadge({ granted, sample }: { granted: boolean; sample?: boolean }) {
+  if (!granted) {
+    return <span className="cl-chart-badge locked"><span className="material-symbols-rounded">lock</span>Locked</span>;
+  }
+  // A backend-flagged placeholder series is representative sample data - it
+  // must never be presented to a paying client as "Live".
+  if (sample) {
     return (
-      <span className="cl-chart-badge live">
-        <span className="cl-live-dot" />Live
+      <span className="cl-chart-badge sample" title="Representative preview - live data appears as this service ramps up" style={{ background: "rgba(255,180,60,.12)", color: "#c8871a", borderColor: "rgba(200,135,26,.35)" }}>
+        <span className="material-symbols-rounded" style={{ fontSize: "0.85em" }}>science</span>Preview
       </span>
     );
   }
-  if (phase === "unlocking") {
-    return <span className="cl-chart-badge unlocking"><span className="material-symbols-rounded">lock_open</span>Revealing</span>;
-  }
-  if (phase === "unlockable") {
-    return <span className="cl-chart-badge ready"><span className="material-symbols-rounded">lock_open</span>Ready</span>;
-  }
-  return <span className="cl-chart-badge locked"><span className="material-symbols-rounded">lock</span>Locked</span>;
+  return (
+    <span className="cl-chart-badge live">
+      <span className="cl-live-dot" />Live
+    </span>
+  );
 }

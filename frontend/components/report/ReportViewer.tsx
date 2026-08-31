@@ -11,9 +11,16 @@
 // Pagination: the report is a print-CSS (A4 @page) flowing document, so there are
 // no discrete page elements to step between. We render it once into a sandboxed
 // srcdoc iframe (no scripts; `allow-same-origin` only, so the report can do
-// nothing but the parent can measure it), then WINDOW it: the iframe is laid out
-// at full height and scaled to fit, and Next/Prev shift it by exactly one A4 page
-// height inside a clipping stage - a PDF-style flip through the report's pages.
+// nothing but the parent can measure it), laid out at full height and scaled to
+// fit, and let the surrounding stage SCROLL it continuously. Next/Prev scroll to
+// an A4 page boundary and the label follows the scroll position, so paging and
+// scrolling agree instead of competing.
+//
+// This used to WINDOW the document instead: the stage was clipped to exactly one
+// page, the iframe's own scrolling was disabled, and the only way to move was the
+// pager. Readers reported the report "stopping after one page" - the wheel did
+// nothing, because there was nothing for it to scroll. Continuous scroll is how a
+// PDF reads, and the pager still works for people who prefer to jump.
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -59,7 +66,9 @@ export default function ReportViewer({
   const [docHeight, setDocHeight] = useState(A4_H);
 
   const stageWrapRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
 
   // Fetch the report HTML (and re-fetch when the target changes).
   useEffect(() => {
@@ -82,14 +91,17 @@ export default function ReportViewer({
     };
   }, [load, reloadKey]);
 
-  // Measure the laid-out document once the srcdoc finishes loading, and derive the
-  // page count. Reading contentDocument needs same-origin, which srcdoc +
-  // allow-same-origin grants; the report carries no scripts so nothing else runs.
+  // Measure the laid-out document and derive the page count. Reading
+  // contentDocument needs same-origin, which srcdoc + allow-same-origin grants;
+  // the report carries no scripts so nothing else runs.
+  //
+  // The iframe is laid out at its FULL document height (the parent scrolls it),
+  // so the inner document never scrolls on its own - there is nothing below the
+  // fold inside it to reach.
   const measure = useCallback(() => {
     const frame = frameRef.current;
     const doc = frame?.contentDocument;
     if (!doc) return;
-    // Lock the inner document's own scroll - we window it from the parent.
     doc.documentElement.style.overflow = "hidden";
     const h = Math.max(
       doc.documentElement.scrollHeight,
@@ -99,6 +111,23 @@ export default function ReportViewer({
     setDocHeight(h);
     setPageCount(Math.max(1, Math.ceil(h / A4_H)));
   }, []);
+
+  // Re-measure once late-loading images and webfonts have grown the document.
+  // Measuring only on `load` left `pageCount` reading "1 / 3" on a report whose
+  // images landed a moment later, and the last pages were unreachable from the
+  // pager. Same-origin lets us watch the real element.
+  const onFrameLoad = useCallback(() => {
+    measure();
+    const doc = frameRef.current?.contentDocument;
+    if (!doc || typeof ResizeObserver === "undefined") return;
+    observerRef.current?.disconnect();
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(doc.documentElement);
+    if (doc.body) ro.observe(doc.body);
+    observerRef.current = ro;
+  }, [measure]);
+
+  useEffect(() => () => observerRef.current?.disconnect(), []);
 
   // Fit the A4-wide page into the available width (never upscale past 1:1).
   useEffect(() => {
@@ -118,8 +147,36 @@ export default function ReportViewer({
     (n: number) => Math.max(0, Math.min(pageCount - 1, n)),
     [pageCount],
   );
-  const goPrev = useCallback(() => setPage((p) => clampPage(p - 1)), [clampPage]);
-  const goNext = useCallback(() => setPage((p) => clampPage(p + 1)), [clampPage]);
+
+  // Scroll the stage to a page boundary. The label then follows from the scroll
+  // handler, so a jump and a wheel-scroll end up reporting the same page.
+  const goToPage = useCallback(
+    (n: number) => {
+      const wrap = stageWrapRef.current;
+      const stage = stageRef.current;
+      if (!wrap || !stage) return;
+      const target = clampPage(n);
+      wrap.scrollTo({
+        top: stage.offsetTop + target * A4_H * scale,
+        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      });
+    },
+    [clampPage, scale],
+  );
+
+  const goPrev = useCallback(() => goToPage(page - 1), [goToPage, page]);
+  const goNext = useCallback(() => goToPage(page + 1), [goToPage, page]);
+
+  // Which page is in view. Derived from the scroll offset rather than stored as
+  // the source of truth, so the counter cannot disagree with what is on screen.
+  const onScroll = useCallback(() => {
+    const wrap = stageWrapRef.current;
+    const stage = stageRef.current;
+    if (!wrap || !stage) return;
+    const pageH = A4_H * scale;
+    if (pageH <= 0) return;
+    setPage(clampPage(Math.round((wrap.scrollTop - stage.offsetTop) / pageH)));
+  }, [clampPage, scale]);
 
   // Keyboard: arrows page, Escape closes (overlay only).
   useEffect(() => {
@@ -135,9 +192,12 @@ export default function ReportViewer({
   // Keep the page in range if the count shrinks after a re-measure.
   useEffect(() => setPage((p) => Math.min(p, pageCount - 1)), [pageCount]);
 
+  // The stage is the WHOLE document, scaled - the wrapper scrolls it. (It used to
+  // be exactly one page tall with the iframe shifted underneath, which is what
+  // made the wheel dead.)
   const stageStyle = useMemo(
-    () => ({ width: A4_W * scale, height: A4_H * scale }),
-    [scale],
+    () => ({ width: A4_W * scale, height: docHeight * scale }),
+    [scale, docHeight],
   );
   const frameStyle = useMemo(
     () => ({
@@ -145,9 +205,8 @@ export default function ReportViewer({
       height: docHeight,
       transform: `scale(${scale})`,
       transformOrigin: "top left",
-      top: -(page * A4_H * scale),
     }),
-    [scale, docHeight, page],
+    [scale, docHeight],
   );
 
   const body = (
@@ -218,7 +277,7 @@ export default function ReportViewer({
         </div>
       </div>
 
-      <div className={styles.stageWrap} ref={stageWrapRef}>
+      <div className={styles.stageWrap} ref={stageWrapRef} onScroll={onScroll}>
         {state.kind === "loading" && (
           <div className={styles.note}>
             <span className={`material-symbols-rounded ${styles.spin}`} aria-hidden>
@@ -237,7 +296,7 @@ export default function ReportViewer({
           </div>
         )}
         {state.kind === "ready" && (
-          <div className={styles.stage} style={stageStyle}>
+          <div className={styles.stage} style={stageStyle} ref={stageRef}>
             <iframe
               ref={frameRef}
               className={styles.frame}
@@ -245,7 +304,8 @@ export default function ReportViewer({
               srcDoc={state.html}
               sandbox="allow-same-origin"
               title={label ?? "Audit report"}
-              onLoad={measure}
+              onLoad={onFrameLoad}
+              scrolling="no"
             />
           </div>
         )}

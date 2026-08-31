@@ -38,12 +38,11 @@ export default function ClientMilestones() {
           <div className="pt-empty-t">Loading your timeline…</div>
         </div>
       ) : projectQ.isError ? (
-        // A FAILED FETCH IS NOT AN EMPTY TIMELINE. `!project` alone covered both the
-        // 404 ("no project yet", which is true and expected) and a 500 or a network
-        // drop ("we do not know") — and told the client, in both cases, that their
-        // onboarding had not begun. That is a false statement about their engagement,
-        // produced by a server problem they cannot see. The requests surface already
-        // draws this distinction (`requestsError`); this one did not.
+        // A FAILED FETCH IS NOT AN EMPTY TIMELINE, and the reverse is just as wrong:
+        // "no project yet" is a 404, which the hook resolves to `null` so it lands in
+        // the empty branch below. Only a genuine failure (5xx, network, auth) reaches
+        // here, so this message is never shown to a client whose onboarding simply
+        // has not started.
         <div className="pt-empty">
           <span className="material-symbols-rounded">error</span>
           <div className="pt-empty-t">Couldn&apos;t load your timeline</div>

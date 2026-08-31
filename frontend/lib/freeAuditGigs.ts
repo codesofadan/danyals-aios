@@ -29,7 +29,7 @@ export const freeAuditGigs: FreeAuditGig[] = [
   },
   {
     id: "fa-gig-citations-145",
-    title: "145 Directory Citations — USA, UK & Canada",
+    title: "145 Directory Citations for USA, UK & Canada",
     description: "Accurate NAP citations across 145 top local directories in the US, UK and Canada to strengthen local rankings.",
     fiverrUrl: "https://www.fiverr.com/iamdaani/do-145-directory-citations-for-usa-uk-canada-local-seo-65552aba-0842-4857-8154-5f493507ca40?ref_ctx_id=4efcb67efe90483d9a5ebfd2230150fe&pckg_id=1&source=seller_page",
     icon: "location_on",

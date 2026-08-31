@@ -41,7 +41,7 @@ function createErrorCopy(err: unknown): { title: string; body: string } {
   if (status === 400) {
     return {
       title: "We can't audit that URL",
-      body: message || "Enter a public website URL — the free audit covers on-page, technical, AI/GEO and strategy checks.",
+      body: message || "Enter a public website URL. The free audit covers on-page, technical, AI/GEO and strategy checks.",
     };
   }
   return {
@@ -144,7 +144,7 @@ export default function FreeAuditFlow() {
             See exactly what&apos;s holding your <span className="fa-hi">rankings</span> back.
           </h1>
           <p className="fa-hero-sub">
-            Get a free SEO audit of your website — technical health and on-page fixes, scored and
+            Get a free SEO audit of your website: technical health and on-page fixes, scored and
             explained by our engine. No login, no sales call.
           </p>
           <div className="fa-trust">
@@ -152,13 +152,6 @@ export default function FreeAuditFlow() {
             <span><span className="material-symbols-rounded">timer</span>Runs in the background</span>
             <span><span className="material-symbols-rounded">insights</span>Real engine score</span>
           </div>
-
-          {/* Fiverr link surfaced above the button, per the brief. */}
-          <a className="fa-fiverr-line" href={FIVERR_PROFILE} target="_blank" rel="noopener noreferrer">
-            <span className="material-symbols-rounded">verified</span>
-            Prefer we handle it end-to-end? See our gigs on Fiverr
-            <span className="material-symbols-rounded">arrow_outward</span>
-          </a>
 
           <button className="primary-btn fa-cta" onClick={() => setView("form")}>
             <span className="material-symbols-rounded">rocket_launch</span>
@@ -175,7 +168,7 @@ export default function FreeAuditFlow() {
               Back
             </button>
             <h1 className="fa-card-h">Where should we look?</h1>
-            <p className="fa-card-sub">Enter your site and email — we run the audit and keep your report at a private link.</p>
+            <p className="fa-card-sub">Enter your site and email. We run the audit and keep your report at a private link.</p>
 
             <form
               className="fa-form"
@@ -265,7 +258,7 @@ export default function FreeAuditFlow() {
             </div>
           </div>
           <h1 className="fa-gen-h">Auditing your site…</h1>
-          <p className="fa-gen-sub">Hang tight — our engine is crawling, cross-checking and scoring your pages. This runs in the background and updates live.</p>
+          <p className="fa-gen-sub">Hang tight. Our engine is crawling, cross-checking and scoring your pages. This runs in the background and updates live.</p>
         </main>
       )}
 

@@ -24,9 +24,7 @@ import type { DashboardReport } from "@/lib/client";
 // the BADGE DECISION rather than of react-query, which is what actually matters here.
 const clientState = {
   isGranted: vi.fn(() => true),
-  isUnlocked: vi.fn(() => true),
   isPlaceholder: vi.fn(() => false),
-  unlock: vi.fn(),
 };
 
 vi.mock("./ClientContext", () => ({ useClient: () => clientState }));
@@ -56,7 +54,6 @@ const REPORT: DashboardReport = {
 
 function renderChart({ placeholder }: { placeholder: boolean }) {
   clientState.isGranted.mockReturnValue(true);
-  clientState.isUnlocked.mockReturnValue(true);
   clientState.isPlaceholder.mockReturnValue(placeholder);
   return render(<LockableChart report={REPORT} />);
 }
@@ -106,7 +103,6 @@ describe("LockableChart — the grant boundary on the client surface", () => {
 
   it("does not put the figure in the DOM when the report is not granted", () => {
     clientState.isGranted.mockReturnValue(false);
-    clientState.isUnlocked.mockReturnValue(false);
     clientState.isPlaceholder.mockReturnValue(false);
     render(<LockableChart report={REPORT} />);
 
@@ -118,32 +114,32 @@ describe("LockableChart — the grant boundary on the client surface", () => {
     expect(screen.queryByText(/site health across four categories/i)).toBeNull();
   });
 
-  it("still withholds the figure when granted but not yet opened", () => {
-    // "Ready" is a granted report the client has not clicked to reveal. The reveal is
-    // a deliberate act, so the data must not already be sitting in the markup.
-    clientState.isGranted.mockReturnValue(true);
-    clientState.isUnlocked.mockReturnValue(false);
-    clientState.isPlaceholder.mockReturnValue(false);
-    render(<LockableChart report={REPORT} />);
-
-    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
-    expect(screen.queryByText("82")).toBeNull();
-  });
-
-  it("renders the figure only once unlocked", () => {
+  it("renders a granted report's figure immediately, with nothing to tap first", () => {
+    // The portal used to hide a GRANTED graph behind a padlock the client had to
+    // tap, and remembered the taps in localStorage. A report the admin has shared
+    // is data the client is entitled to: it shows on arrival, on every visit, with
+    // no reveal step and no per-browser memory to lose.
     renderChart({ placeholder: false });
 
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.getByText(/site health across four categories/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tap to reveal/i)).toBeNull();
+    expect(screen.queryByText(/ready/i)).toBeNull();
   });
 
   it("always names the report, so a locked card is still identifiable", () => {
     // Withholding the DATA is the point; withholding the TITLE would leave the client
     // unable to ask for what they cannot see.
     clientState.isGranted.mockReturnValue(false);
-    clientState.isUnlocked.mockReturnValue(false);
     render(<LockableChart report={REPORT} />);
 
     expect(screen.getByLabelText("Audit Scores")).toBeInTheDocument();
+  });
+
+  it("points an ungranted card at the requests page rather than a dead padlock", () => {
+    clientState.isGranted.mockReturnValue(false);
+    render(<LockableChart report={REPORT} />);
+
+    expect(screen.getByTitle(/request access from your account manager/i)).toBeInTheDocument();
   });
 });
