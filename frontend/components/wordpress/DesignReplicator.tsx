@@ -5,16 +5,26 @@ import Link from "next/link";
 // ============================================================
 // AIOS · Design Replicator
 // Rebuild a page the client already owns as a native Elementor page on the
-// client's connected WordPress site (POST /replica → poll GET /replica/{job_id}).
+// client's connected WordPress site (POST /replica), with the run list read back
+// from the JOB LEDGER (GET /jobs/runs?jobName=replica.publish).
 // Lives on the WordPress screen because the output IS a WordPress publish.
 // The ownership checkbox is a hard gate: the rebuild carries the source's own
 // copy and imagery, so the operator must assert the client owns the site —
 // the submit stays disabled (and the server 400s) without it.
+//
+// THE JOB HANDLE USED TO LIVE IN REACT STATE ALONE. `useState<string|null>` was
+// set in the mutation's onSuccess and read nowhere else, so navigating away or
+// refreshing discarded the only reference to a job that was still running: the
+// work carried on, invisibly, and the operator had no route back to it. Reported
+// as "the queue disappears". The ledger was already the durable record - this
+// screen simply never read it.
 // ============================================================
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useClients } from "@/lib/hooks/clients";
-import { useReplicate, useReplicaJob } from "@/lib/hooks/replica";
+import { REPLICA_RUNS_KEY, useReplicate, useReplicaRuns } from "@/lib/hooks/replica";
+import type { JobRun } from "@/lib/jobs";
 import { isReplicaActive, type ReplicaStatus } from "@/lib/replica";
 import { SelectField, TextField } from "@/components/ui/Field";
 
@@ -70,27 +80,73 @@ function StatusPill({ status }: { status: ReplicaStatus }) {
   );
 }
 
-// --- the live job status line ------------------------------------------------ #
-function JobStatus({ jobId }: { jobId: string }) {
-  const { data: job, isError } = useReplicaJob(jobId);
+// The three typed refusals workers/tasks/replica.py raises when the client's
+// WordPress connection cannot publish. They are not failures - nothing is broken and
+// nothing needs retrying; a connection has to be made first. Rendering them as
+// errors would send an operator hunting for a bug that is not there.
+//
+// Each gets its own sentence rather than echoing the worker's `reason`, which is
+// phrased for a log and points at a Settings path this card is not on.
+const CONNECTION_REASONS: Record<string, { title: string; fix: string }> = {
+  wp_connection_missing: {
+    title: "This client’s WordPress site isn’t connected yet.",
+    fix: "Connect it in the WordPress Connections card on this page, then run the replication again.",
+  },
+  wp_plugin_required: {
+    title: "This client’s connection can’t write Elementor data.",
+    fix: "Replication needs the AIOS Publisher plugin. Install it on the client’s site and reconnect with the plugin method, then run this again.",
+  },
+  wp_credentials_unreadable: {
+    title: "This client’s stored WordPress credential couldn’t be opened.",
+    fix: "Re-enter the connection in the WordPress Connections card on this page, then run the replication again.",
+  },
+};
 
-  if (isError) {
-    return (
-      <div style={{ fontSize: 13, color: "var(--crit)", fontWeight: 600 }}>
-        Could not read the job status. It may still be running — check back shortly.
-      </div>
-    );
-  }
-  if (!job) {
-    return <div style={{ fontSize: 13, color: "var(--muted)" }}>Checking the job…</div>;
-  }
+function fmtWhen(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-  const active = isReplicaActive(job.status);
+// --- one row of the ledger --------------------------------------------------- #
+function RunRow({ run }: { run: JobRun }) {
+  const status = run.status as ReplicaStatus;
+  const active = isReplicaActive(status);
+  const result = (run.result ?? {}) as {
+    url?: string;
+    preview_url?: string | null;
+    sections?: number | null;
+    widgets?: number | null;
+    notes?: string[];
+  };
+  const notes = Array.isArray(result.notes) ? result.notes : [];
+  const previewUrl = result.preview_url || null;
+  const connectionFix = status === "blocked" ? CONNECTION_REASONS[run.reasonCode] : undefined;
 
   return (
-    <div style={{ display: "grid", gap: 8 }}>
+    <div style={{ display: "grid", gap: 6, padding: "12px 0", borderTop: `1px solid ${LINE}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <StatusPill status={job.status} />
+        <StatusPill status={status} />
+        <span
+          style={{
+            fontSize: 13.5,
+            color: INK,
+            fontWeight: 600,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: 320,
+          }}
+          title={result.url ?? ""}
+        >
+          {result.url ?? "—"}
+        </span>
         {active && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)" }}>
             <span
@@ -99,44 +155,64 @@ function JobStatus({ jobId }: { jobId: string }) {
             >
               progress_activity
             </span>
-            {job.status === "queued"
+            {status === "queued"
               ? "Waiting for the worker…"
               : "Capturing the page and rebuilding it as Elementor…"}
           </span>
         )}
-        {job.status === "completed" && job.preview_url && (
+        {previewUrl && (status === "completed" || status === "degraded") && (
           <a
-            href={job.preview_url}
+            href={previewUrl}
             target="_blank"
             rel="noopener noreferrer"
             style={{ fontSize: 13.5, fontWeight: 700, color: ACCENT }}
           >
-            Open the preview →
+            {status === "degraded" ? "Open the preview (published with gaps) →" : "Open the preview →"}
           </a>
         )}
-        {(job.sections !== null || job.widgets !== null) && (
+        {(result.sections != null || result.widgets != null) && (
           <span style={{ fontSize: 13, color: "var(--muted)" }}>
-            {job.sections ?? 0} section{(job.sections ?? 0) === 1 ? "" : "s"} ·{" "}
-            {job.widgets ?? 0} widget{(job.widgets ?? 0) === 1 ? "" : "s"}
+            {result.sections ?? 0} section{(result.sections ?? 0) === 1 ? "" : "s"} ·{" "}
+            {result.widgets ?? 0} widget{(result.widgets ?? 0) === 1 ? "" : "s"}
           </span>
         )}
       </div>
 
-      {/* degraded still publishes — surface the preview alongside the honest notes */}
-      {job.status === "degraded" && job.preview_url && (
-        <a
-          href={job.preview_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 13.5, fontWeight: 700, color: ACCENT }}
+      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+        Started {fmtWhen(run.createdAt) || "just now"}
+        {run.finishedAt ? ` · finished ${fmtWhen(run.finishedAt)}` : ""}
+        {run.attempt > 1 ? ` · attempt ${run.attempt} of ${run.maxAttempts}` : ""}
+      </div>
+
+      {connectionFix ? (
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--body)",
+            background: "var(--well)",
+            border: `1px solid ${LINE}`,
+            borderRadius: 10,
+            padding: "10px 12px",
+            lineHeight: 1.55,
+          }}
         >
-          Open the preview (published with gaps) →
-        </a>
+          <b style={{ color: INK }}>{connectionFix.title}</b> {connectionFix.fix}
+        </div>
+      ) : (
+        run.reason && (
+          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>{run.reason}</div>
+        )
       )}
 
-      {job.notes.length > 0 && (
+      {run.status === "failed" && run.errorMessage && (
+        <div style={{ fontSize: 12.5, color: "var(--crit)", lineHeight: 1.5 }}>
+          {run.errorType}: {run.errorMessage}
+        </div>
+      )}
+
+      {notes.length > 0 && (
         <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 3 }}>
-          {job.notes.map((note, i) => (
+          {notes.map((note, i) => (
             <li key={i} style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
               {note}
             </li>
@@ -149,6 +225,7 @@ function JobStatus({ jobId }: { jobId: string }) {
 
 // --- the card ---------------------------------------------------------------- #
 export default function DesignReplicator() {
+  const qc = useQueryClient();
   const clientsQ = useClients();
   const clients = clientsQ.data ?? [];
   const replicate = useReplicate();
@@ -156,22 +233,31 @@ export default function DesignReplicator() {
   const [clientId, setClientId] = useState("");
   const [url, setUrl] = useState("");
   const [ownerConfirmed, setOwnerConfirmed] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
 
   const effectiveClientId = clientId || clients[0]?.id || "";
   const canSubmit =
     !!effectiveClientId && !!url.trim() && ownerConfirmed && !replicate.isPending;
 
+  // The job list comes from the LEDGER, not from this component's memory, so it is
+  // still here after a refresh, a navigation, or a new browser session.
+  const runsQ = useReplicaRuns(effectiveClientId || null);
+  const runs = runsQ.data ?? [];
+
   const onSubmit = () => {
     if (!canSubmit) return;
-    setJobId(null);
     replicate.mutate(
       {
         client_id: effectiveClientId,
         url: url.trim(),
         owner_confirmed_source: ownerConfirmed,
       },
-      { onSuccess: (res) => setJobId(res.job_id) },
+      {
+        // The run row exists as soon as the API accepts the job, so refetching is
+        // enough to show it - there is no local handle to keep.
+        onSuccess: () => {
+          void qc.invalidateQueries({ queryKey: REPLICA_RUNS_KEY });
+        },
+      },
     );
   };
 
@@ -290,9 +376,37 @@ export default function DesignReplicator() {
             </button>
           </div>
 
-          {jobId && (
-            <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 14 }}>
-              <JobStatus jobId={jobId} />
+        </div>
+
+        {/* Recent replications, straight from the job ledger. */}
+        <div style={{ marginTop: 26 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <h3 style={{ fontSize: 14.5, fontWeight: 800, color: INK, margin: 0 }}>
+              Recent replications
+            </h3>
+            <span style={{ fontSize: 12.5, color: "var(--muted)" }}>
+              Kept server-side — safe to leave this page and come back.
+            </span>
+          </div>
+
+          {runsQ.isLoading ? (
+            <div style={{ fontSize: 13, color: "var(--muted)", paddingTop: 12 }}>
+              Loading recent runs…
+            </div>
+          ) : runsQ.isError ? (
+            <div style={{ fontSize: 13, color: "var(--crit)", fontWeight: 600, paddingTop: 12 }}>
+              Couldn&rsquo;t load recent runs. Any job already queued is unaffected — it is
+              recorded server-side.
+            </div>
+          ) : runs.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--muted)", paddingTop: 12 }}>
+              No replications yet for this client.
+            </div>
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              {runs.map((run) => (
+                <RunRow key={run.id} run={run} />
+              ))}
             </div>
           )}
         </div>
