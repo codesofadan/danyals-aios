@@ -235,7 +235,7 @@ checks:
     owner_agent: B1
     severity_default: minor
     data_sources: [crawled_html, internal_links]
-    analyzer: audit_engine.analyzers.pagination.optimization
+    analyzer: audit_engine.analyzers.extras.check_pagination
     automation: full
 
   - id: TECH-026
@@ -567,7 +567,7 @@ checks:
     owner_agent: B5
     severity_default: major
     data_sources: [crawled_html, http_headers, sitemap]
-    analyzer: audit_engine.analyzers.international.hreflang_validate
+    analyzer: audit_engine.analyzers.onpage.check_hreflang
     automation: full
 
   - id: TECH-062
@@ -613,7 +613,7 @@ checks:
     owner_agent: B2
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.mobile.viewport
+    analyzer: audit_engine.analyzers.onpage.check_viewport
     automation: full
 
   # ----- AMP (1) -----

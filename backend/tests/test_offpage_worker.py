@@ -522,3 +522,34 @@ def test_client_from_row_carries_source_pack() -> None:
     })
     assert client.source_pack is not None
     assert client.source_pack.proof_points == ["Did a real thing"]
+
+
+def test_web2_drafting_honours_the_operators_image_switch() -> None:
+    """MEASURED 2026-08-30: images on $0.01166 vs off $0.00990 per article — ~15% of the
+    drafting cost, for output web2 THROWS AWAY. `builder.images` never enters
+    `builder.parts`, is absent from `Web2Article`, and no web2 publisher renders an image.
+
+    web2 passed the generator's DEFAULT_TUNING (max_images=5) and never consulted
+    `content_images_enabled`, so an operator who switched images off still paid for a
+    photo-brief writer call on every property. The tuning is now taken from the content
+    worker's own derivation, so the two paths cannot disagree about what the switch means.
+    """
+    import inspect
+
+    from workers.tasks import offpage as wk
+
+    # Assert against CODE, not commentary: the comment explaining the fix names the very
+    # constant it removed.
+    code = "\n".join(
+        line
+        for line in inspect.getsource(wk.execute_web2_write).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert "DEFAULT_TUNING" not in code
+    assert "_tuning" in code, "web2 must derive tuning from the setting, not use the default"
+
+    from app.config import Settings
+    from workers.tasks.content import _tuning
+
+    assert _tuning(Settings(_env_file=None, content_images_enabled=False)).max_images == 0
+    assert _tuning(Settings(_env_file=None, content_images_enabled=True)).max_images > 0

@@ -1048,7 +1048,13 @@ class HashnodeClient(HttpProviderClient):
                 "title": post.title,
                 "contentMarkdown": post.body_html,
                 "publicationId": self._publication_id,
-                "originalArticleURL": post.target_url or None,
+                # NO originalArticleURL. It is Hashnode's canonical-source field: it emits
+                # <link rel="canonical"> at that URL and renders "Originally published
+                # at ...". `post.target_url` is the BACKLINK DESTINATION, not a
+                # republication source, so passing it made the property declare itself a
+                # duplicate of the client's own page - Google consolidates it away, the
+                # article leaves the index as an independent document, and the editorial
+                # link passes nothing, while the row still reports published/verified.
                 "slug": post.slug,
             }
         }

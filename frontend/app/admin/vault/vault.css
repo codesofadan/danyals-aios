@@ -102,3 +102,15 @@
 @media (max-width: 640px) {
   .kv-summary-enc { margin-left: 0; }
 }
+
+/* The Integrations card scrolls itself, rather than lengthening the page.
+ *
+ * QA: "displays too many integrations vertically and causes unnecessary page
+ * scrolling ... Scrolling should occur inside the Integrations card, not on the
+ * overall page." ReadMore already caps each CATEGORY at five, but the card stacks
+ * several categories, so the page still grew. The cap is on the card body only —
+ * the header (and its connected count) stays pinned in view. */
+.kv-int-scroll { max-height: 420px; overflow-y: auto; overscroll-behavior: contain; }
+.kv-int-scroll::-webkit-scrollbar { width: 8px; }
+.kv-int-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+.kv-int-scroll::-webkit-scrollbar-track { background: transparent; }

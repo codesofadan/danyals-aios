@@ -56,6 +56,7 @@ from app.services.content_generator import (
     GeneratorTuning,
     SourcePack,
     generate,
+    is_keyword_phrase,
 )
 from app.services.content_research import (
     ContentSpendBlocked,
@@ -225,7 +226,15 @@ def _seed_brief(keyword: str, geo: str | None, da: float | None) -> ResearchBrie
     no SERP call. Enough structure for the generator to build a grounded, on-topic
     article; ``low_confidence`` is set (no live SERP research backed it)."""
     primary = keyword.strip() or "the topic"
-    questions = [f"What is {primary}?", f"How does {primary} help?", f"Why choose {primary}?"]
+    # These become FAQ H3s. The frames only read as English around a KEYWORD; an operator
+    # who types a title ("what a CCTV drain survey shows" - the wizard's own example) would
+    # otherwise get "What is what a CCTV drain survey shows?" in a client-facing heading.
+    if is_keyword_phrase(primary):
+        questions = [
+            f"What is {primary}?", f"How does {primary} help?", f"Why choose {primary}?"
+        ]
+    else:
+        questions = ["What does this cover?", "How does it help?", "Who is it for?"]
     terms = TermSet(primary=primary, secondary=[], semantic_entities=[], questions=questions)
     cluster = TopicalCluster(pillar=primary, primary=primary, supporting=[])
     teardown = Teardown(

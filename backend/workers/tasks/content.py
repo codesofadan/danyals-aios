@@ -2039,11 +2039,22 @@ def _plugin_payload(
     # RENAMED here into the plugin's own field names; the REST/XML-RPC path reads the
     # same struct, so the two can no longer drift apart.
     seo = _seo_fields(row, draft_md, title)
+    # ONE predicate, three consumers: the WordPress post type, the plugin's full_width
+    # flag, and the Elementor stretch. They used to be decided separately (two of them
+    # not at all), so a "full width" page could be published as a blog POST with boxed
+    # Elementor sections and a CSS class that never applied.
+    full_width = _is_full_width_page(row)
     payload: dict[str, Any] = {
         "title": title,
         "content": _shape_body_html(row, draft_md),
         "status": "draft",  # push as a DRAFT - a human publishes it on WordPress
-        "post_type": "post",
+        # A landing page is a PAGE. Publishing a service/local page as a `post` handed
+        # it the theme's single-post template - a narrow blog column with wide margins,
+        # which is QA item 23's exact symptom and had nothing to do with Elementor. The
+        # replica path already publishes pages and its test says why in the same words:
+        # "a POST renders in the theme's narrow blog column". Articles stay posts, so
+        # blog permalinks, categories and the post feed are untouched.
+        "post_type": "page" if full_width else "post",
         "slug": _slug(title),
         "meta_title": seo.meta_title,
         "meta_description": seo.meta_description,
@@ -2077,7 +2088,7 @@ def _plugin_payload(
     # Full-width layout: a landing page (a non-article page type, or a page built to MATCH
     # an analyzed site's design) uses the FULL page width; a blog / FAQ article keeps the
     # narrow reading measure. The plugin turns this into a `.aios-article--full` class.
-    if _is_full_width_page(row):
+    if full_width:
         payload["full_width"] = True
     # Elementor-editable output: attach the widget tree so the plugin writes the builder
     # post-meta (guarded by the setting; absent when disabled -> byte-identical payload).
@@ -2089,7 +2100,9 @@ def _plugin_payload(
         if saved_model.get("sections"):
             # A page hand-edited in the dashboard live editor: publish THAT exact model as
             # the Elementor tree (so WordPress matches the editor preview + stays editable).
-            payload["elementor_data"] = elementor_json_from_model(saved_model)
+            payload["elementor_data"] = elementor_json_from_model(
+                saved_model, full_width=full_width
+            )
         else:
             # Resolve the effective page blueprint (analyzed site > chosen template > page-
             # type default) and SLOT the draft's content into its sections, rendered as
@@ -2103,6 +2116,7 @@ def _plugin_payload(
                 blueprint=blueprint,
                 cta=payload.get("cta") or _derive_cta(row),
                 testimonials=_str_list(raw_pack.get("testimonials")),
+                full_width=full_width,
             )
         payload["elementor_edit_mode"] = "builder"
     return payload

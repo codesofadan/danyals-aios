@@ -13,19 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from audit_engine.analyzers.ai_search import iter_per_page_ai_search
-from audit_engine.analyzers.extras import iter_per_page_extras
-from audit_engine.analyzers.onpage import iter_per_page_checks
-from audit_engine.analyzers.semantic_seo import iter_per_page_semantic_seo
+import audit_engine.cli.main  # noqa: F401  - registers every check
+from audit_engine.analyzers.dispatch import run_scope
 from audit_engine.parsers import html as html_parser
 
 FIXTURES = Path(__file__).parent / "fixtures"
-ITERATORS = (
-    iter_per_page_checks,
-    iter_per_page_ai_search,
-    iter_per_page_extras,
-    iter_per_page_semantic_seo,
-)
+# Through the REGISTRY, not the retired `iter_*` generators: `run_scope("page")`
+# covers every page-scope check, a superset of what those four enumerated.
 
 
 @pytest.fixture(scope="module")
@@ -35,9 +29,8 @@ def empty():
 
 def _verdicts(page):
     out = {}
-    for it in ITERATORS:
-        for cid, *rest in it(page):
-            out[cid] = rest[-1]
+    for cid, verdict in run_scope("page", page).verdicts:
+        out[cid] = verdict
     return out
 
 

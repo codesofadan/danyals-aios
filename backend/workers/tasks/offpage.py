@@ -385,8 +385,18 @@ def execute_web2_write(store: ServiceOffpageStore, settings: Settings, web2_id: 
     row = store.load_web2(web2_id)
     client = _client_from_row(row) if row else Web2Client(client_id=None, name="")
     writer, model = _writer_for(settings)
+    # THE OPERATOR'S IMAGE KILL-SWITCH REACHES THIS PATH TOO. web2 used the generator's
+    # DEFAULT_TUNING, whose max_images is 5, so every article paid for a photo-brief
+    # writer call - and the result was then discarded: `builder.images` never enters
+    # `builder.parts`, is absent from `Web2Article`, and no web2 publisher renders an
+    # image. So it was spend with no output, on a setting the operator believed was off.
+    # Imported from the content worker rather than re-derived, so the two cannot disagree
+    # about what `content_images_enabled` means.
+    from workers.tasks.content import _tuning as _image_tuning
+
     return run_write(
-        store, web2_id, client=client, writer=writer, gate=_gate(), settings=settings, model=model,
+        store, web2_id, client=client, writer=writer, gate=_gate(), settings=settings,
+        model=model, tuning=_image_tuning(settings),
         similarity=_similarity_checker(store, settings),
     )
 
@@ -504,7 +514,25 @@ def _publisher_for(store: ServiceOffpageStore, web2_id: str) -> Web2Publisher | 
         platform = str(row.get("platform") or "")
         if not platform:
             return None
-        vault_label = str(row.get("account_id") or "")
+        account_id = str(row.get("account_id") or "")
+        vault_label = ""
+        if account_id:
+            # Read the label OFF THE ACCOUNT, never infer it from the id: a migrated house
+            # account keeps its legacy client-id label on purpose, so assuming
+            # label == account_id misses a credential that is really there.
+            account = store.web2_account_vault(account_id)
+            if account is None:
+                logger.warning(
+                    "web2_publisher_account_missing", web2_id=web2_id, account_id=account_id
+                )
+                return None
+            if str(account.get("health") or "") in {"suspended", "deleted"}:
+                logger.warning(
+                    "web2_publisher_account_unusable", web2_id=web2_id,
+                    account_id=account_id, health=str(account.get("health") or ""),
+                )
+                return None
+            vault_label = str(account.get("vault_label") or "") or account_id
         if not vault_label:
             vault_label = str(row.get("client_id") or "")
             if not vault_label:

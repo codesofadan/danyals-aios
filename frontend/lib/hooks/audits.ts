@@ -88,7 +88,10 @@ export function useAuditStats() {
 }
 
 export type CreateAuditInput = {
-  client_id: string;
+  // null = no client. An internal or prospect audit, accepted by the server and
+  // stored as a NULL `client_id`. Such a run is structurally unreachable from
+  // any client portal, whose view is keyed on `client_id = current_client_id()`.
+  client_id: string | null;
   url: string;
   tier: Tier;
   // NO `types`. Depth is the only scope axis: every audit covers every dimension,

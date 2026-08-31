@@ -46,7 +46,7 @@ export default function ProvidersOverview() {
           Couldn&apos;t load integrations — {(q.error as Error)?.message ?? "try again"}.
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "4px 2px" }}>
+        <div className="kv-int-scroll" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "4px 2px" }}>
           {cats.map((cat) => (
             <div key={cat}>
               <div

@@ -297,6 +297,52 @@ async def notify_leads(
         await notify(uid, kind=kind, title=title, body=body, email_sender=email_sender)
 
 
+def _client_portal_user_ids(client_id: str) -> list[str]:
+    """The portal login user ids for one client. Blocking.
+
+    Same predicate ``_resolve_client_email`` uses for its fallback address, but it
+    returns EVERY seat rather than the first: a client with three logins should not
+    have only one of them told that their request is done. Read on the privileged pool
+    (the recipients are the client, not the actor).
+    """
+    with privileged_connection() as cur:
+        cur.execute(
+            "select id from public.users where role = 'client' and client_id = %s "
+            "order by created_at",
+            (client_id,),
+        )
+        return [str(r["id"]) for r in cur.fetchall()]
+
+
+async def notify_client_in_app(client_id: str, kind: str, title: str, body: str = "") -> None:
+    """Best-effort: write an IN-APP notification to every portal login of a client.
+
+    Why this exists, and why it deliberately does NOT email. ``email_client`` sends a
+    client-facing email but writes no ``notifications`` row, so a client's bell never
+    lit up for anything except ``portal_ready`` - the QA report's finding that a
+    completed request produced no in-app signal. The obvious fix, calling ``notify``
+    per portal user, would send the client the same news twice: once from the caller's
+    branded ``email_client`` template and once from ``notify``'s generic one.
+
+    So this writes the in-app leg only. The EMAIL for a client-facing event stays the
+    caller's job, through ``email_client``, which reaches the client's ``contact_email``
+    - an address that often has no portal login at all and would otherwise be missed.
+
+    ``_persist_notification`` still honours each recipient's ``in_app`` preference; its
+    returned email flag is discarded here on purpose. Never raises.
+    """
+    try:
+        user_ids = await asyncio.to_thread(_client_portal_user_ids, client_id)
+    except Exception:
+        logger.warning("notify_client_resolve_failed", kind=kind)
+        return
+    for uid in user_ids:
+        try:
+            await asyncio.to_thread(_persist_notification, uid, kind, title, body)
+        except Exception:
+            logger.warning("notify_client_failed", kind=kind)
+
+
 def notify_sync(user_id: str, kind: str, title: str, body: str = "") -> None:
     """Synchronous best-effort ``notify`` for a SYNC Celery worker. Never raises.
 

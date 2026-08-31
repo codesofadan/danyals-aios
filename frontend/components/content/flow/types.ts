@@ -23,6 +23,12 @@ export type FlowState = {
   target: PublishTarget;
   design: SiteDesignProfile | null;
   designFrom: string;
+  // Replicating a design from ANOTHER url (QA 20). `replicaUrl` is what the operator
+  // typed; `replicaOwnerConfirmed` is their copyright assertion, which must be the
+  // operator's real answer and never a hardcoded true - the server enforces it too.
+  replicaUrl: string;
+  replicaOwnerConfirmed: boolean;
+  replicaJobId: string | null;
   /** The visual template, when the operator picks one instead of measuring the
    *  real site. "Auto" means the page kind's own blueprint decides. */
   template: PageTemplate | "Auto";
@@ -32,7 +38,7 @@ export type FlowState = {
 export const EMPTY_FLOW: FlowState = {
   clientId: "", clientName: "", siteDomain: "", kind: "service",
   picks: [], proof: "", services: "", testimonials: "", uniqueData: "",
-  framework: "Auto", target: "WordPress", design: null, designFrom: "",
+  framework: "Auto", target: "WordPress", design: null, designFrom: "", replicaUrl: "", replicaOwnerConfirmed: false, replicaJobId: null,
   template: "Auto", theme: TEMPLATE_THEME_DEFAULTS.service,
 };
 

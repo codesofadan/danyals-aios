@@ -57,6 +57,10 @@ class ReplicaJobResponse(BaseModel):
     sections: int | None = None
     widgets: int | None = None
     notes: list[str] = Field(default_factory=list)
+    # The design the run MEASURED, in the content pipeline's profile shape. Null until
+    # the run completes (and on a degraded run that never got as far as extracting one),
+    # so a caller must treat its absence as "fall back to measuring the site yourself".
+    design_profile: dict[str, Any] | None = None
 
     @classmethod
     def from_run(cls, job_id: str, row: Mapping[str, Any]) -> ReplicaJobResponse:
@@ -81,4 +85,9 @@ class ReplicaJobResponse(BaseModel):
             sections=int(sections) if sections is not None else None,
             widgets=int(widgets) if widgets is not None else None,
             notes=notes,
+            design_profile=(
+                dict(result["design_profile"])
+                if isinstance(result.get("design_profile"), dict)
+                else None
+            ),
         )

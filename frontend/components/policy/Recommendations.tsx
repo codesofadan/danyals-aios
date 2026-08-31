@@ -1,30 +1,37 @@
 "use client";
 
-import { useState } from "react";
-
 import { MODULE_META, type RecStatus } from "@/lib/policy";
 import { useRecommendations, useTransitionRecommendation, type RecAction } from "@/lib/hooks/policy";
 import ReadMore from "@/components/ui/ReadMore";
-import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 const STATUS_META: Record<RecStatus, { label: string; cls: string; icon: string }> = {
   new: { label: "New", cls: "warn", icon: "fiber_new" },
   acknowledged: { label: "Acknowledged", cls: "info", icon: "visibility" },
+  // `applied` is still a status the SERVER can return (a recommendation applied
+  // before this change keeps it), so it must still render. It is no longer a state
+  // this UI can put anything into - see the note on Apply below.
   applied: { label: "Applied", cls: "ok", icon: "check_circle" },
   dismissed: { label: "Dismissed", cls: "mut", icon: "cancel" },
 };
 
 // The recommendation queue.
 //
-// It rendered four status pills - New / Acknowledged / Applied / Dismissed - under a
-// subtitle reading "Closed-loop recommendations", and offered NO WAY TO REACH ANY OF
-// THEM. `useTransitionRecommendation` existed with zero call sites, and
-// `POST /policy/recommendations/{id}/{action}` had no caller, so every recommendation
-// the radar produced stayed "New" forever however many times an operator read it.
+// APPLY WAS WITHDRAWN, and the reason is worth keeping. Applying did persist: it
+// flipped `recommendations.status` to 'applied' AND wrote an `audit_overlay` row.
+// But `list_active_overlay` has exactly ONE caller - `GET /policy/overlay` - and
+// nothing calls that: no audit worker, no report renderer, no scoring path, and no
+// frontend hook. The overlay was written, was queryable, and was read by nothing.
 //
-// `apply` is the consequential one: server-side it also writes the closed-loop
-// `audit_overlay` row, which is the change the presentation layer lays on top of the
-// untouched engine. So it is separated from the other two and asks first.
+// So the dialog's promise - "the change appears in those clients' reports" - was
+// false, and "Applied" was a badge for an effect that never happened. QA asked for
+// the honest option: remove the state rather than display a misleading one.
+//
+// Acknowledge and Dismiss stay: both mean exactly what they say (someone read it,
+// someone rejected it) and neither claims a downstream effect.
+//
+// The backend route, the `audit_overlay` table and `apply_recommendation` are all
+// left in place, unused. Re-offering Apply is a one-component change once an audit
+// run actually reads the overlay.
 export default function Recommendations() {
   const recsQ = useRecommendations();
   const transition = useTransitionRecommendation();
@@ -96,7 +103,6 @@ export default function Recommendations() {
                     <RecActions
                       id={r.id}
                       status={r.status}
-                      title={r.title}
                       busy={transition.isPending}
                       onAct={(action) => transition.mutate({ id: r.id, action })}
                     />
@@ -116,17 +122,15 @@ export default function Recommendations() {
 
 
 function RecActions({
-  id, status, title, busy, onAct,
+  id, status, busy, onAct,
 }: {
   id: string;
   status: RecStatus;
-  title: string;
   busy: boolean;
   onAct: (action: RecAction) => void;
 }) {
-  const [confirmApply, setConfirmApply] = useState(false);
   return (
-    <div className="pr-rec-actions">
+    <div className="pr-rec-actions" data-rec-id={id}>
       {status === "new" && (
         <button type="button" className="mini-btn" disabled={busy} onClick={() => onAct("acknowledge")}>
           <span className="material-symbols-rounded">visibility</span>Acknowledge
@@ -135,30 +139,6 @@ function RecActions({
       <button type="button" className="mini-btn" disabled={busy} onClick={() => onAct("dismiss")}>
         <span className="material-symbols-rounded">cancel</span>Dismiss
       </button>
-      <button
-        type="button"
-        className="primary-btn sm"
-        disabled={busy}
-        onClick={() => setConfirmApply(true)}
-        data-rec-id={id}
-      >
-        <span className="material-symbols-rounded">check_circle</span>Apply
-      </button>
-      {/* `apply` writes an audit overlay that changes what every affected client's
-          report SAYS - outward-facing and not undoable from here, so it confirms
-          with the consequence spelled out (window.confirm could carry one line
-          and no reassurance). */}
-      <ConfirmDialog
-        open={confirmApply}
-        title={`Apply “${title}”?`}
-        body="An overlay is written onto every affected audit - the change appears in those clients' reports."
-        reassurance="The stored audits themselves are not mutated; the overlay is a separate layer the radar owns."
-        confirmLabel="Apply recommendation"
-        tone="caution"
-        pending={busy}
-        onCancel={() => setConfirmApply(false)}
-        onConfirm={() => { setConfirmApply(false); onAct("apply"); }}
-      />
     </div>
   );
 }

@@ -197,11 +197,8 @@ def test_no_analyzer_produces_a_remediation_containing_a_python_repr():
     engine emitted the day they were written. Running the analyzers over the
     fixtures asserts what the engine does NOW.
     """
-    from audit_engine.analyzers.ai_search import iter_per_page_ai_search
-    from audit_engine.analyzers.extras import iter_per_page_extras
-    from audit_engine.analyzers.onpage import iter_per_page_checks
-    from audit_engine.analyzers.page_tech import check_slug  # noqa: F401 - registers
-    from audit_engine.analyzers.semantic_seo import iter_per_page_semantic_seo
+    import audit_engine.cli.main  # noqa: F401 - registers every check module
+    from audit_engine.analyzers.dispatch import run_scope
     from audit_engine.parsers import html as html_parser
 
     fixtures = ROOT / "tests" / "fixtures"
@@ -214,10 +211,11 @@ def test_no_analyzer_produces_a_remediation_containing_a_python_repr():
     offenders: set[str] = set()
     checked = 0
     for page in pages:
-        for it in (iter_per_page_checks, iter_per_page_ai_search,
-                   iter_per_page_extras, iter_per_page_semantic_seo):
-            for cid, *rest in it(page):
-                verdict = rest[-1]
+        # # Through the REGISTRY, not the retired `iter_*` generators. `run_scope`
+    # covers every page-scope check (88), which is a superset of what those
+    # four generators enumerated - so this sweep got wider, not narrower.
+        for cid, verdict in run_scope("page", page).verdicts:
+            if True:
                 text = (getattr(verdict, "remediation", None) or "").strip()
                 if not text:
                     continue

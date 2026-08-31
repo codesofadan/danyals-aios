@@ -85,7 +85,18 @@ class AuditCreate(BaseModel):
     (``validate_public_host`` off the event loop) before enqueuing.
     """
 
-    client_id: str = Field(min_length=1)
+    # OPTIONAL: an audit may run with NO client attached - an internal or
+    # prospect run (a pitch, a spot-check, a site the agency does not yet have on
+    # the books). `None` is not a degraded client, it is the absence of a tenant,
+    # and every layer below already models that: `audits.client_id` is nullable,
+    # `GateContext.client_id` is `str | None` (the per-client cap simply does not
+    # apply - the agency-global halt and the dial still bind), and the worker
+    # reads the column with `.get`. The public free-audit funnel has run this
+    # exact shape since P6C. What a client-less run CANNOT do is reach a client
+    # portal: `portal_audits` filters `client_id = current_client_id()`, and
+    # NULL never equals anything, so the row is unreachable there by
+    # construction rather than by a flag someone has to remember to set.
+    client_id: str | None = None
     url: str = Field(min_length=1)
     tier: AuditTier = "Free"
     # NO `types`. The audit-type picker was removed: every audit covers every
@@ -183,6 +194,15 @@ class AuditResponse(BaseModel):
     # historical rather than chosen. Surfacing the flag is what makes it
     # reviewable; `PATCH /audits/{id}/visibility` is what makes it reversible.
     visible_to_client: bool = Field(default=False, serialization_alias="visibleToClient")
+    # Does this run have a client attached at all?
+    #
+    # A boolean rather than the id, because the id is not what any caller needs:
+    # the UI asks this to decide whether "share to portal" is even a coherent
+    # action. It cannot be inferred from `client` - that is `client_name`, and an
+    # empty name is not the same fact as an absent client (`clients.name` is NOT
+    # NULL but carries no non-empty check). Deriving it from the name would make
+    # a badly-named client look untenanted.
+    has_client: bool = Field(default=False, serialization_alias="hasClient")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> AuditResponse:
@@ -212,6 +232,7 @@ class AuditResponse(BaseModel):
             pdf=bool(row.get("pdf_path")),
             json_=bool(row.get("json_path")),
             visible_to_client=bool(row.get("visible_to_client")),
+            has_client=row.get("client_id") is not None,
         )
 
 

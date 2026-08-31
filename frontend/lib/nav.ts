@@ -59,7 +59,6 @@ export const ADMIN_NAV: NavGroup[] = [
     title: "Delivery",
     items: [
       { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
-      { icon: "flag", label: "Milestones", href: "/admin/milestones", keywords: "projects delivery timeline stages roadmap" },
       { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff management" },
       { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board manager" },
       { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "workbooks sheets pdf downloads" },
@@ -78,11 +77,13 @@ export const ADMIN_NAV: NavGroup[] = [
   },
 ];
 
+// QA removed the Review tab from the team portal. `ReviewCheckpoint` is kept
+// (parked): approving work is still a real capability, it is exercised by leads
+// from the admin task surfaces, and the /tasks/{code}/review endpoint is untouched.
 export const TEAM_NAV: NavItem[] = [
   { icon: "space_dashboard", label: "Team Dashboard", href: "/team", keywords: "home overview" },
   { icon: "view_kanban", label: "My Queue", href: "/team/queue", keywords: "tasks work inbox" },
   { icon: "play_circle", label: "Deliver", href: "/team/deliver", keywords: "handoff shipping" },
-  { icon: "how_to_reg", label: "Review", href: "/team/review", keywords: "qa approve checkpoint" },
 ];
 
 export const CLIENT_NAV: NavItem[] = [

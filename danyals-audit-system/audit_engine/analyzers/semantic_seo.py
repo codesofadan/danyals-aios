@@ -45,12 +45,12 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Iterable
+from collections.abc import Iterable
 from urllib.parse import urlparse
 
 from audit_engine.analyzers.common import Verdict, status_from_score
+from audit_engine.analyzers.registry import check
 from audit_engine.parsers.html import ParsedHTML
-
 
 # ---------- Shared helpers ---------------------------------------------------
 
@@ -144,6 +144,7 @@ def _schema_block_of_type(p: ParsedHTML, name: str) -> dict | None:
 # 3.1 Central Entity & Knowledge Domain
 # ============================================================================
 
+@check("ON-119", scope="page")
 def check_central_entity_coherence(p: ParsedHTML) -> Verdict:
     """ON-119 - One central entity should be obvious from the page's
     title, H1, and Organization schema name. Mismatches confuse both
@@ -228,6 +229,7 @@ def check_knowledge_domain_consistency(pages: list[ParsedHTML]) -> Verdict:
 # 3.2 Entity Audit
 # ============================================================================
 
+@check("ON-121", scope="page")
 def check_entity_coverage(p: ParsedHTML) -> Verdict:
     """ON-121 - Count distinct proper nouns. Authoritative pages name many
     real-world entities (people, places, products, certifications).
@@ -259,6 +261,7 @@ def check_entity_coverage(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-122", scope="page")
 def check_sameas_presence(p: ParsedHTML) -> Verdict:
     """ON-122 - The page's Organization (or Person) schema should include
     `sameAs` pointing to Wikidata + at least 2 verified social profiles.
@@ -315,6 +318,7 @@ def check_sameas_presence(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-123", scope="page")
 def check_organization_schema_completeness(p: ParsedHTML) -> Verdict:
     """ON-123 - Organization schema should have name + url + logo + sameAs
     + contactPoint. Missing fields weaken knowledge-graph eligibility.
@@ -534,6 +538,7 @@ def check_topical_breadth(pages: list[ParsedHTML]) -> Verdict:
 # 3.4 Contextual Structure
 # ============================================================================
 
+@check("ON-128", scope="page")
 def check_heading_paragraph_proximity(p: ParsedHTML) -> Verdict:
     """ON-128 - For each H2, the section beneath it should reference the
     page's central entity (title H1 tokens) within the first 100 words.
@@ -570,6 +575,7 @@ def check_heading_paragraph_proximity(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-129", scope="page")
 def check_section_coherence(p: ParsedHTML) -> Verdict:
     """ON-129 - Compare H2 wording to the page's H1. Sections whose
     headings share zero tokens with the H1 are off-topic asides.
@@ -618,7 +624,7 @@ def _classify_intent(p: ParsedHTML) -> tuple[str, dict[str, int]]:
         (p.body_text or "")[:3000],
         " ".join(p.button_texts or [])[:300],
     ])).lower()
-    counts = {k: 0 for k in _INTENT_SIGNALS}
+    counts = dict.fromkeys(_INTENT_SIGNALS, 0)
     for label, signals in _INTENT_SIGNALS.items():
         for s in signals:
             if "{" in s:
@@ -632,6 +638,7 @@ def _classify_intent(p: ParsedHTML) -> tuple[str, dict[str, int]]:
     return (label, counts)
 
 
+@check("ON-130", scope="page")
 def check_intent_classification(p: ParsedHTML) -> Verdict:
     """ON-130 - Classify the page's intent. The verdict is always 'pass'
     when a clear intent is detected; we surface the label as evidence so
@@ -652,6 +659,7 @@ def check_intent_classification(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-131", scope="page")
 def check_intent_alignment(p: ParsedHTML) -> Verdict:
     """ON-131 - Intent vs evidence alignment:
     - transactional pages must have a CTA + a price/quote signal
@@ -720,6 +728,7 @@ def check_intent_alignment(p: ParsedHTML) -> Verdict:
 # 3.6 Lexical Semantics
 # ============================================================================
 
+@check("ON-132", scope="page")
 def check_lexical_diversity(p: ParsedHTML) -> Verdict:
     """ON-132 - Type-Token Ratio. Higher = richer vocabulary.
     Healthy long-form content typically sits at 0.35 - 0.55.
@@ -753,6 +762,7 @@ def check_lexical_diversity(p: ParsedHTML) -> Verdict:
                    rem)
 
 
+@check("ON-133", scope="page")
 def check_synonym_variation_density(p: ParsedHTML) -> Verdict:
     """ON-133 - Detect over-repeated key terms. Any single non-stopword
     token at > 4% of body text is a keyword-stuffing red flag.
@@ -790,6 +800,7 @@ def _ngrams(tokens: list[str], n: int) -> list[tuple[str, ...]]:
     return [tuple(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
 
 
+@check("ON-134", scope="page")
 def check_ngram_distribution(p: ParsedHTML) -> Verdict:
     """ON-134 - Top 1/2/3-grams + per-bigram stuffing check (any bigram
     > 2% of bigrams = potential stuffing).
@@ -864,6 +875,7 @@ def check_cross_page_ngram_overlap(pages: list[ParsedHTML]) -> Verdict:
 # 3.8 Koray Framework - Semantic Content Writing Rules
 # ============================================================================
 
+@check("ON-136", scope="page")
 def check_macro_context_connection(p: ParsedHTML) -> Verdict:
     """ON-136 - Koray's 'Macro Context Connection': the first paragraph
     must explicitly link to the parent domain topic. Detected by overlap
@@ -893,6 +905,7 @@ def check_macro_context_connection(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-137", scope="page")
 def check_definitional_content(p: ParsedHTML) -> Verdict:
     """ON-137 - Koray's definitional-content rule: at least one passage
     of the form '<X> is ...' or 'A <X> means ...' or 'Definition:'
@@ -923,6 +936,7 @@ def check_definitional_content(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-138", scope="page")
 def check_authoritative_citations(p: ParsedHTML) -> Verdict:
     """ON-138 - external links to authoritative sources (.gov, .edu,
     wikipedia, schema.org, etc) are a Koray information-quality signal.
@@ -954,6 +968,7 @@ def check_authoritative_citations(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-139", scope="page")
 def check_qa_pair_coverage(p: ParsedHTML) -> Verdict:
     """ON-139 - Koray Q&A rule: each section should answer an implicit
     question. Proxy: count question H2s + presence of FAQ schema.
@@ -966,9 +981,7 @@ def check_qa_pair_coverage(p: ParsedHTML) -> Verdict:
     for block in (p.schema_blocks or []):
         if isinstance(block, dict):
             t = block.get("@type")
-            if isinstance(t, str) and t.lower() == "faqpage":
-                has_faq = True
-            elif isinstance(t, list) and any("faqpage" == str(x).lower() for x in t):
+            if (isinstance(t, str) and t.lower() == "faqpage") or (isinstance(t, list) and any(str(x).lower() == "faqpage" for x in t)):
                 has_faq = True
     if not h2:
         return Verdict("n_a", 0.0, "info", 0.7, {"reason": "no H2 sections"})
@@ -1007,6 +1020,7 @@ _FACT_RE = re.compile(
 )
 
 
+@check("ON-140", scope="page")
 def check_information_density(p: ParsedHTML) -> Verdict:
     """ON-140 - count fact tokens (numbers, dates, standards) per 100
     words. Pages with high density are more citable.
@@ -1044,6 +1058,7 @@ _DATE_PATTERN = re.compile(
 )
 
 
+@check("ON-141", scope="page")
 def check_date_freshness(p: ParsedHTML) -> Verdict:
     """ON-141 - look for datePublished / dateModified in schema OR a
     visible date in the first 1000 chars of body text. Pages without any
@@ -1077,6 +1092,7 @@ def check_date_freshness(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-142", scope="page")
 def check_author_expertise_signals(p: ParsedHTML) -> Verdict:
     """ON-142 (rollup) - byline + Person schema + credentials/sameAs.
     Higher signal = stronger E-E-A-T, which is also a Koray quality lever.
@@ -1114,27 +1130,6 @@ def check_author_expertise_signals(p: ParsedHTML) -> Verdict:
 # ============================================================================
 # Aggregators
 # ============================================================================
-
-def iter_per_page_semantic_seo(p: ParsedHTML) -> Iterable[tuple[str, str, Verdict]]:
-    """Yield (check_id, owner, verdict) for every per-page Module 3 check."""
-    yield ("ON-119", "A2", check_central_entity_coherence(p))
-    yield ("ON-121", "A2", check_entity_coverage(p))
-    yield ("ON-122", "A2", check_sameas_presence(p))
-    yield ("ON-123", "B4", check_organization_schema_completeness(p))
-    yield ("ON-128", "A2", check_heading_paragraph_proximity(p))
-    yield ("ON-129", "A2", check_section_coherence(p))
-    yield ("ON-130", "A2", check_intent_classification(p))
-    yield ("ON-131", "A2", check_intent_alignment(p))
-    yield ("ON-132", "A2", check_lexical_diversity(p))
-    yield ("ON-133", "A2", check_synonym_variation_density(p))
-    yield ("ON-134", "A2", check_ngram_distribution(p))
-    yield ("ON-136", "A1", check_macro_context_connection(p))
-    yield ("ON-137", "A1", check_definitional_content(p))
-    yield ("ON-138", "A1", check_authoritative_citations(p))
-    yield ("ON-139", "A5", check_qa_pair_coverage(p))
-    yield ("ON-140", "A1", check_information_density(p))
-    yield ("ON-141", "A1", check_date_freshness(p))
-    yield ("ON-142", "A1", check_author_expertise_signals(p))
 
 
 def iter_site_wide_semantic_seo(

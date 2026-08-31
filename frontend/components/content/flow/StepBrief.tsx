@@ -7,10 +7,20 @@
 // "great service" costs a page its credibility while "412 callouts in 2025, from
 // our dispatch log" earns it. The placeholder now teaches that.
 //
-// Design is a real choice between two real things: measure the client's actual
-// site, or pick a template. Extraction wins when it succeeds, and says so.
+// Design is a real choice between THREE real things: measure the client's actual
+// site, replicate a design from any URL, or pick a template. Extraction wins when it
+// succeeds, and says so.
+//
+// Replication is the one that closes QA 20 ("integrate Design Replicator into the
+// Content module"). The replicator already measured a richer design system than the
+// content analyzer does and threw it away; it now returns that profile on the job, so
+// "replicate a design, then generate N pages on it" is ONE flow instead of two
+// Playwright captures of the same URL. It carries the same copyright assertion the
+// standalone Replicator enforces — never hardcoded, because the server checks it too.
 
+import { useEffect } from "react";
 import { useSiteDesign } from "@/lib/hooks/content";
+import { useReplicaJob, useReplicate } from "@/lib/hooks/replica";
 import { FRAMEWORKS, TEMPLATE_THEME_DEFAULTS, type Framework, type PageTemplate } from "@/lib/content";
 import TemplateGallery from "@/components/content/TemplateGallery";
 import { useToast, describeError } from "@/components/ui/Toast";
@@ -24,7 +34,45 @@ export default function StepBrief({
   patch: (p: Partial<FlowState>) => void;
 }) {
   const extract = useSiteDesign();
+  const replicate = useReplicate();
+  const replicaJob = useReplicaJob(state.replicaJobId);
   const toast = useToast();
+
+  // The replica job carries the measured design once it finishes. A degraded run that
+  // produced no profile is NOT a silent failure — it falls back to measuring the
+  // client's own site, and says so.
+  const replicaStatus = replicaJob.data?.status;
+  useEffect(() => {
+    if (!state.replicaJobId || !replicaJob.data) return;
+    const job = replicaJob.data;
+    if (job.status !== "completed" && job.status !== "degraded") return;
+    if (job.design_profile) {
+      patch({ design: job.design_profile, designFrom: state.replicaUrl, replicaJobId: null });
+      toast.success("Design replicated", `Colours, fonts and width taken from ${state.replicaUrl}.`);
+    } else {
+      patch({ replicaJobId: null });
+      toast.error(
+        "Replicated, but no design came back",
+        "The run degraded before it measured a design system — measure the client's own site or pick a template instead.",
+      );
+    }
+    // `patch` and `toast` are stable for this screen's lifetime; re-running on them
+    // would re-fire the toast on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.replicaJobId, replicaStatus, replicaJob.data?.design_profile]);
+
+  const runReplicate = () =>
+    replicate.mutate(
+      {
+        client_id: state.clientId,
+        url: state.replicaUrl.trim(),
+        owner_confirmed_source: state.replicaOwnerConfirmed,
+      },
+      {
+        onSuccess: (res) => patch({ replicaJobId: res.job_id }),
+        onError: (e: unknown) => toast.error("Couldn't start the replication", describeError(e)),
+      },
+    );
 
   const runExtract = () =>
     extract.mutate(
@@ -111,13 +159,61 @@ export default function StepBrief({
             </button>
           </div>
         ) : (
-          <button
-            type="button" className="ghostbtn" onClick={runExtract}
-            disabled={extract.isPending || !state.siteDomain}
-          >
-            <span className="material-symbols-rounded">palette</span>
-            {extract.isPending ? "Measuring the site…" : `Measure ${state.siteDomain || "the site"}`}
-          </button>
+          <>
+            <button
+              type="button" className="ghostbtn" onClick={runExtract}
+              disabled={extract.isPending || !state.siteDomain}
+            >
+              <span className="material-symbols-rounded">palette</span>
+              {extract.isPending ? "Measuring the site…" : `Measure ${state.siteDomain || "the site"}`}
+            </button>
+
+            {/* Replicate a design from ANY url — the Design Replicator, in the flow
+                that actually needs it. */}
+            <div style={{ marginTop: 16 }}>
+              <div className="cs" style={{ marginBottom: 8 }}>
+                Or replicate a design from another page — its palette, fonts and width
+                become the design these pages are built on.
+              </div>
+              <div className="fld">
+                <label htmlFor="flow-replica-url">Page to replicate</label>
+                <input
+                  id="flow-replica-url" value={state.replicaUrl}
+                  onChange={(e) => patch({ replicaUrl: e.target.value })}
+                  placeholder="https://example.com/the-page-to-copy"
+                />
+              </div>
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "6px 0 10px" }}>
+                <input
+                  type="checkbox" checked={state.replicaOwnerConfirmed}
+                  onChange={(e) => patch({ replicaOwnerConfirmed: e.target.checked })}
+                />
+                <span>
+                  I confirm the client owns this design, or is licensed to reuse it.
+                  Replicating copies someone&apos;s layout and styling.
+                </span>
+              </label>
+              <button
+                type="button" className="ghostbtn"
+                onClick={runReplicate}
+                disabled={
+                  replicate.isPending || !!state.replicaJobId ||
+                  !state.replicaOwnerConfirmed || !state.clientId ||
+                  !state.replicaUrl.trim().startsWith("http")
+                }
+              >
+                <span className="material-symbols-rounded">content_copy</span>
+                {state.replicaJobId
+                  ? `Replicating… (${replicaStatus ?? "queued"})`
+                  : replicate.isPending ? "Starting…" : "Replicate this design"}
+              </button>
+              {replicate.isError && (
+                <div className="fld-hint" style={{ color: "var(--warn)" }} role="alert">
+                  {(replicate.error as Error)?.message ?? "Couldn't start the replication."}
+                </div>
+              )}
+            </div>
+          </>
         )}
         {!state.design && (
           <>

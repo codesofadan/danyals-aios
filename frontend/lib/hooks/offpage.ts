@@ -34,6 +34,8 @@ import type {
   Web2Campaign,
   Web2Account,
   Web2AccountCheck,
+  Web2AnchorCheck,
+  Web2AnchorCheckInput,
   Web2CampaignApproval,
   Web2CampaignEstimate,
   Web2Placement,
@@ -569,5 +571,24 @@ export function useReleaseQueueItem() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["citation-queue"] });
     },
+  });
+}
+
+/**
+ * Ask whether an anchor is usable BEFORE planning anything
+ * (`POST /offpage/web2/anchor-check`).
+ *
+ * The plan route already refuses an exact-match commercial anchor — but it refuses at
+ * submission, as a 422 the modal used to swallow, so the operator was shown a queued
+ * property that did not exist. This lets the form answer beside the field instead.
+ *
+ * Free server-side: no write, no enqueue, no outbound call. The rule is NOT ported to
+ * TypeScript — the brand exemption needs the client name from the database, and a
+ * second copy would drift from the one the write path enforces.
+ */
+export function useCheckWeb2Anchor() {
+  return useMutation({
+    mutationFn: (body: Web2AnchorCheckInput) =>
+      api.post<Web2AnchorCheck>("/offpage/web2/anchor-check", body),
   });
 }

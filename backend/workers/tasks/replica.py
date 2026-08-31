@@ -81,6 +81,10 @@ def result_payload(res: Any, *, url: str) -> dict[str, Any]:
         # The ROUTE enforced the assertion (a 400 without it); the ledger records
         # that it was made, so the row explains what authorised carrying the copy.
         "owner_confirmed_source": True,
+        # The measured design, so the CONTENT flow can generate pages on it without a
+        # second Playwright capture of the same URL. `job_runs.result` is schemaless
+        # jsonb, so this needs no migration.
+        "design_profile": getattr(res, "design_profile", None),
     }
 
 

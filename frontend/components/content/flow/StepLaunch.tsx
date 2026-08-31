@@ -129,7 +129,9 @@ export default function StepLaunch({
           <dt className="cs">Look</dt>
           <dd style={{ margin: 0 }}>
             {state.design
-              ? `Measured from ${state.designFrom}`
+              ? state.designFrom && state.designFrom === state.replicaUrl
+                ? `Replicated from ${state.designFrom}`
+                : `Measured from ${state.designFrom}`
               : state.template !== "Auto"
                 ? `${state.template.replace(/_/g, " ")} template, recoloured`
                 : `${kind.label} blueprint`}

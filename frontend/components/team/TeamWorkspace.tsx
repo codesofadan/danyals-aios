@@ -3,15 +3,13 @@
 import { useState } from "react";
 import type { TaskStatus } from "@/lib/data";
 import {
-  useMembers, useTeamMembers, useTasks, useActivity, useRbac,
+  useMembers, useTeamMembers, useTasks, useActivity,
   useAddMember, useAssignTask, useAdvanceTask, useReviewTask,
 } from "@/lib/hooks/team";
 import { useClients } from "@/lib/hooks/clients";
 import TeamRoster, { type NewMember } from "./TeamRoster";
 import AssignTasks, { type NewTask } from "./AssignTasks";
 import ActivityLog from "./ActivityLog";
-import TeamPerformance from "./TeamPerformance";
-import AccessControl from "./AccessControl";
 
 // Centred muted state for a tab panel (loading / error). Self-styled so it never
 // depends on a class that might not exist.
@@ -25,17 +23,17 @@ function panelGuard(q: { isLoading: boolean; isError: boolean; error?: unknown }
   return null;
 }
 
-type TabKey = "roster" | "assign" | "performance" | "activity" | "access";
+type TabKey = "roster" | "assign" | "activity";
 
-// Performance and Access were dropped when this workspace was cut to three tabs, and
-// the page header kept promising "role-based access" that had nowhere to live. Both
-// panels were already written and correct; only the tab was missing.
+// QA removed Performance and Roles & Access. Performance because its graphs are out
+// of sync with the ledgers they claim to summarise - a number an operator cannot
+// trust is worse than no number. Roles & Access because the agency does not run
+// per-role permission editing from this screen. Both panels are kept (parked), not
+// deleted: the components are correct, it is the surfacing that was wrong.
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: "roster", label: "Team Members", icon: "badge" },
   { key: "assign", label: "Assign Tasks", icon: "assignment_ind" },
-  { key: "performance", label: "Performance", icon: "monitoring" },
   { key: "activity", label: "Activity Log", icon: "history" },
-  { key: "access", label: "Roles & Access", icon: "admin_panel_settings" },
 ];
 
 export default function TeamWorkspace() {
@@ -47,7 +45,6 @@ export default function TeamWorkspace() {
   const activityQ = useActivity();
   // Role -> permission reference data (GET /rbac/roles). Read-only by design: the
   // matrix is versioned platform code and no endpoint persists a change to it.
-  const rbacQ = useRbac();
   const clientsQ = useClients();
 
   const members = membersQ.data ?? [];
@@ -153,11 +150,7 @@ export default function TeamWorkspace() {
             />
           </>
         ))}
-        {tab === "performance" && (panelGuard(membersQ) ?? <TeamPerformance members={members} />)}
         {tab === "activity" && (panelGuard(activityQ) ?? <ActivityLog log={activity} />)}
-        {tab === "access" && (panelGuard(rbacQ) ?? (
-          rbacQ.data ? <AccessControl rolePerms={rbacQ.data} /> : null
-        ))}
       </div>
     </section>
   );

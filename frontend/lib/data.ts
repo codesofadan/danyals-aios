@@ -225,13 +225,19 @@ export const permissions: { key: PermKey; label: string; desc: string; icon: str
 // the real thing and then misdescribe, in the UI, who is allowed to do what.
 
 // --- Members ----------------------------------------------------------------
-export type MemberStatus = "active" | "away" | "invited" | "offline";
+// `suspended` is the fifth label, added to the `user_status` enum by migration
+// 0078 when offboarding shipped — and never added here. The backend has been able
+// to return it ever since, while STATUS_META had no entry for it, so rendering a
+// removed member's status was a lookup that returned undefined. Nothing caught it
+// because nothing in the UI could suspend anyone: the routes had no callers.
+export type MemberStatus = "active" | "away" | "invited" | "offline" | "suspended";
 
 export const STATUS_META: Record<MemberStatus, { label: string; c: string }> = {
   active: { label: "Active", c: "var(--ok)" },
   away: { label: "Away", c: "var(--warn)" },
   invited: { label: "Invited", c: SERIES.c4 },
   offline: { label: "Offline", c: "var(--muted)" },
+  suspended: { label: "Removed", c: "var(--danger, #E5484D)" },
 };
 
 export type TeamMemberRecord = {

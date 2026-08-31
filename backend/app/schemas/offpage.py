@@ -370,6 +370,31 @@ class Web2PlanRequest(BaseModel):
     services: list[str] = Field(default_factory=list, max_length=20)
 
 
+class Web2AnchorCheckRequest(BaseModel):
+    """POST /offpage/web2/anchor-check body: is this anchor usable, before we spend?
+
+    Deliberately mirrors the fields ``check_anchor`` actually reads. It is NOT a
+    trimmed-down copy of :class:`Web2PlanRequest` - a caller must be able to ask about
+    an anchor before it has decided a platform or gathered proof points.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str = Field(min_length=1, alias="clientId")
+    anchor: str = Field(default="", max_length=300)
+    target_url: str = Field(default="", alias="targetUrl", max_length=2000)
+    topic: str = Field(default="", max_length=300)
+
+
+class Web2AnchorCheckResponse(BaseModel):
+    """The anchor verdict, in the shape a form field can render directly."""
+
+    allowed: bool
+    verdict: str
+    reason: str
+    suggestion: str
+
+
 Web2PacingMode = Literal["immediate", "drip"]
 Web2CampaignStatus = Literal[
     "draft", "planning", "needs_approval", "scheduled", "running",

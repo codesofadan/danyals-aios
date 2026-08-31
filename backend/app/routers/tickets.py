@@ -34,7 +34,7 @@ from app.schemas.tickets import (
     TicketToTaskRequest,
 )
 from app.services.activity import record_activity
-from app.services.notifications import email_client
+from app.services.notifications import email_client, notify_client_in_app
 from app.services.task_assignment import assign_task
 
 router = APIRouter(tags=["tickets"])
@@ -135,6 +135,14 @@ async def update_ticket_status(
         await _email_client_ticket_update(
             str(client_id), str(ticket.get("subject", "")), body.status
         )
+        # ...and light up the client's BELL, which the email leg alone never did:
+        # `email_client` writes no notifications row, so a client whose request was
+        # finished saw nothing in the portal until they happened to re-open the
+        # requests page and notice a changed pill. In-app only (see
+        # `notify_client_in_app`) - the email above is the email for this event.
+        await _notify_client_ticket_update(
+            str(client_id), str(ticket.get("subject", "")), body.status
+        )
     return TicketResponse.from_row(updated)
 
 
@@ -196,6 +204,24 @@ async def _email_client_ticket_reply(client_id: str, subject: str, message: str)
         "<p>Sign in to your client portal to see the full conversation.</p>"
     )
     await email_client(client_id, subj, html, text)
+
+
+async def _notify_client_ticket_update(client_id: str, subject: str, status_: str) -> None:
+    """Best-effort: put the status change in the client's portal inbox.
+
+    Only ``resolved`` gets the completed wording; the intermediate states say what
+    they are. A client is told their request is DONE exactly once, by the same
+    transition that emails them.
+    """
+    label = _CLIENT_STATUS_LABEL.get(status_, status_)
+    named = f'"{subject}"' if subject else "your request"
+    if status_ == "resolved":
+        title = "Your request is complete"
+        body = f"{named} has been completed. Sign in to your portal to see the details."
+    else:
+        title = "Update on your request"
+        body = f"{named} is now {label}."
+    await notify_client_in_app(client_id, kind="request_resolved", title=title, body=body)
 
 
 async def _email_client_ticket_update(client_id: str, subject: str, status_: str) -> None:

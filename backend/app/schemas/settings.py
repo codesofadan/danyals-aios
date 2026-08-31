@@ -211,6 +211,14 @@ NOTIF_EVENTS: tuple[dict[str, Any], ...] = (
     {"key": "portal_ready", "label": "Portal access ready",
      "desc": "A client's portal login is created and shared",
      "icon": "vpn_key", "email": True, "in_app": True},
+    {"key": "request_resolved", "label": "Your request is complete",
+     "desc": "A request you raised in the client portal is marked done",
+     # email=False DELIBERATELY, and it does not mean the client gets no email.
+     # `PATCH /tickets/{code}/status` already sends its own branded, client-facing
+     # message through `email_client` (addressed to the client's contact_email, which
+     # may not even be a portal login). Defaulting this to True would send that client
+     # the SAME news twice from two different templates.
+     "icon": "task_alt", "email": False, "in_app": True},
     {"key": "weekly_digest", "label": "Weekly digest",
      "desc": "Monday summary of audits, jobs and client health",
      "icon": "summarize", "email": True, "in_app": False},

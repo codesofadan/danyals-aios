@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   useWorkbooks, useSyncEvents, useSyncWorkbook, useSyncAllWorkbooks,
 } from "@/lib/hooks/reports";
-import ScheduledJobs from "./ScheduledJobs";
 import ReportsKpis from "./ReportsKpis";
 import ReportsLibrary from "./ReportsLibrary";
 import SheetsConnection from "./SheetsConnection";
@@ -21,8 +20,11 @@ import ReportTypes from "./ReportTypes";
 // way to see a produced report, a workbook, or whether Sheets was even connected.
 // Every panel below was already wired to a live endpoint with its own loading, error
 // and empty states — the only thing missing was a route that rendered them.
+// "Scheduled jobs" moved to /admin/operations, which already owns job runs, the
+// dead-letter queue and in-flight work. Reports keeps what only it does: the produced
+// reports themselves and the Sheets sync - both of which feed the CLIENT portal's
+// /client/reports, so the page stays.
 const TABS = [
-  { key: "jobs", label: "Scheduled jobs", icon: "schedule" },
   { key: "library", label: "Report library", icon: "summarize" },
   { key: "sheets", label: "Sheets sync", icon: "table_view" },
 ] as const;
@@ -30,7 +32,7 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 export default function ReportsWorkspace() {
-  const [tab, setTab] = useState<TabKey>("jobs");
+  const [tab, setTab] = useState<TabKey>("library");
 
   // The Sheets tab's three panels are presentational; the workspace owns their data
   // so one fetch feeds all of them and a sync refreshes the whole tab at once.
@@ -73,12 +75,6 @@ export default function ReportsWorkspace() {
           </button>
         ))}
       </div>
-
-      {tab === "jobs" && (
-        <div className="row-single">
-          <ScheduledJobs />
-        </div>
-      )}
 
       {tab === "library" && (
         <>

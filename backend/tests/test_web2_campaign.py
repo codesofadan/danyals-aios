@@ -126,20 +126,23 @@ def test_a_campaign_over_its_ceiling_is_refused_before_any_spend() -> None:
         _plan(requested_count=30, topics=_topics(30), per_article_cost=0.15, cost_ceiling_usd=1.0)
 
 
-def test_the_plan_reports_a_completion_date_and_says_it_in_words() -> None:
-    """An operator who learns the real timeline up front can decide; one who learns it
-    weeks later has been misled by the tool."""
-    plan = _plan(requested_count=5, topics=_topics(5))
-    assert plan.projected_completion is not None
-    assert plan.projected_completion > NOW
-    assert any("day(s)" in note for note in plan.notes)
+def test_every_property_publishes_on_approval_and_the_plan_says_so() -> None:
+    """OWNER DECISION (2026-08-29): an approved campaign publishes immediately, no drip.
 
-
-def test_properties_are_scheduled_at_distinct_times() -> None:
+    ``scheduled_for`` must be NULL on every property. This is not cosmetic: nothing in
+    this deployment drives the release tick (``web2_release_due`` has no caller, celery
+    beat is empty), so a future ``scheduled_for`` did not PACE a property, it PARKED it -
+    approval moved it to ``publishing`` and handed it to a tick that never runs, and
+    every property after the first silently never published having already been paid for.
+    """
     plan = _plan(requested_count=5, topics=_topics(5))
-    slots = [p.scheduled_for for p in plan.properties]
-    assert all(s is not None for s in slots)
-    assert len(set(slots)) == len(slots)
+    assert all(p.scheduled_for is None for p in plan.properties), (
+        "a scheduled property is handed to a release tick that does not run"
+    )
+    assert plan.projected_completion is None
+    # The heavier-footprint trade-off the owner accepted is stated, not hidden.
+    assert any("no drip" in note for note in plan.notes)
+    assert any("footprint" in note for note in plan.notes)
 
 
 def test_the_per_client_campaign_cap_shrinks_the_plan_and_says_so() -> None:
@@ -172,8 +175,10 @@ def test_a_cancelled_campaign_reports_cancelled_whatever_was_published() -> None
     assert campaign_status_for(total=30, published=10, failed=0, cancelled=True) == "cancelled"
 
 
-def test_pacing_history_pushes_a_new_campaign_later() -> None:
-    """A client who published yesterday does not start again from zero."""
+def test_history_no_longer_delays_a_campaign_but_still_shapes_anchors() -> None:
+    """Publishing history stopped moving publish TIMES when drip was removed, but it is
+    still read - it feeds anchor/platform diversification, so the parameter is live and
+    not a leftover."""
     from app.services.web2_pacing import Placement
 
     recent = [
@@ -184,7 +189,8 @@ def test_pacing_history_pushes_a_new_campaign_later() -> None:
     ]
     later = _plan(requested_count=1, topics=_topics(1), history=recent)
     fresh = _plan(requested_count=1, topics=_topics(1))
-    assert later.properties[0].scheduled_for > fresh.properties[0].scheduled_for  # type: ignore[operator]
+    assert later.properties[0].scheduled_for is None
+    assert fresh.properties[0].scheduled_for is None
 
 # --------------------------------------------------------------------------- #
 # Anchor safety inside the planner (R2-14).

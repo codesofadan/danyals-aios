@@ -36,6 +36,10 @@ const row = (over: Record<string, unknown> = {}) => ({
   pdf: true,
   json: true,
   visibleToClient: false,
+  // A normal client-linked audit. Sharing is only coherent for these; a row
+  // with `hasClient: false` is an internal run with no portal to reach, and the
+  // control is inert for it (see the client-less case below).
+  hasClient: true,
   ...over,
 });
 

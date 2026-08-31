@@ -5,6 +5,7 @@ import ThreadPanel from "@/components/threads/ThreadPanel";
 import { useTeamMembers } from "@/lib/hooks/team";
 import { TASK_TYPES, type TaskType } from "@/lib/data";
 import EmptyState from "@/components/ui/EmptyState";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import type { Ticket } from "@/lib/data";
 import { useTickets, useUpdateTicketStatus, useConvertTicketToTask } from "@/lib/hooks/clients";
 
@@ -107,7 +108,12 @@ export default function SupportActivity() {
 // forever however much work had been done on it.
 function TicketTriage({ ticket }: { ticket: Ticket }) {
   const update = useUpdateTicketStatus();
-  const options: Ticket["status"][] = ["open", "pending", "resolved"];
+  const [confirmDone, setConfirmDone] = useState(false);
+  // Completion is deliberately NOT just the third segment. Resolving a request emails
+  // the client and lights up their portal bell, so it is the one outward-facing move
+  // on this widget and it gets its own named control that says so before it fires.
+  const options: Ticket["status"][] = ["open", "pending"];
+  const done = ticket.status === "resolved";
 
   return (
     <div className="tk-triage">
@@ -127,11 +133,50 @@ function TicketTriage({ ticket }: { ticket: Ticket }) {
           </button>
         ))}
       </div>
+
+      {done ? (
+        <span className="tk-done">
+          <span className="material-symbols-rounded">task_alt</span>
+          Completed &mdash; the client has been told.
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="mini-btn"
+          disabled={update.isPending}
+          onClick={() => setConfirmDone(true)}
+          title={`Mark ${ticket.id} complete and tell the client`}
+        >
+          <span className="material-symbols-rounded">task_alt</span>
+          {update.isPending ? "Completing…" : "Mark complete"}
+        </button>
+      )}
+
       {update.isError && (
         <span className="tk-triage-err" role="alert">
           Couldn&apos;t update the status.
         </span>
       )}
+
+      {/* The task a request was converted into is NOT shown here, deliberately: the
+          link is recorded as an internal message on the request's thread, not as a
+          queryable column, so any "the work is done" state rendered on this row would
+          be inferred rather than read. The operator marks completion; the platform
+          does not guess it. */}
+      <ConfirmDialog
+        open={confirmDone}
+        title={`Mark ${ticket.id} complete?`}
+        body="The client is emailed and the request is marked complete in their portal."
+        reassurance="You can move it back to open or in-review afterwards if it turns out more work is needed."
+        confirmLabel="Mark complete"
+        tone="caution"
+        pending={update.isPending}
+        onCancel={() => setConfirmDone(false)}
+        onConfirm={() => {
+          setConfirmDone(false);
+          update.mutate({ code: ticket.id, status: "resolved" });
+        }}
+      />
     </div>
   );
 }

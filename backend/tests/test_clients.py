@@ -21,6 +21,7 @@ class FakeRepo:
         self.sites: dict[str, dict[str, Any]] = {}
         self._seq = 0
         self.last_page: tuple[int | None, int] | None = None
+        self.portal_users: dict[str, list[dict[str, Any]]] = {}
 
     def _id(self, prefix: str) -> str:
         self._seq += 1
@@ -93,6 +94,25 @@ class FakeRepo:
 
     def delete_site(self, site_id: str) -> bool:
         return self.sites.pop(site_id, None) is not None
+
+    def seed_portal_user(self, client_id: str, **over: Any) -> dict[str, Any]:
+        row: dict[str, Any] = {
+            "id": over.get("id", self._id("pu")),
+            "email": "sana@np.com",
+            "username": "sana@aios.com",
+            "name": "Sana Malik",
+            "role": "client",
+            "status": "active",
+            "avatar_color": "#7B69EE",
+            "title": "",
+            "created_at": None,
+        }
+        row.update(over)
+        self.portal_users.setdefault(client_id, []).append(row)
+        return row
+
+    def list_portal_users(self, client_id: str) -> list[dict[str, Any]]:
+        return list(self.portal_users.get(client_id, []))
 
 
 def _user(role: str) -> CurrentUser:
@@ -239,3 +259,137 @@ async def test_list_clients_cap_enforcement(
     wire("viewer")
     assert (await client.get("/api/v1/clients", params={"limit": 0})).status_code == 422
     assert (await client.get("/api/v1/clients", params={"limit": 201})).status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# Portal login credentials — the Client Directory's "Show login"
+# --------------------------------------------------------------------------- #
+# QA found clients could not sign in and admins could not see their credentials.
+# The provisioning already sealed a reversible copy; what was missing was a way to
+# NAME the login (a client row carries a username string, not a user id) and a
+# route a MANAGER could actually call.
+
+
+async def test_portal_credentials_reveal_sealed_password(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cl = repo.seed_client()
+    pu = repo.seed_portal_user(cl["id"], id="pu-42")
+    monkeypatch.setattr("app.routers.clients.reveal_password", lambda uid: "Amber-Fox1234!ab")
+    wire("admin")
+    resp = await client.get(f"/api/v1/clients/{cl['id']}/portal-credentials")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == pu["id"]
+    assert body[0]["username"] == "sana@aios.com"
+    assert body[0]["password"] == "Amber-Fox1234!ab"
+    assert body[0]["available"] is True
+
+
+async def test_portal_credentials_uncaptured_password_is_not_a_blank(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A login sealed before VAULT_MASTER_KEY existed reports `available=False`.
+
+    The distinction is load-bearing: an empty string would render as a password of
+    "" and an operator would hand it over. `None` + `available=False` is what the
+    UI turns into "not captured — reset to issue a new one".
+    """
+    cl = repo.seed_client()
+    repo.seed_portal_user(cl["id"])
+    monkeypatch.setattr("app.routers.clients.reveal_password", lambda uid: None)
+    wire("admin")
+    resp = await client.get(f"/api/v1/clients/{cl['id']}/portal-credentials")
+    assert resp.status_code == 200
+    assert resp.json()[0]["password"] is None
+    assert resp.json()[0]["available"] is False
+
+
+async def test_portal_credentials_readable_by_a_manager(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reason these routes exist at all.
+
+    A manager holds `manage_clients` but NOT `manage_team`, so the team credential
+    tool 403s for them. Reusing it would have left the operator who creates clients
+    unable to ever see the login again.
+    """
+    cl = repo.seed_client()
+    repo.seed_portal_user(cl["id"])
+    monkeypatch.setattr("app.routers.clients.reveal_password", lambda uid: "pw")
+    wire("manager")
+    assert (await client.get(f"/api/v1/clients/{cl['id']}/portal-credentials")).status_code == 200
+
+
+async def test_portal_credentials_denied_without_manage_clients(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+) -> None:
+    cl = repo.seed_client()
+    repo.seed_portal_user(cl["id"])
+    wire("viewer")
+    assert (await client.get(f"/api/v1/clients/{cl['id']}/portal-credentials")).status_code == 403
+
+
+async def test_portal_credentials_unknown_client_404s(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+) -> None:
+    wire("admin")
+    assert (await client.get("/api/v1/clients/nope/portal-credentials")).status_code == 404
+
+
+async def test_portal_password_reset_returns_the_new_pair(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cl = repo.seed_client()
+    pu = repo.seed_portal_user(cl["id"], id="pu-7")
+    seen: dict[str, str] = {}
+
+    def _set(uid: str, pw: str) -> bool:
+        seen["uid"], seen["pw"] = uid, pw
+        return True
+
+    monkeypatch.setattr("app.routers.clients.set_password", _set)
+    wire("admin")
+    resp = await client.post(
+        f"/api/v1/clients/{cl['id']}/portal-users/{pu['id']}/password",
+        json={"password": "a-strong-password"},
+    )
+    assert resp.status_code == 200
+    assert seen == {"uid": "pu-7", "pw": "a-strong-password"}
+    assert resp.json()["password"] == "a-strong-password"
+    assert resp.json()["available"] is True
+
+
+async def test_portal_password_reset_refuses_a_user_from_another_client(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tenant pin is what makes `manage_clients` a safe gate here.
+
+    Without it, widening the guard from `manage_team` would have handed a manager a
+    way to rotate ANY account's password - including an owner's - by walking a user
+    id through the client surface.
+    """
+    mine = repo.seed_client(id="cl-mine")
+    theirs = repo.seed_client(id="cl-theirs")
+    other = repo.seed_portal_user(theirs["id"], id="pu-other")
+    repo.seed_portal_user(mine["id"], id="pu-mine")
+    called = False
+
+    def _set(uid: str, pw: str) -> bool:
+        nonlocal called
+        called = True
+        return True
+
+    monkeypatch.setattr("app.routers.clients.set_password", _set)
+    wire("admin")
+    resp = await client.post(
+        f"/api/v1/clients/{mine['id']}/portal-users/{other['id']}/password", json={}
+    )
+    assert resp.status_code == 404
+    assert called is False, "the password must not be touched before the tenant check"

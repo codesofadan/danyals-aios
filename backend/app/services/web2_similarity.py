@@ -63,8 +63,23 @@ SAMPLE_MODULUS = 16
 # (R2 O-1) - until then the caller runs the gate in warn-only mode.
 BODY_BLOCK = 0.25
 BODY_WARN = 0.15
-HEADING_BLOCK = 0.60
-HEADING_WARN = 0.45
+# CALIBRATED 2026-08-30 against a golden set of 15 real generator articles (105 pairs),
+# not chosen by feel. The heading signal turns out to be dominated by WHICH FRAMEWORK was
+# used rather than by content, because `_FRAMEWORK_MOVES` is a fixed heading table:
+#
+#   distinct, different framework   n=91  median 0.314  max 0.388
+#   distinct, SAME framework        n=5   median 0.648  max 0.656
+#   same topic redrafted            n=3   1.000
+#   same topic, different client    n=6   1.000   (the templated case; masked, or it hides)
+#
+# So the old 0.60 block sat INSIDE the same-framework distinct band and falsely blocked
+# 5 of 96 genuinely distinct pairs. The block now sits above that band (0.656) and far
+# below the duplicate cluster (1.000); the warn sits ON the band, because two articles
+# sharing a heading skeleton is worth telling an operator about - the fix is to rotate
+# the framework, which the campaign planner already does and which is exactly what drops
+# a pair from 0.648 to 0.314.
+HEADING_BLOCK = 0.80
+HEADING_WARN = 0.60
 
 Verdict = Literal["pass", "warn", "block"]
 Scope = Literal["client", "account", "platform"]

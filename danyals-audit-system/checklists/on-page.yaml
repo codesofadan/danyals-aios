@@ -63,8 +63,8 @@ checks:
     subcategory: keywords
     owner_agent: A2
     severity_default: critical
-    data_sources: [crawled_html, moz_keyword]
-    analyzer: audit_engine.analyzers.keywords.primary
+    data_sources: [crawled_html]  # was + moz_keyword: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_primary_keyword_optimization
     automation: full
 
   - id: ON-007
@@ -72,8 +72,8 @@ checks:
     subcategory: keywords
     owner_agent: A2
     severity_default: major
-    data_sources: [crawled_html, moz_keyword]
-    analyzer: audit_engine.analyzers.keywords.secondary
+    data_sources: [crawled_html]  # was + moz_keyword: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_secondary_keywords
     automation: full
 
   - id: ON-008
@@ -109,7 +109,7 @@ checks:
     owner_agent: A2
     severity_default: critical
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.keywords.stuffing
+    analyzer: audit_engine.analyzers.onpage.check_keyword_stuffing
     automation: full
 
   - id: ON-012
@@ -136,8 +136,8 @@ checks:
     subcategory: entities
     owner_agent: A2
     severity_default: major
-    data_sources: [crawled_html, google_nl]
-    analyzer: audit_engine.analyzers.entities.related
+    data_sources: [crawled_html]  # was + google_nl: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_related_entities
     automation: full
 
   - id: ON-015
@@ -209,8 +209,8 @@ checks:
     subcategory: content-quality
     owner_agent: A1
     severity_default: critical
-    data_sources: [crawled_html, serper_top10]
-    analyzer: audit_engine.analyzers.content.depth
+    data_sources: [crawled_html]  # was + serper_top10: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_content_depth
     automation: full
 
   - id: ON-023
@@ -219,7 +219,7 @@ checks:
     owner_agent: A1
     severity_default: critical
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.content.thin
+    analyzer: audit_engine.analyzers.onpage.check_thin_content
     automation: full
 
   - id: ON-024
@@ -246,7 +246,7 @@ checks:
     owner_agent: A1
     severity_default: critical
     data_sources: [crawled_html, site_pages]
-    analyzer: audit_engine.analyzers.eeat.overall
+    analyzer: audit_engine.analyzers.onpage.check_eeat_overall
     automation: full
 
   - id: ON-027
@@ -255,7 +255,7 @@ checks:
     owner_agent: A1
     severity_default: major
     data_sources: [crawled_html, site_pages]
-    analyzer: audit_engine.analyzers.eeat.expertise
+    analyzer: audit_engine.analyzers.onpage.check_expertise_signals
     automation: full
 
   - id: ON-028
@@ -264,7 +264,7 @@ checks:
     owner_agent: A1
     severity_default: critical
     data_sources: [crawled_html, site_pages]
-    analyzer: audit_engine.analyzers.eeat.trust
+    analyzer: audit_engine.analyzers.onpage.check_trust_signals
     automation: full
 
   - id: ON-029
@@ -273,7 +273,7 @@ checks:
     owner_agent: A1
     severity_default: major
     data_sources: [crawled_html, schema_blocks]
-    analyzer: audit_engine.analyzers.eeat.author
+    analyzer: audit_engine.analyzers.onpage.check_author_credibility
     automation: full
 
   - id: ON-030
@@ -300,7 +300,7 @@ checks:
     owner_agent: A1
     severity_default: major
     data_sources: [crawled_html, schema_blocks]
-    analyzer: audit_engine.analyzers.content.freshness
+    analyzer: audit_engine.analyzers.onpage.check_content_freshness
     automation: full
 
   - id: ON-033
@@ -309,7 +309,7 @@ checks:
     owner_agent: A2
     severity_default: major
     data_sources: [computed]
-    analyzer: audit_engine.scorers.content.semantic_relevance
+    analyzer: audit_engine.analyzers.onpage.check_semantic_relevance
     automation: full
 
   # ----- Title Tag (4) -----
@@ -318,8 +318,8 @@ checks:
     subcategory: titles
     owner_agent: A3
     severity_default: critical
-    data_sources: [crawled_html, serper_top10]
-    analyzer: audit_engine.analyzers.titles.optimization
+    data_sources: [crawled_html]  # was + serper_top10: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_title_tag
     automation: full
 
   - id: ON-035
@@ -327,8 +327,8 @@ checks:
     subcategory: titles
     owner_agent: A3
     severity_default: major
-    data_sources: [crawled_html, gsc_ctr]
-    analyzer: audit_engine.analyzers.titles.ctr
+    data_sources: [crawled_html]  # was + gsc_ctr: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_title_ctr
     automation: full
 
   - id: ON-036
@@ -345,8 +345,8 @@ checks:
     subcategory: titles
     owner_agent: A3
     severity_default: major
-    data_sources: [crawled_html, moz_keyword]
-    analyzer: audit_engine.analyzers.titles.keyword_placement
+    data_sources: [crawled_html]  # was + moz_keyword: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_title_keyword_placement
     automation: full
 
   # ----- Meta Description (3) -----
@@ -356,7 +356,7 @@ checks:
     owner_agent: A3
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.meta.description_optimization
+    analyzer: audit_engine.analyzers.onpage.check_meta_description
     automation: full
 
   - id: ON-039
@@ -364,8 +364,8 @@ checks:
     subcategory: meta-description
     owner_agent: A3
     severity_default: minor
-    data_sources: [crawled_html, gsc_ctr]
-    analyzer: audit_engine.analyzers.meta.description_ctr
+    data_sources: [crawled_html]  # was + gsc_ctr: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_meta_ctr
     automation: full
 
   - id: ON-040
@@ -384,7 +384,7 @@ checks:
     owner_agent: A3
     severity_default: critical
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.headings.h1_optimization
+    analyzer: audit_engine.analyzers.onpage.check_h1_optimization
     automation: full
 
   - id: ON-042
@@ -393,7 +393,7 @@ checks:
     owner_agent: A3
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.headings.multiple_h1
+    analyzer: audit_engine.analyzers.onpage.check_multiple_h1
     automation: full
 
   - id: ON-043
@@ -402,7 +402,7 @@ checks:
     owner_agent: A3
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.headings.hierarchy
+    analyzer: audit_engine.analyzers.onpage.check_heading_hierarchy
     automation: full
 
   - id: ON-044
@@ -410,8 +410,8 @@ checks:
     subcategory: headings
     owner_agent: A3
     severity_default: major
-    data_sources: [crawled_html, google_nl]
-    analyzer: audit_engine.analyzers.headings.semantic
+    data_sources: [crawled_html]  # was + google_nl: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_heading_semantics
     automation: full
 
   - id: ON-045
@@ -420,7 +420,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.headings.question_based
+    analyzer: audit_engine.analyzers.onpage.check_heading_questions
     automation: full
 
   # ----- Featured Snippets, AI Overview, FAQ (5) -----
@@ -429,8 +429,8 @@ checks:
     subcategory: snippets
     owner_agent: A5
     severity_default: major
-    data_sources: [crawled_html, serper_top10]
-    analyzer: audit_engine.analyzers.snippets.featured
+    data_sources: [crawled_html]  # was + serper_top10: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_featured_snippet
     automation: full
 
   - id: ON-047
@@ -439,7 +439,7 @@ checks:
     owner_agent: A5
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.snippets.passage
+    analyzer: audit_engine.analyzers.onpage.check_passage_ranking
     automation: full
 
   - id: ON-048
@@ -447,8 +447,8 @@ checks:
     subcategory: ai-search
     owner_agent: A5
     severity_default: major
-    data_sources: [crawled_html, serper_top10, otterly]
-    analyzer: audit_engine.analyzers.ai_search.overview
+    data_sources: [crawled_html]  # was + serper_top10, otterly: declared, never called
+    analyzer: audit_engine.analyzers.ai_search.check_ai_overview_fitness
     automation: full
 
   - id: ON-049
@@ -457,7 +457,7 @@ checks:
     owner_agent: A5
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.ai_search.direct_answer
+    analyzer: audit_engine.analyzers.ai_search.check_direct_answer_paragraph
     automation: full
 
   - id: ON-050
@@ -466,7 +466,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [crawled_html, schema_blocks]
-    analyzer: audit_engine.analyzers.snippets.faq
+    analyzer: audit_engine.analyzers.onpage.check_faq_optimization
     automation: full
 
   # ----- Readability & Scannability (7) -----
@@ -476,7 +476,7 @@ checks:
     owner_agent: A1
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.readability.flesch
+    analyzer: audit_engine.analyzers.onpage.check_readability
     automation: full
 
   - id: ON-052
@@ -494,7 +494,7 @@ checks:
     owner_agent: A1
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.readability.paragraph_length
+    analyzer: audit_engine.analyzers.onpage.check_paragraph_length
     automation: full
 
   - id: ON-054
@@ -503,7 +503,7 @@ checks:
     owner_agent: A1
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.readability.sentence_complexity
+    analyzer: audit_engine.analyzers.onpage.check_sentence_complexity
     automation: full
 
   - id: ON-055
@@ -512,7 +512,7 @@ checks:
     owner_agent: A1
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.readability.scannability
+    analyzer: audit_engine.analyzers.onpage.check_scannability
     automation: full
 
   - id: ON-056
@@ -521,7 +521,7 @@ checks:
     owner_agent: A1
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.readability.intro
+    analyzer: audit_engine.analyzers.onpage.check_intro_optimization
     automation: full
 
   - id: ON-057
@@ -540,7 +540,7 @@ checks:
     owner_agent: A4
     severity_default: major
     data_sources: [internal_links]
-    analyzer: audit_engine.analyzers.links.anchor_text
+    analyzer: audit_engine.analyzers.onpage.check_anchor_text_optimization
     automation: full
 
   - id: ON-059
@@ -603,8 +603,8 @@ checks:
     subcategory: external-links
     owner_agent: A4
     severity_default: major
-    data_sources: [crawled_html, moz_da]
-    analyzer: audit_engine.analyzers.links.external_quality
+    data_sources: [crawled_html]  # was + moz_da: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_external_link_quality
     automation: full
 
   - id: ON-066
@@ -612,8 +612,8 @@ checks:
     subcategory: external-links
     owner_agent: A4
     severity_default: minor
-    data_sources: [crawled_html, moz_da]
-    analyzer: audit_engine.analyzers.links.outbound_authority
+    data_sources: [crawled_html]  # was + moz_da: declared, never called
+    analyzer: audit_engine.analyzers.onpage.check_outbound_authority
     automation: full
 
   # ----- Images (6) -----
@@ -623,7 +623,7 @@ checks:
     owner_agent: A3
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.images.alt_text
+    analyzer: audit_engine.analyzers.onpage.check_image_alt_text
     automation: full
 
   - id: ON-068
@@ -641,7 +641,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.images.filename
+    analyzer: audit_engine.analyzers.onpage.check_image_filename
     automation: full
 
   - id: ON-070
@@ -659,7 +659,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [crawled_html, http_resp]
-    analyzer: audit_engine.analyzers.images.webp_usage
+    analyzer: audit_engine.analyzers.onpage.check_webp_usage
     automation: full
 
   - id: ON-072
@@ -668,7 +668,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.images.lazy_loading
+    analyzer: audit_engine.analyzers.onpage.check_lazy_loading
     automation: full
 
   # ----- Schema on-page (6) - validation duplicates also in technical.yaml -----
@@ -678,7 +678,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [crawled_html, schema_blocks]
-    analyzer: audit_engine.analyzers.schema.on_page_validation
+    analyzer: audit_engine.analyzers.onpage.check_schema_validation
     automation: full
 
   - id: ON-074
@@ -687,7 +687,7 @@ checks:
     owner_agent: B4
     severity_default: minor
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.faq
+    analyzer: audit_engine.analyzers.onpage.check_faq_schema
     automation: full
 
   - id: ON-075
@@ -696,7 +696,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.article
+    analyzer: audit_engine.analyzers.onpage.check_article_schema
     automation: full
 
   - id: ON-076
@@ -705,7 +705,7 @@ checks:
     owner_agent: B4
     severity_default: minor
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.service
+    analyzer: audit_engine.analyzers.onpage.check_service_schema
     automation: full
 
   - id: ON-077
@@ -714,7 +714,7 @@ checks:
     owner_agent: B4
     severity_default: minor
     data_sources: [schema_blocks]
-    analyzer: audit_engine.analyzers.schema.breadcrumb
+    analyzer: audit_engine.analyzers.onpage.check_breadcrumb_schema
     automation: full
 
   - id: ON-078
@@ -723,7 +723,7 @@ checks:
     owner_agent: B4
     severity_default: major
     data_sources: [schema_blocks, crawled_html]
-    analyzer: audit_engine.analyzers.schema.rich_result_eligibility
+    analyzer: audit_engine.analyzers.onpage.check_rich_result_eligibility
     automation: full
 
   # ----- Canonical / Indexability (3) -----
@@ -733,7 +733,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.canonical.on_page
+    analyzer: audit_engine.analyzers.onpage.check_canonical_validation
     automation: full
 
   - id: ON-080
@@ -742,7 +742,7 @@ checks:
     owner_agent: B1
     severity_default: critical
     data_sources: [crawled_html, robots, http_headers]
-    analyzer: audit_engine.analyzers.indexability.on_page
+    analyzer: audit_engine.analyzers.onpage.check_indexability
     automation: full
 
   - id: ON-081
@@ -900,7 +900,7 @@ checks:
     owner_agent: A3
     severity_default: minor
     data_sources: [site_pages]
-    analyzer: audit_engine.analyzers.url.optimization
+    analyzer: audit_engine.analyzers.extras.check_url_structure
     automation: full
 
   - id: ON-098
@@ -928,7 +928,7 @@ checks:
     owner_agent: A5
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.structured_content.analysis
+    analyzer: audit_engine.analyzers.ai_search.check_structured_content
     automation: full
 
   - id: ON-101
@@ -937,7 +937,7 @@ checks:
     owner_agent: A5
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.structured_content.tables
+    analyzer: audit_engine.analyzers.ai_search.check_table_snippet_fitness
     automation: full
 
   - id: ON-102
@@ -946,7 +946,7 @@ checks:
     owner_agent: A5
     severity_default: minor
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.structured_content.lists
+    analyzer: audit_engine.analyzers.ai_search.check_list_snippet_fitness
     automation: full
 
   # ----- AI Search Readiness / GEO (5) -----
@@ -956,7 +956,7 @@ checks:
     owner_agent: A5
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.ai_search.extraction
+    analyzer: audit_engine.analyzers.ai_search.check_extraction_fitness
     automation: full
 
   - id: ON-104
@@ -965,7 +965,7 @@ checks:
     owner_agent: A5
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.ai_search.llm_readability
+    analyzer: audit_engine.analyzers.ai_search.check_llm_readability
     automation: full
 
   - id: ON-105
@@ -973,8 +973,8 @@ checks:
     subcategory: ai-search
     owner_agent: A5
     severity_default: major
-    data_sources: [crawled_html, otterly]
-    analyzer: audit_engine.analyzers.ai_search.generative
+    data_sources: [crawled_html]  # was + otterly: declared, never called
+    analyzer: audit_engine.analyzers.ai_search.check_generative_search_fitness
     automation: full
 
   - id: ON-106
@@ -992,7 +992,7 @@ checks:
     owner_agent: A5
     severity_default: major
     data_sources: [crawled_html]
-    analyzer: audit_engine.analyzers.ai_search.semantic_html
+    analyzer: audit_engine.analyzers.ai_search.check_semantic_html_structure
     automation: full
 
   # ----- Penalty / Spam (4) -----

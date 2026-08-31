@@ -6,15 +6,12 @@ to the Team B agents via the orchestrator.
 
 from __future__ import annotations
 
-import re
-from typing import Iterable
-from urllib.parse import urlparse
+from collections.abc import Iterable
 
 from audit_engine.analyzers.common import Verdict, status_from_score
 from audit_engine.crawlers.basic import CrawledPage
 from audit_engine.parsers.robots import RobotsTxt
 from audit_engine.parsers.sitemap import Sitemap
-
 
 SECURITY_HEADERS_RECOMMENDED = {
     "strict-transport-security": "HSTS - protects against downgrade attacks",
@@ -249,6 +246,15 @@ def iter_site_wide_technical(
     yield ("TECH-015", "technical", "B1", check_redirect_chains(pages))
     yield ("TECH-020", "technical", "B1", check_canonical_chain(pages))
     yield ("TECH-058", "technical", "B5", check_https_redirect(pages))
-    yield ("TECH-061", "technical", "B5", check_hreflang_reciprocity(pages))
+    # check_hreflang_reciprocity is NOT emitted. It is a SITE-WIDE reciprocity
+    # test, and it was yielding under TECH-061 "Hreflang validation" - which the
+    # checklist binds to the PER-PAGE `onpage.check_hreflang`. Two different
+    # measurements under one id meant every run reported TECH-061 twice, with
+    # different verdicts, and a reader had no way to tell which they were seeing.
+    # The plan listed this among the Wave 0 double-emitters. There is no spare
+    # hreflang row to move it to, so it is parked exactly as
+    # `check_about_contact_pages` was (owner decision O-8): give reciprocity its
+    # own checklist row, or retire the analyzer. Owner decision O-10.
+    # (O-9 was already taken: over-declared data sources, now resolved.)
     yield ("TECH-077", "technical", "B1", check_duplicate_metadata(pages))
     yield ("TECH-085", "technical", "B5", check_security_headers(pages))

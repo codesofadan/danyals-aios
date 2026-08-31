@@ -151,7 +151,9 @@ export function useSaveGrants() {
 export function useCreateClient() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: NewClientInput): Promise<ClientRecord & { portalWarning?: string }> => {
+    mutationFn: async (
+      input: NewClientInput,
+    ): Promise<ClientRecord & { portalWarning?: string; portalLogin?: { username: string; password: string } }> => {
       const created = await api.post<ClientRecord>("/clients", {
         cn: input.cn,
         industry: input.industry,
@@ -175,11 +177,22 @@ export function useCreateClient() {
           username: input.adminLogin,
           password: input.adminPass,
         });
-        return created;
-      } catch {
+        // Return the pair the SERVER accepted, so the caller can show credentials
+        // that are known to exist. The wizard used to display a locally generated
+        // pair before this call ran at all - which read as a working login even in
+        // the case below, where no login was created.
+        return { ...created, portalLogin: { username: input.adminLogin, password: input.adminPass } };
+      } catch (e) {
         return {
           ...created,
-          portalWarning: "Client created, but the portal login couldn't be provisioned — set it up from Settings.",
+          // Carry the server's own reason (a duplicate email, most often). The old
+          // text named "Settings" as the repair, a screen that has never had this
+          // control; the real one is Show login -> Create portal login, right here
+          // in the directory.
+          portalWarning:
+            `${input.cn} was created, but its portal login was NOT — ` +
+            `${e instanceof Error ? e.message : "the server refused it"}. ` +
+            `Nobody can sign in until you fix it: use "Show login" on the client's row.`,
         };
       }
     },
@@ -265,5 +278,78 @@ export function useClientSites(clientId: string | null) {
     queryKey: ["clients", clientId, "sites"] as const,
     queryFn: () => api.get<ClientSite[]>(`/clients/${clientId}/sites`),
     enabled: Boolean(clientId),
+  });
+}
+
+// --- Portal login credentials ------------------------------------------------
+// QA: "Clients cannot log in because valid login credentials are not being
+// created/stored" and "there is no Show Login option for existing clients."
+//
+// The credential WAS being stored (provision_user seals an AES-256-GCM copy
+// beside the argon2id hash); what did not exist was a way to read it back. These
+// hit the CLIENT-scoped routes, not the team ones at /admin/users/{id}/*, because
+// those require `manage_team` - which a manager who may create clients does not
+// hold, so the team route 403s for exactly the operator who needs this.
+
+/** One portal login for a client, with its password opened from the sealed copy. */
+export type PortalCredentials = {
+  id: string;
+  username: string | null;
+  email: string;
+  /** null => never captured (provisioned before the vault key). Offer a reset. */
+  password: string | null;
+  available: boolean;
+};
+
+/**
+ * Reveal a client's portal logins on demand (GET /clients/{id}/portal-credentials).
+ *
+ * A mutation, not a query, deliberately: nothing is fetched until the operator
+ * clicks "Show login", so plaintext passwords are never sitting in a cached
+ * response for the whole directory. The server records one activity row per reveal.
+ */
+export function useRevealPortalCredentials() {
+  return useMutation({
+    mutationFn: (clientId: string) =>
+      api.get<PortalCredentials[]>(`/clients/${clientId}/portal-credentials`),
+  });
+}
+
+/**
+ * Set/rotate one portal login's password (POST .../portal-users/{userId}/password).
+ * Omit `password` and the server generates a strong one. This is the repair path
+ * for a login whose password was never captured, and it ends the sessions the old
+ * password opened.
+ */
+export function useSetPortalPassword() {
+  return useMutation({
+    mutationFn: ({ clientId, userId, password }: { clientId: string; userId: string; password?: string }) =>
+      api.post<PortalCredentials>(
+        `/clients/${clientId}/portal-users/${userId}/password`,
+        password ? { password } : {},
+      ),
+  });
+}
+
+/**
+ * Provision a portal login for a client that has none (POST /clients/{id}/portal-users).
+ *
+ * The repair path for the failure the Add-Client wizard now reports instead of
+ * swallowing: the client row is created first, so a login that fails to provision
+ * (a duplicate email, most often) leaves an account nobody can sign in to. Before
+ * this, the only caller of that endpoint was inside `useCreateClient`, so there
+ * was no way back - the warning told the operator to "set it up from Settings",
+ * a screen that has never had this control.
+ */
+export function useProvisionPortalLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { clientId: string; email: string; name: string; username: string; password: string }) => {
+      const { clientId, ...body } = input;
+      return api.post<{ id: string }>(`/clients/${clientId}/portal-users`, body);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: CLIENTS_KEY });
+    },
   });
 }

@@ -96,6 +96,23 @@ function aios_publisher_current_managed_post() {
  * @return bool
  */
 function aios_publisher_is_elementor_page( $post_id ) {
+	// The post meta ALONE is not enough, and trusting it broke every site without
+	// Elementor. The AIOS push writes `_elementor_edit_mode = builder` on every page
+	// it sends (the platform's Elementor flag defaults on and the payload always
+	// carries a tree), so on a site where Elementor is not installed this returned
+	// true, and the plugin then skipped BOTH article.css and the whole
+	// aios_publisher_render_article() wrapper. The result: no `.aios-article`, no
+	// `.aios-article--full` breakout, no TOC/takeaways/FAQ/CTA - WordPress rendered
+	// the raw post_content in the theme's narrow column. That is a complete,
+	// independent cause of "generated pages are not full width", with no width
+	// setting involved at all.
+	//
+	// ELEMENTOR_VERSION is the same probe core-connector.php already trusts, and for
+	// the reason stated there: it beats is_plugin_active(), which needs wp-admin
+	// includes and reports an active-but-erroring plugin as available.
+	if ( ! defined( 'ELEMENTOR_VERSION' ) ) {
+		return false;
+	}
 	return 'builder' === get_post_meta( (int) $post_id, '_elementor_edit_mode', true );
 }
 

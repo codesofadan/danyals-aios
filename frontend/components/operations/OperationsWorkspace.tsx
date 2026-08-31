@@ -38,6 +38,7 @@ import JobRunsTable, {
   type Filter,
 } from "./JobRunsTable";
 import JobRunDrawer from "./JobRunDrawer";
+import ScheduledJobs from "./ScheduledJobs";
 
 const LEAD_ROLES = ["owner", "admin", "manager"];
 
@@ -121,6 +122,10 @@ export default function OperationsWorkspace() {
       {/* Undelivered work sits ABOVE the log on purpose: the log is the reference,
           this is the to-do list, and a lost job buried under 25 rows of history is a
           lost job nobody replays. */}
+      <div className="row-single">
+        <ScheduledJobs />
+      </div>
+
       <div className="row-single">
         <DeadLetterQueue
           rows={deadQ.data ?? []}

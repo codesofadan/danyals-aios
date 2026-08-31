@@ -3,8 +3,6 @@
 import TopBar from "@/components/TopBar";
 import StatTiles from "@/components/StatTiles";
 import CommandDigest from "@/components/overview/CommandDigest";
-import SpendSnapshot from "@/components/overview/SpendSnapshot";
-import AuditVolumeChart from "@/components/charts/AuditVolumeChart";
 import ClientProgress from "@/components/charts/ClientProgress";
 import TeamTracking from "@/components/charts/TeamTracking";
 import { useCommandCenter } from "@/lib/hooks/commandCenter";
@@ -49,11 +47,6 @@ export default function CommandCenter() {
 
           <div className="row b">
             <CommandDigest digest={data.digest} />
-            <SpendSnapshot spend={data.spend} />
-          </div>
-
-          <div className="row">
-            <AuditVolumeChart audits={data.audits} />
             <ClientProgress clients={data.clients} />
           </div>
 

@@ -201,6 +201,57 @@ export const PARKED: ParkedEntry[] = [
     reason,
     reEnableWhen: "Needs an owner decision - do not delete on inference alone.",
   })),
+
+  // --- The 2026-08-30 QA pass: surfaces removed, components kept --------------
+  // A QA session over the portal produced 26 findings. Several were "this card /
+  // tab / module is not required" - a decision about what the portal SURFACES, not
+  // a judgement that the code is wrong. Every component below is working and was
+  // deliberately unmounted; the endpoints behind them are untouched.
+  ...(
+    [
+      ["charts/AuditVolumeChart.tsx", "Free Audit Volume", "The Free Audit Volume card was removed from the admin dashboard (QA 26). Free Audits themselves were verified working and keep their own module at /admin/leads."],
+      ["overview/SpendSnapshot.tsx", "Platform Spend", "The Platform Spend / Cost Controls card was removed from the admin dashboard (QA 26). Spend still has its own module at /admin/cost, and the halt control there was verified working."],
+      ["cost/CostLog.tsx", "Cost Log", "QA 11: the log showed $0.00 for work that did cost money, so it was removed rather than shown wrong. NOTE: the display was never the defect - the per-job cost attribution behind it is. Re-mount once a job's spend is recorded against it."],
+      ["clients/MrrTreemap.tsx", "Revenue Treemap", "QA 16: not required on Client Info."],
+      ["settings/SecurityTab.tsx", "Security", "QA 9: the Security section is not required in the admin portal. The agency-global /settings/security endpoints are untouched."],
+      ["settings/DangerTab.tsx", "Danger zone", "QA 9: the Danger Zone is not required in the admin portal."],
+      ["team/AccessControl.tsx", "Roles & Access", "QA 14: the Roles & Access tab is not required. RBAC itself is unchanged and still enforced server-side."],
+      ["team/TeamPerformance.tsx", "Performance", "QA 14: the Performance tab's graphs are out of sync with the ledgers they summarise, so it was removed rather than left showing numbers an operator cannot trust."],
+      ["team/TeamMetricBox.tsx", "Performance", "Only ever rendered by TeamPerformance; orphaned with it."],
+      ["portal/ReviewCheckpoint.tsx", "Review", "QA 7: the Review tab was removed from the team member portal. POST /tasks/{code}/review is untouched and leads still review from the admin task surfaces."],
+    ] as const
+  ).map(([path, surface, reason]): ParkedEntry => ({
+    path,
+    status: "operator-removed",
+    unmountedBy: "the 2026-08-30 QA remediation (wave 1)",
+    reason,
+    reEnableWhen: `An owner asks for the ${surface} surface back, or the reason above stops being true.`,
+  })),
+
+  // --- Milestones: the whole admin module (QA 15) -----------------------------
+  // "Milestones module is not required. Remove the Milestones option/module from
+  // the admin portal." Removed from ADMIN only: `/client/milestones` is a separate
+  // surface built on components/client/ClientMilestones.tsx and still shipping, and
+  // the /milestones endpoints still feed it. The module was read-only by design
+  // (only the onboarding stage auto-advances), so nothing that wrote is lost.
+  ...(
+    [
+      "milestones/MilestonesWorkspace.tsx",
+      "milestones/MilestoneStats.tsx",
+      "milestones/MilestoneDetail.tsx",
+      "milestones/ProjectGantt.tsx",
+      "milestones/ClientTimeline.tsx",
+      "milestones/StagePipeline.tsx",
+      "milestones/AutoAdvanceFeed.tsx",
+    ] as const
+  ).map((path): ParkedEntry => ({
+    path,
+    status: "operator-removed",
+    unmountedBy: "the 2026-08-30 QA remediation (wave 1)",
+    reason: "QA 15: the Milestones module is not required in the admin portal.",
+    reEnableWhen:
+      "An owner wants admin-side delivery timelines again. The client-facing /client/milestones is unaffected and still live.",
+  })),
 ];
 
 export const PARKED_PATHS: ReadonlySet<string> = new Set(PARKED.map((e) => e.path));

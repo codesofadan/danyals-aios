@@ -127,6 +127,8 @@ export default function ContentWorkspace() {
         </div>
       )}
 
+      <div style={{ marginTop: "var(--s-6, 20px)" }} />
+
       <ReviewGate
         jobs={needsReview}
         onAction={handleReview}

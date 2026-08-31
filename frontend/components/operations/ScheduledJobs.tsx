@@ -2,6 +2,12 @@
 
 import { useScheduledJobs, type ScheduledJob } from "@/lib/hooks/reports";
 
+// Moved here from components/reports/. QA: "Reports and Operations overlap in
+// purpose/functionality ... keep Operations as the single location for operational
+// information, including cron jobs." Background-job health is Operations' whole
+// subject; it was the one tab of Reports that answered the same question twice.
+// The endpoint is still GET /reports/scheduled-jobs - only the surface moved.
+//
 // The "Scheduled jobs" panel: the REAL Celery beat cron jobs the platform runs in the
 // background. The list is derived server-side from the live beat_schedule, so each row is
 // a job that is actually scheduled — name, what it does, its cadence, the next fire time,

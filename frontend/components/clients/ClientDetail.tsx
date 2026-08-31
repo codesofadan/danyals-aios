@@ -19,6 +19,7 @@ import { TIER_COLOR, type ClientRecord } from "@/lib/data";
 import { usd } from "@/lib/format";
 import { useClients } from "@/lib/hooks/clients";
 import { useClientBusinessProfile } from "@/lib/hooks/clients";
+import ClientCredentialCell from "./ClientCredentialCell";
 import DetailShell from "@/components/ui/DetailShell";
 import QueryGuard from "@/components/ui/QueryGuard";
 import EmptyState from "@/components/ui/EmptyState";
@@ -175,9 +176,12 @@ export default function ClientDetail({ clientId }: { clientId: string }) {
         return (
           <section className="card" style={{ padding: "var(--s-7)", maxWidth: 560 }}>
             <div className="cs" style={{ marginBottom: "var(--s-5)" }}>
-              The portal identity this client signs in with. The password was generated
-              and shown ONCE at creation — the platform stores no readable copy, so
-              there is nothing more to reveal here, deliberately.
+              The portal identity this client signs in with. The password IS
+              recoverable — provisioning seals an encrypted copy beside the one-way
+              hash — so reveal it below rather than issuing a new one.
+            </div>
+            <div style={{ marginBottom: "var(--s-5)" }}>
+              <ClientCredentialCell client={client} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--s-6)" }}>
               <div>

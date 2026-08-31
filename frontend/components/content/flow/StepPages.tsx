@@ -30,7 +30,7 @@ const itemFromKeyword = (k: BankKeyword, kindKey: string): ResearchItem => ({
   secondaryKeywords: [],
   estVolume: k.volume,
   difficulty: k.difficulty <= 30 ? "easy" : k.difficulty <= 60 ? "medium" : "hard",
-  rationale: `From the keyword bank — ${k.volume.toLocaleString()}/mo, difficulty ${k.difficulty}${k.cluster ? `, cluster "${k.cluster}"` : ""}.`,
+  rationale: `From the keyword bank — ${k.volume ? `${k.volume.toLocaleString()}/mo, ` : ""}difficulty ${k.difficulty}${k.cluster ? `, cluster "${k.cluster}"` : ""}.`,
   city: k.geo || "",
   service: "",
 });
@@ -157,7 +157,7 @@ export default function StepPages({
                                 />
                               </td>
                               <td>{k.keyword}</td>
-                              <td className="num">{k.volume.toLocaleString()}</td>
+                              <td className="num">{k.volume ? k.volume.toLocaleString() : "—"}</td>
                               <td className="num">{k.difficulty ? k.difficulty : "—"}</td>
                               <td>{k.intent || "—"}</td>
                             </tr>

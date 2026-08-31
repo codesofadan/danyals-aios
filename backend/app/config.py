@@ -664,15 +664,29 @@ class Settings(BaseSettings):
     # A gate switched to hard before it is calibrated blocks legitimate work, and an
     # operator who learns to override it has switched it off in practice. This mirrors
     # how the content module already treats its QA scorecard (advisory first, D-4).
-    web2_similarity_enforce: bool = False
+    #
+    # ARMED 2026-08-30. The stated precondition - calibration against a graded golden set
+    # - is met: 15 real generator articles, 105 pairs, and at the calibrated thresholds
+    # the gate blocks 0 of 96 genuinely distinct pairs and 9 of 9 duplicates, with 0.14
+    # of headroom on either side. A block now means "this really is the same article",
+    # and the escape hatch is to redraft rather than to override - which is the whole
+    # point of hardening it. Set to False to fall back to warn + acknowledgement.
+    web2_similarity_enforce: bool = True
     # Resemblance above which a draft is BLOCKED (Broder r over 5-word masked shingles).
     # Half of Broder's 0.50 duplicate line: a safety gate must trip well before
     # 'duplicate', because the harm is a detectable PATTERN, not a copy.
     web2_similarity_body_block: float = 0.25
     web2_similarity_body_warn: float = 0.15
     # Heading-skeleton Jaccard: catches same-outline/different-words templating.
-    web2_similarity_heading_block: float = 0.60
-    web2_similarity_heading_warn: float = 0.45
+    # CALIBRATED 2026-08-30 against 15 real generator articles / 105 pairs. These are THE
+    # LIVE VALUES - `web2_gate` passes them into the scorer, so the module constants in
+    # `web2_similarity` are defaults these override. They are kept equal, and
+    # `test_web2_similarity_calibration` fails if they drift apart.
+    #   distinct, different framework  max 0.388   |  distinct, SAME framework  max 0.656
+    #   redrafted / templated          1.000
+    # 0.60 sat inside the same-framework distinct band and blocked 5 of 96 real pairs.
+    web2_similarity_heading_block: float = 0.80
+    web2_similarity_heading_warn: float = 0.60
 
     # --- Shared catch-all IMAP mailbox (web2 + citation house-account signup, 7B-5).
     # The off-page automation auto-CREATES house accounts on web2 platforms with a

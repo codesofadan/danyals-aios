@@ -144,6 +144,35 @@ describe("Web2CampaignWizard", () => {
     expect(screen.queryByPlaceholderText(/how many/i)).toBeNull();
   });
 
+  it("sends BOTH grounding inputs, so a UI-built campaign can actually publish", async () => {
+    // MEASURED on a real client draft: the generator gaps separately on "why choose
+    // them" (proofPoints) and "what makes this different" (uniqueData). The wizard used
+    // to collect only the first, so every campaign built here held at review with an
+    // unfillable gap and the operator had no field to fill it from.
+    renderWizard();
+    await fillMinimum("one\ntwo");
+
+    fireEvent.change(screen.getByPlaceholderText(/Cleared 400 blocked drains/i), {
+      target: { value: "Cleared 400 drains in 2025" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Across 40 audits/i), {
+      target: { value: "The named bottleneck was the real one 3 times in 10" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Get quote/i }));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Create/i }));
+
+    await waitFor(() => expect(posts.some((p) => !p.path.endsWith("/estimate"))).toBe(true));
+    const created = posts.filter((p) => !p.path.endsWith("/estimate")).at(-1)!;
+    expect(created.body.proofPoints).toEqual(["Cleared 400 drains in 2025"]);
+    expect(created.body.uniqueData).toEqual([
+      "The named bottleneck was the real one 3 times in 10",
+    ]);
+  });
+
   it("shows why an ineligible platform is not offered instead of hiding it", async () => {
     renderWizard();
     await fillMinimum("one");

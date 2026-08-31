@@ -189,11 +189,6 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   WriteFreely: { icon: "edit_note", c: SERIES.c2 },
 };
 
-// Every platform NOT draft-only can be planned/approved through the pipeline.
-export const LIVE_WEB2_PLATFORMS: Web2Platform[] = (
-  Object.keys(PLATFORM_META) as Web2Platform[]
-).filter((p) => p !== "Medium");
-
 // House account created, but the platform can't actually publish yet - a payment,
 // business-verification, or app-review step outside our control is unresolved. The
 // dashboard flags these with a small red asterisk rather than hiding them, so a lead
@@ -228,6 +223,23 @@ export type Web2Property = {
  * client that no credential changes. Collapsing them into one "unavailable" would send
  * someone hunting for a token that could not help.
  */
+/** What `POST /offpage/web2/anchor-check` accepts — an anchor can be checked before a
+ *  platform or any proof has been decided. */
+export type Web2AnchorCheckInput = {
+  clientId: string;
+  anchor: string;
+  targetUrl?: string;
+  topic?: string;
+};
+
+/** The anchor verdict, shaped so a form field can render it directly. */
+export type Web2AnchorCheck = {
+  allowed: boolean;
+  verdict: string;
+  reason: string;
+  suggestion: string;
+};
+
 export type Web2PlatformStatusRow = {
   name: string;
   platform: string | null;

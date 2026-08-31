@@ -23,6 +23,7 @@ placement to the publish worker.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime, time
 from typing import Annotated, Any
@@ -43,6 +44,11 @@ from app.schemas.offpage import (
     FlagToxicRequest,
     NapStatus,
     OffpageKpisResponse,
+    Web2AccountCheckResponse,
+    Web2AccountCreateRequest,
+    Web2AccountResponse,
+    Web2AnchorCheckRequest,
+    Web2AnchorCheckResponse,
     Web2AuthorityTier,
     Web2AuthType,
     Web2CampaignApprovalResponse,
@@ -344,7 +350,12 @@ async def web2_catalog(
         authority_tier=authority_tier,
         automation_ready=automation_ready,
     )
+    from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
+
     platforms = [Web2PlatformCatalogResponse.from_row(r) for r in rows]
+    credential_fields = {
+        name: list(fields) for name, fields in PLATFORM_CREDENTIAL_FIELDS.items() if fields
+    }
     by_auth_type: dict[str, int] = {}
     for p in platforms:
         by_auth_type[p.auth_type] = by_auth_type.get(p.auth_type, 0) + 1
@@ -353,6 +364,44 @@ async def web2_catalog(
         automation_ready=sum(1 for p in platforms if p.automation_ready),
         by_auth_type=by_auth_type,
         platforms=platforms,
+        credential_fields=credential_fields,
+    )
+
+
+@router.post("/offpage/web2/anchor-check", response_model=Web2AnchorCheckResponse)
+async def check_web2_anchor(
+    body: Web2AnchorCheckRequest, repo: OffpageRepoDep, _actor: ViewReports
+) -> Web2AnchorCheckResponse:
+    """Ask whether an anchor is usable, BEFORE anything is created or paid for.
+
+    ``plan_web2`` already refuses an exact-match commercial anchor - but it refuses at
+    the moment of submission, as a 422 the planning modal swallowed, so the operator
+    saw a queued property that did not exist. This lets the form say so beside the
+    field while they are still typing.
+
+    Free by construction: no write, no enqueue, no outbound call (``check_anchor`` is
+    pure). Hence ``view_reports`` rather than ``Lead`` - asking whether a string is a
+    good anchor is not a privileged act, and gating it behind the write role would
+    stop a specialist drafting a brief.
+
+    The rule is NOT reimplemented client-side, deliberately: the brand exemption needs
+    ``client_name`` from the database, and a second copy would drift from the one the
+    plan route enforces - so the form could bless an anchor the write path then refuses.
+    """
+    name = await asyncio.to_thread(repo.client_name_for, body.client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+
+    from app.services.web2_anchor import check_anchor
+
+    verdict = check_anchor(
+        body.anchor, target_url=body.target_url, topic=body.topic, client_name=name
+    )
+    return Web2AnchorCheckResponse(
+        allowed=verdict.allowed,
+        verdict=verdict.verdict,
+        reason=verdict.reason,
+        suggestion=verdict.suggestion,
     )
 
 
@@ -374,6 +423,37 @@ async def plan_web2(
     name = await asyncio.to_thread(repo.client_name_for, body.client_id)
     if name is None:
         raise _CLIENT_NOT_FOUND
+
+    # THE SAME GUARDS THE CAMPAIGN PATH RUNS. This route creates a property and spends
+    # real drafting money, and it used to run NONE of them: no eligibility, no connected
+    # account, no anchor check. Two doors into one table with different rules is how a
+    # placement lands on a platform the client may not use, or one holding no credential,
+    # after the article has been written and paid for.
+    allowed, refusals = await asyncio.to_thread(
+        _eligible_for, repo, body.client_id, [body.platform]
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(refusals[0] if refusals else f"{body.platform} cannot be used for this client."),
+        )
+
+    # R2-14: an exact-match commercial anchor has no editorial justification, and catching
+    # it at review means discarding paid work rather than preventing it.
+    from app.services.web2_anchor import check_anchor
+
+    verdict = check_anchor(
+        body.anchor, target_url=body.target_url, topic=body.topic or "", client_name=name
+    )
+    if not verdict.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"{verdict.reason}"
+                + (f" Try instead: {verdict.suggestion}" if verdict.suggestion else "")
+            ),
+        )
+
     # Seed the writer's grounding pack (mirrors the content job): first-hand proof so
     # the draft is gap-free instead of holding at [NEEDS:]. Blank lines dropped; an
     # empty pack simply degrades to [NEEDS:] exactly as before.
@@ -599,8 +679,16 @@ def _eligible_for(repo: Any, client_id: str, selected: list[str]) -> tuple[list[
     from app.services.web2_eligibility import evaluate_catalog, refuse_reason
 
     scope = repo.client_web2_scope(client_id)
+    # The connected set comes from ACCOUNTS, never from the operator's own selection.
+    # Feeding `selected` back in declares every requested platform connected by
+    # construction, so `not_connected` can never fire on the WRITE path: a campaign is
+    # then planned, its properties created and its drafting PAID FOR against platforms
+    # holding no credential, and the failure only surfaces at publish time - after the
+    # spend, and after the operator was told it was scheduled.
     board = evaluate_catalog(
-        repo.eligible_catalog(), client_scope=scope, connected_platforms=set(selected)
+        repo.eligible_catalog(),
+        client_scope=scope,
+        connected_platforms=repo.connected_platforms_for(client_id),
     )
     allowed: list[str] = []
     refusals: list[str] = []
@@ -617,6 +705,15 @@ def _build_plan(repo: Any, body: Web2CampaignRequest, client_name: str) -> Any:
     from app.services.web2_campaign import CampaignRefusedError, plan_campaign
 
     allowed, refusals = _eligible_for(repo, body.client_id, list(body.platforms))
+    if not allowed and refusals:
+        # The per-platform reasons are the whole value here. Falling through to the
+        # planner's generic "restricted by their own content policies" would name the
+        # wrong cause for a platform that is merely missing an account - sending the
+        # operator to re-read a content policy when the fix is to connect a credential.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="No platform in this selection can be used. " + "  ".join(refusals),
+        )
     settings = get_settings()
     try:
         plan = plan_campaign(
@@ -679,15 +776,31 @@ async def web2_platform_board(
         raise _CLIENT_NOT_FOUND
     scope = await asyncio.to_thread(repo.client_web2_scope, client_id)
     rows = await asyncio.to_thread(repo.eligible_catalog)
-    connected = {str(r.get("platform_enum")) for r in rows if r.get("platform_enum")}
+    # From ACCOUNTS, never from the catalogue. Deriving "connected" from the catalogue
+    # rows themselves marks every mapped platform connected, which makes `not_connected`
+    # unreachable and shows a green "eligible" for platforms holding no credential at
+    # all - sending an operator to publish somewhere the pipeline cannot authenticate.
+    connected = await asyncio.to_thread(repo.connected_platforms_for, client_id)
     board = evaluate_catalog(rows, client_scope=scope, connected_platforms=connected)
-    return [
-        Web2PlatformStatusResponse(
-            name=v.name, platform=v.platform_enum, status=v.status, reason=v.reason,
-            authority=v.authority_tier,
+    from app.services.web2_provisioning import GUIDES
+    from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
+
+    out: list[Web2PlatformStatusResponse] = []
+    for v in board:
+        guide = GUIDES.get(v.name)
+        out.append(
+            Web2PlatformStatusResponse(
+                name=v.name, platform=v.platform_enum, status=v.status, reason=v.reason,
+                authority=v.authority_tier,
+                setup_url=guide.where if guide else "",
+                setup_steps=guide.steps if guide else "",
+                setup_cost=guide.cost if guide else "",
+                setup_blocker=guide.blocker if guide else "",
+                account_needed=guide.account_needed if guide else "",
+                credential_fields=list(PLATFORM_CREDENTIAL_FIELDS.get(v.name, ())),
+            )
         )
-        for v in board
-    ]
+    return out
 
 
 @router.post("/offpage/web2/campaigns/estimate", response_model=Web2CampaignEstimateResponse)
@@ -941,6 +1054,192 @@ async def list_campaign_placements(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
     rows = await asyncio.to_thread(repo.campaign_placements, campaign_id)
     return [Web2PlacementResponse.from_row(r) for r in rows]
+
+
+def _account_fetcher() -> Any:
+    """The real HTTP seam for credential verification (read-only calls)."""
+    import httpx
+
+    def fetch(req: Any) -> tuple[int, str]:
+        # follow_redirects=False ON PURPOSE: a credential check must see the API's own
+        # answer. Following a redirect lands on whatever page the platform points at -
+        # typically docs or an announcement - which answers 200 and makes a retired
+        # endpoint look authenticated.
+        with httpx.Client(timeout=25.0, follow_redirects=False) as client:
+            resp = client.request(req.method, req.url, headers=req.headers, json=req.json_body)
+        return resp.status_code, resp.text[:4000]
+
+    return fetch
+
+
+def _credential_for(row: dict[str, Any]) -> dict[str, str]:
+    """Open the sealed credential for verification only. Never returned to a caller."""
+    from app.services.vault import find_secret
+
+    raw = find_secret(
+        provider=str(row.get("vault_provider") or ""), label=str(row.get("vault_label") or "")
+    )
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items()} if isinstance(parsed, dict) else {}
+
+
+@router.post(
+    "/offpage/web2/accounts",
+    response_model=Web2AccountResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_web2_account(
+    body: Web2AccountCreateRequest, repo: OffpageRepoDep, actor: Lead
+) -> Web2AccountResponse:
+    """Register a publishing account and seal its credential (lead-only).
+
+    WHY THIS EXISTS. Registration was CLI-only, while the board's empty state told the
+    operator to "register it here" - a promise the UI could not keep, leaving onboarding
+    an engineer's job and the operator stuck on a screen with no action.
+
+    The validation is NOT reimplemented here. ``build_spec`` is the same function the CLI
+    calls, so the R2-08 identity rules (no platform slug or hex run in a per-client
+    handle, no shared catch-all domain behind a client account) hold identically whoever
+    registers. Two copies of those rules would drift, and the drift would show up as a
+    footprint months later.
+
+    The credential is sealed and never read back - it appears in no response, no log and
+    no error. A refusal names the RULE, never the value.
+    """
+    from app.cli.web2_accounts import (
+        HandleRejectedError,
+        _shared_domains,
+        build_spec,
+        insert_account,
+    )
+    from app.services.vault import add_key
+    from integrations.web2_credentials import VAULT_KIND_CLIENT_ACCESS, vault_provider_for
+    from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
+
+    try:
+        spec = await asyncio.to_thread(
+            lambda: build_spec(
+                platform=body.platform,
+                ownership=body.ownership,
+                handle=body.handle,
+                client_id=body.client_id or None,
+                registration_email=body.email,
+                property_url=body.property_url,
+                max_properties=body.max_properties,
+                credential={k: v for k, v in body.credential.items() if str(v).strip()},
+                shared_domains=_shared_domains(),
+            )
+        )
+    except (HandleRejectedError, ValueError) as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
+        ) from refused
+
+    account_id = await asyncio.to_thread(insert_account, spec)
+    if spec.credential:
+        await asyncio.to_thread(
+            add_key,
+            provider=vault_provider_for(spec.platform),
+            label=account_id,
+            secret=json.dumps(spec.credential),
+            kind=VAULT_KIND_CLIENT_ACCESS,
+        )
+    row = await asyncio.to_thread(repo.get_web2_account, account_id)
+    if row is None:  # the insert returned an id, so this is unreachable in practice
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="the account was created but could not be read back",
+        )
+    required = list(PLATFORM_CREDENTIAL_FIELDS.get(spec.platform, ()))
+    return Web2AccountResponse.from_row(
+        row, required=required, complete=not spec.missing_fields()
+    )
+
+
+@router.get("/offpage/web2/accounts", response_model=list[Web2AccountResponse])
+async def list_web2_accounts(
+    repo: OffpageRepoDep,
+    actor: ViewReports,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+) -> list[Web2AccountResponse]:
+    """The connection board: which accounts exist, and whether their credential is
+    structurally usable. Registering an account was CLI-only until now, which made
+    onboarding an engineer's job rather than an operator's."""
+    from app.services.vault import find_secret
+    from integrations.web2_credentials import build_publisher
+    from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
+
+    rows = await asyncio.to_thread(repo.list_web2_accounts, client_id)
+    out: list[Web2AccountResponse] = []
+    for row in rows:
+        platform = str(row.get("platform") or "")
+        required = list(PLATFORM_CREDENTIAL_FIELDS.get(platform, ()))
+        publisher = await asyncio.to_thread(
+            build_publisher,
+            vault_label=str(row.get("vault_label") or ""),
+            platform=platform,
+            lookup=find_secret,
+        )
+        out.append(
+            Web2AccountResponse.from_row(row, required=required, complete=publisher is not None)
+        )
+    return out
+
+
+@router.post(
+    "/offpage/web2/accounts/{account_id}/check", response_model=Web2AccountCheckResponse
+)
+async def check_web2_account(
+    account_id: str, repo: OffpageRepoDep, actor: Lead
+) -> Web2AccountCheckResponse:
+    """Ask the platform, right now, whether this credential still works.
+
+    Until this existed an account counted as connected because its fields were non-empty
+    - which proves shape, not validity - so a revoked token was indistinguishable from a
+    good one until a campaign failed, after the drafting spend.
+
+    Lead-only: it opens a sealed credential (server-side, never returned) and makes an
+    outbound call as the client. Read-only by construction: every verifier is a profile
+    GET, so a check can never publish or modify anything.
+    """
+    from app.services.web2_credcheck import check_credential
+
+    row = await asyncio.to_thread(repo.get_web2_account, account_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+    cred = await asyncio.to_thread(_credential_for, row)
+    result = await asyncio.to_thread(
+        check_credential, str(row.get("platform") or ""), cred, _account_fetcher()
+    )
+    # Only a definite answer moves health; "unknown" must not overwrite a known-good
+    # account with a verdict that came from our own network failing.
+    health = {"ok": "active", "bad": "suspended"}.get(result.state)
+    if health:
+        # Privileged: health is a derived platform fact the server records, not
+        # something an operator authors, so it is written on the service store.
+        from app.db.offpage_repo import service_offpage_store
+
+        await asyncio.to_thread(
+            service_offpage_store().set_web2_account_health, account_id,
+            health=health, checked_at=datetime.now(UTC),
+        )
+    else:
+        health = str(row.get("health") or "unverified")
+    await record_activity(
+        actor, kind="content", action=f"checked a Web 2.0 credential ({result.state})",
+        target=str(row.get("platform") or ""), entity_type="client",
+        entity_id=str(row.get("client_id") or "") or None,
+    )
+    return Web2AccountCheckResponse(
+        account_id=account_id, state=result.state, detail=result.detail,
+        identity=result.identity, health=health,
+    )
 
 
 @router.get("/offpage/web2/placements", response_model=list[Web2PlacementResponse])

@@ -293,3 +293,14 @@ a.au-art[aria-disabled="true"] { opacity: .32; cursor: not-allowed; pointer-even
 
 /* What the chosen depth buys, in a line, under the control that chose it. */
 .au-depthnote { margin-top: 7px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+
+/* A client-less run: the share control is inert because there is no portal for
+   the audit to reach. Dimmed and cursor-blocked so the reason reads before the
+   click, not after it. */
+.au-share.is-disabled { opacity: .55; cursor: not-allowed; border-color: var(--line); }
+.au-share.is-disabled:hover { border-color: var(--line); }
+.au-share.is-disabled input { cursor: not-allowed; }
+
+/* A run with no client shows a placeholder name rather than a real one, so it
+   reads as a label instead of masquerading as a client the agency has. */
+.au-client.is-internal { font-style: italic; color: var(--muted); }
