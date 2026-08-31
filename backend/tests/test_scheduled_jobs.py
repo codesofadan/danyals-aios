@@ -123,28 +123,50 @@ def test_scheduled_jobs_flags_waiting_on_absent_provider_key() -> None:
 # The policy these tests sit on top of
 # --------------------------------------------------------------------------- #
 class TestCronIsParkedOnPurpose:
-    """Cron is OFF platform-wide by the owner's instruction (2026-08-19), so the
-    live beat table is empty and every test above drives the PRESERVED table
-    instead.
+    """The cron policy, recorded in one place - and CHANGED, deliberately, on
+    2026-09-01 with the owner's approval.
 
-    That split is deliberate. Before it, nine tests across six files asserted
-    entries in a schedule that no longer exists, and stayed red permanently -
-    which is worse than no test at all, because it trains everyone to ignore a
-    failing suite. Measured 2026-08-29: telling a genuinely new failure from
-    those nine required stashing the work in progress and re-running.
+    It was: nothing is scheduled at all. Beat was emptied on 2026-08-19 and the
+    fourteen entries kept beside it as `_BEAT_SCHEDULE_DISABLED`. Wholesale was the
+    only option available, because a static schedule is read at process start - so
+    pausing one entry, re-timing one, or scoping one to particular clients each
+    needed a developer and a deploy.
 
-    So: the behaviour of `scheduled_jobs()` is tested against the preserved
-    table, and the POLICY - that nothing is actually scheduled - is asserted
-    exactly once, here.
+    It is now: the business jobs are ROWS (`public.automations`, 0118), every one of
+    them seeded paused, each enabled and re-timed from the dashboard. Beat carries
+    only the two things that are not anyone's business decision - the dispatcher that
+    makes the editable schedule work, and the ledger reaper that must not be pausable
+    from the surface it protects.
+
+    So nothing recurring runs until an admin turns it on, which is what the original
+    park was protecting, and turning one on is no longer a deploy.
+
+    The behaviour of `scheduled_jobs()` is still tested against the preserved table
+    above; the POLICY is asserted exactly once, here.
     """
 
-    def test_nothing_is_actually_scheduled(self) -> None:
-        assert celery_app.conf.beat_schedule == {}, (
-            "cron is parked by owner instruction. If it is being switched back on, "
-            "that is a deliberate change: restore beat_schedule = _BEAT_SCHEDULE_DISABLED "
-            "in workers/celery_app.py and update THIS test, which is the one place the "
-            "policy is recorded."
+    def test_beat_carries_only_the_two_infrastructure_entries(self) -> None:
+        assert set(celery_app.conf.beat_schedule) == {
+            "dispatch-automations",
+            "reap-stale-job-runs",
+        }, (
+            "Business jobs belong in public.automations, where an admin can pause and "
+            "re-time them. An entry added HERE is beyond the reach of the manager built "
+            "to control it. If that is deliberate, update THIS test - it is the one "
+            "place the policy is recorded."
         )
+
+    def test_no_business_job_runs_without_somebody_enabling_it(self) -> None:
+        """What the 2026-08-19 park was actually protecting: no recurring work fires
+        on its own. Still true - every seeded automation starts disabled, and the
+        dispatcher only claims rows where `enabled`."""
+        from pathlib import Path
+
+        sql = (
+            Path(__file__).resolve().parents[2] / "db" / "migrations" / "0118_automations.sql"
+        ).read_text(encoding="utf-8")
+        seeded = sql.split("insert into public.automations", 1)[1].split(";")[0]
+        assert " true" not in seeded.lower()
 
     def test_the_preserved_schedule_has_not_rotted_while_parked(self) -> None:
         """A parked schedule is dead weight the moment it names a task that no

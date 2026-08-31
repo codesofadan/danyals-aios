@@ -25,7 +25,7 @@ from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import privileged_connection, rls_connection
-from app.modules.citations.service import canonical_norm
+from app.services.directory_names import canonical_norm
 
 _Rows = list[dict[str, Any]]
 

@@ -351,7 +351,7 @@ def test_a_legacy_row_without_a_directory_id_still_counts_as_covered() -> None:
 # 45-row cap.
 # --------------------------------------------------------------------------- #
 def test_aliases_map_the_five_verified_name_mismatches() -> None:
-    from app.modules.citations.service import canonical_norm
+    from app.services.directory_names import canonical_norm
 
     assert canonical_norm("Google Business") == canonical_norm("Google Business Profile")
     assert canonical_norm("Bing Places") == canonical_norm("Bing Places for Business")
@@ -361,7 +361,7 @@ def test_aliases_map_the_five_verified_name_mismatches() -> None:
 
 
 def test_normalisation_still_handles_punctuation_and_case_on_its_own() -> None:
-    from app.modules.citations.service import canonical_norm
+    from app.services.directory_names import canonical_norm
 
     assert canonical_norm("YellowPages.com") == canonical_norm("yellowpages.com")
     assert canonical_norm("Chamber of Commerce") == canonical_norm("ChamberofCommerce")
@@ -377,7 +377,7 @@ def test_ambiguous_names_are_left_unresolved_rather_than_guessed() -> None:
     three, and "Local.com" would collide with "Local.com.au" - a different country's
     directory. None of them may be in the alias map.
     """
-    from app.modules.citations.service import _DIRECTORY_ALIASES, canonical_norm
+    from app.services.directory_names import _DIRECTORY_ALIASES, canonical_norm
 
     for risky in ("yellowpages", "bbb", "angi", "justia", "localcom"):
         assert risky not in _DIRECTORY_ALIASES

@@ -110,23 +110,32 @@ def test_nightly_backup_is_scheduled_or_the_config_panel_promises_a_backup_nothi
 
 @pytest.mark.unit
 def test_stuck_run_reaper_is_scheduled_or_a_dead_worker_shrinks_a_client_cap_forever() -> None:
-    """`reap_stale_job_runs` has existed and been registered since the job contract
-    landed, and NOTHING ever called it - no beat entry, no endpoint, no caller. Found by
-    grepping the tree for the task name: every hit was its own definition or a comment
-    about it. Until something calls it, a run left `running` by an OOM kill permanently
-    holds a slot against `JobRunsStore.start`'s per-client concurrency cap."""
-    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+    """`reap_stale_job_runs` had existed and been registered since the job contract
+    landed with NOTHING calling it - no beat entry, no endpoint, no caller. Until
+    something called it, a run left `running` by an OOM kill permanently held a slot
+    against `JobRunsStore.start`'s per-client concurrency cap.
 
+    It is scheduled now (2026-09-01), and it is one of only two live beat entries: it
+    repairs the job ledger, costs nothing, and must NOT be an automation an operator
+    can pause - turning it off would make stuck runs permanent, which is exactly when
+    it matters most."""
     celery_app.loader.import_default_modules()
-    entry = PARKED["reap-stale-job-runs"]
+    entry = celery_app.conf.beat_schedule["reap-stale-job-runs"]
     assert entry["task"] == "reap_stale_job_runs"
     assert entry["task"] in celery_app.tasks, "the beat entry names a task no worker has"
 
 
 @pytest.mark.unit
-def test_adding_the_maintenance_entries_did_not_un_park_cron() -> None:
-    """Cron is OFF by the owner's instruction; the entries above go in the PRESERVED
-    table only. The cheapest way to get this wrong is to paste an entry into the live
-    `beat_schedule = {}` line instead, which would silently start firing pg_dump."""
+def test_no_business_job_was_pasted_into_the_live_beat_table() -> None:
+    """Beat carries the dispatcher and the ledger reaper, and nothing else.
+
+    Business jobs are rows in `public.automations` (0118), seeded paused, enabled from
+    the dashboard. The cheapest way to get this wrong is to paste an entry into the
+    live `beat_schedule` instead - which would start firing pg_dump on a schedule
+    nobody can pause without a deploy, the exact problem the automations table
+    replaced."""
+    assert set(celery_app.conf.beat_schedule) == {
+        "dispatch-automations",
+        "reap-stale-job-runs",
+    }
     assert "nightly-backup" not in celery_app.conf.beat_schedule
-    assert "reap-stale-job-runs" not in celery_app.conf.beat_schedule

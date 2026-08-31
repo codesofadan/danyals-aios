@@ -244,3 +244,56 @@ def test_an_explicit_key_wins_over_the_targets_own(store: FakeStore, sends: _Sen
     row = next(iter(store.rows.values()))
     assert row["idempotency_key"] == "explicit:key:1"
     assert sends.calls[0]["kwargs"]["_aios_idempotency_key"] == "explicit:key:1"
+
+
+def test_enqueue_recognises_a_contract_task_the_caller_never_imported(
+    store: FakeStore, sends: _Sends, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`TASK_SPECS` is populated at DECORATION time, so a process only knows a task is
+    under the contract once it has imported that task's module.
+
+    The API imports routers, not worker task modules - deliberately, so the edge does
+    not drag Celery in at import time. Measured on a real API process: 2 of the ~15
+    contract specs were present. So the run row was created only when the caller
+    happened to have imported the module first (some routers do, via a lazy import in
+    their enqueuer; others do not), which made "a queued job is a row" true by
+    coincidence and silently false for every new caller.
+
+    Simulated by hiding the spec and standing in for the module import that would
+    register it - which is exactly what Celery's loader does for a real task.
+    """
+    import app.jobs.celery_task as ct
+    from workers.celery_app import celery_app
+
+    spec = ct.TASK_SPECS.pop("_test_enqueue_keyed")
+    monkeypatch.setattr(ct, "_specs_loaded", False)
+
+    imported: list[bool] = []
+
+    def _fake_import() -> None:
+        imported.append(True)
+        ct.TASK_SPECS["_test_enqueue_keyed"] = spec
+
+    monkeypatch.setattr(celery_app.loader, "import_default_modules", _fake_import)
+    try:
+        enqueue("_test_enqueue_keyed", "client-7")
+    finally:
+        ct.TASK_SPECS["_test_enqueue_keyed"] = spec
+
+    assert imported, "enqueue did not try to load the task modules it had not seen"
+    assert len(store.rows) == 1, "the task's module was never imported, so no row was written"
+    assert next(iter(store.rows.values()))["job_name"] == "test.enqueue.keyed"
+
+
+def test_a_legacy_task_is_still_legacy_after_the_modules_load(
+    store: FakeStore, sends: _Sends, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Importing every task module must not accidentally make a pre-contract task
+    look like a contract one - `ping` has no spec and must still write no row."""
+    import app.jobs.celery_task as ct
+
+    monkeypatch.setattr(ct, "_specs_loaded", False)
+    enqueue("ping")
+
+    assert store.rows == {}
+    assert len(sends.calls) == 1

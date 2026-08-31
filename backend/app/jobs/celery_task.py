@@ -205,6 +205,41 @@ def aios_job(
     return decorator
 
 
+#: Whether this process has imported the task modules yet. `TASK_SPECS` is populated
+#: at DECORATION time, so a process that has not imported a task's module does not
+#: know that task is under the contract.
+_specs_loaded = False
+
+
+def _ensure_specs(task_name: str) -> None:
+    """Make sure this process knows whether ``task_name`` is under the job contract.
+
+    THE API PROCESS IMPORTS ROUTERS, NOT WORKER TASK MODULES - by design, so the edge
+    does not drag Celery in at import time. Measured: an API process holds 2 of the
+    ~15 contract specs. So `enqueue` could only pre-create a run row when the CALLER
+    happened to have imported the task module first, which some routers do (via a
+    lazy import in their enqueuer) and others do not. That made "a queued job is a
+    row" true by coincidence rather than by construction - and silently false for any
+    new caller.
+
+    Celery already knows how to import every task module (the `include=[...]` list),
+    so this asks it to, once, and only when a task is not already known. A legacy task
+    is still absent afterwards, which is the correct answer for it.
+    """
+    global _specs_loaded
+    if task_name in TASK_SPECS or _specs_loaded:
+        return
+    _specs_loaded = True
+    try:
+        from workers.celery_app import celery_app
+
+        celery_app.loader.import_default_modules()
+    except Exception as exc:
+        # Degrades to the previous behaviour: no row here, the worker claims on
+        # arrival. Never fails the enqueue itself.
+        logger.warning("job.task_modules_unavailable", error=f"{type(exc).__name__}: {exc}")
+
+
 def _precreate_run(
     task_name: str,
     args: tuple[Any, ...],
@@ -226,6 +261,7 @@ def _precreate_run(
     runs" - it only gives the worker something to rendezvous on. It is returned so the
     caller can put it in the payload, where the task wrapper applies it as an override.
     """
+    _ensure_specs(task_name)
     entry = TASK_SPECS.get(task_name)
     if entry is None:
         return None

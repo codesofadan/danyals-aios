@@ -145,6 +145,7 @@ celery_app = Celery(
         # The job contract's own maintenance: the stuck-run reaper. It repairs the
         # ledger, so it deliberately does NOT run under @aios_job - see the module
         # docstring.
+        "workers.tasks.automations",
         "workers.tasks.job_maintenance",
     ],
 )
@@ -223,19 +224,42 @@ celery_app.conf.update(
 # idempotent UPDATE keyed on `status = 'open'`, so a re-run or an overlapping tick is
 # a no-op and it needs no overlap lock.
 # --------------------------------------------------------------------------- #
-# ALL CRON / BEAT JOBS ARE DISABLED (by request, 2026-08-19). Nothing runs on a
-# schedule for now - every periodic job (including the daily Policy Radar generator)
-# is OFF, and Policy Radar is now ON-DEMAND ONLY: a policy brief is fetched + stored
-# only when a user asks (POST /policy/ask + the lead "generate brief" path write into
-# the SAME change_events / kb_entries / recommendations tables the Policy page reads).
+# BEAT CARRIES TWO ENTRIES, AND NEITHER OF THEM IS A BUSINESS DECISION.
 #
-# The full schedule is preserved verbatim below in ``_BEAT_SCHEDULE_DISABLED`` so it
-# can be switched back on later by restoring ``celery_app.conf.beat_schedule =
-# _BEAT_SCHEDULE_DISABLED`` (all tasks are already registered via ``include=[...]``
-# above and remain callable on demand / via .delay()). An empty schedule means the
-# ``aios-beat`` process simply has nothing to fire; the workers keep serving
-# event-driven + on-demand tasks unchanged.
-celery_app.conf.beat_schedule = {}
+# The fourteen periodic jobs that used to live here were switched off wholesale on
+# 2026-08-19 (preserved verbatim below in ``_BEAT_SCHEDULE_DISABLED``). Switching them
+# off wholesale was the only option available: a static schedule is read at process
+# start, so pausing one, re-timing one, or scoping one to particular clients each
+# needed a developer and a deploy.
+#
+# They are automations now - rows in ``public.automations`` (0118), all seeded PAUSED,
+# each created / re-timed / enabled / audited from the dashboard. So this table holds
+# only the two things that are infrastructure rather than anyone's choice:
+#
+#   dispatch-automations  reads due automations and fires them. It is the mechanism
+#                         that makes the editable schedule work; with it off, every
+#                         automation an admin enables silently does nothing.
+#   reap-stale-job-runs   repairs the job ledger after a worker dies. It costs
+#                         nothing, and must NOT be pausable from the surface it
+#                         protects - an operator turning it off would leave stuck runs
+#                         permanent, which is exactly when it is most needed.
+#
+# Adding a business job back to THIS table would put it beyond the reach of the
+# manager that exists to control it. ``tests/test_automations.py`` holds the set at
+# these two.
+celery_app.conf.beat_schedule = {
+    "dispatch-automations": {
+        "task": "dispatch_automations",
+        # A minute is the resolution the whole feature promises: an automation set for
+        # 02:00 fires within a minute of it. It is also the floor the schema enforces
+        # on intervals, so the two cannot disagree.
+        "schedule": 60.0,
+    },
+    "reap-stale-job-runs": {
+        "task": "reap_stale_job_runs",
+        "schedule": 300.0,
+    },
+}
 
 _BEAT_SCHEDULE_DISABLED = {
     # Citation liveness re-check (0106). A listing is not a fact you establish once:

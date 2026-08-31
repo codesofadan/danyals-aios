@@ -259,3 +259,114 @@ export function useReapStuckJobs() {
     },
   });
 }
+
+// --- automations --------------------------------------------------------------
+// Scheduled work an admin controls. The fourteen periodic jobs this platform had
+// were switched off wholesale on 2026-08-19 because a static beat schedule is read
+// at process start: pausing one, re-timing one, or scoping one to some clients each
+// needed a deploy. They are rows now (0118), all seeded paused.
+
+export const AUTOMATIONS_KEY = ["automations"] as const;
+
+export type AutomationCapability = {
+  kind: string;
+  label: string;
+  description: string;
+  scope: "platform" | "client";
+  /** True when a run can spend metered budget. Shown BEFORE anyone enables it. */
+  paid: boolean;
+  defaultIntervalSeconds: number;
+  needs: string[];
+};
+
+export type Automation = {
+  id: string;
+  name: string;
+  kind: string;
+  kindLabel: string;
+  scope: "platform" | "client";
+  paid: boolean;
+  params: Record<string, unknown>;
+  scheduleKind: "interval" | "cron";
+  intervalSeconds: number | null;
+  cronExpr: string | null;
+  /** "every 30 minutes" / "cron: 0 2 * * *" */
+  cadence: string;
+  enabled: boolean;
+  notifyOnFailure: boolean;
+  notifyChannels: Record<string, unknown>;
+  nextDueAt: string | null;
+  lastFiredAt: string | null;
+  /** Null before it has ever run - which is not the same as a run that failed. */
+  lastRunId: string | null;
+  lastStatus: string | null;
+  lastFinishedAt: string | null;
+  lastDetail: string;
+};
+
+export function useAutomations() {
+  return useQuery({
+    queryKey: AUTOMATIONS_KEY,
+    queryFn: () => api.get<Automation[]>("/automations"),
+    refetchInterval: JOBS_POLL_MS,
+  });
+}
+
+export function useAutomationCapabilities() {
+  return useQuery({
+    queryKey: [...AUTOMATIONS_KEY, "capabilities"] as const,
+    queryFn: () => api.get<AutomationCapability[]>("/automations/capabilities"),
+    staleTime: Infinity, // a code-level registry; it cannot change under a session
+  });
+}
+
+export type AutomationInput = {
+  name: string;
+  kind: string;
+  params?: Record<string, unknown>;
+  scheduleKind: "interval" | "cron";
+  intervalSeconds?: number | null;
+  cronExpr?: string | null;
+  enabled?: boolean;
+  notifyOnFailure?: boolean;
+};
+
+export function useCreateAutomation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AutomationInput) => api.post<Automation>("/automations", input),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: AUTOMATIONS_KEY }),
+  });
+}
+
+/** Edit, pause or resume. Pausing is this call with `enabled: false`. */
+export function useUpdateAutomation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, changes }: { id: string; changes: Partial<AutomationInput> }) =>
+      api.patch<Automation>(`/automations/${id}`, changes),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: AUTOMATIONS_KEY }),
+  });
+}
+
+export function useDeleteAutomation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/automations/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: AUTOMATIONS_KEY }),
+  });
+}
+
+/** Fire it once now without changing its schedule - how an automation is tested
+ *  before being enabled, and how a missed window is recovered. */
+export function useRunAutomationNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ automationId: string; runId: string | null; dispatched: number }>(
+        `/automations/${id}/run`,
+        {},
+      ),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: AUTOMATIONS_KEY }),
+  });
+}

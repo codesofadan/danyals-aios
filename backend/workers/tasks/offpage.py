@@ -37,13 +37,13 @@ from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
-from app.modules.citations.service import canonical_norm
 from app.schemas.offpage import action_for
 from app.services import pricing, web2_gate
 from app.services.content_generator import SourcePack
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
+from app.services.directory_names import canonical_norm
 from app.services.vault import find_secret
 from app.services.web2_pacing import PacingCaps, Placement
 from app.services.web2_pipeline import (

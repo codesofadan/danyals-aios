@@ -517,6 +517,9 @@ def execute_liveness_recheck(
 # Celery entry point (thin; import the app lazily-free at module load, per the
 # worker template).
 # --------------------------------------------------------------------------- #
+from app.jobs import JobOutcome, JobQueue  # noqa: E402 - after the pure core
+from app.jobs.celery_task import aios_job  # noqa: E402 - after the pure core
+from app.jobs.contract import JobContext  # noqa: E402 - after the pure core
 from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
 
 
@@ -527,11 +530,43 @@ def citation_submit_job(citation_id: str) -> dict[str, Any]:
     return execute_citation_submit(service_citations_store(), settings, citation_id)
 
 
-@celery_app.task(name="citation_liveness_recheck")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def citation_liveness_recheck_job(limit: int = 200) -> dict[str, Any]:
+@aios_job(
+    # The pinned name is unchanged, so existing callers and any in-flight message
+    # keep working across this migration.
+    name="citation_liveness_recheck",
+    job_name="citations.liveness",
+    queue=JobQueue.LONG,
+    max_attempts=1,
+)
+def citation_liveness_recheck_job(ctx: JobContext, limit: int = 200) -> JobOutcome:
     """Entry point: re-confirm every citation whose re-check has come due.
 
     Cost: this makes plain HTTP GETs and no provider call, so it does NOT go through the
     money dial - there is nothing metered to gate. (~$41/yr for 100 clients even at the
-    Serper-assisted cadence, which is why the cadence is a quality decision.)"""
-    return execute_liveness_recheck(service_citations_store(), fetch=http_liveness_probe)
+    Serper-assisted cadence, which is why the cadence is a quality decision.)
+
+    UNDER THE JOB CONTRACT because it is an automation now, and an automation whose
+    runs leave no trace is the defect this platform is being repaired of: it would
+    fire on schedule, report nothing, and be indistinguishable from one that never
+    ran. It was the last capability in the registry still doing that - the other
+    thirteen already write a run row.
+    """
+    ctx.checkpoint()
+    result = execute_liveness_recheck(service_citations_store(), fetch=http_liveness_probe)
+    counts = {
+        "checked": int(result.get("checked") or 0),
+        "changed": int(result.get("changed") or 0),
+        "outcomes": result.get("outcomes") or {},
+    }
+    if result.get("state") == "error":
+        # The sweep could not read its own work list. Reporting `completed` with zero
+        # checked would say "nothing was due", which is a different fact entirely.
+        return JobOutcome.degraded(
+            "citation_liveness_unavailable",
+            "the listings due a re-check could not be read, so none were confirmed",
+            result=counts,
+        )
+    return JobOutcome.completed(
+        f"re-checked {counts['checked']} listings, {counts['changed']} changed",
+        result=counts,
+    )

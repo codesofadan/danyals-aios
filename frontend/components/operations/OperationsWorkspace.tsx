@@ -38,6 +38,7 @@ import JobRunsTable, {
   type Filter,
 } from "./JobRunsTable";
 import JobRunDrawer from "./JobRunDrawer";
+import AutomationsManager from "./AutomationsManager";
 import ScheduledJobs from "./ScheduledJobs";
 
 const LEAD_ROLES = ["owner", "admin", "manager"];
@@ -123,6 +124,9 @@ export default function OperationsWorkspace() {
           this is the to-do list, and a lost job buried under 25 rows of history is a
           lost job nobody replays. */}
       <div className="row-single">
+        {/* Automations first: it is the one an operator ACTS on. ScheduledJobs
+            below is the read-only history of what has run. */}
+        <AutomationsManager />
         <ScheduledJobs />
       </div>
 
