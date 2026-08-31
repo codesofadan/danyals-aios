@@ -22,7 +22,7 @@ from app.services.content_pipeline.claims import (
     vendor_pattern,
 )
 
-CONTACTS = frozenset({"business.zainsaeed@gmail.com", "+923088040606", "xegents.com"})
+CONTACTS = frozenset({"business.zainsaeed@gmail.com", "+923088040606", "northwind.com"})
 
 
 # --------------------------------------------------------------------------- #
@@ -75,7 +75,7 @@ class TestTheRealFabricationsAreCaught:
         " and title records - in real time.",
         # REAL - absolute data-handling assurances, nothing supplied backs them
         "No data leaves your systems.",
-        'Zero data movement to Xegents servers, zero export-import cycles, zero "data residency" risk.',
+        'Zero data movement to Northwind servers, zero export-import cycles, zero "data residency" risk.',
         # REAL - a published warranty
         "We commit to an accuracy threshold in the audit.",
         # REAL - invented third-party integrations
@@ -88,7 +88,7 @@ class TestTheRealFabricationsAreCaught:
     def test_an_invented_contact_address_is_caught(self) -> None:
         # The one defect that costs the client money on a page that reads perfectly:
         # every lead the page generates is routed to an address nobody owns.
-        fired = needs_citation("email us at hello@xegents.com", allowed_contacts=CONTACTS)
+        fired = needs_citation("email us at hello@northwind.com", allowed_contacts=CONTACTS)
         assert "T7-CONTACT" in fired
 
     def test_the_operators_own_contact_details_pass(self) -> None:
@@ -108,14 +108,14 @@ class TestLegitimateProseSurvives:
 
     @pytest.mark.parametrize("sentence", [
         "We hold no regulatory approval.",
-        "Xegents has no published HIPAA audit or certification.",
+        "Northwind has no published HIPAA audit or certification.",
         "Acme Dental holds no certification of any kind.",
         "Your clinic's HIPAA compliance is your IT and legal team's responsibility.",
     ])
     def test_an_honest_disclaimer_is_never_deleted(self, sentence: str) -> None:
         # Deleting a retraction makes the page LESS true than the writer left it -
         # strictly worse than the fabrication this module removes.
-        vendor = vendor_pattern(["Xegents", "Acme Dental"])
+        vendor = vendor_pattern(["Northwind", "Acme Dental"])
         assert not needs_citation(sentence, allowed_contacts=CONTACTS, vendor=vendor), sentence
 
 

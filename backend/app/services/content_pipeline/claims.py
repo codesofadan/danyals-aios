@@ -309,7 +309,7 @@ def unknown_contact(sentence: str, allowed: frozenset[str]) -> str | None:
 # --------------------------------------------------------------------------- #
 
 #: An honest retraction must never be deleted. Before this existed the pass removed
-#: "Xegents has no published HIPAA audit or certification." - which does not just
+#: "Northwind has no published HIPAA audit or certification." - which does not just
 #: lose a sentence, it makes the page less true than the writer left it.
 _NEGATION = re.compile(
     r"""(?ix)

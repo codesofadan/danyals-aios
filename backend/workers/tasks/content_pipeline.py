@@ -757,7 +757,8 @@ def _allowed_contacts(nap: dict[str, Any] | None, row: dict[str, Any]) -> frozen
     page is treated as invented and removed. That check has no false positives worth
     the name and one very expensive failure mode: a page that reads perfectly and
     routes every lead it generates to an address nobody owns. Measured on a real run
-    - the drafts offered "hello@xegents.com", which does not exist.
+    - the drafts offered a "hello@" address on the client's own domain, and it
+    does not exist.
     """
     values: list[str] = []
     for key in ("phone", "email", "website", "site_url", "domain"):
