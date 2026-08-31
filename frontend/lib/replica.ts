@@ -5,6 +5,8 @@
 // The wire shapes mirror the backend contract EXACTLY — snake_case, no aliases.
 // ============================================================
 
+import type { SiteDesignProfile } from "@/lib/content";
+
 /** Every state a replica job can report. queued/running are worker-active; the
  * rest are terminal (the poll stops on them). */
 export type ReplicaStatus =
@@ -44,6 +46,10 @@ export type ReplicaJob = {
   sections: number | null;
   widgets: number | null;
   notes: string[];
+  /** The design the run MEASURED, in the content pipeline's profile shape. Null on a
+   *  run that predates the capture, or one that degraded before extracting a design —
+   *  the caller must fall back to measuring a site rather than build on a guess. */
+  design_profile: SiteDesignProfile | null;
 };
 
 /** Worker-owned in-flight states — the poll stays alive only while the job sits

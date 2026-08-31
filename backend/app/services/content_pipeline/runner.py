@@ -35,12 +35,32 @@ PAGE_STAGES: tuple[str, ...] = (
     "research",      # 4
     "outline",       # 5  - the uniqueness gate
     "draft",         # 6
+    "claims",        # 6b - delete uncited claims WHILE THE CITATIONS STILL EXIST
     "convert",       # 7
     "voice",         # 8
+    "grounding",     # 8b - cut figures no supplied fact supports
+    "images",        # 8c - the hero/section photos, after the text is final
     "title_meta",    # 9
     "schema_links",  # 10 - free
     "gate",          # 11
 )
+
+#: The sequence for a REVIEWER'S EDIT, which is not a redraft. The page already
+#: exists and the lead has read it; re-running research, outline and draft would
+#: throw away the page they commented on and replace it with a different one, at
+#: the cost of a full page. So: apply the instruction, then re-run only the checks
+#: that must see the change - voice, grounding, the meta that quotes the body, the
+#: schema built from it, and the gate that scores it.
+EDIT_STAGES: tuple[str, ...] = (
+    "guided_edit",
+    "claims",
+    "voice",
+    "grounding",
+    "title_meta",
+    "schema_links",
+    "gate",
+)
+
 
 # Stages whose degrade poisons everything after them. A page whose OUTLINE degraded has
 # no reliable structure to draft against, so continuing spends real money producing

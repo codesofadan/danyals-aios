@@ -234,3 +234,40 @@ def test_secret_never_appears_in_log(capsys: pytest.CaptureFixture[str]) -> None
     # even if someone logs the masked secret, the plaintext must never reach stdout
     get_logger("test.secret").info("boot", vault_key=str(s.vault_master_key))
     assert "SUPERSECRETVALUE" not in capsys.readouterr().out
+
+
+def test_the_operator_alert_inbox_has_no_default_recipient() -> None:
+    """It defaulted to a named individual's personal Gmail. On any deployment that
+    did not override it - a handover to another agency, most obviously - that
+    person would silently receive another company's client notifications.
+
+    `notify_admin` returns early on a blank address, so an unset value costs a
+    missed alert rather than a leak, and that is the far cheaper failure."""
+    from app.config import Settings
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.admin_notify_email == ""
+
+
+def test_no_personal_inbox_is_baked_into_any_default() -> None:
+    """Catches the CLASS, not just the address that shipped.
+
+    A free-mail address in a default is always someone's personal inbox, and a
+    default recipient is a recipient nobody chose. Deliberately narrow: a
+    placeholder domain (owner@local.aios) and the platform's own SENDING address
+    (noreply@mail.qanry.com) are both legitimate and must not trip this - a guard
+    that cries wolf on those gets deleted the first time it blocks a release."""
+    import re
+    from pathlib import Path
+
+    free_mail = ("gmail.", "googlemail.", "outlook.", "hotmail.", "yahoo.",
+                 "icloud.", "proton.me", "protonmail.", "aol.")
+    source = Path(__file__).resolve().parents[1] / "app" / "config.py"
+    offenders = [
+        f"{name} = {value}"
+        for name, value in re.findall(
+            r'^\s*(\w+):\s*str\s*=\s*"([^"]*@[^"]*)"', source.read_text(), re.M
+        )
+        if any(host in value.lower() for host in free_mail)
+    ]
+    assert offenders == [], f"a personal inbox is defaulted in config: {offenders}"

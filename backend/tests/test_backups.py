@@ -537,3 +537,212 @@ async def test_restore_ok_for_owner(
     assert resp.status_code == 200
     assert resp.json() == {"restored": True, "id": "snap-1"}
     assert service.restored == [("snap-1", "snap-1")]
+
+
+# --------------------------------------------------------------------------- #
+# The nightly backup TASK (workers/tasks/backups.py) - the pure core.
+#
+# Why these live in this file rather than a worker test file: the honesty rules they
+# pin (a failed dump is not a completed backup, a missing offsite copy is a degrade)
+# are decisions about the SERVICE's output, and the fakes for that service are here.
+# --------------------------------------------------------------------------- #
+from app.jobs.contract import validate_reason_code  # noqa: E402
+from workers.tasks.backups import execute_nightly_backup  # noqa: E402
+
+
+class FakeConfigReader:
+    """The one read the core makes before spending half an hour on a dump."""
+
+    def __init__(self, config: dict[str, Any] | None, *, raises: bool = False) -> None:
+        self._config = config
+        self._raises = raises
+
+    def get_config(self) -> dict[str, Any] | None:
+        if self._raises:
+            raise RuntimeError("connection refused")
+        return self._config
+
+
+class RecordingSnapshotRunner:
+    """Records how it was CALLED (the type/scope the ledger row gets) and returns a
+    caller-chosen row, so a failed dump can be exercised with no subprocess."""
+
+    def __init__(self, row: dict[str, Any] | None = None) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.row = row or {
+            "id": "snap-nightly", "status": "success", "size_bytes": 4096,
+            "offsite_synced": False,
+        }
+
+    def run_snapshot(self, *, snap_type: str, scope: str) -> dict[str, Any]:
+        self.calls.append((snap_type, scope))
+        return self.row
+
+
+def test_nightly_backup_does_not_report_success_when_pg_dump_produced_nothing() -> None:
+    """The service NEVER raises - a missing dump root, a missing pg_dump binary and a
+    non-zero exit all come back as a recorded row with status='failed'. Found by reading
+    run_snapshot: a task that only checked "did it throw" would report every one of those
+    nights as a completed backup, which is the exact fake-success this module removes."""
+    runner = RecordingSnapshotRunner(
+        {"id": "snap-x", "status": "failed", "size_bytes": 0, "offsite_synced": False}
+    )
+    verdict = execute_nightly_backup(
+        FakeConfigReader({"nightly_enabled": True}), runner, offsite_available=False
+    )
+    assert verdict["state"] == "failed"
+    assert verdict["error_type"] == "BackupSnapshotFailed"
+    assert "snap-x" in verdict["detail"]
+
+
+def test_nightly_backup_records_a_nightly_typed_row_not_a_manual_one() -> None:
+    """0026's snapshot_type enum is ('Nightly', 'Manual') and the ledger is the only
+    place the answer to "did last night's backup run" is written down. Found while
+    wiring the task: the service's snap_type is a plain str argument with no default, so
+    passing the router's 'Manual' would have made an automatic run indistinguishable
+    from a human's. Scope is 'Database' because nothing copies the files volume yet."""
+    runner = RecordingSnapshotRunner()
+    execute_nightly_backup(
+        FakeConfigReader({"nightly_enabled": True}), runner, offsite_available=False
+    )
+    assert runner.calls == [("Nightly", "Database")]
+
+
+def test_nightly_backup_is_blocked_and_takes_no_snapshot_when_the_toggle_is_off() -> None:
+    """`backup_config.nightly_enabled` is an operator switch the Backups panel exposes.
+    Found by reading the config panel: beat has no database, so the ONLY place the toggle
+    can be honoured is inside the task - and a task that ignored it would keep dumping
+    after the operator switched nightly backups off."""
+    runner = RecordingSnapshotRunner()
+    verdict = execute_nightly_backup(
+        FakeConfigReader({"nightly_enabled": False}), runner, offsite_available=True
+    )
+    assert verdict["state"] == "blocked"
+    assert verdict["reason_code"] == "nightly_backups_disabled"
+    assert runner.calls == [], "a disabled nightly must not spend half an hour on pg_dump"
+
+
+def test_nightly_backup_treats_an_unreadable_config_as_a_failure_not_as_disabled() -> None:
+    """The toggle read and the "should I run" decision are the same call, so the lazy
+    shape (`config = get_config() or {}` inside a bare try) turns a Postgres outage into
+    a silent skip - the platform would report nothing wrong on a night it took no
+    backup. Found by asking what the except branch should return."""
+    runner = RecordingSnapshotRunner()
+    verdict = execute_nightly_backup(
+        FakeConfigReader(None, raises=True), runner, offsite_available=False
+    )
+    assert verdict["state"] == "failed"
+    assert verdict["error_type"] == "RuntimeError"
+    assert runner.calls == []
+
+
+def test_nightly_backup_degrades_when_an_enabled_offsite_copy_did_not_happen() -> None:
+    """`BackupService._sync_offsite` returns False for BOTH "no B2 credentials" and "the
+    upload errored", and the local snapshot still records status='success'. Found by
+    reading _sync_offsite: reporting that night as completed would tell the operator the
+    offsite backup they switched on is happening when the only copy is on the box being
+    backed up. The two causes get different reason codes because they need different
+    fixes."""
+    row = {"id": "snap-o", "status": "success", "size_bytes": 99, "offsite_synced": False}
+    config = {"nightly_enabled": True, "offsite_enabled": True}
+
+    keyless = execute_nightly_backup(
+        FakeConfigReader(config), RecordingSnapshotRunner(row), offsite_available=False
+    )
+    assert keyless["state"] == "degraded"
+    assert keyless["reason_code"] == "offsite_not_configured"
+    assert "Backblaze B2 credentials" in keyless["reason"]
+
+    upload_failed = execute_nightly_backup(
+        FakeConfigReader(config), RecordingSnapshotRunner(row), offsite_available=True
+    )
+    assert upload_failed["state"] == "degraded"
+    assert upload_failed["reason_code"] == "offsite_upload_failed"
+
+    # A degraded JobOutcome validates its reason_code at construction, so a code the
+    # regex rejects would crash the task at the worker rather than at import.
+    for verdict in (keyless, upload_failed):
+        assert validate_reason_code(str(verdict["reason_code"]))
+
+
+def test_nightly_backup_completes_only_on_a_real_snapshot() -> None:
+    runner = RecordingSnapshotRunner(
+        {"id": "snap-ok", "status": "success", "size_bytes": 2048, "offsite_synced": True}
+    )
+    verdict = execute_nightly_backup(
+        FakeConfigReader({"nightly_enabled": True, "offsite_enabled": True}),
+        runner,
+        offsite_available=True,
+    )
+    assert verdict["state"] == "completed"
+    assert verdict["snapshot_id"] == "snap-ok"
+    assert verdict["size_bytes"] == 2048
+    assert "reason_code" not in verdict  # a completed outcome takes no caveat
+
+
+def test_nightly_backup_heartbeat_ledger_failure_does_not_fail_a_real_backup() -> None:
+    """The scheduled_job_runs row only feeds the Reports panel's last-run column; the
+    snapshot ledger is the authoritative record. Found by asking what happens if the
+    heartbeat insert raises after a 20-minute dump that actually succeeded."""
+
+    class ExplodingRecorder:
+        def record_run(self, *, job_name: str, task: str, status: str, detail: str) -> str:
+            raise RuntimeError("ledger unavailable")
+
+    verdict = execute_nightly_backup(
+        FakeConfigReader({"nightly_enabled": True}),
+        RecordingSnapshotRunner(),
+        offsite_available=False,
+        recorder=ExplodingRecorder(),
+    )
+    assert verdict["state"] == "completed"
+
+
+# --------------------------------------------------------------------------- #
+# The manual door for the stuck-run reaper (cron is parked, so this is the only
+# thing that calls it).
+# --------------------------------------------------------------------------- #
+from app.routers.backups import get_job_reaper  # noqa: E402
+
+
+@pytest.fixture
+def wire_reaper(app: FastAPI, wire: Callable[..., None]) -> Callable[..., None]:
+    def _install(result: dict[str, Any], role: str = "owner") -> None:
+        app.dependency_overrides[get_job_reaper] = lambda: lambda: result
+        wire(role, f"u-{role}")
+
+    return _install
+
+
+async def test_reap_endpoint_is_owner_only_because_it_marks_live_runs_failed(
+    client: httpx.AsyncClient, wire_reaper: Callable[..., None]
+) -> None:
+    """The sweep writes status='failed' onto rows in the live job ledger. Admin is enough
+    to RUN a backup here; it is not enough to declare other people's jobs dead."""
+    wire_reaper({"status": "ok", "reaped": 0, "detail": "no stale runs"}, role="admin")
+    resp = await client.post("/api/v1/maintenance/reap-stuck-jobs")
+    assert resp.status_code == 403
+
+
+async def test_reap_endpoint_returns_the_real_reaped_count(
+    client: httpx.AsyncClient, wire_reaper: Callable[..., None]
+) -> None:
+    wire_reaper({"status": "degraded", "reaped": 3, "detail": "reaped audit.runx3"})
+    resp = await client.post("/api/v1/maintenance/reap-stuck-jobs")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "degraded", "reaped": 3, "detail": "reaped audit.runx3"}
+
+
+async def test_reap_endpoint_503s_instead_of_reporting_zero_reaped_when_the_ledger_is_down(
+    client: httpx.AsyncClient, wire_reaper: Callable[..., None]
+) -> None:
+    """`execute_reap` swallows its own exception and returns {"status": "error",
+    "reaped": 0}. Found by reading it: forwarding that body with a 200 would show an
+    operator "reaped 0" - indistinguishable from a healthy queue - on exactly the run
+    where the sweep could not look at all."""
+    wire_reaper({"status": "error", "reaped": 0, "detail": "OperationalError"})
+    resp = await client.post("/api/v1/maintenance/reap-stuck-jobs")
+    assert resp.status_code == 503
+    # The platform's error envelope (app/core/errors.py) carries the raiser's detail as
+    # `message`; the point is that the CAUSE reaches the operator, not a bare 503.
+    assert "OperationalError" in resp.json()["error"]["message"]

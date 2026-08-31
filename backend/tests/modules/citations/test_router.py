@@ -41,6 +41,25 @@ def _profile_row(**over: Any) -> dict[str, Any]:
     return row
 
 
+
+def _profile_body(**over: Any) -> dict[str, Any]:
+    """A COMPLETE profile PATCH body.
+
+    `BusinessProfileRequest` defaults every field, so `model_dump()` always yields the
+    full object - a PATCH that omits `addressLine1` genuinely asks for it to be blanked.
+    Tests that mean "change one field" must therefore send the rest unchanged, exactly as
+    the UI form does."""
+    body: dict[str, Any] = {
+        "clientId": "cl-secret", "label": "Primary", "businessName": "Acme Dental",
+        "addressLine1": "123 Main St", "addressLine2": "", "city": "Bellevue",
+        "region": "WA", "postalCode": "98004", "market": "US", "phone": "555-0100",
+        "websiteUrl": "https://acme.example", "categories": ["dentist"],
+        "isPrimary": True,
+    }
+    body.update(over)
+    return body
+
+
 def _directory_row(**over: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": "d-1", "name": "Brownbook", "url": "brownbook.net", "market": "US",
@@ -67,6 +86,10 @@ class FakeCitationsRepo:
         self.requeued: list[str] = []
         self.client_naps: dict[str, dict[str, Any]] = {}
         self.citations: dict[str, list[dict[str, Any]]] = {}
+        # 0107 NAP fan-out: citations keyed by the PROFILE they were built from,
+        # plus a record of every change event + flag the router produced.
+        self.profile_citations: dict[str, list[dict[str, Any]]] = {}
+        self.nap_changes: list[dict[str, Any]] = []
         self._next_id = 1
 
     def client_business_profile_for(self, client_id: str) -> dict[str, Any] | None:
@@ -81,6 +104,27 @@ class FakeCitationsRepo:
 
     def get_business_profile(self, profile_id: str) -> dict[str, Any] | None:
         return self.profiles.get(profile_id)
+
+    def citations_for_profile(self, profile_id: str) -> list[dict[str, Any]]:
+        return list(self.profile_citations.get(profile_id, []))
+
+    def record_nap_change(
+        self,
+        *,
+        client_id: str,
+        profile_id: str,
+        events: list[dict[str, str]],
+        citation_ids: list[str],
+    ) -> int:
+        self.nap_changes.append(
+            {
+                "client_id": client_id,
+                "profile_id": profile_id,
+                "events": events,
+                "citation_ids": citation_ids,
+            }
+        )
+        return len(citation_ids)
 
     def ensure_business_profile(
         self, *, client_id: str, client_name: str
@@ -615,3 +659,81 @@ async def test_audit_plan_unknown_client_404(
     wire("viewer")
     resp = await client.get("/api/v1/citation-builder/clients/nope/audit-plan")
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# 0107: editing the canonical NAP flags the listings it made stale.
+# --------------------------------------------------------------------------- #
+async def test_editing_the_canonical_nap_flags_the_live_listings_built_from_it(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    """The edit and the fan-out are ONE action.
+
+    Before this, editing a profile silently re-pointed canonical while every listing
+    already built kept carrying the old address. They do not go wrong gradually - they
+    are wrong the moment Save is pressed."""
+    repo.profiles["bp-1"] = _profile_row()
+    repo.profile_citations["bp-1"] = [
+        {"id": "c-live", "directory": "Brownbook", "submit_status": "live"},
+        {"id": "c-drift", "directory": "Hotfrog", "submit_status": "drifted"},
+        {"id": "c-sent", "directory": "Cylex", "submit_status": "submitted"},
+        {"id": "c-none", "directory": "n49", "submit_status": "not_started"},
+    ]
+    wire("owner")
+
+    resp = await client.patch(
+        "/api/v1/citation-builder/business-profiles/bp-1",
+        json=_profile_body(addressLine1="12 Marine Parade"),
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert len(repo.nap_changes) == 1
+    change = repo.nap_changes[0]
+    assert change["profile_id"] == "bp-1"
+    assert change["events"] == [
+        {
+            "field": "address_line1",
+            "old_value": "123 Main St",
+            "new_value": "12 Marine Parade",
+        }
+    ]
+    # Only listings we believe EXIST. A `submitted` row has nothing confirmed to
+    # correct, and a never-started row was never built.
+    assert set(change["citation_ids"]) == {"c-live", "c-drift"}
+
+
+async def test_a_cosmetic_profile_edit_flags_nothing(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    """A listing asserts a name, address, phone and website - not our internal
+    description. Flagging every citation over a copy tweak would train operators to
+    ignore the flag, which is the same as not having one."""
+    repo.profiles["bp-1"] = _profile_row(description="A dental practice.")
+    repo.profile_citations["bp-1"] = [
+        {"id": "c-live", "directory": "Brownbook", "submit_status": "live"}
+    ]
+    wire("owner")
+
+    resp = await client.patch(
+        "/api/v1/citation-builder/business-profiles/bp-1",
+        json=_profile_body(description="Now with more dentists."),
+    )
+    assert resp.status_code == 200, resp.text
+    assert repo.nap_changes == []
+
+
+async def test_a_nap_edit_on_a_client_with_no_listings_is_a_clean_noop(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+) -> None:
+    """Zero flagged is a legitimate answer, not an error - and the change is still
+    recorded, so "we moved them in March" stays answerable later."""
+    repo.profiles["bp-1"] = _profile_row()
+    wire("owner")
+
+    resp = await client.patch(
+        "/api/v1/citation-builder/business-profiles/bp-1",
+        json=_profile_body(phone="555-0999"),
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(repo.nap_changes) == 1
+    assert repo.nap_changes[0]["citation_ids"] == []

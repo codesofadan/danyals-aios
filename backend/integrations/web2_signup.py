@@ -214,6 +214,10 @@ class SignupContext:
     mailbox: MailboxLike | None = None
     http: HttpJson | None = None
     page: Any = None
+    #: The captcha solver, injected like every other seam so the flow fakes offline.
+    #: None is a legitimate state: the signup then submits without a token and fails
+    #: honestly as "form not accepted" rather than crashing.
+    captcha: Any = None
     verify_timeout_s: int = 120
     clock: Callable[[], datetime] = _default_clock
 
@@ -339,6 +343,35 @@ class WriteFreelySignupProvider:
 # Browser provider (Playwright, spec-driven) -- mirrors citation account-creation.
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
+class Step:
+    """One action in a signup form.
+
+    The original spec could only express "type this text into that selector", which is
+    not what real signup forms are. MEASURED on Dreamwidth's live form (2026-08-29): it
+    needs a username, an email, TWO password fields, a birth year as text, a birth month
+    and day as SELECTS, a required terms CHECKBOX, and it carries hCaptcha. None of that
+    is expressible as a (selector, value) pair, so a spec written in the old model could
+    not have completed a single real signup.
+
+    ``kind``:
+      * ``fill``    - type into a field, at human cadence
+      * ``check``   - tick a checkbox (skipped if already ticked)
+      * ``select``  - choose an option by value
+      * ``click``   - press something that is not the final submit
+      * ``captcha`` - solve the challenge on the page and inject the token
+      * ``wait``    - pause (ms in ``value``) for a step that reveals the next field
+
+    ``value`` is a ctx key (``email``/``username``/``password``/``business_name``), a
+    ``literal:...`` constant, or empty where the kind needs no value.
+    """
+
+    kind: str
+    selector: str = ""
+    value: str = ""
+    optional: bool = False
+
+
+@dataclass(frozen=True)
 class BrowserSignupSpec:
     """A per-platform browser-signup recipe (selectors + verify contract). ``fields``
     is a sequence of ``(selector, value_key)`` where ``value_key`` is one of
@@ -355,6 +388,20 @@ class BrowserSignupSpec:
     credential_keys: tuple[str, ...]
     subject_contains: tuple[str, ...] = ()
     verify_link_pattern: str = ""
+    #: The richer form. When present it REPLACES ``fields`` - kept side by side rather
+    #: than migrated so the one existing spec keeps working untouched.
+    steps: tuple[Step, ...] = ()
+    #: Captcha on the page, if any: ("hcaptcha"|"recaptcha_v2"|"turnstile", site-key
+    #: selector/attr). Empty means the form has none.
+    captcha_kind: str = ""
+    captcha_sitekey_selector: str = ""
+    captcha_response_selector: str = ""
+
+    def plan(self) -> tuple[Step, ...]:
+        """The steps to run: the rich form if given, else the legacy field list."""
+        if self.steps:
+            return self.steps
+        return tuple(Step("fill", sel, key) for sel, key in self.fields)
 
 
 _NAV_TIMEOUT_MS = 30_000
@@ -387,6 +434,90 @@ def _check_indicator(page: Any, indicator: str) -> bool:
         return False
 
 
+def _run_steps(page: Any, spec: BrowserSignupSpec, ctx: SignupContext) -> None:
+    """Execute a spec's steps against the page.
+
+    Typing goes through ``page.type`` with a per-character delay rather than ``fill``:
+    ``fill`` sets the value in one assignment, which is a behavioural tell no fingerprint
+    masking can hide, and several of these forms validate on keystroke events that a bulk
+    set never fires.
+
+    A step marked ``optional`` that fails is skipped rather than fatal - a consent
+    checkbox that is absent for some locales must not abort an otherwise-good signup -
+    while a required step raising propagates to the provider's degrade path.
+    """
+    for step in spec.plan():
+        try:
+            if step.kind == "wait":
+                page.wait_for_timeout(int(step.value or 500))
+                continue
+            if step.kind == "captcha":
+                _solve_captcha(page, spec, ctx)
+                continue
+            if step.kind == "check":
+                if not page.is_checked(step.selector):
+                    page.check(step.selector, timeout=_FILL_TIMEOUT_MS)
+                continue
+            if step.kind == "select":
+                page.select_option(step.selector, _resolve_value(step.value, ctx),
+                                   timeout=_FILL_TIMEOUT_MS)
+                continue
+            if step.kind == "click":
+                page.click(step.selector, timeout=_FILL_TIMEOUT_MS)
+                continue
+            # fill
+            value = _resolve_value(step.value, ctx)
+            if not value:
+                continue
+            # `type` focuses the element itself, so no explicit click: an extra click
+            # adds nothing human (the keystrokes are the tell that matters) and can trip
+            # overlays, while leaving the click list meaning "submit + deliberate clicks".
+            page.type(step.selector, value, delay=_rand_type_delay())
+        except Exception:
+            if step.optional:
+                logger.debug("signup_optional_step_skipped", kind=step.kind, sel=step.selector[:40])
+                continue
+            raise
+
+
+def _rand_type_delay() -> int:
+    """Per-character delay in ms. A constant delay is as detectable as none."""
+    import random
+
+    return random.randint(45, 155)
+
+
+def _solve_captcha(page: Any, spec: BrowserSignupSpec, ctx: SignupContext) -> None:
+    """Solve the page's challenge and inject the token.
+
+    Degrades rather than raises when no solver is configured: the submit will simply be
+    rejected, which surfaces as "form not accepted" - an honest failure - instead of a
+    crash that looks like a selector bug.
+    """
+    solver = ctx.captcha
+    if solver is None or not spec.captcha_kind:
+        logger.info("signup_captcha_unsolved", platform=spec.platform, kind=spec.captcha_kind)
+        return
+    sitekey = ""
+    if spec.captcha_sitekey_selector:
+        try:
+            sitekey = page.get_attribute(spec.captcha_sitekey_selector, "data-sitekey") or ""
+        except Exception:
+            sitekey = ""
+    if not sitekey:
+        logger.info("signup_captcha_no_sitekey", platform=spec.platform)
+        return
+    token = solver.solve(kind=spec.captcha_kind, site_key=sitekey, page_url=spec.signup_url)
+    if not token:
+        return
+    target = spec.captcha_response_selector or "textarea[name='h-captcha-response']"
+    page.evaluate(
+        "([sel, tok]) => { const el = document.querySelector(sel);"
+        " if (el) { el.value = tok; el.dispatchEvent(new Event('change', {bubbles: true})); } }",
+        [target, token],
+    )
+
+
 class BrowserSignupProvider:
     """Drive an injected Playwright ``page`` through a :class:`BrowserSignupSpec` to
     create + verify a house account, then build the sealed credential from the ctx
@@ -417,10 +548,7 @@ class BrowserSignupProvider:
     def _run(self, page: Any, ctx: SignupContext, since: datetime) -> Web2SignupResult:
         spec = self.spec
         page.goto(spec.signup_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
-        for selector, value_key in spec.fields:
-            value = _resolve_value(value_key, ctx)
-            if value:
-                page.fill(selector, value, timeout=_FILL_TIMEOUT_MS)
+        _run_steps(page, spec, ctx)
         page.click(spec.submit_selector)
         page.wait_for_timeout(2000)
         if not _check_indicator(page, spec.success_indicator):

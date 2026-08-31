@@ -95,13 +95,41 @@ class _FakePage:
         self._content = content
         self.gotos: list[str] = []
         self.filled: list[tuple[str, str]] = []
+        self.typed: list[tuple[str, str, int]] = []
+        self.checked: list[str] = []
+        self.selected: list[tuple[str, str]] = []
+        self.evaluated: list[Any] = []
         self.clicked: list[str] = []
+        self.sitekey: str | None = None
 
     def goto(self, url: str, **_: Any) -> None:
         self.gotos.append(url)
 
     def fill(self, selector: str, value: str, **_: Any) -> None:
         self.filled.append((selector, value))
+
+    def type(self, selector: str, value: str, **kw: Any) -> None:
+        """Typing replaced `fill` in the executor: `fill` sets a value in one assignment,
+        which is a behavioural tell, and several real forms validate on keystroke events
+        a bulk set never fires. The per-character delay is recorded so a regression to a
+        constant (or absent) cadence is visible."""
+        self.filled.append((selector, value))
+        self.typed.append((selector, value, int(kw.get("delay") or 0)))
+
+    def check(self, selector: str, **_: Any) -> None:
+        self.checked.append(selector)
+
+    def is_checked(self, _selector: str) -> bool:
+        return False
+
+    def select_option(self, selector: str, value: str, **_: Any) -> None:
+        self.selected.append((selector, value))
+
+    def get_attribute(self, _selector: str, _name: str) -> str | None:
+        return self.sitekey
+
+    def evaluate(self, _script: str, arg: Any = None) -> None:
+        self.evaluated.append(arg)
 
     def click(self, selector: str, **_: Any) -> None:
         self.clicked.append(selector)

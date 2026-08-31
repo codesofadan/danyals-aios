@@ -88,7 +88,9 @@ export default function Web2CampaignBoard({ clientId }: { clientId?: string }) {
                     <b>{c.published}</b> of {c.total}
                   </td>
                   <td>{c.platforms.length}</td>
-                  <td>{c.pacing === "drip" ? "Drip" : "Fast"}</td>
+                  {/* Historical only: new campaigns publish automatically, so this
+                      just records how an older one was created. */}
+                  <td className="op-muted">{c.pacing === "drip" ? "Drip (legacy)" : "Auto"}</td>
                   <td>{c.nextPublish ? new Date(c.nextPublish).toLocaleDateString() : "—"}</td>
                   <td>{money(c.spentUsd)}</td>
                   <td>

@@ -57,8 +57,9 @@ export default function LoginForm() {
         <div className="login-brand">
           <div className="logo" />
           <div>
+            {/* See Sidebar.tsx: the subtitle was the builder's agency name and
+                became a duplicate of the product name when that was stripped. */}
             <div className="login-brand-n">AIOS</div>
-            <div className="login-brand-s">AIOS</div>
           </div>
         </div>
 

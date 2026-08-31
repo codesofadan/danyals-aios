@@ -22,11 +22,10 @@ AI-bot robots directives). Per-page checks live here.
 from __future__ import annotations
 
 import re
-from typing import Iterable
 
 from audit_engine.analyzers.common import Verdict, status_from_score
+from audit_engine.analyzers.registry import check
 from audit_engine.parsers.html import ParsedHTML
-
 
 # ----- Shared helpers --------------------------------------------------------
 
@@ -61,6 +60,7 @@ def _first_paragraph_words(p: ParsedHTML) -> int:
 
 # ----- ON-049 Direct answer paragraph (40-60 words near top) ---------------
 
+@check("ON-049", scope="page")
 def check_direct_answer_paragraph(p: ParsedHTML) -> Verdict:
     """ON-049 - First paragraph should answer the page's central question in
     ~40-80 words. Too short = LLM has nothing to lift. Too long = answer is
@@ -100,6 +100,7 @@ def check_direct_answer_paragraph(p: ParsedHTML) -> Verdict:
 
 # ----- ON-048 AI Overview fitness (question H2s + answer-bearing intro) ----
 
+@check("ON-048", scope="page")
 def check_ai_overview_fitness(p: ParsedHTML) -> Verdict:
     """ON-048 - AI Overview fitness rolls up: question-style H2/H3 ratio,
     first-paragraph length, presence of a named entity (title/H1 overlap).
@@ -143,6 +144,7 @@ def check_ai_overview_fitness(p: ParsedHTML) -> Verdict:
 
 # ----- ON-100 Structured content analysis ----------------------------------
 
+@check("ON-100", scope="page")
 def check_structured_content(p: ParsedHTML) -> Verdict:
     """ON-100 - Pages cited by AI tend to mix paragraphs + lists + tables +
     semantic sections. Flat walls of <p> rarely get cited as passages.
@@ -184,6 +186,7 @@ def check_structured_content(p: ParsedHTML) -> Verdict:
 
 # ----- ON-101 Table optimization for snippets ------------------------------
 
+@check("ON-101", scope="page")
 def check_table_snippet_fitness(p: ParsedHTML) -> Verdict:
     """ON-101 - tables only earn snippet/AI citations when they use proper
     <table>/<th>. Tables faked from <div>s do not. Parser only counts real
@@ -213,6 +216,7 @@ def check_table_snippet_fitness(p: ParsedHTML) -> Verdict:
 
 # ----- ON-102 List optimization for snippets -------------------------------
 
+@check("ON-102", scope="page")
 def check_list_snippet_fitness(p: ParsedHTML) -> Verdict:
     """ON-102 - bulleted / numbered lists are the most-cited passage type
     after direct-answer paragraphs. Pages with 2+ semantic lists are favored.
@@ -240,6 +244,7 @@ def check_list_snippet_fitness(p: ParsedHTML) -> Verdict:
 
 # ----- ON-103 Content extraction fitness for AI ----------------------------
 
+@check("ON-103", scope="page")
 def check_extraction_fitness(p: ParsedHTML) -> Verdict:
     """ON-103 - Can a crawler extract clean, fact-bearing prose from this
     page? Penalize: tiny body, no schema, body-text-to-HTML ratio low.
@@ -286,6 +291,7 @@ def check_extraction_fitness(p: ParsedHTML) -> Verdict:
 
 # ----- ON-104 LLM readability ---------------------------------------------
 
+@check("ON-104", scope="page")
 def check_llm_readability(p: ParsedHTML) -> Verdict:
     """ON-104 - Short sentences (12-22 words avg) read cleanly in AI
     summaries. Walls of 35+ word sentences truncate badly.
@@ -324,6 +330,7 @@ def check_llm_readability(p: ParsedHTML) -> Verdict:
 
 # ----- ON-105 Generative search fitness (passage citability) ---------------
 
+@check("ON-105", scope="page")
 def check_generative_search_fitness(p: ParsedHTML) -> Verdict:
     """ON-105 - Self-contained passages: each H2 section should make sense
     lifted out of context. Heuristic: H2 count, avg words per section, lists
@@ -375,6 +382,7 @@ def check_generative_search_fitness(p: ParsedHTML) -> Verdict:
 
 # ----- ON-107 Semantic HTML structure --------------------------------------
 
+@check("ON-107", scope="page")
 def check_semantic_html_structure(p: ParsedHTML) -> Verdict:
     """ON-107 - Modern AI crawlers prefer pages that use semantic landmarks
     (<main>, <article>, <section>, <nav>, <header>, <footer>). Pages built
@@ -434,19 +442,3 @@ except ImportError:  # pragma: no cover - circular import safety
 
 
 # ----- Aggregator ----------------------------------------------------------
-
-def iter_per_page_ai_search(p: ParsedHTML) -> Iterable[tuple[str, str, Verdict]]:
-    """Yield (check_id, owner, verdict) for every AI-search per-page check.
-
-    Owner is always A5 (GEO/AI Search analyst). These run for EVERY parsed
-    page so the AI-search section of the report is never empty.
-    """
-    yield ("ON-049", "A5", check_direct_answer_paragraph(p))
-    yield ("ON-048", "A5", check_ai_overview_fitness(p))
-    yield ("ON-100", "A5", check_structured_content(p))
-    yield ("ON-101", "A5", check_table_snippet_fitness(p))
-    yield ("ON-102", "A5", check_list_snippet_fitness(p))
-    yield ("ON-103", "A5", check_extraction_fitness(p))
-    yield ("ON-104", "A5", check_llm_readability(p))
-    yield ("ON-105", "A5", check_generative_search_fitness(p))
-    yield ("ON-107", "A5", check_semantic_html_structure(p))

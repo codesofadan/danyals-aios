@@ -193,3 +193,45 @@ def test_generate_empty_data_raises() -> None:
 def test_constructing_without_key_is_unconfigured() -> None:
     with pytest.raises(ProviderNotConfiguredError):
         OpenAIImageGenerator(api_key="")
+
+
+# --------------------------------------------------------------------------- #
+# The doubled route prefix.
+#
+# MEASURED on a real deploy, 2026-08-30: every generated page embedded
+# ``http://host:8000/api/v1/api/v1/public/content-images/<sha>.png``, which 404s,
+# because PUBLIC_FILE_BASE_URL had been set to the API base *including* /api/v1
+# while CONTENT_IMAGE_ROUTE already carries it.
+#
+# The reason this is worth a guard rather than a docs note is where it surfaces.
+# The bytes host correctly (the single-slash URL returns 200), the stage reports
+# success, the cost is real and the page passes QA - so nothing in the platform
+# knows. It is discovered as a missing image on the client's live page.
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("base", [
+    "http://host:8000/api/v1",      # the exact value that shipped the 404
+    "http://host:8000/api/v1/",     # ...with a trailing slash
+    "http://host:8000/api",         # a partial overlap
+    "http://host:8000",             # the documented, correct form
+])
+def test_a_base_url_that_repeats_the_route_still_mints_a_working_url(base: str) -> None:
+    store = LocalContentImageStore("/tmp/unused", base_url=base)
+    url = f"{store._base_url}{store._route}"
+    assert url == "http://host:8000/api/v1/public/content-images"
+    assert "/api/v1/api/v1/" not in url
+
+
+def test_a_blank_base_url_stays_relative() -> None:
+    # Same-origin dashboard preview depends on this; it is not an error case.
+    store = LocalContentImageStore("/tmp/unused", base_url="")
+    assert f"{store._base_url}{store._route}" == "/api/v1/public/content-images"
+
+
+def test_an_unrelated_path_on_the_base_url_is_preserved() -> None:
+    # Only an overlap with the ROUTE is trimmed. A host served under its own
+    # sub-path keeps that sub-path, or every such deploy breaks instead.
+    store = LocalContentImageStore("/tmp/unused", base_url="https://cdn.example.com/files")
+    assert f"{store._base_url}{store._route}" == (
+        "https://cdn.example.com/files/api/v1/public/content-images"
+    )

@@ -25,6 +25,7 @@ const CLIENT = {
 } as unknown as ClientRecord;
 
 const saveMutate = vi.fn();
+const revealMutate = vi.fn();
 let grants: Record<string, string[]> = { c1: [] };
 let grantsLoading = false;
 
@@ -35,10 +36,16 @@ vi.mock("@/lib/hooks/clients", () => ({
   useDeleteClient: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useAllReportGrants: () => ({ grants, isLoading: grantsLoading, isError: false }),
   useSaveGrants: () => ({ mutate: saveMutate, isPending: false, error: null }),
+  // The "Show login" cell's hooks. Nothing here fires until the operator clicks,
+  // so an inert mutate is enough for the directory's own tests.
+  useRevealPortalCredentials: () => ({ mutate: revealMutate, isPending: false, error: null }),
+  useSetPortalPassword: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useProvisionPortalLogin: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }));
 
 beforeEach(() => {
   saveMutate.mockClear();
+  revealMutate.mockClear();
   grants = { c1: [] };
   grantsLoading = false;
 });
@@ -81,5 +88,31 @@ describe("client report access", () => {
     grantsLoading = true;
     render(<ToastProvider><ClientDirectory /></ToastProvider>);
     expect(screen.getByTitle(/Choose which reports/i)).toBeDisabled();
+  });
+});
+
+// --- Portal logins ---------------------------------------------------------
+// QA: clients could not sign in, and there was no way for an admin to look up
+// an existing client's credentials. Both defects were invisible from this screen:
+// a failed provision produced a dismissible warning naming a repair screen that
+// does not exist, and the password was believed unrecoverable when it was not.
+
+describe("client portal logins", () => {
+  it("offers Show login on every client row", () => {
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
+    expect(screen.getByTitle(/Show Bellevue Dental's portal login/i)).toBeInTheDocument();
+  });
+
+  it("does not reveal anything until the operator asks", () => {
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
+    // The reveal is a click-per-row, never a page-load fetch: the directory must
+    // not hold a table of plaintext passwords nobody asked for.
+    expect(revealMutate).not.toHaveBeenCalled();
+  });
+
+  it("fetches the credentials only once Show login is clicked", async () => {
+    render(<ToastProvider><ClientDirectory /></ToastProvider>);
+    await userEvent.click(screen.getByTitle(/Show Bellevue Dental's portal login/i));
+    expect(revealMutate).toHaveBeenCalledWith("c1", expect.anything());
   });
 });

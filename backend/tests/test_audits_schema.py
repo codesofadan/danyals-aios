@@ -54,6 +54,11 @@ def test_response_matches_auditrow_shape() -> None:
         # at creation and readable nowhere, so exposure could not be reviewed or
         # revoked. PATCH /audits/{id}/visibility is the other half.
         "visibleToClient",
+        # Whether a client is attached at all. An audit may legitimately have
+        # none - an internal or prospect run - and the UI needs that fact itself
+        # rather than inferring it from an empty `client` name, which is the
+        # client's NAME and not the same question.
+        "hasClient",
     }
     assert body["client"] == "NorthPeak Dental"
     assert body["tier"] == "Paid"  # stored 'paid' -> surfaced 'Paid'

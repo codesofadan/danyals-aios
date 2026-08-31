@@ -1,0 +1,5 @@
+# Build output. `dist/` is what you load into Chrome, and it is reproduced by
+# `npm run build` — committing it would mean reviewing minified diffs and would let the
+# loaded extension drift from the source that supposedly produced it.
+dist/
+node_modules/

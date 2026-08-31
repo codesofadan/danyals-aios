@@ -17,6 +17,8 @@ import { useToast, describeError } from "@/components/ui/Toast";
 import AddClientWizard from "./AddClientWizard";
 import EditClientModal from "./EditClientModal";
 import ClientAccessEditor from "./ClientAccessEditor";
+import ClientCredentialCell from "./ClientCredentialCell";
+import CopyButton from "@/components/CopyButton";
 
 // Centred muted state message (loading / error / empty), self-styled so it never
 // depends on a class that might not exist.
@@ -53,6 +55,10 @@ export default function ClientDirectory() {
   const [infoEditId, setInfoEditId] = useState<string | null>(null);
   const [accessId, setAccessId] = useState<string | null>(null);
   const [portalWarning, setPortalWarning] = useState<string | null>(null);
+  // The credentials the SERVER accepted, shown once creation has actually happened.
+  // The wizard used to print a locally generated pair before the login was
+  // provisioned, so an operator could copy and send a password that was never stored.
+  const [newLogin, setNewLogin] = useState<{ cn: string; username: string; password: string } | null>(null);
 
   // Which reports each client may see. Read for the whole table so the count is
   // visible per row: before this screen existed, EVERY client sat at 0 and nothing
@@ -97,6 +103,11 @@ export default function ClientDirectory() {
         // returned a portalWarning and this callback ignored it, so the operator saw
         // an unqualified success for an account nobody could sign in to.
         setPortalWarning(created.portalWarning ?? null);
+        setNewLogin(
+          created.portalLogin
+            ? { cn: created.cn, username: created.portalLogin.username, password: created.portalLogin.password }
+            : null,
+        );
       },
     });
   }
@@ -129,6 +140,33 @@ export default function ClientDirectory() {
         <div className="login-error" role="alert">
           <span className="material-symbols-rounded">error</span>
           Couldn&apos;t create the client — {createClient.error.message}
+        </div>
+      )}
+      {newLogin && (
+        <div className="wiz-creds" role="status" style={{ margin: "0 0 var(--s-5)" }}>
+          <div className="wiz-creds-h">
+            <span className="material-symbols-rounded">key</span>
+            <div>
+              <div className="wiz-creds-t">{newLogin.cn} &mdash; portal login created</div>
+              <div className="wiz-creds-s">
+                Send these to the client. They are stored, not just shown: you can read
+                them back any time from <b>Show login</b> on the client&apos;s row.
+              </div>
+            </div>
+          </div>
+          <div className="wiz-cred-row">
+            <span className="wiz-cred-k">Username</span>
+            <code className="wiz-cred-v">{newLogin.username}</code>
+            <CopyButton value={newLogin.username} label="portal username" />
+          </div>
+          <div className="wiz-cred-row">
+            <span className="wiz-cred-k">Password</span>
+            <code className="wiz-cred-v">{newLogin.password}</code>
+            <CopyButton value={newLogin.password} label="portal password" />
+          </div>
+          <div className="modal-f" style={{ marginTop: "var(--s-4)" }}>
+            <button type="button" className="ghostbtn" onClick={() => setNewLogin(null)}>Done</button>
+          </div>
         </div>
       )}
       {portalWarning && (
@@ -212,6 +250,7 @@ export default function ClientDirectory() {
                           Reports
                           <span className="cd-grantcount">{(grantsQ.grants[c.id] ?? []).length}</span>
                         </button>
+                        <ClientCredentialCell client={c} />
                         <button
                           className="cd-manage danger"
                           onClick={() => handleDeleteClient(c.id, c.cn)}

@@ -1,9 +1,39 @@
-# AIOS backend - Caddy reverse proxy with automatic TLS.
+# AIOS - Caddy reverse proxy with automatic TLS.
 #
-# Caddy terminates HTTPS (Let's Encrypt / ZeroSSL, auto-obtained + auto-renewed)
-# and reverse-proxies public 443 traffic to the loopback-only uvicorn (aios-api on
-# 127.0.0.1:8000). It is the ONLY process facing the network - Postgres, Redis, and
-# the API itself all bind localhost.
+# TWO public hosts, because the platform is two processes:
+#
+#   app.example.com  -> 127.0.0.1:3000  aios-web  (Next.js dashboard - what people use)
+#   api.example.com  -> 127.0.0.1:8000  aios-api  (FastAPI - JSON + file downloads)
+#
+# This file used to publish only the API. That was not a missing nicety: an agency
+# that followed README-deploy.md end to end got a working backend and NO WAY TO LOG
+# IN, because nothing served the dashboard. The `app.example.com` block below is the
+# other half.
+#
+# Caddy terminates HTTPS (Let's Encrypt / ZeroSSL, auto-obtained + auto-renewed) and
+# is the ONLY process facing the network - Postgres, Redis, uvicorn and the Next
+# server all bind loopback.
+#
+# --- The topology this file COMMITS TO (next.config.mjs asks for a decision) ---
+# The browser talks to ONE origin: the dashboard. Its API calls go to the RELATIVE
+# `/api/v1/*`, which the Next server rewrite-proxies to 127.0.0.1:8000 in-process
+# (frontend/next.config.mjs; NEXT_PUBLIC_API_BASE_URL stays BLANK to keep that
+# default). Consequences, all of them deliberate:
+#   * no CORS preflight and no cross-origin cookie/token questions at all;
+#   * the app's own CSP (`connect-src 'self'`, emitted by Next) stays TRUE, so it
+#     does not have to be widened to admit the API origin;
+#   * api.example.com is still published, because it is a real, separately useful
+#     surface - direct API access, and the fast path for multi-MB file downloads
+#     (see NEXT_PUBLIC_FILE_BASE_URL in aios.env.example, and read the trade-off
+#     there before turning it on: it is cross-origin, and the shipped CSP blocks it).
+#
+# MEASURED FOOTGUN, set TRUSTED_HOSTS accordingly: Next's rewrite proxy runs with
+# `changeOrigin: true`, so a proxied call reaches uvicorn with `Host: 127.0.0.1:8000`
+# - NOT `api.example.com`. Starlette's TrustedHostMiddleware compares the Host header
+# with the port stripped, so `TRUSTED_HOSTS=api.example.com` alone makes EVERY call
+# from the dashboard a 400 while the pages themselves load perfectly. The template
+# ships `TRUSTED_HOSTS=api.example.com,app.example.com,127.0.0.1` for this reason;
+# do not trim the `127.0.0.1`.
 #
 # Install:
 #   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -11,13 +41,61 @@
 #   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 #   sudo apt-get update && sudo apt-get install -y caddy
 #
-# Deploy: copy this file to /etc/caddy/Caddyfile, replace api.example.com with your
-# real API hostname (its DNS A/AAAA record must already point at this VPS), then:
+# Deploy: copy this file to /etc/caddy/Caddyfile, replace app.example.com and
+# api.example.com with your real hostnames (both DNS A/AAAA records must already
+# point at this VPS), then:
 #   sudo systemctl reload caddy
 #
-# Keep the hostnames in sync with aios.env: set TRUSTED_HOSTS=api.example.com and
-# API_CORS_ORIGINS=https://app.example.com so TrustedHostMiddleware + CORS match.
+# Keep the hostnames in sync with aios.env: TRUSTED_HOSTS (see the footgun above),
+# API_CORS_ORIGINS=https://app.example.com, ADMIN_BASE_URL=https://app.example.com,
+# and PUBLIC_FILE_BASE_URL=https://api.example.com.
 
+# ============================ DASHBOARD (aios-web) ============================
+app.example.com {
+	# aios-web listens on 127.0.0.1:${AIOS_WEB_PORT}. If you change that in
+	# aios.env, change it here too - there is no shared source for this number.
+	reverse_proxy 127.0.0.1:3000
+
+	# Compress responses.
+	encode zstd gzip
+
+	header {
+		# HSTS is the one security header Next does NOT emit (it is a transport
+		# property, and the app cannot know it is behind TLS), so it is set
+		# unconditionally here.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# Everything below uses Caddy's `?` (set-only-if-absent) prefix, and that
+		# is load-bearing rather than stylistic. A bare `header X = Y` REPLACES the
+		# upstream's header, and Next.js emits this app's real policy itself
+		# (SECURITY_HEADERS in frontend/next.config.mjs - a CSP that has to permit
+		# Next's inline hydration scripts and the Google Fonts icon face). Setting
+		# a CSP here would silently overwrite that one with a weaker or a broken
+		# policy, and a CSP breakage does not fail loudly - it just stops some of
+		# the page working. So these are FALLBACKS for the case where the app did
+		# not send one, never overrides.
+		?X-Content-Type-Options "nosniff"
+		?X-Frame-Options "DENY"
+		?Referrer-Policy "strict-origin-when-cross-origin"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		?Cross-Origin-Opener-Policy "same-origin"
+		# Do not advertise the server software.
+		-Server
+	}
+
+	# NOTE on timeouts: a few dashboard calls are legitimately slow (content
+	# research runs a live web search for ~40-60s), and Next raises its own
+	# upstream proxy timeout to 180s for them. Caddy's reverse_proxy has no
+	# response timeout by default - do not add one below ~200s or those calls will
+	# fail at the edge as a 502 while the backend is still working correctly.
+
+	log {
+		output stderr
+		format json
+	}
+}
+
+# =============================== API (aios-api) ===============================
 api.example.com {
 	reverse_proxy 127.0.0.1:8000
 

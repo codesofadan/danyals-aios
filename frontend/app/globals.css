@@ -763,6 +763,27 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 .tw-tab.on { color: var(--fg-strong); background: linear-gradient(100deg, color-mix(in srgb, var(--violet) 32%, transparent), color-mix(in srgb, var(--violet) 12%, transparent));
   border-color: var(--line-2); }
 .tw-panel { padding-top: 18px; }
+
+/* The shared TabBar primitive (components/ui/TabBar.tsx).
+ *
+ * `.tabbtn` was referenced by that component and DEFINED NOWHERE, so every screen
+ * using the house tab primitive rendered native unstyled <button>s - browser-default
+ * black text on a white box. QA reported it twice without connecting them: the
+ * Settings nav controls ("poorly designed ... outdated black/white visual style")
+ * and the Key Vault's Keys/Backups buttons ("outdated design"). Those are the only
+ * two TabBar consumers in the product, which is why the fix is one rule, not two.
+ *
+ * Matches `.tw-tab` deliberately - the workspace tabs the rest of the portal already
+ * uses - so tabs look the same wherever they appear. */
+.tabbtn { font-family: inherit; font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px; background: none; border: 1px solid transparent;
+  padding: 9px 14px; border-radius: 11px; transition: .18s; }
+.tabbtn .material-symbols-rounded { font-size: 19px; }
+.tabbtn:hover { color: var(--lilac); background: var(--hover); }
+.tabbtn:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.tabbtn.on { color: var(--fg-strong);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--violet) 32%, transparent), color-mix(in srgb, var(--violet) 12%, transparent));
+  border-color: var(--line-2); }
 .panel-in { animation: tw-fade .28s ease; }
 @keyframes tw-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
@@ -2050,3 +2071,10 @@ a.pr-src-name:hover { color: var(--lilac); text-decoration: underline; }
 .set-hint { margin-top: 8px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
 .set-hint.warn { color: var(--warn); }
 .set-hint.err { color: var(--danger, #E5484D); }
+
+/* The completed state of a client request (QA 17). Completion is its own control,
+ * not a third status segment: resolving a request emails the client and writes to
+ * their portal inbox, so it reads as the outward-facing act it is. */
+.tk-done { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  font-weight: 700; color: var(--ok); }
+.tk-done .material-symbols-rounded { font-size: 17px; }

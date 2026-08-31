@@ -53,6 +53,80 @@ def test_context_worker_tasks_are_registered() -> None:
 def test_context_dispatch_is_on_the_beat_schedule() -> None:
     # the debounced dispatcher runs every context_debounce_seconds (config only;
     # no beat process is started here)
-    entry = celery_app.conf.beat_schedule["dispatch-context"]
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+
+    # Cron is PARKED platform-wide (owner instruction 2026-08-19), so the LIVE
+    # beat table is empty and this asserts the preserved one: the wiring must
+    # survive the parking, or switching cron back on would silently skip this
+    # job. The policy itself is asserted once, in tests/test_scheduled_jobs.py.
+    entry = PARKED["dispatch-context"]
     assert entry["task"] == "dispatch_context"
     assert entry["schedule"] > 0
+
+
+@pytest.mark.unit
+def test_the_worker_validates_its_own_configuration() -> None:
+    """The documented fail-fast on missing production secrets ran in the API's
+    lifespan and NOWHERE ELSE, so the process that actually SPENDS MONEY started
+    blind: a worker with no vault key or no provider key came up healthy, accepted
+    jobs, and failed them one at a time at runtime instead of refusing to start."""
+    import inspect
+
+    import workers.celery_app as mod
+
+    source = inspect.getsource(mod._init_worker_db_pools)
+    assert "validate_settings" in source, (
+        "the worker process init must validate config, or prod misconfiguration "
+        "is only discovered one failed job at a time"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The two maintenance sweeps that nothing was calling
+# --------------------------------------------------------------------------- #
+# NOTE for whoever adds the next beat entry: the "every task named in the preserved
+# schedule is actually registered" gate already exists, once, as
+# tests/test_scheduled_jobs.py::TestCronIsParkedOnPurpose::
+# test_the_preserved_schedule_has_not_rotted_while_parked. Do not add a third copy of
+# it here. The tests below assert something that one cannot: that these two ENTRIES
+# exist at all, and that adding them did not un-park cron.
+@pytest.mark.unit
+def test_nightly_backup_is_scheduled_or_the_config_panel_promises_a_backup_nothing_takes() -> None:
+    """`backup_config.nightly_enabled` defaults to true and the Backups panel renders
+    "Nightly 02:00 UTC" with a next-backup countdown, but the only caller of the pg_dump
+    service was POST /backups/run - a human. Found by grepping for a caller of
+    `run_snapshot` outside the router and finding none: the platform was rendering a
+    schedule it had no mechanism to keep."""
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+
+    celery_app.loader.import_default_modules()
+    entry = PARKED["nightly-backup"]
+    assert entry["task"] == "run_nightly_backup"
+    assert entry["task"] in celery_app.tasks, "the beat entry names a task no worker has"
+    # 02:00 UTC, matching the nightly_time 0026 seeds and the panel renders.
+    assert set(entry["schedule"].hour) == {2}
+    assert set(entry["schedule"].minute) == {0}
+
+
+@pytest.mark.unit
+def test_stuck_run_reaper_is_scheduled_or_a_dead_worker_shrinks_a_client_cap_forever() -> None:
+    """`reap_stale_job_runs` has existed and been registered since the job contract
+    landed, and NOTHING ever called it - no beat entry, no endpoint, no caller. Found by
+    grepping the tree for the task name: every hit was its own definition or a comment
+    about it. Until something calls it, a run left `running` by an OOM kill permanently
+    holds a slot against `JobRunsStore.start`'s per-client concurrency cap."""
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+
+    celery_app.loader.import_default_modules()
+    entry = PARKED["reap-stale-job-runs"]
+    assert entry["task"] == "reap_stale_job_runs"
+    assert entry["task"] in celery_app.tasks, "the beat entry names a task no worker has"
+
+
+@pytest.mark.unit
+def test_adding_the_maintenance_entries_did_not_un_park_cron() -> None:
+    """Cron is OFF by the owner's instruction; the entries above go in the PRESERVED
+    table only. The cheapest way to get this wrong is to paste an entry into the live
+    `beat_schedule = {}` line instead, which would silently start firing pg_dump."""
+    assert "nightly-backup" not in celery_app.conf.beat_schedule
+    assert "reap-stale-job-runs" not in celery_app.conf.beat_schedule

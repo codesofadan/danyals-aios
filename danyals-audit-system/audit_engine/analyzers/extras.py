@@ -6,18 +6,18 @@ single per-page analyzer. Per-page checks now live in onpage.py.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections import Counter, defaultdict
-from typing import Iterable
+from collections.abc import Iterable
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
 from audit_engine.analyzers.common import Verdict, status_from_score
+from audit_engine.analyzers.registry import check
 from audit_engine.crawlers.basic import CrawledPage
 from audit_engine.parsers.html import ParsedHTML
-
 
 # ---------- F-2.2.3 Heading-as-question detection ----------
 
@@ -164,6 +164,7 @@ def check_duplicate_content(pages: list[ParsedHTML]) -> Verdict:
 
 # ---------- F-2.4.1, F-2.4.3, F-2.4.4 URL structure ----------
 
+@check("ON-097", scope="page")
 def check_url_structure(p: ParsedHTML) -> Verdict:
     """F-2.4.1 / .3 / .4 - URL readability, slug quality, conventions."""
     parsed = urlparse(p.url)
@@ -396,6 +397,7 @@ def check_click_depth(pages: list[CrawledPage], site_url: str) -> Verdict:
 
 # ---------- F-2.2.1 H1 existence + uniqueness (per-page) ----------
 
+@check("TECH-025", scope="page")
 def check_pagination(p: ParsedHTML) -> Verdict:
     """F-5.1.6 - presence of rel=next/prev for paginated content."""
     # We only emit a finding when there IS a paginated context.
@@ -541,6 +543,79 @@ _CWV_BUDGETS = {
 }
 
 
+#: What each metric is CALLED, and what an owner actually does about it. The
+#: remediation used to read `largest_contentful_paint = 7238ms (poor). Target <=
+#: 2500ms.` - an internal identifier, an equals sign and a number, printed onto a
+#: card in a client's PDF. It stated the reading and named no action, which is the
+#: half of a finding that is worth paying for.
+_CWV_PROSE: dict[str, tuple[str, str]] = {
+    "largest_contentful_paint": (
+        "Largest Contentful Paint",
+        "This is how long the biggest thing on the screen takes to appear. It is "
+        "usually the hero image or a web font: compress the image, serve it at the "
+        "size it is displayed, and preload it rather than letting it queue behind "
+        "scripts.",
+    ),
+    "cumulative_layout_shift": (
+        "Cumulative Layout Shift",
+        "This is how much the page jumps about while it loads. Give every image and "
+        "embed an explicit width and height, and reserve the space adverts and "
+        "banners will take, so nothing below them moves when they arrive.",
+    ),
+    "interaction_to_next_paint": (
+        "Interaction to Next Paint",
+        "This is the delay between someone tapping and the page responding. It is "
+        "long JavaScript tasks blocking the main thread: split them up, and defer "
+        "anything that is not needed for the first interaction.",
+    ),
+    "first_contentful_paint": (
+        "First Contentful Paint",
+        "This is how long the page stays blank. Reduce render-blocking CSS and "
+        "fonts in the document head.",
+    ),
+    "experimental_time_to_first_byte": (
+        "Time to First Byte",
+        "This is how long the server takes to start answering, before the browser "
+        "has drawn anything. It is hosting, database queries or a missing cache - "
+        "every other timing on this page starts late because of it.",
+    ),
+    "server_response_time": (
+        "Server response time",
+        "The server is slow to answer. Add page caching, or move to hosting that "
+        "responds faster; nothing on the page can be quick until this is.",
+    ),
+    "first_input_delay": (
+        "First Input Delay",
+        "The page is busy when someone first tries to use it. Defer non-essential "
+        "JavaScript so the main thread is free sooner.",
+    ),
+}
+
+
+def _cwv_reading(metric_id: str, value: float, unit: str) -> str:
+    """The measurement, phrased for a reader rather than dumped.
+
+    Milliseconds become seconds past a thousand, because "7.2 seconds" is a
+    length of time a person can picture and "7238ms" is a number they have to
+    convert first.
+    """
+    label = _CWV_PROSE.get(metric_id, (metric_id.replace("_", " ").title(), ""))[0]
+    if unit == "ms" and value >= 1000:
+        return f"{label} is {value / 1000:.1f} seconds"
+    if unit == "ms":
+        return f"{label} is {value:.0f} milliseconds"
+    return f"{label} is {value:g}"
+
+
+def _cwv_target(metric_id: str, good: float, unit: str) -> str:
+    """The budget, as a noun phrase that reads inside "the ... target"."""
+    if unit == "ms" and good >= 1000:
+        return f"{good / 1000:.1f} second"
+    if unit == "ms":
+        return f"{good:.0f} millisecond"
+    return f"{good:g}"
+
+
 def _cwv_verdict(metric_id: str, value: float | None, *, unit_override: str | None = None) -> Verdict:
     if value is None:
         return Verdict("n_a", 0.0, "info", 0.9, {"metric": metric_id, "value": None})
@@ -555,10 +630,14 @@ def _cwv_verdict(metric_id: str, value: float | None, *, unit_override: str | No
     if value <= needs:
         return Verdict("warn", 6.0, "minor", 0.9,
                        {"metric": metric_id, "value": value, "unit": unit, "band": "needs_improvement"},
-                       f"{metric_id} = {value:g}{unit} (needs improvement). Target <= {good:g}{unit}.")
+                       f"{_cwv_reading(metric_id, value, unit)}, over the "
+                       f"{_cwv_target(metric_id, good, unit)} target. "
+                       f"{_CWV_PROSE.get(metric_id, ('', ''))[1]}".strip())
     return Verdict("fail", 3.0, "major", 0.9,
                    {"metric": metric_id, "value": value, "unit": unit, "band": "poor"},
-                   f"{metric_id} = {value:g}{unit} (poor). Target <= {good:g}{unit}.")
+                   f"{_cwv_reading(metric_id, value, unit)}, well past the "
+                   f"{_cwv_target(metric_id, good, unit)} target. "
+                   f"{_CWV_PROSE.get(metric_id, ('', ''))[1]}".strip())
 
 
 def iter_cwv_findings(psi_result: Any) -> Iterable[tuple[str, str, Verdict]]:
@@ -637,25 +716,3 @@ def iter_psi_quality_findings(psi_result: Any) -> Iterable[tuple[str, str, Verdi
 
 
 # ---------- Aggregator ----------
-
-def iter_per_page_extras(p: ParsedHTML) -> Iterable[tuple[str, str, Verdict]]:
-    """Yield (check_id, owner, verdict) for per-page extras.
-
-    Only checks that fill a genuine GAP (no overlap with onpage.py's emitted
-    check_ids) live here. ON-097 URL hygiene - long URLs, underscores,
-    uppercase, query params, slug-title mismatch - is the Semrush "URL
-    structure" family and is not emitted anywhere else, so it is activated
-    here. Owner A3 (headings / meta / URL structure analyst).
-
-    TECH-025 Pagination optimization is the other genuine gap: no other module
-    emits it, and check_pagination reads rel=next/prev straight off the crawled
-    HTML, which is what the checklist declares it needs. Owner B1.
-
-    The remaining check_* functions in this module are deliberately NOT wired:
-    each duplicates a check onpage.py already emits (check_image_filenames vs
-    ON-069, check_anchor_text_quality vs ON-058, check_author_existence vs
-    ON-029, check_h1_title_alignment vs ON-119). Wiring them would put two
-    scores on one check for one page - the defect just removed from ON-048/049.
-    """
-    yield ("ON-097", "A3", check_url_structure(p))
-    yield ("TECH-025", "B1", check_pagination(p))

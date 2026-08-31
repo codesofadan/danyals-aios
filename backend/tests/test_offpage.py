@@ -9,6 +9,7 @@ pinned verbatim and the internal ``client_id`` never leaks.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -342,6 +343,14 @@ class FakeOffpageRepo:
             },
         ]
         self.attached: list[tuple[str, str]] = []
+        # Platforms where the client has a usable account. Defaults to "all catalogued
+        # platforms are connected" so campaign tests exercise campaign mechanics rather
+        # than re-testing connectivity; the tests that are ABOUT connectivity set this
+        # explicitly, including to the empty set.
+        self.accounts: dict[str, dict[str, Any]] = {}
+        self.connected: set[str] = {
+            str(r["platform_enum"]) for r in self.catalog_rows if r.get("platform_enum")
+        }
 
     # --- campaign surface ---
     def eligible_catalog(self) -> list[dict[str, Any]]:
@@ -349,6 +358,12 @@ class FakeOffpageRepo:
 
     def client_web2_scope(self, client_id: str) -> str:
         return self.client_scope
+
+    def connected_platforms_for(self, client_id: str) -> set[str]:
+        return set(self.connected)
+
+    def get_web2_account(self, account_id: str) -> dict[str, Any] | None:
+        return self.accounts.get(account_id)
 
     def pacing_caps_row(self) -> dict[str, Any] | None:
         # Jitter off and the campaign cap lifted so these tests assert the ROUTER's
@@ -718,12 +733,57 @@ def web2_sim_code(app: FastAPI) -> Callable[[str], None]:
 
 
 def _plan_body(**over: Any) -> dict[str, Any]:
+    # A BRAND anchor, not "roof repair" -> /roof-repair. The old fixture used the exact
+    # money phrase, which R2-14 forbids outright; it passed only because this route ran
+    # no anchor check. Leaving it would have re-encoded the defect in the fixture.
     body: dict[str, Any] = {
-        "clientId": "cl-1", "platform": "WordPress.com", "anchor": "roof repair",
+        "clientId": "cl-1", "platform": "WordPress.com", "anchor": "Acme Roofing",
         "targetUrl": "https://acme.example/roof-repair",
     }
     body.update(over)
     return body
+
+
+async def test_the_single_property_route_refuses_an_exact_match_anchor(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """The campaign planner has always refused these; this route did not, and it spends
+    the same money. An anchor that is exactly the phrase the destination ranks for has no
+    editorial justification, and catching it at review means discarding a paid article
+    instead of never writing it."""
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    writes, _ = web2_enqueues
+    wire("manager", "u-lead")
+
+    resp = await client.post(
+        "/api/v1/offpage/web2/plan",
+        json=_plan_body(anchor="roof repair", targetUrl="https://acme.example/roof-repair"),
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert repo.created_web2 == [], "nothing may be created"
+    assert writes == [], "and nothing may be queued to spend on"
+
+
+async def test_the_single_property_route_refuses_a_platform_with_no_account(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """Two doors into one table must enforce one set of rules. This route created a
+    property against any platform at all - unconnected, or ineligible for the client -
+    and the failure only surfaced at publish, after the drafting spend."""
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    repo.connected = set()  # no accounts anywhere
+    writes, _ = web2_enqueues
+    wire("manager", "u-lead")
+
+    resp = await client.post("/api/v1/offpage/web2/plan", json=_plan_body())
+
+    assert resp.status_code == 422, resp.text
+    assert "no account is connected" in resp.text.lower()
+    assert repo.created_web2 == []
+    assert writes == []
 
 
 async def test_web2_plan_is_lead_only(
@@ -832,7 +892,9 @@ async def test_the_estimate_prices_and_schedules_without_creating_anything(
     data = resp.json()
     assert data["count"] == 3
     assert data["estimatedCostUsd"] > 0
-    assert data["projectedCompletion"]
+    # No completion DATE any more: an approved campaign publishes on approval, so there
+    # is no future timeline to project. Asserting a date here would re-encode the drip.
+    assert not data.get("projectedCompletion")
     assert len(data["properties"]) == 3
     # Nothing was created and no drafting was queued.
     assert repo.created_web2 == []
@@ -879,16 +941,55 @@ async def test_creating_a_campaign_fans_out_properties_and_starts_drafting(
     assert {t for _w, t in repo.attached} == {data["id"]}
 
 
-async def test_each_campaign_property_gets_a_distinct_topic_and_a_schedule(
+async def test_each_campaign_property_gets_a_distinct_topic_and_no_schedule(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]],
 ) -> None:
+    """Distinct topics (one article each, never one fanned out) and NO drip slot."""
     repo.client_names["cl-1"] = "Leeds Drainage"
     wire("manager", "u-lead")
     await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
     topics = [r["topic"] for r in repo.created_web2]
     assert len(set(topics)) == 3
-    assert all(r.get("scheduled_for") for r in repo.created_web2)
+    assert not any(r.get("scheduled_for") for r in repo.created_web2), (
+        "a scheduled property waits on a release tick that has no caller"
+    )
+
+
+async def test_approving_a_campaign_enqueues_a_publish_for_every_property(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """THE defect this guards: 1 of N properties published, N were paid for.
+
+    The planner used to stamp a future ``scheduled_for`` on properties 2..N. Approve
+    moved every property to ``publishing`` but only enqueued the ones not scheduled
+    later, handing the rest to ``web2_release_due`` - a task with no caller in this
+    deployment (celery beat is empty). So properties 2..N sat in ``publishing`` forever
+    while the API reported the campaign ``scheduled`` and the ledger said "publishing
+    now". Every one of them had already been drafted and charged for.
+    """
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    rows = repo.campaign_properties(campaign_id)
+    assert len(rows) == 3
+    for row in rows:
+        row["status"] = "needs_review"
+    publishes.clear()
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "approve"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert len(publishes) == 3, (
+        f"every approved property must be enqueued to publish, got {len(publishes)} of 3"
+    )
+    assert {str(r["id"]) for r in rows} == set(publishes)
 
 
 async def test_an_ineligible_platform_is_dropped_and_the_reason_is_reported(
@@ -972,6 +1073,7 @@ async def test_the_platform_board_shows_every_row_with_a_reason(
     platform's own policy. That is what makes offering 50+ platforms honest."""
     repo.client_names["cl-1"] = "Leeds Drainage"
     wire("specialist", "u-staff")  # a read, so any staff may see it
+    repo.connected = {"Blogger"}  # one real account; WordPress.com has none
     resp = await client.get("/api/v1/offpage/web2/platform-board?clientId=cl-1")
     assert resp.status_code == 200
     board = resp.json()
@@ -979,7 +1081,59 @@ async def test_the_platform_board_shows_every_row_with_a_reason(
     devto = next(r for r in board if r["name"] == "dev.to")
     assert devto["status"] == "not_eligible"
     assert "developer" in devto["reason"]
-    assert any(r["status"] == "eligible" for r in board)
+    assert next(r for r in board if r["name"] == "Blogger")["status"] == "eligible"
+
+
+async def test_a_campaign_is_refused_for_a_platform_with_no_connected_account(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """No account, no campaign - and the refusal must arrive BEFORE any drafting spend.
+
+    The planner previously passed the operator's own selection in as the connected set,
+    which declared every requested platform connected by construction. A campaign could
+    then be created, its properties drafted and PAID FOR, and only fail at publish time
+    when no credential could be resolved. Refusing up front is the difference between a
+    clear message and a bill for articles that can never go live.
+    """
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    repo.connected = set()  # no accounts anywhere
+    wire("manager", "u-lead")
+
+    resp = await client.post("/api/v1/offpage/web2/campaigns/estimate", json=_campaign_body())
+
+    assert resp.status_code in (200, 422), resp.text
+    body = resp.json()
+    blob = json.dumps(body).lower()
+    assert "no account is connected" in blob, (
+        f"the operator must be told the account is missing, got: {blob[:400]}"
+    )
+    assert body.get("count", 0) == 0 or body.get("estimatedCostUsd", 0) == 0, (
+        "nothing may be priced for a platform that cannot publish"
+    )
+
+
+async def test_the_platform_board_never_calls_a_platform_connected_without_an_account(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """A platform with NO account is ``not_connected``, never ``eligible``.
+
+    Deriving the connected set from the catalogue makes every mapped platform look
+    connected, so `not_connected` becomes unreachable and the operator is shown a green
+    light for a platform the pipeline holds no credential for. The distinction is the
+    whole point of the three-state board: a missing credential is a ten-minute fix, and
+    it must be named as one.
+    """
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    repo.connected = set()  # a fresh workspace: nothing is connected
+    wire("specialist", "u-staff")
+    board = (await client.get("/api/v1/offpage/web2/platform-board?clientId=cl-1")).json()
+
+    assert [r["status"] for r in board if r["name"] == "Blogger"] == ["not_connected"]
+    assert not [r for r in board if r["status"] == "eligible"], (
+        "no account exists, so nothing may report as eligible"
+    )
+    reason = next(r for r in board if r["name"] == "Blogger")["reason"]
+    assert "no account is connected" in reason.lower()
 
 
 async def test_web2_approve_refuses_when_the_similarity_gate_could_not_run(
@@ -1034,15 +1188,31 @@ async def test_web2_approve_needs_an_explicit_acknowledgement_after_a_warn(
     assert publishes == ["w2-1"]
 
 
+def _force_enforcement(monkeypatch: pytest.MonkeyPatch, *, enforce: bool) -> None:
+    """Pin `web2_similarity_enforce` for one test, whatever the deployment default is."""
+    from app.config import Settings, get_settings
+
+    base = get_settings()
+    patched = Settings(
+        _env_file=None,
+        **{**base.model_dump(), "web2_similarity_enforce": enforce},
+    )
+    monkeypatch.setattr("app.routers.offpage.get_settings", lambda: patched)
+
+
 async def test_a_similarity_block_is_acknowledgeable_while_enforcement_is_off(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The gate ships warn-only (settings.web2_similarity_enforce=False) because its
-    thresholds are agency policy with no published source and calibration is a stated
-    precondition to hardening. Until then a block is loud and acknowledgeable, not fatal
-    - a gate switched to hard before it is calibrated blocks real work, and an operator
-    who learns to route around it has switched it off in practice."""
+    """The warn-only posture, which is still reachable by config.
+
+    This test used to rely on the GLOBAL default being False. That made it a test of the
+    deployment's current setting rather than of the behaviour, so arming the gate broke
+    it for the wrong reason. It now pins enforcement off for itself, and its armed
+    counterpart below pins the other side.
+    """
+    _force_enforcement(monkeypatch, enforce=False)
     repo.web2_by_id = {
         "w2-1": _web2_row(
             id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review",
@@ -1057,6 +1227,37 @@ async def test_a_similarity_block_is_acknowledgeable_while_enforcement_is_off(
     )
     assert resp.status_code == 200
     assert publishes == ["w2-1"]
+
+
+async def test_an_armed_similarity_block_cannot_be_acknowledged_away(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ARMED 2026-08-30, once the golden set showed 0 false blocks in 96 distinct pairs.
+
+    With enforcement on, a block is not a warning with a confirm button - the article is
+    the same article, and the only honest fix is to redraft it. An acknowledgement that
+    could wave this through would be the override that switches the gate off in practice.
+    """
+    _force_enforcement(monkeypatch, enforce=True)
+    repo.web2_by_id = {
+        "w2-1": _web2_row(
+            id="w2-1", client_id="cl-1", platform="Blogger", status="needs_review",
+        )
+    }
+    web2_sim_code("sim_block:heading_skeleton:client:w2-9")
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+
+    resp = await client.post(
+        "/api/v1/offpage/web2/w2-1/approve",
+        json={"action": "approve", "acknowledgeSimilarity": True},
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert "cannot be approved" in resp.text
+    assert publishes == [], "an armed block must not publish, acknowledged or not"
 
 
 async def test_a_reject_never_needs_a_similarity_acknowledgement(
@@ -1377,3 +1578,159 @@ async def test_the_placement_report_is_readable_by_any_staff_not_just_leads(
     wire("specialist", "u-staff")
     resp = await client.get("/api/v1/offpage/web2/placements")
     assert resp.status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Registering an account from the portal (the board promised it; nothing did it)
+# --------------------------------------------------------------------------- #
+def _account_body(**over: Any) -> dict[str, Any]:
+    body = {
+        "platform": "Blogger", "ownership": "per_client", "clientId": "cl-1",
+        "handle": "leedsdrainage", "email": "hello@leedsdrainage.example",
+        "maxProperties": 5, "credential": {"oauth_token": "SECRET-TOKEN", "blog_id": "42"},
+    }
+    body.update(over)
+    return body
+
+
+async def test_registering_an_account_seals_the_credential_and_never_returns_it(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The board's empty state told the operator to "register it here" while no endpoint
+    existed. It exists now - and the secret it seals must never come back out."""
+    sealed: dict[str, Any] = {}
+
+    def fake_insert(spec: Any) -> str:
+        repo.accounts["acct-1"] = {
+            "id": "acct-1", "platform": spec.platform, "ownership": spec.ownership,
+            "client_id": spec.client_id, "handle": spec.handle,
+            "registration_email": spec.registration_email, "property_url": "",
+            "health": "unverified", "health_checked_at": None, "property_count": 0,
+            "max_properties": spec.max_properties, "client_name": "Leeds Drainage",
+            "vault_provider": "web2:Blogger", "vault_label": "acct-1",
+        }
+        return "acct-1"
+
+    monkeypatch.setattr("app.cli.web2_accounts.insert_account", fake_insert)
+    monkeypatch.setattr(
+        "app.services.vault.add_key",
+        lambda **kw: sealed.update(kw),
+    )
+    wire("manager", "u-lead")
+
+    resp = await client.post("/api/v1/offpage/web2/accounts", json=_account_body())
+
+    assert resp.status_code == 201, resp.text
+    blob = resp.text
+    assert "SECRET-TOKEN" not in blob, "the credential must never be returned"
+    assert resp.json()["handle"] == "leedsdrainage"
+    # It really was sealed, under the ACCOUNT id (what the publish worker reads).
+    assert sealed.get("label") == "acct-1"
+    assert "SECRET-TOKEN" in str(sealed.get("secret"))
+
+
+async def test_a_footprint_handle_is_refused_with_the_rule_not_the_value(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """The endpoint calls the SAME `build_spec` the CLI calls, so R2-08 identity hygiene
+    cannot drift between the two doors into the same table. And the refusal explains the
+    rule without ever echoing the secret back."""
+    wire("manager", "u-lead")
+
+    resp = await client.post(
+        "/api/v1/offpage/web2/accounts",
+        json=_account_body(handle="blogger-a1b2c3d4e5"),  # platform slug + hex run
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "SECRET-TOKEN" not in resp.text
+
+
+# --------------------------------------------------------------------------- #
+# The free anchor pre-check (QA 19)
+# --------------------------------------------------------------------------- #
+# `plan_web2` already refused an exact-match commercial anchor - but at submission,
+# as a 422 the Single Property modal swallowed, so the operator was shown a queued
+# property that did not exist. This lets the form ask BEFORE anything is created.
+
+
+async def test_anchor_check_refuses_an_exact_match_commercial_anchor(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/anchor-check",
+        json={
+            "clientId": "cl-1", "anchor": "roof repair",
+            "targetUrl": "https://acme.example/roof-repair",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["allowed"] is False
+    assert body["reason"], "a refusal must say why"
+
+
+async def test_anchor_check_allows_the_brand_on_the_same_url(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """The subtle half: a client called "Leeds Drain Unblocking" cannot be forbidden
+    from using its own name, even though it contains the money words. The rule needs
+    the client name from the DATABASE - which is exactly why this check is a server
+    route and not a TypeScript copy that would drift from the write path."""
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/anchor-check",
+        json={
+            "clientId": "cl-1", "anchor": "Acme Roofing",
+            "targetUrl": "https://acme.example/roof-repair",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["allowed"] is True
+
+
+async def test_anchor_check_creates_nothing_and_spends_nothing(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """The whole point of asking first is that asking is free."""
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    writes, _ = web2_enqueues
+    wire("manager", "u-lead")
+    await client.post(
+        "/api/v1/offpage/web2/anchor-check",
+        json={"clientId": "cl-1", "anchor": "roof repair", "targetUrl": "https://a.example/x"},
+    )
+    assert repo.created_web2 == []
+    assert writes == []
+
+
+async def test_anchor_check_is_readable_by_a_specialist(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """Deliberately NOT lead-only: asking whether a string is a good anchor is not a
+    privileged act, and gating it behind the write role would stop a specialist
+    drafting a brief."""
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    wire("specialist", "u-spec")
+    resp = await client.post(
+        "/api/v1/offpage/web2/anchor-check",
+        json={"clientId": "cl-1", "anchor": "the roofing team", "targetUrl": "https://a.example/x"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_anchor_check_404s_on_an_unknown_client(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    repo.client_names = {}
+    wire("manager", "u-lead")
+    resp = await client.post(
+        "/api/v1/offpage/web2/anchor-check",
+        json={"clientId": "nope", "anchor": "x y", "targetUrl": "https://a.example/x"},
+    )
+    assert resp.status_code == 404

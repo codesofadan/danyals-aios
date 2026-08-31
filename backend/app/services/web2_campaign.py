@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.services.web2_anchor import check_anchor
-from app.services.web2_pacing import PacingCaps, Placement, schedule_campaign
+from app.services.web2_pacing import PacingCaps, Placement
 from integrations.web2_publishers import diversify_footprint
 
 # The frameworks the generator can drive. Rotated across a campaign so the set does not
@@ -181,18 +181,25 @@ def plan_campaign(
         )
         used_pairs.append((choice.platform, choice.anchor))
 
-    schedule = schedule_campaign(
-        now=now,
-        caps=caps,
-        client_id=client_id,
-        properties=[(p.placeholder_id, p.platform) for p in properties],
-        history=history,
-    )
-    slots = dict(schedule)
+    # OWNER DECISION (2026-08-29): an approved campaign publishes IMMEDIATELY - every
+    # property, on approval, with no drip. `scheduled_for` therefore stays NULL.
+    #
+    # WHY THIS IS NOT MERELY "pacing turned off". Nothing in this deployment drives the
+    # release tick: `web2_release_due` has no caller and celery beat is empty by a
+    # standing instruction. So a future `scheduled_for` did not pace a property, it
+    # PARKED it - approval moved it to `publishing`, handed it to a tick that never runs,
+    # and the API went on reporting the campaign `scheduled` with a completion date
+    # derived from slots nothing would ever act on. Every property after the first
+    # silently never published, having already been drafted and paid for.
+    #
+    # The trade-off was put to the owner explicitly and accepted: N properties appearing
+    # at once is a heavier footprint than a drip, and that is now their call rather than
+    # an accident. `schedule_campaign` and the caps are left intact for the day a release
+    # driver exists - see `web2_pacing`.
     properties = [
         PlannedProperty(
             index=p.index, platform=p.platform, topic=p.topic, anchor=p.anchor,
-            framework=p.framework, scheduled_for=slots.get(p.placeholder_id),
+            framework=p.framework, scheduled_for=None,
         )
         for p in properties
     ]
@@ -205,13 +212,12 @@ def plan_campaign(
         )
 
     completion = max((p.scheduled_for for p in properties if p.scheduled_for), default=None)
-    if completion is not None:
-        days = max(0, (completion - now).days)
+    if completion is None:
         notes.append(
-            f"Pacing spreads these {count} properties over about {days} day(s); the last "
-            "one publishes around then. Spreading across more platforms shortens this "
-            "materially - a single platform is governed by a 72-hour gap per client, "
-            "several platforms by a 24-hour one."
+            f"All {count} properties publish as soon as the campaign is approved - there "
+            "is no drip. They will appear across the selected platforms at roughly the "
+            "same time, which is a heavier footprint than spacing them out; spreading "
+            "across more platforms rather than repeating one keeps it lighter."
         )
 
     return CampaignPlan(

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import CurrentUser, require_perm
@@ -25,10 +26,14 @@ from app.modules.content_planning.repo import ContentPlanningRepoDep
 from app.modules.content_planning.schemas import Engagement, MapNode
 from app.modules.content_planning.service import build_work_plan, plan_for
 
+logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["content-planning"])
 
 ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
 RunAudits = Annotated[CurrentUser, Depends(require_perm("run_audits"))]
+# Supplying a client's first-party facts is content work, so it takes the same
+# permission as creating content rather than a read permission.
+PublishContent = Annotated[CurrentUser, Depends(require_perm("publish_content"))]
 
 
 def _engagement_from_row(row: dict[str, Any]) -> Engagement:

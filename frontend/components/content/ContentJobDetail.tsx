@@ -35,7 +35,10 @@ import {
 import DetailShell from "@/components/ui/DetailShell";
 import StageTimeline, { type Stage } from "@/components/ui/StageTimeline";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import Modal from "@/components/ui/Modal";
 import QueryGuard from "@/components/ui/QueryGuard";
+import { qaVerdict } from "@/lib/content";
+import ExperiencePanel from "./ExperiencePanel";
 import { useToast } from "@/components/ui/Toast";
 import ReviewPreview from "./ReviewPreview";
 
@@ -99,6 +102,8 @@ export default function ContentJobDetail({ code }: { code: string }) {
 
   const job = jobQ.data;
   const qa = qaQ.data?.qa ?? null;
+  // Scored only when a real number came back; see qaVerdict.
+  const verdict = qaVerdict(qa);
 
   // The CSV the operator asked for: the job's keyword map + internal links +
   // entity coverage, one file, built from data already on screen.
@@ -142,9 +147,16 @@ export default function ContentJobDetail({ code }: { code: string }) {
   }
 
   const inReview = job.status === "needs_review";
+  // Both are re-pushable, and `degraded` is the one that matters: the artifact
+  // rendered but nothing reached the site, so a re-push IS the remedy. The
+  // backend refused degraded until 2026-08-29, which made this a dead control
+  // offered on exactly the jobs that needed it.
   const republishable = job.status === "done" || job.status === "degraded";
   const url = liveUrl(job);
-  const qaFailed = qa !== null && qa.passed === false;
+  // Only a REAL verdict can fail. An unscored page is not a failed one, and
+  // making the operator type PUBLISH for a failure nobody measured is the
+  // over-confirmation that trains people to click through the dialogs that matter.
+  const qaFailed = verdict !== null && !verdict.passed;
 
   return (
     <>
@@ -164,7 +176,11 @@ export default function ContentJobDetail({ code }: { code: string }) {
           { label: "Cost", value: `$${job.cost.toFixed(2)}` },
           {
             label: "QA",
-            value: qa ? `${Math.round(qa.weighted_total)} · ${qa.passed ? "passed" : "failed"} (advisory)` : "—",
+            // Unscored is not "failed". `qa_score` is `{}` when the gate produced
+            // no verdict, and `{}` is truthy - this used to render "NaN · failed".
+            value: verdict
+              ? `${Math.round(verdict.total)} · ${verdict.passed ? "passed" : "failed"} (advisory)`
+              : "not scored",
           },
         ]}
         actions={
@@ -200,10 +216,15 @@ export default function ContentJobDetail({ code }: { code: string }) {
         tabs={[
           { key: "draft", label: "Draft & data", icon: "article" },
           { key: "process", label: "Process", icon: "route" },
+          // The gate that holds this page. Placed beside Process because that is
+          // where an operator looks when they want to know why nothing is moving.
+          { key: "experience", label: "Experience", icon: "quiz" },
         ]}
       >
         {(tab) =>
-          tab === "process" ? (
+          tab === "experience" ? (
+            <ExperiencePanel code={code} />
+          ) : tab === "process" ? (
             <section className="card" style={{ padding: "var(--s-7)" }}>
               <div className="cs" style={{ marginBottom: "var(--s-6)", maxWidth: 560 }}>
                 The pipeline, against this job&apos;s live stage
@@ -227,11 +248,11 @@ export default function ContentJobDetail({ code }: { code: string }) {
         title="Approve and publish this draft?"
         body={
           <QueryGuard queries={[qaQ]} label="the QA verdict" minHeight={60}>
-            {qa ? (
+            {verdict ? (
               <>
-                The QA scorecard reads <b>{Math.round(qa.weighted_total)} / 100</b> —{" "}
-                <b>{qa.passed ? "passed" : "FAILED"}</b>
-                {qa.provisional ? " (provisional weights)" : ""}. It is advisory: your
+                The QA scorecard reads <b>{Math.round(verdict.total)} / 100</b> —{" "}
+                <b>{verdict.passed ? "passed" : "FAILED"}</b>
+                {qa?.provisional ? " (provisional weights)" : ""}. It is advisory: your
                 approval is the gate, and the page publishes to{" "}
                 <b>{job.client}</b>&apos;s live site.
               </>
@@ -307,41 +328,74 @@ export default function ContentJobDetail({ code }: { code: string }) {
         }
       />
 
-      {editing && (
-        <ConfirmDialog
-          open
-          tone="normal"
-          title="Request edits"
-          body={
-            <div className="fld">
-              <label htmlFor="edit-note">What should change? The writer re-drafts under this instruction.</label>
-              <textarea
-                id="edit-note"
-                rows={4}
-                value={editNote}
-                onChange={(e) => setEditNote(e.target.value)}
-                style={{ width: "100%", marginTop: "var(--s-2)" }}
-              />
-            </div>
-          }
-          confirmLabel="Send back for edits"
-          pending={review.isPending}
-          onCancel={() => setEditing(false)}
-          onConfirm={() =>
-            review.mutate(
-              { code, action: "edit", note: editNote.trim() || undefined },
-              {
-                onSuccess: () => {
-                  setEditing(false);
-                  setEditNote("");
-                  toast.success(`${code} sent back with your instruction`);
-                },
-                onError: (e) => toast.fromError(`Couldn't request edits on ${code}`, e),
-              },
-            )
-          }
-        />
-      )}
+      {/* THE INSTRUCTION IS REQUIRED, and the button says so by staying disabled.
+          This prompt asked for a note but sent `note: editNote.trim() || undefined`
+          on a ConfirmDialog whose confirm button is always armed, so an empty
+          textarea sent a note-less edit: the job left needs_review, landed in
+          `drafting` with a blank `edit_instruction`, and the pipeline's guided-edit
+          entry then correctly declined to guess - leaving the page at "Edit
+          requested" with the review gate gone. The server refuses it now
+          (routers/content.py, 400), and this is the matching client half so the
+          reviewer is stopped BEFORE the request rather than by a toast.
+
+          Modal, not ConfirmDialog: this is a form, not a confirmation, and
+          ConfirmDialog deliberately exposes no way to disable its confirm button
+          (its `typeToConfirm` is for irreversible platform-wide actions, and
+          borrowing `pending` would render a false "Working…"). Modal shares the
+          same focus trap, Escape and focus-restore. */}
+      <Modal
+        open={editing}
+        title="Request edits"
+        onClose={() => setEditing(false)}
+        footer={
+          <>
+            <button type="button" className="ghostbtn" onClick={() => setEditing(false)} disabled={review.isPending}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={!editNote.trim() || review.isPending}
+              title={editNote.trim() ? undefined : "Write what the re-draft should change"}
+              onClick={() => {
+                const instruction = editNote.trim();
+                // Belt and braces with the disabled button above: the mutation must
+                // never carry a blank instruction even if a future edit re-arms the
+                // button, because the server 400s and the reviewer learns nothing.
+                if (!instruction) return;
+                review.mutate(
+                  { code, action: "edit", note: instruction },
+                  {
+                    onSuccess: () => {
+                      setEditing(false);
+                      setEditNote("");
+                      toast.success(`${code} sent back with your instruction`);
+                    },
+                    onError: (e) => toast.fromError(`Couldn't request edits on ${code}`, e),
+                  },
+                );
+              }}
+            >
+              {review.isPending ? "Working…" : "Send back for edits"}
+            </button>
+          </>
+        }
+      >
+        <div className="fld">
+          <label htmlFor="edit-note">
+            What should change? The writer re-drafts under this instruction — it is required,
+            because a blank one gives the pipeline nothing to act on.
+          </label>
+          <textarea
+            id="edit-note"
+            rows={4}
+            value={editNote}
+            onChange={(e) => setEditNote(e.target.value)}
+            placeholder="e.g. cut the second section, add pricing, tighten the H2s"
+            style={{ width: "100%", marginTop: "var(--s-2)" }}
+          />
+        </div>
+      </Modal>
     </>
   );
 }

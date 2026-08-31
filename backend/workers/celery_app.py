@@ -13,7 +13,7 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_process_init
 
-from app.config import get_settings
+from app.config import get_settings, validate_settings
 from app.jobs.celery_task import route_task
 from app.jobs.status import BROKER_VISIBILITY_TIMEOUT
 
@@ -33,6 +33,13 @@ def _init_worker_db_pools(**_kwargs: object) -> None:
     from app.db.database import build_admin_pool, build_rls_pool, set_pools
 
     s = get_settings()
+    # The documented fail-fast on missing production secrets ran in the API's
+    # lifespan and NOWHERE ELSE - so the process that actually spends money started
+    # blind. A worker with, say, no VAULT_MASTER_KEY or no provider key came up
+    # healthy, accepted jobs, and failed them one at a time at runtime instead of
+    # refusing to start. In prod this raises and the unit stops; in dev it warns,
+    # exactly as it does for the API.
+    validate_settings(s)
     rls = build_rls_pool(s.database_url)
     admin = build_admin_pool(s.database_admin_url)
     if rls is not None:
@@ -128,6 +135,13 @@ celery_app = Celery(
         # records its run in the scheduled_job_runs ledger so the Reports tab can show
         # last-run / last-status, and none re-raises into beat.
         "workers.tasks.reports",
+        # The nightly Postgres snapshot (run_nightly_backup). Before this, the ONLY
+        # caller of the pg_dump service was a human pressing POST /backups/run, while
+        # backup_config.nightly_enabled defaulted to true and the panel rendered a
+        # nightly schedule - a promise with no mechanism. Registered here so it is
+        # dispatchable now; its beat entry sits in the PRESERVED table below, because
+        # cron stays parked.
+        "workers.tasks.backups",
         # The job contract's own maintenance: the stuck-run reaper. It repairs the
         # ledger, so it deliberately does NOT run under @aios_job - see the module
         # docstring.
@@ -224,6 +238,25 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {}
 
 _BEAT_SCHEDULE_DISABLED = {
+    # Citation liveness re-check (0106). A listing is not a fact you establish once:
+    # directories delete listings, merge duplicates, expire unclaimed entries and quietly
+    # change a phone number, and none of that notifies us. Without this sweep `live`
+    # decays from an observation into a claim - the same defect class as the
+    # screenshot-as-live-URL this module was recovering from.
+    #
+    # Hourly is not a cadence choice, it is a POLLING choice: the actual cadence lives per
+    # row in `citations.next_recheck_at` (+3d, +14d, +60d for a new listing, then monthly
+    # for route A / core and quarterly for the rest). This sweep just asks "is anything
+    # due?" and does nothing when the answer is no. It makes NO provider call - plain HTTP
+    # GETs against listing URLs - so it is not metered and needs no dial.
+    #
+    # NOTE: beat is OFF (see above), so this does not run today. Until it is switched on,
+    # the same task is reachable on demand at POST /citation-builder/recheck, which is how
+    # the feature is usable without reversing the owner's decision about cron.
+    "citation-liveness-recheck": {
+        "task": "citation_liveness_recheck",
+        "schedule": 3600.0,
+    },
     # Scheduled content publishing (spec section 46). A lead's approve already moved
     # the job to `publishing` (the human gate is unchanged); this sweep only fires
     # the already-approved push once its publish_at is due. 5-minute cadence is
@@ -316,5 +349,39 @@ _BEAT_SCHEDULE_DISABLED = {
     "sweep-offpage-monitors": {
         "task": "sweep_offpage_monitors",
         "schedule": float(settings.report_offpage_sweep_seconds),
+    },
+    # The NIGHTLY POSTGRES SNAPSHOT (workers/tasks/backups.py). 02:00 UTC matches the
+    # `backup_config.nightly_time` default that 0026 seeds and the config panel renders;
+    # the two are NOT wired to each other and cannot be - beat reads a static table at
+    # process start and has no database. Editing nightly_time in the UI therefore changes
+    # what the panel SAYS, not when this fires. What the task does honour at run time is
+    # `nightly_enabled`: with the toggle off it returns a BLOCKED outcome naming the
+    # toggle rather than quietly taking a snapshot the operator switched off.
+    #
+    # NOTE: beat is OFF (see above), so this does not run today. Until it is switched on,
+    # a snapshot is taken on demand at POST /backups/run (owner/admin) - which is how the
+    # capability is usable without reversing the owner's decision about cron.
+    "nightly-backup": {
+        "task": "run_nightly_backup",
+        "schedule": crontab(hour=2, minute=0),
+    },
+    # The STUCK-RUN REAPER (workers/tasks/job_maintenance.py). The task has existed since
+    # the job contract landed and was registered in `include` above, but nothing ever
+    # called it - so `JobRunsStore.start` counted `running` rows against the per-client
+    # concurrency cap while nothing on the system could ever clear a row whose worker died
+    # without writing an outcome. That is a cap that only ever tightens.
+    #
+    # Every 5 minutes is derived, not picked: the tightest staleness budget is INTERACTIVE
+    # (TIME_LIMITS 60s + HEARTBEAT_GRACE_SECONDS 300 = 360s of silence), so a 300s sweep
+    # bounds detection lag to under one grace window for every queue. A slower sweep would
+    # let a dead interactive run hold a client's slot for materially longer than the
+    # contract says it can.
+    #
+    # NOTE: beat is OFF (see above), so this does not run today. Until it is switched on,
+    # the same sweep is reachable on demand at POST /maintenance/reap-stuck-jobs
+    # (owner-only, in app/routers/backups.py).
+    "reap-stale-job-runs": {
+        "task": "reap_stale_job_runs",
+        "schedule": 300.0,
     },
 }

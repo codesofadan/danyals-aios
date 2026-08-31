@@ -11,14 +11,61 @@ import json
 import re
 import time
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from audit_engine import emit as _emit
+from audit_engine.agents.dispatcher import (
+    dispatch_agents,
+    load_check_specs,
+    run_usage_snapshot,
+)
+
+# ai_search was imported only for its generator. Removing that import when the
+# generator was retired silently unregistered its 9 checks - the same way the
+# backlink modules were dead code: written, decorated, and never imported.
+from audit_engine.analyzers import ai_search as _ai_search_checks  # noqa: F401
+from audit_engine.analyzers import backlinks_anchors as _backlinks_anchors_checks  # noqa: F401
+from audit_engine.analyzers import backlinks_diversity as _backlinks_div_checks  # noqa: F401
+
+# The 39 backlink checks. `_emit_backlinks` and the `backlinks` scope were both
+# built, but nothing imported these modules, so no check ever registered and the
+# dispatcher had an empty scope to run. They were dead code that the ledger's
+# string-literal heuristic nonetheless counted as implemented.
+from audit_engine.analyzers import backlinks_profile as _backlinks_profile_checks  # noqa: F401
+from audit_engine.analyzers import crawl_graph as _crawl_graph_checks  # noqa: F401
+
+# Importing an analyzer module is what registers its checks. Keep this beside
+# the registry import so the two are never separated by an autoformatter.
+from audit_engine.analyzers import headers as _headers_checks  # noqa: F401
+from audit_engine.analyzers import images as _image_checks  # noqa: F401
+from audit_engine.analyzers import media_content as _media_checks  # noqa: F401
+from audit_engine.analyzers import network as _network_checks  # noqa: F401
+from audit_engine.analyzers import page_tech as _page_tech_checks  # noqa: F401
+from audit_engine.analyzers import psi_detail as _psi_detail_checks  # noqa: F401
+from audit_engine.analyzers import registry
+from audit_engine.analyzers import rendering as _rendering_checks  # noqa: F401
+from audit_engine.analyzers import rollups as _rollup_checks  # noqa: F401
+from audit_engine.analyzers import security as _security_checks  # noqa: F401
+from audit_engine.analyzers.common import Verdict
+from audit_engine.analyzers.context import build_context
+from audit_engine.analyzers.dispatch import run_rollups, run_scope
+from audit_engine.analyzers.extras import (
+    check_ai_bot_crawlability,
+    check_click_depth,
+    check_duplicate_content,
+    check_http_version,
+    check_llms_txt,
+    iter_cwv_findings,
+    iter_psi_quality_findings,
+)
+from audit_engine.analyzers.local import iter_local_findings
+from audit_engine.analyzers.offpage import iter_off_page_findings
 from audit_engine.analyzers.onpage import (
     check_broken_internal_links,
     check_https,
@@ -27,57 +74,13 @@ from audit_engine.analyzers.onpage import (
     check_meta_description_uniqueness,
     check_orphan_pages,
     check_title_uniqueness,
-    iter_per_page_checks,
 )
-from audit_engine.agents.dispatcher import (
-    AgentRunResult,
-    dispatch_agents,
-    load_check_specs,
-    run_usage_snapshot,
-)
-from audit_engine.analyzers.ai_search import iter_per_page_ai_search
-from audit_engine.analyzers.common import Verdict
-from audit_engine.analyzers.context import build_context
-from audit_engine.analyzers.dispatch import run_rollups, run_scope
 from audit_engine.analyzers.rollups import RollupContext
-from audit_engine.analyzers import registry
-from audit_engine.checklist import load_registry as load_registry_specs
-# Importing an analyzer module is what registers its checks. Keep this beside
-# the registry import so the two are never separated by an autoformatter.
-from audit_engine.analyzers import headers as _headers_checks  # noqa: F401
-from audit_engine.analyzers import crawl_graph as _crawl_graph_checks  # noqa: F401
-from audit_engine.analyzers import page_tech as _page_tech_checks  # noqa: F401
-from audit_engine.analyzers import psi_detail as _psi_detail_checks  # noqa: F401
-from audit_engine.analyzers import rollups as _rollup_checks  # noqa: F401
-from audit_engine.analyzers import network as _network_checks  # noqa: F401
-from audit_engine.analyzers import media_content as _media_checks  # noqa: F401
-from audit_engine.analyzers import rendering as _rendering_checks  # noqa: F401
-# The 39 backlink checks. `_emit_backlinks` and the `backlinks` scope were both
-# built, but nothing imported these modules, so no check ever registered and the
-# dispatcher had an empty scope to run. They were dead code that the ledger's
-# string-literal heuristic nonetheless counted as implemented.
-from audit_engine.analyzers import backlinks_profile as _backlinks_profile_checks  # noqa: F401
-from audit_engine.analyzers import backlinks_anchors as _backlinks_anchors_checks  # noqa: F401
-from audit_engine.analyzers import backlinks_diversity as _backlinks_div_checks  # noqa: F401
-from audit_engine.analyzers import images as _image_checks  # noqa: F401
-from audit_engine.analyzers import security as _security_checks  # noqa: F401
 from audit_engine.analyzers.semantic_seo import (
-    iter_per_page_semantic_seo,
     iter_site_wide_semantic_seo,
 )
-from audit_engine.analyzers.extras import (
-    check_ai_bot_crawlability,
-    check_click_depth,
-    check_duplicate_content,
-    check_http_version,
-    check_llms_txt,
-    iter_cwv_findings,
-    iter_per_page_extras,
-    iter_psi_quality_findings,
-)
-from audit_engine.analyzers.local import iter_local_findings
-from audit_engine.analyzers.offpage import iter_off_page_findings
 from audit_engine.analyzers.technical import iter_site_wide_technical
+from audit_engine.checklist import load_registry as load_registry_specs
 from audit_engine.config import AUDITS_DIR, CrawlConfig, ensure_dirs, get_keys
 from audit_engine.crawlers.basic import crawl
 from audit_engine.db.repository import (
@@ -92,16 +95,14 @@ from audit_engine.db.repository import (
 )
 from audit_engine.integrations.citations import CitationsClient, CitationSummary
 from audit_engine.integrations.google_nl import GoogleNLClient, NLAnalysis
-from audit_engine import emit as _emit
 from audit_engine.integrations.moz import MozClient
 from audit_engine.integrations.pagespeed import PageSpeedClient
 from audit_engine.integrations.places import Place, PlacesClient
 from audit_engine.integrations.serper import SerperClient
 from audit_engine.logging_setup import configure, get_logger
-from audit_engine.security import PrivateAddressError, validate_public_host
-from audit_engine.reporters import markdown as md_reporter
 from audit_engine.reporters.bundle import write_full_bundle
 from audit_engine.scorers.aggregator import aggregate
+from audit_engine.security import PrivateAddressError, validate_public_host
 
 PKT = timezone(timedelta(hours=5), name="PKT")
 
@@ -303,20 +304,10 @@ def _finding(*, run_id: int, page_id: int | None, check_id: str, owner: str, ver
 def _emit_extras(*, run_id: int, page_id_by_url: dict[str, int], crawl_result: Any, parsed_pages: list) -> list[Finding]:
     """Run the free deterministic extras analyzers and return their findings."""
     out: list[Finding] = []
-    for cp in crawl_result.pages:
-        if not cp.parsed:
-            continue
-        pid = page_id_by_url.get(cp.url)
-        for check_id, owner, verdict in iter_per_page_extras(cp.parsed):
-            out.append(_finding(run_id=run_id, page_id=pid, check_id=check_id, owner=owner, verdict=verdict))
-        # Deterministic AI-search / GEO checks. Run on every page so Section
-        # 04 (AI Search Visibility) is populated even when A5 LLM is skipped.
-        for check_id, owner, verdict in iter_per_page_ai_search(cp.parsed):
-            out.append(_finding(run_id=run_id, page_id=pid, check_id=check_id, owner=owner, verdict=verdict))
-        # Module 3 - Semantic SEO + Topical Authority + Koray Framework
-        # (per-page slice). Site-wide checks fire in the run-level loop.
-        for check_id, owner, verdict in iter_per_page_semantic_seo(cp.parsed):
-            out.append(_finding(run_id=run_id, page_id=pid, check_id=check_id, owner=owner, verdict=verdict))
+    # The per-page loop that stood here is gone: the extras, AI-search and
+    # semantic-SEO per-page checks are registered at `page` scope now and run
+    # through `_emit_registered`, which isolates each one. What is left below is
+    # only the work that has no scope of its own yet.
     # Module 3 site-wide rollups: topical clusters, hub-spoke links,
     # cross-page n-gram overlap, knowledge-domain consistency.
     if parsed_pages:
@@ -671,7 +662,7 @@ def _write_altitude(
             dimensions=dimensions,
             permitted_cost_classes=permitted,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("altitude_artifacts_failed", error=type(e).__name__)
 
 
@@ -720,7 +711,7 @@ async def _emit_google_nl_snapshot(
     try:
         async with GoogleNLClient(api_key=keys.google_nl) as client:
             result = await client.analyze(combined_text, want_categories=True, want_sentiment=True)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]Google NL failed: {type(e).__name__}: {e}[/yellow]")
         return None
     payload = {
@@ -838,7 +829,7 @@ def _resolve_optional_ai(mode: str, label: str, cost_hint: str) -> bool:
             return False
         console.print()
         return bool(typer.confirm(f"Run {label}? ({cost_hint})", default=False))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -896,7 +887,7 @@ async def _maybe_dispatch_ai_search_agents(
             deterministic_findings=deterministic_shaped,
             only_agents=only,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]AI-search fallback dispatch failed: {type(e).__name__}: {e}[/yellow]")
         return []
 
@@ -1064,7 +1055,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
                     _permitted_cost_classes(psi=True)
                 ),
             ))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [red]PSI failed: {type(e).__name__}: {e}[/red]")
 
     # ----- Run per-page analyzers -----
@@ -1076,26 +1067,6 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         if not cp.parsed:
             continue
         pid = page_id_by_url.get(cp.url)
-        for check_id, owner, verdict in iter_per_page_checks(cp.parsed):
-            findings.append(
-                Finding(
-                    run_id=run_id,
-                    page_id=pid,
-                    check_id=check_id,
-                    check_name=_check_name_for(check_id),
-                    category=_category_for(check_id),
-                    subcategory=None,
-                    owner_agent=owner,
-                    status=verdict.status,
-                    severity=verdict.severity,
-                    score=verdict.score,
-                    confidence=verdict.confidence,
-                    evidence_json=encode_evidence(verdict.evidence),
-                    remediation=verdict.remediation,
-                    references_json=None,
-                    impact_usd=None,
-                )
-            )
         # HTTPS (page-level check applied to homepage only for quick)
         if cp.url == crawl_result.site_url:
             v = check_https(cp)
@@ -1231,7 +1202,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         console.print(f"  [yellow]backlink checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
@@ -1240,7 +1211,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
         await _emit_google_nl_snapshot(
             artifact_dir=artifact_dir, crawl_result=crawl_result, permit_billable=True
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]Google NL snapshot failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Specialist agents (paid, opt-in) -----
@@ -1266,7 +1237,7 @@ async def _run_quick(*, domain: str, profile: str, max_pages: int, psi: bool, us
                 teams=["onpage", "technical", "local"],  # /quick: skip off-page
             )
             findings.extend(agent_findings)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Agent dispatch failed: {type(e).__name__}: {e}[/yellow]")
     else:
         # Always run A5 (AI Search) when an Anthropic key exists - quick mode
@@ -1598,7 +1569,7 @@ async def _run_full(
                     _permitted_cost_classes(psi=True)
                 ),
             ))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]PSI failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Per-page on-page analyzers -----
@@ -1607,26 +1578,6 @@ async def _run_full(
         if not cp.parsed:
             continue
         pid = page_id_by_url.get(cp.url)
-        for check_id, owner, verdict in iter_per_page_checks(cp.parsed):
-            findings.append(
-                Finding(
-                    run_id=run_id,
-                    page_id=pid,
-                    check_id=check_id,
-                    check_name=_check_name_for(check_id),
-                    category=_category_for(check_id),
-                    subcategory=None,
-                    owner_agent=owner,
-                    status=verdict.status,
-                    severity=verdict.severity,
-                    score=verdict.score,
-                    confidence=verdict.confidence,
-                    evidence_json=encode_evidence(verdict.evidence),
-                    remediation=verdict.remediation,
-                    references_json=None,
-                    impact_usd=None,
-                )
-            )
         if cp.url == crawl_result.site_url:
             v = check_https(cp)
             findings.append(
@@ -1772,7 +1723,7 @@ async def _run_full(
                         remediation=verdict.remediation, references_json=None, impact_usd=None,
                     )
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Moz failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Serper SERP sampling -----
@@ -1810,7 +1761,7 @@ async def _run_full(
                 ),
                 encoding="utf-8",
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Serper failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Local data: Places + citations + local analyzers (profile=local only) -----
@@ -1836,7 +1787,7 @@ async def _run_full(
                 console.print(f"  [yellow]Places: {place.error}[/yellow]")
             else:
                 console.print(f"  [yellow]No Place match for '{query}'[/yellow]")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Places failed: {type(e).__name__}: {e}[/yellow]")
 
     if profile == "local" and citations and keys.serper:
@@ -1884,7 +1835,7 @@ async def _run_full(
                     f" found={citations_summary.found_count}"
                     f" inconsistent={citations_summary.inconsistent_count}"
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Citations failed: {type(e).__name__}: {e}[/yellow]")
 
     if profile == "local":
@@ -1930,7 +1881,7 @@ async def _run_full(
         console.print(f"  [yellow]backlink checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
@@ -1941,7 +1892,7 @@ async def _run_full(
             crawl_result=crawl_result,
             permit_billable=(str(mode).lower() != "free"),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]Google NL snapshot failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Specialist agents (paid, opt-in) -----
@@ -1967,7 +1918,7 @@ async def _run_full(
                 teams=None,
             )
             findings.extend(agent_findings)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Agent dispatch failed: {type(e).__name__}: {e}[/yellow]")
     else:
         # Always-on AI-search fallback dispatch. Even when the operator
@@ -2117,7 +2068,7 @@ def local(
         citations = False
     use_ai = _resolve_ai_narrative(ai_narrative)
     use_agents = _resolve_agents(agents)
-    _ = moz  # noqa: F841 - accepted for harness parity; local has no Moz path
+    _ = moz
     asyncio.run(
         _run_local(
             domain=domain,
@@ -2233,7 +2184,7 @@ async def _run_local(
                 console.print(f"  [yellow]Places: {place.error}[/yellow]")
             else:
                 console.print(f"  [yellow]No Place match for '{query}'[/yellow]")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Places failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Citations (Serper-driven discovery + NAP inference) -----
@@ -2282,7 +2233,7 @@ async def _run_local(
                     f"  citations checked={citations.total_checked} found={citations.found_count}"
                     f" inconsistent={citations.inconsistent_count}"
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Citations failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Run on-page analyzers (subset relevant to local) -----
@@ -2291,23 +2242,6 @@ async def _run_local(
         if not cp.parsed:
             continue
         pid = page_id_by_url.get(cp.url)
-        for check_id, owner, verdict in iter_per_page_checks(cp.parsed):
-            if check_id in {"ON-073", "ON-079", "ON-080", "TECH-066"} or check_id.startswith("ON-04"):
-                findings.append(
-                    Finding(
-                        run_id=run_id, page_id=pid, check_id=check_id,
-                        check_name=_check_name_for(check_id),
-                        category=_category_for(check_id),
-                        subcategory=_meta_for(check_id)[2],
-                        owner_agent=owner,
-                        status=verdict.status, severity=verdict.severity, score=verdict.score,
-                        confidence=verdict.confidence,
-                        evidence_json=encode_evidence(verdict.evidence),
-                        remediation=verdict.remediation,
-                        references_json=None, impact_usd=None,
-                    )
-                )
-
     # ----- Local analyzers -----
     console.print("[bold]> Running local analyzers...[/bold]")
     for check_id, category, owner, verdict in iter_local_findings(
@@ -2351,7 +2285,7 @@ async def _run_local(
         console.print(f"  [yellow]backlink checks skipped: {type(e).__name__}: {e}[/yellow]")
     try:
         findings.append(await _emit_ai_crawl_readiness(run_id=run_id, crawl_result=crawl_result))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]AI crawl readiness check failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Google Cloud NL: entity + category + sentiment snapshot -----
@@ -2360,7 +2294,7 @@ async def _run_local(
         await _emit_google_nl_snapshot(
             artifact_dir=artifact_dir, crawl_result=crawl_result, permit_billable=True
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         console.print(f"  [yellow]Google NL snapshot failed: {type(e).__name__}: {e}[/yellow]")
 
     # ----- Specialist agents (paid, opt-in) -----
@@ -2386,7 +2320,7 @@ async def _run_local(
                 teams=["onpage", "technical", "local"],
             )
             findings.extend(agent_findings)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             console.print(f"  [yellow]Agent dispatch failed: {type(e).__name__}: {e}[/yellow]")
     else:
         # Always-on AI-search fallback dispatch (A5 + C4) when Anthropic key
@@ -2593,10 +2527,10 @@ def fix_finding(
         if f.get("confidence") is not None:
             console.print(f"[bold]Confidence:[/bold] {f['confidence']:.2f}")
         if f.get("evidence_json"):
-            console.print(f"[bold]Evidence:[/bold]")
+            console.print("[bold]Evidence:[/bold]")
             console.print(f"  {f['evidence_json']}")
         if f.get("remediation"):
-            console.print(f"[bold]Remediation:[/bold]")
+            console.print("[bold]Remediation:[/bold]")
             console.print(f"  {f['remediation']}")
         else:
             console.print("[dim]No remediation text on this finding.[/dim]")

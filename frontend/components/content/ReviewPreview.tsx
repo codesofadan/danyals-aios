@@ -28,6 +28,7 @@ import {
 } from "@/lib/hooks/content";
 import type { ContentJob } from "@/lib/content";
 import type { ReviewAction } from "./ReviewGate";
+import ApproveGate from "./ApproveGate";
 
 const PAGE_LABEL: Record<ContentJob["pageType"], string> = {
   service: "Service", blog: "Blog", local: "Local", gbp_post: "GMB Post",
@@ -150,6 +151,11 @@ export default function ReviewPreview({
 
   const [tab, setTab] = useState<TabKey>("article");
   const [editOpen, setEditOpen] = useState(false);
+  // Approving from the preview goes through the SAME acknowledgement gate as the
+  // queue. It used to publish straight from this button - and because the QA
+  // scorecard is the fifth tab and "article" is the default, a reviewer could sign
+  // off on a client's live page having never opened the score at all.
+  const [approveOpen, setApproveOpen] = useState(false);
   const [note, setNote] = useState("");
 
   const md = draftQ.data?.draft ?? "";
@@ -175,7 +181,15 @@ export default function ReviewPreview({
   const qa = qaQ.data?.qa ?? null;
 
   function sendEdit() {
-    onAction(job.id, "edit", note.trim());
+    const instruction = note.trim();
+    // The Send button below is already disabled while this is blank; this repeats
+    // the check because a note-less edit is not a cosmetic slip - it moved the job
+    // out of needs_review into a `drafting` state the pipeline refuses to act on
+    // (blank `edit_instruction`), stranding the page at "Edit requested". The
+    // server now 400s it (routers/content.py); this keeps the reviewer from ever
+    // seeing that error via a form the button state alone stopped guarding.
+    if (!instruction) return;
+    onAction(job.id, "edit", instruction);
     setEditOpen(false);
     setNote("");
   }
@@ -406,7 +420,7 @@ export default function ReviewPreview({
         <div className="co-gate-actions" style={{ marginTop: 14 }}>
           <button
             className="primary-btn co-approve"
-            onClick={() => onAction(job.id, "approve")}
+            onClick={() => setApproveOpen(true)}
             disabled={!canReview}
             title={reviewGateTitle}
           >
@@ -431,6 +445,16 @@ export default function ReviewPreview({
           </button>
         </div>
       )}
+      <ApproveGate
+        code={approveOpen ? job.id : null}
+        title={job.topic}
+        onCancel={() => setApproveOpen(false)}
+        onConfirm={(note) => {
+          setApproveOpen(false);
+          onAction(job.id, "approve", note);
+        }}
+      />
+
       {inReview && !hideActions && !canReview && (
         <div className="cs" style={{ marginTop: 8 }}>
           Ask a lead (owner, admin or manager) to approve, edit or reject this draft.
@@ -442,7 +466,8 @@ export default function ReviewPreview({
         <div style={{ marginTop: 12, padding: 14, borderRadius: 12,
           border: "1px solid var(--line, #e8d2d7)", background: "var(--blush, #F8ECEE)" }}>
           <label htmlFor="co-edit-note" className="cs" style={{ display: "block", marginBottom: 6 }}>
-            What should the re-draft change? The pipeline re-drafts targeting exactly this note.
+            What should the re-draft change? The pipeline re-drafts targeting exactly this note,
+            and cannot run without one — so this is required.
           </label>
           <textarea
             id="co-edit-note"
@@ -455,7 +480,12 @@ export default function ReviewPreview({
           />
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
             <button className="ghostbtn" onClick={() => { setEditOpen(false); setNote(""); }}>Cancel</button>
-            <button className="primary-btn" onClick={sendEdit} disabled={!note.trim()}>
+            <button
+              className="primary-btn"
+              onClick={sendEdit}
+              disabled={!note.trim()}
+              title={note.trim() ? undefined : "Write what the re-draft should change"}
+            >
               <span className="material-symbols-rounded">send</span>Send edit request
             </button>
           </div>
@@ -534,7 +564,7 @@ function SchemaTab({ loading, error, data, fallbackType }: {
 function QaTab({ loading, error, qa }: {
   loading: boolean; error: Error | null;
   qa: { dimensions: Record<string, number>; weighted_total: number; passed: boolean;
-    blocked_by: string[]; provisional: boolean; notes: string[] } | null;
+    blocked_by: string[]; provisional: boolean; notes?: string[] } | null;
 }) {
   if (loading) return <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span><div>Loading QA…</div></div>;
   if (error) return <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span><div>Couldn&apos;t load the QA scorecard — {error.message}.</div></div>;
@@ -554,7 +584,11 @@ function QaTab({ loading, error, qa }: {
           <span className="material-symbols-rounded">{qa.passed ? "check_circle" : "gpp_maybe"}</span>
           {qa.passed ? "Meets the quality bar" : "Below the quality bar"}
         </span>
-        <span className="pill-tag"><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</span>
+        <span className="pill-tag">
+          {Number.isFinite(qa.weighted_total)
+            ? <><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</>
+            : <strong>not scored</strong>}
+        </span>
         {qa.provisional && <span className="pill-tag" style={{ opacity: 0.8 }}>provisional weights</span>}
         <span className="cs" style={{ flexBasis: "100%" }}>
           Advisory — this score does not block publishing. Your approval does.
@@ -587,11 +621,15 @@ function QaTab({ loading, error, qa }: {
         })}
       </div>
 
-      {qa.notes.length > 0 && (
+      {/* `qa_score` is a jsonb column: its shape is whatever the engine that wrote
+          it happened to include, not a contract. The doctrine engine omitted
+          `notes`, so this threw a TypeError and took the whole QA tab down on
+          every page it drafted. Read defensively. */}
+      {(qa.notes ?? []).length > 0 && (
         <details style={{ marginTop: 12 }}>
-          <summary className="cs" style={{ cursor: "pointer" }}>Why ({qa.notes.length} note{qa.notes.length === 1 ? "" : "s"})</summary>
+          <summary className="cs" style={{ cursor: "pointer" }}>Why ({(qa.notes ?? []).length} note{(qa.notes ?? []).length === 1 ? "" : "s"})</summary>
           <ul style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13, opacity: 0.85 }}>
-            {qa.notes.map((n, i) => <li key={i}>{n}</li>)}
+            {(qa.notes ?? []).map((n, i) => <li key={i}>{n}</li>)}
           </ul>
         </details>
       )}

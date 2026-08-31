@@ -96,6 +96,12 @@ packages = ["app", "workers", "integrations"]
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+# VENDORED, not ours. `seo-content-os/` is the imported SEO doctrine corpus and its
+# helper scripts; 447 of the 471 lint errors in this repo were in that one
+# directory, which made `ruff check .` - the documented commit gate - permanently
+# red and therefore ignored. A gate nobody can pass is a gate nobody reads. Lint
+# the platform's own source; the corpus is third-party content that travels as-is.
+extend-exclude = ["seo-content-os"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]

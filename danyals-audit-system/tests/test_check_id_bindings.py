@@ -188,16 +188,17 @@ def test_no_check_id_is_emitted_twice_by_the_same_per_page_iterator_set():
     ai_search.py, both firing per page. Whichever landed last in the list won
     in some readers and lost in others; the two disagreed on score.
     """
-    from audit_engine.analyzers.ai_search import iter_per_page_ai_search
-    from audit_engine.analyzers.onpage import iter_per_page_checks
+    import audit_engine.cli.main  # noqa: F401 - registers every check module
+    from audit_engine.analyzers.dispatch import run_scope
     from audit_engine.parsers import html as html_parser
 
     for name in ("clean.html", "thin.html", "broken-schema.html"):
         fixture = pathlib.Path(__file__).parent / "fixtures" / name
         page = html_parser.parse(fixture.read_text(), "https://example.com/")
-        emitted: list[str] = []
-        for it in (iter_per_page_checks, iter_per_page_ai_search):
-            emitted.extend(cid for cid, *_rest in it(page))
+        # The registry is a dict keyed by check id, so a duplicate is refused at
+        # import rather than caught here - this now asserts the dispatcher does not
+        # reintroduce one.
+        emitted = [cid for cid, _v in run_scope("page", page).verdicts]
         dupes = sorted({c for c in emitted if emitted.count(c) > 1})
         assert not dupes, f"{name}: emitted twice for one page: {dupes}"
 

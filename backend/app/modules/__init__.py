@@ -23,6 +23,7 @@ from app.modules.billing import router as billing_router
 from app.modules.citations import router as citations_router
 from app.modules.client_onboarding import router as client_onboarding_router
 from app.modules.competitor_intel import router as competitor_intel_router
+from app.modules.content_experience import router as content_experience_router
 from app.modules.content_planning import router as content_planning_router
 from app.modules.data_import import router as data_import_router
 from app.modules.gmb import router as gmb_router
@@ -52,6 +53,10 @@ MODULE_ROUTERS: list[APIRouter] = [
     # P4: the engagement/scope layer above content_jobs. Read-only - production is
     # started through the existing gated content job path.
     content_planning_router,
+    # The human half of the Experience gate: read the questions the pipeline
+    # asked, answer them, and resume the page it halted. Separate from
+    # content_planning because that router is read-only by design.
+    content_experience_router,
     data_import_router,
     # 7B-4: citation SUBMISSION (business profiles + directory catalog + campaign
     # dispatch) - the write half of off-page; app/routers/offpage.py keeps the

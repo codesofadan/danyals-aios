@@ -116,15 +116,45 @@ def test_every_manifest_file_is_present_and_unmodified(manifest: dict) -> None:
     )
 
 
+#: Trees that live inside the corpus directory but are NOT doctrine: Claude Code
+#: tooling, per-client workspaces, generated sample output, and rendered docs.
+#:
+#: The exclusion is scoped to exactly what `doctrine.chunk_index` can reach. It reads
+#: `INDEXED_FILES` plus `INDEXED_AREAS` = knowledge/agents/commands/skills resolved
+#: against the corpus ROOT - so `.claude/agents/*.md` is a copy of the tooling that
+#: no loader opens, while `agents/*.md` one level up is the real thing and stays
+#: guarded. Nothing excluded here backs a numeric constant either, which is the other
+#: half of what the manifest exists to pin.
+#:
+#: Keep this list closed. A new top-level tree in the corpus should fail this test
+#: until someone decides which of the two it is.
+_NOT_DOCTRINE = (".claude/", "output/", "docs/")
+
+
+def _is_doctrine(rel: str) -> bool:
+    """Whether `rel` falls in the part of the corpus the manifest governs."""
+    if rel.startswith(_NOT_DOCTRINE):
+        return False
+    # `clients/` holds the declared `_template/` alongside sample workspaces that
+    # ship with the corpus; only the template is doctrine.
+    if rel.startswith("clients/") and not rel.startswith("clients/_template/"):
+        return False
+    return True
+
+
 def test_no_undeclared_file_has_appeared(manifest: dict) -> None:
     """An untracked addition is drift too: it would be indexed at runtime while no
-    hash covers it."""
+    hash covers it.
+
+    Scoped to the doctrine trees. The corpus directory also carries tooling and sample
+    output that no loader indexes and no constant cites - see `_NOT_DOCTRINE`.
+    """
     on_disk = {
         p.relative_to(_CORPUS).as_posix()
         for p in _CORPUS.rglob("*")
         if p.is_file() and p.name != "MANIFEST.json" and "__pycache__" not in p.parts
     }
-    extra = sorted(on_disk - set(manifest["files"]))
+    extra = sorted(f for f in on_disk - set(manifest["files"]) if _is_doctrine(f))
     assert not extra, f"files present but not in MANIFEST.json: {extra}"
 
 

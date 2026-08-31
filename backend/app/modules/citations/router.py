@@ -18,14 +18,21 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.security import is_public_url
+from app.modules.citations.evidence import citation_evidence_store
+from app.modules.citations.operator_auth import OperatorOrUserDep, require_operator_lead
 from app.modules.citations.repo import (
+    CitationQueueRepoDep,
     CitationsRepoDep,
+    DirectorySpecsRepoDep,
     ServiceCitationsStore,
     service_citations_store,
     web2_credential_counts,
@@ -41,29 +48,59 @@ from app.modules.citations.schemas import (
     CitationCampaignRequest,
     CitationCampaignResponse,
     CitationLiveUrl,
+    CitationSkip,
     DirectoryResponse,
+    DirectorySpecResponse,
     EngineStatusBoardResponse,
     EngineStatusResponse,
     GapAnalysisResponse,
+    QueueBlockedRequest,
+    QueueBoardResponse,
+    QueueClaimRequest,
+    QueueCompleteRequest,
+    QueueCompleteResponse,
+    QueueFieldValue,
+    QueueHeartbeatRequest,
+    QueueItemResponse,
+    SpecBoardResponse,
+    SpecCreateRequest,
+    SpecDeactivateRequest,
+    SpecFirstLiveRequest,
+    SpecVerifyRequest,
     Web2PlatformStatusResponse,
     Web2StatusResponse,
 )
 from app.modules.citations.service import (
     automatable_directories,
     build_audit_plan,
+    citations_needing_correction,
     compute_citation_gap,
+    diff_nap_fields,
     estimate_campaign_cost,
+    job_from_row,
     select_campaign_directories,
     submit_method_label,
 )
 from app.modules.citations.verticals import normalize_vertical
 from app.services.activity import record_activity
+from app.services.citation_liveness import http_liveness_probe, judge_liveness
+from integrations.citation_bot import db_spec_loader
 from integrations.citation_status import citation_engine_board
 from integrations.web2_status import web2_status_board
 
 router = APIRouter(prefix="/citation-builder", tags=["citation-builder"])
 
 ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
+# The QUEUE routes only. These accept a dashboard bearer token OR the extension's
+# `X-Operator-Token`, resolving both to the same CurrentUser - so there is ONE
+# implementation of "a completion is checked by fetching the URL", not two.
+#
+# `OperatorOrUserLead` additionally requires a lead role, exactly as the bearer-only
+# version did: an operator token inherits its holder's role and grants nothing extra.
+# A non-lead paired extension is refused the write endpoints for the same reason a
+# non-lead session is.
+OperatorOrUser = OperatorOrUserDep
+OperatorOrUserLead = Annotated[CurrentUser, Depends(require_operator_lead)]
 Lead = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))]
 
 _PROFILE_NOT_FOUND = HTTPException(
@@ -176,14 +213,41 @@ async def update_business_profile(
             detail="This profile's NAP is locked. Unlock it (napLocked=false) before editing.",
         )
     changes = body.model_dump(exclude={"client_id"})
+
+    # THE FAN-OUT (0107). Every listing already built carries the values in `current`.
+    # The moment this profile is saved they all disagree with canonical - not gradually,
+    # immediately - and an inconsistent citation is worse than no citation, because it
+    # splits the local signal instead of reinforcing it. So the canonical fields that
+    # actually moved are diffed BEFORE the write, and every live listing built from this
+    # profile is flagged for correction in the same breath as the edit.
+    nap_events = diff_nap_fields(current, changes)
+
     row = await asyncio.to_thread(repo.update_business_profile, profile_id, changes)
     if row is None:
         raise _PROFILE_NOT_FOUND
     client_id = row.get("client_id")
+
+    flagged = 0
+    if nap_events and client_id:
+        affected = await asyncio.to_thread(repo.citations_for_profile, profile_id)
+        flagged = await asyncio.to_thread(
+            repo.record_nap_change,
+            client_id=str(client_id),
+            profile_id=profile_id,
+            events=nap_events,
+            citation_ids=citations_needing_correction(affected),
+        )
+
     await record_activity(
         actor, kind="content", action="updated a business profile",
         target=row.get("client_name", ""), entity_type="client",
         entity_id=str(client_id) if client_id else None,
+        meta=(
+            f"canonical NAP changed ({', '.join(e['field'] for e in nap_events)}); "
+            f"{flagged} live listing(s) flagged for correction"
+        )
+        if nap_events
+        else None,
     )
     return BusinessProfileResponse.from_row(row)
 
@@ -469,6 +533,7 @@ async def gap_analysis(
         missing_count=len(gap.missing),
         missing=[DirectoryResponse.from_row(d) for d in gap.missing],
         live_urls=[CitationLiveUrl(**u) for u in gap.live_urls],
+        skipped=[CitationSkip(**s) for s in gap.skipped],
         by_submit_status=gap.by_submit_status,
         by_nap_status=gap.by_nap_status,
     )
@@ -577,3 +642,560 @@ async def engine_status(_user: ViewReports) -> EngineStatusBoardResponse:
             for e in board.engines
         ],
     )
+
+
+# --- proof screenshot download ----------------------------------------------------
+
+
+@router.get("/citations/{citation_id}/proof")
+async def download_citation_proof(
+    citation_id: str,
+    _user: ViewReports,
+    repo: CitationsRepoDep,
+) -> FileResponse:
+    """Serve a citation's proof SCREENSHOT.
+
+    A screenshot is evidence that a submission happened. It is NOT the listing, it is
+    not a live URL, and it is served from a separate route for exactly that reason -
+    `proof_url` and `live_url` are different facts and conflating them is the defect
+    0106 exists to remove.
+
+    `proof_url` holds a relative key, never a path. The key is resolved inside a fixed
+    root and the resolved path is never returned to the caller - only the bytes."""
+    row = await asyncio.to_thread(repo.get_citation, citation_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Citation not found")
+
+    store = citation_evidence_store(get_settings())
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No citation artifact root is configured, so no proof was captured",
+        )
+
+    path = await asyncio.to_thread(store.resolve, str(row.get("proof_url") or ""))
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No proof on file")
+    return FileResponse(path, media_type="image/png", filename=f"citation-{citation_id}.png")
+
+
+# --- the human work queue (0110) ---------------------------------------------------
+#
+# Route C - a human working a directory by hand - is ~200 of the 226 catalogue rows and,
+# measured, 56% of the loaded cost per live citation. It was previously a desktop script
+# that printed one shared password for a whole campaign and recorded nothing. These
+# endpoints are the product that replaces it.
+#
+# All of them are ordinary staff-authenticated routes. The Chrome extension (Phase 3)
+# will reach the same queue through a separate scoped credential; keeping the surfaces
+# apart means the dashboard's auth never has to loosen to accommodate a browser
+# extension living next to hostile page JS.
+
+# How long a claim is held before it returns to the pool. A LEASE, not a lock: an
+# operator who closes their laptop must not strand an item forever. Twenty minutes is
+# comfortably longer than the ~4 minutes a prepared item should take, and short enough
+# that a stranded item is back in the queue within one coffee break.
+_QUEUE_LEASE_SECONDS = 20 * 60
+
+_QUEUE_BLOCK_LABELS: dict[str, str] = {
+    "captcha_wall": "a CAPTCHA the operator could not clear",
+    "account_required": "the directory demands an account we do not hold",
+    "paid_only": "listing requires payment",
+    "form_changed": "the add-listing form is not what we expected",
+    "duplicate_listing": "the business is already listed",
+    "directory_dead": "the directory no longer accepts listings",
+    "phone_verification": "verification by phone call to the business",
+    "postcard_verification": "verification by posted card to the business",
+    "other": "see the operator's note",
+}
+
+
+def _spec_selectors(row: dict[str, Any]) -> dict[str, str]:
+    """`{value_key: selector}` from this directory's ACTIVE spec, or empty.
+
+    Empty is the normal case and must stay honest: the whitelist starts empty, and a
+    directory with no earned spec has no selectors to offer. The panel then shows
+    copy-buttons instead of a Fill action, which is a smaller feature rather than a
+    broken one."""
+    spec_loader = db_spec_loader
+    try:
+        job = job_from_row(row)
+        spec = spec_loader(job)
+    except Exception:
+        return {}
+    if spec is None:
+        return {}
+    return {f.value_key: f.selector for f in spec.fields}
+
+
+def _queue_fields(row: dict[str, Any]) -> list[QueueFieldValue]:
+    """Every value the operator needs, pre-computed and labelled.
+
+    Empty values are DROPPED rather than shown blank. A form asks for what it asks for;
+    presenting an operator with eight empty boxes to puzzle over is exactly the friction
+    the queue exists to remove, and a blank field is better discovered on the directory's
+    own form than in our panel."""
+    pairs: list[tuple[str, str, Any]] = [
+        ("business_name", "Business name", row.get("bp_business_name")),
+        ("address_line1", "Address", row.get("bp_address_line1")),
+        ("address_line2", "Address line 2", row.get("bp_address_line2")),
+        ("city", "City", row.get("bp_city")),
+        ("region", "State / region", row.get("bp_region")),
+        ("postal_code", "Postcode", row.get("bp_postal_code")),
+        ("phone", "Phone", row.get("bp_phone")),
+        ("website_url", "Website", row.get("bp_website_url")),
+        ("email", "Email", row.get("bp_email")),
+        ("description", "Description", row.get("bp_description")),
+    ]
+    selectors = _spec_selectors(row)
+    out = [
+        QueueFieldValue(key=k, label=label, value=str(v).strip(), selector=selectors.get(k, ""))
+        for k, label, v in pairs
+        if str(v or "").strip()
+    ]
+    categories = row.get("bp_categories") or []
+    if categories:
+        out.append(
+            QueueFieldValue(
+                key="categories", label="Categories", value=", ".join(categories),
+                selector=selectors.get("categories", ""),
+            )
+        )
+    return out
+
+
+def _queue_item(row: dict[str, Any]) -> QueueItemResponse:
+    expires = row.get("claim_expires_at")
+    prohibited = ""
+    if str(row.get("directory_route") or "").upper() == "F":
+        # This should be unreachable - a route-F row can never be queued - so if it is
+        # ever seen, say so loudly rather than letting an operator submit against terms
+        # that forbid it under the client's own identity.
+        prohibited = (
+            "This directory's terms forbid automated submission and it should not be in "
+            f"the queue. Do not submit. {row.get('directory_tos_source_url') or ''}"
+        ).strip()
+    return QueueItemResponse(
+        citation_id=str(row.get("id")),
+        client=str(row.get("client_name") or ""),
+        directory=str(row.get("directory_name") or row.get("directory") or ""),
+        directory_url=str(row.get("directory_url") or ""),
+        add_url=str(row.get("directory_add_url") or ""),
+        fields=_queue_fields(row),
+        queued_because=str(row.get("blocked_reason") or "") or "prepared for a human to finish",
+        claim_expires_at=expires.isoformat() if expires else None,
+        human_attempts=int(row.get("human_attempts") or 0),
+        worked_seconds=int(row.get("worked_seconds") or 0),
+        prohibited_warning=prohibited,
+    )
+
+
+@router.get("/queue", response_model=QueueBoardResponse)
+async def citation_queue_board(queue: CitationQueueRepoDep, _user: OperatorOrUser) -> QueueBoardResponse:
+    """The queue at a glance, plus the median minutes per finished item."""
+    stats = await asyncio.to_thread(queue.queue_stats)
+    median = stats.get("median_seconds")
+    return QueueBoardResponse(
+        waiting=int(stats.get("waiting") or 0),
+        in_progress=int(stats.get("in_progress") or 0),
+        median_seconds=int(median) if median is not None else None,
+    )
+
+
+@router.post("/queue/claim", response_model=QueueItemResponse | None)
+async def claim_queue_item(
+    body: QueueClaimRequest, queue: CitationQueueRepoDep, actor: OperatorOrUserLead
+) -> QueueItemResponse | None:
+    """Take the next available item. Returns ``null`` when the queue is empty."""
+    claimed = await asyncio.to_thread(
+        queue.claim_next, lease_seconds=_QUEUE_LEASE_SECONDS, client_id=body.client_id
+    )
+    if claimed is None:
+        return None
+    # Re-read through held_item so the response carries the joined directory + NAP the
+    # operator actually needs; the claim UPDATE can only return citations.* .
+    row = await asyncio.to_thread(queue.held_item, str(claimed["id"]))
+    if row is None:
+        return None
+    await record_activity(
+        actor, kind="task", action="claimed a citation queue item",
+        target=str(row.get("directory_name") or row.get("directory") or ""),
+        entity_type="client",
+        entity_id=str(row.get("client_id")) if row.get("client_id") else None,
+    )
+    return _queue_item(row)
+
+
+@router.get("/queue/{citation_id}", response_model=QueueItemResponse)
+async def get_queue_item(
+    citation_id: str, queue: CitationQueueRepoDep, _user: OperatorOrUser
+) -> QueueItemResponse:
+    """The item this operator currently holds. 404s once the claim lapses, so a stale
+    browser tab cannot keep working an item somebody else now owns."""
+    row = await asyncio.to_thread(queue.held_item, citation_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You do not hold this item, or the claim has expired.",
+        )
+    return _queue_item(row)
+
+
+@router.post("/queue/{citation_id}/heartbeat")
+async def heartbeat_queue_item(
+    citation_id: str, body: QueueHeartbeatRequest, queue: CitationQueueRepoDep, _user: OperatorOrUser
+) -> dict[str, Any]:
+    """Extend the lease and bank the time worked. Time ACCUMULATES, so a crash costs at
+    most one heartbeat of measurement rather than the whole session."""
+    ok = await asyncio.to_thread(
+        queue.extend_claim,
+        citation_id,
+        lease_seconds=_QUEUE_LEASE_SECONDS,
+        worked_seconds=body.worked_seconds,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Your claim on this item has expired - claim it again before continuing.",
+        )
+    return {"ok": True, "leaseSeconds": _QUEUE_LEASE_SECONDS}
+
+
+@router.post("/queue/{citation_id}/release", status_code=status.HTTP_204_NO_CONTENT)
+async def release_queue_item(
+    citation_id: str, body: QueueHeartbeatRequest, queue: CitationQueueRepoDep, _user: OperatorOrUser
+) -> None:
+    """Hand the item back without finishing it. The attempt still counts."""
+    await asyncio.to_thread(queue.release_claim, citation_id, worked_seconds=body.worked_seconds)
+
+
+@router.post("/queue/{citation_id}/complete", response_model=QueueCompleteResponse)
+async def complete_queue_item(
+    citation_id: str, body: QueueCompleteRequest, queue: CitationQueueRepoDep, actor: OperatorOrUserLead
+) -> QueueCompleteResponse:
+    """Close an item with the public URL of the listing that was created.
+
+    THE COMPLETION IS CHECKED, NOT ASSERTED. The operator supplies a URL; the same
+    liveness probe the scheduled re-check uses fetches it and looks for the business's
+    name and its phone or address. If it is not there, the completion is REFUSED and the
+    item stays claimed - the operator finds out while the tab is still open, instead of
+    at a re-check three days later when the context is gone.
+
+    That refusal is a normal response, not an error. The commonest cause is not
+    dishonesty, it is a directory that has accepted the submission into a moderation
+    queue and not published it yet - in which case the honest answer really is 'not live
+    yet', and the operator should release the item rather than close it."""
+    row = await asyncio.to_thread(queue.held_item, citation_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You do not hold this item, or the claim has expired.",
+        )
+
+    live_url = body.live_url.strip()
+    # SSRF: the URL is operator-supplied and this fetch runs server-side.
+    if not await asyncio.to_thread(is_public_url, live_url):
+        return QueueCompleteResponse(
+            accepted=False,
+            submit_status=str(row.get("submit_status") or ""),
+            live_url=live_url,
+            reason="That is not a reachable public URL.",
+        )
+
+    probe = await asyncio.to_thread(http_liveness_probe, live_url)
+    verdict = judge_liveness(
+        probe,
+        business_name=str(row.get("bp_business_name") or ""),
+        phone=str(row.get("bp_phone") or ""),
+        address_line1=str(row.get("bp_address_line1") or ""),
+    )
+    if not verdict.is_live:
+        return QueueCompleteResponse(
+            accepted=False,
+            submit_status=str(row.get("submit_status") or ""),
+            live_url=live_url,
+            reason=str(verdict.evidence.get("reason") or "the business was not found on that page"),
+            matched_fields=list(verdict.evidence.get("matched_fields") or []),
+        )
+
+    updated = await asyncio.to_thread(
+        queue.complete_item,
+        citation_id,
+        live_url=live_url,
+        submit_status=verdict.status,
+        evidence=verdict.evidence,
+        worked_seconds=body.worked_seconds,
+        note=body.note,
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Your claim on this item expired."
+        )
+    await record_activity(
+        actor, kind="task", action="completed a citation listing",
+        target=str(row.get("directory_name") or row.get("directory") or ""),
+        entity_type="client",
+        entity_id=str(row.get("client_id")) if row.get("client_id") else None,
+        meta=f"live at {live_url}",
+    )
+    return QueueCompleteResponse(
+        accepted=True,
+        submit_status=verdict.status,
+        live_url=live_url,
+        matched_fields=list(verdict.evidence.get("matched_fields") or []),
+    )
+
+
+@router.post("/queue/{citation_id}/blocked", status_code=status.HTTP_204_NO_CONTENT)
+async def block_queue_item(
+    citation_id: str, body: QueueBlockedRequest, queue: CitationQueueRepoDep, actor: OperatorOrUserLead
+) -> None:
+    """Close an item as NOT done, with a machine-readable reason.
+
+    This is the outcome operators will reach for most often and it must cost them
+    nothing to report. The reasons are a closed vocabulary so the board can answer
+    'which directories are wasting our time?' - which is what eventually removes a row
+    from the offer list."""
+    row = await asyncio.to_thread(queue.held_item, citation_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You do not hold this item, or the claim has expired.",
+        )
+    detail = body.detail.strip() or _QUEUE_BLOCK_LABELS.get(body.reason, body.reason)
+    await asyncio.to_thread(
+        queue.block_item,
+        citation_id,
+        reason=body.reason,
+        detail=detail,
+        worked_seconds=body.worked_seconds,
+    )
+    await record_activity(
+        actor, kind="task", action="reported a citation as blocked",
+        target=str(row.get("directory_name") or row.get("directory") or ""),
+        entity_type="client",
+        entity_id=str(row.get("client_id")) if row.get("client_id") else None,
+        meta=f"{body.reason}: {detail}",
+    )
+
+
+@router.post("/recheck", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_liveness_recheck(actor: Lead, limit: int = 200) -> dict[str, Any]:
+    """Re-verify every citation whose re-check has come due, now.
+
+    WHY THIS EXISTS AS AN ENDPOINT. The sweep is designed to run on a schedule, but
+    Celery beat is switched OFF across this platform by an owner instruction - so a
+    scheduled-only re-check would be a feature that never runs, and `live` would quietly
+    go back to meaning "was live once". Rather than reverse someone else's decision about
+    cron, the same task is reachable on demand here; the beat entry sits ready in
+    ``_BEAT_SCHEDULE_DISABLED`` for whenever that decision changes.
+
+    Costs nothing metered: plain HTTP GETs against listing URLs, no provider call, so it
+    does not pass through the money dial. Runs inline rather than via Celery so the
+    operator gets the counts back instead of a job id they would have to chase."""
+    from app.modules.citations.tasks import execute_liveness_recheck
+    from app.services.citation_liveness import http_liveness_probe
+
+    result = await asyncio.to_thread(
+        execute_liveness_recheck,
+        service_citations_store(),
+        fetch=http_liveness_probe,
+        limit=max(1, min(limit, 500)),
+    )
+    await record_activity(
+        actor, kind="task", action="ran a citation liveness re-check",
+        target=f"{result.get('checked', 0)} listing(s)",
+        meta=f"{result.get('changed', 0)} changed state",
+    )
+    return result
+
+
+# --- the earned spec whitelist (0111) ----------------------------------------------
+#
+# A directory reaches the automated route only after (a) a dated human live-DOM check and
+# (b) one submission that produced a public listing URL. The whitelist starts EMPTY, and
+# that is the true state rather than a regression: the 50 in-code specs were never
+# verified, and 29 of their URLs answer 403.
+#
+# Every rule here is enforced in the DATABASE - a CHECK for the earned contract, triggers
+# for immutability and for binding a spec's URL to its own directory's host. These routes
+# are a thin caller; they deliberately do not re-implement any of it, so there is exactly
+# one place each rule can be wrong. A constraint violation surfaces as a 409 with the
+# database's own message, which is more accurate than anything restated here.
+
+
+def _spec_conflict(exc: Exception) -> HTTPException:
+    """Turn a database refusal into a 409 carrying the reason the database gave.
+
+    Restating these in Python would mean maintaining a second copy of every rule, and the
+    copy would drift. The database's message names the exact constraint, which is what an
+    operator needs."""
+    # psycopg exposes the server's own message on `.diag`; anything else falls back to
+    # str(exc). Read defensively so a non-psycopg error still produces a usable 409
+    # rather than raising a second exception inside the handler.
+    diag = getattr(exc, "diag", None)
+    primary = getattr(diag, "message_primary", None) if diag is not None else None
+    detail = str(primary or exc)
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail[:400])
+
+
+@router.get("/specs", response_model=SpecBoardResponse)
+async def list_directory_specs(
+    specs: DirectorySpecsRepoDep,
+    _user: ViewReports,
+    directory_id: Annotated[str | None, Query(alias="directoryId")] = None,
+) -> SpecBoardResponse:
+    """The whitelist, and how much each spec has earned."""
+    rows = await asyncio.to_thread(specs.list_specs, directory_id=directory_id)
+    out = [DirectorySpecResponse.from_row(r) for r in rows]
+    return SpecBoardResponse(
+        active=sum(1 for s in out if s.active),
+        verified_not_live=sum(1 for s in out if s.verified and not s.has_first_live_url),
+        unverified=sum(1 for s in out if not s.verified),
+        drifted=sum(1 for s in out if s.drifted),
+        specs=out,
+    )
+
+
+@router.post("/specs", response_model=DirectorySpecResponse, status_code=status.HTTP_201_CREATED)
+async def create_directory_spec(
+    body: SpecCreateRequest, specs: DirectorySpecsRepoDep, actor: Lead
+) -> DirectorySpecResponse:
+    """Record a NEW spec revision, always inactive.
+
+    The spec's URL must belong to its own directory's host - enforced by a trigger,
+    because that URL is a browser navigation target. Without it a lead could point our
+    headless browser at an internal address and read the response back as a screenshot."""
+    payload = {
+        "url": body.url,
+        "fields": [{"selector": f.selector, "value_key": f.value_key} for f in body.fields],
+        "submit_selector": body.submit_selector,
+        "success_indicator": body.success_indicator,
+    }
+    try:
+        row = await asyncio.to_thread(
+            specs.create_spec, directory_id=body.directory_id, spec=payload
+        )
+    except Exception as exc:
+        raise _spec_conflict(exc) from exc
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Could not create the spec")
+    await record_activity(
+        actor, kind="content", action="recorded a directory form spec",
+        target=body.directory_id,
+    )
+    full = await asyncio.to_thread(specs.get_spec, str(row["id"]))
+    return DirectorySpecResponse.from_row(full or row)
+
+
+@router.post("/specs/{spec_id}/verify", response_model=DirectorySpecResponse)
+async def verify_directory_spec(
+    spec_id: str, body: SpecVerifyRequest, specs: DirectorySpecsRepoDep, actor: Lead
+) -> DirectorySpecResponse:
+    """Half (a): sign that a human diffed these selectors against the live form.
+
+    Write-once. A stale verification cannot be quietly refreshed to make an old spec look
+    recently checked - that would turn the date, which is the whole value, into
+    decoration."""
+    evidence = {
+        "checked_at": datetime.now(UTC).isoformat(),
+        "selectors": body.selectors,
+        "notes": body.notes[:1000],
+    }
+    row = await asyncio.to_thread(
+        specs.record_verification, spec_id, verified_by=actor.id, evidence=evidence
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Not found, or already verified - a verification is written once.",
+        )
+    await record_activity(
+        actor, kind="content", action="verified a directory form spec against the live DOM",
+        target=str(row.get("directory_id") or ""),
+    )
+    full = await asyncio.to_thread(specs.get_spec, spec_id)
+    return DirectorySpecResponse.from_row(full or row)
+
+
+@router.post("/specs/{spec_id}/first-live", response_model=DirectorySpecResponse)
+async def record_spec_first_live(
+    spec_id: str, body: SpecFirstLiveRequest, specs: DirectorySpecsRepoDep, actor: Lead
+) -> DirectorySpecResponse:
+    """Half (b): the first public listing URL this exact spec produced.
+
+    CHECKED, not asserted - the same probe the queue and the re-check use fetches the URL
+    and looks for nothing in particular except that it answers. A spec is not permitted to
+    earn its way onto the whitelist on a URL nobody could load."""
+    live_url = body.live_url.strip()
+    if not await asyncio.to_thread(is_public_url, live_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="That is not a reachable public URL.",
+        )
+    probe = await asyncio.to_thread(http_liveness_probe, live_url)
+    if probe.status_code is None or not (200 <= probe.status_code < 300):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"That URL did not answer (status: {probe.status_code}). A spec earns the "
+                "whitelist on a listing that exists, not on a URL that was typed."
+            ),
+        )
+    try:
+        row = await asyncio.to_thread(specs.record_first_live, spec_id, live_url=live_url)
+    except Exception as exc:
+        raise _spec_conflict(exc) from exc
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Not found, or a first live URL is already on file (write-once).",
+        )
+    await record_activity(
+        actor, kind="content", action="recorded a spec's first live listing",
+        target=str(row.get("directory_id") or ""), meta=live_url,
+    )
+    full = await asyncio.to_thread(specs.get_spec, spec_id)
+    return DirectorySpecResponse.from_row(full or row)
+
+
+@router.post("/specs/{spec_id}/activate", response_model=DirectorySpecResponse)
+async def activate_directory_spec(
+    spec_id: str, specs: DirectorySpecsRepoDep, actor: Lead
+) -> DirectorySpecResponse:
+    """Turn the spec on, and promote its directory to route B in the same transaction.
+
+    The route move is the point, not bookkeeping: gating the loader on `route = 'B'` while
+    nothing could ever SET route B produced a whitelist that could never have a member.
+    Activation IS the evidence the directory earned route B.
+
+    The refusal comes from the `active_is_earned` CHECK, so an unverified spec cannot be
+    activated however the request is shaped."""
+    try:
+        row = await asyncio.to_thread(specs.activate, spec_id)
+    except Exception as exc:
+        raise _spec_conflict(exc) from exc
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spec not found")
+    await record_activity(
+        actor, kind="content", action="activated a directory form spec",
+        target=str(row.get("directory_id") or ""),
+    )
+    full = await asyncio.to_thread(specs.get_spec, spec_id)
+    return DirectorySpecResponse.from_row(full or row)
+
+
+@router.post("/specs/{spec_id}/deactivate", response_model=DirectorySpecResponse)
+async def deactivate_directory_spec(
+    spec_id: str, body: SpecDeactivateRequest, specs: DirectorySpecsRepoDep, actor: Lead
+) -> DirectorySpecResponse:
+    """Turn a spec off, with a reason that reaches the client report."""
+    row = await asyncio.to_thread(specs.deactivate, spec_id, reason=body.reason)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spec not found")
+    await record_activity(
+        actor, kind="content", action="deactivated a directory form spec",
+        target=str(row.get("directory_id") or ""), meta=body.reason,
+    )
+    full = await asyncio.to_thread(specs.get_spec, spec_id)
+    return DirectorySpecResponse.from_row(full or row)

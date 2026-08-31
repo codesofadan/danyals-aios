@@ -2,43 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { reportBundles, type SubTier } from "@/lib/data";
-import CopyButton from "@/components/CopyButton";
 import type { NewClientInput } from "@/lib/hooks/clients";
+import { genPortalLogin, genPortalPassword } from "@/lib/portalCredentials";
 import type { BusinessMarket } from "@/lib/offpage";
 import nap from "@/components/offpage/Wave4.module.css";
 
 const MARKETS: BusinessMarket[] = ["US", "UK", "CA", "AU", "GLOBAL"];
-
-const ADJ = ["Solar", "Rapid", "Cobalt", "Lunar", "Amber", "Quartz", "Nimbus", "Vivid", "Onyx", "Cedar", "Zephyr", "Crimson"];
-const NOUN = ["Falcon", "Harbor", "Cipher", "Meadow", "Quasar", "Lynx", "Beacon", "Vertex", "Willow", "Ember", "Comet", "Delta"];
-const SYM = "!@#$%&*?";
-
-
-// Crypto-random index — this password is the REAL stored portal credential (the
-// server hashes exactly what the wizard generates), so Math.random isn't enough.
-function rand(n: number): number {
-  const buf = new Uint32Array(1);
-  crypto.getRandomValues(buf);
-  return buf[0] % n;
-}
-
-function pick<T>(arr: T[]): T { return arr[rand(arr.length)]; }
-
-// Mirrors the server's shape: Adjective-Noun####$xxxxxx (4 digits + symbol + 6 hex).
-function genPassword(): string {
-  const digits = String(1000 + rand(9000));
-  const sym = SYM[rand(SYM.length)];
-  const tail = Array.from({ length: 6 }, () => "0123456789abcdef"[rand(16)]).join("");
-  return `${pick(ADJ)}-${pick(NOUN)}${digits}${sym}${tail}`;
-}
-
-// Portal login as `<first-name>@aios.com`, from the contact's name (falls back to
-// the company name). Never the client's own email/domain - it's an AIOS portal login.
-function genLogin(contactName: string, client: string): string {
-  const source = contactName.trim() || client.trim();
-  const first = source.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-  return `${first || "client"}@aios.com`;
-}
 
 export default function AddClientWizard({ onClose, onAdd }: { onClose: () => void; onAdd: (c: NewClientInput) => void }) {
   const [cn, setCn] = useState("");
@@ -77,7 +46,7 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
   // Generated ONCE per open, not inside finish(): the operator has to be able to read
   // and hand over the password, and a value regenerated on every render could not be
   // trusted to match what was actually sent. The server hashes exactly this string.
-  const [adminPass] = useState(genPassword);
+  const [adminPass] = useState(genPortalPassword);
   const [bundleKey, setBundleKey] = useState<string>(reportBundles[0]?.key ?? "");
 
   const emailValid = /\S+@\S+\.\S+/.test(contactEmail);
@@ -89,7 +58,7 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
 
   function finish() {
     if (!nameValid || !contactValid || !emailValid) return;
-    const adminLogin = genLogin(contactName, cn);
+    const adminLogin = genPortalLogin(contactName, cn);
     onAdd({
       cn: cn.trim(),
       industry: industry.trim() || "General",
@@ -247,20 +216,11 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
                 <div>
                   <div className="wiz-creds-t">Portal login</div>
                   <div className="wiz-creds-s">
-                    Copy these now and send them to the client — the password is generated
-                    here and stored only as a hash, so it cannot be shown again.
+                    A portal login is created for {contactName.trim() || "the primary contact"} as
+                    part of this step. The username and password appear once the client
+                    exists &mdash; and stay available from <b>Show login</b> on the client&apos;s row.
                   </div>
                 </div>
-              </div>
-              <div className="wiz-cred-row">
-                <span className="wiz-cred-k">Username</span>
-                <code className="wiz-cred-v">{genLogin(contactName, cn)}</code>
-                <CopyButton value={genLogin(contactName, cn)} label="portal username" />
-              </div>
-              <div className="wiz-cred-row">
-                <span className="wiz-cred-k">Password</span>
-                <code className="wiz-cred-v">{adminPass}</code>
-                <CopyButton value={adminPass} label="portal password" />
               </div>
             </div>
 

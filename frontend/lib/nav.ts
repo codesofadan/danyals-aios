@@ -49,6 +49,8 @@ export const ADMIN_NAV: NavGroup[] = [
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads free audits public prospects funnel pipeline" },
       { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard" },
       { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections replicate replica design elementor sites cms plugin" },
+      { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "citations nap directories listings local business profile aggregator yelp" },
+      { icon: "assignment_turned_in", label: "Citation queue", href: "/admin/citations/queue", keywords: "citation queue work items operator finish listing by hand manual" },
       { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "web2 properties placements platforms articles anchors", badge: "test" },
       { icon: "radar", label: "Google Updates", href: "/admin/policy-radar", keywords: "google updates algorithm policy radar changes core update guidance" },
     ],
@@ -57,7 +59,6 @@ export const ADMIN_NAV: NavGroup[] = [
     title: "Delivery",
     items: [
       { icon: "diversity_3", label: "Clients", href: "/admin/clients", keywords: "accounts customers directory" },
-      { icon: "flag", label: "Milestones", href: "/admin/milestones", keywords: "projects delivery timeline stages roadmap" },
       { icon: "groups", label: "Team Management", href: "/admin/team", keywords: "members assignees staff management" },
       { icon: "task_alt", label: "Task Manager", href: "/admin/tasks", keywords: "tasks progress proof assignee queue board manager" },
       { icon: "summarize", label: "Reports", href: "/admin/reports", keywords: "workbooks sheets pdf downloads" },
@@ -76,11 +77,13 @@ export const ADMIN_NAV: NavGroup[] = [
   },
 ];
 
+// QA removed the Review tab from the team portal. `ReviewCheckpoint` is kept
+// (parked): approving work is still a real capability, it is exercised by leads
+// from the admin task surfaces, and the /tasks/{code}/review endpoint is untouched.
 export const TEAM_NAV: NavItem[] = [
   { icon: "space_dashboard", label: "Team Dashboard", href: "/team", keywords: "home overview" },
   { icon: "view_kanban", label: "My Queue", href: "/team/queue", keywords: "tasks work inbox" },
   { icon: "play_circle", label: "Deliver", href: "/team/deliver", keywords: "handoff shipping" },
-  { icon: "how_to_reg", label: "Review", href: "/team/review", keywords: "qa approve checkpoint" },
 ];
 
 export const CLIENT_NAV: NavItem[] = [

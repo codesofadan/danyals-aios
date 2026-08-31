@@ -29,7 +29,21 @@ export function makeQueryClient(): QueryClient {
   });
 }
 
+// The live client, for the ONE caller that cannot reach it through context:
+// AuthProvider sits OUTSIDE QueryProvider in app/layout.tsx, so `useQueryClient()`
+// there would throw. Sign-out still has to empty this cache — it outlives the
+// session (created once per browser session, below), so without a clear the next
+// person to sign in on the same machine is served the previous user's cached
+// counts and lists until every query happens to refetch.
+let activeClient: QueryClient | null = null;
+
+/** Drop every cached response. Called on sign-out. No-op before the app mounts. */
+export function clearQueryCache(): void {
+  activeClient?.clear();
+}
+
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(makeQueryClient);
+  activeClient = client;
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

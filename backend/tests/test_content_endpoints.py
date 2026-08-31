@@ -7,6 +7,7 @@ Repo + clients + both enqueuers are faked (no Postgres, no broker). The DB-trigg
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -535,9 +536,14 @@ async def test_review_reject_still_works_on_failing_qa(
 async def test_review_edit_to_drafting_no_publish(
     client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
 ) -> None:
+    # Carries a real note: the blank-note request this used to send is now a 400
+    # (see test_review_edit_with_blank_note_is_400_not_a_stranded_job), and the
+    # transition under test here is edit -> drafting without a publish enqueue.
     repo.seed(code="CJ-1", status="needs_review")
     wire("admin")
-    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "edit"})
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review", json={"action": "edit", "note": "tighten the H2s"}
+    )
     assert resp.json()["status"] == "drafting"
     assert published == []
 
@@ -561,16 +567,77 @@ async def test_review_edit_persists_note_and_reenqueues_pipeline(
     assert published == []
 
 
-async def test_review_edit_without_note_persists_empty_instruction(
-    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str], wire: Callable[..., None],
+@pytest.mark.parametrize("body", [
+    {"action": "edit"},                    # note omitted entirely
+    {"action": "edit", "note": ""},        # note present but empty
+    {"action": "edit", "note": "   \n\t "},  # whitespace only - .strip() makes it empty
+])
+async def test_review_edit_with_blank_note_is_400_not_a_stranded_job(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str],
+    published: list[str], wire: Callable[..., None], body: dict[str, Any],
 ) -> None:
+    """This test previously ASSERTED THE DEFECT: it was named
+    ``test_review_edit_without_note_persists_empty_instruction`` and asserted
+    200 + ``edit_instruction == ""`` with the comment "empty note -> unsteered
+    re-draft". No unsteered re-draft ever happened. Traced from the worker
+    backwards: ``workers/tasks/content_pipeline.py`` treats a ``drafting``
+    redelivery as resumable only when the instruction is non-empty (``editing =
+    bool(edit_instruction) and status == "drafting"``), so a blank note produced
+    "noop - job is drafting, not queued" and the job sat at "Edit requested"
+    forever, out of the reviewer's reach - the review gate was already gone.
+
+    Non-vacuous: restore ``changes["edit_instruction"] = (body.note or "").strip()``
+    without the guard and every assertion below fails - 200 instead of 400, the
+    status moves to drafting, and the pipeline is enqueued for a run that no-ops."""
     repo.seed(code="CJ-1", status="needs_review")
     wire("admin")
-    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "edit"})
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json=body)
+    assert resp.status_code == 400
+    assert "instruction" in resp.json()["error"]["message"].lower()
+    # The job KEPT the review gate: nothing moved and nothing was queued, so the
+    # reviewer can retry with a real note instead of hunting for a stuck job.
+    assert repo.jobs["CJ-1"]["status"] == "needs_review"
+    assert repo.jobs["CJ-1"].get("edit_instruction", "") == ""
+    assert enqueued == []
+    assert published == []
+
+
+async def test_review_edit_note_is_stripped_before_it_is_persisted(
+    client: httpx.AsyncClient, repo: FakeContentRepo, enqueued: list[str], wire: Callable[..., None],
+) -> None:
+    """Guards the OTHER half of the blank-note fix: the value persisted must be the
+    same stripped string the guard judged. Found while writing the guard - checking
+    a stripped copy but storing the raw ``body.note`` would let " x " pass the
+    check and store padding the worker then strips again, so the column and the
+    validation could disagree about what the reviewer asked for."""
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("admin")
+    resp = await client.post(
+        "/api/v1/content/jobs/CJ-1/review",
+        json={"action": "edit", "note": "  add an FAQ section  \n"},
+    )
     assert resp.status_code == 200
-    assert resp.json()["status"] == "drafting"
-    assert repo.jobs["CJ-1"]["edit_instruction"] == ""  # empty note -> unsteered re-draft
+    assert repo.jobs["CJ-1"]["edit_instruction"] == "add an FAQ section"
     assert enqueued == ["CJ-1"]
+
+
+async def test_review_reject_with_blank_note_still_succeeds(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str],
+    enqueued: list[str], wire: Callable[..., None],
+) -> None:
+    """Pins the deliberate ASYMMETRY between edit and reject, so the blank-note
+    guard is not later "made consistent" by copying it onto reject. Reject is
+    terminal: it enqueues nothing, so there is no worker to strand and no
+    downstream consumer of a note (``content_jobs`` has no rejection-reason
+    column - checked against the built schema, not the CREATE TABLE). A blank
+    edit note breaks a promise the UI made; a blank rejection breaks nothing."""
+    repo.seed(code="CJ-1", status="needs_review")
+    wire("admin")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/review", json={"action": "reject"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "rejected"
+    assert published == []
+    assert enqueued == []
 
 
 async def test_review_reject_to_rejected_no_publish(
@@ -740,3 +807,202 @@ async def test_patch_missing_job_404(
 ) -> None:
     wire("manager")
     assert (await client.patch("/api/v1/content/jobs/CJ-nope", json={"topic": "x"})).status_code == 404
+
+
+class TestTheSiteTheOperatorChose:
+    """A client with several sites had no way to say which one a page was for: the
+    creation path always took the FIRST, so the flow's site picker changed what was
+    researched and nothing else - and the page then published to whichever site
+    happened to be first."""
+
+    @pytest.mark.asyncio
+    async def test_an_unowned_domain_is_refused_not_silently_replaced(self) -> None:
+        """Falling back to the first site would publish a page to a site the
+        operator did not choose - the exact failure this guards."""
+        from fastapi import HTTPException
+
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "theirs.com"}, {"domain": "also-theirs.com"}]
+
+        with pytest.raises(HTTPException) as exc:
+            await _chosen_site(_Clients(), "c-1", "somebody-elses.com")  # type: ignore[arg-type]
+        assert exc.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_a_chosen_domain_resolves_to_that_site(self) -> None:
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "first.com"}, {"domain": "second.com"}]
+
+        site = await _chosen_site(_Clients(), "c-1", "second.com")  # type: ignore[arg-type]
+        assert site is not None and site["domain"] == "second.com"
+
+    @pytest.mark.asyncio
+    async def test_the_scheme_and_trailing_slash_do_not_defeat_the_match(self) -> None:
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "https://second.com/"}]
+
+        site = await _chosen_site(_Clients(), "c-1", "second.com")  # type: ignore[arg-type]
+        assert site is not None
+
+    @pytest.mark.asyncio
+    async def test_no_choice_still_takes_the_first_site(self) -> None:
+        """Every existing caller omits it; they must keep working unchanged."""
+        from app.routers.content import _chosen_site
+
+        class _Clients:
+            def list_sites(self, client_id: str, *, limit: int, offset: int) -> list[dict[str, str]]:
+                return [{"domain": "first.com"}]
+
+        site = await _chosen_site(_Clients(), "c-1", None)  # type: ignore[arg-type]
+        assert site is not None and site["domain"] == "first.com"
+
+
+class TestRepublishingADegradedJob:
+    """A degraded publish means the artifact rendered but NOTHING reached the
+    client's site - a missing WordPress connection, an exhausted transport
+    cascade. Re-pushing is exactly the remedy, and the UI offered the button for
+    precisely these jobs while the API answered 409 every time: the one recovery
+    path an operator had was a dead control."""
+
+    @pytest.mark.asyncio
+    async def test_a_degraded_job_can_be_re_pushed(self) -> None:
+        from app.routers.content import republish_content_job
+
+        pushed: list[str] = []
+
+        class _Repo:
+            def get_job_by_code(self, code: str) -> dict[str, Any]:
+                return {"code": code, "status": "degraded", "client_name": "C", "client_id": "c1"}
+
+            def update_job_by_code(
+                self, code: str, changes: dict[str, Any], expect: str
+            ) -> dict[str, Any] | None:
+                assert expect == "degraded", "must expect the status it actually found"
+                return {"code": code, **changes, "client_name": "C"}
+
+        # Only the transition + enqueue are under test; the activity write and
+        # response serialisation beyond it need seams this double does not carry.
+        with contextlib.suppress(Exception):
+            await republish_content_job(
+                "CJ-1", _Repo(), pushed.append, _actor(),  # type: ignore[arg-type]
+            )
+        assert pushed == ["CJ-1"], "the publish worker must be enqueued"
+
+    @pytest.mark.asyncio
+    async def test_a_drafting_job_is_still_refused(self) -> None:
+        from fastapi import HTTPException
+
+        from app.routers.content import republish_content_job
+
+        class _Repo:
+            def get_job_by_code(self, code: str) -> dict[str, Any]:
+                return {"code": code, "status": "drafting"}
+
+        with pytest.raises(HTTPException) as exc:
+            await republish_content_job("CJ-1", _Repo(), lambda c: None, _actor())  # type: ignore[arg-type]
+        assert exc.value.status_code == 409
+
+
+def _actor() -> Any:
+    return type("U", (), {"id": "u1", "role": "owner", "client_id": None, "email": "o@x.com"})()
+
+
+# --------------------------------------------------------------------------- #
+# The QA acknowledgement survives the request (D-4).
+#
+# `ApproveGate` puts the scorecard in front of the approver and composes a note
+# recording what they were shown ("QA acknowledged: 61/100 weighted, did not
+# pass; below floor: eeat_experience"). That note was being posted and then
+# silently dropped: the approve branch read `body.note` only under `action ==
+# "edit"`, and `record_activity` was called with no `meta`.
+#
+# The consequence was that D-4's acknowledgement half could not be audited after
+# the fact. The dialog appeared, the reviewer clicked through it, and nothing
+# anywhere remembered which score they had accepted - so "who approved a 61, and
+# did they know?" was unanswerable. Until R3A-36's `qa_acknowledged_*` columns
+# exist, this activity note IS the audit trail.
+# --------------------------------------------------------------------------- #
+
+class TestTheReviewNoteIsRecorded:
+    @pytest.fixture
+    def activity(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        """Capture every record_activity call the review endpoint makes."""
+        calls: list[dict[str, Any]] = []
+
+        async def _spy(_actor: Any, **kw: Any) -> None:
+            calls.append(kw)
+
+        monkeypatch.setattr("app.routers.content.record_activity", _spy)
+        return calls
+
+    async def test_an_approval_records_the_qa_acknowledgement(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+    ) -> None:
+        repo.seed(code="CJ-1", status="needs_review",
+                  qa_score={"passed": False, "weighted_total": 61})
+        wire("manager")
+        ack = "QA acknowledged: 61/100 weighted, did not pass; below floor: eeat_experience"
+        resp = await client.post(
+            "/api/v1/content/jobs/CJ-1/review",
+            json={"action": "approve", "note": ack},
+        )
+        assert resp.status_code == 200
+        # The score the approver was shown is now answerable from the activity log.
+        assert activity[0]["meta"] == ack
+        assert activity[0]["action"] == "approved content for publishing"
+
+    async def test_a_rejection_records_its_reason(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+    ) -> None:
+        repo.seed(code="CJ-1", status="needs_review")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/content/jobs/CJ-1/review",
+            json={"action": "reject", "note": "the case study is not ours"},
+        )
+        assert resp.status_code == 200
+        assert activity[0]["meta"] == "the case study is not ours"
+
+    async def test_an_edit_does_not_duplicate_its_instruction_into_the_log(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+    ) -> None:
+        # The edit instruction is already persisted on the row, where the worker
+        # reads it. Repeating it as activity meta would duplicate, not add.
+        repo.seed(code="CJ-1", status="needs_review")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/content/jobs/CJ-1/review",
+            json={"action": "edit", "note": "tighten the H2s"},
+        )
+        assert resp.status_code == 200
+        assert activity[0]["meta"] is None
+        assert repo.jobs["CJ-1"]["edit_instruction"] == "tighten the H2s"
+
+    @pytest.mark.parametrize("note", [None, "", "   \n\t "])
+    async def test_an_absent_note_records_nothing_rather_than_an_empty_string(
+        self, client: httpx.AsyncClient, repo: FakeContentRepo,
+        activity: list[dict[str, Any]], wire: Callable[..., None],
+        note: str | None,
+    ) -> None:
+        # An empty meta would read in the activity feed as "acknowledged nothing",
+        # which is a different and worse claim than recording no meta at all.
+        repo.seed(code="CJ-1", status="needs_review")
+        wire("manager")
+        body: dict[str, Any] = {"action": "approve"}
+        if note is not None:
+            body["note"] = note
+        resp = await client.post("/api/v1/content/jobs/CJ-1/review", json=body)
+        assert resp.status_code == 200
+        assert activity[0]["meta"] is None

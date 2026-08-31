@@ -1,0 +1,261 @@
+"use client";
+
+// Screen 3 — the facts the pages are allowed to state, and how they should look.
+//
+// Proof points are REQUIRED and always were; what was missing was any hint of
+// what a usable one looks like. The writer may state these and nothing else, so
+// "great service" costs a page its credibility while "412 callouts in 2025, from
+// our dispatch log" earns it. The placeholder now teaches that.
+//
+// Design is a real choice between THREE real things: measure the client's actual
+// site, replicate a design from any URL, or pick a template. Extraction wins when it
+// succeeds, and says so.
+//
+// Replication is the one that closes QA 20 ("integrate Design Replicator into the
+// Content module"). The replicator already measured a richer design system than the
+// content analyzer does and threw it away; it now returns that profile on the job, so
+// "replicate a design, then generate N pages on it" is ONE flow instead of two
+// Playwright captures of the same URL. It carries the same copyright assertion the
+// standalone Replicator enforces — never hardcoded, because the server checks it too.
+
+import { useEffect } from "react";
+import { useSiteDesign } from "@/lib/hooks/content";
+import { useReplicaJob, useReplicate } from "@/lib/hooks/replica";
+import { FRAMEWORKS, TEMPLATE_THEME_DEFAULTS, type Framework, type PageTemplate } from "@/lib/content";
+import TemplateGallery from "@/components/content/TemplateGallery";
+import { useToast, describeError } from "@/components/ui/Toast";
+import type { FlowState } from "./types";
+import { lines } from "./types";
+
+export default function StepBrief({
+  state, patch,
+}: {
+  state: FlowState;
+  patch: (p: Partial<FlowState>) => void;
+}) {
+  const extract = useSiteDesign();
+  const replicate = useReplicate();
+  const replicaJob = useReplicaJob(state.replicaJobId);
+  const toast = useToast();
+
+  // The replica job carries the measured design once it finishes. A degraded run that
+  // produced no profile is NOT a silent failure — it falls back to measuring the
+  // client's own site, and says so.
+  const replicaStatus = replicaJob.data?.status;
+  useEffect(() => {
+    if (!state.replicaJobId || !replicaJob.data) return;
+    const job = replicaJob.data;
+    if (job.status !== "completed" && job.status !== "degraded") return;
+    if (job.design_profile) {
+      patch({ design: job.design_profile, designFrom: state.replicaUrl, replicaJobId: null });
+      toast.success("Design replicated", `Colours, fonts and width taken from ${state.replicaUrl}.`);
+    } else {
+      patch({ replicaJobId: null });
+      toast.error(
+        "Replicated, but no design came back",
+        "The run degraded before it measured a design system — measure the client's own site or pick a template instead.",
+      );
+    }
+    // `patch` and `toast` are stable for this screen's lifetime; re-running on them
+    // would re-fire the toast on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.replicaJobId, replicaStatus, replicaJob.data?.design_profile]);
+
+  const runReplicate = () =>
+    replicate.mutate(
+      {
+        client_id: state.clientId,
+        url: state.replicaUrl.trim(),
+        owner_confirmed_source: state.replicaOwnerConfirmed,
+      },
+      {
+        onSuccess: (res) => patch({ replicaJobId: res.job_id }),
+        onError: (e: unknown) => toast.error("Couldn't start the replication", describeError(e)),
+      },
+    );
+
+  const runExtract = () =>
+    extract.mutate(
+      { site: state.siteDomain },
+      {
+        onSuccess: (res) => {
+          if (res.status === "ok" && res.profile) {
+            patch({ design: res.profile, designFrom: state.siteDomain });
+            toast.success("Design measured", `Colours, fonts and section order taken from ${state.siteDomain}.`);
+          } else {
+            toast.error("Couldn't measure the site", res.reason || "The extractor degraded; a template will be used instead.");
+          }
+        },
+        onError: (e: unknown) => toast.error("Couldn't measure the site", describeError(e)),
+      },
+    );
+
+  return (
+    <div style={{ display: "grid", gap: 16, maxWidth: 760 }}>
+      <section className="card" style={{ padding: "var(--s-7)" }}>
+        <div className="ct">What can these pages prove?</div>
+        <div className="cs" style={{ margin: "4px 0 14px" }}>
+          The writer may state these facts and nothing else. Anything vague gets cut rather
+          than softened, so a number with a source beats an adjective every time.
+        </div>
+        <div className="fld">
+          <label htmlFor="flow-proof">
+            Proof points <span style={{ color: "var(--crit)" }}>*</span>
+          </label>
+          <textarea
+            id="flow-proof" rows={4} value={state.proof}
+            onChange={(e) => patch({ proof: e.target.value })}
+            placeholder={"412 emergency callouts in 2025, from our dispatch log\nTexas Master Plumber licence M-41982\nMedian on-site time 47 minutes"}
+          />
+          <div className="fld-hint">
+            One per line. {lines(state.proof).length === 0
+              ? "At least one is required — pages cannot be written without something to stand on."
+              : `${lines(state.proof).length} supplied.`}
+          </div>
+        </div>
+        <div className="fld" style={{ marginTop: 12 }}>
+          <label htmlFor="flow-services">Services offered</label>
+          <textarea
+            id="flow-services" rows={3} value={state.services}
+            onChange={(e) => patch({ services: e.target.value })}
+            placeholder={"Emergency leak repair\nWater heater replacement\nSlab leak detection"}
+          />
+        </div>
+        <div className="fld-row" style={{ marginTop: 12 }}>
+          <div className="fld">
+            <label htmlFor="flow-testimonials">Testimonials (optional)</label>
+            <textarea
+              id="flow-testimonials" rows={3} value={state.testimonials}
+              onChange={(e) => patch({ testimonials: e.target.value })}
+              placeholder="One per line, with the customer's name if you have it"
+            />
+          </div>
+          <div className="fld">
+            <label htmlFor="flow-unique">Anything only you know (optional)</label>
+            <textarea
+              id="flow-unique" rows={3} value={state.uniqueData}
+              onChange={(e) => patch({ uniqueData: e.target.value })}
+              placeholder="Original data, internal stats, things competitors cannot say"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="card" style={{ padding: "var(--s-7)" }}>
+        <div className="ct">How should the pages look?</div>
+        <div className="cs" style={{ margin: "4px 0 14px" }}>
+          Measuring the client&apos;s own site copies its palette, fonts and section order, so
+          the new pages match what is already there. One paid call.
+        </div>
+        {state.design ? (
+          <div role="status" style={{ display: "flex", gap: 9, alignItems: "center", color: "var(--ok)", fontSize: 13.5 }}>
+            <span className="material-symbols-rounded">check_circle</span>
+            Using the measured design from <b>{state.designFrom}</b>.
+            <button
+              type="button" className="mini-btn" style={{ marginLeft: 8 }}
+              onClick={() => patch({ design: null, designFrom: "" })}
+            >
+              Use a template instead
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button" className="ghostbtn" onClick={runExtract}
+              disabled={extract.isPending || !state.siteDomain}
+            >
+              <span className="material-symbols-rounded">palette</span>
+              {extract.isPending ? "Measuring the site…" : `Measure ${state.siteDomain || "the site"}`}
+            </button>
+
+            {/* Replicate a design from ANY url — the Design Replicator, in the flow
+                that actually needs it. */}
+            <div style={{ marginTop: 16 }}>
+              <div className="cs" style={{ marginBottom: 8 }}>
+                Or replicate a design from another page — its palette, fonts and width
+                become the design these pages are built on.
+              </div>
+              <div className="fld">
+                <label htmlFor="flow-replica-url">Page to replicate</label>
+                <input
+                  id="flow-replica-url" value={state.replicaUrl}
+                  onChange={(e) => patch({ replicaUrl: e.target.value })}
+                  placeholder="https://example.com/the-page-to-copy"
+                />
+              </div>
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "6px 0 10px" }}>
+                <input
+                  type="checkbox" checked={state.replicaOwnerConfirmed}
+                  onChange={(e) => patch({ replicaOwnerConfirmed: e.target.checked })}
+                />
+                <span>
+                  I confirm the client owns this design, or is licensed to reuse it.
+                  Replicating copies someone&apos;s layout and styling.
+                </span>
+              </label>
+              <button
+                type="button" className="ghostbtn"
+                onClick={runReplicate}
+                disabled={
+                  replicate.isPending || !!state.replicaJobId ||
+                  !state.replicaOwnerConfirmed || !state.clientId ||
+                  !state.replicaUrl.trim().startsWith("http")
+                }
+              >
+                <span className="material-symbols-rounded">content_copy</span>
+                {state.replicaJobId
+                  ? `Replicating… (${replicaStatus ?? "queued"})`
+                  : replicate.isPending ? "Starting…" : "Replicate this design"}
+              </button>
+              {replicate.isError && (
+                <div className="fld-hint" style={{ color: "var(--warn)" }} role="alert">
+                  {(replicate.error as Error)?.message ?? "Couldn't start the replication."}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        {!state.design && (
+          <>
+            <div className="cs" style={{ margin: "16px 0 10px" }}>
+              Or pick a template and tune it. Leave it on Auto to use the blueprint that
+              belongs to the page kind you chose.
+            </div>
+            <TemplateGallery
+              value={state.template}
+              theme={state.theme}
+              onSelect={(tpl) => patch({
+                template: tpl,
+                // Switching to a NEW template seeds its curated theme; re-picking
+                // the same one keeps whatever the operator has customised.
+                ...(tpl !== "Auto" && tpl !== state.template
+                  ? { theme: TEMPLATE_THEME_DEFAULTS[tpl as PageTemplate] }
+                  : {}),
+              })}
+              onTheme={(theme) => patch({ theme })}
+            />
+          </>
+        )}
+      </section>
+
+      <section className="card" style={{ padding: "var(--s-7)" }}>
+        <div className="ct">Copywriting framework</div>
+        <div className="cs" style={{ margin: "4px 0 12px" }}>
+          The persuasive structure the body follows. Auto picks the one that suits the page kind.
+        </div>
+        <div className="fld" style={{ maxWidth: 260 }}>
+          <label htmlFor="flow-framework">Framework</label>
+          <select
+            id="flow-framework" value={state.framework}
+            onChange={(e) => patch({ framework: e.target.value as Framework | "Auto" })}
+          >
+            <option value="Auto">Auto — choose for me</option>
+            {FRAMEWORKS.map((f) => (
+              <option key={f.key} value={f.key}>{f.key} — {f.expansion}</option>
+            ))}
+          </select>
+        </div>
+      </section>
+    </div>
+  );
+}

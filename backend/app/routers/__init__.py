@@ -22,6 +22,7 @@ from app.routers.command_center import router as command_center_router
 from app.routers.content import router as content_router
 from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
+from app.routers.extension_tokens import router as extension_tokens_router
 from app.routers.integrations import router as integrations_router
 from app.routers.jobs import router as jobs_router
 from app.routers.me import router as me_router
@@ -46,6 +47,7 @@ from app.routers.vault import router as vault_router
 from app.routers.wp_connections import router as wp_connections_router
 
 api_v1 = APIRouter()
+api_v1.include_router(extension_tokens_router)
 api_v1.include_router(auth_router)
 api_v1.include_router(rbac_router)
 api_v1.include_router(admin_users_router)

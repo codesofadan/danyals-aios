@@ -34,7 +34,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg.types.json import Jsonb
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
 from app.core.deps import HttpClientDep, SettingsDep
 from app.core.pagination import PageDep
@@ -112,7 +112,21 @@ _NOT_IN_REVIEW = HTTPException(
     status_code=status.HTTP_409_CONFLICT, detail="Content job is not awaiting review"
 )
 _NOT_DONE = HTTPException(
-    status_code=status.HTTP_409_CONFLICT, detail="Content job has not completed its first publish yet"
+    status_code=status.HTTP_409_CONFLICT,
+    detail="Only a published or degraded job can be re-pushed",
+)
+# A note-less `edit` STRANDED the job. The endpoint accepted an empty note, wrote an
+# empty `edit_instruction`, moved the job to `drafting` and re-enqueued it - but the
+# pipeline's guided-edit entry requires a non-empty instruction to treat a `drafting`
+# redelivery as resumable (workers/tasks/content_pipeline.py: `editing = bool(
+# edit_instruction) and status == "drafting"`), so the run returned `noop - job is
+# drafting, not queued` and the page sat at "Edit requested" with no signal to the
+# reviewer that their click did nothing. Refusing at the edge is the fix, NOT making
+# the worker regenerate blindly on an empty note: a blind regen spends real money to
+# produce a different draft that answers no question the reviewer asked.
+_EDIT_NEEDS_INSTRUCTION = HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    detail="An edit needs an instruction: say what the re-draft should change.",
 )
 
 
@@ -121,9 +135,29 @@ _NOT_DONE = HTTPException(
 # so the API process never pulls in Celery task modules just to import the router).
 # --------------------------------------------------------------------------- #
 def get_content_enqueuer() -> Callable[[str], None]:
-    """Dependency: enqueue the content PIPELINE worker for a job code."""
+    """Dependency: enqueue the content PIPELINE worker for a job code.
+
+    ``settings.content_engine`` picks which engine a NEW job runs on:
+
+    * ``v1`` - ``workers/tasks/content.py``, the generator that has always
+      produced this platform's content.
+    * ``v2`` - the staged doctrine pipeline: an Experience gate that refuses to
+      draft a page nobody supplied first-party facts for, a uniqueness gate, a
+      conversion and voice pass, and a QA gate with the judge connected.
+
+    The flag existed and was READ BY NOTHING for a day - documented in two
+    places, implemented in none, so every job ran v1 whatever it said. An
+    unknown value falls back to v1 rather than failing the request: a typo in
+    config must not stop an agency creating content.
+    """
 
     def _enqueue(code: str) -> None:
+        engine = (get_settings().content_engine or "v1").strip().lower()
+        if engine == "v2":
+            from workers.tasks.content_pipeline import run_content_pipeline_job
+
+            run_content_pipeline_job.delay(code)
+            return
         from workers.tasks.content import run_content_job
 
         run_content_job.delay(code)
@@ -244,11 +278,43 @@ async def _first_site(clients: ClientsRepoDep, client_id: str) -> dict[str, Any]
     return sites[0] if sites else None
 
 
+async def _chosen_site(
+    clients: ClientsRepoDep, client_id: str, domain: str | None
+) -> dict[str, Any] | None:
+    """The site the operator PICKED, verified to belong to this client.
+
+    A client with several sites had no way to say which one a page was for: the
+    creation path always took the first, so the flow's site picker changed what
+    was researched and nothing else. The page then published to whichever site
+    happened to be first.
+
+    The domain is matched against the client's OWN sites and never trusted from
+    the wire - a domain that does not belong to them is refused, not silently
+    replaced with the first site, because publishing a page to a site the
+    operator did not choose is the failure this exists to prevent.
+    """
+    wanted = (domain or "").strip().lower()
+    if not wanted:
+        return await _first_site(clients, client_id)
+    wanted = wanted.removeprefix("https://").removeprefix("http://").rstrip("/")
+    sites = await asyncio.to_thread(clients.list_sites, client_id, limit=200, offset=0)
+    for site in sites:
+        owned = str(site.get("domain") or "").strip().lower()
+        owned = owned.removeprefix("https://").removeprefix("http://").rstrip("/")
+        if owned == wanted:
+            return site
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"'{domain}' is not a registered site for this client",
+    )
+
+
 async def _seed_and_insert_job(
     repo: ContentRepo,
     clients: ClientsRepo,
     enqueue: Callable[[str], None],
     *,
+    site_domain: str | None = None,
     client: dict[str, Any],
     client_id: str,
     page_type: str,
@@ -277,7 +343,10 @@ async def _seed_and_insert_job(
         framework_resolved = framework
         auto = False
 
-    site = await _first_site(clients, client_id) if target == "WordPress" else None
+    site = (
+        await _chosen_site(clients, client_id, site_domain)
+        if target == "WordPress" else None
+    )
     source_pack = _seed_source_pack(
         client,
         site,
@@ -487,6 +556,7 @@ async def create_content_job(
         repo,
         clients,
         enqueue,
+        site_domain=body.site_domain,
         client=client,
         client_id=body.client_id,
         page_type=body.page_type,
@@ -599,6 +669,7 @@ async def generate_from_research(
             repo,
             clients,
             enqueue,
+            site_domain=body.site_domain,
             client=client,
             client_id=body.client_id,
             page_type=job_page_type_for(item.page_type),
@@ -871,7 +942,8 @@ async def review_content_job(
     """The human review gate (owner/admin/manager only). ``approve`` -> publishing
     (and enqueue the publish worker, unless ``publishAt`` schedules it for later),
     ``edit`` -> drafting (persist the reviewer's guided-edit note + RE-ENQUEUE the
-    pipeline for a GUIDED re-draft), ``reject`` -> rejected. 409 unless the job is in
+    pipeline for a GUIDED re-draft; 400 when that note is blank - see
+    ``_EDIT_NEEDS_INSTRUCTION``), ``reject`` -> rejected. 409 unless the job is in
     needs_review (optimistic ``expect_status``). All three transitions run on the
     RLS path, where the DB guard recognises the lead (its lead branch allows the
     status change + the ``edit_instruction`` column edit together).
@@ -897,8 +969,14 @@ async def review_content_job(
     schedule_for_later = False
     if body.action == "edit":
         # Persist the reviewer's guided-edit instruction so the worker's re-draft
-        # targets exactly what was asked (not a blind regen). Empty note is allowed.
-        changes["edit_instruction"] = (body.note or "").strip()
+        # targets exactly what was asked (not a blind regen). Checked BEFORE the
+        # status write: a blank note here is the stranding defect (_EDIT_NEEDS_
+        # INSTRUCTION), and once the row has moved to `drafting` the reviewer has
+        # lost the review gate they would need to retry from.
+        instruction = (body.note or "").strip()
+        if not instruction:
+            raise _EDIT_NEEDS_INSTRUCTION
+        changes["edit_instruction"] = instruction
         changes["stage"] = "Edit requested"
     elif body.action == "approve":
         publish_at = body.publish_at
@@ -929,8 +1007,27 @@ async def review_content_job(
         "reject": "rejected content",
     }[body.action]
     client_id = job.get("client_id")
+    # The reviewer's note is the audit trail for the two actions that do not otherwise
+    # persist it, and it was being dropped on the floor for both.
+    #
+    # On APPROVE it carries the QA acknowledgement that `ApproveGate` composes from the
+    # scorecard it just put in front of the approver ("QA acknowledged: 61/100
+    # weighted, did not pass; below floor: experience, specificity"). That string is
+    # currently the ONLY durable record of what the approver was shown - R3A-36's
+    # `qa_acknowledged_by` / `qa_acknowledged_at` / `qa_override_reason` columns do not
+    # exist yet - so discarding it made the acknowledgement half of D-4 unfalsifiable
+    # after the fact: the dialog was shown, and nothing anywhere remembered it.
+    #
+    # On REJECT it carries the reason, which is the only explanation the client-facing
+    # side of a dropped draft ever gets.
+    #
+    # EDIT is excluded deliberately: its note is already stored as `edit_instruction`
+    # on the row above, where the worker reads it, so repeating it here would duplicate
+    # rather than add.
+    note = (body.note or "").strip()
     await record_activity(
         actor, kind="content", action=action, target=job.get("client_name", ""),
+        meta=note if note and body.action != "edit" else None,
         entity_type="client" if client_id is not None else None,
         entity_id=str(client_id) if client_id is not None else None,
     )
@@ -950,19 +1047,24 @@ async def republish_content_job(
     ``done -> publishing`` is a NEW transition for the app, but NOT a new one for
     the DB guard: the trigger's lead branch already permits any status change from
     a lead ("any other legal edit"), so no migration/trigger change was needed -
-    only this endpoint. 409 unless the job has actually finished a first publish
-    (optimistic ``expect_status``). The re-push itself reuses the EXISTING publish
-    worker unchanged - its update-or-create-by ``wp_post_id`` logic is already
-    idempotent, so a re-push updates the SAME WordPress post rather than
-    duplicating it, and the hard QA gate applies exactly as it does on a first
-    publish."""
+    only this endpoint. The re-push reuses the EXISTING publish worker unchanged -
+    its update-or-create-by ``wp_post_id`` logic is already idempotent, so a
+    re-push updates the SAME WordPress post rather than duplicating it.
+
+    ``degraded`` IS ACCEPTED, and it is the case that matters most. A degraded
+    publish means the artifact rendered but nothing reached the client's site -
+    a missing WordPress connection, an exhausted transport cascade. Re-pushing is
+    precisely the remedy for it, and refusing was worse than useless: the UI
+    offered the button for exactly these jobs and the API answered 409 every
+    time, so the one recovery path the operator had was a dead control."""
     job = await asyncio.to_thread(repo.get_job_by_code, code)
     if job is None:
         raise _JOB_NOT_FOUND
-    if job.get("status") != "done":
+    current = str(job.get("status") or "")
+    if current not in ("done", "degraded"):
         raise _NOT_DONE
     updated = await asyncio.to_thread(
-        repo.update_job_by_code, code, {"status": "publishing", "stage": "Republishing"}, "done"
+        repo.update_job_by_code, code, {"status": "publishing", "stage": "Republishing"}, current
     )
     if updated is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Content job changed concurrently")

@@ -43,8 +43,16 @@ export default function Sidebar() {
       <div className="brand">
         <div className="logo" />
         <div className="wm">
+          {/* The subtitle names the WORKSPACE - TeamSidebar says "Team" and
+              ClientSidebar says "Client". This one read "AIOS" under "AIOS":
+              the line originally carried the builder's agency name, and when
+              that was stripped for white-labelling it was blanket-replaced
+              with the product name, breaking the pattern rather than filling
+              it. "Agency" is the shell this is - the agency's own workspace,
+              beside the Team portal and the Client portal. (Not "Admin": that
+              collides with the operator name in the user chip below.) */}
           <div className="n">AIOS</div>
-          <div className="s">AIOS</div>
+          <div className="s">Agency</div>
         </div>
       </div>
 

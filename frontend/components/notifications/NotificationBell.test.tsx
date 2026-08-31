@@ -25,6 +25,7 @@ let unread = 0;
 let items: AppNotification[] = [];
 const listEnabled: boolean[] = [];
 const alertsEnabled: boolean[] = [];
+const toastsEnabled: boolean[] = [];
 const markAll = vi.fn();
 const markRead = vi.fn();
 
@@ -46,6 +47,10 @@ vi.mock("@/lib/hooks/notifications", () => ({
   useMarkNotificationRead: () => ({ mutate: markRead, isPending: false }),
   useMarkAllRead: () => ({ mutate: markAll, isPending: false }),
   useAcknowledgeAlert: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  // The arrival-toast hook. Its own behaviour is pinned in
+  // lib/hooks/notificationToasts.test.tsx; here it only needs to record whether the
+  // bell suppresses it while the panel is open.
+  useNotificationToasts: (enabled: boolean) => { toastsEnabled.push(enabled); },
 }));
 
 beforeEach(() => {
@@ -54,6 +59,7 @@ beforeEach(() => {
   items = [];
   listEnabled.length = 0;
   alertsEnabled.length = 0;
+  toastsEnabled.length = 0;
   markAll.mockClear();
   markRead.mockClear();
 });
@@ -124,6 +130,15 @@ describe("NotificationBell", () => {
     // The API 403s a client from /alerts; the chrome should not imply otherwise.
     expect(screen.queryByRole("tab", { name: /Alerts/i })).not.toBeInTheDocument();
     expect(alertsEnabled.every((e) => e === false)).toBe(true);
+  });
+
+  it("stops announcing arrivals while the panel is open", async () => {
+    const user = userEvent.setup();
+    render(<NotificationBell />);
+    expect(toastsEnabled.at(-1)).toBe(true);
+    await user.click(screen.getByRole("button", { name: /Notifications/i }));
+    // The operator is looking at the inbox — toasting what is already on screen is noise.
+    expect(toastsEnabled.at(-1)).toBe(false);
   });
 
   it("renders nothing at all when signed out", () => {

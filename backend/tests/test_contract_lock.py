@@ -210,8 +210,24 @@ def _ts_union_literals(ts_path: Path, type_name: str) -> set[str]:
 
     Handles single- and multi-line unions (a leading ``|`` and line breaks are
     fine - we just harvest every double-quoted literal in the RHS up to the ``;``).
+
+    COMMENTS ARE STRIPPED FIRST, and that is not tidiness. The terminator search is
+    non-greedy to the first ``;``, so a semicolon anywhere in an interleaved ``//``
+    comment ENDS the union early and every member below it vanishes. Measured
+    2026-08-30 on ``CitationSubmitStatus``: one explanatory line ending in
+    "...the original 0064 handoff;" silently truncated the union to seven members and
+    this test reported ``model-only=['delisted', 'drifted', 'live', 'ready_for_human']``.
+
+    That message is the hazard. It reads as "the backend has four enum values the
+    frontend lacks", and the obvious way to make it green is to DELETE those four from
+    the Python model - which would be a real contract regression introduced to satisfy a
+    parser artefact. Documenting unions is normal and prose contains semicolons, so the
+    parser has to tolerate it rather than the next person having to know this.
     """
     src = ts_path.read_text(encoding="utf-8")
+    # Line comments only: block comments do not appear in these files, and a ``//``
+    # inside a string literal would be a URL, which no union member here is.
+    src = re.sub(r"//[^\n]*", "", src)
     match = re.search(rf"export type {type_name}\s*=\s*(.*?);", src, re.DOTALL)
     assert match, f"TS union {type_name} not found in {ts_path}"
     literals = set(re.findall(r'"([^"]*)"', match.group(1)))
@@ -259,3 +275,44 @@ def test_enum_field_matches_frontend_union(
         f"{model.__name__}.{field} enum drifted from {ts_union} ({ts_file}): "
         f"model-only={sorted(py - ts)} ts-only={sorted(ts - py)}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The parser itself, because it silently lost four enum members once.
+# --------------------------------------------------------------------------- #
+@pytest.mark.unit
+def test_a_semicolon_in_a_comment_does_not_truncate_a_union(tmp_path: Path) -> None:
+    """MEASURED 2026-08-30. `_ts_union_literals` terminates on the first `;`, so a
+    documented union - which is every interesting one - could be cut in half by ordinary
+    prose. `CitationSubmitStatus` lost `ready_for_human`, `live`, `drifted` and
+    `delisted` to a comment ending "the original 0064 handoff;".
+
+    What makes it worth a test rather than a fix-and-move-on is the SHAPE of the failure
+    it produced: "model-only=['delisted', 'drifted', 'live', 'ready_for_human']" reads as
+    the frontend missing four values, and the quickest way to green is to delete them from
+    the Python model - turning a parser artefact into a genuine contract regression.
+    """
+    ts = tmp_path / "sample.ts"
+    ts.write_text(
+        'export type Thing =\n'
+        '  | "alpha"\n'
+        '  // a comment with a semicolon; and a second clause after it\n'
+        '  | "beta"\n'
+        '  // 1. one thing (parenthesised, then terminated);\n'
+        '  | "gamma";\n',
+        encoding="utf-8",
+    )
+    assert _ts_union_literals(ts, "Thing") == {"alpha", "beta", "gamma"}
+
+
+@pytest.mark.unit
+def test_the_union_parser_still_stops_at_the_real_terminator(tmp_path: Path) -> None:
+    """The negative control: stripping comments must not make the parser greedy enough to
+    swallow the NEXT declaration, which would hide a genuinely missing member."""
+    ts = tmp_path / "sample.ts"
+    ts.write_text(
+        'export type Thing = "alpha" | "beta";\n'
+        'export type Other = "gamma" | "delta";\n',
+        encoding="utf-8",
+    )
+    assert _ts_union_literals(ts, "Thing") == {"alpha", "beta"}

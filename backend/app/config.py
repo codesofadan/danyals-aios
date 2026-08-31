@@ -43,6 +43,22 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "prod"] = "dev"
     log_level: LogLevel = "INFO"
     api_cors_origins: str = "http://localhost:3000"
+    # Chrome extension origins allowed to call the API, comma-separated, each exactly
+    # `chrome-extension://<32-char id>`.
+    #
+    # STRICTLY THIS MAY NOT BE NEEDED: the extension makes every backend call from its
+    # SERVICE WORKER, and a service-worker fetch to a host in `host_permissions` is made
+    # with extension privileges rather than being page-CORS-checked. That architecture is
+    # required anyway - the content script must never see the operator token, so it talks
+    # to the worker instead of the API - and it happens to sidestep CORS. This knob is
+    # belt-and-braces, and it weakens nothing: exact-string origins with credentials
+    # remain legal (only `*` plus credentials is not).
+    #
+    # `validate_settings` REFUSES a wildcard here in production. A wildcard would let ANY
+    # extension installed in ANY user's browser call this API with credentials, which is
+    # the one way to get this badly wrong - so it is made unrepresentable rather than
+    # documented.
+    extension_origins: str = ""
     trusted_hosts: str = "*"
     # Public origin the API is reachable at (e.g. https://app.qanry.com), used to
     # build ABSOLUTE URLs for server-hosted files that must load with NO auth header
@@ -269,6 +285,13 @@ class Settings(BaseSettings):
     # Card/feature GLYPHS are inline SVG icons (never PNGs). Flip off to drop the photos and
     # run icon-only.
     content_images_enabled: bool = True
+    # How many images ONE page gets from the DOCTRINE engine (v2). Deliberately far
+    # below v1's MAX_IMAGES=5: v2 became the default engine without ever having had a
+    # paid image run, and a hero image is the smallest change that stops a page
+    # shipping with no featured image at all. Raise it per deployment once the
+    # per-image spend has been watched on a real job. 0 disables images on v2 while
+    # leaving v1's photos alone; content_images_enabled=false disables BOTH.
+    content_pipeline_max_images: int = 1
     # Per-call cost estimates for the money-dial (a later chunk wires these in).
     content_research_cost_estimate: float = 0.01
     content_generate_cost_estimate: float = 0.15
@@ -295,14 +318,33 @@ class Settings(BaseSettings):
     # `content_research` money-dial (committed spend = Anthropic token cost + web-search
     # cost); keyless / a dial-block / a research failure all DEGRADE (200, status=
     # 'degraded'), never crash - exactly like POST /policy/ask. All additive + optional. ---
-    # Which content engine a new job runs on. "v1" is the shipped generator
+    # Which content engine a new job runs on. "v1" is the older generator
     # (workers/tasks/content.py); "v2" is the staged doctrine pipeline
     # (app/services/content_pipeline/ via workers/tasks/content_pipeline.py).
-    # Defaults to v1 deliberately: v2 has never completed a run against a real
-    # provider, and defaulting a live agency onto an unverified engine is the
-    # kind of assumed-success this codebase keeps removing. Flip to "v2" only
-    # after an end-to-end run has been observed.
-    content_engine: str = "v1"
+    #
+    # Switched to v2 on 2026-08-29, by the owner, on measured evidence. It sat on
+    # v1 until the pipeline had completed real provider runs, because defaulting a
+    # live agency onto an unverified engine is the assumed-success this codebase
+    # keeps removing. Six paid runs later:
+    #
+    #   fact_grounding  40 -> 100      (the writer stopped inventing figures)
+    #   hard blocks     one -> none
+    #   QA weighted     72 -> 84
+    #
+    # 84 sits just under the 85 threshold, and that is not the reason to hold
+    # back: the threshold and its weight vector are explicitly PROVISIONAL,
+    # uncalibrated against ranking outcomes or a human SEO grade (P7A-11). What
+    # decided it is that v2 has gates v1 has none of - Experience, uniqueness,
+    # conversion, voice, grounding, and a QA judge that actually runs - and v1
+    # produces the same invented figures with no detection at all.
+    #
+    # WHAT CHANGES OPERATIONALLY: v2 HALTS every page until its first-party facts
+    # are supplied (Law 16). New jobs stop at "Waiting on your experience answers"
+    # and resume when the questions are answered. That is the gate, not a fault.
+    #
+    # To revert: CONTENT_ENGINE=v1 in the environment. Nothing else changes - both
+    # engines land a job at `needs_review` and share the publish path.
+    content_engine: str = "v2"
     content_research_model: str = "claude-sonnet-5"  # web-search Claude for the page-set recommender
     content_research_count: int = 12  # recommended pages returned per research call (default cap)
     content_research_max_searches: int = 6  # web_search tool max_uses per recommend lookup
@@ -622,15 +664,29 @@ class Settings(BaseSettings):
     # A gate switched to hard before it is calibrated blocks legitimate work, and an
     # operator who learns to override it has switched it off in practice. This mirrors
     # how the content module already treats its QA scorecard (advisory first, D-4).
-    web2_similarity_enforce: bool = False
+    #
+    # ARMED 2026-08-30. The stated precondition - calibration against a graded golden set
+    # - is met: 15 real generator articles, 105 pairs, and at the calibrated thresholds
+    # the gate blocks 0 of 96 genuinely distinct pairs and 9 of 9 duplicates, with 0.14
+    # of headroom on either side. A block now means "this really is the same article",
+    # and the escape hatch is to redraft rather than to override - which is the whole
+    # point of hardening it. Set to False to fall back to warn + acknowledgement.
+    web2_similarity_enforce: bool = True
     # Resemblance above which a draft is BLOCKED (Broder r over 5-word masked shingles).
     # Half of Broder's 0.50 duplicate line: a safety gate must trip well before
     # 'duplicate', because the harm is a detectable PATTERN, not a copy.
     web2_similarity_body_block: float = 0.25
     web2_similarity_body_warn: float = 0.15
     # Heading-skeleton Jaccard: catches same-outline/different-words templating.
-    web2_similarity_heading_block: float = 0.60
-    web2_similarity_heading_warn: float = 0.45
+    # CALIBRATED 2026-08-30 against 15 real generator articles / 105 pairs. These are THE
+    # LIVE VALUES - `web2_gate` passes them into the scorer, so the module constants in
+    # `web2_similarity` are defaults these override. They are kept equal, and
+    # `test_web2_similarity_calibration` fails if they drift apart.
+    #   distinct, different framework  max 0.388   |  distinct, SAME framework  max 0.656
+    #   redrafted / templated          1.000
+    # 0.60 sat inside the same-framework distinct band and blocked 5 of 96 real pairs.
+    web2_similarity_heading_block: float = 0.80
+    web2_similarity_heading_warn: float = 0.60
 
     # --- Shared catch-all IMAP mailbox (web2 + citation house-account signup, 7B-5).
     # The off-page automation auto-CREATES house accounts on web2 platforms with a
@@ -669,17 +725,39 @@ class Settings(BaseSettings):
     # the anchor. Keys are SecretStr (never logged / never in a repr). ---
     google_places_api_key: SecretStr | None = None  # Google Places API (New) anchor lookup
     google_maps_api_key: SecretStr | None = None  # legacy alias, fallback for the Places anchor
-    captcha_solver_provider: str = "capsolver"  # capsolver | capmonster | none
+    # DEFAULTS TO OFF, deliberately changed from "capsolver" 2026-08-29. Paying a solver
+    # to clear a CAPTCHA IS the anti-abuse evasion this project has ruled out, and a live
+    # solver as the DEFAULT meant the policy and the code disagreed - the policy said
+    # "CAPTCHA is a workflow boundary", the shipped default said "pay to cross it".
+    # A CAPTCHA is now what routes a directory to the human queue, where a person clears
+    # it. Set this explicitly if that is ever reversed as a deliberate owner decision.
+    captcha_solver_provider: str = "none"  # capsolver | capmonster | none
     captcha_solver_api_key: SecretStr | None = None
+    # Residential proxy. Same reasoning: a directory that needs a proxy to look human is
+    # DEFENDED, and a defended directory is a human-queue item, not a bandwidth purchase.
     citation_proxy_url: SecretStr | None = None  # http(s)://user:pass@host:port
-    # Per-call/per-submit cost estimates for the `citations` money-dial. Figures are
-    # the reference plan's own directional numbers (self-hosted route): a solve is
-    # ~$0.0006 (CapMonster reCAPTCHA v2), a submit's proxy bandwidth is ~$0.002-0.005,
-    # and Playwright compute is ~$0.001 — summing to the bot_fillable estimate below;
-    # captcha_assisted adds one solve; api/aggregator calls carry no CAPTCHA/proxy.
-    citation_api_cost_estimate: float = 0.01  # one direct-API submit (Bing/Foursquare)
+    # Per-submit cost estimates for the `citations` money-dial.
+    #
+    # `citation_api_cost_estimate` was DELETED with the Bing/Foursquare submitters - it
+    # priced a call to endpoints that return 404. Do not reintroduce it as a generic
+    # "api" figure: the three write paths that verified (Data Axle, Apple, GBP) have
+    # wildly different costs, and one blended number would hide that.
     citation_bot_cost_estimate: float = 0.005  # one Playwright bot_fillable submit (no CAPTCHA)
     citation_captcha_cost_estimate: float = 0.006  # one Playwright captcha_assisted submit
+    # Route B is compute only - no proxy, no solve - because a directory needing either
+    # is by definition Route C. This is the ONLY route the "under 10c marginal"
+    # commitment has ever been true for.
+    citation_route_b_cost_estimate: float = 0.002
+    # Data Axle Local Listings Premium, per Add/Renewal. UNKNOWN: the price is published
+    # nowhere reachable and www.data-axle.com 403s every client tried (R1 O-2). It stays
+    # 0.0, and 0.0 BLOCKS the route rather than enabling a free one - see
+    # `data_axle_submits_enabled`. No run may ever spend against an invented price.
+    data_axle_add_cost_estimate: float = 0.0
+    # Route A credentials. All optional and NOT in _REQUIRED_IN_PROD: absent, the
+    # submitter simply is not built and the row blocks with an honest reason.
+    data_axle_api_key: SecretStr | None = None
+    apple_business_api_key: SecretStr | None = None
+    apple_business_org_id: str = ""
     # Controlled root a bot_fillable/captcha_assisted submission's proof screenshot is
     # written under. Unset -> no screenshot is captured (an honest empty proof_url,
     # never a crash) - mirrors audit_artifact_dir's key-gating.
@@ -750,7 +828,15 @@ class Settings(BaseSettings):
     # emailed. NOT a per-user notification (no prefs / no DB user row) - it targets one
     # standing inbox. Overridable via ADMIN_NOTIFY_EMAIL; key-gated exactly like every
     # email leg (no RESEND_API_KEY -> the send is skipped, the mutation still succeeds).
-    admin_notify_email: str = "business.zainsaeed@gmail.com"  # operator inbox for portal alerts
+    # The ONE operator inbox that receives client-portal alerts. Blank by design.
+    #
+    # This defaulted to a named individual's personal Gmail. On any deployment that
+    # did not override it - a handover to another agency, most obviously - that
+    # person would silently receive another company's client notifications. The
+    # sender already skips cleanly on a blank address (`notify_admin` returns before
+    # building a sender), so an unset value costs a missed alert, not a leak, and
+    # missing an alert is the far cheaper failure.
+    admin_notify_email: str = ""  # operator inbox for portal alerts; blank -> no send
     # Base URL of the admin dashboard, used to build a deep link into an email alert
     # (e.g. the client directory where a new portal request surfaces). Not a secret.
     admin_base_url: str = "http://localhost:3000"
@@ -851,6 +937,20 @@ class Settings(BaseSettings):
         return raw.replace("\\n", "\n") if raw else None
 
     @property
+    def data_axle_submits_enabled(self) -> bool:
+        """Whether a Data Axle submission may run at all.
+
+        FALSE while `data_axle_add_cost_estimate` is 0.0, and that is the point: the
+        price is genuinely unknown (published nowhere reachable; the vendor's own site
+        403s every client tried), and an unpriced Add is the one thing that can breach a
+        written per-citation commitment without anyone noticing. A 0.0 estimate would
+        otherwise sail through the cost gate as free.
+
+        This is a HARD block, not a warning. It lifts when someone puts a real rate card
+        on file - a phone call, not a code change."""
+        return self.data_axle_add_cost_estimate > 0.0
+
+    @property
     def jwt_private_key_pem(self) -> str | None:
         """The Ed25519 PRIVATE-key PEM used to SIGN access tokens (API-only)."""
         secret = self.jwt_private_key
@@ -867,7 +967,13 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
+        """Dashboard origins plus any configured extension origins.
+
+        The extension entries are additional EXACT strings, never a wildcard and never a
+        regex, so the browser app's posture is unchanged by their presence."""
+        origins = [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
+        origins += [o.strip() for o in self.extension_origins.split(",") if o.strip()]
+        return origins
 
     @property
     def trusted_hosts_list(self) -> list[str]:
@@ -912,6 +1018,24 @@ def validate_settings(settings: Settings) -> None:
     Uses falsiness, not ``is None``: a blank env value arrives as ``""`` /
     ``SecretStr("")`` (present but empty) and must still count as missing.
     """
+    # A wildcard extension origin in production would let ANY extension installed in ANY
+    # user's browser call this API with credentials. Refuse it outright rather than
+    # documenting it - this check runs before the missing-secrets check because it is a
+    # misconfiguration that is actively dangerous rather than merely incomplete.
+    for origin in (o.strip() for o in settings.extension_origins.split(",")):
+        if not origin:
+            continue
+        ident = origin.removeprefix("chrome-extension://")
+        if "*" in origin or not (len(ident) == 32 and ident.isalpha() and ident.islower()):
+            message = (
+                f"EXTENSION_ORIGINS entry {origin!r} is not a specific extension. Each "
+                "entry must be exactly chrome-extension://<32 lowercase letters>; a "
+                "wildcard would admit every extension in every user's browser."
+            )
+            if settings.is_prod:
+                raise ConfigError(message)
+            logging.getLogger("app.config").warning(message)
+
     missing = [name for name in _REQUIRED_IN_PROD if not getattr(settings, name)]
     if not missing:
         return

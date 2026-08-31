@@ -10,14 +10,13 @@ import { TEAM_NAV } from "@/lib/nav";
 
 export default function TeamSidebar() {
   const pathname = usePathname();
-  const { me, myGrants, openCount, reviewCount } = usePortal();
+  const { me, myGrants, openCount } = usePortal();
   const { logout } = useAuth();
 
   // Identity from lib/nav.ts; the runtime COUNTS are this shell's context and
   // are attached here by href.
   const counts: Record<string, number> = {
     "/team/queue": openCount,
-    "/team/review": reviewCount,
   };
   const items = TEAM_NAV.map((it) => ({ ...it, count: counts[it.href] }));
 

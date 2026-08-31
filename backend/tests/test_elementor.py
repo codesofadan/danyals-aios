@@ -309,3 +309,132 @@ def test_plugin_payload_is_byte_identical_when_disabled() -> None:
     # introduces is exactly the two elementor_* keys.
     assert set(enabled) - set(disabled) == {"elementor_data", "elementor_edit_mode"}
     assert {k: disabled[k] for k in disabled} == {k: enabled[k] for k in disabled}
+
+
+# --------------------------------------------------------------------------- #
+# QA 23: generated pages render narrow instead of full width
+# --------------------------------------------------------------------------- #
+# Three independent causes, each pinned below. The plan that preceded this work
+# asserted "content_width is already emitted on virtually every page, so only
+# stretch_section is missing" - measurement proved that FALSE, and acting on it
+# would have stretched uncapped sections and run the text off the left viewport.
+
+
+def test_every_section_carries_a_content_width_even_with_no_tokens() -> None:
+    """The cap is unconditional. It used to be double-gated and often absent.
+
+    Two real holes it closes: `build_elementor_data`'s simple path passes tokens=None
+    outright, and `_design_tokens` returns `tokens or None` - so a profile with a font
+    but no `layout.container_width` yields a TRUTHY dict with no container_px, which
+    defeats the `or dict(_CLASSIC_TOKENS)` fallback its callers rely on.
+    """
+    from app.services.elementor import build_elementor_data
+
+    # (a) no profile at all -> the simple path, tokens=None
+    for section in build_elementor_data(_DRAFT, design_profile=None):
+        assert section["settings"]["content_width"]["size"] > 0
+
+    # (b) a profile carrying a font but NO container width - the truthy-dict hole
+    thin = {"typography": {"body_font": "Inter"}}
+    for section in build_elementor_data(_DRAFT, design_profile=thin):
+        assert section["settings"]["content_width"]["size"] > 0
+
+
+def test_a_full_width_page_is_a_stretched_band_with_boxed_content() -> None:
+    """Stretch breaks out of the theme's box; `boxed` keeps the text on the measure.
+
+    Never `layout: "full_width"` - the replica emitter recorded on a real client site
+    that pairing it with stretch ran the text edge-to-edge and off the left viewport.
+    """
+    import json as _json
+
+    from app.services.elementor import elementor_json
+
+    tree = _json.loads(elementor_json(_DRAFT, None, full_width=True))
+    assert tree, "a full-width page must still produce sections"
+    for section in tree:
+        st = section["settings"]
+        assert st["stretch_section"] == "section-stretched"
+        assert st["layout"] == "boxed"
+        assert st["content_width"]["size"] > 0  # stretched but never uncapped
+
+
+def test_an_article_is_not_stretched() -> None:
+    """A blog post keeps the reading measure - full width is for landing pages."""
+    import json as _json
+
+    from app.services.elementor import elementor_json
+
+    for section in _json.loads(elementor_json(_DRAFT, None)):
+        assert "stretch_section" not in section["settings"]
+
+
+def test_a_landing_page_is_published_as_a_page_not_a_blog_post() -> None:
+    """The cause QA actually described: "content is centered in a narrow/tab-like
+    layout with very large margins".
+
+    A service page published as a `post` gets the theme's SINGLE-POST template - a
+    narrow blog column. Nothing to do with Elementor. The replica path already learned
+    this and says so in the same words (test_replica_publish.py: "a POST renders in
+    the theme's narrow blog column"). Articles stay posts so blog permalinks,
+    categories and the feed are untouched.
+    """
+    from workers.tasks.content import _plugin_payload
+
+    def _bare(page_type: str) -> dict[str, Any]:
+        return {
+            "code": "CJ-9003", "topic": "t", "page_type": page_type,
+            "outline": {"meta": {"title": "T", "description": "d"}},
+            "keyword_map": {"primary": "t"},
+            "source_pack": {"wp_site_url": "https://client.test"},
+        }
+
+    assert _plugin_payload(_bare("service"), _DRAFT, "T", settings=_settings())["post_type"] == "page"
+    assert _plugin_payload(_bare("local"), _DRAFT, "T", settings=_settings())["post_type"] == "page"
+    assert _plugin_payload(_bare("blog"), _DRAFT, "T", settings=_settings())["post_type"] == "post"
+
+
+def test_the_published_payload_stretches_exactly_when_it_claims_full_width() -> None:
+    """One predicate drives the post type, the plugin flag AND the Elementor stretch,
+    so they can no longer disagree about what kind of page this is."""
+    import json as _json
+
+    from workers.tasks.content import _plugin_payload
+
+    def _bare(page_type: str) -> dict[str, Any]:
+        return {
+            "code": "CJ-9004", "topic": "t", "page_type": page_type,
+            "outline": {"meta": {"title": "T", "description": "d"}},
+            "keyword_map": {"primary": "t"},
+            "source_pack": {"wp_site_url": "https://client.test"},
+        }
+
+    service = _plugin_payload(_bare("service"), _DRAFT, "T", settings=_settings())
+    assert service.get("full_width") is True
+    assert service["post_type"] == "page"
+    for section in _json.loads(service["elementor_data"]):
+        assert section["settings"]["stretch_section"] == "section-stretched"
+
+    blog = _plugin_payload(_bare("blog"), _DRAFT, "T", settings=_settings())
+    assert "full_width" not in blog
+    assert blog["post_type"] == "post"
+    for section in _json.loads(blog["elementor_data"]):
+        assert "stretch_section" not in section["settings"]
+
+
+def test_the_content_tree_passes_the_elementor_oracle() -> None:
+    """The content emitter has never been validated against Elementor's registry.
+
+    `validate_tree` runs at exactly ONE production site - the replica path - so any
+    key the content emitter invents reaches WordPress unchecked and is "stored and
+    silently ignored", which is the failure mode that function's docstring says
+    already shipped two real bugs. This certifies the three width keys are real
+    Elementor 4.7 controls, and guards every future addition here.
+    """
+    import json as _json
+
+    from app.services.elementor import elementor_json
+    from app.services.elementor_replica import validate_tree
+
+    validate_tree(_json.loads(elementor_json(_DRAFT, None, full_width=True)))
+    validate_tree(_json.loads(elementor_json(_DRAFT, None)))

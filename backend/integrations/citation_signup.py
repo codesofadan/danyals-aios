@@ -33,6 +33,7 @@ module costs nothing until a signup job runs.
 from __future__ import annotations
 
 import string
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +53,10 @@ from integrations.citation_bot import (
 from integrations.citation_submitters import CitationJob, CitationSubmitResult
 from integrations.errors import ProviderNotConfiguredError
 from integrations.imap_mailbox import ImapMailbox, alias_for, extract_verification
+
+# Seals a password for one job and returns the plaintext to type into the form.
+# `app.services.citation_accounts.create_account_with_credential` is the real one.
+CredentialSink = Callable[["CitationJob"], str]
 
 logger = get_logger("integrations.citation_signup")
 
@@ -144,6 +149,10 @@ class SignupCitationSubmitter(PlaywrightCitationSubmitter):
         mail_domain: str,
         signup_specs: dict[str, SignupSpec] | None = None,
         captcha_solver: CaptchaSolver | None = None,
+        # Seals a fresh password for this job and returns the plaintext to type. Left
+        # None the bot still works and still signs up - it just cannot remember the
+        # login, which is the pre-0111 behaviour and is logged as the defect it is.
+        credential_sink: CredentialSink | None = None,
         proxy_url: str | None = None,
         screenshot_dir: str | None = None,
         headless: bool = True,
@@ -152,6 +161,7 @@ class SignupCitationSubmitter(PlaywrightCitationSubmitter):
         # No FORM_SPECS: this engine dispatches on SIGNUP_SPECS, not the public-form
         # catalog. The base ctor still validates Playwright is importable (raises
         # ProviderNotConfiguredError otherwise, caught by the factory).
+        self._credential_sink = credential_sink
         super().__init__(
             specs={},
             captcha_solver=captcha_solver,
@@ -163,6 +173,21 @@ class SignupCitationSubmitter(PlaywrightCitationSubmitter):
         self._mailbox = mailbox
         self._mail_domain = mail_domain
         self._signup_specs = signup_specs if signup_specs is not None else SIGNUP_SPECS
+
+    def can_submit(self, job: CitationJob) -> bool:
+        """Overridden because this engine dispatches on a DIFFERENT dictionary.
+
+        The base implementation asks whether `self._specs` has the directory, and the
+        ctor above passes `specs={}` on purpose - so the inherited answer was always
+        False and every `bot:signup` row blocked as "no verified spec", whatever
+        SIGNUP_SPECS held. The worker asks this before the cost gate, so the failure was
+        silent rather than loud: the row simply never ran.
+
+        A signup spec is not on the 0108 earned whitelist and does not need to be. That
+        whitelist gates the PUBLIC-FORM path, where an unverified selector means posting
+        a client's NAP into an unknown form. A signup spec creates an account first and
+        is gated by the mailbox and mail-domain checks in `submit` instead."""
+        return job.directory_name in self._signup_specs
 
     def submit(self, job: CitationJob) -> CitationSubmitResult:
         spec = self._signup_specs.get(job.directory_name)
@@ -193,7 +218,33 @@ class SignupCitationSubmitter(PlaywrightCitationSubmitter):
         from datetime import UTC, datetime
 
         alias = alias_for(directory=job.directory_name, client_id=job.client_id, domain=self._mail_domain)
-        password = _generate_password(self._rng)  # never logged
+
+        # THE PASSWORD IS PERSISTED BEFORE IT IS USED, and the order is the fix.
+        #
+        # This line used to be `password = _generate_password(self._rng)` and that was
+        # the whole story: a strong password was generated, typed into the form, and
+        # then discarded when the function returned. Every account this bot ever created
+        # has an irrecoverable login - so its listings cannot be corrected, cannot be
+        # removed, and cannot be handed to an operator to finish. The only remaining move
+        # was to abandon the account and create a duplicate, which is precisely the
+        # duplicate-listing problem a citation campaign exists to prevent.
+        #
+        # `credential_sink` seals it into the vault (0111) and hands back the plaintext
+        # to type. Sealing FIRST means a crash between here and the form submit costs us
+        # an unused account row, not an unreachable live one - the cheap failure.
+        #
+        # It stays optional so every existing construction site and unit test keeps
+        # working; when it is absent the bot behaves exactly as before, and the caller
+        # that wired it is the one that wanted persistence.
+        if self._credential_sink is not None:
+            password = self._credential_sink(job)
+        else:
+            logger.warning(
+                "citation_signup_credential_not_persisted",
+                directory=job.directory_name,
+                reason="no credential sink wired - this account's login will be unrecoverable",
+            )
+            password = _generate_password(self._rng)
 
         page = context.new_page()
         page.goto(spec.signup_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)

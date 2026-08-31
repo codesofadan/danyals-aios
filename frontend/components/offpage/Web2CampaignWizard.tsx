@@ -36,9 +36,16 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   const [topicsText, setTopicsText] = useState("");
   const [anchorsText, setAnchorsText] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
-  const [pacing, setPacing] = useState<Web2PacingMode>("drip");
+  // Fixed: approved campaigns publish as fast as the safety caps allow.
+  const pacing: Web2PacingMode = "immediate";
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [proof, setProof] = useState("");
+  // A SECOND grounding input, not a nicety. The generator asks for two different things
+  // and gaps on each separately: `proofPoints` answers "why choose us" (real projects,
+  // results, credentials) and `uniqueData` answers "what makes this different" (something
+  // only this client knows). Collecting only the first left every UI-built campaign
+  // holding at review with an unfillable gap - measured on a real client draft.
+  const [uniqueData, setUniqueData] = useState("");
   const [created, setCreated] = useState<{ id: string; total: number } | null>(null);
   const [error, setError] = useState("");
   // The inputs AS THEY WERE when the quote was taken. Without this the operator can
@@ -54,7 +61,13 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
 
   const board = boardQ.data ?? [];
   const eligible = board.filter((r) => r.status === "eligible");
-  const blocked = board.filter((r) => r.status !== "eligible");
+  // Two DIFFERENT problems, so two lists. `not_connected` is a missing credential an
+  // operator fixes in ten minutes; `not_eligible` is a judgement about this client that
+  // no credential changes. Collapsing them into one "unavailable" list buries the
+  // actionable rows under the permanent ones and sends people hunting for a token that
+  // would not help.
+  const needsAccount = board.filter((r) => r.status === "not_connected");
+  const blocked = board.filter((r) => r.status === "not_eligible");
 
   const topics = lines(topicsText);
   const anchors = lines(anchorsText);
@@ -84,6 +97,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
       targetUrl: targetUrl.trim(),
       pacing,
       proofPoints: proofLines.slice(0, 12),
+      uniqueData: lines(uniqueData).slice(0, 12),
     };
   }
 
@@ -241,6 +255,35 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                     more platforms finishes sooner <em>and</em> leaves a lighter footprint.
                   </div>
 
+                  {needsAccount.length > 0 && (
+                    <details className="fld-hint" style={{ marginTop: 8 }} open={eligible.length === 0}>
+                      <summary>
+                        {needsAccount.length} more platform(s) this client may use — connect an account
+                      </summary>
+                      <ul style={{ margin: "8px 0 0 16px" }}>
+                        {needsAccount.map((row) => (
+                          <li key={row.name} style={{ marginBottom: 8 }}>
+                            <b>{row.name}</b>
+                            {row.setupCost && !/^free/i.test(row.setupCost) && (
+                              <span style={{ color: "#92400e" }}> — {row.setupCost}</span>
+                            )}
+                            {row.setupBlocker && (
+                              <div style={{ color: "#92400e", marginTop: 2 }}>⚠ {row.setupBlocker}</div>
+                            )}
+                            {row.setupSteps && <div style={{ marginTop: 2 }}>{row.setupSteps}</div>}
+                            {row.setupUrl && (
+                              <div style={{ marginTop: 2 }}>
+                                <a href={row.setupUrl} target="_blank" rel="noopener noreferrer">
+                                  {row.setupUrl}
+                                </a>
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+
                   {blocked.length > 0 && (
                     <details className="fld-hint" style={{ marginTop: 8 }}>
                       <summary>{blocked.length} platform(s) not available for this client — why</summary>
@@ -257,18 +300,16 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
               )}
             </div>
 
-            <div className="fld">
-              <label>Publishing pace</label>
-              <select value={pacing} onChange={(e) => setPacing(e.target.value as Web2PacingMode)}>
-                <option value="drip">Drip — spread out (recommended)</option>
-                <option value="immediate">As fast as the safety caps allow</option>
-              </select>
-              <div className="fld-hint">
-                Either way the pacing caps apply — they are what keeps a client&rsquo;s properties
-                looking like real, low-volume blogs. The quote below shows the real finish date.
-              </div>
-            </div>
+            {/* The pace SELECTOR is gone by decision (2026-08-29): approved campaigns
+                publish automatically. Offering "drip" while the release tick is not
+                running would have been the worst of both — the operator picks a schedule
+                and the properties then sit unpublished forever. The safety caps still
+                apply; they are what pace it now, not a dropdown.
 
+                UPDATE (owner decision, same day): approved campaigns publish EVERY
+                property immediately. A future `scheduled_for` handed the property to a
+                release tick that nothing in this deployment runs, so it parked the work
+                rather than pacing it - 1 property of N published and N were paid for. */}
             <div className="fld">
               <label>Proof &amp; first-hand experience — one per line</label>
               <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)}
@@ -276,6 +317,17 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
               <div className="fld-hint">
                 Without real proof the writer leaves <code>[NEEDS:]</code> gaps and the draft holds at
                 review, un-publishable.
+              </div>
+            </div>
+
+            <div className="fld">
+              <label>What only this client knows — one per line</label>
+              <textarea rows={3} value={uniqueData} onChange={(e) => setUniqueData(e.target.value)}
+                placeholder={"Across 40 audits, the bottleneck teams named was the real one 3 times in 10\nOur audit returns in ten minutes; the industry norm is two to three weeks"} />
+              <div className="fld-hint">
+                The <b>differentiation</b> angle. Proof above answers &ldquo;why choose them&rdquo;; this
+                answers &ldquo;what makes this different&rdquo; — a separate <code>[NEEDS:]</code> gap,
+                and the one that most often holds a draft at review.
               </div>
             </div>
 
@@ -294,7 +346,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                   <b>${quoted.estimatedCostUsd.toFixed(2)}</b> in drafting ·{" "}
                   {quoted.projectedCompletion
                     ? <>last one publishes <b>{new Date(quoted.projectedCompletion).toLocaleDateString()}</b></>
-                    : "no schedule yet"}
+                    : <>all publish <b>as soon as you approve</b></>}
                 </div>
                 {quoted.notes.length > 0 && (
                   <ul style={{ margin: "8px 0 0 16px" }} className="fld-hint">

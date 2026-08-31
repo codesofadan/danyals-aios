@@ -149,7 +149,31 @@ class TestTheStatusRead:
         assert got == {"job_id": _JOB_ID, "status": "completed",
                        "preview_url": "https://spotino.org/?page_id=157",
                        "post_id": 157, "sections": 8, "widgets": 97,
-                       "notes": ["navbar recognised"]}
+                       "notes": ["navbar recognised"],
+                       # A run that predates the design capture carries no profile, and
+                       # null is the honest answer: the caller must fall back to
+                       # measuring the site itself rather than build on a guess.
+                       "design_profile": None}
+
+    def test_the_measured_design_reaches_the_caller(self, client: TestClient,
+                                                    runs: _FakeRuns) -> None:
+        """QA 20: the replicated design is what the content flow builds pages ON.
+
+        The replicator always measured a richer design system than the content
+        analyzer does and then discarded it. Carrying it out on the job result is what
+        lets "replicate a design, then generate N pages on it" be one flow instead of
+        two Playwright captures of the same URL.
+        """
+        profile = {"palette": {"primary": "#0f172a", "accent": "#e11d48"},
+                   "layout": {"container_width": "1140px"}}
+        runs.rows[_JOB_ID] = {
+            "status": "completed", "reason": None, "error_type": None,
+            "error_message": None,
+            "result": {"post_id": 157, "preview_url": "u", "sections": 8, "widgets": 97,
+                       "notes": [], "design_profile": profile},
+        }
+        got = client.get(f"/api/v1/replica/{_JOB_ID}").json()
+        assert got["design_profile"] == profile
 
     def test_a_degraded_rows_reason_reaches_notes(self, client: TestClient,
                                                   runs: _FakeRuns) -> None:

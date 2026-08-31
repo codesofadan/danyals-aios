@@ -333,6 +333,16 @@ def _concrete_claim_digits(draft_md: str) -> list[str]:
     return [t for t in tokens if t]
 
 
+#: The fact-grounding audit set, under a PUBLIC name.
+#:
+#: The grounding repair stage has to measure exactly what this gate measures. It
+#: did not at first - it skipped bare integers under 100 to avoid mangling prose,
+#: while this counts every standalone 2+ digit number - so the repair could clear
+#: its own check and still leave the gate blocking on "24", "50", "90". A repair
+#: that measures less than the gate can never satisfy it, by construction.
+concrete_claim_digits = _concrete_claim_digits
+
+
 def _grounded_corpus_digits(content: GeneratedContent, source_pack: SourcePack) -> str:
     """The digit string of everything the draft is ALLOWED to claim: the grounding
     trace values + the whole source pack. A concrete number not in here is
@@ -401,9 +411,24 @@ def _score_structure_readability(content: GeneratedContent) -> tuple[int, list[s
     notes: list[str] = []
     structure = 100
     h1_count = sum(1 for h in content.headings if h.level == 1)
-    if h1_count != 1:
+    # WHO SUPPLIES THE H1 DEPENDS ON THE TARGET, and scoring the body alone got this
+    # wrong on every WordPress page ever generated. The publish payload sends `title`
+    # as its own field (integrations/wordpress.py) and the theme renders it as the
+    # page's H1, so a body that starts at H2 is CORRECT there - nothing in the
+    # pipeline injects an H1 into the markdown, and nothing should. Charging -40 for
+    # it meant a permanent, unearnable deduction on the default target.
+    #
+    # A PDF/Markdown deliverable has no CMS to supply one, so the body must carry it
+    # and the deduction stands.
+    cms_supplies_h1 = content.target == "WordPress" and bool(content.title.strip())
+    if h1_count == 0 and cms_supplies_h1:
+        pass  # the rendered page has exactly one H1: the post title.
+    elif h1_count != 1:
         structure -= 40
-        notes.append(f"expected exactly one H1, found {h1_count}")
+        notes.append(
+            f"expected exactly one H1, found {h1_count}"
+            + ("" if h1_count else " and no CMS title to supply it")
+        )
     answer_words = len(content.answer_block.split())
     if not (ANSWER_MIN_WORDS <= answer_words <= ANSWER_MAX_WORDS):
         structure -= 15

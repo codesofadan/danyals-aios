@@ -5,16 +5,14 @@
 // sync history, or whether Google Sheets was connected at all. Six built, live-wired
 // components sat unreachable.
 //
-// Two properties are pinned here because both were wrong before, and both are about
-// telling an operator the truth rather than about layout:
+// The "Scheduled jobs" tab moved to /admin/operations (QA 12) - along with the
+// "paused, not broken" assertion that used to live here; see
+// components/operations/ScheduledJobs.test.tsx. This page keeps what only it does:
+// the produced reports and the Sheets sync, both of which feed /client/reports.
 //
-//   1. An EMPTY scheduled-jobs list must say the schedule is deliberately paused.
-//      Celery's `beat_schedule` is `{}` on purpose while the job-retry contract is
-//      finished. "No scheduled jobs are configured" reads as a broken deployment, and
-//      an operator who believes that will go looking for a fault that is not there.
-//
-//   2. The "open in Sheets" affordances must not be `href="#"`. Both were: a link that
-//      looked live, went nowhere, and sat beside a real sheet id.
+// The property pinned here is about telling an operator the truth, not layout: the
+// "open in Sheets" affordances must not be `href="#"`. Both were - a link that looked
+// live, went nowhere, and sat beside a real sheet id.
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -41,13 +39,6 @@ vi.mock("@/lib/hooks/reports", () => ({
 }));
 
 describe("ReportsWorkspace", () => {
-  it("explains that the cron schedule is paused rather than implying a fault", () => {
-    render(<ReportsWorkspace />);
-    expect(screen.getByTestId("jobs-parked")).toBeInTheDocument();
-    expect(screen.getByText(/Background jobs are paused/i)).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/No scheduled jobs are configured/i);
-  });
-
   it("reaches the report library and the Sheets plumbing, not just the job list", async () => {
     const user = userEvent.setup();
     render(<ReportsWorkspace />);

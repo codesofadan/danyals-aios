@@ -9,13 +9,12 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from statistics import mean
-from typing import Iterable
 
 from audit_engine.analyzers.common import Verdict, length_score, status_from_score
+from audit_engine.analyzers.registry import check
 from audit_engine.crawlers.basic import CrawledPage
 from audit_engine.parsers.html import ParsedHTML
 from audit_engine.parsers.jsonld import validate_all
-
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
@@ -78,6 +77,7 @@ def _syllable_count(word: str) -> int:
     return max(len(runs), 1)
 
 
+@check("ON-051", scope="page")
 def check_readability(p: ParsedHTML) -> Verdict:
     """ON-051 Content readability analysis (Flesch Reading Ease)."""
     text = (p.body_text or "")[:20000]
@@ -115,6 +115,7 @@ def check_readability(p: ParsedHTML) -> Verdict:
                    rem)
 
 
+@check("ON-034", scope="page")
 def check_title_tag(p: ParsedHTML) -> Verdict:
     """ON-034 Title tag optimization (deterministic core)."""
     title = (p.title or "").strip()
@@ -174,6 +175,7 @@ def check_title_uniqueness(pages: list[ParsedHTML]) -> dict[str, Verdict]:
     return out
 
 
+@check("ON-038", scope="page")
 def check_meta_description(p: ParsedHTML) -> Verdict:
     """ON-038 Meta description optimization."""
     md = (p.meta_description or "").strip()
@@ -197,6 +199,7 @@ def check_meta_description(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-041", scope="page")
 def check_h1_optimization(p: ParsedHTML) -> Verdict:
     """ON-041 H1 optimization + ON-042 multiple H1 detection (combined)."""
     if not p.h1s:
@@ -226,6 +229,7 @@ def check_h1_optimization(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-043", scope="page")
 def check_heading_hierarchy(p: ParsedHTML) -> Verdict:
     """ON-043 Heading hierarchy analysis."""
     if not p.headings:
@@ -249,6 +253,7 @@ def check_heading_hierarchy(p: ParsedHTML) -> Verdict:
     return Verdict("pass", 10.0, "info", 1.0, {"headings": len(p.headings)})
 
 
+@check("ON-035", scope="page")
 def check_title_ctr(p: ParsedHTML) -> Verdict:
     """ON-035 Title CTR optimization (heuristic)."""
     title = (p.title or "").strip()
@@ -267,6 +272,7 @@ def check_title_ctr(p: ParsedHTML) -> Verdict:
                    {"title": title, "has_number": has_number, "has_power_word": has_power}, remediation)
 
 
+@check("ON-037", scope="page")
 def check_title_keyword_placement(p: ParsedHTML) -> Verdict:
     """ON-037 Title keyword placement."""
     title = (p.title or "").strip()
@@ -283,6 +289,7 @@ def check_title_keyword_placement(p: ParsedHTML) -> Verdict:
                    "Move the primary keyword into the first 3 words of the title.")
 
 
+@check("ON-039", scope="page")
 def check_meta_ctr(p: ParsedHTML) -> Verdict:
     """ON-039 Meta description CTR analysis (heuristic)."""
     md = (p.meta_description or "").strip()
@@ -300,6 +307,7 @@ def check_meta_ctr(p: ParsedHTML) -> Verdict:
                    "Add a number or action verb to improve CTR." if score < 9 else None)
 
 
+@check("ON-042", scope="page")
 def check_multiple_h1(p: ParsedHTML) -> Verdict:
     """ON-042 Multiple H1 detection."""
     if not p.h1s:
@@ -310,6 +318,7 @@ def check_multiple_h1(p: ParsedHTML) -> Verdict:
     return Verdict("pass", 10.0, "info", 1.0, {"h1_count": 1})
 
 
+@check("ON-044", scope="page")
 def check_heading_semantics(p: ParsedHTML) -> Verdict:
     """ON-044 Semantic heading optimization."""
     if not p.headings:
@@ -328,6 +337,7 @@ def check_heading_semantics(p: ParsedHTML) -> Verdict:
                    "Headings do not reflect core topics. Rewrite H2/H3 to match key entities and intents.")
 
 
+@check("ON-045", scope="page")
 def check_heading_questions(p: ParsedHTML) -> Verdict:
     """ON-045 Question based heading detection."""
     headings = [h.text for h in p.headings if h.level in (2, 3)]
@@ -341,6 +351,7 @@ def check_heading_questions(p: ParsedHTML) -> Verdict:
                    "Convert 2-3 headings into question form to improve PAA and AI Overview eligibility.")
 
 
+@check("ON-046", scope="page")
 def check_featured_snippet(p: ParsedHTML) -> Verdict:
     """ON-046 Featured snippet optimization."""
     snippet_paras = [w for w in p.paragraph_word_counts if 18 <= w <= 45]
@@ -363,6 +374,7 @@ def check_featured_snippet(p: ParsedHTML) -> Verdict:
                    remediation)
 
 
+@check("ON-047", scope="page")
 def check_passage_ranking(p: ParsedHTML) -> Verdict:
     """ON-047 Passage ranking optimization."""
     passages = [w for w in p.paragraph_word_counts if 40 <= w <= 90]
@@ -398,6 +410,7 @@ def check_direct_answer(p: ParsedHTML) -> Verdict:
                    "Add a direct 1-2 sentence answer immediately after a question heading.")
 
 
+@check("ON-050", scope="page")
 def check_faq_optimization(p: ParsedHTML) -> Verdict:
     """ON-050 FAQ optimization."""
     has_faq_schema = any(
@@ -412,6 +425,7 @@ def check_faq_optimization(p: ParsedHTML) -> Verdict:
                    "Add an FAQ section with 3-5 Q&A pairs and FAQPage schema.")
 
 
+@check("ON-053", scope="page")
 def check_paragraph_length(p: ParsedHTML) -> Verdict:
     """ON-053 Paragraph length analysis."""
     if not p.paragraph_word_counts:
@@ -424,6 +438,7 @@ def check_paragraph_length(p: ParsedHTML) -> Verdict:
                    "Keep paragraphs in the 40-120 word range for readability.")
 
 
+@check("ON-054", scope="page")
 def check_sentence_complexity(p: ParsedHTML) -> Verdict:
     """ON-054 Sentence complexity analysis."""
     count, avg_words = _sentence_stats(p.body_text or "")
@@ -435,6 +450,7 @@ def check_sentence_complexity(p: ParsedHTML) -> Verdict:
                    "Shorten sentences to improve readability and extractability.")
 
 
+@check("ON-055", scope="page")
 def check_scannability(p: ParsedHTML) -> Verdict:
     """ON-055 Content scannability analysis."""
     headings = len(p.headings)
@@ -449,6 +465,7 @@ def check_scannability(p: ParsedHTML) -> Verdict:
                    "Improve scannability with more subheadings, short paragraphs, and lists.")
 
 
+@check("ON-056", scope="page")
 def check_intro_optimization(p: ParsedHTML) -> Verdict:
     """ON-056 Intro optimization."""
     if not p.paragraphs:
@@ -463,6 +480,7 @@ def check_intro_optimization(p: ParsedHTML) -> Verdict:
                    "Make the intro 40-90 words and include the primary entity or keyword.")
 
 
+@check("ON-058", scope="page")
 def check_anchor_text_optimization(p: ParsedHTML) -> Verdict:
     """ON-058 Anchor text optimization."""
     internal = [link for link in p.links if link.is_internal]
@@ -481,6 +499,7 @@ def check_anchor_text_optimization(p: ParsedHTML) -> Verdict:
                    "Replace generic anchors with contextual, entity-rich text.")
 
 
+@check("ON-065", scope="page")
 def check_external_link_quality(p: ParsedHTML) -> Verdict:
     """ON-065 External link quality analysis (heuristic)."""
     external = [link for link in p.links if not link.is_internal]
@@ -496,6 +515,7 @@ def check_external_link_quality(p: ParsedHTML) -> Verdict:
                    {"external_links": len(external), "http_links": len(insecure)}, remediation)
 
 
+@check("ON-066", scope="page")
 def check_outbound_authority(p: ParsedHTML) -> Verdict:
     """ON-066 Outbound authority link analysis (heuristic)."""
     external = [link.href for link in p.links if not link.is_internal]
@@ -508,6 +528,7 @@ def check_outbound_authority(p: ParsedHTML) -> Verdict:
                    "Cite at least one authoritative source (.gov/.edu) where relevant.")
 
 
+@check("ON-069", scope="page")
 def check_image_filename(p: ParsedHTML) -> Verdict:
     """ON-069 Image filename optimization."""
     if not p.images:
@@ -526,6 +547,7 @@ def check_image_filename(p: ParsedHTML) -> Verdict:
                    "Rename images to descriptive, keyword-rich filenames.")
 
 
+@check("ON-071", scope="page")
 def check_webp_usage(p: ParsedHTML) -> Verdict:
     """ON-071 WebP image usage check."""
     if not p.images:
@@ -537,6 +559,7 @@ def check_webp_usage(p: ParsedHTML) -> Verdict:
                    "Serve images as WebP or AVIF for better performance.")
 
 
+@check("ON-072", scope="page")
 def check_lazy_loading(p: ParsedHTML) -> Verdict:
     """ON-072 Lazy loading optimization."""
     if not p.images:
@@ -550,6 +573,7 @@ def check_lazy_loading(p: ParsedHTML) -> Verdict:
                    {"lazy_ratio": round(ratio, 2)}, "Enable loading=lazy for non-critical images.")
 
 
+@check("ON-074", scope="page")
 def check_faq_schema(p: ParsedHTML) -> Verdict:
     """ON-074 FAQ schema optimization."""
     has_faq = any(
@@ -562,6 +586,7 @@ def check_faq_schema(p: ParsedHTML) -> Verdict:
                    "Add FAQPage schema to Q&A sections.")
 
 
+@check("ON-075", scope="page")
 def check_article_schema(p: ParsedHTML) -> Verdict:
     """ON-075 Article schema validation."""
     has_article = any(
@@ -578,6 +603,7 @@ def check_article_schema(p: ParsedHTML) -> Verdict:
     return Verdict("n_a", 0.0, "info", 0.7, {"article_schema": False})
 
 
+@check("ON-076", scope="page")
 def check_service_schema(p: ParsedHTML) -> Verdict:
     """ON-076 Service schema optimization."""
     has_service = any(
@@ -590,6 +616,7 @@ def check_service_schema(p: ParsedHTML) -> Verdict:
                    "Add Service schema on core service pages.")
 
 
+@check("ON-077", scope="page")
 def check_breadcrumb_schema(p: ParsedHTML) -> Verdict:
     """ON-077 Breadcrumb schema validation."""
     has_breadcrumb = any(
@@ -602,6 +629,7 @@ def check_breadcrumb_schema(p: ParsedHTML) -> Verdict:
                    "Add BreadcrumbList schema and visible breadcrumbs on content pages.")
 
 
+@check("ON-078", scope="page")
 def check_rich_result_eligibility(p: ParsedHTML) -> Verdict:
     """ON-078 Rich result eligibility analysis."""
     results = validate_all(p.schema_blocks)
@@ -615,6 +643,7 @@ def check_rich_result_eligibility(p: ParsedHTML) -> Verdict:
                    "Implement structured data for rich result eligibility.")
 
 
+@check("ON-022", scope="page")
 def check_content_depth(p: ParsedHTML) -> Verdict:
     """ON-022 Content depth analysis."""
     wc = p.word_count
@@ -627,6 +656,7 @@ def check_content_depth(p: ParsedHTML) -> Verdict:
                    "Expand depth with more subtopics and evidence to reach 900+ words.")
 
 
+@check("ON-006", scope="page")
 def check_primary_keyword_optimization(p: ParsedHTML) -> Verdict:
     """ON-006 Primary keyword optimization."""
     primary = _primary_phrase(p)
@@ -645,6 +675,7 @@ def check_primary_keyword_optimization(p: ParsedHTML) -> Verdict:
                    "Include the primary keyword in title, H1, meta description, and URL slug.")
 
 
+@check("ON-007", scope="page")
 def check_secondary_keywords(p: ParsedHTML) -> Verdict:
     """ON-007 Secondary keyword optimization."""
     terms = _top_terms(p.body_text or "", n=8)
@@ -661,6 +692,7 @@ def check_secondary_keywords(p: ParsedHTML) -> Verdict:
                    "Use secondary terms in H2/H3 headings and supporting paragraphs.")
 
 
+@check("ON-011", scope="page")
 def check_keyword_stuffing(p: ParsedHTML) -> Verdict:
     """ON-011 Keyword stuffing detection."""
     terms = _tokens(p.body_text or "")
@@ -678,6 +710,7 @@ def check_keyword_stuffing(p: ParsedHTML) -> Verdict:
                    "Keyword repetition is high. Rewrite to improve natural phrasing.")
 
 
+@check("ON-014", scope="page")
 def check_related_entities(p: ParsedHTML) -> Verdict:
     """ON-014 Related entities optimization (heuristic)."""
     text = p.body_text or ""
@@ -709,6 +742,7 @@ _STATISTIC = re.compile(
 )
 
 
+@check("ON-027", scope="page")
 def check_expertise_signals(p: ParsedHTML) -> Verdict:
     """ON-027 Expertise signal detection.
 
@@ -749,6 +783,7 @@ def check_expertise_signals(p: ParsedHTML) -> Verdict:
                    f"marketing copy on the same subject.")
 
 
+@check("ON-028", scope="page")
 def check_trust_signals(p: ParsedHTML) -> Verdict:
     """ON-028 Trust signal analysis."""
     anchors = [l.anchor_text.lower() for l in p.links if l.anchor_text]
@@ -765,6 +800,7 @@ def check_trust_signals(p: ParsedHTML) -> Verdict:
                    "Add visible About, Contact, Privacy Policy, and Terms or Refund pages.")
 
 
+@check("ON-029", scope="page")
 def check_author_credibility(p: ParsedHTML) -> Verdict:
     """ON-029 Author credibility analysis (heuristic)."""
     has_byline = bool(p.bylines)
@@ -787,6 +823,7 @@ def check_author_credibility(p: ParsedHTML) -> Verdict:
                    "Add a byline and Person schema with credentials for content pages.")
 
 
+@check("ON-026", scope="page")
 def check_eeat_overall(p: ParsedHTML) -> Verdict:
     """ON-026 E-E-A-T optimization analysis (heuristic rollup)."""
     ex = check_expertise_signals(p)
@@ -799,6 +836,7 @@ def check_eeat_overall(p: ParsedHTML) -> Verdict:
                    {"expertise": ex.score, "trust": tr.score, "author": au.score})
 
 
+@check("ON-032", scope="page")
 def check_content_freshness(p: ParsedHTML) -> Verdict:
     """ON-032 Content freshness analysis."""
     dates = []
@@ -814,6 +852,7 @@ def check_content_freshness(p: ParsedHTML) -> Verdict:
     return Verdict("n_a", 0.0, "info", 0.7, {"dates": []})
 
 
+@check("ON-033", scope="page")
 def check_semantic_relevance(p: ParsedHTML) -> Verdict:
     """ON-033 Semantic relevance score (heuristic)."""
     primary = _primary_tokens(p)
@@ -826,6 +865,7 @@ def check_semantic_relevance(p: ParsedHTML) -> Verdict:
                    {"overlap": round(overlap, 2), "primary": list(primary)[:3]})
 
 
+@check("ON-023", scope="page")
 def check_thin_content(p: ParsedHTML, *, threshold: int = 300) -> Verdict:
     """ON-023 Thin content detection (deterministic)."""
     if p.word_count < threshold:
@@ -843,6 +883,7 @@ def check_thin_content(p: ParsedHTML, *, threshold: int = 300) -> Verdict:
     )
 
 
+@check("ON-067", scope="page")
 def check_image_alt_text(p: ParsedHTML) -> Verdict:
     """ON-067 Image alt text optimization."""
     if not p.images:
@@ -862,6 +903,7 @@ def check_image_alt_text(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-079", scope="page")
 def check_canonical_validation(p: ParsedHTML) -> Verdict:
     """ON-079 / TECH-019 Canonical tag validation."""
     if not p.canonical:
@@ -875,6 +917,7 @@ def check_canonical_validation(p: ParsedHTML) -> Verdict:
     )
 
 
+@check("ON-080", scope="page")
 def check_indexability(p: ParsedHTML) -> Verdict:
     """ON-080 Indexability analysis (on-page meta-robots view)."""
     if p.has_noindex:
@@ -886,6 +929,7 @@ def check_indexability(p: ParsedHTML) -> Verdict:
     return Verdict("pass", 10.0, "info", 1.0, {"meta_robots": p.meta_robots or "(default)"})
 
 
+@check("ON-073", scope="page")
 def check_schema_validation(p: ParsedHTML) -> Verdict:
     """ON-073 / TECH-035 Schema markup validation."""
     if not p.schema_blocks:
@@ -989,6 +1033,7 @@ def check_https(cp: CrawledPage) -> Verdict:
     )
 
 
+@check("TECH-066", scope="page")
 def check_viewport(p: ParsedHTML) -> Verdict:
     """TECH-066 Viewport configuration analysis."""
     if not p.viewport:
@@ -999,6 +1044,7 @@ def check_viewport(p: ParsedHTML) -> Verdict:
     return Verdict("pass", 10.0, "info", 1.0, {"viewport": p.viewport})
 
 
+@check("TECH-061", scope="page")
 def check_hreflang(p: ParsedHTML) -> Verdict:
     """TECH-061 Hreflang validation (light)."""
     if not p.hreflang:
@@ -1093,62 +1139,3 @@ def check_link_equity_distribution(pages: list[CrawledPage]) -> Verdict:
         return Verdict("pass", 10.0, "info", 0.85, {"avg_inbound": round(avg, 2), "max_over_avg": round(spread, 2)})
     return Verdict("warn", 6.0, "minor", 0.8, {"avg_inbound": round(avg, 2), "max_over_avg": round(spread, 2)},
                    "Redistribute internal links so key pages receive more consistent link equity.")
-
-
-def iter_per_page_checks(p: ParsedHTML) -> Iterable[tuple[str, str, Verdict]]:
-    """Yield (check_id, owner_agent, verdict) for the per-page analyzer set.
-
-    Used by the orchestrator to flatten findings into rows."""
-    yield ("ON-034", "A3", check_title_tag(p))
-    yield ("ON-035", "A3", check_title_ctr(p))
-    yield ("ON-037", "A3", check_title_keyword_placement(p))
-    yield ("ON-038", "A3", check_meta_description(p))
-    yield ("ON-039", "A3", check_meta_ctr(p))
-    yield ("ON-041", "A3", check_h1_optimization(p))
-    yield ("ON-042", "A3", check_multiple_h1(p))
-    yield ("ON-043", "A3", check_heading_hierarchy(p))
-    yield ("ON-044", "A3", check_heading_semantics(p))
-    yield ("ON-045", "A3", check_heading_questions(p))
-    yield ("ON-046", "A5", check_featured_snippet(p))
-    yield ("ON-047", "A5", check_passage_ranking(p))
-    # ON-048/ON-049 are emitted by analyzers/ai_search.py, not here. Both ids had
-    # two competing implementations firing on the same page in the same run, so a
-    # page carried two different scores for one check. The ai_search pair wins:
-    # it is self-contained (check_ai_overview below is a mean of three other
-    # checks, one of them check_direct_answer), it reaches pass/warn/fail rather
-    # than pass/warn only, and its remediation names the measurement.
-    yield ("ON-050", "A3", check_faq_optimization(p))
-    yield ("ON-051", "A1", check_readability(p))
-    yield ("ON-053", "A1", check_paragraph_length(p))
-    yield ("ON-054", "A1", check_sentence_complexity(p))
-    yield ("ON-055", "A1", check_scannability(p))
-    yield ("ON-056", "A1", check_intro_optimization(p))
-    yield ("ON-058", "A4", check_anchor_text_optimization(p))
-    yield ("ON-065", "A4", check_external_link_quality(p))
-    yield ("ON-066", "A4", check_outbound_authority(p))
-    yield ("ON-069", "A3", check_image_filename(p))
-    yield ("ON-071", "A3", check_webp_usage(p))
-    yield ("ON-072", "A3", check_lazy_loading(p))
-    yield ("ON-073", "B4", check_schema_validation(p))
-    yield ("ON-074", "B4", check_faq_schema(p))
-    yield ("ON-075", "B4", check_article_schema(p))
-    yield ("ON-076", "B4", check_service_schema(p))
-    yield ("ON-077", "B4", check_breadcrumb_schema(p))
-    yield ("ON-078", "B4", check_rich_result_eligibility(p))
-    yield ("ON-022", "A1", check_content_depth(p))
-    yield ("ON-006", "A2", check_primary_keyword_optimization(p))
-    yield ("ON-007", "A2", check_secondary_keywords(p))
-    yield ("ON-011", "A2", check_keyword_stuffing(p))
-    yield ("ON-014", "A2", check_related_entities(p))
-    yield ("ON-026", "A1", check_eeat_overall(p))
-    yield ("ON-027", "A1", check_expertise_signals(p))
-    yield ("ON-028", "A1", check_trust_signals(p))
-    yield ("ON-029", "A1", check_author_credibility(p))
-    yield ("ON-032", "A1", check_content_freshness(p))
-    yield ("ON-033", "A2", check_semantic_relevance(p))
-    yield ("ON-023", "A1", check_thin_content(p))
-    yield ("ON-067", "A3", check_image_alt_text(p))
-    yield ("ON-079", "B1", check_canonical_validation(p))
-    yield ("ON-080", "B1", check_indexability(p))
-    yield ("TECH-066", "B2", check_viewport(p))
-    yield ("TECH-061", "B5", check_hreflang(p))

@@ -1,14 +1,13 @@
 // The Policy Radar recommendation queue.
 //
-// It rendered four status pills — New / Acknowledged / Applied / Dismissed — under a
-// subtitle reading "Closed-loop recommendations", and offered no control that could
-// reach any of them. `useTransitionRecommendation` had zero call sites and
-// `POST /policy/recommendations/{id}/{action}` had no caller, so every recommendation
-// the radar produced stayed "New" forever however many times an operator read it.
+// APPLY WAS WITHDRAWN. It persisted — a status flip plus an `audit_overlay` row —
+// but `list_active_overlay` has one caller (`GET /policy/overlay`) and NOTHING calls
+// that: no audit worker, no report renderer, no frontend hook. The overlay was
+// written and read by nobody, so "Applied" badged an effect that never happened and
+// the confirm dialog promised a change to "those clients' reports" that could not
+// occur. QA asked for the honest option: remove the state, don't display a lie.
 //
-// `apply` is the consequential action: server-side it also writes an `audit_overlay`
-// row, which changes what affected clients' reports say. So it confirms first, and
-// settled rows offer nothing at all.
+// Acknowledge and Dismiss stay — both mean exactly what they say.
 
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -58,32 +57,33 @@ describe("recommendation actions", () => {
     expect(mutate).toHaveBeenCalledWith({ id: "r1", action: "dismiss" });
   });
 
-  it("confirms before applying, because apply writes an audit overlay", async () => {
-    const user = userEvent.setup();
+  it("offers no Apply control at all", () => {
     render(<Recommendations />);
-    await user.click(screen.getByRole("button", { name: /Apply/i }));
-    // A real dialog now (window.confirm was suppressible and stated nothing):
-    // the overlay's outward consequence renders, then the named verb applies.
-    expect(mutate).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toHaveTextContent(/clients' reports/i);
-    await user.click(screen.getByRole("button", { name: /Apply recommendation/i }));
-    expect(mutate).toHaveBeenCalledWith({ id: "r1", action: "apply" });
+    // The regression guard: an operator must not be able to reach a state that
+    // claims a downstream effect nothing produces.
+    expect(screen.queryByRole("button", { name: /Apply/i })).not.toBeInTheDocument();
   });
 
-  it("does not apply when the confirmation is cancelled", async () => {
+  it("never sends an apply transition", async () => {
     const user = userEvent.setup();
     render(<Recommendations />);
-    await user.click(screen.getByRole("button", { name: /Apply/i }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(mutate).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Dismiss/i }));
+    expect(mutate).not.toHaveBeenCalledWith(expect.objectContaining({ action: "apply" }));
   });
 
-  it("stops offering Acknowledge once it has been acknowledged", async () => {
+  it("stops offering Acknowledge once it has been acknowledged", () => {
     rows = [rec({ status: "acknowledged" })];
     render(<Recommendations />);
     expect(screen.queryByRole("button", { name: /Acknowledge/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Apply/i })).toBeInTheDocument();
+    // Dismiss is still reachable — acknowledged is not a terminal state.
+    expect(screen.getByRole("button", { name: /Dismiss/i })).toBeInTheDocument();
+  });
+
+  it("still renders a recommendation applied before Apply was withdrawn", () => {
+    // The server can still return `applied`, so STATUS_META must keep the entry.
+    rows = [rec({ status: "applied" })];
+    render(<Recommendations />);
+    expect(screen.getByText("Applied")).toBeInTheDocument();
   });
 
   it.each(["applied", "dismissed"])("offers nothing on a %s recommendation", (status) => {

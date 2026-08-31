@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 #
-# Provision the AIOS backend on a single Ubuntu 22.04+ / Debian VPS - NO Docker.
-# Native PostgreSQL 16 + native Redis + a Python venv + three systemd units
-# (aios-api uvicorn, aios-worker celery, aios-beat celery beat) behind Caddy.
+# Provision the WHOLE AIOS platform on a single Ubuntu 22.04+ / Debian VPS - NO
+# Docker. Native PostgreSQL 16 + native Redis + a Python venv + a Next.js build +
+# four systemd units (aios-api uvicorn, aios-worker celery, aios-beat celery beat,
+# aios-web the dashboard) behind Caddy.
+#
+# aios-web exists because for a long time this script did NOT build one: it
+# provisioned an API with no user interface, and an agency that followed this file
+# to the letter finished the install with nothing to log in to. The frontend is
+# half the product, so it is installed here, not left as a manual afterthought.
 #
 # What it does (idempotent - safe to re-run after a `git pull` to pick up code,
 # migrations, and unit changes):
@@ -18,7 +24,9 @@
 #   7. provisions the seed OWNER (idempotent) so there is a login
 #   7.5 builds the audit-engine venv (crawl+reports extras) + installs a headless
 #      Chromium so the report.pdf actually renders (skipped if AUDIT_ENGINE_DIR unset)
-#   8. installs + enables + (re)starts the three systemd units
+#   7.6 installs Node (NodeSource) if absent, then `npm ci` + `npm run build` in
+#      frontend/ - the dashboard the operator actually uses
+#   8. installs + enables + (re)starts the four systemd units
 #
 # Prereqs: run as root; clone the repo to $DEPLOY_ROOT first (git clone <repo>
 # /opt/aios). Everything lives in the agency's own VPS + accounts - no lock-in.
@@ -28,6 +36,7 @@ set -euo pipefail
 
 DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/aios}"
 BACKEND_DIR="${DEPLOY_ROOT}/backend"
+FRONTEND_DIR="${DEPLOY_ROOT}/frontend"
 VENV_DIR="${BACKEND_DIR}/.venv"
 MIGRATIONS_DIR="${DEPLOY_ROOT}/db/migrations"
 UNIT_SRC="${DEPLOY_ROOT}/infra/systemd"
@@ -37,6 +46,11 @@ ENV_FILE="${ENV_DIR}/aios.env"
 ENV_TEMPLATE="${DEPLOY_ROOT}/infra/deploy/aios.env.example"
 STATE_DIR="/var/lib/aios"
 PG_VERSION="16"
+# Next 15.5 needs Node >= 18.18; 20 is the floor we accept and 22 (LTS) is what we
+# install, because Ubuntu 22.04 ships nodejs 12 and 24.04 ships 18 - both from a
+# distro repo that will never move. Override NODE_MAJOR to pin a different line.
+NODE_MAJOR="${NODE_MAJOR:-22}"
+NODE_MIN_MAJOR=20
 
 log() { printf '\033[1;32m[install]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[install]\033[0m %s\n' "$*" >&2; }
@@ -292,11 +306,137 @@ else
     warn "audits stay unavailable until AUDIT_ENGINE_DIR + AUDIT_ENGINE_PYTHON are set in ${ENV_FILE}."
 fi
 
+# --- 7.6 Dashboard (aios-web): Node + `npm ci` + `npm run build` ---------------
+# WHY THIS EXISTS: before this block the install produced an API and no user
+# interface. Nothing failed - there was simply nothing to open, which is the worst
+# shape a failure can take, so the dashboard is built here as a first-class step.
+#
+# A failure here is NOT fatal to the rest of the install (a `git pull` + re-run must
+# still be able to restart the backend when the frontend build is what broke), but it
+# is never silent either: `WEB_STATUS` carries the cause, step 8 refuses to start
+# aios-web, and the script exits non-zero with that cause named. "API is up" is not a
+# successful install of this platform.
+WEB_STATUS="ok"
+
+node_major() { # node_major -> installed node major version, or 0 if absent
+    if ! command -v node >/dev/null 2>&1; then
+        echo 0
+        return
+    fi
+    node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0
+}
+
+if [[ ! -f "${FRONTEND_DIR}/package.json" ]]; then
+    WEB_STATUS="no frontend/package.json under ${DEPLOY_ROOT} (incomplete clone?)"
+    err "${WEB_STATUS}"
+else
+    if [[ "$(node_major)" -lt "${NODE_MIN_MAJOR}" ]]; then
+        log "installing Node.js ${NODE_MAJOR}.x from NodeSource (found: $(node --version 2>/dev/null || echo none))"
+        # NodeSource, not `apt-get install nodejs`: the distro package is Node 12 on
+        # 22.04 and 18 on 24.04, and Next 15.5 refuses to build on either. The
+        # `nodistro` suite is NodeSource's single distribution-independent channel.
+        install -d /usr/share/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+            | gpg --batch --yes --dearmor -o /usr/share/keyrings/nodesource.gpg
+        echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+            > /etc/apt/sources.list.d/nodesource.list
+        apt-get update -qq
+        apt-get install -y -qq nodejs
+    else
+        log "Node.js $(node --version) already present (>= ${NODE_MIN_MAJOR}); leaving it alone"
+    fi
+fi
+
+if [[ "${WEB_STATUS}" == "ok" ]]; then
+    # --- BUILD-TIME configuration. READ THIS BEFORE CHANGING IT ---------------
+    # These are NOT runtime settings, however much they look like them:
+    #   * every NEXT_PUBLIC_* is textually INLINED into the JS bundle by
+    #     `next build`;
+    #   * BACKEND_ORIGIN is read by next.config.mjs to build the /api/v1 rewrite,
+    #     and `next build` freezes the result into .next/routes-manifest.json.
+    # So putting them only in the unit's EnvironmentFile does nothing at all - the
+    # value that wins is whatever was in the environment during THIS build. (Proof
+    # that this bites: a routes-manifest checked on a dev box had a developer's
+    # personal 127.0.0.1:8099 baked into it.) They are therefore read out of
+    # aios.env here and exported for the build, and re-running install.sh is what
+    # applies a change to any of them.
+    WEB_PORT="$(env_get AIOS_WEB_PORT)"
+    : "${WEB_PORT:=3000}"
+    BACKEND_ORIGIN="$(env_get BACKEND_ORIGIN)"
+    : "${BACKEND_ORIGIN:=http://127.0.0.1:8000}"
+    export BACKEND_ORIGIN
+    export NEXT_TELEMETRY_DISABLED=1
+    # NOTE: NODE_ENV is deliberately NOT exported here, even though this is a
+    # production install and the unit sets it. `npm ci` reads NODE_ENV and OMITS
+    # devDependencies when it is "production" - which is where typescript, the
+    # @types packages and eslint-config-next live, so the build would then fail on a
+    # missing compiler. `next build` sets NODE_ENV=production for the build itself;
+    # it does not need help, and helping here breaks the install.
+
+    # Exported ONLY when non-empty, and that is a guard, not tidiness. lib/api.ts
+    # reads `process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1"`, and `??` falls back
+    # on undefined but NOT on "". Next inlines any NEXT_PUBLIC_* that is merely
+    # PRESENT, so exporting a blank one bakes `""` into the bundle, API_BASE becomes
+    # the empty string, and every call goes to `/audits` instead of `/api/v1/audits`
+    # - a fully-loading dashboard where nothing works. A blank line in aios.env
+    # must mean "unset", so it is dropped here rather than exported empty.
+    for key in NEXT_PUBLIC_API_BASE_URL NEXT_PUBLIC_FILE_BASE_URL; do
+        value="$(env_get "${key}")"
+        if [[ -n "${value}" ]]; then
+            export "${key}=${value}"
+            log "  build-time ${key}=${value}"
+        fi
+    done
+    log "building the dashboard (npm ci + npm run build) with BACKEND_ORIGIN=${BACKEND_ORIGIN}"
+
+    # `npm ci`, not `npm install`: ci installs exactly what package-lock.json pins and
+    # fails loudly if the lock and package.json disagree, so a deploy can never resolve
+    # a different dependency tree than the one that was tested.
+    if ! (cd "${FRONTEND_DIR}" && npm ci --no-audit --no-fund); then
+        WEB_STATUS="npm ci failed in ${FRONTEND_DIR}"
+    elif ! (cd "${FRONTEND_DIR}" && npm run build); then
+        WEB_STATUS="npm run build failed in ${FRONTEND_DIR}"
+    elif [[ ! -f "${FRONTEND_DIR}/.next/BUILD_ID" ]]; then
+        # Checking the ARTIFACT, not just the exit code: this is the file `next start`
+        # needs, and its absence is the difference between "built" and "the command
+        # returned 0". Starting the unit without it produces a crash-loop whose journal
+        # line ("Could not find a production build") is three steps from the cause.
+        WEB_STATUS="npm run build produced no .next/BUILD_ID in ${FRONTEND_DIR}"
+    fi
+
+    if [[ "${WEB_STATUS}" == "ok" ]]; then
+        # ProtectSystem=strict + ReadWritePaths=<frontend>/.next/cache in
+        # aios-web.service: systemd REFUSES TO START a unit whose ReadWritePaths entry
+        # does not exist, and the build does not always leave this directory behind.
+        install -d -o "${APP_USER}" -g "${APP_USER}" -m 0750 "${FRONTEND_DIR}/.next/cache"
+        # The tree-wide chown ran in step 3, before node_modules and .next existed.
+        chown -R "${APP_USER}:${APP_USER}" "${FRONTEND_DIR}"
+        log "dashboard built; it will listen on 127.0.0.1:${WEB_PORT}"
+    else
+        err "${WEB_STATUS}"
+    fi
+fi
+
 # --- 8. systemd units ----------------------------------------------------------
-log "installing systemd units (aios-api, aios-worker, aios-beat)"
-install -m 0644 "${UNIT_SRC}/aios-api.service" /etc/systemd/system/aios-api.service
-install -m 0644 "${UNIT_SRC}/aios-worker.service" /etc/systemd/system/aios-worker.service
-install -m 0644 "${UNIT_SRC}/aios-beat.service" /etc/systemd/system/aios-beat.service
+log "installing systemd units (aios-api, aios-worker, aios-beat, aios-web)"
+# The units are written against the default /opt/aios. DEPLOY_ROOT is advertised
+# as configurable at the top of this script, and installing them verbatim made
+# that a lie: any other root produced units pointing at a directory that does not
+# exist, so they failed to start with no obvious cause. Substitute the real root
+# on the way in rather than hardcoding it in the unit files, which would just move
+# the problem. aios-web carries THREE /opt/aios paths (WorkingDirectory, the node
+# entrypoint, and ReadWritePaths), so this substitution is load-bearing for it in
+# a way it is not for the backend units - a missed one there is a unit that
+# refuses to start on the mount namespace, not a clean error.
+#
+# aios-web's unit FILE is written unconditionally even when the build failed, so a
+# later successful re-run only has to start it - but it is not enabled or started
+# below unless the build actually produced one.
+for unit in aios-api aios-worker aios-beat aios-web; do
+  sed "s|/opt/aios|${DEPLOY_ROOT}|g" "${UNIT_SRC}/${unit}.service" \
+    > "/etc/systemd/system/${unit}.service"
+  chmod 0644 "/etc/systemd/system/${unit}.service"
+done
 
 log "reloading systemd + enabling/starting services"
 systemctl daemon-reload
@@ -304,10 +444,36 @@ systemctl enable aios-api.service aios-worker.service aios-beat.service
 # restart (not just start) so a re-run picks up new code/units.
 systemctl restart aios-api.service aios-worker.service aios-beat.service
 
+if [[ "${WEB_STATUS}" == "ok" ]]; then
+    systemctl enable aios-web.service
+    systemctl restart aios-web.service
+else
+    # Deliberately NOT enabled/restarted. Enabling it would schedule a crash-loop at
+    # every boot for a build that is known to be missing, and restarting it would
+    # take down a dashboard from a previous good build - punishing the operator twice
+    # for one failure. Whatever is running now keeps running; the error below says so.
+    err "aios-web NOT started: ${WEB_STATUS}"
+fi
+
 log "done. next steps:"
 log "  1. put Caddy in front for TLS (see infra/deploy/Caddyfile + README-deploy.md)"
+log "     it publishes BOTH hosts: the API and the dashboard."
 log "  2. verify:"
-log "       systemctl status aios-api aios-worker aios-beat postgresql redis-server"
+log "       systemctl status aios-api aios-worker aios-beat aios-web postgresql redis-server"
 log "       journalctl -u aios-api -f"
 log "       curl -sf http://127.0.0.1:8000/health  && echo"
 log "       curl -s  http://127.0.0.1:8000/health/ready | python3 -m json.tool"
+log "       curl -sfI http://127.0.0.1:${WEB_PORT:-3000}/login | head -1"
+
+if [[ "${WEB_STATUS}" != "ok" ]]; then
+    err "-------------------------------------------------------------------"
+    err " INSTALL INCOMPLETE. The backend is running, but the DASHBOARD is not:"
+    err "   ${WEB_STATUS}"
+    err " There is no user interface on this box until that is fixed. Re-run this"
+    err " script once it is; nothing else needs undoing."
+    err "-------------------------------------------------------------------"
+    # Non-zero on purpose. An API with no dashboard is not a successful install of
+    # this platform, and an exit 0 here is exactly the "looks fine" that let a
+    # UI-less deploy ship in the first place.
+    exit 1
+fi

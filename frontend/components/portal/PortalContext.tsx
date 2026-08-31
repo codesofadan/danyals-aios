@@ -16,7 +16,6 @@ type PortalState = {
   myTasks: Task[];
   myGrants: string[]; // granted accessFeatures.key[] for the signed-in member
   openCount: number;
-  reviewCount: number;
   advance: (id: string) => void;
   review: (id: string, action: ReviewAction) => void;
 };
@@ -48,12 +47,11 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const myTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
   const myGrants = useMemo(() => grantsQ.data ?? [], [grantsQ.data]);
   const openCount = myTasks.filter((t) => t.status !== "done").length;
-  const reviewCount = myTasks.filter((t) => t.status === "review").length;
 
   const value = useMemo<PortalState | null>(
     () =>
-      me ? { me, myTasks, myGrants, openCount, reviewCount, advance, review } : null,
-    [me, myTasks, myGrants, openCount, reviewCount, advance, review],
+      me ? { me, myTasks, myGrants, openCount, advance, review } : null,
+    [me, myTasks, myGrants, openCount, advance, review],
   );
 
   // Loading / not-yet-resolved gate — never render the workspace until the

@@ -1,8 +1,14 @@
 """One bad check must cost one check, never a run.
 
-Today an exception inside iter_per_page_checks abandons every remaining check
-for that page and every page after it, and the audit still reports success with
-a quietly smaller denominator - which RAISES the score.
+The defect this replaced, now history: `iter_per_page_checks` was a bare
+generator, so an exception inside it abandoned every remaining check for that
+page AND every page after it - and the audit still reported success with a
+quietly smaller denominator, which RAISES the score. Nothing on the call path in
+`_run_quick` wrapped the loop.
+
+That generator and its three siblings are gone; every page-scope check now runs
+through the dispatcher, which converts a failure into one `n_a` carrying
+`analyzer_error` and continues. These tests are what makes that claim checkable.
 """
 from __future__ import annotations
 

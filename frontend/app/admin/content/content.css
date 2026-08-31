@@ -56,7 +56,8 @@
 .co-col-n { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--muted);
   background: var(--raise); border: 1px solid var(--line); border-radius: 999px;
   min-width: 22px; text-align: center; padding: 1px 6px; font-variant-numeric: tabular-nums; }
-.co-col-body { display: flex; flex-direction: column; gap: 10px; }
+.co-col-body { display: flex; flex-direction: column; gap: 10px;
+  max-height: 460px; overflow-y: auto; overscroll-behavior: contain; }
 .co-empty { padding: 18px 6px; text-align: center; font-size: 11.5px; color: var(--muted-2); }
 
 /* ---- job card ---- */
@@ -109,7 +110,8 @@
   border-radius: 6px; padding: 1px 6px; }
 
 /* ---- review gate ---- */
-.co-gate-list { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+.co-gate-list { margin-top: 12px; display: flex; flex-direction: column; gap: 12px;
+  max-height: 520px; overflow-y: auto; overscroll-behavior: contain; }
 .co-gate-row { display: flex; align-items: center; gap: 16px; padding: 15px 16px;
   background: color-mix(in srgb, var(--warn) 5%, transparent); border: 1px solid var(--line);
   border-left: 3px solid var(--acc, var(--warn)); border-radius: 14px; flex-wrap: wrap; }
@@ -274,3 +276,22 @@
 }
 .co-degrade > .material-symbols-rounded { color: var(--warn); font-size: 20px; }
 .co-degrade b { display: block; font-size: 13.5px; color: var(--ink); margin-bottom: 2px; }
+
+/* A page waiting on a person, not on the machine. */
+.co-stage-blocked { color: var(--warn); font-weight: 600; }
+.co-stage-blocked .material-symbols-rounded { color: var(--warn); }
+.co-blocked-cta {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 7px; padding: 5px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn); text-decoration: none;
+}
+.co-blocked-cta:hover { background: color-mix(in srgb, var(--warn) 24%, transparent); }
+.co-blocked-cta .material-symbols-rounded { font-size: 15px; }
+
+/* Both scrolling regions share the portal's thin scrollbar rather than the OS default. */
+.co-col-body::-webkit-scrollbar, .co-gate-list::-webkit-scrollbar { width: 8px; }
+.co-col-body::-webkit-scrollbar-thumb, .co-gate-list::-webkit-scrollbar-thumb {
+  background: var(--line-2); border-radius: 8px; }
+.co-col-body::-webkit-scrollbar-track, .co-gate-list::-webkit-scrollbar-track { background: transparent; }

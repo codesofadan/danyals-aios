@@ -315,13 +315,22 @@ class OffpageRepo:
         The write worker fills the drafted body + flips the status."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
+                # account_id is resolved HERE, in the same statement, because the publish
+                # worker reads it to find the vault label. Leaving it NULL sends the
+                # worker down its legacy client-id fallback, which cannot match a
+                # credential sealed under the account id - so a correctly registered
+                # account publishes nothing. It also re-arms the per-account pacing
+                # ceilings, which key off this column.
                 "insert into public.web2_properties "
                 "(client_id, client_name, platform, anchor, target_url, topic, "
-                "page_type, framework, source_pack, status) "
-                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft') returning *",
+                "page_type, framework, source_pack, status, account_id) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', "
+                "  (select a.id " + self._USABLE_ACCOUNT_FROM +
+                "     and a.platform = %s order by a.created_at limit 1)) returning *",
                 (
                     client_id, client_name, platform, anchor, target_url, topic,
                     page_type, framework, Jsonb(source_pack or {}),
+                    client_id, platform,
                 ),
             )
             return cur.fetchone()
@@ -335,6 +344,36 @@ class OffpageRepo:
 
     # --- campaigns (the operator's unit of work) ---------------------------------- #
 
+    def list_web2_accounts(self, client_id: str | None = None) -> _Rows:
+        """Registered publishing accounts, newest first.
+
+        Deliberately returns the vault COORDINATES (provider + label) and never the
+        secret: the board needs to know where a credential lives so it can be verified,
+        not what it says.
+        """
+        where = "where a.client_id = %s" if client_id else ""
+        params: tuple[Any, ...] = (client_id,) if client_id else ()
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select a.id, a.platform, a.ownership, a.client_id, a.handle, "
+                "       a.property_url, a.registration_email, a.health, "
+                "       a.health_checked_at, a.property_count, a.max_properties, "
+                "       a.vault_provider, a.vault_label, a.created_at, "
+                "       coalesce(c.name, '') as client_name "
+                "from public.web2_accounts a "
+                "left join public.clients c on c.id = a.client_id "
+                f"{where} order by a.created_at desc",
+                params,
+            )
+            return list(cur.fetchall())
+
+    def get_web2_account(self, account_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.web2_accounts where id = %s limit 1", (account_id,)
+            )
+            return cur.fetchone()
+
     def eligible_catalog(self) -> _Rows:
         """The automation-ready catalogue rows the eligibility service classifies."""
         with rls_connection(self._user_id) as cur:
@@ -344,6 +383,50 @@ class OffpageRepo:
                 "from public.web2_platforms order by authority_tier, name"
             )
             return list(cur.fetchall())
+
+    #: ONE definition of "an account this client may publish with", shared by the
+    #: platform board and by placement creation. They must not drift: a board that says
+    #: "connected" while placement creation resolves no account is exactly how a campaign
+    #: gets drafted, paid for and approved, and then fails at publish with
+    #: "degraded: publisher unconfigured". Takes one parameter: the client id.
+    _USABLE_ACCOUNT_FROM = (
+        "from public.web2_accounts a "
+        "join public.web2_platforms p on p.platform_enum = a.platform "
+        "where a.health not in ('suspended', 'deleted') "
+        # AND A CREDENTIAL ACTUALLY EXISTS. An account ROW is not a credential: the
+        # registration CLI and the portal both create the row first and seal the secret
+        # second, so a half-finished registration leaves a row with nothing behind it.
+        # Counting that as connected reports the platform "eligible", lets a campaign be
+        # planned, DRAFTED AND PAID FOR, and fails only at publish - measured on the
+        # canonical database, where 6 platforms showed green and 0 credentials resolved.
+        # Existence is all SQL can check; whether the token still authenticates is what
+        # the account board's Test-connection is for.
+        "  and exists (select 1 from public.vault_keys v "
+        "              where v.provider = a.vault_provider and v.label = a.vault_label) "
+        "  and ( (p.ownership_tier = 'per_client' "
+        "         and a.ownership = 'per_client' "
+        "         and a.client_id = %s) "
+        "     or (p.ownership_tier = 'house' and a.ownership = 'house') )"
+    )
+
+    def connected_platforms_for(self, client_id: str) -> set[str]:
+        """Platforms where THIS client has a usable publishing account.
+
+        Ownership is load-bearing, not decoration. A ``per_client`` platform is only
+        connected when the client has an account of their OWN: satisfying it with a house
+        account is precisely the shared-origin fan-out P1 retired, and it would put one
+        agency identity behind every client's links. A ``house`` platform is the case
+        where a shared account is legitimate, so a house row connects it.
+
+        Accounts in a terminal state (``suspended``/``deleted``) are not connected - a
+        credential that no longer logs in is not a credential, and reporting it as one
+        sends the operator to a platform that will fail at publish time.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select distinct a.platform " + self._USABLE_ACCOUNT_FROM, (client_id,)
+            )
+            return {str(r["platform"]) for r in cur.fetchall()}
 
     def client_web2_scope(self, client_id: str) -> str:
         """The client's declared topical scope (defaults to the safe agnostic set)."""
@@ -572,6 +655,25 @@ class ServiceOffpageStore:
                 "left join public.client_business_profiles b on b.client_id = p.client_id "
                 "where p.id = %s limit 1",
                 (web2_id,),
+            )
+            return cur.fetchone()
+
+    def web2_account_vault(self, account_id: str) -> dict[str, Any] | None:
+        """The vault COORDINATES of one publishing account (never the secret).
+
+        The publish worker must read the label from the ACCOUNT ROW rather than assume it
+        equals the account id. The two are usually the same, but a house account migrated
+        by ``web2_migrate_house`` deliberately keeps its LEGACY client-id label so the
+        already-sealed secret stays reachable. Inferring the label instead of reading it
+        therefore fails in one direction or the other, and this is also the exact source
+        the accounts board and the credential-check endpoint read - so all three agree.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select id, platform, ownership, client_id, health, "
+                "       vault_provider, vault_label "
+                "from public.web2_accounts where id = %s limit 1",
+                (account_id,),
             )
             return cur.fetchone()
 
@@ -860,6 +962,22 @@ class ServiceOffpageStore:
                 (days,),
             )
             return list(cur.fetchall())
+
+    def set_web2_account_health(
+        self, account_id: str, *, health: str, checked_at: Any
+    ) -> dict[str, Any] | None:
+        """Record what a verification actually found.
+
+        Written only from a real check, so `health_checked_at` always answers "when did
+        someone last confirm this" rather than "when was the row touched".
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.web2_accounts set health = %s, health_checked_at = %s "
+                "where id = %s returning *",
+                (health, checked_at, account_id),
+            )
+            return cur.fetchone()
 
     def known_web2_urls(self) -> set[str]:
         """Every published property URL plus every account's property URL.

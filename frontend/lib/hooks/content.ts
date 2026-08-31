@@ -172,6 +172,9 @@ export function useContentResearch() {
 export type BulkGenerateInput = {
   items: ResearchItem[];
   clientId: string;
+  /** The client's OWN site the pages publish to. Omitted -> the backend takes their
+   *  first site, which is what happened before the flow offered a choice. */
+  siteDomain?: string;
   framework?: Framework | "Auto";
   // The page-layout template shared across every fanned-out job ("Auto" derives it
   // per-item from each item's page type; an analyzed design profile still wins).
@@ -344,6 +347,55 @@ export function useRepublishJob() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
       void qc.invalidateQueries({ queryKey: CONTENT_STATS_KEY });
+    },
+  });
+}
+
+// --- The Experience questionnaire ---------------------------------------------
+// The doctrine pipeline halts a page whose first-party facts nobody has supplied
+// and writes the interview questions it needs answered. These two calls are the
+// only way to clear that halt: everything else about the job is downstream of it.
+
+export type ExperienceSlot = {
+  slotKey: string;
+  question: string;
+  answer: string;
+  artifactUrl: string;
+  answered: boolean;
+};
+
+export type ExperienceDossier = {
+  code: string;
+  dossierId: string | null;
+  /** empty | partial | complete | not_started (the job has not run yet) */
+  status: string;
+  clusterKey?: string;
+  slots: ExperienceSlot[];
+  /** Set by the answer call: whether the completed dossier actually re-queued the page. */
+  resumed?: boolean;
+};
+
+export const experienceKey = (code: string) => ["content", "experience", code] as const;
+
+export function useExperience(code: string | null) {
+  return useQuery({
+    queryKey: experienceKey(String(code)),
+    queryFn: () => api.get<ExperienceDossier>(`/content/experience/${code}`),
+    enabled: Boolean(code),
+  });
+}
+
+export type ExperienceAnswer = { slot_key: string; answer?: string; artifact_url?: string };
+
+export function useAnswerExperience(code: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (answers: ExperienceAnswer[]) =>
+      api.put<ExperienceDossier>(`/content/experience/${code}`, { answers }),
+    onSuccess: (fresh) => {
+      qc.setQueryData(experienceKey(code), fresh);
+      // A completed dossier resumes the page, so the job row changes too.
+      void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
     },
   });
 }

@@ -309,3 +309,50 @@ export function useDecideDeadlineRequest() {
 // — there is no endpoint to persist a role→permission change, so AccessControl renders
 // it as a static grid. The former `useTogglePerm` (a local-cache-only, non-persisted
 // toggle) was removed rather than ship a control that silently discards edits.
+
+// --- Offboarding -------------------------------------------------------------
+// QA: "Team members can be created, but there is no option to delete a team member."
+//
+// The capability was already built server-side — POST /admin/users/{id}/suspend and
+// /reactivate, complete with the owner-only interlock for elevated accounts, a
+// refusal to remove the last super-admin, and session revocation — and had ZERO
+// callers. So this is a wiring job, not a new feature.
+//
+// Removal is SUSPENSION, not deletion, and that is the backend's deliberate choice:
+// `tasks.assignee_id`, `activity_log.actor_id` and every audit trail reference the
+// user id, and `public.users` cascades from `auth.users`. Deleting the row would
+// detach a departed member's entire work history — the ledger would show tasks that
+// nobody ever did. Access closes; the record stays.
+
+export type SuspensionResult = {
+  user: TeamMemberRecord;
+  status: string;
+  /** False means Redis did not engage — NOT that the person still has access. */
+  tokens_revoked: boolean;
+};
+
+/** Close a member's access and end their live sessions (POST .../suspend). */
+export function useSuspendMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, reason }: { userId: string; reason?: string }) =>
+      api.post<SuspensionResult>(`/admin/users/${userId}/suspend`, { reason: reason ?? "" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: MEMBERS_KEY });
+      void qc.invalidateQueries({ queryKey: TEAM_MEMBERS_KEY });
+    },
+  });
+}
+
+/** Restore a suspended member's access (POST .../reactivate). Owner-only for admins. */
+export function useReactivateMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) =>
+      api.post<SuspensionResult>(`/admin/users/${userId}/reactivate`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: MEMBERS_KEY });
+      void qc.invalidateQueries({ queryKey: TEAM_MEMBERS_KEY });
+    },
+  });
+}

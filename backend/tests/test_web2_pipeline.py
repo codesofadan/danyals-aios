@@ -692,3 +692,97 @@ def test_the_freeze_does_not_touch_a_normal_property() -> None:
         settings=_settings(),
     )
     assert outcome.state == "published"
+
+
+# --------------------------------------------------------------------------- #
+# Heading frames vs title-shaped topics
+# --------------------------------------------------------------------------- #
+def test_a_keyword_topic_still_fills_the_heading_frames() -> None:
+    """The local-SEO case must not regress: a real keyword belongs IN the heading."""
+    from app.services.content_generator import is_keyword_phrase, render_heading
+
+    assert is_keyword_phrase("emergency drain unblocking")
+    assert render_heading(
+        "The problem with {primary}", primary="emergency drain unblocking", client="Acme"
+    ) == "The problem with emergency drain unblocking"
+
+
+def test_a_title_shaped_topic_never_lands_inside_a_heading_frame() -> None:
+    """The defect this guards: the campaign wizard's OWN placeholder example is a
+    title, and interpolating one produced 'What is what a CCTV drain survey shows?' -
+    broken English in a client-facing H2. A title drops out of the frame instead."""
+    from app.services.content_generator import is_keyword_phrase, render_heading
+
+    title = "what a CCTV drain survey shows"
+    assert not is_keyword_phrase(title)
+
+    heading = render_heading("The problem with {primary}", primary=title, client="Acme")
+    assert heading == "The problem"
+    assert title not in heading
+
+    # And the long declarative form, which is what a real operator typed.
+    long_title = "What an AI audit actually measures before anyone automates anything"
+    assert not is_keyword_phrase(long_title)
+    for frame in ("Why {primary} matters", "How {primary} works", "{primary} features"):
+        rendered = render_heading(frame, primary=long_title, client="Acme")
+        assert long_title not in rendered, f"{frame!r} still swallowed the title"
+        assert "{primary}" not in rendered
+
+
+def test_seed_brief_faq_questions_survive_a_title_topic() -> None:
+    """The FAQ H3s are built from the topic too, and were the worst offender:
+    'What is What an AI audit actually measures...?' has two question words."""
+    from app.services.web2_pipeline import _seed_brief
+
+    brief = _seed_brief(
+        "What an AI audit actually measures before anyone automates anything", None, None
+    )
+    for question in brief.terms.questions:
+        assert not question.lower().startswith("what is what"), question
+        assert len(question.split()) <= 8, f"FAQ heading reads as a sentence: {question}"
+
+
+def test_a_capped_title_never_keeps_a_dangling_separator() -> None:
+    """A title is "{lead} | {brand}". When the cap eats the brand, the pipe must go with
+    it - "How AI consultancies scope a first automation project |" was published as the
+    H1 and as the post title on every platform, brand amputated, separator dangling."""
+    from app.services.content_generator import TITLE_MAX_CHARS, _cap
+
+    # A NEUTRAL brand on purpose: `test_builder_branding` scans the tree for the
+    # builder's own name, and example data is not a reason to put it back.
+    # 72 chars: the cap eats the brand entirely, which is exactly when the separator was
+    # left stranded. A NEUTRAL brand on purpose - `test_builder_branding` scans the tree
+    # for the builder's own name, and example data is not a reason to put it back.
+    capped = _cap(
+        "How consultancies scope their first automation project | Acme Consulting",
+        TITLE_MAX_CHARS,
+    )
+    assert not capped.rstrip().endswith("|"), capped
+    assert capped == "How consultancies scope their first automation project"
+    # A title that FITS keeps its brand - the fix must not strip legitimate separators.
+    assert _cap("AI audit | Acme", TITLE_MAX_CHARS) == "AI audit | Acme"
+
+
+def test_hashnode_never_declares_the_backlink_target_as_the_canonical_source() -> None:
+    """``originalArticleURL`` emits <link rel="canonical"> and "Originally published
+    at ...". Passing the BACKLINK DESTINATION there made every Hashnode property declare
+    itself a duplicate of the client's own page: it drops out of the index as an
+    independent document and the editorial link passes nothing - while the placement row
+    still reports published and verified."""
+    import inspect
+
+    from integrations import web2_publishers
+
+    source = inspect.getsource(web2_publishers.HashnodeClient.publish)
+    # Assert against CODE, not commentary: the comment explaining the removal naturally
+    # names both the field and the variable.
+    code = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "originalArticleURL" not in code, (
+        "the canonical-source field is back in the Hashnode mutation"
+    )
+    # target_url may still reach the post - but only as the anchor href in the body.
+    assert "post.target_url" not in code, (
+        "target_url must not be passed to Hashnode outside the rendered body"
+    )

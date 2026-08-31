@@ -55,6 +55,19 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # queued campaign submits immediately"); the dial + per-client budget caps +
     # the global manual spend halt still bound the spend, and an operator can turn it
     # back to byhand/off at any time.
+    # KEPT AT `api` DELIBERATELY, 2026-08-29. The obvious safety move was to flip this to
+    # `byhand`, because an `api` dial plus 50 never-verified form specs meant a queued
+    # campaign would auto-submit against selectors nobody had ever checked. But the `api`
+    # default is a RECORDED CLIENT DECISION and overriding it quietly would replace one
+    # honesty problem with another - the client would believe they had the no-gate
+    # behaviour they asked for while the code had taken it away.
+    #
+    # The real defect was never the dial: it was that an unverified spec could run at all.
+    # That is now gated where it belongs - a directory reaches the automated route only
+    # after a dated human DOM verification AND one submission that produced a public
+    # listing URL (see directory_specs). With the whitelist empty, `api` mode submits
+    # nothing through the bot, so the client's decision and the safety requirement stop
+    # being in tension. Flip this to `byhand` only as a deliberate operator choice.
     DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="Auto-submits queued directories (CAPTCHA + proxy spend)", default_mode="api"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
     DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),

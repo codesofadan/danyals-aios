@@ -51,6 +51,29 @@ export type ParkedEntry = {
 };
 
 export const PARKED: ParkedEntry[] = [
+  // --- The wizard the content flow replaced -----------------------------------
+  // SUPERSEDED, not merely unmounted. `components/content/flow/` is the same job
+  // done as four screens with the step in the URL; this was five steps mounted
+  // INLINE on the board, so one scrolling page carried making, watching and
+  // approving at once. The owner's verdict on that shape was explicit.
+  //
+  // Kept rather than deleted for one reason: it is the only remaining record of
+  // two behaviours the flow has not re-implemented - the queued-jobs preview
+  // strip on its final step, and its "start another" reset. If neither is
+  // missed, delete it; nothing imports it.
+  {
+    path: "content/ContentWizard.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-08-29 content flow (components/content/flow/)",
+    reason:
+      "Replaced by a four-screen flow at /admin/content/new. The inline five-step " +
+      "wizard is the shape the owner rejected: creating, watching and approving " +
+      "stacked on one scrolling page.",
+    reEnableWhen:
+      "Never as-is. Salvage its queued-jobs preview strip into StepLaunch if that " +
+      "turns out to be missed, then delete the file.",
+  },
+
   // --- Phase-1 screen grammar: built ahead of the screens that mount them ----
   // The approved Screen & Hierarchy Specification (plan of 2026-08-27) builds the
   // shared vocabulary FIRST, then migrates screens onto it phase by phase. These
@@ -59,7 +82,9 @@ export const PARKED: ParkedEntry[] = [
   // preserved from a removal - nothing unmounted them; their mounts are next.
   ...(
     [
-      ["ui/Modal.tsx", "any screen migrating off a hand-rolled modal (11 exist)"],
+      // ui/Modal.tsx graduated: ContentJobDetail's "request edits" dialog mounts it,
+      // which is exactly the migration this entry was waiting for. The reachability
+      // guard fails on a registry that still calls a mounted component parked.
       ["ui/PageHeader.tsx", "the first LIST-archetype screen migration"],
       ["ui/useCountUp.ts", "the first KPI strip migrated off its local copy (11 exist)"],
     ] as const
@@ -93,21 +118,30 @@ export const PARKED: ParkedEntry[] = [
       "not as a tab, and needs server pagination first (the hook fetches unbounded).",
   },
 
-  // --- Citations: ACTIVE work, locked pending a data source -------------------
-  // `app/admin/citations/page.tsx` renders a lock card that says so in plain words:
-  // "Re-enable by restoring the CitationsTab render below (see git history) once the
-  // engine is ready." Edited 2026-08-20. Do not touch these while the lock stands.
-  ...(
-    ["offpage/CitationsTab.tsx", "offpage/CitationCampaignModal.tsx", "offpage/AuditPlanPanel.tsx"] as const
-  ).map((path): ParkedEntry => ({
-    path,
-    status: "active-parked",
-    unmountedBy: "fd1bf2a -> 5ba93b7 -> the lock card in app/admin/citations/page.tsx",
-    reason:
-      "Directory auto-submission is blocked by captcha/dead forms and does not produce " +
-      "dependable live listings; the module is locked rather than shipping misleading data.",
-    reEnableWhen: "A verified citation data aggregator is wired in.",
-  })),
+  // --- Citations: UNPARKED 2026-08-29 -----------------------------------------
+  // CitationsTab / CitationCampaignModal / AuditPlanPanel were parked here with the
+  // reason: "Directory auto-submission is blocked by captcha/dead forms and does not
+  // produce dependable live listings; the module is locked rather than shipping
+  // misleading data." That was the right call, and it is worth recording WHY it no
+  // longer applies rather than deleting the entry silently:
+  //
+  //   * The specific misleading data was one mis-wired field. `CitationGap.live_urls`
+  //     was populated from `proof_url` - a screenshot key, and for a while the absolute
+  //     server path the Playwright bot returned - and rendered under a KPI tile reading
+  //     "Live listing URLs". Migration 0106 gave a listing a real `live_url`, and
+  //     `service.py` now reads that and only for `submit_status = 'live'`.
+  //   * "Does not produce dependable live listings" is still TRUE of the automated
+  //     route, and the module no longer claims otherwise: `submitted` is labelled
+  //     "Sent - unconfirmed", only a fetched-and-matched listing reaches `live`, and
+  //     every directory we do not build is listed with the reason.
+  //   * The 16 directories whose terms forbid automated submission are route F and
+  //     cannot be queued at all (0106), so the captcha/dead-form problem is now data
+  //     the module reports rather than a trap it walks into.
+  //
+  // The page is `app/admin/citations/page.tsx` (created 2026-08-29 - the earlier
+  // "lock card" this comment used to describe had itself been deleted, so the note was
+  // pointing at a file that did not exist). Route B - real automated submission at
+  // volume - is still gated on a verified aggregator; that is Phase 4, not this page.
 
   // --- The 158c204 batch: six admin tabs removed, components kept -------------
   // "fix(admin): remove Milestones/Upsells/Backups/Service Tiers/Off-page/GMB tabs"
@@ -166,6 +200,57 @@ export const PARKED: ParkedEntry[] = [
     unmountedBy: "no recorded commit or rationale",
     reason,
     reEnableWhen: "Needs an owner decision - do not delete on inference alone.",
+  })),
+
+  // --- The 2026-08-30 QA pass: surfaces removed, components kept --------------
+  // A QA session over the portal produced 26 findings. Several were "this card /
+  // tab / module is not required" - a decision about what the portal SURFACES, not
+  // a judgement that the code is wrong. Every component below is working and was
+  // deliberately unmounted; the endpoints behind them are untouched.
+  ...(
+    [
+      ["charts/AuditVolumeChart.tsx", "Free Audit Volume", "The Free Audit Volume card was removed from the admin dashboard (QA 26). Free Audits themselves were verified working and keep their own module at /admin/leads."],
+      ["overview/SpendSnapshot.tsx", "Platform Spend", "The Platform Spend / Cost Controls card was removed from the admin dashboard (QA 26). Spend still has its own module at /admin/cost, and the halt control there was verified working."],
+      ["cost/CostLog.tsx", "Cost Log", "QA 11: the log showed $0.00 for work that did cost money, so it was removed rather than shown wrong. NOTE: the display was never the defect - the per-job cost attribution behind it is. Re-mount once a job's spend is recorded against it."],
+      ["clients/MrrTreemap.tsx", "Revenue Treemap", "QA 16: not required on Client Info."],
+      ["settings/SecurityTab.tsx", "Security", "QA 9: the Security section is not required in the admin portal. The agency-global /settings/security endpoints are untouched."],
+      ["settings/DangerTab.tsx", "Danger zone", "QA 9: the Danger Zone is not required in the admin portal."],
+      ["team/AccessControl.tsx", "Roles & Access", "QA 14: the Roles & Access tab is not required. RBAC itself is unchanged and still enforced server-side."],
+      ["team/TeamPerformance.tsx", "Performance", "QA 14: the Performance tab's graphs are out of sync with the ledgers they summarise, so it was removed rather than left showing numbers an operator cannot trust."],
+      ["team/TeamMetricBox.tsx", "Performance", "Only ever rendered by TeamPerformance; orphaned with it."],
+      ["portal/ReviewCheckpoint.tsx", "Review", "QA 7: the Review tab was removed from the team member portal. POST /tasks/{code}/review is untouched and leads still review from the admin task surfaces."],
+    ] as const
+  ).map(([path, surface, reason]): ParkedEntry => ({
+    path,
+    status: "operator-removed",
+    unmountedBy: "the 2026-08-30 QA remediation (wave 1)",
+    reason,
+    reEnableWhen: `An owner asks for the ${surface} surface back, or the reason above stops being true.`,
+  })),
+
+  // --- Milestones: the whole admin module (QA 15) -----------------------------
+  // "Milestones module is not required. Remove the Milestones option/module from
+  // the admin portal." Removed from ADMIN only: `/client/milestones` is a separate
+  // surface built on components/client/ClientMilestones.tsx and still shipping, and
+  // the /milestones endpoints still feed it. The module was read-only by design
+  // (only the onboarding stage auto-advances), so nothing that wrote is lost.
+  ...(
+    [
+      "milestones/MilestonesWorkspace.tsx",
+      "milestones/MilestoneStats.tsx",
+      "milestones/MilestoneDetail.tsx",
+      "milestones/ProjectGantt.tsx",
+      "milestones/ClientTimeline.tsx",
+      "milestones/StagePipeline.tsx",
+      "milestones/AutoAdvanceFeed.tsx",
+    ] as const
+  ).map((path): ParkedEntry => ({
+    path,
+    status: "operator-removed",
+    unmountedBy: "the 2026-08-30 QA remediation (wave 1)",
+    reason: "QA 15: the Milestones module is not required in the admin portal.",
+    reEnableWhen:
+      "An owner wants admin-side delivery timelines again. The client-facing /client/milestones is unaffected and still live.",
   })),
 ];
 

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useState } from "react";
 import { useContentJobs, useContentReviewQueue, useReviewContentJob } from "@/lib/hooks/content";
 import { useMe } from "@/lib/hooks/portal";
@@ -8,7 +10,6 @@ import ContentKpis from "./ContentKpis";
 import PipelineBoard from "./PipelineBoard";
 import ReviewGate, { type ReviewAction } from "./ReviewGate";
 import ReviewPreview from "./ReviewPreview";
-import ContentWizard from "./ContentWizard";
 
 export default function ContentWorkspace() {
   const jobsQ = useContentJobs(); // live: GET /content/jobs, polls while the worker moves a job
@@ -71,9 +72,36 @@ export default function ContentWorkspace() {
 
       <ContentKpis />
 
-      {/* THE primary surface — one guided wizard replacing the old research /
-          design / new-job entry cards. */}
-      <ContentWizard jobs={jobs} halted={halted} onReview={handleReview} />
+      {/* THE BOARD IS THE HOME. Creating content used to happen in a five-step
+          wizard mounted INLINE here, so one scrolling page carried making,
+          watching and approving at once - the operator's own read was that it
+          had no logic. Making now has its own screens at /admin/content/new;
+          this page is what is in flight and what needs a human. */}
+      {/* The halt used to reach the operator only through the wizard that lived
+          here. It still has to: nothing will be written while it is engaged, and
+          the board would otherwise just look quiet. */}
+      {halted && (
+        <div role="alert" className="co-degrade" style={{ marginTop: "var(--s-6)" }}>
+          <span className="material-symbols-rounded">pause_circle</span>
+          <div>
+            <b>API spend is halted</b>
+            <div className="cs">
+              No page will be researched, written or published while this is on. Lift it on{" "}
+              <Link href="/admin/cost">Cost Controls</Link>.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "var(--s-7) 0 var(--s-5)" }}>
+        <div>
+          <div className="ct">Content pipeline</div>
+          <div className="cs">Every page in flight, and where it has got to.</div>
+        </div>
+        <Link className="primary-btn" href="/admin/content/new" style={{ marginLeft: "auto" }}>
+          <span className="material-symbols-rounded">add</span>New content
+        </Link>
+      </div>
 
       {/* Tracking surfaces for jobs already in flight. Cards are clickable → modal preview. */}
       <PipelineBoard jobs={jobs} onSelect={setSelectedId} />
@@ -98,6 +126,8 @@ export default function ContentWorkspace() {
           </div>
         </div>
       )}
+
+      <div style={{ marginTop: "var(--s-6, 20px)" }} />
 
       <ReviewGate
         jobs={needsReview}

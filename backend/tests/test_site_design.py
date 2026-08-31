@@ -678,3 +678,103 @@ def test_publish_body_gets_default_template_from_page_type() -> None:
     assert "<style>" not in out
     assert "<!-- wp:group" in out
     assert '"className":"aios-sec' in out
+
+
+# --------------------------------------------------------------------------- #
+# The replica -> content bridge (QA 20)
+# --------------------------------------------------------------------------- #
+# The replicator measures a richer design system than the content analyzer does and
+# then throws it away. `profile_from_design_system` is what carries it across, so a
+# replicated design can drive generated pages.
+
+
+def _ds(**over: object) -> object:
+    """A DesignSystem-shaped stand-in, keyed the way design_system.extract keys it."""
+    from app.services.design_system import DesignSystem
+
+    base = {
+        # DOM ROLES — deliberately NOT the profile's palette field names.
+        "palette": {
+            "background": "#fffdf8", "surface": "#f5efe4", "border": "#e2d9c8",
+            "heading": "#1b1b1b", "text": "#3a3a3a", "muted": "#7b7b7b",
+            "accent": "#b8860b",
+        },
+        "fonts": {"heading": "Playfair Display, serif", "body": "Inter, sans-serif"},
+        "type_scale": (17, 20, 28, 44),
+        "radius_scale": (999, 12),
+        "spacing_scale": (32, 64),
+    }
+    base.update(over)
+    return DesignSystem(**base)  # type: ignore[arg-type]
+
+
+def test_the_replica_palette_is_translated_not_passed_through() -> None:
+    """THE BUG THIS EXISTS TO PREVENT.
+
+    DesignSystem keys its palette by DOM role (background/surface/border/heading/
+    text/muted/accent); SiteDesignProfile.Palette wants primary/secondary/background/
+    text/accent. Handing the raw dict to `build_profile` parses cleanly and silently
+    yields the DATACLASS DEFAULTS for primary and secondary - so every replicated site
+    would come back wearing the same "measured" brand, and nothing would report it.
+    """
+    from app.services.site_design import Palette, profile_from_design_system
+
+    profile = profile_from_design_system(_ds(), container_px=1140)
+    defaults = Palette()
+
+    assert profile.palette.background == "#fffdf8"
+    assert profile.palette.text == "#3a3a3a"
+    assert profile.palette.accent == "#b8860b"
+    # The two that a pass-through would silently default:
+    assert profile.palette.primary == "#1b1b1b" != defaults.primary
+    assert profile.palette.secondary == "#7b7b7b" != defaults.secondary
+
+
+def test_the_replica_fonts_are_translated_not_passed_through() -> None:
+    """Same trap in the type system: `heading`/`body` vs `heading_font`/`body_font`."""
+    from app.services.site_design import Typography, profile_from_design_system
+
+    profile = profile_from_design_system(_ds(), container_px=1140)
+    defaults = Typography()
+    assert profile.typography.heading_font == "Playfair Display, serif"
+    assert profile.typography.body_font == "Inter, sans-serif"
+    assert profile.typography.heading_font != defaults.heading_font
+    # The smallest measured step is the size the body actually reads at.
+    assert profile.typography.base_size == "17px"
+
+
+def test_the_container_width_comes_from_the_inferred_page_not_the_design_system() -> None:
+    """`replicate()` calls `extract()` WITHOUT a container, so `ds.container_px` is 0
+    there and the measured width lives on InferredPage. Reading `ds` would hand every
+    replicated site the default 1200px."""
+    from app.services.site_design import profile_from_design_system
+
+    ds = _ds()
+    assert ds.container_px == 0, "the fixture reproduces the real call"  # type: ignore[attr-defined]
+    assert profile_from_design_system(ds, container_px=1140).layout.container_width == "1140px"
+    # No measurement at all -> the default, rather than a fabricated "0px".
+    assert profile_from_design_system(ds, container_px=0).layout.container_width == "1200px"
+
+
+def test_a_thin_design_system_degrades_instead_of_crashing() -> None:
+    """An ungrounded capture must still yield a usable profile - the same tolerance
+    `build_profile` already gives a thin LLM reply."""
+    from app.services.site_design import Palette, profile_from_design_system
+
+    profile = profile_from_design_system(_ds(palette={}, fonts={}, type_scale=(),
+                                             radius_scale=(), spacing_scale=()))
+    assert profile.palette.primary == Palette().primary  # defaults, not a crash
+    assert profile.layout.container_width == "1200px"
+
+
+def test_measured_scales_are_described_in_the_profiles_own_vocabulary() -> None:
+    """The content emitter reads component words, not pixel scales."""
+    from app.services.site_design import profile_from_design_system
+
+    pill = profile_from_design_system(_ds(radius_scale=(999,), spacing_scale=(32,)))
+    assert pill.components.button_style == "solid pill"
+    assert pill.components.spacing_scale == "airy"
+
+    square = profile_from_design_system(_ds(radius_scale=(0,), spacing_scale=(8,)))
+    assert square.components.button_style == "solid square"
+    assert square.components.spacing_scale == "tight"

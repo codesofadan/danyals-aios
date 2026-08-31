@@ -373,10 +373,8 @@ def _wrap_section(
     if palette is not None:
         sec_settings["background_background"] = "classic"
         sec_settings["background_color"] = palette["background"]
+    _apply_width(sec_settings, tokens)
     if tokens is not None:
-        container_px = tokens.get("container_px")
-        if container_px is not None:
-            sec_settings["content_width"] = {"unit": "px", "size": container_px}
         spacing_px = tokens.get("spacing_px")
         if is_hero and tokens.get("hero_style"):
             # The hero gets a bigger, deliberate frame; centre it when the profile says so.
@@ -432,6 +430,61 @@ _CLASSIC_PALETTE: dict[str, str] = {
     "text": "#1e293b", "accent": "#2563eb",
 }
 _CLASSIC_TOKENS: dict[str, Any] = {"container_px": 1160, "spacing_px": 64, "button_radius": 8}
+
+# The width a section falls back to when nothing else supplies one. Matches
+# site_design.Layout.container_width's own default, so a page with no measured profile
+# lands on the same measure the profile builder would have given it.
+_DEFAULT_CONTAINER_PX = 1200
+
+
+def _apply_width(settings: dict[str, Any], tokens: dict[str, Any] | None) -> None:
+    """Give the section a content-width cap. ALWAYS - that is the whole point.
+
+    This used to be double-gated, on ``tokens is not None`` and then on
+    ``container_px is not None``, which left two real holes:
+
+    * the simple ``build_elementor_data`` path passes ``tokens=None`` outright (a
+      ``gbp_post`` resolves to no blueprint and goes down it), and
+    * ``_design_tokens`` returns ``tokens or None``, so a profile carrying a font but
+      no ``layout.container_width`` yields a TRUTHY dict with no ``container_px`` -
+      defeating the ``or dict(_CLASSIC_TOKENS)`` fallback its callers rely on.
+
+    Either way the section shipped with no cap. That was survivable while sections
+    were boxed by the theme; it is NOT survivable once :func:`stretch_sections` breaks
+    them out of the theme's content box, because a stretched section with no cap runs
+    its text edge-to-edge across the viewport. So the cap is unconditional and is
+    established here, before anything can stretch anything.
+    """
+    container_px = (tokens or {}).get("container_px") or _DEFAULT_CONTAINER_PX
+    settings["content_width"] = {"unit": "px", "size": container_px}
+
+
+def stretch_sections(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Make every TOP-LEVEL section a full-bleed band with boxed content. In place.
+
+    A "full width" page is not a page whose text spans the monitor - it is one whose
+    BANDS span the monitor while the text stays on a readable measure. Elementor spells
+    that as ``stretch_section: "section-stretched"`` (break out of the theme's content
+    box) plus ``layout: "boxed"`` (keep the content capped).
+
+    NEVER pair stretch with ``layout: "full_width"``. The replica emitter learned that
+    on a real client's site and records it: it ran the text edge-to-edge and off the
+    left viewport.
+
+    Top-level only. A nested section is inside its parent's box by design, and
+    stretching it would tear the layout apart. ``content_width`` is guaranteed by
+    :func:`_apply_width` on every section this could touch, so this can never produce
+    the uncapped-and-stretched combination described above.
+    """
+    for section in sections:
+        if not isinstance(section, dict) or section.get("elType") != "section":
+            continue
+        settings = section.setdefault("settings", {})
+        if not isinstance(settings, dict):
+            continue
+        settings["stretch_section"] = "section-stretched"
+        settings["layout"] = "boxed"
+    return sections
 _GRID_COLS_MAX = 3  # icon-box / card grids cap at 3 columns (stack within on overflow)
 
 # Heading keywords -> the section KIND a generated <h2> block most likely fills, so a
@@ -686,10 +739,8 @@ def _section(
     if background:
         settings["background_background"] = "classic"
         settings["background_color"] = background
+    _apply_width(settings, tokens)
     if tokens is not None:
-        container_px = tokens.get("container_px")
-        if container_px is not None:
-            settings["content_width"] = {"unit": "px", "size": container_px}
         spacing = tokens.get("spacing_px")
         pad = max(72, spacing or 0) if hero else (spacing if spacing is not None else 48)
         settings["padding"] = _pad(pad)
@@ -1232,10 +1283,14 @@ def _model_section_to_elementor(
                     kind=kind, variant=variant, palette=palette, tokens=tokens)
 
 
-def elementor_json_from_model(model: dict[str, Any]) -> str:
+def elementor_json_from_model(model: dict[str, Any], *, full_width: bool = False) -> str:
     """Compact JSON of :func:`model_to_elementor` - the ``_elementor_data`` for a saved,
-    edited page model."""
-    return json.dumps(model_to_elementor(model), separators=(",", ":"), ensure_ascii=False)
+    edited page model. ``full_width`` stretches the top-level bands (see
+    :func:`stretch_sections`)."""
+    tree = model_to_elementor(model)
+    if full_width:
+        stretch_sections(tree)
+    return json.dumps(tree, separators=(",", ":"), ensure_ascii=False)
 
 
 def elementor_json(
@@ -1245,11 +1300,18 @@ def elementor_json(
     blueprint: list[dict[str, Any]] | None = None,
     cta: dict[str, Any] | None = None,
     testimonials: list[str] | None = None,
+    full_width: bool = False,
 ) -> str:
     """The compact JSON string of :func:`build_elementor_data` - exactly what WordPress
-    stores in the ``_elementor_data`` post-meta."""
+    stores in the ``_elementor_data`` post-meta.
+
+    ``full_width`` defaults False so every existing caller keeps its exact tree; the
+    publish path passes the SAME predicate it uses for the plugin's ``full_width``
+    flag, so the two can no longer disagree about what kind of page this is."""
     tree = build_elementor_data(
         draft_md, design_profile=design_profile, blueprint=blueprint,
         cta=cta, testimonials=testimonials,
     )
+    if full_width:
+        stretch_sections(tree)
     return json.dumps(tree, separators=(",", ":"), ensure_ascii=False)

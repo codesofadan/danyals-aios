@@ -89,6 +89,10 @@ def run_repair_stage(
         "  - Do not add a fact, number, name, date or claim that is not already in the "
         "draft. A repair that invents evidence is worse than the defect it fixes.",
         "  - Do not drop a heading, and do not renumber or reorder sections.",
+        "  - PRESERVE every [[a1]]-style citation marker EXACTLY where it is. Each one "
+        "records which supplied fact its sentence rests on, and a sentence that "
+        "arrives at the claims check without its marker is deleted as unsourced. If "
+        "you rewrite a sentence, carry its markers across.",
         "  - Leave prose that was not flagged alone. This is a repair, not a rewrite.",
         "",
         "Return the COMPLETE corrected page in markdown. No preamble, no commentary.",

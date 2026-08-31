@@ -121,9 +121,18 @@ const nextConfig = {
       { source: "/admin/site-builder", destination: "/admin/wordpress", permanent: false },
       { source: "/admin/integrations", destination: "/admin/vault", permanent: false },
       { source: "/admin/off-page", destination: "/admin/web2", permanent: false },
-      // Citations left the navigation with the revert; the module itself stays
-      // locked (no verified aggregator), so its URL points at its nearest home.
-      { source: "/admin/citations", destination: "/admin/web2", permanent: false },
+      // REMOVED 2026-08-29: `/admin/citations` -> `/admin/web2`.
+      //
+      // This was the last thing making the module unreachable, and the most easily
+      // missed - the page, the nav entry and the components can all be correct while a
+      // redirect three files away silently sends every visitor somewhere else. Its
+      // comment read "the module itself stays locked (no verified aggregator), so its
+      // URL points at its nearest home"; both halves are now stale. Citations has its
+      // own screen again at `app/admin/citations/page.tsx`, and what it reports is
+      // honest: only a fetched-and-matched listing counts as live, and the directories
+      // whose terms forbid automated submission are named rather than quietly skipped.
+      // Route B (automated submission at volume) is still gated on a verified
+      // aggregator - but that gates a SUBMISSION PATH, not the whole screen.
       // The Search module is gone from the admin portal. Its five tool
       // workspaces remain reachable, RBAC-gated, at /team/tools/[slug].
       { source: "/admin/search", destination: "/team", permanent: false },

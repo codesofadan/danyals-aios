@@ -535,8 +535,16 @@ async def test_sync_events_feed_shape(
 
 
 async def test_scheduled_jobs_endpoint_lists_live_beat_schedule(
-    client: httpx.AsyncClient, repo: FakeReportsRepo, wire: Callable[..., None]
+    client: httpx.AsyncClient, repo: FakeReportsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Cron is parked, so the live beat table is empty; point the app at the
+    # preserved one for this test. The endpoint's real job is the shape and the
+    # camelCase contract, and neither is testable against an empty schedule.
+    from workers.celery_app import _BEAT_SCHEDULE_DISABLED as PARKED
+    from workers.celery_app import celery_app
+
+    monkeypatch.setattr(celery_app.conf, "beat_schedule", PARKED)
     repo.job_runs = [
         {"job_name": "generate-monthly-reports", "task": "generate_monthly_reports",
          "status": "ok", "detail": "produced 3 reports", "created_at": datetime(2026, 7, 1, tzinfo=UTC)},

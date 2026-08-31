@@ -346,3 +346,62 @@ export function profileFromTemplate(key: PageTemplate, theme: TemplateTheme): Si
     wireframeHtml: wf,
   };
 }
+
+// --- Is this page waiting on a PERSON? ----------------------------------------
+// The doctrine pipeline holds a page at `drafting` when it needs first-party
+// facts, and holds it again when a run produced nothing publishable. Both look
+// identical to a page the machine is actively writing - same status, same
+// column, same "in progress" read - so an operator can watch a page that is
+// waiting on THEM and conclude the system is slow.
+//
+// The stage string is the only channel that carries this: the job contract's
+// fifteen keys have no "blocked on" field, and adding one is a backend change
+// that has to reach the DB, the serializer and the frontend type together. So
+// this parses the stage, deliberately and in one place, rather than at each
+// call site. If the contract ever gains a real field, this is the only thing
+// that has to change.
+export type OperatorBlock = { kind: "experience" | "held"; label: string; hint: string };
+
+export function operatorBlock(job: Pick<ContentJob, "status" | "stage">): OperatorBlock | null {
+  if (job.status !== "drafting") return null;
+  const stage = job.stage ?? "";
+  if (/waiting on your experience answers/i.test(stage)) {
+    return {
+      kind: "experience",
+      label: "Waiting on you",
+      hint: "This page will not be written until its first-party facts are supplied.",
+    };
+  }
+  if (/^held\b/i.test(stage)) {
+    return {
+      kind: "held",
+      label: "Held",
+      hint: "The run finished without producing a page. Nothing is queued for review.",
+    };
+  }
+  return null;
+}
+
+// --- Has this page actually been scored? --------------------------------------
+// `qa_score` is a jsonb column and an unscored page carries `{}` - which is
+// TRUTHY in JavaScript. Every surface that read `qa ? ... : "—"` therefore took
+// the scored branch on an unscored page and rendered `Math.round(undefined)`
+// beside `qa.passed ? "passed" : "failed"`:
+//
+//     QA: NaN · failed (advisory)
+//
+// A fabricated verdict on a decision screen, claiming a page FAILED when nothing
+// had scored it - and a lead could reject good work on the strength of it. The
+// gate legitimately produces no verdict quite often: it degrades to nothing
+// without a research brief, which is exactly the case after a reviewer's edit.
+//
+// One predicate, used by every surface, so a scorecard is "present" only when it
+// carries a real number.
+export type QaVerdict = { total: number; passed: boolean };
+
+export function qaVerdict(qa: { weighted_total?: unknown; passed?: unknown } | null | undefined):
+  QaVerdict | null {
+  const total = qa?.weighted_total;
+  if (typeof total !== "number" || !Number.isFinite(total)) return null;
+  return { total, passed: qa?.passed === true };
+}

@@ -180,6 +180,27 @@ class ClientsRepo:
             cur.execute("delete from public.sites where id = %s returning id", (site_id,))
             return bool(cur.fetchall())
 
+    # --- portal logins --------------------------------------------------------
+    def list_portal_users(self, client_id: str) -> _Rows:
+        """The PORTAL logins provisioned for one client (role='client'), oldest first.
+
+        The Client Directory's "Show login" needs a user id: a client row carries a
+        username string but nothing that identifies the account behind it, so before
+        this there was no way to name the login an operator wanted revealed.
+
+        ``role = 'client'`` is not decoration. ``users.client_id`` is only ever set on
+        a client row (the 0010 CHECK enforces it), but pinning the role here means a
+        future column reuse cannot turn this into a way to list staff.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, email, username, name, role, status, avatar_color, title, created_at "
+                "from public.users where client_id = %s and role = 'client' "
+                "order by created_at",
+                (client_id,),
+            )
+            return cur.fetchall()
+
 
 def get_clients_repo(user: CurrentUserDep) -> ClientsRepo:
     """Dependency: a repo bound to the caller's verified user id (RLS-scoped).

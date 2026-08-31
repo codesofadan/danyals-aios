@@ -1,0 +1,46 @@
+:root {
+  --ink: #101720; --muted: #4a5a6c; --line: #d3dbe3;
+  --ok: #1d6a55; --warn: #8a5d00; --bad: #a02f2a; --accent: #1f4e8c;
+  --paper: #fff; --surface: #f6f8fa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e5ebf1; --muted: #9babbc; --line: #26333f;
+    --ok: #55b99b; --warn: #dca33b; --bad: #e5786f; --accent: #84b4ee;
+    --paper: #0c1116; --surface: #141c25;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 14px; background: var(--paper); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 15px; margin: 0 0 10px; }
+.muted { color: var(--muted); font-size: 13px; }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+button {
+  font: inherit; padding: 7px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+input, textarea, select {
+  font: inherit; width: 100%; padding: 7px 9px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--paper); color: var(--ink);
+}
+.field {
+  display: flex; gap: 8px; justify-content: space-between; align-items: baseline;
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  margin-top: 5px; cursor: pointer; background: var(--surface);
+}
+.field b { font-weight: 600; word-break: break-word; text-align: right; }
+.pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+}
+.pill.ok { background: var(--ok); color: #fff; }
+.pill.warn { background: var(--warn); color: #fff; }
+.pill.bad { background: var(--bad); color: #fff; }
+.note { border-left: 3px solid var(--warn); padding: 8px 10px; margin-top: 10px; background: var(--surface); }
+.note.bad { border-color: var(--bad); }
+hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }

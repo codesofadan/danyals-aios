@@ -11,7 +11,6 @@ import CostStats from "./CostStats";
 import SpendStopCard from "./SpendStopCard";
 import CostDial from "./CostDial";
 import BudgetTable from "./BudgetTable";
-import CostLog from "./CostLog";
 
 export default function CostWorkspace() {
   const budgetsQ = useBudgets();
@@ -115,10 +114,6 @@ export default function CostWorkspace() {
 
       <div className="row-single">
         <BudgetTable budgets={budgets} total={totals} onEditCap={handleEditCap} />
-      </div>
-
-      <div className="row-single">
-        <CostLog />
       </div>
 
       <ConfirmDialog

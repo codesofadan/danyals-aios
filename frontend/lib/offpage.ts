@@ -56,19 +56,37 @@ export type CitationAction = "Submit" | "Update";
 // guess at a live result).
 export type CitationSubmitStatus =
   | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked"
-  // ready_for_human: the bot created the account + prepared the listing - a human
-  // finishes with one click in the browser at handoffUrl.
-  | "ready_for_human";
+  // ready_for_human: an operator's queue item. TWO paths reach it, and since 2026-08-30
+  // the second is by far the common one:
+  //   1. the bot created the account and prepared the listing, and a human finishes at
+  //      handoffUrl (the original 0064 handoff);
+  //   2. the machine could not act at all - no engine, or no EARNED form spec - so the
+  //      row becomes human work instead of parking in `blocked`. With zero active specs
+  //      in the catalogue this is nearly every bot-tier directory, and it is what gives
+  //      the operator queue and the browser extension anything to read.
+  // `blocked` now means the opposite: nobody should act (terms prohibit it, an aggregator
+  // already feeds it, there is no NAP, or a lead must approve an unpriced spend).
+  | "ready_for_human"
+  // 0106. `submitted` STOPS meaning done — every write path returns it honestly and none
+  // can promise more, so only `live` means a listing exists.
+  | "live"       // live_url was fetched and the business was found on the page
+  | "drifted"    // the listing exists but its NAP drifted — correct it, don't rebuild
+  | "delisted";  // it was live and now it is gone
 
 export const SUBMIT_STATUS_META: Record<CitationSubmitStatus, { label: string; cls: string }> = {
   not_started: { label: "Not started", cls: "mut" },
   queued: { label: "Queued", cls: "info" },
   submitting: { label: "Submitting", cls: "info" },
-  submitted: { label: "Submitted", cls: "ok" },
+  // "Sent", not "Submitted-and-done": nothing has confirmed a listing came back yet, so
+  // this is deliberately NOT styled as a success.
+  submitted: { label: "Sent — unconfirmed", cls: "info" },
   verified: { label: "Verified", cls: "ok" },
   failed: { label: "Failed", cls: "op-crit" },
   blocked: { label: "Blocked", cls: "warn" },
   ready_for_human: { label: "Ready to finish", cls: "info" },
+  live: { label: "Live", cls: "ok" },
+  drifted: { label: "Drifted — needs correcting", cls: "warn" },
+  delisted: { label: "Delisted", cls: "op-crit" },
 };
 
 export type Citation = {
@@ -171,11 +189,6 @@ export const PLATFORM_META: Record<Web2Platform, { icon: string; c: string }> = 
   WriteFreely: { icon: "edit_note", c: SERIES.c2 },
 };
 
-// Every platform NOT draft-only can be planned/approved through the pipeline.
-export const LIVE_WEB2_PLATFORMS: Web2Platform[] = (
-  Object.keys(PLATFORM_META) as Web2Platform[]
-).filter((p) => p !== "Medium");
-
 // House account created, but the platform can't actually publish yet - a payment,
 // business-verification, or app-review step outside our control is unresolved. The
 // dashboard flags these with a small red asterisk rather than hiding them, so a lead
@@ -210,12 +223,37 @@ export type Web2Property = {
  * client that no credential changes. Collapsing them into one "unavailable" would send
  * someone hunting for a token that could not help.
  */
+/** What `POST /offpage/web2/anchor-check` accepts — an anchor can be checked before a
+ *  platform or any proof has been decided. */
+export type Web2AnchorCheckInput = {
+  clientId: string;
+  anchor: string;
+  targetUrl?: string;
+  topic?: string;
+};
+
+/** The anchor verdict, shaped so a form field can render it directly. */
+export type Web2AnchorCheck = {
+  allowed: boolean;
+  verdict: string;
+  reason: string;
+  suggestion: string;
+};
+
 export type Web2PlatformStatusRow = {
   name: string;
   platform: string | null;
   status: "eligible" | "not_connected" | "not_eligible";
   reason: string;
   authorityTier: string;
+  //: How to connect it, carried on the row that says it is not connected. A board that
+  //: reports a gap without saying how to close it is a dead end wearing a call to action.
+  setupUrl?: string;
+  setupSteps?: string;
+  setupCost?: string;
+  setupBlocker?: string;
+  accountNeeded?: string;
+  credentialFields?: string[];
 };
 
 export type Web2CampaignStatus =
@@ -226,6 +264,66 @@ export type Web2PacingMode = "immediate" | "drip";
 
 /** One property a campaign approval refused to wave through, named so the operator can
  *  redraft that one rather than being told "something failed". */
+/** A publishing account on the connection board.
+ *
+ *  `complete` means the sealed credential has every required field (a publisher can be
+ *  built). `health` means a platform was actually ASKED and answered. They are different
+ *  claims and the board shows both, because a structurally complete credential can still
+ *  be revoked.
+ */
+export type Web2Account = {
+  id: string;
+  platform: string;
+  ownership: string;
+  client: string;
+  handle: string;
+  propertyUrl: string;
+  email: string;
+  health: string;
+  checked: string;
+  properties: number;
+  maxProperties: number;
+  required: string[];
+  complete: boolean;
+};
+
+/** The catalogue rollup, including each platform's credential shape.
+ *
+ *  `credentialFields` is served rather than duplicated here on purpose: a hand-copied
+ *  list drifts the first time a platform changes its auth, and the operator then fills
+ *  fields that seal into a credential the publisher rejects. */
+export type Web2Catalog = {
+  total: number;
+  automationReady: number;
+  byAuthType: Record<string, number>;
+  credentialFields: Record<string, string[]>;
+};
+
+/** What the operator supplies to register an account.
+ *
+ *  `credential` is field -> value for THIS platform's shape; `Web2Account.required`
+ *  says which fields that is, so a new platform needs no frontend change. It is sealed
+ *  server-side and never comes back. */
+export type Web2AccountCreate = {
+  platform: string;
+  ownership: "per_client" | "house";
+  clientId?: string;
+  handle: string;
+  email?: string;
+  propertyUrl?: string;
+  maxProperties?: number;
+  credential: Record<string, string>;
+};
+
+/** The result of asking a platform whether a credential still works. */
+export type Web2AccountCheck = {
+  accountId: string;
+  state: "ok" | "bad" | "unknown";
+  detail: string;
+  identity: string;
+  health: string;
+};
+
 /** One Web 2.0 placement in full — the deliverable record.
  *
  *  `linkFound` / `linkRel` are the honest part: "published" only means the platform
@@ -322,6 +420,10 @@ export type Web2CampaignInput = {
   dripWindowDays?: number;
   costCeilingUsd?: number;
   proofPoints?: string[];
+  //: The differentiation grounding. The generator gaps on this SEPARATELY from
+  //: `proofPoints`, so a campaign that supplies only proof still holds at review.
+  uniqueData?: string[];
+  testimonials?: string[];
 };
 
 // The publish PIPELINE's state machine (0028) — distinct from `verified`, which is
@@ -473,8 +575,40 @@ export type CitationGap = {
   missingCount: number;
   missing: Directory[];
   liveUrls: CitationLiveUrl[];
+  skipped: CitationSkip[];
   bySubmitStatus: Record<string, number>;
   byNapStatus: Record<string, number>;
+};
+
+// One catalog directory NOT built for this client, and why. A required output: without
+// it, a shorter-than-promised list is indistinguishable from a system that quietly
+// failed. `clause` carries the exact terms text when `reason` is "prohibited_by_terms".
+export type CitationSkip = {
+  directory: string;
+  reason: CitationSkipReason;
+  detail: string;
+  clause: string;
+};
+
+export type CitationSkipReason =
+  | "prohibited_by_terms"
+  | "fed_by_aggregator"
+  | "not_automatable"
+  | "off_vertical"
+  | "marketplace_not_opted_in"
+  | "below_authority_floor"
+  | "over_campaign_cap";
+
+// Mirrors SKIP_REASON_LABELS in backend/app/modules/citations/service.py. A reason code
+// with no label reaches a client report as a raw enum string.
+export const SKIP_REASON_LABEL: Record<CitationSkipReason, string> = {
+  prohibited_by_terms: "the directory's terms forbid automated submission",
+  fed_by_aggregator: "covered by an aggregator we already submit to — no separate listing",
+  not_automatable: "no automated submission path; handled by a human",
+  off_vertical: "serves industries this client is not in",
+  marketplace_not_opted_in: "a paid lead-gen marketplace; not built without opt-in",
+  below_authority_floor: "authority below the floor we build to",
+  over_campaign_cap: "beyond this campaign's size cap; queued in a later one",
 };
 
 // --- audit plan (generic → country → niche) ----------------------------------
@@ -574,4 +708,75 @@ export type CitationEngineBoard = {
   connectedCount: number;
   totalCount: number;
   engines: CitationEngineStatus[];
+};
+
+// --- the human work queue (0110) ---------------------------------------------
+// Route C — a human working a directory by hand — is ~200 of the 226 catalogue rows and
+// 56% of the loaded cost per live citation. The queue exists to make the minutes per item
+// smaller and, for the first time, to measure them.
+
+export type QueueFieldValue = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+export type QueueItem = {
+  citationId: string;
+  client: string;
+  directory: string;
+  directoryUrl: string;
+  /** The verified deep link to the add-listing form. Empty when the catalogue has never
+   *  had one probed — the UI must say so rather than render an empty link. */
+  addUrl: string;
+  fields: QueueFieldValue[];
+  queuedBecause: string;
+  claimExpiresAt: string | null;
+  humanAttempts: number;
+  workedSeconds: number;
+  /** Non-empty only if a directory whose terms forbid automation somehow reached the
+   *  queue. That should be impossible; if it happens the UI refuses to help. */
+  prohibitedWarning: string;
+};
+
+export type QueueBoard = {
+  waiting: number;
+  inProgress: number;
+  /** MEDIAN seconds per finished item. `null` until something has been finished — an
+   *  unmeasured number must read as unmeasured, never as zero. */
+  medianSeconds: number | null;
+  mine: QueueItem[];
+};
+
+export type QueueCompleteResult = {
+  accepted: boolean;
+  submitStatus: string;
+  liveUrl: string;
+  reason: string;
+  matchedFields: string[];
+};
+
+/** Why an item could not be finished. A closed vocabulary so the board can answer
+ *  "which directories are wasting our time?" — which is what eventually removes one. */
+export type QueueBlockReason =
+  | "captcha_wall"
+  | "account_required"
+  | "paid_only"
+  | "form_changed"
+  | "duplicate_listing"
+  | "directory_dead"
+  | "phone_verification"
+  | "postcard_verification"
+  | "other";
+
+export const QUEUE_BLOCK_LABEL: Record<QueueBlockReason, string> = {
+  captcha_wall: "CAPTCHA I couldn't clear",
+  account_required: "Needs an account we don't have",
+  paid_only: "Paid listing only",
+  form_changed: "The form isn't what we expected",
+  duplicate_listing: "Already listed",
+  directory_dead: "Directory is dead / not accepting",
+  phone_verification: "Wants to phone the business",
+  postcard_verification: "Wants to post a card to the business",
+  other: "Something else (see note)",
 };

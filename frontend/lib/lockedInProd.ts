@@ -30,9 +30,14 @@ import { redirect } from "next/navigation";
 // typing the URL.
 // ============================================================
 
-// The 2026-08-27 restructure folded Citations into /admin/web2 as a TAB;
-// its lock card moved with it (see that page). No whole ROUTE is production-
-// locked right now - the set stays as the mechanism for the next one.
+// No whole ROUTE is production-locked right now - the set stays as the mechanism for
+// the next one.
+//
+// Corrected 2026-08-29. This said "The 2026-08-27 restructure folded Citations into
+// /admin/web2 as a TAB; its lock card moved with it (see that page)." Neither half was
+// true: `app/admin/web2/page.tsx` renders only `Web2Tab`, and there was no lock card
+// anywhere. Citations had no route at all until `app/admin/citations/page.tsx` was
+// created, and it is now a normal unlocked screen.
 export const LOCKED_IN_PROD = new Set<string>([]);
 
 export const HIDE_LOCKED = process.env.NODE_ENV === "production";

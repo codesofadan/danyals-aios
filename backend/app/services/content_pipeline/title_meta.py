@@ -38,6 +38,18 @@ MAX_TOKENS = 4_000
 # re-asking once with the measured overshoot named; a second retry does not add much.
 MAX_REPAIRS = 1
 
+# A line that is nothing but an image. The IMAGES stage runs BEFORE this one and injects
+# the hero photo two lines under the H1, so the twelve-line tone excerpt below was
+# spending two of its twelve lines on `![alt](url)` markup instead of the prose it is
+# there to convey. The writer should see how the page READS.
+_IMAGE_LINE_RE = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")
+
+
+def opening_prose(draft_md: str, lines: int = 12) -> str:
+    """The first ``lines`` lines of the draft that a reader would actually read."""
+    kept = [ln for ln in draft_md.strip().splitlines() if not _IMAGE_LINE_RE.match(ln.strip())]
+    return "\n".join(kept[:lines])
+
 
 def _prompt(ctx: PipelineContext, problems: list[str]) -> str:
     lines = [
@@ -59,7 +71,7 @@ def _prompt(ctx: PipelineContext, problems: list[str]) -> str:
         "superlatives unless the draft already carries them.",
     ]
     if ctx.draft_md.strip():
-        opening = "\n".join(ctx.draft_md.strip().splitlines()[:12])
+        opening = opening_prose(ctx.draft_md)
         lines += ["", "How the page opens, for tone and substance:", opening]
     if problems:
         lines += ["", "Your previous attempt was rejected:", *(f"  - {p}" for p in problems),

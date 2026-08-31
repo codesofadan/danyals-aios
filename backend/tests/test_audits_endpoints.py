@@ -34,6 +34,12 @@ class FakeAuditsRepo:
         aid = over.get("id", f"aud-{self._seq}")
         row: dict[str, Any] = {
             "id": aid,
+            # A seeded row is a NORMAL client-linked audit, so it carries the id
+            # as well as the name. Seeding only the name made every fixture row
+            # indistinguishable from an untenanted internal run, which the
+            # sharing rules now (correctly) treat differently. Pass
+            # `client_id=None` explicitly for the client-less case.
+            "client_id": "cl-1",
             "client_name": "Verde Cafe",
             "url": "verdecafe.co",
             "types": ["technical"],
@@ -138,6 +144,8 @@ async def test_create_enqueues_queued_row(
         # Whether the run is shared into the client's portal, so exposure is
         # visible wherever an audit is listed rather than write-once and unseen.
         "visibleToClient",
+        # Whether a client is attached at all - false for an internal/prospect run.
+        "hasClient",
     }
     assert body["visibleToClient"] is False  # internal until someone shares it
     assert body["depth"] == "free"  # Free tier pins the depth
@@ -288,6 +296,14 @@ async def test_free_audit_is_not_cost_gated_at_enqueue(
 async def test_create_unknown_client_404(
     client: httpx.AsyncClient, wire: Callable[..., None]
 ) -> None:
+    """Still a 404, now that a client is optional.
+
+    Omitting `client_id` and naming one that does not exist are different
+    requests: the first asks for an internal run, the second asks for a specific
+    tenant's run. Only the first is permitted without a client row - otherwise a
+    typo'd id would silently produce an audit detached from the client it was
+    meant for.
+    """
     wire("manager", client_exists=False)
     resp = await client.post(
         "/api/v1/audits",
@@ -520,3 +536,124 @@ async def test_the_route_cannot_be_used_to_edit_anything_else(
     assert resp.status_code == 200
     assert repo.rows["aud-5"]["url"] == "verdecafe.co"
     assert repo.rows["aud-5"].get("cost") != 999
+
+
+# --------------------------------------------------------------------------- #
+# An audit with NO client. Internal and prospect runs: a pitch, a spot-check, a
+# site the agency does not have on the books yet. The requirement used to be
+# structural - `client_id` was `min_length=1` - which meant a workspace with an
+# empty client list could not audit anything at all, including the site it was
+# trying to win. Nothing below the API ever needed it: the column is nullable,
+# `GateContext.client_id` is `str | None`, and the public funnel has run this
+# exact shape since P6C.
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_audit_runs_with_no_client_attached(
+    client: httpx.AsyncClient,
+    repo: FakeAuditsRepo,
+    enqueued: list[str],
+    wire: Callable[..., None],
+) -> None:
+    """No client_id at all -> 201, queued, and NOT attributed to anyone."""
+    wire("manager")
+    resp = await client.post("/api/v1/audits", json={"url": _PUBLIC_URL})
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["hasClient"] is False
+    assert body["client"] == ""
+    # It really was enqueued - the run is not merely accepted and dropped.
+    assert enqueued == [body["id"]]
+    row = repo.rows[body["id"]]
+    assert row["client_id"] is None
+    assert row["client_name"] == ""
+
+
+async def test_an_explicit_null_client_is_accepted_like_an_absent_one(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    """`client_id: null` and an omitted key are the same request."""
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits", json={"client_id": None, "url": _PUBLIC_URL}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["hasClient"] is False
+
+
+async def test_a_clientless_audit_cannot_be_created_pre_shared(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """`visible_to_client: true` with no client stores FALSE, not true.
+
+    `portal_audits` filters on `client_id = current_client_id()`, which NULL
+    never satisfies, so the row is unreachable either way. What is refused here
+    is the row CLAIMING to be shared: a `true` flag would render a "Shared" badge
+    for an audit no client can open, and that badge is what someone reads later
+    when they ask whether a client has seen it.
+    """
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/audits", json={"url": _PUBLIC_URL, "visible_to_client": True}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["visibleToClient"] is False
+    assert repo.rows[resp.json()["id"]]["visible_to_client"] is False
+
+
+async def test_a_clientless_audit_cannot_be_shared_into_a_portal(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """PATCH visibility on an untenanted audit is a 409, not a quiet no-op.
+
+    The alternative is the failure this codebase already refuses elsewhere: a
+    200 for a flag flip that changes nothing an operator can observe, leaving
+    them believing a report was delivered.
+    """
+    wire("manager")
+    repo.seed(id="aud-solo", client_id=None, client_name="", visible_to_client=False)
+    resp = await client.patch(
+        "/api/v1/audits/aud-solo/visibility", json={"visible_to_client": True}
+    )
+    assert resp.status_code == 409
+    assert repo.rows["aud-solo"]["visible_to_client"] is False
+
+
+async def test_unsharing_a_clientless_audit_is_still_allowed(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """Withdrawing is always permitted - including for a legacy row that somehow
+    carries `true` with no client. Refusing the safe direction would leave such a
+    row stuck advertising an exposure it cannot have."""
+    wire("manager")
+    repo.seed(id="aud-legacy", client_id=None, client_name="", visible_to_client=True)
+    resp = await client.patch(
+        "/api/v1/audits/aud-legacy/visibility", json={"visible_to_client": False}
+    )
+    assert resp.status_code == 200
+    assert repo.rows["aud-legacy"]["visible_to_client"] is False
+
+
+async def test_a_clientless_paid_run_still_passes_the_spend_gate(
+    app: FastAPI, client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    """No client means no per-client CAP - it does not mean no gate.
+
+    The agency-global halt and the feature dial still bind an untenanted paid
+    run, exactly as they do on the public funnel. If this ever returns 201, an
+    operator could spend past a halt simply by leaving the client field empty.
+    """
+    wire("manager")
+    seen: list[str | None] = []
+
+    def _blocked(client_id: str | None, client_name: str, cost: float) -> GateDecision:
+        seen.append(client_id)
+        return GateDecision("blocked_halt", cost=cost)
+
+    app.dependency_overrides[get_paid_audit_gate] = lambda: _blocked
+    resp = await client.post(
+        "/api/v1/audits", json={"url": _PUBLIC_URL, "tier": "Paid", "depth": "standard"}
+    )
+    assert resp.status_code == 402
+    # The gate was consulted, and told the truth about the missing tenant.
+    assert seen == [None]

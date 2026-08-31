@@ -192,6 +192,54 @@ class _Move:
     heading: str
 
 
+#: Heading frames below interpolate the primary term: "What is {primary}?", "The problem
+#: with {primary}". Every one of them assumes a KEYWORD - a noun phrase like "emergency
+#: drain unblocking". Operators legitimately type a TITLE instead ("what a CCTV drain
+#: survey shows" is one of the campaign wizard's own placeholder examples), and dropping a
+#: title into those frames produces "What is what a CCTV drain survey shows?" - broken
+#: English in a client-facing H2.
+#:
+#: A noun phrase cannot be derived from an arbitrary title without inventing wording the
+#: operator never wrote, so the honest move is the other one: a title-shaped term drops OUT
+#: of the frame and the heading stands on its own. The article still carries the full topic
+#: as its H1, so nothing is lost.
+_TITLE_SAFE_HEADINGS = {
+    "A real {primary} story": "A real example",
+    "Get started with {primary}": "Getting started",
+    "How {primary} works": "How it works",
+    "The problem with {primary}": "The problem",
+    "The useful essentials of {primary}": "The useful essentials",
+    "Where {primary} takes you": "Where this takes you",
+    "Why {primary} matters": "Why this matters",
+    "{primary} features": "The features that matter",
+}
+
+#: An opener that makes a phrase read as a question or a statement rather than a subject.
+_TITLE_OPENERS = frozenset({
+    "what", "how", "why", "when", "where", "who", "whose", "which", "should", "can",
+    "could", "do", "does", "did", "is", "are", "was", "were", "will", "would", "if",
+})
+
+#: Beyond this a phrase is a sentence, not a keyword, whatever it starts with.
+_MAX_KEYWORD_WORDS = 6
+
+
+def is_keyword_phrase(text: str) -> bool:
+    """True when ``text`` reads as a KEYWORD that may be interpolated into a heading
+    frame; False when it reads as a title or a question."""
+    words = text.strip().split()
+    if not words or len(words) > _MAX_KEYWORD_WORDS:
+        return False
+    return words[0].strip("\"'").lower() not in _TITLE_OPENERS
+
+
+def render_heading(template: str, *, primary: str, client: str) -> str:
+    """Fill a heading frame, degrading to a standalone heading for a title-shaped term."""
+    if "{primary}" in template and not is_keyword_phrase(primary):
+        template = _TITLE_SAFE_HEADINGS.get(template, template.replace("{primary}", "this"))
+    return template.format(primary=primary, client=client)
+
+
 _FRAMEWORK_MOVES: dict[Framework, tuple[_Move, ...]] = {
     "AIDA": (
         _Move("attention", "Why {primary} matters"),
@@ -517,7 +565,11 @@ def _cap(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     cut = text[:max_chars].rsplit(" ", 1)[0]
-    return (cut or text[:max_chars]).rstrip(" ,.;:-")
+    # "|" belongs in this set. A title is built as "{lead} | {brand}"; when the cap eats
+    # the brand, stripping everything BUT the pipe publishes "How to scope a project |" as
+    # the H1 and the post title on every platform - the brand amputated and the separator
+    # left dangling, on an asset whose whole job is to look human-written.
+    return (cut or text[:max_chars]).rstrip(" ,.;:-|")
 
 
 def resolve_framework(page_type: str, framework: str) -> Framework:
@@ -1087,7 +1139,7 @@ def _plan_images(
     for move in moves:
         if len(slots) >= tuning.max_images:
             break
-        heading = move.heading.format(primary=primary, client=client)
+        heading = render_heading(move.heading, primary=primary, client=client)
         slots.append((f"section:{move.role}", heading))
 
     scenes = _photo_briefs(
@@ -1184,7 +1236,8 @@ def generate(
     )
 
     # B. Key heading + the 40-55-word extractable answer block (§4).
-    key_question = next((q for q in brief.fanout if q), f"What is {primary}?")
+    fallback_q = f"What is {primary}?" if is_keyword_phrase(primary) else "The short answer"
+    key_question = next((q for q in brief.fanout if q), fallback_q)
     builder.h2(key_question)
     answer = _answer_block(
         writer,
@@ -1209,7 +1262,7 @@ def generate(
     spokes = list(brief.cluster.supporting)
     for index, move in enumerate(moves):
         builder.section_roles.append(move.role)
-        heading = move.heading.format(primary=primary, client=client)
+        heading = render_heading(move.heading, primary=primary, client=client)
         builder.h2(heading)
         grounded = _facts_for_move(move.role, source_pack)
         section_entities = spokes[index : index + 2]
@@ -1272,7 +1325,11 @@ def generate(
     _links_block(builder, brief=brief, source_pack=source_pack, tuning=tuning)
 
     # I. Conclusion / CTA.
-    builder.h2(f"Ready to move forward with {primary}?")
+    builder.h2(
+        f"Ready to move forward with {primary}?"
+        if is_keyword_phrase(primary)
+        else "Ready to move forward?"
+    )
     builder.para(
         _write(
             writer,

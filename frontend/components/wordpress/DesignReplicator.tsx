@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 // ============================================================
 // AIOS · Design Replicator
 // Rebuild a page the client already owns as a native Elementor page on the
@@ -184,12 +186,23 @@ export default function DesignReplicator() {
           Design Replicator
         </div>
         <h2 style={{ fontSize: 18, fontWeight: 800, color: INK, margin: "2px 0 0" }}>
-          Rebuild a page as native Elementor
+          Rebuild a single page as native Elementor
         </h2>
         <p style={{ fontSize: 14, color: "var(--body)", lineHeight: 1.55, margin: "8px 0 0", maxWidth: 640 }}>
           Point it at a page the client owns and it rebuilds the design as an editable
           Elementor page on the client&rsquo;s connected WordPress site, then hands you
           a preview link.
+        </p>
+        {/* This card REBUILDS one page the client already has; it generates no new
+            copy. Building several NEW pages on a replicated design is the content
+            flow's job — the replicator now returns its measured design profile, so
+            that flow starts from the same measurement rather than re-capturing. */}
+        <p style={{ fontSize: 13.5, color: "var(--body)", lineHeight: 1.55, margin: "8px 0 0", maxWidth: 640 }}>
+          Building several <b>new</b> pages on a design instead?{" "}
+          <Link href="/admin/content/new" style={{ color: ACCENT, fontWeight: 700 }}>
+            Start in Content
+          </Link>{" "}
+          — it replicates the design, writes the pages and publishes them in one run.
         </p>
 
         <div style={{ marginTop: 18, display: "grid", gap: 16, maxWidth: 560 }}>

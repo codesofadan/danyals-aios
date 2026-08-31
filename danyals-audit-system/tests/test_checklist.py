@@ -67,7 +67,7 @@ def test_every_data_source_is_deliberately_classified(registry):
     one of the four sets."""
     known = cl._ZERO | cl._FREE_QUOTA | cl._CONNECTION | cl._BILLABLE
     seen = {s for spec in registry.values() for s in spec.data_sources}
-    assert len(seen) == 53
+    assert len(seen) == 52
     assert seen <= known, f"unclassified data sources: {sorted(seen - known)}"
 
 
@@ -87,19 +87,29 @@ def test_containment_counts_are_frozen(registry):
     # Firecrawl rather than a local browser: a metered monthly allowance is not
     # "no quota is consumed". Nine checks left the truly-free tier as a result.
     # ZERO_QUOTA is unchanged because free_quota still admits them.
-    assert n(ZERO) == 188
-    assert n(ZERO_QUOTA) == 219
-    assert n(ZERO_QUOTA_CONN) == 228
+    # O-9 RESOLVED. Fourteen page-scope checks declared a provider their
+    # implementation cannot reach - `check_title_tag(p: ParsedHTML)` was declared
+    # against `serper_top10` and never called it - so the cost gate excluded
+    # checks that spend nothing. They ran anyway while the legacy generators
+    # bypassed the gate; the moment the registry started honouring it, all
+    # fourteen vanished from a free run. The declarations were corrected to what
+    # the code reads. Every one is still a `crawled_html` check, so the free tier
+    # gained 14 checks it had always in fact been running.
+    assert n(ZERO) == 202
+    assert n(ZERO_QUOTA) == 233
+    assert n(ZERO_QUOTA_CONN) == 240
     assert n(ALL) == 363
     # Wave A moved 17 checks from ai-assisted to full: Python already computed
     # every one of them, so the model call was paying for a second opinion that
     # then collided with the first. Nine of the 17 declare only zero-cost
     # sources, so they now count as free-tier runnable - which they always were
-    # in practice. The other eight declare sources their deterministic
-    # implementation never reads and stay excluded; see O-9.
-    assert n(ZERO, True) == 172
-    assert n(ZERO_QUOTA, True) == 202
-    assert n(ZERO_QUOTA_CONN, True) == 208
+    # in practice. The other eight declared sources their deterministic
+    # implementation never reads - that was O-9, and it is now resolved: the
+    # declarations were corrected to what the code actually reads, so those
+    # checks count as free-tier runnable too.
+    assert n(ZERO, True) == 186
+    assert n(ZERO_QUOTA, True) == 216
+    assert n(ZERO_QUOTA_CONN, True) == 220
 
 
 def test_automation_split_is_frozen(registry):

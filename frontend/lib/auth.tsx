@@ -15,6 +15,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch, api, setToken, clearSession, SESSION_KEY } from "@/lib/api";
+import { resetNotificationToasts } from "@/lib/hooks/notifications";
+import { clearQueryCache } from "@/lib/query";
 
 export type Role = "admin" | "team" | "client";
 
@@ -136,6 +138,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void api.post("/auth/logout", {}).catch(() => undefined);
     clearSession();
     persist(null);
+    // Drop every cached response with it. The QueryClient is created once per browser
+    // session (lib/query.tsx), so without this it SURVIVES a sign-out: the next person
+    // to sign in on this machine is served the previous user's cached counts and lists
+    // until each query refetches. That is a cross-user data leak on a shared machine,
+    // and it also made the notification bell announce the incoming user's backlog as
+    // if it had just arrived.
+    clearQueryCache();
+    resetNotificationToasts();
   }, [persist]);
 
   const value = useMemo<AuthState>(() => ({ session, ready, login, logout }), [session, ready, login, logout]);

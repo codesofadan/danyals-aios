@@ -7,6 +7,7 @@ import {
   useAlerts,
   useMarkAllRead,
   useMarkNotificationRead,
+  useNotificationToasts,
   useNotifications,
   useUnreadCount,
 } from "@/lib/hooks/notifications";
@@ -37,6 +38,12 @@ export default function NotificationBell() {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const unreadQ = useUnreadCount();
+  // Announce arrivals while the portal is open (QA 4). Lives here because the bell is
+  // the one component mounted on every page of all three portals, via TopBar — a team
+  // member on their dashboard gets the toast without the dashboard knowing about it.
+  // Suppressed while the panel is open: the operator is already looking at the inbox,
+  // and toasting what they can see would be noise.
+  useNotificationToasts(!open);
   // Bodies are fetched only while the panel is open; the always-mounted cost is the
   // one-integer badge poll.
   const listQ = useNotifications(open && tab === "inbox");

@@ -486,3 +486,37 @@ def test_wait_for_message_imap_error_degrades_to_none(monkeypatch: pytest.Monkey
     since = datetime(2026, 8, 19, 9, 0, tzinfo=UTC)
     # An IMAP connect failure must NEVER raise out - it degrades to None.
     assert _mailbox().wait_for_message(to_alias="x@mail.example", since=since, timeout_s=0) is None
+
+
+# --------------------------------------------------------------------------- #
+# can_submit: the inherited answer was always False.
+#
+# The worker asks `can_submit` BEFORE the cost gate, so a wrong False is silent - the row
+# blocks as "no verified spec" and nothing is charged, logged as an error, or retried. The
+# base implementation consults `self._specs`, and this engine's ctor passes `specs={}` on
+# purpose (it dispatches on SIGNUP_SPECS instead), so every `bot:signup` directory was
+# unreachable no matter what SIGNUP_SPECS held.
+# --------------------------------------------------------------------------- #
+def test_can_submit_consults_the_signup_specs_not_the_empty_form_specs(fake_pw: _Page) -> None:
+    bot = _bot(_FakeMailbox(_canned_email()), _link_spec())
+    assert bot.can_submit(_job()) is True, (
+        "TestDir IS in signup_specs; a False here means can_submit is reading `_specs`, "
+        "which this engine deliberately leaves empty"
+    )
+
+
+def test_can_submit_is_false_for_a_directory_with_no_signup_spec(fake_pw: _Page) -> None:
+    """The negative control: it must be answering about the directory, not returning True."""
+    import dataclasses
+
+    bot = _bot(_FakeMailbox(_canned_email()), _link_spec())
+    assert bot.can_submit(dataclasses.replace(_job(), directory_name="NotInTheSpecs")) is False
+
+
+def test_can_submit_does_not_open_a_browser(fake_pw: _Page) -> None:
+    """It is asked before the gate to avoid charging for a submission that cannot happen;
+    it must therefore be cheap. If it navigated, the pre-gate check would cost more than
+    the thing it protects."""
+    bot = _bot(_FakeMailbox(_canned_email()), _link_spec())
+    bot.can_submit(_job())
+    assert not getattr(fake_pw, "goto_calls", []), "can_submit navigated"

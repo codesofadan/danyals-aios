@@ -444,3 +444,115 @@ async def test_reply_survives_email_layer_unconfigured(
     )
     assert resp.status_code == 200
     assert repo.rows[seeded["code"]]["reply"] == "hello"
+
+
+# --------------------------------------------------------------------------- #
+# The client's BELL (QA 17)
+# --------------------------------------------------------------------------- #
+# "When the admin marks the request as completed, an email and/or in-app
+# notification should be sent to the client confirming that the task/request is done."
+#
+# The email half already worked. The in-app half could not: `email_client` writes no
+# notifications row and consults no prefs, so the only in-app notification a client
+# had ever received was `portal_ready`. A finished request changed a status pill and
+# nothing else.
+
+
+async def test_resolving_a_request_notifies_the_client_in_app(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict[str, str]] = []
+
+    async def _fake_notify(client_id: str, kind: str, title: str, body: str = "") -> None:
+        seen.append({"client_id": client_id, "kind": kind, "title": title, "body": body})
+
+    async def _noop_email(*_a: Any, **_k: Any) -> None: ...
+
+    monkeypatch.setattr("app.routers.tickets.notify_client_in_app", _fake_notify)
+    monkeypatch.setattr("app.routers.tickets.email_client", _noop_email)
+    seeded = repo.seed(status="open", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.patch(
+        f"/api/v1/tickets/{seeded['code']}/status", json={"status": "resolved"}
+    )
+    assert resp.status_code == 200
+    assert len(seen) == 1
+    assert seen[0]["client_id"] == "cl-atlas"
+    assert seen[0]["kind"] == "request_resolved"
+    # The completed wording, not a generic "status changed".
+    assert "complete" in seen[0]["title"].lower()
+    assert seeded["subject"] in seen[0]["body"]
+
+
+async def test_an_intermediate_status_does_not_claim_completion(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    async def _fake_notify(client_id: str, kind: str, title: str, body: str = "") -> None:
+        seen.append(title)
+
+    async def _noop_email(*_a: Any, **_k: Any) -> None: ...
+
+    monkeypatch.setattr("app.routers.tickets.notify_client_in_app", _fake_notify)
+    monkeypatch.setattr("app.routers.tickets.email_client", _noop_email)
+    seeded = repo.seed(status="open", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    await client.patch(f"/api/v1/tickets/{seeded['code']}/status", json={"status": "pending"})
+    assert seen == ["Update on your request"]
+
+
+async def test_a_status_that_did_not_change_notifies_nobody(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    async def _fake_notify(client_id: str, kind: str, title: str, body: str = "") -> None:
+        seen.append(title)
+
+    async def _noop_email(*_a: Any, **_k: Any) -> None: ...
+
+    monkeypatch.setattr("app.routers.tickets.notify_client_in_app", _fake_notify)
+    monkeypatch.setattr("app.routers.tickets.email_client", _noop_email)
+    seeded = repo.seed(status="resolved", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    await client.patch(f"/api/v1/tickets/{seeded['code']}/status", json={"status": "resolved"})
+    # Re-saving the same status must not re-announce a completion the client was
+    # already told about.
+    assert seen == []
+
+
+async def test_a_ticket_with_no_client_notifies_nobody(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    async def _fake_notify(client_id: str, kind: str, title: str, body: str = "") -> None:
+        seen.append(client_id)
+
+    monkeypatch.setattr("app.routers.tickets.notify_client_in_app", _fake_notify)
+    seeded = repo.seed(status="open", client_id=None)
+    wire("admin", "u-admin")
+    resp = await client.patch(
+        f"/api/v1/tickets/{seeded['code']}/status", json={"status": "resolved"}
+    )
+    assert resp.status_code == 200
+    assert seen == []
+
+
+async def test_resolution_survives_the_notification_layer_failing(
+    client: httpx.AsyncClient, repo: FakeTicketsRepo, wire: Callable[..., None]
+) -> None:
+    # No monkeypatch: the REAL notify_client_in_app runs with no database. Telling the
+    # client must never be able to fail the triage that already happened.
+    seeded = repo.seed(status="open", client_id="cl-atlas")
+    wire("admin", "u-admin")
+    resp = await client.patch(
+        f"/api/v1/tickets/{seeded['code']}/status", json={"status": "resolved"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "resolved"

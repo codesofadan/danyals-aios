@@ -140,6 +140,11 @@ export type AuditRow = {
   when: string; // display timestamp
   pdf: boolean;
   json: boolean;
+  // Does this audit have a client attached? False for an internal / prospect run.
+  // Distinct from `client` being empty: that is the client's NAME, and an absent
+  // client and a blank-named one are different facts. Sharing to a portal is only
+  // meaningful when this is true.
+  hasClient: boolean;
   // Is this audit shared into the client's own portal?
   //
   // It was settable when an audit was created and readable nowhere, so an

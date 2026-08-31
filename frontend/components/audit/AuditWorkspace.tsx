@@ -55,6 +55,18 @@ function scoreClass(score: number) {
 // any of these runs as a Paid audit (cost-gated); an empty or free-only selection
 // stays Free. Derived from the single source of truth in lib/audit.ts.
 
+// The select value that means "deliberately no client", kept distinct from ""
+// ("nothing picked yet"). A sentinel rather than null because a DOM <select>
+// value is always a string.
+const NO_CLIENT = "__no_client__";
+
+// What to call a run with no client attached. `client_name` is "" for those, and
+// the client cell is the row's only link into the audit - rendering "" would
+// leave the row with no clickable target at all. Also used for download
+// filenames, which would otherwise start with a bare hyphen.
+const INTERNAL_LABEL = "Internal audit";
+const clientLabel = (r: { client: string }) => r.client || INTERNAL_LABEL;
+
 export default function AuditWorkspace() {
   // How many server pages of history to hold. The list took the server default
   // of 50 with no way to ask for more, so an agency past its first fifty audits
@@ -80,12 +92,24 @@ export default function AuditWorkspace() {
   // deterministic crawl always ran in full and a run scoped to "on-page +
   // technical" still came back with GEO and strategy findings.
   const [url, setUrl] = useState("");
+  // "" = not chosen yet (falls through to the first client, if there is one);
+  // NO_CLIENT = chosen deliberately, run with no tenant attached. The two are
+  // kept distinct because they mean different things: the empty string is the
+  // absence of a decision, and picking "no client" IS a decision. Collapsing
+  // them would make the select unable to hold the choice - selecting no-client
+  // would fall straight back to clients[0] on the next render.
   const [clientId, setClientId] = useState("");
   const [depth, setDepth] = useState<AuditDepth>("standard");
   // Off by default, matching the server. Sharing a report is a decision someone
   // makes, not a side effect of picking a client.
   const [shareWithClient, setShareWithClient] = useState(false);
-  const effectiveClientId = clientId || clients[0]?.id || "";
+  // null = run with no client (internal / prospect audit). The server accepts a
+  // null client_id and the database column is nullable; what it can never do is
+  // surface in a client portal, because `portal_audits` selects on
+  // `client_id = current_client_id()` and NULL matches nothing.
+  const effectiveClientId: string | null =
+    clientId === NO_CLIENT ? null : clientId || clients[0]?.id || null;
+  const clientless = effectiveClientId === null;
 
   // The quote currently on screen, or null. Held in state (not react-query cache)
   // because a confirmation is bound to ONE figure: the moment any input changes,
@@ -112,7 +136,20 @@ export default function AuditWorkspace() {
 
   // A run at Standard or Advanced spends metered budget, so it is blocked while
   // the global API-spend halt is engaged.
-  const canRun = url.trim().length > 3 && !!effectiveClientId && !createAudit.isPending && !halted;
+  // A client is NOT required. An audit with no client is an internal or prospect
+  // run - a pitch, a spot-check, a site not yet on the books - and every layer
+  // below already models it: the column is nullable, the cost gate takes
+  // `client_id: string | null` (it drops the per-client cap and keeps the global
+  // halt), and the worker reads the column defensively. Requiring one here meant
+  // an agency with an empty client list could not audit anything at all.
+  // `!clientsQ.isLoading` is about attribution, not permission. Until the list
+  // resolves, `clients[0]` is undefined and the form reads as client-less - so a
+  // fast operator could submit in that window and get an INTERNAL audit when the
+  // default would have been their first client a moment later. Running with no
+  // client has to be a choice, and a choice cannot be made against a control
+  // that has not finished loading.
+  const canRun =
+    url.trim().length > 3 && !createAudit.isPending && !halted && !clientsQ.isLoading;
 
   // TIER FOLLOWS DEPTH, and there is nothing else it could follow. Basic runs
   // `--mode free`, which the engine enforces by clearing every provider after
@@ -159,7 +196,7 @@ export default function AuditWorkspace() {
         url: clean,
         tier,
         depth: effectiveDepth,
-        visible_to_client: shareWithClient,
+        visible_to_client: shareWithClient && !clientless,
         // Echo the exact figure that was displayed. If unit prices or the depth's
         // page budget moved since the quote, the server returns 409 rather than
         // charging against a number the operator never saw.
@@ -193,7 +230,7 @@ export default function AuditWorkspace() {
     // Search matches the two things an operator actually remembers: who it was
     // for, and which site. Case-insensitive substring, no fuzzy matching - a
     // near-miss that silently returns the wrong client is worse than no match.
-    if (q && !`${r.client} ${r.url}`.toLowerCase().includes(q)) return false;
+    if (q && !`${clientLabel(r)} ${r.url}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -309,8 +346,11 @@ export default function AuditWorkspace() {
                       <td className="au-c-audit">
                         {/* The row IS the way into the audit. The artifact column
                             carries downloads only, so the name has to be the link. */}
-                        <Link className="au-client au-open" href={`/admin/audit/${r.id}`}>
-                          {r.client}
+                        <Link
+                          className={`au-client au-open${r.client ? "" : " is-internal"}`}
+                          href={`/admin/audit/${r.id}`}
+                        >
+                          {clientLabel(r)}
                         </Link>
                         <span className="au-url" title={r.url}>
                           <span className="material-symbols-rounded">link</span>{r.url}
@@ -383,14 +423,20 @@ export default function AuditWorkspace() {
                         )}
                       </td>
                       <td>
+                        {/* No client, no portal to share into. The server
+                            returns a 409 for the same request; disabling it here
+                            means the operator is told before the click rather
+                            than by an error afterwards. */}
                         <button
-                          className={`au-share${r.visibleToClient ? " is-on" : ""}`}
+                          className={`au-share${r.visibleToClient ? " is-on" : ""}${r.hasClient ? "" : " is-disabled"}`}
                           aria-pressed={r.visibleToClient}
-                          disabled={setVisibility.isPending}
+                          disabled={setVisibility.isPending || !r.hasClient}
                           title={
-                            r.visibleToClient
-                              ? "This client can read this audit in their portal. Click to stop sharing it."
-                              : "Internal only. Click to share it into the client's portal."
+                            !r.hasClient
+                              ? "This audit has no client, so there is no portal to share it into."
+                              : r.visibleToClient
+                                ? "This client can read this audit in their portal. Click to stop sharing it."
+                                : "Internal only. Click to share it into the client's portal."
                           }
                           onClick={() => {
                             // Only SHARING asks. Publishing an audit into a
@@ -428,7 +474,7 @@ export default function AuditWorkspace() {
                           <Link
                             className="au-art is-primary"
                             title="Open this audit - overview, issues, pages, downloads"
-                            aria-label={`Open the ${r.client} audit`}
+                            aria-label={`Open the ${clientLabel(r)} audit`}
                             href={`/admin/audit/${r.id}`}
                           >
                             <span className="material-symbols-rounded">open_in_new</span>
@@ -452,7 +498,7 @@ export default function AuditWorkspace() {
                             title="Download the full PDF report"
                             disabled={!r.pdf}
                             onClick={() =>
-                              downloadFile(`/audits/${r.id}/report.pdf`, `${r.client}-audit-${r.id}.pdf`)
+                              downloadFile(`/audits/${r.id}/report.pdf`, `${clientLabel(r)}-audit-${r.id}.pdf`)
                             }
                           >
                             <span className="material-symbols-rounded">picture_as_pdf</span>
@@ -464,7 +510,7 @@ export default function AuditWorkspace() {
                             onClick={() =>
                               downloadFile(
                                 `/audits/${r.id}/download/workbook`,
-                                `${r.client}-audit-${r.id}.xlsx`,
+                                `${clientLabel(r)}-audit-${r.id}.xlsx`,
                               )
                             }
                           >
@@ -525,31 +571,50 @@ export default function AuditWorkspace() {
           </div>
 
           <div className="fld">
-            <label>Client</label>
+            {/* Associated with `htmlFor`, not merely adjacent: the control now
+                carries a real choice (which client, or none at all) and a
+                screen reader has to be able to name it. */}
+            <label htmlFor="au-client">Client</label>
             <select
-              value={effectiveClientId}
+              id="au-client"
+              value={clientless ? NO_CLIENT : effectiveClientId}
               onChange={(e) => setClientId(e.target.value)}
-              disabled={clients.length === 0}
             >
-              {clients.length === 0 ? (
-                <option value="">{clientsQ.isLoading ? "Loading clients…" : "No clients yet"}</option>
-              ) : (
-                clients.map((c) => <option key={c.id} value={c.id}>{c.cn}</option>)
-              )}
+              {/* Always offered, with or without clients on the books: an audit
+                  does not need a tenant, and this is the option that says so. */}
+              <option value={NO_CLIENT}>
+                {clientsQ.isLoading ? "Loading clients…" : "No client (internal audit)"}
+              </option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.cn}</option>
+              ))}
             </select>
+            {clientless && !clientsQ.isLoading && (
+              <div className="au-run-note">
+                Runs for you only. With no client attached it can never appear in
+                a client portal.
+              </div>
+            )}
           </div>
 
-          <label className="au-share">
+          {/* Disabled with no client attached, because there is no portal for
+              the run to appear in - the server refuses the same combination
+              rather than storing a flag that claims a sharing that cannot
+              happen. Offering a checkbox that silently does nothing is how an
+              operator comes to believe a client has seen a report. */}
+          <label className={`au-share${clientless ? " is-disabled" : ""}`}>
             <input
               type="checkbox"
-              checked={shareWithClient}
+              checked={shareWithClient && !clientless}
+              disabled={clientless}
               onChange={(e) => setShareWithClient(e.target.checked)}
             />
             <span>
               <b>Show this audit in the client&rsquo;s portal</b>
               <em>
-                Off by default. The client sees the report, score and downloads -
-                never the cost, the error or the internal paths.
+                {clientless
+                  ? "Needs a client. With none attached this audit stays internal."
+                  : "Off by default. The client sees the report, score and downloads - never the cost, the error or the internal paths."}
               </em>
             </span>
           </label>
@@ -663,11 +728,11 @@ export default function AuditWorkspace() {
         <ReportViewer
           load={loadReport}
           reloadKey={viewId}
-          label={viewRow ? `${viewRow.client} · ${viewRow.url}` : "Audit report"}
+          label={viewRow ? `${clientLabel(viewRow)} · ${viewRow.url}` : "Audit report"}
           onClose={() => setViewId(null)}
           onDownloadPdf={
             viewRow?.pdf
-              ? () => downloadFile(`/audits/${viewId}/report.pdf`, `${viewRow.client}-audit-${viewId}.pdf`)
+              ? () => downloadFile(`/audits/${viewId}/report.pdf`, `${clientLabel(viewRow)}-audit-${viewId}.pdf`)
               : undefined
           }
         />

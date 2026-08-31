@@ -1,5 +1,5 @@
 [Unit]
-Description=AIOS Celery beat (schedule dispatcher: context compaction + reconcile, and future policy/report/backup schedules)
+Description=AIOS Celery beat (schedule dispatcher; schedule is EMPTY by owner instruction - this unit currently fires nothing)
 Documentation=file:///opt/aios/infra/deploy/README-deploy.md
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
@@ -11,11 +11,19 @@ User=aios
 Group=aios
 WorkingDirectory=/opt/aios/backend
 EnvironmentFile=/etc/aios/aios.env
-# Beat only ENQUEUES on a timer (workers.celery_app.beat_schedule): it fans out the
-# context-compaction dispatcher every debounce window and the slower reconcile
-# sweep, and is the single place future policy/report/backup schedules attach. It
-# runs NO task itself, so the visibility_timeout >= task_time_limit invariant is a
-# worker concern, not a beat one.
+# Beat only ENQUEUES on a timer (workers.celery_app.beat_schedule). It runs NO task
+# itself, so the visibility_timeout >= task_time_limit invariant is a worker concern,
+# not a beat one.
+#
+# TODAY THAT SCHEDULE IS EMPTY, by owner instruction (2026-08-19). This unit starts,
+# stays healthy, and fires nothing - a silent beat log here is correct, not broken.
+# Citation liveness is therefore never re-swept, Policy Radar is on-demand only, and
+# no backup/reconcile/compaction runs by itself. The full schedule is preserved in
+# `_BEAT_SCHEDULE_DISABLED` (same module) and every task stays registered and
+# callable via .delay(); restoring the one assignment and restarting this unit turns
+# scheduling back on. Several of those jobs call paid APIs, so that is a budget
+# decision as much as a freshness one - see "Nothing runs on a timer" in
+# infra/deploy/README-deploy.md before flipping it.
 #
 # EXACTLY ONE beat may run cluster-wide (a second would double-enqueue every tick).
 # On this single-VPS deploy that is guaranteed by this being the only beat unit.

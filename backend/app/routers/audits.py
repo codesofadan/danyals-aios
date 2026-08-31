@@ -137,7 +137,7 @@ def get_audit_enqueuer() -> Callable[[str], None]:
 AuditEnqueuerDep = Annotated[Callable[[str], None], Depends(get_audit_enqueuer)]
 
 
-def get_paid_audit_gate() -> Callable[[str, str, float], GateDecision]:
+def get_paid_audit_gate() -> Callable[[str | None, str, float], GateDecision]:
     """Dependency: evaluate a prospective PAID audit against the cost gate
     (overridable in tests).
 
@@ -146,7 +146,9 @@ def get_paid_audit_gate() -> Callable[[str, str, float], GateDecision]:
     gate makes no paid call - it only decides - so a read here is cheap and safe.
     """
 
-    def _evaluate(client_id: str, client_name: str, estimated_cost: float) -> GateDecision:
+    def _evaluate(
+        client_id: str | None, client_name: str, estimated_cost: float
+    ) -> GateDecision:
         ctx = GateContext(
             feature_key=_TECH_AUDIT_FEATURE,
             client_id=client_id,
@@ -177,7 +179,12 @@ def get_site_size_probe() -> Callable[[str], SiteSize]:
 SiteSizeProbeDep = Annotated[Callable[[str], SiteSize], Depends(get_site_size_probe)]
 
 
-PaidAuditGateDep = Annotated[Callable[[str, str, float], GateDecision], Depends(get_paid_audit_gate)]
+# `str | None` in the first slot: an audit may have no client, and the gate is
+# built for that - it drops the per-client budget cap and keeps the global spend
+# halt and the feature dial.
+PaidAuditGateDep = Annotated[
+    Callable[[str | None, str, float], GateDecision], Depends(get_paid_audit_gate)
+]
 
 
 def _rows_to_responses(
@@ -467,9 +474,18 @@ async def create_audit(
         ) from exc
 
     # Resolve + snapshot the client name (also validates tenant scope via RLS).
-    client = await asyncio.to_thread(clients.get_client, body.client_id)
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    # A run with NO client is legitimate - an internal or prospect audit - so the
+    # lookup is skipped rather than failed. A client_id that IS supplied must
+    # still resolve: "no client" and "a client that does not exist" are different
+    # requests, and only the first one is being allowed here.
+    client: dict[str, Any] | None = None
+    if body.client_id:
+        client = await asyncio.to_thread(clients.get_client, body.client_id)
+        if client is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+            )
+    client_name = client.get("name", "") if client else ""
 
     # Cost pre-check (Paid only): reject an over-budget / dial-disabled paid audit
     # at ENQUEUE so the operator is told immediately, not after the worker marks it
@@ -482,9 +498,12 @@ async def create_audit(
         # spared for reasons unrelated to what was actually being asked for. The
         # figure now comes from `pricing.audit_cost`, the SAME function that
         # computes the committed cost, over PLANNED rather than actual observables.
-        decision = await asyncio.to_thread(
-            gate, body.client_id, client.get("name", ""), estimate
-        )
+        # `client_id` may be None here. The gate models that directly: it skips
+        # the per-client budget cap (there is no client to bill) and still
+        # enforces the agency-global spend halt and the feature dial, which are
+        # what actually bound an untenanted paid run. Same contract the public
+        # funnel uses.
+        decision = await asyncio.to_thread(gate, body.client_id, client_name, estimate)
         if decision.halted:
             # Global API-spend halt: a typed 402 "spend_halted" refusal (not run).
             raise SpendHaltedError()
@@ -497,8 +516,8 @@ async def create_audit(
     row = await asyncio.to_thread(
         repo.insert_audit,
         {
-            "client_id": body.client_id,
-            "client_name": client.get("name", ""),
+            "client_id": body.client_id or None,
+            "client_name": client_name,
             "url": body.url,
             # Always empty: the audit-type picker is gone and every run is the
             # full audit. Historical rows keep whatever they were created with, so
@@ -515,13 +534,20 @@ async def create_audit(
                 datetime.now(UTC) if depth in CONFIRM_REQUIRED_DEPTHS else None
             ),
             "status": "queued",
-            "visible_to_client": body.visible_to_client,
+            # No client, no portal. `portal_audits` already makes a NULL-client
+            # row unreachable (NULL = current_client_id() is never true), so this
+            # is not what keeps it private - it is what stops the row from
+            # CLAIMING to be shared. A `true` here would render a "shared" badge
+            # in the admin table for an audit no one can open, which is the kind
+            # of flag that gets trusted later. Store what is true.
+            "visible_to_client": bool(body.visible_to_client and body.client_id),
         },
     )
     enqueue(str(row["id"]))
     await record_activity(
         actor, kind="audit", action="ran an audit", target=body.url,
-        entity_type="client", entity_id=body.client_id,
+        entity_type="client" if body.client_id else None,
+        entity_id=body.client_id or None,
     )
     return AuditResponse.from_row(row)
 
@@ -545,6 +571,23 @@ async def set_audit_visibility(
     RLS refusal does not raise, it matches zero rows, so a missing row is
     reported as a 404 rather than returned as a successful no-op.
     """
+    if body.visible_to_client:
+        current = await asyncio.to_thread(repo.get_audit, audit_id)
+        if current is None:
+            raise _AUDIT_NOT_FOUND
+        if not current.get("client_id"):
+            # An audit with no client has no portal to appear in: `portal_audits`
+            # is keyed on `client_id = current_client_id()`, which NULL never
+            # satisfies. Honouring this would flip a flag that changes nothing
+            # and then report success, so the operator would believe a document
+            # had been shared that no one can reach. Refuse and say why.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This audit has no client, so it cannot be shared to a client "
+                    "portal. Attach it to a client first."
+                ),
+            )
     row = await asyncio.to_thread(
         repo.set_visibility, audit_id, visible=body.visible_to_client
     )

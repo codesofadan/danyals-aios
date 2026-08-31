@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { NAP_META, SUBMIT_STATUS_META, type Citation, type NapStatus } from "@/lib/offpage";
+import {
+  NAP_META,
+  SKIP_REASON_LABEL,
+  SUBMIT_STATUS_META,
+  type Citation,
+  type CitationSkip,
+  type CitationSkipReason,
+  type NapStatus,
+} from "@/lib/offpage";
 import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
@@ -37,6 +45,27 @@ export default function CitationsTab() {
   const gap = gapQ.data;
   const runAudit = useRunCitationAudit();
   const clearCitations = useClearCitations();
+
+  // The honest split of what "covered" contains. `submitted` means a form was sent and
+  // nothing has confirmed a listing came back — Data Axle runs teleresearch for up to
+  // three business days, Apple returns state SUBMITTED, GBP needs verification before it
+  // appears at all — so it is shown as its own number rather than folded into "live".
+  const byStatus = gap?.bySubmitStatus ?? {};
+  const awaitingConfirmation =
+    (byStatus.submitted ?? 0) + (byStatus.queued ?? 0) + (byStatus.submitting ?? 0);
+  const needsAttention = (byStatus.drifted ?? 0) + (byStatus.delisted ?? 0);
+
+  // Every catalog directory NOT built for this client, grouped by reason. Without this a
+  // shorter-than-promised list is indistinguishable from a system that quietly failed.
+  const skipsByReason = useMemo(() => {
+    const out = new Map<CitationSkipReason, CitationSkip[]>();
+    for (const s of gap?.skipped ?? []) {
+      const bucket = out.get(s.reason);
+      if (bucket) bucket.push(s);
+      else out.set(s.reason, [s]);
+    }
+    return [...out.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [gap?.skipped]);
 
   // Step 1 (the client picker) collapses to a one-line summary once an audit has been
   // run, so Step 2 (build) becomes the focus. Picking a different client — or hitting
@@ -188,50 +217,42 @@ export default function CitationsTab() {
         </div>
       )}
 
-      {/* ───────── Ready to finish — the handoff queue ───────── */}
+      {/* ───────── Ready to finish — now handled by the work queue ─────────
+          REPLACED 2026-08-29. This block used to tell operators to run
+          `python tools/finish_citation.py` on their own machine, print the directory
+          login and password IN THE PAGE (parsed out of the free-text note field), and
+          offer a "Mark published" button that set the listing live on the operator's
+          word alone.
+
+          Three defects in one panel: a credential rendered into the DOM, a workflow that
+          only existed on one person's laptop, and a completion that was asserted rather
+          than checked. The queue at /admin/citations/queue does the same job with a
+          claim, pre-computed values, measured time, and a completion that FETCHES the
+          URL and looks for the business before it counts. */}
       {readyToFinish.length > 0 && (
-        <div className={w.step} style={{ background: "var(--blush, #f8ecee)", borderColor: "var(--rose, #b85c6b)" }}>
+        <div className={w.step}>
           <div className={w.stepH}>
-            <span className="material-symbols-rounded" style={{ color: "var(--maroon-2, #8c1d2e)" }}>touch_app</span>
-            {readyToFinish.length} ready to finish locally
+            <span className="material-symbols-rounded">assignment_turned_in</span>
+            {readyToFinish.length} listing{readyToFinish.length === 1 ? "" : "s"} ready for a human
           </div>
           <div className="cs" style={{ marginBottom: 10 }}>
-            These are finished on your machine, not here: run <code>python tools/finish_citation.py</code> locally
-            and Claude Code opens each directory in a browser — logged in and pre-filled — so you do the one human
-            step (category / captcha), click <b>Publish</b>, then mark it done. Only completed listings stay on the dashboard.
+            These need one human step each — a category choice, a CAPTCHA, a confirmation.
+            The queue hands them out one at a time with every field already filled in, and
+            checks the listing is really live before it counts.
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {readyToFinish.map((c) => {
-              const login = /Login:\s*([^\s|]+)/.exec(c.note)?.[1] ?? "";
-              const pass = /password:\s*([^\s|]+)/.exec(c.note)?.[1] ?? "";
-              return (
-                <div key={c.id} style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
-                  background: "var(--white, #fff)", border: "1px solid var(--line)", borderRadius: 8, flexWrap: "wrap",
-                }}>
-                  <span style={{ fontWeight: 700, minWidth: 150 }}>{c.directory}</span>
-                  {login && (
-                    <span className="cs" style={{ fontFamily: "monospace", flex: 1, minWidth: 200 }}>
-                      {login} <span className="op-muted">/</span> {pass}
-                      <button className="ghostbtn" style={{ padding: "2px 6px", marginLeft: 6 }}
-                        onClick={() => navigator.clipboard?.writeText(`${login}\t${pass}`)}
-                        title="Copy login">
-                        <span className="material-symbols-rounded" style={{ fontSize: 15 }}>content_copy</span>
-                      </button>
-                    </span>
-                  )}
-                  {c.handoffUrl && (
-                    <a className="ghostbtn" href={c.handoffUrl} target="_blank" rel="noopener noreferrer"
-                      style={{ textDecoration: "none" }}>
-                      <span className="material-symbols-rounded">open_in_new</span>Open directory
-                    </a>
-                  )}
-                  <button className="primary-btn" onClick={() => actOnRow(c)} disabled={act.isPending}>
-                    <span className="material-symbols-rounded">check</span>Mark published
-                  </button>
-                </div>
-              );
-            })}
+          <div className={w.missList}>
+            {readyToFinish.slice(0, 12).map((c) => (
+              <span key={c.id} className={w.chip}>{c.directory}</span>
+            ))}
+            {readyToFinish.length > 12 && (
+              <span className={w.chip}>+{readyToFinish.length - 12} more</span>
+            )}
+          </div>
+          <div className="op-toolset" style={{ marginTop: 10 }}>
+            <a className="primary-btn" href="/admin/citations/queue" style={{ textDecoration: "none" }}>
+              <span className="material-symbols-rounded">play_arrow</span>
+              Work the queue
+            </a>
           </div>
         </div>
       )}
@@ -267,10 +288,24 @@ export default function CitationsTab() {
               <div className={w.statNum}>{gap.missingCount}</div>
               <div className={w.statLbl}>Missing from the catalog</div>
             </div>
+            {/* LIVE and SUBMITTED are separate tiles because they are separate facts, and
+                collapsing them is the defect this module is recovering from. A live count
+                is only ever rows whose public URL was fetched and found to carry the
+                business; everything sent-but-unconfirmed sits in the tile beside it. */}
             <div className={w.stat}>
               <div className={w.statNum}>{gap.liveUrls.length}</div>
-              <div className={w.statLbl}>Live listing URLs</div>
+              <div className={w.statLbl}>Live — verified on the page</div>
             </div>
+            <div className={w.stat}>
+              <div className={w.statNum}>{awaitingConfirmation}</div>
+              <div className={w.statLbl}>Submitted, not yet confirmed</div>
+            </div>
+            {needsAttention > 0 && (
+              <div className={w.stat}>
+                <div className={w.statNum}>{needsAttention}</div>
+                <div className={w.statLbl}>Drifted or delisted</div>
+              </div>
+            )}
           </div>
 
           {gap.missing.length > 0 && (
@@ -289,7 +324,10 @@ export default function CitationsTab() {
 
           {gap.liveUrls.length > 0 && (
             <>
-              <div className="op-muted" style={{ marginTop: 10 }}>Live listings already earned:</div>
+              <div className="op-muted" style={{ marginTop: 10 }}>
+                Live listings — each URL below was fetched and found to carry this
+                business&apos;s name and its phone or address:
+              </div>
               {gap.liveUrls.slice(0, 12).map((u, i) => (
                 <div key={i} className={w.urlRow}>
                   <span className="status-pill ok">{u.status}</span>
@@ -299,6 +337,48 @@ export default function CitationsTab() {
                 </div>
               ))}
             </>
+          )}
+
+          {/* THE SKIP LEDGER. A client comparing "100 promised" against "45 delivered"
+              reads the other 55 here, by name and by reason — including the ones whose
+              terms forbid automated submission, quoted with the clause we read. */}
+          {skipsByReason.length > 0 && (
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ cursor: "pointer" }} className="op-muted">
+                Not built for this client: {gap.skipped.length} directories — and why
+              </summary>
+              <div style={{ marginTop: 8 }}>
+                {skipsByReason.map(([reason, rows]) => (
+                  <div key={reason} style={{ marginTop: 10 }}>
+                    <div className={w.planLabel}>
+                      {rows.length} × {SKIP_REASON_LABEL[reason] ?? reason}
+                    </div>
+                    <div className={w.missList}>
+                      {rows.slice(0, 18).map((s, i) => (
+                        <span
+                          key={`${s.directory}-${i}`}
+                          className={w.chip}
+                          title={s.clause || s.detail || undefined}
+                        >
+                          {s.directory}
+                        </span>
+                      ))}
+                      {rows.length > 18 && (
+                        <span className={w.chip}>+{rows.length - 18} more</span>
+                      )}
+                    </div>
+                    {reason === "prohibited_by_terms" && rows[0]?.detail && (
+                      <div className="op-muted" style={{ marginTop: 4, fontSize: 12 }}>
+                        We do not submit to these. Hover a name for the clause;{" "}
+                        <a className="op-url" href={rows[0].detail} target="_blank" rel="noreferrer">
+                          source terms
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           <div className="op-toolset" style={{ marginTop: 12 }}>

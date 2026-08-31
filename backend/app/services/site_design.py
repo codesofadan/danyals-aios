@@ -550,6 +550,101 @@ def build_profile(data: dict[str, Any]) -> SiteDesignProfile:
 # browser capture degrades (Playwright not installed, or the target site could not be
 # captured at all).
 # --------------------------------------------------------------------------- #
+def profile_from_design_system(
+    ds: Any, *, container_px: int = 0, notes: str = ""
+) -> SiteDesignProfile:
+    """Build a :class:`SiteDesignProfile` from the REPLICA pipeline's ``DesignSystem``.
+
+    The replicator already measures a strictly richer design system than the content
+    analyzer does - a mode-colour palette, computed fonts, and real type / radius /
+    spacing scales - and then throws all of it away: ``DesignSystem`` is consumed only
+    by the Elementor rebuild and never returned. This mapper is what lets a replicated
+    design drive generated CONTENT.
+
+    THE ROLE NAMES DO NOT MATCH, and that is the whole reason this is an explicit
+    mapper rather than a pass-through. ``DesignSystem.palette`` is keyed by DOM roles
+    (``background`` / ``surface`` / ``border`` / ``heading`` / ``text`` / ``muted`` /
+    ``accent``) while :class:`Palette` wants ``primary`` / ``secondary`` /
+    ``background`` / ``text`` / ``accent``; ``fonts`` is ``heading`` / ``body`` while
+    :class:`Typography` wants ``heading_font`` / ``body_font``. Handing the raw dicts
+    to :func:`build_profile` parses cleanly and silently yields the DATACLASS DEFAULTS
+    for primary, secondary and both fonts - so every replicated site would come back
+    wearing the same "measured" brand (#111827 / #4b5563 / system-ui). That is the
+    precise failure this module's own header exists to prevent, and nothing downstream
+    would report it.
+
+    ``container_px`` is a PARAMETER, not read from ``ds``: ``replicate()`` calls
+    ``extract(nodes, css_vars=...)`` without a container, so ``ds.container_px`` is 0
+    there and the measured width lives on ``InferredPage.container_px``. Passing 0
+    simply leaves the profile's default width.
+
+    ``layout.blueprint`` is left empty deliberately - ``InferredSection`` carries
+    geometry, not semantics, so there is nothing honest to name the sections; the
+    publish path already falls back to the chosen template / page-type default.
+    """
+    palette = dict(getattr(ds, "palette", {}) or {})
+    fonts = dict(getattr(ds, "fonts", {}) or {})
+    radius = tuple(getattr(ds, "radius_scale", ()) or ())
+    spacing = tuple(getattr(ds, "spacing_scale", ()) or ())
+    type_scale = tuple(getattr(ds, "type_scale", ()) or ())
+
+    # `heading` is the site's dominant ink; it is the closest thing the DOM analysis
+    # has to a "primary". `muted` is the deliberate secondary tone; `surface` is the
+    # nearest stand-in when a site has no muted text.
+    primary = palette.get("heading") or palette.get("accent") or ""
+    secondary = palette.get("muted") or palette.get("surface") or ""
+
+    return build_profile(
+        {
+            "palette": {
+                "primary": primary,
+                "secondary": secondary,
+                "background": palette.get("background") or "",
+                "text": palette.get("text") or "",
+                "accent": palette.get("accent") or "",
+            },
+            "typography": {
+                "heading_font": fonts.get("heading") or "",
+                "body_font": fonts.get("body") or "",
+                # The smallest measured step is the body size the page actually reads at.
+                "base_size": f"{type_scale[0]}px" if type_scale else "",
+            },
+            "layout": {
+                "container_width": f"{int(container_px)}px" if container_px else None,
+            },
+            "components": {
+                # A measured radius/spacing scale, described in the vocabulary the
+                # content emitter's tokens already understand.
+                "button_style": _button_style_for(radius[0] if radius else None),
+                "spacing_scale": _spacing_word_for(spacing[0] if spacing else None),
+            },
+            "notes": notes,
+        }
+    )
+
+
+def _button_style_for(radius_px: int | None) -> str:
+    """Describe a measured corner radius in the profile's component vocabulary."""
+    if radius_px is None:
+        return ""
+    if radius_px >= 999:
+        return "solid pill"
+    if radius_px >= 4:
+        return "solid rounded"
+    return "solid square"
+
+
+def _spacing_word_for(step_px: int | None) -> str:
+    """Describe a measured spacing step in the profile's component vocabulary."""
+    if step_px is None:
+        return ""
+    if step_px >= 24:
+        return "airy"
+    if step_px >= 12:
+        return "comfortable"
+    return "tight"
+
+
 def profile_from_capture(capture: SiteCapture) -> SiteDesignProfile:
     """Build a :class:`SiteDesignProfile` from a REAL, Playwright-measured
     ``SiteCapture`` (``integrations.site_analyzer``).

@@ -251,11 +251,31 @@ class CitationCampaignResponse(BaseModel):
 
 
 class CitationLiveUrl(BaseModel):
-    """One live listing already earned: which directory and its proof/listing URL."""
+    """One LIVE listing: the directory and the public URL of the listing itself.
+
+    `url` is `citations.live_url` and nothing else. It is never `proof_url` (a
+    screenshot key) and never appears for a row that is merely `submitted` - only a row
+    the liveness probe has fetched and found the business on can reach this list."""
 
     directory: str
     url: str
     status: str
+
+
+class CitationSkip(BaseModel):
+    """One catalog directory NOT built for this client, and why.
+
+    Required output, not a nicety: without it a shorter-than-promised list looks
+    identical to a system that quietly failed. A client comparing "100 promised" against
+    "45 delivered" reads the other 55 here, by name."""
+
+    directory: str
+    reason: str
+    detail: str = ""
+    # The exact terms clause, when the reason is `prohibited_by_terms`. "We did not
+    # submit to Yelp, and here is the sentence that says we must not" is a far better
+    # answer than a silently shorter list.
+    clause: str = ""
 
 
 class GapAnalysisResponse(BaseModel):
@@ -276,6 +296,7 @@ class GapAnalysisResponse(BaseModel):
     missing_count: int = Field(serialization_alias="missingCount")
     missing: list[DirectoryResponse]
     live_urls: list[CitationLiveUrl] = Field(serialization_alias="liveUrls")
+    skipped: list[CitationSkip] = Field(default_factory=list)
     by_submit_status: dict[str, int] = Field(serialization_alias="bySubmitStatus")
     by_nap_status: dict[str, int] = Field(serialization_alias="byNapStatus")
 
@@ -366,3 +387,253 @@ class EngineStatusBoardResponse(BaseModel):
     connected_count: int = Field(serialization_alias="connectedCount")
     total_count: int = Field(serialization_alias="totalCount")
     engines: list[EngineStatusResponse]
+
+
+# --- the human work queue (0110) ---------------------------------------------------
+
+
+class QueueFieldValue(BaseModel):
+    """One pre-computed field the operator pastes — or the extension types — into the
+    directory's form.
+
+    Pre-computing every value server-side is the entire point of the queue: the two
+    levers on cost per live citation are the aggregator price and MINUTES PER ITEM, and
+    the minutes are spent hunting for values, not typing them.
+
+    `selector` is where that value goes on the live form, taken from the directory's
+    ACTIVE spec. It was missing, and the omission made the extension inert: the service
+    worker had nothing to send, so it shipped `selector: ""`, `document.querySelector("")`
+    matched nothing, and every field came back `selector_not_found`. The read-back logic
+    that catches a React revert was unreachable because nothing was ever filled.
+
+    EMPTY IS THE HONEST DEFAULT and it is common: a directory with no earned spec has no
+    selectors, and the panel then falls back to copy-buttons for a human to paste. A
+    fabricated selector would be worse than none - it would type a client's phone number
+    into whatever field happened to match."""
+
+    key: str
+    label: str
+    value: str
+    selector: str = ""
+
+
+class QueueItemResponse(BaseModel):
+    """One claimed queue item: what to do, where to do it, and with what values."""
+
+    citation_id: str = Field(serialization_alias="citationId")
+    client: str
+    directory: str
+    directory_url: str = Field(serialization_alias="directoryUrl")
+    # The verified deep link to the add-listing form. Empty when the catalogue has never
+    # had one probed - the operator then starts from the directory's home page, and the
+    # UI says so rather than presenting an empty link as if it were a destination.
+    add_url: str = Field(serialization_alias="addUrl")
+    fields: list[QueueFieldValue]
+    # Why this is a human's job rather than the bot's. Shown to the operator because
+    # knowing the obstacle before opening the tab is worth ~a minute an item.
+    queued_because: str = Field(serialization_alias="queuedBecause")
+    claim_expires_at: str | None = Field(default=None, serialization_alias="claimExpiresAt")
+    human_attempts: int = Field(serialization_alias="humanAttempts")
+    worked_seconds: int = Field(serialization_alias="workedSeconds")
+    # Set only when the directory's terms forbid automated submission. The queue should
+    # never contain one of these, so if it is ever non-empty the UI must refuse to help.
+    prohibited_warning: str = Field(default="", serialization_alias="prohibitedWarning")
+
+
+class QueueBoardResponse(BaseModel):
+    """The queue at a glance, plus the number the cost model actually rests on."""
+
+    waiting: int
+    in_progress: int = Field(serialization_alias="inProgress")
+    # MEDIAN seconds per finished item. `None` until something has been finished - an
+    # unmeasured number must read as unmeasured, never as zero, because zero would make
+    # the loaded-cost model look free.
+    median_seconds: int | None = Field(default=None, serialization_alias="medianSeconds")
+    mine: list[QueueItemResponse] = Field(default_factory=list)
+
+
+class QueueClaimRequest(BaseModel):
+    """Optionally narrow the claim to one client (an operator working one account)."""
+
+    client_id: str | None = Field(default=None, alias="clientId")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class QueueHeartbeatRequest(BaseModel):
+    """Extend the lease and bank the seconds worked since the last heartbeat."""
+
+    worked_seconds: int = Field(default=0, ge=0, le=3600, alias="workedSeconds")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class QueueCompleteRequest(BaseModel):
+    """Close an item WITH the public URL of the listing that was created.
+
+    `live_url` is required and is checked before it is stored. An operator cannot mark
+    an item done by asserting it - the same liveness probe the re-check uses has to
+    fetch that URL and find the business on it first."""
+
+    live_url: str = Field(min_length=1, alias="liveUrl")
+    worked_seconds: int = Field(default=0, ge=0, le=86400, alias="workedSeconds")
+    note: str = ""
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class QueueBlockedRequest(BaseModel):
+    """Close an item as NOT done, with a reason. A first-class outcome, not a failure:
+    a queue whose only exit is success trains people to fake success."""
+
+    reason: Literal[
+        "captcha_wall",
+        "account_required",
+        "paid_only",
+        "form_changed",
+        "duplicate_listing",
+        "directory_dead",
+        "phone_verification",
+        "postcard_verification",
+        "other",
+    ]
+    detail: str = ""
+    worked_seconds: int = Field(default=0, ge=0, le=86400, alias="workedSeconds")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class QueueCompleteResponse(BaseModel):
+    """The outcome of a completion attempt, including a REFUSAL.
+
+    A refusal is a normal, expected response and not an error: the operator submitted a
+    URL, we fetched it, and the business was not on the page. Telling them that
+    immediately - while they still have the tab open - is worth far more than accepting
+    it and discovering the truth at the next re-check."""
+
+    accepted: bool
+    submit_status: str = Field(serialization_alias="submitStatus")
+    live_url: str = Field(serialization_alias="liveUrl")
+    # Present when accepted is false: what we fetched and why it did not convince us.
+    reason: str = ""
+    matched_fields: list[str] = Field(default_factory=list, serialization_alias="matchedFields")
+
+
+# --- the earned spec whitelist (0111) ----------------------------------------------
+
+
+class SpecFieldRequest(BaseModel):
+    """One form field: where it is, and which canonical value goes in it."""
+
+    selector: str = Field(min_length=1)
+    value_key: str = Field(min_length=1, alias="valueKey")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SpecCreateRequest(BaseModel):
+    """A NEW spec revision. Always created INACTIVE - it has earned nothing yet.
+
+    There is no update endpoint by design: `spec` is immutable once written, so a
+    revision is a new row. That is what makes a verification meaningful - it signs the
+    selectors it actually checked and cannot be carried onto different ones."""
+
+    directory_id: str = Field(min_length=1, alias="directoryId")
+    url: str = Field(min_length=1)
+    fields: list[SpecFieldRequest]
+    submit_selector: str = Field(min_length=1, alias="submitSelector")
+    success_indicator: str = Field(default="", alias="successIndicator")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SpecVerifyRequest(BaseModel):
+    """The dated human live-DOM check. `selectors` is what the person actually saw."""
+
+    selectors: list[dict[str, Any]] = Field(default_factory=list)
+    notes: str = ""
+
+
+class SpecFirstLiveRequest(BaseModel):
+    """The first submission using this exact spec that produced a public listing URL."""
+
+    live_url: str = Field(min_length=1, alias="liveUrl")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SpecDeactivateRequest(BaseModel):
+    reason: Literal[
+        "drift_detected", "stale_unused", "submission_failed",
+        "operator_disabled", "terms_changed",
+    ]
+
+
+class DirectorySpecResponse(BaseModel):
+    """One spec and exactly how much it has earned."""
+
+    id: str
+    directory_id: str = Field(serialization_alias="directoryId")
+    directory_name: str = Field(serialization_alias="directoryName")
+    url: str
+    field_count: int = Field(serialization_alias="fieldCount")
+    active: bool
+    # The two halves of the contract, reported separately so a half-earned spec reads as
+    # half-earned rather than simply "not active".
+    verified: bool
+    verified_at: str | None = Field(default=None, serialization_alias="verifiedAt")
+    has_first_live_url: bool = Field(serialization_alias="hasFirstLiveUrl")
+    first_live_url: str = Field(default="", serialization_alias="firstLiveUrl")
+    success_count: int = Field(serialization_alias="successCount")
+    failure_count: int = Field(serialization_alias="failureCount")
+    drifted: bool
+    drift_selector: str = Field(default="", serialization_alias="driftSelector")
+    deactivated_reason: str = Field(default="", serialization_alias="deactivatedReason")
+    # What still has to happen before this spec may run. Empty when it is active.
+    blocking: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> DirectorySpecResponse:
+        spec = row.get("spec") or {}
+        verified = row.get("verified_at") is not None
+        has_live = bool(str(row.get("first_live_url") or ""))
+        drifted = row.get("drift_detected_at") is not None
+        blocking: list[str] = []
+        if not row.get("active"):
+            if not verified:
+                blocking.append("needs a dated human DOM verification")
+            if not has_live:
+                blocking.append("needs one submission that produced a public listing URL")
+            if drifted:
+                blocking.append(
+                    f"drifted: selector {row.get('drift_selector') or 'unknown'} is gone - "
+                    "record a NEW revision, this one cannot be repaired in place"
+                )
+        # Tolerate a datetime OR an already-serialised string. psycopg hands back a
+        # datetime, but the same row can arrive from a JSON round-trip, and a serializer
+        # that 500s on the shape of its own input is a bad trade for one line.
+        va = row.get("verified_at")
+        iso = getattr(va, "isoformat", None)
+        verified_at = iso() if callable(iso) else (str(va) if va else None)
+        return cls(
+            id=str(row["id"]),
+            directory_id=str(row["directory_id"]),
+            directory_name=str(row.get("directory_name") or ""),
+            url=str(spec.get("url") or ""),
+            field_count=len(spec.get("fields") or []),
+            active=bool(row.get("active")),
+            verified=verified,
+            verified_at=verified_at,
+            has_first_live_url=has_live,
+            first_live_url=str(row.get("first_live_url") or ""),
+            success_count=int(row.get("success_count") or 0),
+            failure_count=int(row.get("failure_count") or 0),
+            drifted=drifted,
+            drift_selector=str(row.get("drift_selector") or ""),
+            deactivated_reason=str(row.get("deactivated_reason") or ""),
+            blocking=blocking,
+        )
+
+
+class SpecBoardResponse(BaseModel):
+    """The whitelist at a glance. `active` is the ONLY honest coverage number for the
+    automated route - and it starts at zero, which is the true state, not a regression."""
+
+    active: int
+    verified_not_live: int = Field(serialization_alias="verifiedNotLive")
+    unverified: int
+    drifted: int
+    specs: list[DirectorySpecResponse]

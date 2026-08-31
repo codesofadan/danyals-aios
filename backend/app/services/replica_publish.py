@@ -35,6 +35,7 @@ from app.services.elementor_replica import (
 from app.services.layout_infer import InferredPage, infer_layout, infer_navbar
 from app.services.replica_capability import TargetCapability
 from app.services.replica_css import generate
+from app.services.site_design import profile_from_design_system
 
 
 class ReplicaPublisher(Protocol):
@@ -52,6 +53,11 @@ class ReplicaResult:
     sections: int = 0
     widgets: int = 0
     notes: list[str] = field(default_factory=list)
+    # The measured design, as the CONTENT pipeline's profile shape. The replicator has
+    # always measured a richer design system than the content analyzer does and then
+    # discarded it; carrying it out is what lets a replicated design drive generated
+    # pages (QA 20) without a second Playwright capture of the same URL.
+    design_profile: dict[str, Any] | None = None
 
     def note(self, text: str) -> None:
         self.notes.append(text)
@@ -130,6 +136,13 @@ def replicate(
     ds: DesignSystem = extract(nodes, css_vars=capture.css_vars)
     if not ds.is_grounded:
         result.note("design system is ungrounded (few measured values); styling will be thin")
+    # Capture it for the content pipeline before the rebuild consumes it. `container_px`
+    # comes from the INFERRED PAGE, not from `ds` - `extract` was called without a
+    # container above, so `ds.container_px` is 0 here and reading it would silently
+    # emit the default width for every site.
+    result.design_profile = profile_from_design_system(
+        ds, container_px=page.container_px, notes=f"Replicated from {url}"
+    ).as_dict()
 
     tree = build_tree(
         page, ds,

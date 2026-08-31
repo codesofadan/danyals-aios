@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Verified } from "@/lib/offpage";
 import { useApproveWeb2, useWeb2, useWeb2Placements } from "@/lib/hooks/offpage";
 import Web2CampaignBoard from "./Web2CampaignBoard";
+import Web2AccountBoard from "./Web2AccountBoard";
 import Web2PlacementTable from "./Web2PlacementTable";
 import Web2CampaignWizard from "./Web2CampaignWizard";
 import Web2PlanModal from "./Web2PlanModal";
@@ -29,7 +30,7 @@ const PIPELINE_META: Record<Web2PipelineStatus, { label: string; cls: string }> 
 
 export default function Web2Tab() {
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [view, setView] = useState<"ledger" | "campaigns" | "links" | "status">("ledger");
+  const [view, setView] = useState<"ledger" | "campaigns" | "links" | "accounts" | "status">("ledger");
   const web2Q = useWeb2();
   const web2Properties = web2Q.data ?? [];
   const approve = useApproveWeb2();
@@ -42,17 +43,32 @@ export default function Web2Tab() {
     [web2Properties, filter],
   );
   const needsReviewCount = web2Properties.filter((w) => w.status === "needs_review").length;
+  // A flagged placement waiting on a DELIBERATE second decision. Held per-property, so
+  // acknowledging one collision can never wave through another.
+  const [pendingAck, setPendingAck] = useState<{ id: string; message: string } | null>(null);
 
-  function act(id: string, action: "approve" | "reject") {
+  function act(id: string, action: "approve" | "reject", acknowledgeSimilarity = false) {
     approve.mutate(
-      { id, action },
+      { id, action, acknowledgeSimilarity },
       {
         onSuccess: () => {
+          setPendingAck(null);
           setFlash(action === "approve" ? "Approved — publishing now." : "Rejected.");
           window.setTimeout(() => setFlash(null), 3200);
         },
         onError: (err) => {
-          setFlash(`${action === "approve" ? "Approve" : "Reject"} failed — ${(err as Error)?.message ?? "try again"}.`);
+          const message = (err as Error)?.message ?? "try again";
+          // THE ONLY 409 THE OPERATOR CAN CLEAR THEMSELVES. The approve route raises
+          // three different conflicts and only this one is acknowledgeable: a gate that
+          // could not RUN, and a hard block while enforcement is on, both require a
+          // re-draft and must never be offered an override. The server names the
+          // acknowledgement in exactly the case where it is allowed, so that is what is
+          // matched — not the status code, which is 409 for all three.
+          if (action === "approve" && message.includes("acknowledgeSimilarity")) {
+            setPendingAck({ id, message });
+            return;
+          }
+          setFlash(`${action === "approve" ? "Approve" : "Reject"} failed — ${message}.`);
           window.setTimeout(() => setFlash(null), 3200);
         },
       },
@@ -86,7 +102,8 @@ export default function Web2Tab() {
           <button className={view === "ledger" ? "on" : undefined} onClick={() => setView("ledger")}>Placements</button>
           <button className={view === "campaigns" ? "on" : undefined} onClick={() => setView("campaigns")}>Campaigns</button>
           <button className={view === "links" ? "on" : undefined} onClick={() => setView("links")}>Links built</button>
-          <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>API status</button>
+          <button className={view === "accounts" ? "on" : undefined} onClick={() => setView("accounts")}>Accounts</button>
+            <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>API status</button>
         </div>
         {view === "ledger" && (
           <div className="seg w2-tabs-right">
@@ -101,12 +118,37 @@ export default function Web2Tab() {
 
       {view === "campaigns" && <Web2CampaignBoard />}
       {view === "links" && <LinksBuilt />}
+      {view === "accounts" && <Web2AccountBoard />}
       {view === "status" && <Web2StatusBoard />}
 
       {view === "ledger" && needsReviewCount > 0 && (
         <div className="op-flash" style={{ position: "static" }}>
           <span className="material-symbols-rounded">hourglass_top</span>
           {needsReviewCount} propert{needsReviewCount > 1 ? "ies" : "y"} awaiting a lead&apos;s review below.
+        </div>
+      )}
+      {pendingAck && (
+        <div
+          className="op-flash"
+          style={{ position: "static", background: "#fef3c7", color: "#92400e", display: "block" }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            The similarity gate flagged this placement
+          </div>
+          <div style={{ marginBottom: 8 }}>{pendingAck.message}</div>
+          <div style={{ marginBottom: 8, fontSize: "0.9em" }}>
+            Open the colliding property and read it. Approving here records that{" "}
+            <b>you</b> judged this article genuinely distinct — it does not silence the
+            gate for anything else.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="op-act" onClick={() => act(pendingAck.id, "approve", true)}>
+              I have reviewed it — approve anyway
+            </button>
+            <button className="op-act" onClick={() => setPendingAck(null)}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
       {showPlan && <Web2PlanModal onClose={() => setShowPlan(false)} />}

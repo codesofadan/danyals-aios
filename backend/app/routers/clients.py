@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, require_perm, require_staff
+from app.core.deps import RedisDep, SettingsDep
 from app.core.pagination import PageDep
-from app.db.clients_repo import ClientsRepoDep
+from app.db.clients_repo import ClientsRepo, ClientsRepoDep
 from app.db.database import DatabaseNotConfiguredError
 from app.db.report_grants_repo import ReportGrantsRepoDep
 from app.logging_setup import get_logger
@@ -28,10 +29,18 @@ from app.schemas.clients_business import (
     ClientBusinessProfileInput,
     ClientBusinessProfileResponse,
 )
-from app.schemas.identity import MemberResponse, PortalUserRequest
+from app.schemas.identity import (
+    MemberCredentials,
+    MemberResponse,
+    PortalUserRequest,
+    SetPasswordRequest,
+)
 from app.services.activity import record_activity
+from app.services.credentials import generate_password
+from app.services.login_credentials import reveal_password, set_password
 from app.services.notifications import notify
 from app.services.provisioning import provision_user
+from app.services.token_denylist import revoke_all_for_user
 
 router = APIRouter(tags=["clients"])
 logger = get_logger("app.clients")
@@ -310,6 +319,135 @@ async def create_portal_user(
         ),
     )
     return MemberResponse.from_row(row)
+
+
+# --------------------------------------------------------------------------- #
+# Portal login credentials (the Client Directory's "Show login")
+# --------------------------------------------------------------------------- #
+# These mirror the team tool (`GET|POST /admin/users/{id}/credentials|password`)
+# but are gated on `manage_clients`, NOT `manage_team`. That is the whole reason
+# they exist rather than the directory calling the team routes: a MANAGER holds
+# manage_clients and not manage_team, so a manager who may create a client - and
+# who is shown its password once at creation - could never see it again. The same
+# trap `create_portal_user` above already documents for provisioning.
+#
+# Widening the gate is not an escalation, because every route here re-reads the
+# target through `_portal_user_of` and refuses any account that is not a
+# `role='client'` login belonging to THIS client. A caller cannot walk an
+# arbitrary user id through the client surface to reach a staff account.
+
+
+async def _portal_user_of(repo: ClientsRepo, client_id: str, user_id: str) -> dict[str, Any]:
+    """The client's portal login row, or 404. Pins the tenant AND the role."""
+    rows = await asyncio.to_thread(repo.list_portal_users, client_id)
+    for row in rows:
+        if str(row["id"]) == str(user_id):
+            return row
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="No such portal login for this client"
+    )
+
+
+@router.get("/clients/{client_id}/portal-credentials", response_model=list[MemberCredentials])
+async def get_portal_credentials(
+    client_id: str, repo: ClientsRepoDep, actor: ManageClients
+) -> list[MemberCredentials]:
+    """Reveal every portal login this client can sign in with (lead-only).
+
+    Fetched on demand - one click per client, never for the whole directory - so
+    plaintext passwords are not sitting in a list response nobody asked for.
+
+    A ``password`` of ``None`` (``available=False``) is the honest answer for a
+    login provisioned before the sealed copy existed, or with no ``VAULT_MASTER_KEY``
+    set at the time. The caller renders "not captured" and offers a reset; it must
+    never render a blank as though the password were empty.
+    """
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    rows = await asyncio.to_thread(repo.list_portal_users, client_id)
+    out: list[MemberCredentials] = []
+    for row in rows:
+        password = await asyncio.to_thread(reveal_password, str(row["id"]))
+        out.append(
+            MemberCredentials(
+                id=str(row["id"]),
+                username=row.get("username"),
+                email=str(row.get("email") or ""),
+                password=password,
+                available=password is not None,
+            )
+        )
+    # One activity row for the reveal, not one per login: the operator performed a
+    # single act. Recorded even when nothing was captured - the ATTEMPT is the event.
+    await record_activity(
+        actor, kind="access", action="revealed portal credentials",
+        target=str(client.get("name") or client_id),
+        entity_type="client", entity_id=client_id,
+    )
+    return out
+
+
+@router.post(
+    "/clients/{client_id}/portal-users/{user_id}/password", response_model=MemberCredentials
+)
+async def set_portal_password(
+    client_id: str,
+    user_id: str,
+    body: SetPasswordRequest,
+    repo: ClientsRepoDep,
+    actor: ManageClients,
+    redis: RedisDep,
+    settings: SettingsDep,
+) -> MemberCredentials:
+    """Set/rotate a client portal password and return it once (lead-only).
+
+    With no ``password`` in the body the server generates a strong one. This is the
+    repair path for a login whose password was never captured, and the reason the
+    reveal above can answer "not captured" without stranding the operator.
+
+    Rotating ENDS the sessions the old password opened, for the same reason the team
+    route does: a bearer token never consults the password again, so without this a
+    rotation would change nothing for days.
+    """
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    target = await _portal_user_of(repo, client_id, user_id)
+
+    new_password = (
+        body.password.get_secret_value() if body.password is not None else generate_password()
+    )
+    ok = await asyncio.to_thread(set_password, user_id, new_password)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No such portal login for this client"
+        )
+
+    # Best-effort by design: the password has ALREADY changed in Postgres, so failing
+    # the request here would tell the operator a rotation did not happen when it did.
+    if not await revoke_all_for_user(
+        redis, user_id=user_id, max_token_ttl=settings.jwt_access_ttl_seconds
+    ):
+        logger.warning(
+            "portal_password_rotation_token_revocation_unavailable",
+            target=user_id,
+            actor=actor.id,
+        )
+
+    await record_activity(
+        actor, kind="access", action="reset a portal password",
+        target=str(target.get("name") or target.get("username") or ""),
+        meta=str(client.get("name") or client_id),
+        entity_type="client", entity_id=client_id,
+    )
+    return MemberCredentials(
+        id=str(target["id"]),
+        username=target.get("username"),
+        email=str(target.get("email") or ""),
+        password=new_password,
+        available=True,
+    )
 
 
 @router.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)

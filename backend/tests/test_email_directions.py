@@ -26,7 +26,6 @@ from typing import Any
 
 import pytest
 
-from app.config import get_settings
 from app.services import notifications as svc
 from app.services.notifications import email_admin, email_client, notify, notify_leads
 from integrations.resend import FakeEmailSender
@@ -133,16 +132,53 @@ async def test_admin_to_client_emails_the_client_contact(
     assert sender.sent[0].to == "hi@atlas.com"  # the counterpart = the client contact
 
 
+def _configure_admin_inbox(monkeypatch: pytest.MonkeyPatch, address: str) -> None:
+    """Point `admin_notify_email` at a test address, cache included.
+
+    `get_settings` is lru_cached, so setting the env var alone does nothing once
+    any earlier test has read the settings.
+    """
+    from app.config import get_settings as _get
+
+    monkeypatch.setenv("ADMIN_NOTIFY_EMAIL", address)
+    _get.cache_clear()
+    monkeypatch.setattr(
+        "app.services.notifications.get_settings",
+        lambda: _get().model_copy(update={"admin_notify_email": address}),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Direction 4 - client -> admin
 # --------------------------------------------------------------------------- #
 async def test_client_to_admin_emails_the_operator_inbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The inbox is CONFIGURED, never defaulted.
+
+    This used to pass on a default baked into config.py - a named individual's
+    personal Gmail - so the test proved the send worked AND quietly depended on
+    the defect that any deployment which did not override it emailed that person
+    another company's client requests. The setting is blank by default now, so
+    the test has to supply an address like a real deployment does.
+    """
+    _configure_admin_inbox(monkeypatch, "ops@agency.example.com")
     sender = FakeEmailSender()
     await email_admin("New portal request", "<p>details</p>", "details", email_sender=sender)
     assert len(sender.sent) == 1
-    assert sender.sent[0].to == get_settings().admin_notify_email  # the operator inbox
+    assert sender.sent[0].to == "ops@agency.example.com"
+
+
+async def test_with_no_inbox_configured_nothing_is_sent_anywhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The blank default must SKIP, not fall back to some address. A missed
+    operator alert is a far cheaper failure than delivering a client's name and
+    their free-text message to whoever a default happened to name."""
+    _configure_admin_inbox(monkeypatch, "")
+    sender = FakeEmailSender()
+    await email_admin("New portal request", "<p>details</p>", "details", email_sender=sender)
+    assert sender.sent == []
 
 
 # --------------------------------------------------------------------------- #
