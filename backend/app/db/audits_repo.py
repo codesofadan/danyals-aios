@@ -59,6 +59,25 @@ class AuditsRepo:
             )
             return cur.fetchone()
 
+    def clear_error(self, audit_id: str) -> dict[str, Any] | None:
+        """Drop the recorded reason a completed audit's findings were unavailable.
+
+        ``audits.error`` on a ``done`` row means "the run finished but its findings
+        were not stored as rows, and here is why". Once a rebuild has produced those
+        rows the sentence is false, so it is cleared rather than left to describe a
+        state that no longer exists.
+
+        Narrow on purpose, like ``set_visibility``: a generic update on this table
+        would let a route reviewed as a repair edit a completed run's url, tier or
+        cost. Returns None when RLS matched no row (a refusal does not raise).
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.audits set error = null where id = %s returning *",
+                (audit_id,),
+            )
+            return cur.fetchone()
+
     def insert_audit(self, row: dict[str, Any]) -> dict[str, Any]:
         cols = list(row.keys())
         stmt = sql.SQL("insert into public.audits ({cols}) values ({vals}) returning *").format(

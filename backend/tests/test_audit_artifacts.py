@@ -120,7 +120,9 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
     artifacts = LocalArtifactStore(tmp_path / "root")
     out = execute_audit(store, Settings(_env_file=None), "aud-1", runner=_runner, artifacts=artifacts)
     assert out["status"] == "done"
-    done = store.updates[-1]
+    # Found by status, not by position: a run whose altitude ingest fails records
+    # the reason on the audit AFTER completing, so "done" is not always last.
+    done = next(u for u in store.updates if u.get("status") == "done")
     assert done["pdf_path"] == "aud-1/report.pdf"
     assert done["json_path"] == "aud-1/findings.json"
     assert (tmp_path / "root" / "aud-1" / "report.pdf").is_file()

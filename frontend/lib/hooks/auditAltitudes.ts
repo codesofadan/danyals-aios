@@ -7,13 +7,13 @@
 // Every one is READ-ONLY: the altitude tables are written by the worker's ingest
 // on the service_role seam, never through a user JWT.
 //
-// These are all `staleTime: Infinity` and never poll. A completed audit's
+// All the READS are `staleTime: Infinity` and never poll. A completed audit's
 // findings do not change until it is RE-RUN, and re-running creates a new audit
 // row - so refetching on an interval would be pure waste. This is deliberately
 // the opposite of `useAudits`, which polls while a job is in flight.
 // ============================================================
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
   AuditPage,
@@ -117,5 +117,44 @@ export function useAuditRoadmap(auditId: string) {
     enabled: Boolean(auditId),
     retry: false,
     ...FOREVER,
+  });
+}
+
+
+/** What POST /audits/{id}/reingest reports having rebuilt. */
+export type ReingestResult = {
+  auditId: string;
+  pages: number;
+  findings: number;
+  instances: number;
+  roadmapItems: number;
+  workbookBuilt: boolean;
+  reportBuilt: boolean;
+  notes: string[];
+};
+
+/**
+ * Rebuild a completed audit's findings from the artifacts it already produced.
+ *
+ * The one WRITE in this module, and it writes no new evidence: it re-runs the
+ * same transform the worker runs, against the run's own stored artifact_dir. An
+ * audit whose ingest failed - or that predates the altitude tables - has a report
+ * on disk and no rows behind it, which the detail page could only report as "no
+ * altitude data" and a link back to the list. This is the way out of that.
+ *
+ * It does not re-run the audit and spends nothing. A run whose artifacts are gone
+ * returns 409 with the reason, rather than an empty rebuild reported as success.
+ *
+ * Invalidates every altitude query for the audit, so the page redraws with the
+ * rebuilt rows instead of asking the operator to refresh.
+ */
+export function useReingestAudit(auditId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<ReingestResult>(`/audits/${auditId}/reingest`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["audit", auditId] });
+      void qc.invalidateQueries({ queryKey: ["audits"] });
+    },
   });
 }

@@ -16,13 +16,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { downloadFile, openFile } from "@/lib/api";
+import { downloadFile, getReportHtml, openFile } from "@/lib/api";
 import { useAudit } from "@/lib/hooks/audits";
 import {
   useAuditFindings,
   useAuditPages,
   useAuditRoadmap,
   useAuditRollups,
+  useReingestAudit,
 } from "@/lib/hooks/auditAltitudes";
 import {
   DOWNLOADS,
@@ -37,6 +38,7 @@ import SubpointTable from "@/components/audit/SubpointTable";
 import FindingList from "@/components/audit/FindingList";
 import RoadmapBoard from "@/components/audit/RoadmapBoard";
 import AuditPagesTable from "@/components/audit/AuditPagesTable";
+import ReportViewer from "@/components/report/ReportViewer";
 
 type Tab = "overview" | "strategy" | "issues" | "pages" | "downloads";
 
@@ -109,6 +111,7 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
   const [page, setPage] = useState(0);
 
   const rollups = useAuditRollups(auditId);
+  const reingest = useReingestAudit(auditId);
   // Server-side paging. This used to fetch a flat `limit: 200`, so on the real
   // 461-finding audit 261 problems were reachable only by downloading the CSV -
   // and the UI gave no sign they existed.
@@ -187,20 +190,68 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
     );
   }
 
-  // An audit run before the altitude ingest existed has no rows to show. That is
-  // a legitimate state, not an error - say so plainly and offer the old report.
+  // The audit completed and its report exists, but the findings were never stored
+  // as rows - the ingest failed, or the run predates the altitude tables.
+  //
+  // This used to be a dead end: a sentence explaining the state and a link back to
+  // the list. The artifacts are still on disk, so the rows CAN be rebuilt from the
+  // run's own evidence, and the report it describes can be read right here rather
+  // than hunted for elsewhere. Both are offered instead of an apology.
   if ((rollups.data ?? []).length === 0) {
     return (
       <div className="alt-empty big">
         <span className="material-symbols-rounded">layers_clear</span>
-        <h2>No altitude data for this audit</h2>
+        <h2>This audit&rsquo;s findings aren&rsquo;t stored yet</h2>
         <p>
-          This run completed before findings were stored as rows, or produced no
-          findings. The original report is still available from the audit list.
+          The run completed and its report is below. Its findings were not saved as
+          rows, so the pillar scores, the issue list and the plan have nothing to
+          read yet. They can be rebuilt from the report this run already produced,
+          which costs nothing and does not re-run the audit.
         </p>
-        <Link className="alt-back" href="/admin/audit">
-          Back to audits
-        </Link>
+        {reingest.isError && (
+          <p style={{ color: "var(--crit)", fontWeight: 600 }}>
+            {reingest.error instanceof Error
+              ? reingest.error.message
+              : "The rebuild could not be completed."}
+          </p>
+        )}
+        {reingest.isSuccess && reingest.data.findings === 0 && (
+          <p style={{ color: "var(--warn)", fontWeight: 600 }}>
+            The rebuild finished and this run genuinely recorded no findings.
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={() => reingest.mutate()}
+            disabled={reingest.isPending}
+          >
+            <span
+              className={`material-symbols-rounded${reingest.isPending ? " spin" : ""}`}
+            >
+              {reingest.isPending ? "progress_activity" : "build"}
+            </span>
+            {reingest.isPending ? "Rebuilding…" : "Rebuild findings from the report"}
+          </button>
+          <Link className="alt-back" href="/admin/audit">
+            Back to audits
+          </Link>
+        </div>
+
+        {/* The report itself, in place. It is the deliverable, and it existed all
+            along - the previous version of this screen sent the operator away to
+            find it. */}
+        <div style={{ marginTop: 22, textAlign: "left" }}>
+          <ReportViewer
+            label={audit.data?.url ?? "Audit report"}
+            load={() => getReportHtml(`/audits/${auditId}/report.html`)}
+            onDownloadPdf={() =>
+              downloadFile(`/audits/${auditId}/report.pdf`, `audit-${auditId}.pdf`)
+            }
+            reloadKey={auditId}
+          />
+        </div>
       </div>
     );
   }

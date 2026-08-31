@@ -184,6 +184,16 @@ def _safe_record_cost(store: AuditStore, row: dict[str, Any], cost: float) -> No
         logger.warning("audit_cost_log_failed", audit_id=str(row.get("id", "")))
 
 
+def _safe_update(store: AuditStore, audit_id: str, fields: dict[str, Any]) -> None:
+    """A supplementary write on an ALREADY-COMPLETED audit. Never fatal: the run
+    has succeeded and its report exists, so failing here would throw away a
+    finished deliverable to record a footnote about it."""
+    try:
+        store.update(audit_id, fields)
+    except Exception:
+        logger.warning("audit_note_update_failed", audit_id=audit_id)
+
+
 def _store_artifacts(
     artifacts: ArtifactStore | None, audit_id: str, result: AuditRunResult
 ) -> tuple[str | None, str | None]:
@@ -248,7 +258,7 @@ def _ingest_altitudes(
     row: dict[str, Any],
     *,
     tier_label: str,
-) -> None:
+) -> str:
     """Load the run into the three altitude tables, then build the workbook.
 
     This is what turns a 9.3 MB JSON blob into rows a human and a query can both
@@ -260,9 +270,17 @@ def _ingest_altitudes(
     client deliverable because a supplementary transform failed would be a strictly
     worse outcome than shipping without the workbook. Failures are logged and the
     audit stays ``done``.
+
+    RETURNS a short reason when the rows were NOT produced, empty when they were.
+    The caller records it on the audit. Previously this swallowed every failure
+    into a log line and returned None, so an audit whose ingest died looked
+    identical to a healthy one: green in the list, and an empty "no altitude data
+    for this audit" dead-end when opened. The run is still `done` - the report
+    exists and is the deliverable - but the platform should be able to say WHY the
+    findings are missing, and offer to rebuild them.
     """
     if not result.artifact_dir:
-        return
+        return "the run left no artifact directory to ingest"
     try:
         ingested = audit_ingest.ingest(
             audit_id=audit_id,
@@ -287,7 +305,7 @@ def _ingest_altitudes(
             audit_id=audit_id,
             error=f"{type(exc).__name__}: {exc}",
         )
-        return
+        return f"storing the findings as rows failed: {type(exc).__name__}: {exc}"
 
     # The plan. Deterministic and model-free: if this fails the audit still has
     # its findings, so it is warned about rather than raised.
@@ -305,7 +323,7 @@ def _ingest_altitudes(
         )
 
     if not isinstance(artifacts, LocalArtifactStore):
-        return
+        return ""
     try:
         built = audit_workbook.build(
             audit_id=audit_id,
@@ -343,6 +361,11 @@ def _ingest_altitudes(
             audit_id=audit_id,
             error=f"{type(exc).__name__}: {exc}",
         )
+        # The ROWS landed, so the findings views work; only the downloadable
+        # workbook and the platform report are missing. Distinguished from an
+        # ingest failure because the remedy is different and cheaper.
+        return f"building the workbook failed: {type(exc).__name__}: {exc}"
+    return ""
 
 
 def execute_audit(
@@ -482,7 +505,16 @@ def execute_audit(
     )
     # Role-based remediation sheets (xlsx + csvs) from the SAME findings.json.
     _store_sheets(artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free")
-    _ingest_altitudes(artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free")
+    ingest_note = _ingest_altitudes(
+        artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free"
+    )
+    if ingest_note:
+        # The audit itself succeeded and its report exists, so the status stays
+        # `done` - but the reason its findings are not queryable is recorded rather
+        # than left in a log line nobody reads. `audits.error` is server-side only
+        # (it is not on AuditResponse), and POST /audits/{id}/reingest clears it
+        # when the rows are rebuilt.
+        _safe_update(store, audit_id, {"error": ingest_note[:_ERROR_MAX]})
     # Publish a client deliverable for a completed audit that produced a PDF
     # (best-effort; never fails the job). Public/unlinked audits have no client.
     if pdf_key and row.get("client_id"):

@@ -152,6 +152,26 @@ class AuditVisibilityUpdate(BaseModel):
     visible_to_client: bool
 
 
+class AuditReingestResponse(BaseModel):
+    """What ``POST /audits/{id}/reingest`` rebuilt, in the numbers that show it worked.
+
+    Reporting the counts rather than a bare ``{"ok": true}`` is the point: a rebuild
+    that produced zero findings is a DIFFERENT outcome from one that produced eight
+    thousand, and the operator is about to decide whether the audit is now usable.
+    """
+
+    audit_id: str = Field(serialization_alias="auditId")
+    pages: int
+    findings: int
+    instances: int
+    roadmap_items: int = Field(serialization_alias="roadmapItems")
+    workbook_built: bool = Field(serialization_alias="workbookBuilt")
+    report_built: bool = Field(serialization_alias="reportBuilt")
+    #: Non-empty when a PART of the rebuild failed. The findings can be present and
+    #: the workbook missing; saying which is what stops "it worked" covering both.
+    notes: list[str] = Field(default_factory=list)
+
+
 class AuditResponse(BaseModel):
     """One audit row in the frontend ``AuditRow`` shape."""
 

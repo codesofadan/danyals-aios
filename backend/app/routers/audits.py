@@ -37,6 +37,7 @@ from app.schemas.audits import (
     AuditCreate,
     AuditEstimateRequest,
     AuditEstimateResponse,
+    AuditReingestResponse,
     AuditResponse,
     AuditStatsResponse,
     AuditVisibilityUpdate,
@@ -58,6 +59,7 @@ from app.services.audit_depth import (
     estimate_audit_cost,
     planned_pages,
 )
+from app.services.audit_reingest import ReingestUnavailableError, reingest_audit
 from app.services.audit_sheets import SHEET_FILES, sheet_media_type
 from app.services.cost_gate import CostGate, GateContext, GateDecision, SpendHaltedError
 from app.services.cost_store import PostgresCostStore
@@ -608,3 +610,66 @@ async def set_audit_visibility(
     resp = AuditResponse.from_row(row)
     resp.pdf, resp.json_ = await asyncio.to_thread(honest_artifact_flags, store, row)
     return resp
+
+
+@router.post("/audits/{audit_id}/reingest", response_model=AuditReingestResponse)
+async def reingest_audit_findings(
+    audit_id: str,
+    repo: AuditsRepoDep,
+    store: ArtifactStoreDep,
+    actor: RunAudits,
+) -> AuditReingestResponse:
+    """Rebuild this audit's stored findings from the artifacts it already produced.
+
+    An audit's report and its QUERYABLE findings come from two different steps. The
+    engine writes the report and the run is marked ``done``; a separate, deliberately
+    non-fatal transform then loads those artifacts into the altitude tables and builds
+    the workbook and the client report from them. When that second step failed - or
+    never existed, for a run predating it - the audit stayed green in the list and its
+    detail page was a dead end reading "No altitude data for this audit", while the
+    report it was describing sat intact on disk.
+
+    This is the way back. It re-runs the SAME transform the worker runs, against the
+    stored ``artifact_dir``, so the findings, the roadmap, the workbook and the client
+    report are rebuilt from the run's own evidence - one canonical stored result, not
+    a second copy.
+
+    It does not re-run the audit and it spends nothing: no engine invocation, no
+    provider call. Gated on ``run_audits`` rather than ``view_reports`` because it
+    writes, and it is the same permission the ``audits_modify`` policy admits.
+
+    A run whose artifacts are gone gets a 409 saying so, rather than an empty rebuild
+    reported as a success.
+    """
+    row = await asyncio.to_thread(repo.get_audit, audit_id)
+    if row is None:
+        raise _AUDIT_NOT_FOUND
+
+    try:
+        result = await asyncio.to_thread(reingest_audit, row, artifacts=store)
+    except ReingestUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    # The recorded reason is now stale: the rows exist. Clearing it keeps
+    # `audits.error` meaning "the findings are not queryable, and here is why".
+    if row.get("error"):
+        await asyncio.to_thread(repo.clear_error, audit_id)
+
+    await record_activity(
+        actor,
+        kind="audit",
+        action="rebuilt an audit's findings from its stored report",
+        target=str(row.get("url") or audit_id),
+        entity_type="audit",
+        entity_id=audit_id,
+    )
+    return AuditReingestResponse(
+        audit_id=audit_id,
+        pages=result.pages,
+        findings=result.findings,
+        instances=result.instances,
+        roadmap_items=result.roadmap_items,
+        workbook_built=result.workbook_built,
+        report_built=result.report_built,
+        notes=result.notes,
+    )

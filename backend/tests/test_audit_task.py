@@ -90,10 +90,11 @@ def test_success_marks_running_then_done_and_logs_zero_cost_on_free() -> None:
     out = execute_audit(store, _settings(), "aud-1", runner=_ok_runner(82))
     assert out["status"] == "done"
     assert out["score"] == 82
-    # first update = running, last update = done with the result fields
+    # First update = running. The completion update is found by its status rather
+    # than by position: a run whose altitude ingest fails records the reason on the
+    # audit afterwards, so "done" is no longer guaranteed to be the LAST write.
     assert store.updates[0]["status"] == "running" and "started_at" in store.updates[0]
-    done = store.updates[-1]
-    assert done["status"] == "done"
+    done = next(u for u in store.updates if u.get("status") == "done")
     assert done["score"] == 82
     assert done["run_uuid"] == "u-1"
     assert done["runtime_seconds"] == 372
@@ -358,3 +359,28 @@ def test_a_run_that_wrote_no_mode_falls_back_to_what_we_invoked(monkeypatch: Any
     assert _cost_mode_for(monkeypatch, depth="deep", engine_mode="") == "paid"
     # ... and a free-depth run that wrote no mode is not invented into a bill.
     assert _cost_mode_for(monkeypatch, depth="free", engine_mode="") == "free"
+
+
+def test_a_failed_altitude_ingest_is_recorded_rather_than_swallowed() -> None:
+    """The audit still completes - its report exists and IS the deliverable - but
+    the platform must be able to say why the findings are not queryable.
+
+    Before this, the failure went to a log line and nothing else. The audit was
+    green in the list and, when opened, an empty "No altitude data for this audit"
+    dead end. Two very different situations - "this run genuinely found nothing"
+    and "storing what it found failed" - were indistinguishable from the outside,
+    and neither offered a way back.
+
+    (The ingest genuinely fails here: it writes on the privileged pool, which the
+    unit environment has no DSN for. So this asserts the real path, not a mock of
+    it.)
+    """
+    store = FakeStore(_row(tier="free"))
+    out = execute_audit(store, _settings(), "aud-1", runner=_ok_runner(82))
+
+    assert out["status"] == "done"
+    note = next((u for u in store.updates if "error" in u and u.get("status") is None), None)
+    assert note is not None, "the ingest failure was not recorded on the audit"
+    assert "findings" in note["error"]
+    # The run itself is NOT reported as failed: it succeeded.
+    assert not any(u.get("status") == "failed" for u in store.updates)
