@@ -9,6 +9,7 @@
  */
 
 import type { CompleteResult, FillOutcome, PanelRequest, PanelResponse, QueueBoard, QueueItem } from "../lib/messages";
+import { needsGrant, originPattern } from "../lib/origins";
 
 const root = document.getElementById("root") as HTMLElement;
 
@@ -47,6 +48,33 @@ function mmss(total: number): string {
 // --------------------------------------------------------------------------- //
 // Pairing.
 // --------------------------------------------------------------------------- //
+/**
+ * Ensure this extension may talk to the dashboard the operator typed.
+ *
+ * localhost is already in `host_permissions`, so it needs no prompt - and asking
+ * for it anyway would put a permission dialog in front of every developer. Any
+ * other origin is requested once and remembered by Chrome.
+ *
+ * Returns false when the operator declines or the URL is unusable, so the caller
+ * can say what happened rather than pairing into an origin every request will fail
+ * against.
+ */
+async function ensureOriginPermission(apiBase: string): Promise<boolean> {
+  let pattern: string;
+  try {
+    pattern = originPattern(apiBase);
+  } catch {
+    return false;
+  }
+  if (!needsGrant(pattern)) return true;
+  try {
+    if (await chrome.permissions.contains({ origins: [pattern] })) return true;
+    return await chrome.permissions.request({ origins: [pattern] });
+  } catch {
+    return false;
+  }
+}
+
 function renderPairing(message = ""): void {
   root.replaceChildren();
   root.append(el("h1", { textContent: "Pair this device" }));
@@ -64,6 +92,22 @@ function renderPairing(message = ""): void {
   const go = el("button", { className: "primary", textContent: "Pair" });
   go.onclick = async () => {
     go.disabled = true;
+    // THE MANIFEST ONLY GRANTS localhost. host_permissions is
+    // ["http://localhost:8000/*"], so pairing against the deployed dashboard - the
+    // only place a real operator's queue lives - would have every request blocked
+    // by the extension's own permissions, with no error the panel could explain.
+    // The grant for any other origin has to be REQUESTED, and Chrome only shows
+    // that prompt inside a user gesture, which this click is. Declared in the
+    // manifest as optional_host_permissions: ["https://*/*"].
+    const granted = await ensureOriginPermission(base.value);
+    if (!granted) {
+      go.disabled = false;
+      renderPairing(
+        "This device needs permission to reach that dashboard. Press Pair again and " +
+          "choose Allow, or pair against http://localhost:8000 while developing.",
+      );
+      return;
+    }
     const res = await send({ type: "pair", token: token.value, apiBase: base.value });
     if (res.ok) { flash = "Paired."; void refresh(); }
     else { go.disabled = false; renderPairing(res.error); }

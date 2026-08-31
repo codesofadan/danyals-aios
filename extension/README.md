@@ -26,7 +26,19 @@ deep link is what turns five minutes into about ninety seconds.
 npm install && npm run build      # produces a loadable dist/
 ```
 
-Then `chrome://extensions` → Developer mode → **Load unpacked** → select `dist/`.
+Then `chrome://extensions` → Developer mode → **Load unpacked** → select **`extension/dist`**.
+
+**Load `dist/`, not this folder.** `manifest.json` names `service-worker.js`,
+`panel.html` and `filler.js` — all of them build output. Point Chrome at the project
+folder and it finds the manifest sitting next to `src/` with none of the files it
+names, and reports exactly that: *Could not load manifest* / *Could not load
+background script*. `dist/` is gitignored on purpose (see `.gitignore`), so a fresh
+clone has no build until you make one, and the loaded extension can never drift from
+the source that produced it. Re-run the build after pulling, then press **Reload** on
+the extension card.
+
+On Windows, `Build-Extension.bat` at the repo root does the install, the build, and
+prints the folder to load.
 
 **Do not publish this to the Chrome Web Store.** An extension that fills forms on
 third-party sites and uploads screenshots to a private API invites heavy review and can
@@ -35,8 +47,16 @@ self-hosted `.crx` by enterprise policy, or load unpacked for a small team.
 
 ## Pairing
 
-Mint a token in the dashboard (Settings → Extension), paste it into the panel. It is
-shown **once**.
+Mint a token in the dashboard (Settings → Extension), paste it into the panel along
+with the dashboard's URL. The token is shown **once**.
+
+**A non-localhost dashboard needs one permission grant.** `host_permissions` in the
+manifest covers `http://localhost:8000` and nothing else, so pairing against the
+deployed dashboard asks Chrome for access to that origin at the moment you press
+Pair — choose **Allow**. Decline it and the panel says so rather than pairing into an
+origin every request would be blocked from reaching. The grant is remembered per
+origin, and it is drawn from `optional_host_permissions`, so it is the operator's
+decision rather than a blanket permission asked for at install time.
 
 ## The credential, honestly
 

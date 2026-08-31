@@ -1,6 +1,6 @@
 # Running AIOS locally
 
-Four double-click batch files at the repo root:
+Five double-click batch files at the repo root:
 
 | File | What it does |
 |---|---|
@@ -8,6 +8,7 @@ Four double-click batch files at the repo root:
 | **Start-Backend.bat** | Runs the local backend (the engine) on `http://localhost:8000`. |
 | **Start-Worker.bat** | Runs the job worker that actually executes background work. |
 | **Finish-Citations.bat** | Opens each ready citation in a real browser (logged-in + pre-filled) for the final click. |
+| **Build-Extension.bat** | Builds the Citation Assistant browser extension and prints the folder to load into Chrome. |
 
 ## The worker is not optional
 
