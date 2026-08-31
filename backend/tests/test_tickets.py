@@ -22,7 +22,12 @@ from app.schemas.tickets import TicketResponse, to_response
 
 pytestmark = pytest.mark.unit
 
-_TICKET_KEYS = {"id", "client", "subject", "channel", "priority", "status", "ago"}
+# The 7 original keys plus the converted-task link (0117). `taskCode` is a PUBLIC
+# handle, like `id`; no internal identity joins the wire.
+_TICKET_KEYS = {
+    "id", "client", "subject", "channel", "priority", "status", "ago",
+    "taskCode", "taskStatus", "taskAssignee",
+}
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

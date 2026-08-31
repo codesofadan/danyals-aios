@@ -74,6 +74,13 @@ class TicketResponse(BaseModel):
     priority: TicketPriority
     status: TicketStatus
     ago: str
+    # --- the work this request became (0117) ---
+    # Still no internal identity on the wire: a task CODE is the public J-#### handle,
+    # exactly as `id` is the public T-#### one. Null means not converted, which is what
+    # the Convert control tests - so the same request cannot be converted twice.
+    task_code: str | None = Field(default=None, serialization_alias="taskCode")
+    task_status: str | None = Field(default=None, serialization_alias="taskStatus")
+    task_assignee: str | None = Field(default=None, serialization_alias="taskAssignee")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> TicketResponse:
@@ -88,6 +95,9 @@ class TicketResponse(BaseModel):
             priority=priority if priority in _PRIORITIES else "med",
             status=status if status in _STATUSES else "open",
             ago=relative_ago(row.get("opened_at"), empty="just now"),
+            task_code=(str(row["task_code"]) if row.get("task_code") else None),
+            task_status=(str(row["task_status"]) if row.get("task_status") else None),
+            task_assignee=(str(row["task_assignee"]) if row.get("task_assignee") else None),
         )
 
 

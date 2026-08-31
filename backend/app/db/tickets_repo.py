@@ -34,18 +34,41 @@ class TicketsRepo:
     def list_tickets(
         self, *, status: str | None = None, limit: int | None = None, offset: int = 0
     ) -> _Rows:
-        query = "select * from public.support_tickets"
+        # Joined to the task a converted request became (0117), so the board can show
+        # the state of the WORK beside the request. Without it, "has this been picked
+        # up, and where has it got to?" could only be answered by reading thread
+        # messages one at a time.
+        query = (
+            "select t.*, k.code as task_code, k.status as task_status, "
+            "       u.name as task_assignee "
+            "from public.support_tickets t "
+            "left join public.tasks k on k.id = t.task_id "
+            "left join public.users u on u.id = k.assignee_id"
+        )
         params: list[Any] = []
         if status is not None:
-            query += " where status = %s"
+            query += " where t.status = %s"
             params.append(status)
-        query += " order by opened_at desc"
+        query += " order by t.opened_at desc"
         if limit is not None:
             query += " limit %s offset %s"
             params += [limit, offset]
         with rls_connection(self._user_id) as cur:
             cur.execute(query, params)
             return cur.fetchall()
+
+    def link_task(self, ticket_id: str, task_id: str) -> dict[str, Any] | None:
+        """Record which task this request became.
+
+        Returns None when RLS matched no row - a refusal does not raise, so a caller
+        that assumed success would report a link that was never made.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.support_tickets set task_id = %s where id = %s returning *",
+                (task_id, ticket_id),
+            )
+            return cur.fetchone()
 
     def get_ticket_by_code(self, code: str) -> dict[str, Any] | None:
         with rls_connection(self._user_id) as cur:

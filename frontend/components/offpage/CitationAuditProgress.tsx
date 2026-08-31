@@ -47,8 +47,7 @@ function when(iso: string | null): string {
 export default function CitationAuditProgress({ clientId }: { clientId: string }) {
   const qc = useQueryClient();
   const runsQ = useCitationAuditRuns(clientId, 3);
-  const runs = runsQ.data ?? [];
-  const latest = runs[0];
+  const latest = runsQ.data?.[0];
 
   // Refresh the board the moment the sweep lands, rather than leaving the operator
   // looking at pre-audit counts next to a "Completed" badge.
@@ -62,6 +61,20 @@ export default function CitationAuditProgress({ clientId }: { clientId: string }
     void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
   }, [latest, qc]);
 
+  // A FAILED FETCH IS NOT "NEVER AUDITED". Falling back to an empty list here would
+  // render nothing at all - identical to a client who has never been audited - which
+  // is the same lie this panel exists to remove, one level up. (The repo's own
+  // honesty guard catches exactly this; it caught this component.)
+  if (runsQ.isError) {
+    return (
+      <div style={{ marginTop: 10, fontSize: 13, color: "var(--crit)", fontWeight: 600 }}>
+        Couldn&rsquo;t load this client&rsquo;s audit history.{" "}
+        <button type="button" className="ghostbtn" onClick={() => void runsQ.refetch()}>
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (!latest) return null;
 
   const tone = TONE[latest.status] ?? { label: latest.status, cls: "mut" };

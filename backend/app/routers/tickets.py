@@ -289,6 +289,15 @@ async def convert_ticket_to_task(
     client_id = ticket.get("client_id")
     if not client_id:
         raise _NO_CLIENT
+    if ticket.get("task_id"):
+        # The link used to exist only as prose in a thread message, which is easy to
+        # miss - so the same request could be converted again and again, each time
+        # producing another task for work already assigned. Now it is a column, and
+        # this is what it is for.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This request has already been converted to a task.",
+        )
 
     title = (body.title or "").strip() or str(ticket.get("subject") or "Client request")
     row = await assign_task(
@@ -305,6 +314,9 @@ async def convert_ticket_to_task(
     )
 
     task_code = str(row.get("code") or "")
+    # Record the link on the request itself, so "which requests are being worked on,
+    # and how far along?" is a query rather than a reading exercise.
+    await asyncio.to_thread(tickets.link_task, str(ticket["id"]), str(row["id"]))
     thread = await asyncio.to_thread(
         threads.create_thread,
         entity_type="ticket",

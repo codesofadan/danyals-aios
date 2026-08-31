@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useMemo, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
+import ClientRequests from "./ClientRequests";
 import { useAllTasks, useSetTaskProof } from "@/lib/hooks/tasks";
 import { useTeamMembers } from "@/lib/hooks/team";
 import {
@@ -169,10 +170,37 @@ function AssigneeCell({ member, id }: { member: TeamMemberRecord | undefined; id
   );
 }
 
+/** Team tasks | Client requests. One screen, because a request becomes a task. */
+function ViewSwitch({
+  view,
+  onChange,
+}: {
+  view: "tasks" | "requests";
+  onChange: (v: "tasks" | "requests") => void;
+}) {
+  return (
+    <div className="seg" style={{ marginBottom: "var(--s-5)" }}>
+      <button className={view === "tasks" ? "on" : undefined} onClick={() => onChange("tasks")}>
+        Team tasks
+      </button>
+      <button
+        className={view === "requests" ? "on" : undefined}
+        onClick={() => onChange("requests")}
+      >
+        Client requests
+      </button>
+    </div>
+  );
+}
+
 export default function TaskManager() {
   const tasksQ = useAllTasks();
   const membersQ = useTeamMembers();
 
+  // Team tasks and client requests are two views of the same work, and they belong
+  // on the same screen: a request BECOMES a task, and until now the two lived on
+  // different pages with nothing linking them.
+  const [view, setView] = useState<"tasks" | "requests">("tasks");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
 
@@ -200,7 +228,18 @@ export default function TaskManager() {
     [tasks, statusFilter, assigneeFilter],
   );
 
+  if (view === "requests") {
+    return (
+      <>
+        <ViewSwitch view={view} onChange={setView} />
+        <ClientRequests />
+      </>
+    );
+  }
+
   return (
+    <>
+    <ViewSwitch view={view} onChange={setView} />
     <section className="card">
       <div className="card-h">
         <div>
@@ -279,5 +318,6 @@ export default function TaskManager() {
         </div>
       )}
     </section>
+    </>
   );
 }

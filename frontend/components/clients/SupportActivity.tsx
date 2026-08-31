@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import ConvertToTask from "./ConvertToTask";
 import ThreadPanel from "@/components/threads/ThreadPanel";
-import { useTeamMembers } from "@/lib/hooks/team";
-import { TASK_TYPES, type TaskType } from "@/lib/data";
 import EmptyState from "@/components/ui/EmptyState";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import type { Ticket } from "@/lib/data";
-import { useTickets, useUpdateTicketStatus, useConvertTicketToTask } from "@/lib/hooks/clients";
+import { useTickets, useUpdateTicketStatus } from "@/lib/hooks/clients";
 
 const PRIORITY_COLOR: Record<Ticket["priority"], string> = {
   urgent: "#D64545",
@@ -75,7 +74,9 @@ export default function SupportActivity() {
               {openId === t.id ? (
                 <div onClick={(e) => e.stopPropagation()}>
                   <TicketTriage ticket={t} />
-                  <ConvertToTask ticket={t} />
+                  {/* Not rendered once converted: the request already has its task,
+                      and the server refuses a second conversion. */}
+                  {!t.taskCode && <ConvertToTask ticket={t} />}
                   <ThreadPanel entity="ticket" code={t.id} />
                 </div>
               ) : null}
@@ -177,78 +178,6 @@ function TicketTriage({ ticket }: { ticket: Ticket }) {
           update.mutate({ code: ticket.id, status: "resolved" });
         }}
       />
-    </div>
-  );
-}
-
-
-// Turn a request into work somebody is assigned.
-//
-// THE LOOP THIS CLOSES. A client raised a request and it stopped here: a row, an
-// email to the operator inbox, and this widget. There was no path from a request to
-// the team's queue at all, so whether it became work depended on somebody
-// remembering. Now it is one action, and the request records which task it became.
-function ConvertToTask({ ticket }: { ticket: Ticket }) {
-  const [open, setOpen] = useState(false);
-  const [assignee, setAssignee] = useState("");
-  const [type, setType] = useState<TaskType>("Technical Audit");
-  const membersQ = useTeamMembers();
-  const convert = useConvertTicketToTask();
-
-  const members = membersQ.data ?? [];
-  const chosen = assignee || members[0]?.id || "";
-
-  if (!open) {
-    return (
-      <button type="button" className="tk-convert" onClick={() => setOpen(true)}>
-        <span className="material-symbols-rounded">add_task</span>Create task from this request
-      </button>
-    );
-  }
-
-  return (
-    <div className="tk-convert-form">
-      <label className="tk-convert-fld">
-        <span>Assign to</span>
-        <select value={chosen} onChange={(e) => setAssignee(e.target.value)} disabled={membersQ.isLoading}>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-      </label>
-      <label className="tk-convert-fld">
-        <span>Type</span>
-        <select value={type} onChange={(e) => setType(e.target.value as TaskType)}>
-          {TASK_TYPES.map((tt) => (
-            <option key={tt} value={tt}>{tt}</option>
-          ))}
-        </select>
-      </label>
-      <div className="tk-convert-actions">
-        <button type="button" className="ghostbtn" onClick={() => setOpen(false)}>Cancel</button>
-        <button
-          type="button"
-          className="primary-btn"
-          disabled={!chosen || convert.isPending}
-          onClick={() =>
-            convert.mutate(
-              { code: ticket.id, assignee_id: chosen, type, priority: ticket.priority },
-              { onSuccess: () => setOpen(false) },
-            )
-          }
-        >
-          <span className="material-symbols-rounded">add_task</span>
-          {convert.isPending ? "Creating…" : "Create task"}
-        </button>
-      </div>
-      {/* The title is intentionally not editable here: it defaults to the request's own
-          subject server-side, and retyping it is how a task and its request drift apart. */}
-      <div className="tk-convert-hint">
-        Titled &ldquo;{ticket.subject}&rdquo;, for {ticket.client}. The request will record which task it became.
-      </div>
-      {convert.error instanceof Error && (
-        <div className="tk-triage-err" role="alert">Couldn&apos;t create the task — {convert.error.message}</div>
-      )}
     </div>
   );
 }

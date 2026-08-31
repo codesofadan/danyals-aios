@@ -85,6 +85,15 @@ export type Ticket = {
   priority: "urgent" | "high" | "med" | "low";
   status: "open" | "pending" | "resolved";
   ago: string;
+  /** The task this request became, if it has been converted (0117).
+   *
+   *  The link used to live only as prose in a thread message, so nothing could say
+   *  which requests were being worked on without someone reading them one by one -
+   *  and the same request could be converted twice. `taskCode` is the public J-####
+   *  handle, never an internal id, exactly as `id` is the public T-#### one. */
+  taskCode?: string | null;
+  taskStatus?: string | null;
+  taskAssignee?: string | null;
 };
 
 // ============================================================

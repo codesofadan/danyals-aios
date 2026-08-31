@@ -47,11 +47,21 @@ _TICKET = {
 class FakeTickets:
     def __init__(self, ticket: dict[str, Any] | None = None) -> None:
         self.ticket = ticket
+        self.linked: list[tuple[str, str]] = []
 
     def get_ticket_by_code(self, code: str) -> dict[str, Any] | None:
         if self.ticket and code == self.ticket["code"]:
             return dict(self.ticket)
         return None
+
+    def link_task(self, ticket_id: str, task_id: str) -> dict[str, Any] | None:
+        """Records which task the request became (0117) - the column that makes
+        'has this been converted?' answerable without reading thread messages."""
+        # Deliberately does NOT mutate `self.ticket`: the router does not re-read the
+        # row after linking, and mutating shared fixture state here would make one
+        # test's conversion look like an already-converted request to the next.
+        self.linked.append((ticket_id, task_id))
+        return dict(self.ticket) if self.ticket else None
 
 
 class FakeTasks:
@@ -114,10 +124,22 @@ def threads() -> FakeThreads:
 
 
 @pytest.fixture
-def wire(app: FastAPI, tasks: FakeTasks, threads: FakeThreads) -> Callable[..., None]:
+def tickets() -> FakeTickets:
+    """The ticket repo double, exposed so a test can inspect what was LINKED - and
+    seed an already-converted request. Its ticket is a per-test copy, so one test's
+    conversion never leaks into the next."""
+    return FakeTickets(dict(_TICKET))
+
+
+@pytest.fixture
+def wire(
+    app: FastAPI, tasks: FakeTasks, threads: FakeThreads, tickets: FakeTickets
+) -> Callable[..., None]:
     def _as(role: str, *, ticket: dict[str, Any] | None = _TICKET) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
-        app.dependency_overrides[get_tickets_repo] = lambda: FakeTickets(ticket)
+        if ticket is not _TICKET:
+            tickets.ticket = ticket
+        app.dependency_overrides[get_tickets_repo] = lambda: tickets
         app.dependency_overrides[get_tasks_repo] = lambda: tasks
         app.dependency_overrides[get_clients_repo] = lambda: FakeClients()
         app.dependency_overrides[get_threads_repo] = lambda: threads
@@ -219,3 +241,43 @@ async def test_the_assignee_must_be_staff(
     wire("manager")
     resp = await client.post(_URL, json={"assignee_id": assignee})
     assert resp.status_code == expected
+
+
+# --------------------------------------------------------------------------- #
+# The link is a COLUMN now, not prose in a thread message (0117).
+#
+# `assign_task` has always taken an `origin` argument and used it in the activity
+# entry and the assignee's notification - and written it nowhere. There is no origin
+# column on `tasks` and never was. So the only record that a request had become work
+# was a sentence inside a thread, which nothing could query and which is easy to
+# miss: the Convert button stayed live, and pressing it again produced a second task
+# for work already assigned.
+# --------------------------------------------------------------------------- #
+async def test_conversion_records_which_task_the_request_became(
+    client: httpx.AsyncClient, tickets: FakeTickets, tasks: FakeTasks, wire: Any
+) -> None:
+    wire("admin")
+    resp = await client.post(
+        "/api/v1/tickets/T-4821/convert-to-task", json={"assignee_id": "u-staff"}
+    )
+    assert resp.status_code == 201
+    assert len(tickets.linked) == 1
+    ticket_id, task_id = tickets.linked[0]
+    assert ticket_id == tickets.ticket["id"]
+    # The id the repo RETURNED for the new task, which is what the link stores.
+    assert task_id == "t-uuid"
+
+
+async def test_a_request_cannot_be_converted_twice(
+    client: httpx.AsyncClient, tickets: FakeTickets, tasks: FakeTasks, wire: Any
+) -> None:
+    """Two tasks for one request means two people assigned the same work, and a
+    client whose single request appears twice on the board."""
+    tickets.ticket["task_id"] = "11111111-1111-1111-1111-111111111111"
+    wire("admin")
+    resp = await client.post(
+        "/api/v1/tickets/T-4821/convert-to-task", json={"assignee_id": "u-staff"}
+    )
+    assert resp.status_code == 409
+    assert "already been converted" in resp.json()["error"]["message"]
+    assert tasks.inserted == []
