@@ -23,6 +23,7 @@ import ClientCredentialCell from "./ClientCredentialCell";
 import DetailShell from "@/components/ui/DetailShell";
 import QueryGuard from "@/components/ui/QueryGuard";
 import EmptyState from "@/components/ui/EmptyState";
+import PortalPublishing from "./PortalPublishing";
 import { clientReports } from "@/lib/data";
 
 /** THIS client's grants only — the directory's useAllReportGrants issues one
@@ -134,6 +135,7 @@ export default function ClientDetail({ clientId }: { clientId: string }) {
                   ))}
                 </div>
               </section>
+              <PortalPublishing clientId={clientId} clientName={client.cn} />
             </QueryGuard>
           );
         }

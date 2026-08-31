@@ -47,13 +47,25 @@ def emit_deliverable(
     media_type: str = "application/pdf",
     period: str = "",
     size_label: str = "",
-    status: str = "ready",
+    status: str = "pending_review",
 ) -> None:
-    """Publish ONE deliverable to a client's Reports library. Best-effort: never
-    raises. ``issued_at`` is stamped now for a ``ready`` deliverable and left NULL
-    while ``generating``. ``client_id`` is server-pinned by the caller (the producing
-    worker already owns the tenant); ``requires`` is the grant key that gates its
-    visibility."""
+    """Queue ONE deliverable for a client's Reports library. Best-effort: never
+    raises. ``client_id`` is server-pinned by the caller (the producing worker already
+    owns the tenant); ``requires`` is the grant key that gates its visibility.
+
+    THE DEFAULT IS `pending_review`, NOT `ready`. Every producer used to write straight
+    to `ready`, and `portal_deliverables` shows any ready row whose grant key the
+    client holds - so a document was in front of the client the moment a job finished,
+    with no review and no way to hold one back short of revoking the whole report grant
+    (which would remove every other document of that kind at the same time).
+
+    A staff member releases it with ``POST /deliverables/{id}/publish``. The gate is in
+    the VIEW (0116), so a row awaiting review is never selected for a client by any
+    route, present or future.
+
+    ``issued_at`` is stamped when a deliverable becomes `ready` - at publish for the
+    normal path - and left NULL while `pending_review` or `generating`, so "when did
+    this client get this" is the release date rather than the production date."""
     # A "ready" deliverable is an OFFER OF A FILE. The client's Reports library renders
     # View and Download for it, and `GET /portal/deliverables/{id}/download` resolves
     # `artifact_key` -> a path; with no key it raises 404. So a ready row without an
@@ -68,7 +80,14 @@ def emit_deliverable(
     # Refusing the write is the honest outcome and matches the portal rule that it must
     # never offer an artefact it has not verified exists. Best-effort like the rest of
     # this function: it logs and returns rather than raising into the producing job.
-    if status == "ready" and not artifact_key:
+    #
+    # The guard covers `pending_review` too, now that it is the default. Such a row is
+    # invisible to the client, so it cannot break a download - but it CANNOT BE
+    # PUBLISHED either (the publish route refuses a deliverable with no file, for the
+    # reason above), so writing one only fills the review queue with rows no one can
+    # ever act on. A queue of permanently unactionable items is its own dishonesty.
+    # `generating` remains exempt: it is an explicit promise that a file is coming.
+    if status != "generating" and not artifact_key:
         logger.warning(
             "emit_deliverable_skipped_no_artifact",
             title=title, kind=kind, requires=requires, client=client_name,
@@ -144,7 +163,9 @@ def backfill_audit_deliverables() -> int:
             artifact_key=row.get("pdf_path"),
             media_type="application/pdf",
             period=period,
-            status="ready",
+            # No status override: a backfilled document has never been in front of
+            # this client (the row did not exist), so it enters review like any other
+            # new emission rather than appearing unannounced.
         )
         created += 1
     return created

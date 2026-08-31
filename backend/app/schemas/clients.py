@@ -177,6 +177,49 @@ class ReportGrantsUpdate(BaseModel):
     reports: list[str] = Field(default_factory=list)
 
 
+class StaffDeliverableResponse(BaseModel):
+    """One deliverable as STAFF see it - including the ones a client cannot.
+
+    Deliberately not the portal shape: this carries `status`, which is the whole
+    point of the screen (what is waiting for a decision), and `sourceKind`/`sourceId`
+    so a reviewer can tell which run produced the document. It still does not carry
+    `artifactKey`: the path is resolved server-side on download, here as in the portal.
+    """
+
+    id: str
+    title: str
+    kind: str
+    icon: str
+    period: str
+    status: str
+    requires: str
+    issued_at: str | None = Field(default=None, serialization_alias="issuedAt")
+    size_label: str = Field(default="", serialization_alias="sizeLabel")
+    source_kind: str = Field(default="", serialization_alias="sourceKind")
+    source_id: str | None = Field(default=None, serialization_alias="sourceId")
+    #: False when the row carries no stored artifact - a document that cannot be
+    #: downloaded must not be released to a client as if it could.
+    has_file: bool = Field(default=False, serialization_alias="hasFile")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> StaffDeliverableResponse:
+        issued = row.get("issued_at")
+        return cls(
+            id=str(row["id"]),
+            title=str(row.get("title") or ""),
+            kind=str(row.get("kind") or ""),
+            icon=str(row.get("icon") or ""),
+            period=str(row.get("period") or ""),
+            status=str(row.get("status") or ""),
+            requires=str(row.get("requires") or ""),
+            issued_at=issued.isoformat() if issued is not None else None,
+            size_label=str(row.get("size_label") or ""),
+            source_kind=str(row.get("source_kind") or ""),
+            source_id=str(row["source_id"]) if row.get("source_id") else None,
+            has_file=bool(row.get("artifact_key")),
+        )
+
+
 class SiteCreate(BaseModel):
     domain: str = Field(min_length=1)
     cms_type: str = "wordpress"

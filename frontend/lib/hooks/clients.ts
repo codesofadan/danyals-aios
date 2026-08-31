@@ -392,3 +392,59 @@ export function useProvisionPortalLogin() {
     },
   });
 }
+
+
+// --- Portal publishing --------------------------------------------------------
+
+/** One document produced for a client, as STAFF see it - including the ones the
+ *  client cannot, which is the point of the screen. */
+export type StaffDeliverable = {
+  id: string;
+  title: string;
+  kind: string;
+  icon: string;
+  period: string;
+  status: string;
+  requires: string;
+  issuedAt: string | null;
+  sizeLabel: string;
+  sourceKind: string;
+  sourceId: string | null;
+  /** False when the row has no stored file. Publishing one is refused server-side:
+   *  it would show the client a download that 404s. */
+  hasFile: boolean;
+};
+
+export const clientDeliverablesKey = (clientId: string) =>
+  ["clients", clientId, "deliverables"] as const;
+
+/** Everything produced for this client, awaiting-review rows first. */
+export function useClientDeliverables(clientId: string | null) {
+  return useQuery({
+    queryKey: clientDeliverablesKey(clientId ?? ""),
+    queryFn: () => api.get<StaffDeliverable[]>(`/clients/${clientId}/deliverables`),
+    enabled: Boolean(clientId),
+  });
+}
+
+/**
+ * Release a document to the client's portal, or pull it back into review.
+ *
+ * Producers write documents as `pending_review`, so this is the act that puts one in
+ * front of a client. Before it existed, an audit PDF was visible the moment its job
+ * finished, and the only way to hide one was to revoke the whole report grant - which
+ * removes every other document of that kind at the same time.
+ */
+export function useSetDeliverablePublished(clientId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, publish }: { id: string; publish: boolean }) =>
+      api.post<StaffDeliverable>(
+        `/deliverables/${id}/${publish ? "publish" : "unpublish"}`,
+        {},
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: clientDeliverablesKey(clientId) });
+    },
+  });
+}

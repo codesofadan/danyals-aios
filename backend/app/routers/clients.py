@@ -14,6 +14,7 @@ from app.core.deps import RedisDep, SettingsDep
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepo, ClientsRepoDep
 from app.db.database import DatabaseNotConfiguredError
+from app.db.deliverables_repo import DeliverablesRepoDep
 from app.db.report_grants_repo import ReportGrantsRepoDep
 from app.logging_setup import get_logger
 from app.modules.client_onboarding.service import seed_onboarding_for_client
@@ -24,6 +25,7 @@ from app.schemas.clients import (
     ReportGrantsUpdate,
     SiteCreate,
     SiteResponse,
+    StaffDeliverableResponse,
 )
 from app.schemas.clients_business import (
     ClientBusinessProfileInput,
@@ -54,6 +56,9 @@ ManageClients = Annotated[CurrentUser, Depends(require_perm("manage_clients"))]
 Staff = Annotated[CurrentUser, Depends(require_staff())]
 
 _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+_DELIVERABLE_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Deliverable not found"
+)
 
 
 @router.get("/clients", response_model=list[ClientResponse])
@@ -187,6 +192,95 @@ async def delete_client(client_id: str, repo: ClientsRepoDep, actor: ManageClien
         actor, kind="client", action="deleted client", target=client_id,
         entity_type="client", entity_id=client_id,
     )
+
+
+@router.get(
+    "/clients/{client_id}/deliverables", response_model=list[StaffDeliverableResponse]
+)
+async def list_client_deliverables(
+    client_id: str,
+    repo: ClientsRepoDep,
+    deliverables: DeliverablesRepoDep,
+    _user: Staff,
+) -> list[StaffDeliverableResponse]:
+    """Every document produced for this client, INCLUDING the ones awaiting review.
+
+    The portal's own list is a different surface with a different filter: it shows
+    what the client may see. This is the staff view of the same table, which is where
+    the approval decision is taken.
+    """
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    rows = await asyncio.to_thread(deliverables.list_for_client, client_id)
+    return [StaffDeliverableResponse.from_row(r) for r in rows]
+
+
+@router.post(
+    "/deliverables/{deliverable_id}/publish", response_model=StaffDeliverableResponse
+)
+async def publish_deliverable(
+    deliverable_id: str, deliverables: DeliverablesRepoDep, actor: ManageClients
+) -> StaffDeliverableResponse:
+    """Release a document to the client's portal.
+
+    Producers write documents as `pending_review`, so this is the act that puts one in
+    front of a client - the same decision for an audit PDF, a scheduled monthly report
+    and a client-requested one. Lead-only, like every other outward-facing act
+    (sharing an audit, editing report grants).
+
+    A document with no stored artifact is REFUSED. The portal renders View and
+    Download for a ready row and the download endpoint resolves an artifact key; with
+    no key those buttons 404, so releasing one would hand a paying client a file that
+    does not exist.
+    """
+    row = await asyncio.to_thread(deliverables.get, deliverable_id)
+    if row is None:
+        raise _DELIVERABLE_NOT_FOUND
+    if not row.get("artifact_key"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This deliverable has no stored file, so publishing it would show the "
+                "client a download that cannot work. Re-run the job that produces it."
+            ),
+        )
+    updated = await asyncio.to_thread(deliverables.set_status, deliverable_id, status="ready")
+    if updated is None:
+        raise _DELIVERABLE_NOT_FOUND
+    await record_activity(
+        actor, kind="access", action="published a report to the client portal",
+        target=str(updated.get("title") or deliverable_id),
+        entity_type="client",
+        entity_id=str(updated["client_id"]) if updated.get("client_id") else None,
+    )
+    return StaffDeliverableResponse.from_row(updated)
+
+
+@router.post(
+    "/deliverables/{deliverable_id}/unpublish", response_model=StaffDeliverableResponse
+)
+async def unpublish_deliverable(
+    deliverable_id: str, deliverables: DeliverablesRepoDep, actor: ManageClients
+) -> StaffDeliverableResponse:
+    """Pull a document back out of the client's portal, into review.
+
+    The counterpart to publish, and the reason the approval state is worth having: a
+    document released by mistake could previously only be hidden by revoking the whole
+    report grant, which removes every other document of that kind at the same time.
+    """
+    updated = await asyncio.to_thread(
+        deliverables.set_status, deliverable_id, status="pending_review"
+    )
+    if updated is None:
+        raise _DELIVERABLE_NOT_FOUND
+    await record_activity(
+        actor, kind="access", action="withdrew a report from the client portal",
+        target=str(updated.get("title") or deliverable_id),
+        entity_type="client",
+        entity_id=str(updated["client_id"]) if updated.get("client_id") else None,
+    )
+    return StaffDeliverableResponse.from_row(updated)
 
 
 @router.get("/clients/{client_id}/report-grants", response_model=list[str])

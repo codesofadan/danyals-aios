@@ -101,3 +101,41 @@ def test_the_two_known_producers_still_pass_no_artifact_key() -> None:
             f"{rel} now passes artifact_key - it renders a real file, so update this "
             f"test and confirm its deliverable is genuinely downloadable"
         )
+
+
+# --------------------------------------------------------------------------- #
+# The review gate: a document reaches a client because someone decided it should.
+#
+# Every producer used to write straight to `ready`, and `portal_deliverables` shows
+# any ready row whose grant key the client holds - so an audit PDF was in front of
+# the client the moment the job finished, with no review, and no way to hold one
+# back short of revoking the whole report grant (which removes every other document
+# of that kind at the same time).
+# --------------------------------------------------------------------------- #
+def _written(cur: MagicMock) -> dict[str, Any]:
+    """The parameters emit_deliverable actually wrote, keyed by column."""
+    params = cur.execute.call_args.args[1]
+    return dict(zip(deliverables._COLUMNS, params, strict=True))
+
+
+def test_a_produced_document_waits_for_a_decision_by_default() -> None:
+    cur = _emit(artifact_key="audits/a-1/report.pdf")
+    assert cur.execute.call_count == 1
+    assert _written(cur)["status"] == "pending_review"
+
+
+def test_a_document_awaiting_review_carries_no_issue_date() -> None:
+    """`issued_at` is when the CLIENT got the document, not when it was produced -
+    so it is stamped at publish. A date set here would tell a client they had been
+    given something days before anyone released it."""
+    cur = _emit(artifact_key="audits/a-1/report.pdf")
+    assert _written(cur)["issued_at"] is None
+
+
+def test_an_explicit_ready_status_is_still_honoured() -> None:
+    """The parameter is not decorative: a caller that has already made the decision
+    (a restore, a migration) can still write a released document."""
+    cur = _emit(artifact_key="audits/a-1/report.pdf", status="ready")
+    row = _written(cur)
+    assert row["status"] == "ready"
+    assert row["issued_at"] is not None
