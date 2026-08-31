@@ -250,8 +250,10 @@ def wire(
 ) -> Callable[[str], None]:
     app.dependency_overrides[get_citations_repo] = lambda: repo
     app.dependency_overrides[get_citation_enqueuer] = lambda: enqueued.append
+    # Returns the idempotency key, as the real enqueuer does - the router resolves the
+    # job run from it so the 202 carries an id the caller can poll.
     app.dependency_overrides[get_audit_enqueuer] = lambda: (
-        lambda cid, dom, biz: audits.append((cid, dom, biz))
+        lambda cid, dom, biz: (audits.append((cid, dom, biz)), f"offpage.monitor:{cid}:t")[1]
     )
     app.dependency_overrides[get_service_citations_store] = lambda: svc_store
 

@@ -40,6 +40,10 @@ _Rows = list[dict[str, Any]]
 #: even by accident.
 _JOB_CAP_LOCK_NAMESPACE: Final[int] = 0x41494F53  # 'AIOS'
 
+#: `detail` is unbounded `text`, so the cap is about what a human can read in a row,
+#: not what the column can hold - a stage line that scrolls is not a status.
+_DETAIL_MAX: Final[int] = 200
+
 _RUN_COLUMNS: Final[str] = (
     "id, job_name, task, queue, idempotency_key, correlation_id, parent_run_id, "
     "celery_task_id, client_id, client_name, scope_type, scope_id, status, attempt, "
@@ -216,6 +220,35 @@ class JobRunsStore:
                 "update public.job_runs set heartbeat_at = now() where id = %s and status = 'running'",
                 (run_id,),
             )
+
+    def progress(self, run_id: str, detail: str) -> None:
+        """Record what the job is doing now, and stamp liveness while doing it.
+
+        Scoped to ``running`` for the same reason ``heartbeat`` is: a late line from a
+        task that has already finished must not overwrite the conclusion with a stage
+        it was passing through. ``detail`` is the contract's one human-readable line,
+        and ``finish`` writes it last, so this can only ever describe work in flight.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.job_runs set detail = %s, heartbeat_at = now() "
+                "where id = %s and status = 'running'",
+                (detail[:_DETAIL_MAX], run_id),
+            )
+
+    def get_by_idempotency_key(self, key: str) -> dict[str, Any] | None:
+        """The run that owns this unit of work, by the key that identifies it.
+
+        Enqueue writes the row and knows the key, so a router can hand its caller a
+        durable run id in the same request - rather than a Celery message id, which
+        outlives nothing, or no handle at all.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                f"select {_RUN_COLUMNS} from public.job_runs where idempotency_key = %s",
+                (key,),
+            )
+            return cur.fetchone()
 
     def cancel_requested(self, run_id: str) -> bool:
         """Whether a human has asked this run to stop."""
@@ -481,10 +514,13 @@ class JobRunsRepo:
     ) -> dict[str, Any] | None:
         """The run a given Celery message became - the ENQUEUE-time handle.
 
-        A router that enqueues returns the Celery message id immediately, but the
-        ``job_runs`` row is only created at first CLAIM, on the worker - so a status
-        endpoint keyed by that handle reads through this (row absent = accepted, not
-        yet claimed). ``job_name`` scopes the lookup to one logical job, so a caller
+        A router that enqueues returns the Celery message id immediately, and the row
+        now carries that id from the moment the work is ACCEPTED (``enqueue`` writes it
+        and supplies the task id), so a status endpoint keyed by that handle finds a
+        queued run rather than nothing. A missing row therefore means the send itself
+        never landed - it no longer means "waiting for a worker", which is a state the
+        row can now express on its own. ``job_name`` scopes the lookup to one logical
+        job, so a caller
         mapping the row into a module-specific response shape can never be handed
         some other module's run. Newest first, defensively: the id is unique per
         send in practice, but nothing at the database enforces that.

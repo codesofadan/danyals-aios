@@ -10,7 +10,8 @@ import {
   type CitationSkipReason,
   type NapStatus,
 } from "@/lib/offpage";
-import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
+import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useCitationAuditRuns, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
+import CitationAuditProgress from "./CitationAuditProgress";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
 import AuditPlanPanel from "./AuditPlanPanel";
@@ -211,6 +212,10 @@ export default function CitationsTab() {
               </button>
             </div>
           )}
+          {/* The audit's REAL state, for as long as it lasts - not a flash that
+              fades after four seconds and leaves the operator guessing whether a
+              sweep is still working, already finished, or never started. */}
+          {gapClient && <CitationAuditProgress clientId={gapClient} />}
           {!gapClient && (
             <div className="op-muted" style={{ fontSize: 13 }}>Pick a client to see its citation coverage and build the gaps.</div>
           )}

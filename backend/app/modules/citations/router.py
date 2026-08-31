@@ -125,7 +125,7 @@ def get_citation_enqueuer() -> Callable[[str], None]:
 CitationEnqueuerDep = Annotated[Callable[[str], None], Depends(get_citation_enqueuer)]
 
 
-def get_audit_enqueuer() -> Callable[[str, str, str], None]:
+def get_audit_enqueuer() -> Callable[[str, str, str], str]:
     """Dependency: enqueue the citation-AUDIT sweep (overridable in tests).
 
     Reuses the built off-page monitor worker (``monitor_offpage``): it pulls the
@@ -134,15 +134,45 @@ def get_audit_enqueuer() -> Callable[[str, str, str], None]:
     - i.e. discovers where the business is already listed vs where it is not. Lazily
     imported so the API process never pulls in Celery just to import this router."""
 
-    def _enqueue(client_id: str, domain: str, business: str) -> None:
-        from workers.tasks.offpage import monitor_offpage_job
+    def _enqueue(client_id: str, domain: str, business: str) -> str:
+        from app.jobs.celery_task import enqueue as enqueue_job
 
-        monitor_offpage_job.delay(client_id, domain, business)
+        # A MINUTE BUCKET, not a bare send. Two clicks a second apart are one unit of
+        # work and collapse onto one run; a re-run five minutes later is a genuinely
+        # new one and gets its own. The key is supplied here rather than derived in the
+        # task, so a deliberate re-audit is never silently a no-op.
+        bucket = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
+        enqueue_job(
+            "monitor_offpage",
+            client_id,
+            domain,
+            business,
+            idempotency_key=f"offpage.monitor:{client_id}:{bucket}",
+        )
+        return f"offpage.monitor:{client_id}:{bucket}"
 
     return _enqueue
 
 
-AuditEnqueuerDep = Annotated[Callable[[str, str, str], None], Depends(get_audit_enqueuer)]
+AuditEnqueuerDep = Annotated[Callable[[str, str, str], str], Depends(get_audit_enqueuer)]
+
+
+def _run_for_key(key: str) -> dict[str, Any] | None:
+    """The job run that owns this key, so the 202 can carry an id worth polling.
+
+    Imported lazily for the same reason the enqueuer is: the API edge must not pull in
+    the job/Celery modules merely to import this router.
+    """
+    from app.db.job_runs_repo import job_runs_store
+
+    try:
+        return job_runs_store().get_by_idempotency_key(key)
+    except Exception:
+        # The work is already accepted and queued at this point. Failing the request
+        # because the run could not be READ BACK would turn a visible audit into a
+        # refused one; the caller simply gets no id to follow, and the board still
+        # updates when the sweep lands.
+        return None
 
 
 def get_service_citations_store() -> ServiceCitationsStore:
@@ -309,7 +339,13 @@ async def run_citation_audit(
     business = str(profile.get("business_name") or name)
     # domain is only used by the sibling backlink monitor; a citation audit keys off
     # the business name, so "" is fine here.
-    enqueue(client_id, "", business)
+    key = await asyncio.to_thread(enqueue, client_id, "", business)
+    # The run row exists as soon as the work is accepted, so the caller gets an id it
+    # can actually follow. This used to return a bare {"status": "queued"} with nothing
+    # to poll: the audit was invisible from the moment it started until whenever its
+    # rows happened to appear, and a sweep that never ran looked the same as one still
+    # working.
+    run = await asyncio.to_thread(_run_for_key, key)
     await record_activity(
         actor, kind="content", action="ran a citation audit", target=name,
         entity_type="client", entity_id=client_id,
@@ -318,6 +354,8 @@ async def run_citation_audit(
         "status": "queued",
         "clientId": client_id,
         "business": business,
+        "jobRunId": str(run["id"]) if run else None,
+        "jobName": "offpage.monitor",
         "detail": "Citation audit queued - discovering existing vs missing listings.",
     }
 

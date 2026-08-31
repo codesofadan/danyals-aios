@@ -334,6 +334,8 @@ class JobRunStore(Protocol):
 
     def heartbeat(self, run_id: str) -> None: ...
 
+    def progress(self, run_id: str, detail: str) -> None: ...
+
     def cancel_requested(self, run_id: str) -> bool: ...
 
     def finish(
@@ -427,6 +429,27 @@ class JobContext:
             return
         self._last_heartbeat = now
         self._store.heartbeat(self.run_id)
+
+    def progress(self, detail: str) -> None:
+        """Say what this job is doing NOW, in one line a human can read.
+
+        A long job could only ever report two things - that it had been claimed, and
+        what it concluded - so "running" covered everything between, and an operator
+        watching a sweep of two hundred directories had no way to tell work from a
+        hang. This writes the contract's own ``detail`` column, which is documented as
+        "one human line, always safe to show", and stamps liveness at the same time.
+
+        Throttled on the heartbeat's own clock: a per-directory call would otherwise
+        be one UPDATE per directory. The FINAL detail is written by ``finish``, so a
+        throttled-away line is never the last word.
+        """
+        if self._store is None or not detail:
+            return
+        now = self._clock()
+        if (now - self._last_heartbeat) < self._heartbeat_every:
+            return
+        self._last_heartbeat = now
+        self._store.progress(self.run_id, detail)
 
     def cancelled(self) -> bool:
         """Whether a human has requested cancellation. Throttled; latches once True."""

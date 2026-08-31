@@ -273,6 +273,7 @@ def run_citation_monitor(
     client_name: str,
     business: str,
     limit: int = 50,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Pull ``business``'s directory listings, diff vs the ledger, and apply new/changed
     rows (NAP state drives the Submit/Update action). Cost-gated + never-raises like the
@@ -282,11 +283,13 @@ def run_citation_monitor(
         estimated_cost=float(settings.offpage_monitor_cost_estimate), job_id=business,
         job_type=_MONITOR_JOB_TYPE, client_name=client_name,
     )
+    say = progress or (lambda _msg: None)
     decision = gate.evaluate(ctx)
     if not decision.allowed:
         logger.info("citation_monitor_blocked", business=business, outcome=decision.outcome)
         return {"state": "blocked", "reason": decision.outcome, "new": 0, "changed": 0}
     try:
+        say(f"searching for listings of {business}")
         fetched = provider.fetch_citations(business, limit=limit)
     except Exception:
         logger.exception("citation_monitor_pull_failed", business=business)
@@ -298,6 +301,7 @@ def run_citation_monitor(
 
     stored = store.list_citations_for_client(client_id)
     diff = diff_citations(fetched, stored)
+    say(f"found {len(fetched)} listings; recording {len(diff.new)} new, {len(diff.changed)} changed")
     # Resolve each discovered listing to its CATALOG ROW before writing it. Discovery
     # names a listing from its domain and the catalog names it as a product, so a row
     # written with a name alone matched nothing later and the client was told to build
@@ -557,10 +561,20 @@ def _publisher_for(store: ServiceOffpageStore, web2_id: str) -> Web2Publisher | 
 
 
 def execute_monitor(
-    store: ServiceOffpageStore, settings: Settings, *, client_id: str, domain: str, business: str
+    store: ServiceOffpageStore,
+    settings: Settings,
+    *,
+    client_id: str,
+    domain: str,
+    business: str,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Run the backlink + citation monitoring sweep for one client (wires the key-gated
-    providers). A degraded (keyless) provider is SKIPPED, never a crash."""
+    providers). A degraded (keyless) provider is SKIPPED, never a crash.
+
+    ``progress`` reports the current stage in one human line. Optional so the pure core
+    stays callable without a job context (and Celery-free)."""
+    say = progress or (lambda _msg: None)
     gate = _gate()
     stored_name = ""
     row_source = store.list_backlinks_for_client(client_id)
@@ -568,6 +582,7 @@ def execute_monitor(
         stored_name = str(row_source[0].get("client_name") or "")
 
     result: dict[str, Any] = {"client_id": client_id}
+    say("checking the backlink profile")
     backlinks = backlink_provider_from_settings(settings)
     if backlinks is None:
         logger.info("backlink_monitor_degraded", client_id=client_id, reason="no_provider")
@@ -578,6 +593,7 @@ def execute_monitor(
             client_id=client_id, client_name=stored_name, domain=domain,
         )
 
+    say("checking directory listings")
     citations = citation_provider_from_settings(settings)
     if citations is None or not business:
         logger.info("citation_monitor_degraded", client_id=client_id)
@@ -586,6 +602,7 @@ def execute_monitor(
         result["citations"] = run_citation_monitor(
             store, citations, gate, settings,
             client_id=client_id, client_name=stored_name, business=business,
+            progress=say,
         )
     return result
 
@@ -593,6 +610,9 @@ def execute_monitor(
 # --------------------------------------------------------------------------- #
 # Celery entry points (thin; import the app lazily-free at module load).
 # --------------------------------------------------------------------------- #
+from app.jobs import JobOutcome, JobQueue, JobTarget  # noqa: E402
+from app.jobs.celery_task import aios_job  # noqa: E402
+from app.jobs.contract import JobContext  # noqa: E402
 from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
 
 
@@ -712,10 +732,93 @@ def web2_release_due_job() -> dict[str, Any]:
     return execute_web2_release(service_offpage_store(), settings)
 
 
-@celery_app.task(name="monitor_offpage")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def monitor_offpage_job(client_id: str, domain: str, business: str = "") -> dict[str, Any]:
-    """Entry point: run the backlink + citation monitoring sweep for one client."""
+def _monitor_target(client_id: str, domain: str = "", business: str = "") -> JobTarget:
+    # No idempotency key of its own: the caller supplies one (the router buckets by
+    # minute so a double-click collapses, the weekly sweep derives one per client), and
+    # a key baked in here would make a deliberate re-run a no-op.
+    return JobTarget(client_id=client_id, scope_id=client_id)
+
+
+@aios_job(
+    # The pinned name is UNCHANGED, so every existing caller and any message already
+    # in flight keeps working across this migration.
+    name="monitor_offpage",
+    job_name="offpage.monitor",
+    # LONG, not STANDARD. This ran under Celery's default 1800s limit; LONG's limit is
+    # exactly that, so nothing that was legal yesterday is newly killed today.
+    queue=JobQueue.LONG,
+    max_attempts=1,
+    client_concurrency=1,
+    scope_type="client",
+    target=_monitor_target,
+)
+def monitor_offpage_job(
+    ctx: JobContext, client_id: str, domain: str = "", business: str = ""
+) -> JobOutcome:
+    """Run the backlink + citation monitoring sweep for one client.
+
+    UNDER THE JOB CONTRACT SINCE THE CITATION AUDIT NEEDED TO BE VISIBLE. As a plain
+    Celery task this produced no job_runs row at all, so "run citation audit" returned
+    a bare {"status": "queued"} with no id, nothing could be polled, and an operator
+    had no way to tell a running sweep from a dead one. Now it has a run id, a live
+    stage line, and an honest terminal state.
+
+    A keyless provider DEGRADES rather than passing silently. That was the worst of
+    the old behaviour: with no BrightLocal or Serper key the sweep returned
+    {"state": "degraded"} to a caller that discarded it, wrote zero rows, and the
+    board simply showed no citations - indistinguishable from a business that has
+    none. The contract requires a reason for `degraded`, so it cannot be recorded
+    without saying which half did not run.
+    """
     settings = get_settings()
-    return execute_monitor(
-        service_offpage_store(), settings, client_id=client_id, domain=domain, business=business,
+    ctx.checkpoint()
+    result = execute_monitor(
+        service_offpage_store(), settings,
+        client_id=client_id, domain=domain, business=business,
+        progress=ctx.progress,
+    )
+
+    backlinks = dict(result.get("backlinks") or {})
+    citations = dict(result.get("citations") or {})
+    counts = {
+        "backlinks_new": int(backlinks.get("new") or 0),
+        "backlinks_changed": int(backlinks.get("changed") or 0),
+        "citations_new": int(citations.get("new") or 0),
+        "citations_changed": int(citations.get("changed") or 0),
+        "backlinks_state": str(backlinks.get("state") or ""),
+        "citations_state": str(citations.get("state") or ""),
+    }
+
+    states = {counts["backlinks_state"], counts["citations_state"]}
+    if states & {"blocked"}:
+        return JobOutcome.blocked(
+            "offpage_monitor_blocked",
+            "the cost gate refused this sweep: "
+            + ", ".join(
+                f"{half} ({d.get('reason')})"
+                for half, d in (("backlinks", backlinks), ("citations", citations))
+                if d.get("state") == "blocked"
+            ),
+            result=counts,
+        )
+    unavailable = [
+        half
+        for half, d in (("backlinks", backlinks), ("citations", citations))
+        if d.get("state") in {"degraded", "error"}
+    ]
+    if unavailable:
+        return JobOutcome.degraded(
+            "offpage_provider_unavailable",
+            f"{' and '.join(unavailable)} could not be checked: "
+            + "; ".join(
+                str(d.get("reason") or "unavailable")
+                for d in (backlinks, citations)
+                if d.get("state") in {"degraded", "error"}
+            )
+            + ". The counts below cover only what did run.",
+            result=counts,
+        )
+    return JobOutcome.completed(
+        f"{counts['citations_new']} new and {counts['citations_changed']} changed listings",
+        result=counts,
     )

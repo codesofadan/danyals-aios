@@ -10,6 +10,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { JobRun } from "@/lib/jobs";
+import { isTerminalStatus } from "@/lib/jobs";
 import type {
   AuditPlan,
   Backlink,
@@ -162,6 +164,7 @@ export function useDirectories(filters?: { market?: BusinessMarket[]; tier?: Dir
 
 // --- Wave 4: NAP gap analysis + auto-derive submission profile ---------------
 export const CITATION_GAP_KEY = ["citation-builder", "gap-analysis"] as const;
+export const CITATION_AUDIT_RUNS_KEY = ["citation-builder", "audit-runs"] as const;
 
 /** Reconcile a client's citations vs the catalog: existing/covered/missing + live URLs
  * + the resolved NAP source (so the UI stops showing "No business profile yet"). */
@@ -187,14 +190,22 @@ export function useEnsureBusinessProfile() {
 /** POST /citation-builder/clients/{id}/audit — the AUDIT-FIRST step: discover which
  *  directories already list this business vs which are missing (writes nap_status
  *  rows the board + gap-analysis read). Requires the client's NAP. */
+export type CitationAuditQueued = {
+  status: string;
+  business: string;
+  clientId: string;
+  detail: string;
+  /** The job run to follow. Null only if the ledger could not be read back - the
+   *  audit is still queued, there is simply nothing to poll. */
+  jobRunId: string | null;
+  jobName: string;
+};
+
 export function useRunCitationAudit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (clientId: string) =>
-      api.post<{ status: string; business: string; clientId: string; detail: string }>(
-        `/citation-builder/clients/${clientId}/audit`,
-        {},
-      ),
+      api.post<CitationAuditQueued>(`/citation-builder/clients/${clientId}/audit`, {}),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
       void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
@@ -590,5 +601,36 @@ export function useCheckWeb2Anchor() {
   return useMutation({
     mutationFn: (body: Web2AnchorCheckInput) =>
       api.post<Web2AnchorCheck>("/offpage/web2/anchor-check", body),
+  });
+}
+
+
+/**
+ * The citation audit's own run history, newest first.
+ *
+ * The audit used to be invisible: POST returned a bare {"status":"queued"} with no
+ * id, the underlying task produced no ledger row at all, and the UI showed a flash
+ * that faded after four seconds. After that an operator had no way to tell a sweep
+ * still working from one that died - or from one that never started because no
+ * worker was consuming the queue.
+ *
+ * It is a job under the contract now, so its state, its live stage line and its
+ * counts are all readable from the ledger every other long job already uses.
+ */
+export function useCitationAuditRuns(clientId: string | null, limit = 5) {
+  const params = new URLSearchParams({ jobName: "offpage.monitor", limit: String(limit) });
+  if (clientId) params.set("clientId", clientId);
+  const qs = params.toString();
+
+  return useQuery({
+    queryKey: [...CITATION_AUDIT_RUNS_KEY, qs] as const,
+    queryFn: () => api.get<JobRun[]>(`/jobs/runs?${qs}`),
+    enabled: Boolean(clientId),
+    refetchInterval: (query) => {
+      const rows = query.state.data as JobRun[] | undefined;
+      if (!rows) return 4000;
+      return rows.some((r) => !isTerminalStatus(r.status)) ? 4000 : false;
+    },
+    placeholderData: (prev) => prev,
   });
 }
