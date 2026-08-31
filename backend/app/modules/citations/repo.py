@@ -428,6 +428,26 @@ class CitationQueueRepo:
             )
             return cur.fetchone()
 
+    #: The joined SELECT every queue read returns. One definition, so `held_item` and
+    #: `my_claims` can never drift into showing an operator two different shapes of the
+    #: same row.
+    _QUEUE_SELECT = (
+        "select c.*, d.name as directory_name, d.url as directory_url, "
+        "       d.add_url as directory_add_url, d.tier as directory_tier, "
+        "       d.route as directory_route, d.tos_position as directory_tos_position, "
+        "       d.tos_clause as directory_tos_clause, "
+        "       d.tos_source_url as directory_tos_source_url, "
+        "       bp.business_name as bp_business_name, bp.address_line1 as bp_address_line1, "
+        "       bp.address_line2 as bp_address_line2, bp.city as bp_city, "
+        "       bp.region as bp_region, bp.postal_code as bp_postal_code, "
+        "       bp.phone as bp_phone, bp.website_url as bp_website_url, "
+        "       bp.categories as bp_categories, bp.description as bp_description, "
+        "       bp.email as bp_email, bp.hours as bp_hours "
+        "from public.citations c "
+        "left join public.directories d on d.id = c.directory_id "
+        "left join public.business_profiles bp on bp.id = c.business_profile_id "
+    )
+
     def held_item(self, citation_id: str) -> dict[str, Any] | None:
         """The item, but ONLY if this operator currently holds an unexpired claim on it.
 
@@ -436,25 +456,33 @@ class CitationQueueRepo:
         written through by a client that simply kept the id around."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
-                "select c.*, d.name as directory_name, d.url as directory_url, "
-                "       d.add_url as directory_add_url, d.tier as directory_tier, "
-                "       d.route as directory_route, d.tos_position as directory_tos_position, "
-                "       d.tos_clause as directory_tos_clause, "
-                "       d.tos_source_url as directory_tos_source_url, "
-                "       bp.business_name as bp_business_name, bp.address_line1 as bp_address_line1, "
-                "       bp.address_line2 as bp_address_line2, bp.city as bp_city, "
-                "       bp.region as bp_region, bp.postal_code as bp_postal_code, "
-                "       bp.phone as bp_phone, bp.website_url as bp_website_url, "
-                "       bp.categories as bp_categories, bp.description as bp_description, "
-                "       bp.email as bp_email, bp.hours as bp_hours "
-                "from public.citations c "
-                "left join public.directories d on d.id = c.directory_id "
-                "left join public.business_profiles bp on bp.id = c.business_profile_id "
-                "where c.id = %s and c.claimed_by = %s::uuid and c.claim_expires_at > now() "
+                self._QUEUE_SELECT
+                + "where c.id = %s and c.claimed_by = %s::uuid and c.claim_expires_at > now() "
                 "limit 1",
                 (citation_id, self._user_id),
             )
             return cur.fetchone()
+
+    def my_claims(self) -> list[dict[str, Any]]:
+        """Every item this operator currently holds an unexpired claim on.
+
+        The server has always known this - `claimed_by` is how the lease works - and
+        nothing asked. So a reload lost the operator's in-hand item: the panel kept it
+        in component state alone, the row stayed claimed until the lease lapsed
+        (twenty minutes), and taking it again incremented `human_attempts`, which reads
+        as "someone has tried this before" to whoever picks it up next. The work of
+        answering "what am I holding?" is one WHERE clause.
+
+        Oldest claim first, so resuming lands on the item nearest its lease expiry.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                self._QUEUE_SELECT
+                + "where c.claimed_by = %s::uuid and c.claim_expires_at > now() "
+                "order by c.claimed_at",
+                (self._user_id,),
+            )
+            return cur.fetchall()
 
     def extend_claim(self, citation_id: str, *, lease_seconds: int, worked_seconds: int) -> bool:
         """Heartbeat: push the lease out and bank the time worked so far.

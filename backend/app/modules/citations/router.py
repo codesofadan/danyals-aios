@@ -792,13 +792,24 @@ def _queue_item(row: dict[str, Any]) -> QueueItemResponse:
 
 @router.get("/queue", response_model=QueueBoardResponse)
 async def citation_queue_board(queue: CitationQueueRepoDep, _user: OperatorOrUser) -> QueueBoardResponse:
-    """The queue at a glance, plus the median minutes per finished item."""
-    stats = await asyncio.to_thread(queue.queue_stats)
+    """The queue at a glance, plus whatever this operator is already holding.
+
+    `mine` has been on both this response model and the frontend type since the queue
+    shipped, and nothing ever filled it. So the operator's in-hand item lived only in
+    component state: a reload lost it, the row stayed claimed until its twenty-minute
+    lease lapsed, and re-taking it bumped `human_attempts` - which tells the next
+    person "someone has tried this before". The server always knew the answer.
+    """
+    stats, mine = await asyncio.gather(
+        asyncio.to_thread(queue.queue_stats),
+        asyncio.to_thread(queue.my_claims),
+    )
     median = stats.get("median_seconds")
     return QueueBoardResponse(
         waiting=int(stats.get("waiting") or 0),
         in_progress=int(stats.get("in_progress") or 0),
         median_seconds=int(median) if median is not None else None,
+        mine=[_queue_item(row) for row in mine],
     )
 
 

@@ -55,6 +55,31 @@ export default function CitationQueue() {
   const [elapsed, setElapsed] = useState(0);
   const bankedRef = useRef(0);
 
+  // RESUME WHAT THIS OPERATOR IS ALREADY HOLDING.
+  //
+  // The claimed item used to live in `item` alone, set only by the claim mutation's
+  // onSuccess. So a reload - or opening the queue on a second screen - showed an
+  // empty board while the row stayed claimed server-side for the rest of its
+  // twenty-minute lease, and pressing "Take the next item" handed back a DIFFERENT
+  // row while the first sat locked. Re-taking the original later incremented
+  // `human_attempts`, which reads to the next person as "someone has tried this
+  // before and failed".
+  //
+  // `mine` comes from the board's own poll, so this needs no extra request. Items
+  // finished in this session are remembered so a completion is not immediately
+  // resumed from a board response that predates it.
+  const doneRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (item) return;
+    const held = (boardQ.data?.mine ?? []).find((m) => !doneRef.current.has(m.citationId));
+    if (!held) return;
+    setItem(held);
+    // Seed from the server's banked total, or the local tick would restart at zero
+    // and the next heartbeat would bank the same seconds twice.
+    setElapsed(held.workedSeconds);
+    bankedRef.current = held.workedSeconds;
+  }, [boardQ.data, item]);
+
   useEffect(() => {
     if (!item) return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -73,7 +98,10 @@ export default function CitationQueue() {
   }, [item, elapsed, heartbeat]);
 
   const reset = useCallback(() => {
-    setItem(null);
+    setItem((current) => {
+      if (current) doneRef.current.add(current.citationId);
+      return null;
+    });
     setLiveUrl("");
     setNote("");
     setRefusal(null);

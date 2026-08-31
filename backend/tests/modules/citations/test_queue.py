@@ -94,6 +94,11 @@ class FakeQueueRepo:
     def held_item(self, citation_id: str) -> dict[str, Any] | None:
         return self.held.get(citation_id) if self.claim_valid else None
 
+    def my_claims(self) -> list[dict[str, Any]]:
+        """What this operator is holding - the board reports it so a reload can
+        resume rather than stranding the row until its lease lapses."""
+        return list(self.held.values()) if self.claim_valid else []
+
     def extend_claim(self, citation_id: str, *, lease_seconds: int, worked_seconds: int) -> bool:
         if not self.claim_valid or citation_id not in self.held:
             return False
@@ -431,3 +436,53 @@ async def test_a_lead_may_use_the_same_write_endpoints(
         "/api/v1/citation-builder/queue/cit-1/blocked", json={"reason": "captcha_wall"}
     )
     assert resp.status_code == 204, resp.text
+
+
+@pytest.mark.unit
+class TestBoardReportsWhatTheOperatorHolds:
+    """`mine` has been on the response model and the frontend type since the queue
+    shipped, and nothing ever filled it.
+
+    So the operator's in-hand item lived only in component state. A reload showed an
+    empty board while the row stayed claimed for the rest of its twenty-minute lease;
+    "take the next item" then handed over a different row while the first sat locked,
+    and re-taking the original later incremented `human_attempts` - which tells the
+    next person "someone has tried this before and failed". The server knew the whole
+    time.
+    """
+
+    async def test_the_board_returns_the_item_this_operator_is_holding(
+        self, client: httpx.AsyncClient, queue: FakeQueueRepo, wire: Callable[[str], None]
+    ) -> None:
+        queue.available = [_held_row()]
+        wire("owner")
+        claimed = (await client.post("/api/v1/citation-builder/queue/claim", json={})).json()
+
+        board = (await client.get("/api/v1/citation-builder/queue")).json()
+
+        assert [m["citationId"] for m in board["mine"]] == [claimed["citationId"]]
+
+    async def test_the_board_is_empty_when_nothing_is_held(
+        self, client: httpx.AsyncClient, queue: FakeQueueRepo, wire: Callable[[str], None]
+    ) -> None:
+        queue.stats = {"waiting": 2, "in_progress": 0, "median_seconds": None}
+        wire("owner")
+
+        board = (await client.get("/api/v1/citation-builder/queue")).json()
+
+        assert board["mine"] == []
+        assert board["waiting"] == 2
+
+    async def test_a_lapsed_claim_is_not_reported_as_held(
+        self, client: httpx.AsyncClient, queue: FakeQueueRepo, wire: Callable[[str], None]
+    ) -> None:
+        """The lease is the boundary. Resuming an item whose claim has expired would
+        put an operator to work on a row someone else may already have taken."""
+        queue.available = [_held_row()]
+        wire("owner")
+        await client.post("/api/v1/citation-builder/queue/claim", json={})
+        queue.claim_valid = False  # the lease lapsed
+
+        board = (await client.get("/api/v1/citation-builder/queue")).json()
+
+        assert board["mine"] == []
