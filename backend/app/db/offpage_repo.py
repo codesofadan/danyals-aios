@@ -25,6 +25,7 @@ from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import privileged_connection, rls_connection
+from app.modules.citations.service import canonical_norm
 
 _Rows = list[dict[str, Any]]
 
@@ -747,6 +748,33 @@ class ServiceOffpageStore:
             )
             return cur.fetchall()
 
+    def directory_ids_by_name(self) -> dict[str, str]:
+        """Catalog name (canonically normalised) -> directory id, over the whole catalog.
+
+        Lets a DISCOVERED listing be written with the same ``directory_id`` a campaign
+        row would carry. Without it, discovery wrote a free-text name and NULL, so the
+        gap report could only match those rows by name - and the names differ ("Google
+        Business" vs "Google Business Profile", "Bing Places" vs "Bing Places for
+        Business"). A listing the client demonstrably had was therefore reported as
+        missing, and the count moved between runs depending on which names happened to
+        line up. Measured against the live catalog: 11 of the 31 names discovery can
+        emit did not match.
+
+        A name that normalises to two different catalog rows is dropped rather than
+        guessed: marking the wrong directory covered would suppress a build that never
+        happened, and there is no signal afterwards that it went wrong. That guard is
+        also why this does not need to be scoped by market - a name that is unique
+        across the catalog is unambiguous in any market, and one that is not is
+        skipped either way.
+        """
+        with privileged_connection() as cur:
+            cur.execute("select id, name from public.directories where active")
+            rows = cur.fetchall()
+        by_key: dict[str, list[str]] = {}
+        for r in rows:
+            by_key.setdefault(canonical_norm(str(r["name"])), []).append(str(r["id"]))
+        return {k: v[0] for k, v in by_key.items() if len(v) == 1}
+
     def insert_citation(
         self,
         *,
@@ -756,13 +784,14 @@ class ServiceOffpageStore:
         nap_status: str,
         action: str,
         note: str,
+        directory_id: str | None = None,
     ) -> None:
         with privileged_connection() as cur:
             cur.execute(
                 "insert into public.citations "
-                "(client_id, client_name, directory, nap_status, action, note) "
-                "values (%s, %s, %s, %s, %s, %s)",
-                (client_id, client_name, directory, nap_status, action, note),
+                "(client_id, client_name, directory, nap_status, action, note, directory_id) "
+                "values (%s, %s, %s, %s, %s, %s, %s)",
+                (client_id, client_name, directory, nap_status, action, note, directory_id),
             )
 
     def update_citation_status(

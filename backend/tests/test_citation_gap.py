@@ -230,3 +230,176 @@ def test_a_key_cannot_reconnect_a_retired_engine() -> None:
     # FOURSQUARE_API_KEY is still live for DISCOVERY (a read path) - the reason says so,
     # so nobody deletes the key while something still depends on it.
     assert "DISCOVERY" in engines["foursquare"].reason
+
+
+# --------------------------------------------------------------------------- #
+# Determinism: the cap must not decide what counts as covered.
+#
+# QA ran the same client's citation audit twice and read two different answers:
+# "4 existing / 4 covered / 45 missing", then "4 built / 41 missing". Nothing about
+# the client or the catalog had changed.
+#
+# The cause was the ORDER of two steps. The selection capped the catalog to 45
+# first, and covered directories were subtracted from that 45 afterwards - so
+# whether a covered listing reduced `missing` depended on whether it happened to
+# sit inside the top 45 of the build order. Four covered rows inside it gave 41;
+# the same four outside it gave 45, with `covered_count` reading 4 either way.
+#
+# The fix subtracts first and caps second, so the cap means "the next N to build"
+# and the number moves only when the coverage or the catalog really does.
+# --------------------------------------------------------------------------- #
+def _catalog(n: int) -> list[dict[str, Any]]:
+    """n directories in a STABLE build order: d000 sorts first, d049 last."""
+    return [
+        _dir(f"d{i:03d}", f"Dir{i:03d}", authority=90 - i, authority_tier="core")
+        for i in range(n)
+    ]
+
+
+def _covered(directory_id: str, name: str) -> dict[str, Any]:
+    return {
+        "directory_id": directory_id, "directory": name,
+        "submit_status": "live", "nap_status": "consistent", "live_url": "https://x.example/l",
+    }
+
+
+def test_covered_directories_reduce_the_missing_count_wherever_they_sit() -> None:
+    """The load-bearing case. Four covered listings must remove four from the
+    build target whether they are near the top of the catalog or the bottom -
+    otherwise the same client reads 41 one day and 45 the next."""
+    cat = _catalog(50)
+
+    near_top = compute_citation_gap(
+        directories=cat,
+        existing_citations=[_covered(f"d{i:03d}", f"Dir{i:03d}") for i in range(4)],
+        cap=45,
+    )
+    near_bottom = compute_citation_gap(
+        directories=cat,
+        existing_citations=[_covered(f"d{i:03d}", f"Dir{i:03d}") for i in range(46, 50)],
+        cap=45,
+    )
+
+    assert near_top.covered_count == near_bottom.covered_count == 4
+    # 50 in the catalog, 4 covered, 46 genuinely missing -> capped to 45 in both.
+    assert near_top.missing and near_bottom.missing
+    assert len(near_top.missing) == len(near_bottom.missing) == 45
+
+
+def test_the_cap_is_applied_to_what_is_actually_missing() -> None:
+    cat = _catalog(50)
+    gap = compute_citation_gap(
+        directories=cat,
+        existing_citations=[_covered(f"d{i:03d}", f"Dir{i:03d}") for i in range(10)],
+        cap=45,
+    )
+    # 50 - 10 covered = 40 missing, which is under the cap, so the cap does nothing.
+    assert len(gap.missing) == 40
+    assert not any(s["reason"] == "over_campaign_cap" for s in gap.skipped)
+    # And nothing already covered leaks back into the build target.
+    assert {str(d["id"]) for d in gap.missing}.isdisjoint({f"d{i:03d}" for i in range(10)})
+
+
+def test_directories_beyond_the_cap_are_recorded_as_deferred_not_dropped() -> None:
+    """A shorter-than-expected list must never be indistinguishable from a silent
+    failure - the same contract every other skip reason keeps."""
+    gap = compute_citation_gap(directories=_catalog(60), existing_citations=[], cap=45)
+
+    assert len(gap.missing) == 45
+    deferred = [s for s in gap.skipped if s["reason"] == "over_campaign_cap"]
+    assert len(deferred) == 15
+    assert "queued in a later campaign" in deferred[0]["detail"]
+
+
+def test_the_same_inputs_give_the_same_answer_twice() -> None:
+    """Determinism, stated directly: the audit is a pure function of the stored
+    rows, so two runs over unchanged data cannot disagree."""
+    cat = _catalog(50)
+    existing = [_covered(f"d{i:03d}", f"Dir{i:03d}") for i in (3, 17, 41, 48)]
+
+    first = compute_citation_gap(directories=cat, existing_citations=existing, cap=45)
+    second = compute_citation_gap(directories=cat, existing_citations=existing, cap=45)
+
+    assert first.covered_count == second.covered_count
+    assert [d["id"] for d in first.missing] == [d["id"] for d in second.missing]
+
+
+def test_a_legacy_row_without_a_directory_id_still_counts_as_covered() -> None:
+    """Discovery writes citations with a free-text name and no directory_id, so
+    name matching is the only thing that stops a found listing being re-queued as
+    missing. If this regressed, every discovered listing would be built twice."""
+    gap = compute_citation_gap(
+        directories=_catalog(10),
+        existing_citations=[
+            {"directory": "Dir003", "submit_status": "live", "nap_status": "consistent"}
+        ],
+        cap=45,
+    )
+    assert gap.covered_count == 1
+    assert "d003" not in {str(d["id"]) for d in gap.missing}
+
+
+# --------------------------------------------------------------------------- #
+# canonical_norm: the one rule both sides of a directory match must agree on.
+#
+# Discovery names a found listing from its DOMAIN; the catalog names the same
+# directory as a product. Measured against the live catalog (226 active rows) on
+# 2026-09-01, 11 of the 31 names discovery can emit matched nothing - including
+# Google Business, Bing Places, Facebook and Foursquare, i.e. the listings a local
+# business is most likely to already have. Each of those was reported as MISSING
+# every time, and whether it moved the count depended on where it fell against the
+# 45-row cap.
+# --------------------------------------------------------------------------- #
+def test_aliases_map_the_five_verified_name_mismatches() -> None:
+    from app.modules.citations.service import canonical_norm
+
+    assert canonical_norm("Google Business") == canonical_norm("Google Business Profile")
+    assert canonical_norm("Bing Places") == canonical_norm("Bing Places for Business")
+    assert canonical_norm("Facebook") == canonical_norm("Facebook Business (Page)")
+    assert canonical_norm("Foursquare") == canonical_norm("Foursquare Places")
+    assert canonical_norm("Apple Maps") == canonical_norm("Apple Business Connect")
+
+
+def test_normalisation_still_handles_punctuation_and_case_on_its_own() -> None:
+    from app.modules.citations.service import canonical_norm
+
+    assert canonical_norm("YellowPages.com") == canonical_norm("yellowpages.com")
+    assert canonical_norm("Chamber of Commerce") == canonical_norm("ChamberofCommerce")
+    assert canonical_norm("TripAdvisor") == canonical_norm("Tripadvisor")
+
+
+def test_ambiguous_names_are_left_unresolved_rather_than_guessed() -> None:
+    """The safety property. A wrong merge marks a directory covered that was never
+    built, and nothing afterwards signals it went wrong - the operator simply never
+    builds the listing. A miss only costs a duplicate offer.
+
+    "Yellow Pages" has six plausible catalog targets across three countries, "BBB"
+    three, and "Local.com" would collide with "Local.com.au" - a different country's
+    directory. None of them may be in the alias map.
+    """
+    from app.modules.citations.service import _DIRECTORY_ALIASES, canonical_norm
+
+    for risky in ("yellowpages", "bbb", "angi", "justia", "localcom"):
+        assert risky not in _DIRECTORY_ALIASES
+
+    # And the specific false merge that would matter most:
+    assert canonical_norm("Local.com") != canonical_norm("Local.com.au")
+
+
+def test_an_aliased_discovery_row_suppresses_the_catalog_entry_it_covers() -> None:
+    """End to end over the gap: a client whose Google Business listing was FOUND
+    must not be told to build Google Business Profile."""
+    directories = [
+        _dir("d1", "Google Business Profile"),
+        _dir("d2", "Bing Places for Business"),
+        _dir("d3", "Hotfrog"),
+    ]
+    # Exactly what discovery writes: the domain-derived name, no directory_id.
+    existing = [
+        {"directory": "Google Business", "submit_status": "live", "nap_status": "consistent"},
+        {"directory": "Bing Places", "submit_status": "live", "nap_status": "consistent"},
+    ]
+    gap = compute_citation_gap(directories=directories, existing_citations=existing)
+
+    assert gap.covered_count == 2
+    assert [d["id"] for d in gap.missing] == ["d3"]

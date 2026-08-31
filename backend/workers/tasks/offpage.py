@@ -37,6 +37,7 @@ from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
+from app.modules.citations.service import canonical_norm
 from app.schemas.offpage import action_for
 from app.services import pricing, web2_gate
 from app.services.content_generator import SourcePack
@@ -297,10 +298,21 @@ def run_citation_monitor(
 
     stored = store.list_citations_for_client(client_id)
     diff = diff_citations(fetched, stored)
+    # Resolve each discovered listing to its CATALOG ROW before writing it. Discovery
+    # names a listing from its domain and the catalog names it as a product, so a row
+    # written with a name alone matched nothing later and the client was told to build
+    # a listing they already had. Looked up once for the whole batch; a name with no
+    # unambiguous catalog row is written with a NULL id and still matches by name.
+    try:
+        catalog = store.directory_ids_by_name()
+    except Exception:
+        logger.warning("citation_directory_lookup_failed", business=business)
+        catalog = {}
     for rec in diff.new:
         store.insert_citation(
             client_id=client_id, client_name=client_name, directory=rec.directory,
             nap_status=rec.nap_status, action=action_for(rec.nap_status), note=rec.note,
+            directory_id=catalog.get(canonical_norm(rec.directory)),
         )
     for existing, rec in diff.changed:
         store.update_citation_status(
