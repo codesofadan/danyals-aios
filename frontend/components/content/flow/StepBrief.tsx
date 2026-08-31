@@ -163,10 +163,19 @@ export default function StepBrief({
             <button
               type="button" className="ghostbtn" onClick={runExtract}
               disabled={extract.isPending || !state.siteDomain}
+              title={state.siteDomain ? undefined : "Measuring needs a site to measure"}
             >
               <span className="material-symbols-rounded">palette</span>
               {extract.isPending ? "Measuring the site…" : `Measure ${state.siteDomain || "the site"}`}
             </button>
+            {/* Naming the cause, rather than a grey button with no explanation.
+                A template below is the real alternative, so point at it. */}
+            {!state.siteDomain && (
+              <div className="cs" style={{ marginTop: 8 }}>
+                No site chosen on screen 1, so there is nothing to measure. Pick a
+                template below, or replicate a design from a URL.
+              </div>
+            )}
 
             {/* Replicate a design from ANY url — the Design Replicator, in the flow
                 that actually needs it. */}

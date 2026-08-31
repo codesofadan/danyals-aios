@@ -52,8 +52,11 @@ export default function NewContentFlow() {
   // the sentence explaining why it is disabled.
   const blocker = useMemo(() => {
     if (step === 1) {
+      // The CLIENT is the only thing screen 1 must produce. The site used to be
+      // required too, which made the flow unexitable for a client with no `sites`
+      // row - and the backend never needed one: site_domain is optional on both
+      // creation schemas and generation completes without it.
       if (!state.clientId) return "Choose a client to continue.";
-      if (!state.siteDomain) return "Choose which of their sites these pages go on.";
       return null;
     }
     if (step === 2) return state.picks.length ? null : "Select at least one page to build.";

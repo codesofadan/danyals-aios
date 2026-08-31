@@ -193,10 +193,20 @@ export default function StepPages({
           <button
             type="button" className="primary-btn" style={{ marginTop: 12 }}
             onClick={runResearch} disabled={research.isPending || !state.siteDomain}
+            title={state.siteDomain ? undefined : "Research needs a site to measure against"}
           >
             <span className="material-symbols-rounded">travel_explore</span>
             {research.isPending ? "Researching…" : "Recommend pages"}
           </button>
+          {/* Say why, rather than leaving a grey button. Research measures the
+              client's site against the SERP, so it genuinely needs a domain -
+              unlike the rest of the flow, which no longer does. */}
+          {!state.siteDomain && (
+            <div className="cs" style={{ marginTop: 8 }}>
+              No site chosen on screen 1, so there is nothing to research against. Go
+              back and pick one, or add the pages you want by hand below.
+            </div>
+          )}
         </section>
       )}
 

@@ -202,6 +202,17 @@ function RegisterAccountForm({
 
   return (
     <div className="fld" style={{ border: "1px solid var(--line, #e5e7eb)", padding: 12, marginBottom: 12 }}>
+      {/* Ownership is DERIVED from the selected client, and it decides which
+          platforms the account can ever satisfy - a house account only matches a
+          house-tier platform. Saying so here is what stops someone registering a
+          WordPress.com login as "house" and being unable to explain why the
+          platform still shows as not connected. */}
+      <div className="fld-hint" style={{ marginBottom: 10 }}>
+        {clientId
+          ? "This account will be owned by the selected client (per-client), which is what most platforms require."
+          : "This account will be house-owned and shared across clients. Only Telegra.ph accepts a house account — switch to a client above for any other platform."}
+      </div>
+
       <label>Platform</label>
       <select value={platform} onChange={(e) => { setPlatform(e.target.value); setCred({}); }}>
         <option value="">Choose a platform…</option>

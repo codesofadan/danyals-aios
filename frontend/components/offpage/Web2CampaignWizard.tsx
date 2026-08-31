@@ -101,12 +101,29 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
     };
   }
 
+  // What the quote actually PROMISES: how many properties, on which platforms, at
+  // what pace, for whom. Those decide the price and the finish date.
+  //
+  // The signature used to be the whole body, so editing the title or a proof point
+  // invalidated a perfectly good quote and re-disabled Create - the operator had to
+  // re-quote to change a word. Anchors and the target URL change what is created but
+  // not what the quote claims, so they are out too. The guarded lie is "quote three,
+  // create ten", and that remains impossible: count derives from topics, which is in.
+  function quoteSignature() {
+    return JSON.stringify({
+      clientId,
+      articleCount: topics.length,
+      topics,
+      platforms: Array.from(selected).sort(),
+      pacing,
+    });
+  }
+
   async function quote() {
     setError("");
     try {
-      const payload = body();
-      await estimate.mutateAsync(payload);
-      setQuotedSignature(JSON.stringify(payload));
+      await estimate.mutateAsync(body());
+      setQuotedSignature(quoteSignature());
     } catch (e) {
       setQuotedSignature(null);
       setError(messageOf(e));
@@ -123,8 +140,8 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
     }
   }
 
-  // A quote only counts while the inputs still match the ones it was taken from.
-  const quoteIsCurrent = quotedSignature !== null && quotedSignature === JSON.stringify(body());
+  // A quote only counts while the inputs it PRICED still match.
+  const quoteIsCurrent = quotedSignature !== null && quotedSignature === quoteSignature();
   const quoted = quoteIsCurrent ? estimate.data : undefined;
   const quoteWentStale = quotedSignature !== null && !quoteIsCurrent;
 
@@ -250,10 +267,37 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                       );
                     })}
                   </div>
-                  <div className="fld-hint">
-                    <b>{selected.size}</b> of {eligible.length} eligible selected. Spreading across
-                    more platforms finishes sooner <em>and</em> leaves a lighter footprint.
-                  </div>
+                  {eligible.length === 0 ? (
+                    // "0 of 0 eligible selected" over an empty grid is not an
+                    // explanation. Nothing here is broken - this client has no
+                    // CONNECTED account on any platform it is allowed to use - and
+                    // saying which of the two reasons applies is the difference
+                    // between a ten-minute fix and a bug hunt.
+                    <div className="fld-hint">
+                      <b>No platform is ready for this client yet.</b>{" "}
+                      {needsAccount.length > 0 && (
+                        <>
+                          {needsAccount.length} platform(s) this client may use have no
+                          connected account — add one under <b>Accounts</b>, with this
+                          client selected.{" "}
+                        </>
+                      )}
+                      {blocked.length > 0 && (
+                        <>
+                          {blocked.length} more are not eligible for this client&rsquo;s
+                          scope or tier (listed below).
+                        </>
+                      )}
+                      {needsAccount.length === 0 && blocked.length === 0 && (
+                        <>No platforms are configured at all.</>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="fld-hint">
+                      <b>{selected.size}</b> of {eligible.length} eligible selected. Spreading across
+                      more platforms finishes sooner <em>and</em> leaves a lighter footprint.
+                    </div>
+                  )}
 
                   {needsAccount.length > 0 && (
                     <details className="fld-hint" style={{ marginTop: 8 }} open={eligible.length === 0}>
@@ -366,11 +410,25 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                 {create.isPending ? "Creating…" : `Create ${quoted?.count ?? ""} propert${quoted?.count === 1 ? "y" : "ies"}`}
               </button>
             </div>
+            {/* Name the REAL reason Create is disabled. "Get a quote first" is only
+                true when a quote is actually obtainable; when there are no eligible
+                platforms or a required field is empty, it sends the operator to a
+                button that is disabled for a different reason again. */}
             {!quoted && (
               <div className="fld-hint" style={{ textAlign: "right" }}>
-                {quoteWentStale
-                  ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
-                  : "Get a quote first — it shows the cost and the finish date before anything is created."}
+                {!canQuote
+                  ? eligible.length === 0
+                    ? "No connected platform for this client — connect an account under Accounts before creating a campaign."
+                    : selected.size === 0
+                      ? "Choose at least one platform above."
+                      : topics.length === 0
+                        ? "Add at least one topic — one per line."
+                        : !targetUrl.trim().startsWith("http")
+                          ? "Add the target URL these properties will link to."
+                          : "Choose a client to continue."
+                  : quoteWentStale
+                    ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
+                    : "Get a quote first — it shows the cost and the finish date before anything is created."}
               </div>
             )}
           </div>

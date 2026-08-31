@@ -180,4 +180,55 @@ describe("Web2CampaignWizard", () => {
     fireEvent.click(screen.getByText(/not available for this client/i));
     expect(screen.getByText(/Restricted to developer clients/i)).toBeTruthy();
   });
+
+  it("keeps a quote alive when the operator edits the copy it never priced", async () => {
+    // The signature used to be the WHOLE body, so typing in the title or a proof
+    // point invalidated a good quote and re-disabled Create - to change a word the
+    // operator had to re-price. The quote promises a count, a set of platforms, a
+    // pace and a client; a title is none of those.
+    renderWizard();
+    await fillMinimum("one\ntwo");
+
+    fireEvent.click(screen.getByRole("button", { name: /Get quote/i }));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(false),
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Cleared 400 blocked drains/i), {
+      target: { value: "Cleared 400 drains in 2025" },
+    });
+
+    expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("still invalidates the quote when the PLATFORM set changes", async () => {
+    // The other half of the same property: platforms decide the finish date, so a
+    // quote taken for one platform must not authorise two.
+    renderWizard();
+    await fillMinimum("one\ntwo");
+
+    fireEvent.click(screen.getByRole("button", { name: /Get quote/i }));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(false),
+    );
+
+    fireEvent.click(screen.getByText("Tumblr"));
+
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(screen.getByText(/changed since that quote/i)).toBeTruthy();
+  });
+
+  it("names the missing input instead of telling the operator to get an impossible quote", async () => {
+    // "Get a quote first" is only true when a quote can be taken. With no platform
+    // selected it points at a button that is disabled for a different reason again.
+    renderWizard();
+    const [clientSelect] = screen.getAllByRole("combobox") as HTMLSelectElement[];
+    fireEvent.change(clientSelect, { target: { value: "cl-1" } });
+    await waitFor(() => expect(screen.getByText("Blogger")).toBeTruthy());
+
+    expect(screen.getByText(/choose at least one platform/i)).toBeTruthy();
+    expect(screen.queryByText(/Get a quote first/i)).toBeNull();
+  });
 });

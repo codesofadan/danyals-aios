@@ -42,7 +42,12 @@ export default function StepLaunch({
         // The site chosen on screen 1. Without this the backend takes the client's
         // FIRST site, so the picker changed what was researched and nothing else -
         // the page then published wherever happened to be first.
-        siteDomain: state.siteDomain,
+        //
+        // Sent ONLY when it is a registered site: `_chosen_site` 400s on a domain
+        // that is not registered to the client, so a domain merely derived from the
+        // business profile (used for research) must be omitted here. Omitted, the
+        // backend applies its own fallback - first registered site, else none.
+        ...(state.siteRegistered && state.siteDomain ? { siteDomain: state.siteDomain } : {}),
         framework: state.framework,
         // An explicit template wins over the kind's default blueprint; "Auto"
         // falls back to the blueprint the chosen page kind derives.
@@ -122,8 +127,17 @@ export default function StepLaunch({
           </dd>
           <dt className="cs">For</dt>
           <dd style={{ margin: 0 }}>{state.clientName || "—"}</dd>
+          {/* Say which site will actually be published to, including the two cases
+              where it is not the one on screen 1 - finding that out afterwards is
+              how a page ends up on the wrong site. */}
           <dt className="cs">On</dt>
-          <dd style={{ margin: 0 }}>{state.siteDomain || "—"}</dd>
+          <dd style={{ margin: 0 }}>
+            {state.siteRegistered && state.siteDomain
+              ? state.siteDomain
+              : state.siteDomain
+                ? `${state.siteDomain} (research only — publishes to their registered site)`
+                : "No site chosen — saved for review, published later"}
+          </dd>
           <dt className="cs">Grounded in</dt>
           <dd style={{ margin: 0 }}>{facts} proof point{facts === 1 ? "" : "s"}</dd>
           <dt className="cs">Look</dt>

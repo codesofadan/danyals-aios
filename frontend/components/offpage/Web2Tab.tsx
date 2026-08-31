@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Verified } from "@/lib/offpage";
 import { useApproveWeb2, useWeb2, useWeb2Placements } from "@/lib/hooks/offpage";
+import { useClients } from "@/lib/hooks/clients";
 import Web2CampaignBoard from "./Web2CampaignBoard";
 import Web2AccountBoard from "./Web2AccountBoard";
 import Web2PlacementTable from "./Web2PlacementTable";
@@ -37,6 +38,21 @@ export default function Web2Tab() {
   const [showPlan, setShowPlan] = useState(false);
   const [showCampaign, setShowCampaign] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+
+  // WHOSE accounts the Accounts view is showing and registering.
+  //
+  // This board used to be mounted with no clientId at all, and the register form
+  // derives ownership from exactly that: `ownership: clientId ? "per_client" :
+  // "house"`. So every account registered through the UI was a HOUSE account - and
+  // a house account only satisfies a house-tier platform, of which there is exactly
+  // one (Telegra.ph). WordPress.com, Blogger, Tumblr and the eleven developer
+  // platforms are all per_client tier, so they could never reach "eligible" no
+  // matter how many accounts were added here; a per_client account could only be
+  // created from the CLI. That is why both Create Property buttons were disabled:
+  // eligibility requires a connected account, and the UI could not produce one.
+  const clientsQ = useClients();
+  const clientList = clientsQ.data ?? [];
+  const [accountsClientId, setAccountsClientId] = useState("");
 
   const rows = useMemo(
     () => web2Properties.filter((w) => filter === "all" || w.verified === filter),
@@ -118,7 +134,37 @@ export default function Web2Tab() {
 
       {view === "campaigns" && <Web2CampaignBoard />}
       {view === "links" && <LinksBuilt />}
-      {view === "accounts" && <Web2AccountBoard />}
+      {view === "accounts" && (
+        <>
+          <div
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              flexWrap: "wrap", margin: "14px 0 4px",
+            }}
+          >
+            <label htmlFor="w2-accounts-client" style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
+              Accounts for
+            </label>
+            <select
+              id="w2-accounts-client"
+              value={accountsClientId}
+              onChange={(e) => setAccountsClientId(e.target.value)}
+              style={{ minWidth: 240 }}
+            >
+              <option value="">House (agency-shared)</option>
+              {clientList.map((c) => (
+                <option key={c.id} value={c.id}>{c.cn}</option>
+              ))}
+            </select>
+            <span className="cs" style={{ flexBasis: "100%" }}>
+              {accountsClientId
+                ? "New accounts here are owned by this client, which is what most platforms require."
+                : "House accounts are shared across clients. Only Telegra.ph accepts one — pick a client for every other platform."}
+            </span>
+          </div>
+          <Web2AccountBoard clientId={accountsClientId || undefined} />
+        </>
+      )}
       {view === "status" && <Web2StatusBoard />}
 
       {view === "ledger" && needsReviewCount > 0 && (

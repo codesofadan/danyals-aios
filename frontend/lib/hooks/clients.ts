@@ -291,6 +291,35 @@ export function useClientSites(clientId: string | null) {
   });
 }
 
+/** Register a site for a client (POST /clients/{id}/sites, lead-only).
+ *
+ * The endpoint has existed since P2-4 and had NO caller in the frontend: a site
+ * row could only be created by hand against the API. Meanwhile the content flow
+ * required one and told the operator to "add one on the client's page", where no
+ * such control existed. This is that control. */
+export function useCreateClientSite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, domain, cms = "wordpress" }: { clientId: string; domain: string; cms?: string }) =>
+      api.post<ClientSite>(`/clients/${clientId}/sites`, { domain, cms_type: cms }),
+    onSuccess: (_row, { clientId }) => {
+      void qc.invalidateQueries({ queryKey: ["clients", clientId, "sites"] });
+    },
+  });
+}
+
+/** Strip scheme, `www.`, path and trailing slash so what we store matches what the
+ *  backend's own site-matching normalises to (routers/content.py `_chosen_site`). */
+export function normalizeDomain(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .split("/")[0]
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
 // --- Portal login credentials ------------------------------------------------
 // QA: "Clients cannot log in because valid login credentials are not being
 // created/stored" and "there is no Show Login option for existing clients."

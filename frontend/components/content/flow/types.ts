@@ -10,8 +10,17 @@ import type { PageKindKey } from "@/lib/pageKinds";
 export type FlowState = {
   clientId: string;
   clientName: string;
-  /** The client's OWN registered site, chosen from the database - never typed. */
+  /** The site these pages are researched against and published to. Usually one of
+   *  the client's registered sites; may also be a domain derived from the client's
+   *  business profile, or empty when the operator continues without one. */
   siteDomain: string;
+  /** Whether `siteDomain` is a REGISTERED site row for this client.
+   *
+   *  It decides whether the domain may travel in the generate payload:
+   *  `_chosen_site` 400s on a domain that is not registered to the client, so an
+   *  unregistered one is used for research only and omitted at launch (where the
+   *  backend then applies its own fallback). */
+  siteRegistered: boolean;
   kind: PageKindKey;
   /** The pages to build, from the keyword bank, a research run, or added by hand. */
   picks: ResearchItem[];
@@ -36,7 +45,7 @@ export type FlowState = {
 };
 
 export const EMPTY_FLOW: FlowState = {
-  clientId: "", clientName: "", siteDomain: "", kind: "service",
+  clientId: "", clientName: "", siteDomain: "", siteRegistered: false, kind: "service",
   picks: [], proof: "", services: "", testimonials: "", uniqueData: "",
   framework: "Auto", target: "WordPress", design: null, designFrom: "", replicaUrl: "", replicaOwnerConfirmed: false, replicaJobId: null,
   template: "Auto", theme: TEMPLATE_THEME_DEFAULTS.service,
