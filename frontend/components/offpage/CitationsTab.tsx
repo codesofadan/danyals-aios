@@ -80,7 +80,15 @@ export default function CitationsTab() {
     runAudit.mutate(gapClient, {
       onSuccess: (r) => {
         setAuditCollapsed(true); // fold Step 1 away — the build flow is the next step
-        setFlash(r?.detail ?? "Citation audit queued — discovering existing vs missing.");
+        // The run id is what the progress panel follows. The backend returns null
+        // for it only when the ledger could not be read back - the sweep is still
+        // queued, but nothing can report on it, and a panel that stays empty for
+        // that reason must not read as "nothing is happening".
+        setFlash(
+          r?.jobRunId
+            ? (r?.detail ?? "Citation audit queued — discovering existing vs missing.")
+            : "Audit queued, but its run could not be recorded — there is nothing to follow here. Check Operations, or re-run it.",
+        );
         window.setTimeout(() => setFlash(null), 4200);
       },
       onError: (err) => {
@@ -212,15 +220,23 @@ export default function CitationsTab() {
               </button>
             </div>
           )}
-          {/* The audit's REAL state, for as long as it lasts - not a flash that
-              fades after four seconds and leaves the operator guessing whether a
-              sweep is still working, already finished, or never started. */}
-          {gapClient && <CitationAuditProgress clientId={gapClient} />}
           {!gapClient && (
             <div className="op-muted" style={{ fontSize: 13 }}>Pick a client to see its citation coverage and build the gaps.</div>
           )}
         </div>
       )}
+
+      {/* The audit's REAL state, for as long as it lasts - not a flash that fades
+          after four seconds and leaves the operator guessing whether a sweep is
+          still working, already finished, or never started.
+          OUTSIDE the collapse ternary on purpose: starting an audit folds Step 1
+          away (that is deliberate - the build flow is the next step), and while
+          this panel lived INSIDE the expanded branch, pressing "Run citation
+          audit" unmounted the one thing that says the audit is running. One
+          instance rather than a copy in each branch, so it is not remounted by the
+          fold - CitationAuditProgress holds a ref to fire the board refresh once
+          per run, and a remount would re-fire it. */}
+      {gapClient && <CitationAuditProgress clientId={gapClient} />}
 
       {/* ───────── Ready to finish — now handled by the work queue ─────────
           REPLACED 2026-08-29. This block used to tell operators to run

@@ -210,6 +210,11 @@ export function useRunCitationAudit() {
       void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
       void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
       void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
+      // The run list is what the progress panel reads. Without this the panel sits
+      // on a 30s-stale empty list after the POST - and its poll only speeds up once
+      // it can SEE a non-terminal run, so it would show nothing for half a minute
+      // at exactly the moment the operator is asking "did that start?".
+      void qc.invalidateQueries({ queryKey: CITATION_AUDIT_RUNS_KEY });
     },
   });
 }
