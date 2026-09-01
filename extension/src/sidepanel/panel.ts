@@ -8,7 +8,7 @@
  * worker what is going on.
  */
 
-import type { CompleteResult, FillOutcome, PanelRequest, PanelResponse, QueueBoard, QueueItem } from "../lib/messages";
+import type { CompleteResult, ConnectionReport, FillOutcome, PanelRequest, PanelResponse, QueueBoard, QueueItem } from "../lib/messages";
 import { needsGrant, originPattern } from "../lib/origins";
 
 const root = document.getElementById("root") as HTMLElement;
@@ -75,7 +75,41 @@ async function ensureOriginPermission(apiBase: string): Promise<boolean> {
   }
 }
 
-function renderPairing(message = ""): void {
+/** One actionable sentence per verdict — the whole point of the diagnostic. */
+function diagnosisCopy(report: ConnectionReport, base: string): string {
+  switch (report.verdict) {
+    case "server_unreachable":
+      return (
+        `Nothing answered at ${base}. Is the backend running? Copy the exact API ` +
+        "address from the dashboard's Settings → Extension page rather than typing one from memory."
+      );
+    case "ipv6_localhost_trap":
+      return (
+        `"localhost" didn't answer, but the same server DOES answer at ${report.detail}. ` +
+        "Pair with that address — on this machine, localhost points first at an address the server doesn't listen on."
+      );
+    case "cors_refused":
+      return (
+        "The server is up, but Chrome blocked this extension from calling it. Two fixes to try: " +
+        "press Reload on this extension in chrome://extensions (a stale build keeps old permissions), " +
+        `and have an admin allow-list this device on the server: EXTENSION_ORIGINS=chrome-extension://${report.extensionId} ` +
+        "in backend/.env, then restart the API."
+      );
+    case "token_rejected":
+      return (
+        "The server answered: that token is missing, mistyped, expired, or revoked. Tokens last " +
+        "one shift by design — mint a fresh one under Settings → Extension and paste the whole aop_… string."
+      );
+    case "scope_or_role_refused":
+      return `The server refused this token's permissions: ${report.detail || "no detail given"}.`;
+    case "server_error":
+      return `The server answered with an error: ${report.detail || "no detail given"}.`;
+    case "connected":
+      return "Connection is good — try pairing again.";
+  }
+}
+
+function renderPairing(message = "", baseValue = ""): void {
   root.replaceChildren();
   root.append(el("h1", { textContent: "Pair this device" }));
   if (message) root.append(el("div", { className: "note bad", textContent: message }));
@@ -83,36 +117,61 @@ function renderPairing(message = ""): void {
     el("p", {
       className: "muted",
       textContent:
-        "Create a token in the dashboard under Settings → Extension, then paste it here. " +
-        "It only reaches the citation queue and expires after one shift.",
+        "Create a token in the dashboard under Settings → Extension and copy the API address " +
+        "shown beside it. The token only reaches the citation queue and expires after one shift.",
     }),
   );
-  const base = el("input", { value: "http://localhost:8000", placeholder: "API base URL" });
+  const base = el("input", {
+    value: baseValue || "http://127.0.0.1:8000",
+    placeholder: "API address — copy it from Settings → Extension",
+  });
   const token = el("input", { placeholder: "aop_…", type: "password" });
   const go = el("button", { className: "primary", textContent: "Pair" });
   go.onclick = async () => {
     go.disabled = true;
-    // THE MANIFEST ONLY GRANTS localhost. host_permissions is
-    // ["http://localhost:8000/*"], so pairing against the deployed dashboard - the
-    // only place a real operator's queue lives - would have every request blocked
-    // by the extension's own permissions, with no error the panel could explain.
-    // The grant for any other origin has to be REQUESTED, and Chrome only shows
-    // that prompt inside a user gesture, which this click is. Declared in the
-    // manifest as optional_host_permissions: ["https://*/*"].
+    // Loopback (localhost / 127.0.0.1, any port) is granted by the manifest. Pairing
+    // against the deployed dashboard - the only place a real operator's queue lives -
+    // needs a runtime grant drawn from optional_host_permissions, and Chrome only
+    // shows that prompt inside a user gesture, which this click is.
     const granted = await ensureOriginPermission(base.value);
     if (!granted) {
       go.disabled = false;
       renderPairing(
         "This device needs permission to reach that dashboard. Press Pair again and " +
-          "choose Allow, or pair against http://localhost:8000 while developing.",
+          "choose Allow, or pair against http://127.0.0.1:8000 while developing.",
+        base.value,
       );
       return;
     }
     const res = await send({ type: "pair", token: token.value, apiBase: base.value });
-    if (res.ok) { flash = "Paired."; void refresh(); }
-    else { go.disabled = false; renderPairing(res.error); }
+    if (res.ok) { flash = "Paired."; void refresh(); return; }
+    go.disabled = false;
+    if (res.needsPairing) {
+      // The pair call itself came back 401 — the token is the problem, say so.
+      renderPairing(
+        "The server answered: that token is missing, mistyped, expired, or revoked. " +
+          "Mint a fresh one under Settings → Extension.",
+        base.value,
+      );
+      return;
+    }
+    if (res.diagnosis) {
+      renderPairing(diagnosisCopy(res.diagnosis, base.value.trim()), base.value);
+      return;
+    }
+    renderPairing(res.error, base.value);
   };
   root.append(el("div", { className: "row" }, base), el("div", { className: "row" }, token), el("div", { className: "row" }, go));
+
+  // The one fact only this side can know: the identity the server's allow-list needs.
+  // Rendered click-to-copy so "paste your extension ID" is never a chrome:// scavenger hunt.
+  const idLine = el("p", {
+    className: "muted",
+    textContent: `This device: chrome-extension://${chrome.runtime.id} — click to copy`,
+    style: "cursor: pointer;" as never,
+  });
+  idLine.onclick = () => void navigator.clipboard.writeText(`chrome-extension://${chrome.runtime.id}`);
+  root.append(el("hr"), idLine);
 }
 
 // --------------------------------------------------------------------------- //

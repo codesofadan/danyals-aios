@@ -42,6 +42,12 @@ export type FillOutcome = {
   failed: { key: string; reason: string }[];
 };
 
+import type { Diagnosis } from "./diagnose";
+
+/** A diagnosis plus the one fact only the extension knows: its own identity, which is
+ *  exactly what the server's EXTENSION_ORIGINS allow-list needs. */
+export type ConnectionReport = Diagnosis & { extensionId: string };
+
 /** Panel → worker. The panel never calls the API and never sees the token. */
 export type PanelRequest =
   | { type: "pair"; token: string; apiBase: string }
@@ -52,8 +58,9 @@ export type PanelRequest =
   | { type: "fill" }
   | { type: "complete"; liveUrl: string; note: string }
   | { type: "blocked"; reason: string; detail: string }
-  | { type: "release" };
+  | { type: "release" }
+  | { type: "diagnose"; apiBase?: string; token?: string };
 
 export type PanelResponse =
   | { ok: true; data: unknown }
-  | { ok: false; error: string; needsPairing?: boolean };
+  | { ok: false; error: string; needsPairing?: boolean; diagnosis?: ConnectionReport };

@@ -13,7 +13,8 @@
  */
 
 import { api, clearCredentials, NeedsPairing, readCredentials, storeCredentials } from "../lib/api";
-import type { PanelRequest, PanelResponse, QueueItem } from "../lib/messages";
+import { diagnoseConnection } from "../lib/diagnose";
+import type { ConnectionReport, PanelRequest, PanelResponse, QueueItem } from "../lib/messages";
 import { clearClaim, readClaim, unbankedSeconds, writeClaim } from "../lib/session";
 
 const HEARTBEAT_ALARM = "aios-queue-heartbeat";
@@ -83,9 +84,34 @@ async function handle(request: PanelRequest): Promise<PanelResponse> {
   try {
     switch (request.type) {
       case "pair": {
-        await storeCredentials(request.token.trim(), request.apiBase.trim());
-        const board = await api.board();
-        return { ok: true, data: board };
+        const token = request.token.trim();
+        const base = request.apiBase.trim();
+        await storeCredentials(token, base);
+        try {
+          const board = await api.board();
+          return { ok: true, data: board };
+        } catch {
+          // A failed pair must not leave dead credentials behind, and must not hand the
+          // operator fetch()'s bare "Failed to fetch" — run the staged probe and return
+          // a verdict the panel can turn into a next step.
+          await clearCredentials();
+          const diagnosis = await diagnoseConnection(base, token, fetch);
+          return {
+            ok: false,
+            error: "Pairing failed.",
+            diagnosis: { ...diagnosis, extensionId: chrome.runtime.id } satisfies ConnectionReport,
+          };
+        }
+      }
+
+      case "diagnose": {
+        const creds = await readCredentials();
+        const diagnosis = await diagnoseConnection(
+          request.apiBase ?? creds?.base ?? "",
+          request.token ?? creds?.token ?? "",
+          fetch,
+        );
+        return { ok: true, data: { ...diagnosis, extensionId: chrome.runtime.id } satisfies ConnectionReport };
       }
       case "unpair": {
         await chrome.alarms.clear(HEARTBEAT_ALARM);

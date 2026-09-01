@@ -8,7 +8,7 @@
   "action": { "default_title": "AIOS Citation Assistant" },
   "side_panel": { "default_path": "panel.html" },
   "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "alarms"],
-  "host_permissions": ["http://localhost:8000/*"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "optional_host_permissions": ["https://*/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
