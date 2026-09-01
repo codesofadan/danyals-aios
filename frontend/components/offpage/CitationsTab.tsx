@@ -10,7 +10,7 @@ import {
   type CitationSkipReason,
   type NapStatus,
 } from "@/lib/offpage";
-import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useCitationAuditRuns, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
+import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
 import CitationAuditProgress from "./CitationAuditProgress";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
