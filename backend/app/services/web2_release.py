@@ -18,6 +18,13 @@ DEFERRED (its slot moves), never published anyway. Deferring is the safe directi
 worst case is a placement going out later than planned, which is invisible to everyone
 except the schedule.
 
+PARKED, DELIBERATELY (owner decision 2026-08-29, recorded at web2_campaign.py's
+scheduled_for note): approved campaigns publish immediately, `scheduled_for` stays NULL,
+and no beat entry runs `web2_release_due` - beat itself is parked by owner instruction.
+This module is the preserved half of that decision, kept tested so re-enabling drip is a
+wiring task (a beat entry or a self-rescheduling chain - an OWNER decision), not a
+rewrite. Do not delete it as dead code; do not wire it up on your own judgement either.
+
 Pure: takes rows and a clock, returns decisions. The worker performs them.
 """
 
