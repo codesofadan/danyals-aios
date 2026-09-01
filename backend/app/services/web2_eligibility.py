@@ -70,6 +70,26 @@ class PlatformVerdict:
     def eligible(self) -> bool:
         return self.status == "eligible"
 
+    @property
+    def advisable(self) -> bool:
+        """Whether an operator may CHOOSE this platform for this client.
+
+        The distinction that makes "any platform for any client" honest without making
+        it reckless. Two states are hard facts about the machine and can never be
+        overridden - there is no publisher (``not_supported``) or there is no credential
+        (``not_connected``), and no amount of operator conviction publishes through
+        either. The other two are JUDGEMENTS about fit: a topical mismatch
+        (``not_eligible``) or an unread terms page (``not_reviewed``). Those are the
+        operator's call to make with the platform's own rule in front of them, so they
+        are advisory - selectable against a recorded acknowledgement, not refused.
+        """
+        return self.status in ("eligible", "not_eligible", "not_reviewed")
+
+    @property
+    def needs_acknowledgement(self) -> bool:
+        """Selectable, but only against an explicit, recorded acknowledgement."""
+        return self.status in ("not_eligible", "not_reviewed")
+
 
 def evaluate_platform(
     row: dict[str, Any], *, client_scope: str, connected: bool
@@ -175,6 +195,63 @@ def eligible_platform_names(verdicts: Iterable[PlatformVerdict]) -> list[str]:
     publish, so offering it as a campaign target would queue work that can only hold.
     """
     return [v.platform_enum for v in verdicts if v.eligible and v.platform_enum]
+
+
+@dataclass(frozen=True)
+class SelectionVerdict:
+    """What an operator's platform selection resolves to.
+
+    Three lists, because three different things must happen to them: ``allowed`` is
+    planned, ``blocked`` is refused with the machine reason, and ``advisories`` is
+    planned ONLY if the operator has acknowledged it - and is refused with the
+    platform's own words if they have not.
+    """
+
+    allowed: list[str]
+    blocked: list[str]  # "platform: reason" - cannot publish, no override exists
+    advisories: list[str]  # "platform: reason" - the operator's call, needs an ack
+
+
+def resolve_selection(
+    verdicts: Iterable[PlatformVerdict],
+    selected: Iterable[str],
+    *,
+    acknowledged: bool = False,
+) -> SelectionVerdict:
+    """Narrow an operator's chosen platforms into plan / refuse / ask.
+
+    THE CHANGE THIS EXISTS TO MAKE. The board previously refused four states
+    identically, which capped a default client at the four topic-agnostic platforms and
+    left the operator no way to say "I know, use it anyway" - so 35 platforms holding
+    real, working publisher code were unreachable for every client in the system. The
+    hard blocks stay hard (no publisher, no credential: those are facts, not opinions);
+    the two judgement states become the operator's decision, taken with the platform's
+    own rule quoted to them and their acknowledgement recorded.
+    """
+    by_name: dict[str, PlatformVerdict] = {}
+    for verdict in verdicts:
+        by_name[verdict.name] = verdict
+        if verdict.platform_enum:
+            by_name.setdefault(verdict.platform_enum, verdict)
+
+    allowed: list[str] = []
+    blocked: list[str] = []
+    advisories: list[str] = []
+    for name in selected:
+        chosen = by_name.get(name)
+        if chosen is None:
+            blocked.append(f"{name}: not in the platform catalogue.")
+            continue
+        target = chosen.platform_enum or chosen.name
+        if chosen.eligible:
+            allowed.append(target)
+        elif not chosen.advisable:
+            blocked.append(f"{name}: {chosen.reason}")
+        elif acknowledged:
+            allowed.append(target)
+        else:
+            advisories.append(f"{name}: {chosen.reason}")
+    return SelectionVerdict(allowed=allowed, blocked=blocked, advisories=advisories)
 
 
 def refuse_reason(verdicts: Iterable[PlatformVerdict], platform: str) -> str:

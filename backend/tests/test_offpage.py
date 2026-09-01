@@ -311,6 +311,13 @@ def test_citation_factory_builds_real_with_key() -> None:
 # --- endpoints (faked repo) ---------------------------------------------------
 
 
+_BLANK_IDENTITY: dict[str, Any] = {
+    "web2_handle_base": "", "web2_contact_email": "", "web2_imap_host": "",
+    "web2_imap_port": 993, "web2_imap_user": "",
+    "web2_imap_vault_provider": "", "web2_imap_vault_label": "",
+}
+
+
 class FakeOffpageRepo:
     def __init__(self) -> None:
         self.backlinks: list[dict[str, Any]] = []
@@ -323,6 +330,7 @@ class FakeOffpageRepo:
         self.bulk_ids: list[str] | None = None
         self.web2_by_id: dict[str, dict[str, Any]] = {}
         self.client_names: dict[str, str] = {}
+        self.identity: dict[str, dict[str, Any]] = {}
         self.created_web2: list[dict[str, Any]] = []
         # --- campaigns ---
         self.campaigns: dict[str, dict[str, Any]] = {}
@@ -361,6 +369,27 @@ class FakeOffpageRepo:
 
     def client_web2_scope(self, client_id: str) -> str:
         return self.client_scope
+
+    def client_web2_identity(self, client_id: str) -> dict[str, Any] | None:
+        name = self.client_names.get(client_id)
+        if name is None:
+            return None
+        return {"id": client_id, "name": name, **self.identity.get(client_id, _BLANK_IDENTITY)}
+
+    def set_client_web2_identity(self, client_id: str, **kw: Any) -> dict[str, Any] | None:
+        name = self.client_names.get(client_id)
+        if name is None:
+            return None
+        self.identity[client_id] = {
+            "web2_handle_base": kw["handle_base"],
+            "web2_contact_email": kw["contact_email"],
+            "web2_imap_host": kw["imap_host"],
+            "web2_imap_port": kw["imap_port"],
+            "web2_imap_user": kw["imap_user"],
+            "web2_imap_vault_provider": kw["vault_provider"],
+            "web2_imap_vault_label": kw["vault_label"],
+        }
+        return {"id": client_id, "name": name, **self.identity[client_id]}
 
     def connected_platforms_for(self, client_id: str) -> set[str]:
         return set(self.connected)
@@ -819,6 +848,32 @@ async def test_the_single_property_route_is_held_to_the_campaign_burst_ceiling(
     assert writes == [], "and nothing may be queued to spend on"
 
 
+async def test_the_single_property_route_asks_before_refusing_a_judgement_platform(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """Every platform the pipeline can drive is reachable for every client. A topical
+    mismatch is a judgement, so it is put to the operator with the platform's own rule
+    attached - and honoured when they answer. A missing publisher or credential is a
+    fact about the machine and stays refused, because no acknowledgement creates one."""
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    writes, _ = web2_enqueues
+    wire("manager", "u-lead")
+    body = _plan_body(platform="dev.to")
+
+    asked = await client.post("/api/v1/offpage/web2/plan", json=body)
+    assert asked.status_code == 422, asked.text
+    assert "developer" in asked.text
+    assert "acknowledgePlatformAdvisory" in asked.text
+    assert repo.created_web2 == [] and writes == [], "asking must not spend"
+
+    used = await client.post(
+        "/api/v1/offpage/web2/plan", json={**body, "acknowledgePlatformAdvisory": True}
+    )
+    assert used.status_code == 201, used.text
+    assert used.json()["platform"] == "dev.to"
+
+
 async def test_web2_plan_is_lead_only(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]],
@@ -1029,19 +1084,29 @@ async def test_an_ineligible_platform_is_dropped_and_the_reason_is_reported(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]],
 ) -> None:
-    """A selection quietly shrunk is a lie the operator discovers weeks later. dev.to is
-    developer-scope, so a local-business client may not use it - and is told why."""
+    """A selection quietly shrunk is a lie the operator discovers weeks later - so a
+    topical mismatch now STOPS the request and asks, quoting the platform's own rule,
+    instead of dropping the platform behind the operator's back. One acknowledgement
+    then uses it: the operator, not the catalogue, decides where their client posts."""
     repo.client_names["cl-1"] = "Leeds Drainage"
     wire("manager", "u-lead")
-    resp = await client.post(
+    body = _campaign_body(platforms=["Blogger", "dev.to"])
+
+    asked = await client.post("/api/v1/offpage/web2/campaigns/estimate", json=body)
+    assert asked.status_code == 422, asked.text
+    detail = asked.json()["error"]["message"] if "error" in asked.json() else asked.text
+    assert "dev.to" in detail
+    assert "developer" in detail
+    assert "acknowledgePlatformAdvisories" in detail, "the operator must be told HOW to proceed"
+
+    allowed = await client.post(
         "/api/v1/offpage/web2/campaigns/estimate",
-        json=_campaign_body(platforms=["Blogger", "dev.to"]),
+        json={**body, "acknowledgePlatformAdvisories": True},
     )
-    assert resp.status_code == 200
-    notes = " ".join(resp.json()["notes"])
-    assert "dev.to" in notes
-    assert "developer" in notes
-    assert all(p["platform"] != "dev.to" for p in resp.json()["properties"])
+    assert allowed.status_code == 200, allowed.text
+    assert any(p["platform"] == "dev.to" for p in allowed.json()["properties"]), (
+        "acknowledged, the platform is genuinely usable"
+    )
 
 
 async def test_campaign_creation_is_lead_only(
@@ -1787,3 +1852,108 @@ async def test_anchor_check_404s_on_an_unknown_client(
         json={"clientId": "nope", "anchor": "x y", "targetUrl": "https://a.example/x"},
     )
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# The per-client publishing identity (0122) - what makes account-building scale.
+# --------------------------------------------------------------------------- #
+async def test_the_client_identity_round_trips_without_ever_returning_the_password(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One identity per client, reused by every signup after it. The mailbox password
+    is sealed like any other credential: the response says only whether one is HELD."""
+    sealed: dict[str, str] = {}
+    monkeypatch.setattr(
+        "app.services.vault.add_key",
+        lambda **kw: sealed.__setitem__(f"{kw['provider']}|{kw['label']}", kw["secret"]),
+    )
+    monkeypatch.setattr(
+        "app.services.vault.find_secret",
+        lambda *, provider, label: sealed.get(f"{provider}|{label}"),
+    )
+    repo.client_names["cl-1"] = "Acme Roofing"
+    wire("manager", "u-lead")
+
+    resp = await client.put(
+        "/api/v1/offpage/web2/clients/cl-1/identity",
+        json={
+            "handleBase": "acmeroofing", "contactEmail": "web@acmeroofing.com",
+            "imapHost": "imap.acmeroofing.com", "imapUser": "web@acmeroofing.com",
+            "imapPassword": "hunter2",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["handleBase"] == "acmeroofing"
+    assert body["imapPasswordHeld"] is True
+    assert body["mailboxReady"] is True, "host + user + sealed password = readable"
+    assert "hunter2" not in resp.text, "the password must never travel back"
+
+
+async def test_a_per_client_identity_refuses_the_agency_catch_all_domain(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R2-08, the footprint rule the similarity gate cannot see. Aliases minted per
+    (platform, client) on ONE agency domain share a prefix, a client-id hash and a
+    registrant domain, so suspending one account hands a trust-and-safety team the
+    query that finds every other client. Structural refusal, not a warning."""
+    monkeypatch.setattr("app.cli.web2_accounts._shared_domains", lambda: {"mail.agency.com"})
+    repo.client_names["cl-1"] = "Acme Roofing"
+    wire("manager", "u-lead")
+
+    resp = await client.put(
+        "/api/v1/offpage/web2/clients/cl-1/identity",
+        json={"handleBase": "acmeroofing", "contactEmail": "acme@mail.agency.com"},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "client" in resp.text.lower() and "own domain" in resp.text.lower()
+    assert repo.identity == {}, "nothing may be written on a refusal"
+
+
+async def test_a_blank_password_leaves_an_existing_seal_alone(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Editing the handle must not silently drop a working mailbox credential, which is
+    what a form round-tripping an empty password field would otherwise do."""
+    sealed = {"web2:mailbox|cl-1:mailbox": "hunter2"}
+    monkeypatch.setattr("app.services.vault.add_key", lambda **kw: None)
+    monkeypatch.setattr(
+        "app.services.vault.find_secret",
+        lambda *, provider, label: sealed.get(f"{provider}|{label}"),
+    )
+    repo.client_names["cl-1"] = "Acme Roofing"
+    repo.identity["cl-1"] = {
+        "web2_handle_base": "old", "web2_contact_email": "web@acmeroofing.com",
+        "web2_imap_host": "imap.acmeroofing.com", "web2_imap_port": 993,
+        "web2_imap_user": "web@acmeroofing.com",
+        "web2_imap_vault_provider": "web2:mailbox", "web2_imap_vault_label": "cl-1:mailbox",
+    }
+    wire("manager", "u-lead")
+
+    resp = await client.put(
+        "/api/v1/offpage/web2/clients/cl-1/identity",
+        json={
+            "handleBase": "acmeroofing", "contactEmail": "web@acmeroofing.com",
+            "imapHost": "imap.acmeroofing.com", "imapUser": "web@acmeroofing.com",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imapPasswordHeld"] is True, "the seal survived an unrelated edit"
+    assert repo.identity["cl-1"]["web2_imap_vault_label"] == "cl-1:mailbox"
+
+
+async def test_setting_a_client_identity_is_lead_only(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    repo.client_names["cl-1"] = "Acme Roofing"
+    wire("specialist", "u-staff")
+    resp = await client.put(
+        "/api/v1/offpage/web2/clients/cl-1/identity", json={"handleBase": "acme"}
+    )
+    assert resp.status_code == 403

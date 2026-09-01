@@ -22,6 +22,7 @@ from app.services.web2_eligibility import (
     evaluate_catalog,
     evaluate_platform,
     refuse_reason,
+    resolve_selection,
 )
 
 pytestmark = pytest.mark.unit
@@ -208,3 +209,75 @@ def test_refuse_reason_explains_an_ineligible_target_and_is_empty_for_a_good_one
 
 def test_an_unknown_platform_is_refused_by_name() -> None:
     assert "not in the platform catalogue" in refuse_reason([], "NotAPlatform")
+
+
+# --------------------------------------------------------------------------- #
+# Platform freedom: the operator chooses, with the platform's own rule quoted.
+# --------------------------------------------------------------------------- #
+def test_a_topical_mismatch_is_the_operators_call_not_a_refusal() -> None:
+    """The change that unlocks the catalogue. 35 platforms hold working publisher code
+    that NO client could reach, because a topical judgement refused exactly like a
+    missing credential. A judgement is now advisory: quoted, acknowledged, allowed."""
+    board = evaluate_catalog(
+        [_row(name="dev.to", platform_enum="dev.to", topical_scope="developer")],
+        client_scope="agnostic",
+        connected_platforms={"dev.to"},
+    )
+    unacked = resolve_selection(board, ["dev.to"])
+    assert unacked.allowed == []
+    assert unacked.blocked == []
+    assert "developer" in unacked.advisories[0], "the platform's OWN rule must be quoted"
+
+    acked = resolve_selection(board, ["dev.to"], acknowledged=True)
+    assert acked.allowed == ["dev.to"], "acknowledged, it is usable"
+
+
+def test_an_unreviewed_platform_is_also_the_operators_call() -> None:
+    board = evaluate_catalog(
+        [_row(name="Plurk", platform_enum="Plurk", ownership_tier="do_not_use")],
+        client_scope="agnostic",
+        connected_platforms={"Plurk"},
+    )
+    assert resolve_selection(board, ["Plurk"]).advisories
+    assert resolve_selection(board, ["Plurk"], acknowledged=True).allowed == ["Plurk"]
+
+
+def test_no_credential_and_no_publisher_stay_hard_refusals() -> None:
+    """An acknowledgement cannot conjure a credential or a publisher class. These two
+    are facts about the machine, so no override exists - waving them through would
+    queue work that can only fail after the drafting spend."""
+    board = evaluate_catalog(
+        [
+            _row(name="Blogger", platform_enum="Blogger"),  # eligible but unconnected
+            _row(name="Wix", platform_enum=None, automation_ready=False),
+        ],
+        client_scope="agnostic",
+        connected_platforms=set(),
+    )
+    verdict = resolve_selection(board, ["Blogger", "Wix"], acknowledged=True)
+    assert verdict.allowed == []
+    assert len(verdict.blocked) == 2
+    assert any("no account is connected" in b.lower() for b in verdict.blocked)
+    assert any("build target" in b for b in verdict.blocked)
+
+
+def test_an_unknown_platform_is_blocked_by_name() -> None:
+    assert resolve_selection([], ["NotAPlatform"]).blocked == [
+        "NotAPlatform: not in the platform catalogue."
+    ]
+
+
+def test_a_mixed_selection_splits_three_ways() -> None:
+    board = evaluate_catalog(
+        [
+            _row(),  # WordPress.com, eligible + connected
+            _row(name="dev.to", platform_enum="dev.to", topical_scope="developer"),
+            _row(name="Wix", platform_enum=None, automation_ready=False),
+        ],
+        client_scope="agnostic",
+        connected_platforms={"WordPress.com", "dev.to"},
+    )
+    verdict = resolve_selection(board, ["WordPress.com", "dev.to", "Wix"])
+    assert verdict.allowed == ["WordPress.com"]
+    assert len(verdict.advisories) == 1 and "dev.to" in verdict.advisories[0]
+    assert len(verdict.blocked) == 1 and "Wix" in verdict.blocked[0]

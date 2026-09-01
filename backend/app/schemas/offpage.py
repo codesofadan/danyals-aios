@@ -386,6 +386,12 @@ class Web2PlanRequest(BaseModel):
     testimonials: list[str] = Field(default_factory=list, max_length=12)
     unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
     services: list[str] = Field(default_factory=list, max_length=20)
+    #: "I have read this platform's own rule for this client and I am choosing it
+    #: anyway." Moves a topical mismatch or an unreviewed platform from refused to
+    #: allowed; it can never conjure a publisher or a credential.
+    acknowledge_platform_advisory: bool = Field(
+        default=False, alias="acknowledgePlatformAdvisory"
+    )
 
 
 class Web2AnchorCheckRequest(BaseModel):
@@ -477,6 +483,15 @@ class Web2CampaignRequest(BaseModel):
     testimonials: list[str] = Field(default_factory=list, max_length=12)
     unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
     services: list[str] = Field(default_factory=list, max_length=20)
+    #: One acknowledgement covering every advisory platform in THIS campaign - the
+    #: operator has read each platform's own rule for this client and chosen it anyway.
+    #: Unlike the similarity gate's per-property acknowledgement (which must never be
+    #: given in bulk, because each collision is a different fact about a different
+    #: article), a platform advisory is one judgement about one client, so a single
+    #: campaign-level answer is honest.
+    acknowledge_platform_advisories: bool = Field(
+        default=False, alias="acknowledgePlatformAdvisories"
+    )
 
 
 class Web2PlannedPropertyResponse(BaseModel):
@@ -559,6 +574,64 @@ class Web2AccountCreateRequest(BaseModel):
     property_url: str = Field(default="", alias="propertyUrl")
     max_properties: int = Field(default=1, alias="maxProperties", ge=1, le=500)
     credential: dict[str, str] = Field(default_factory=dict)
+
+
+class Web2ClientIdentityRequest(BaseModel):
+    """The standing publishing identity for ONE client (lead-only).
+
+    Set once per client, reused by every signup after it. ``imapPassword`` is sealed
+    into the vault on write and is NEVER read back - the response carries only whether
+    a password is held.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    #: The brand stem handles are built from ("leedsdrainageco"). Operator-entered on
+    #: purpose: a generated handle carries a platform prefix and a client-id hash, and
+    #: those are the two keys that let one suspension enumerate every other client.
+    handle_base: str = Field(default="", alias="handleBase", max_length=64)
+    #: The CLIENT-domain address that receives platform verification mail.
+    contact_email: str = Field(default="", alias="contactEmail", max_length=320)
+    imap_host: str = Field(default="", alias="imapHost", max_length=255)
+    imap_port: int = Field(default=993, alias="imapPort", ge=1, le=65535)
+    imap_user: str = Field(default="", alias="imapUser", max_length=320)
+    #: Write-only. Blank leaves an existing sealed password untouched; clearing it is
+    #: `clearImapPassword`, so an accidental blank can never silently drop a credential.
+    imap_password: str = Field(default="", alias="imapPassword", max_length=512)
+    clear_imap_password: bool = Field(default=False, alias="clearImapPassword")
+
+
+class Web2ClientIdentityResponse(BaseModel):
+    """What the account builder knows about a client, minus every secret."""
+
+    client_id: str = Field(serialization_alias="clientId")
+    client: str
+    handle_base: str = Field(default="", serialization_alias="handleBase")
+    contact_email: str = Field(default="", serialization_alias="contactEmail")
+    imap_host: str = Field(default="", serialization_alias="imapHost")
+    imap_port: int = Field(default=993, serialization_alias="imapPort")
+    imap_user: str = Field(default="", serialization_alias="imapUser")
+    #: Whether a mailbox password is sealed - never the password.
+    imap_password_held: bool = Field(default=False, serialization_alias="imapPasswordHeld")
+    #: Whether the builder can read this client's mailbox unaided. False is a normal
+    #: state, not a fault: verification then degrades to the operator reading the inbox.
+    mailbox_ready: bool = Field(default=False, serialization_alias="mailboxReady")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any], *, password_held: bool) -> Web2ClientIdentityResponse:
+        host = str(row.get("web2_imap_host") or "")
+        user = str(row.get("web2_imap_user") or "")
+        return cls(
+            client_id=str(row.get("id") or ""),
+            client=str(row.get("name") or ""),
+            handle_base=str(row.get("web2_handle_base") or ""),
+            contact_email=str(row.get("web2_contact_email") or ""),
+            imap_host=host,
+            imap_port=int(row.get("web2_imap_port") or 993),
+            imap_user=user,
+            imap_password_held=password_held,
+            mailbox_ready=bool(host and user and password_held),
+        )
 
 
 class Web2AccountResponse(BaseModel):

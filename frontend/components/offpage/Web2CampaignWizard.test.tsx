@@ -179,15 +179,20 @@ describe("Web2CampaignWizard", () => {
     ]);
   });
 
-  it("shows why an ineligible platform is not offered instead of hiding it", async () => {
+  it("offers a discouraged platform, warns with its own rule, and takes the answer", async () => {
+    // The operator picks where their client posts. A platform whose own rules argue
+    // against it is still offered — marked, quoted, and gated behind one explicit
+    // answer — rather than dropped from the plan behind their back.
     renderWizard();
     await fillMinimum("one");
-    expect(screen.getByText(/1 platform\(s\) not suitable/i)).toBeTruthy();
-    fireEvent.click(screen.getByText(/not suitable for this client/i));
+    expect(screen.getByText(/are marked ⚠/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /dev\.to/i }));
     expect(screen.getByText(/Restricted to developer clients/i)).toBeTruthy();
-    // A row nobody has adjudicated is named as unreviewed, never folded into the
-    // reviewed exclusions.
-    expect(screen.getByText(/1 platform\(s\) not yet reviewed/i)).toBeTruthy();
+    const ack = screen.getByRole("checkbox", { name: /choosing them for this client anyway/i });
+    expect(ack).not.toBeChecked();
+    fireEvent.click(ack);
+    expect(ack).toBeChecked();
   });
 
   it("keeps a quote alive when the operator edits the copy it never priced", async () => {

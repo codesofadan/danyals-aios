@@ -58,6 +58,8 @@ from app.schemas.offpage import (
     Web2CampaignResponse,
     Web2CampaignStatus,
     Web2CatalogResponse,
+    Web2ClientIdentityRequest,
+    Web2ClientIdentityResponse,
     Web2PlacementResponse,
     Web2PlannedPropertyResponse,
     Web2PlanRequest,
@@ -429,13 +431,28 @@ async def plan_web2(
     # account, no anchor check. Two doors into one table with different rules is how a
     # placement lands on a platform the client may not use, or one holding no credential,
     # after the article has been written and paid for.
-    allowed, refusals = await asyncio.to_thread(
-        _eligible_for, repo, body.client_id, [body.platform]
+    selection = await asyncio.to_thread(
+        _eligible_for, repo, body.client_id, [body.platform],
+        acknowledged=body.acknowledge_platform_advisory,
     )
-    if not allowed:
+    if selection.advisories:
+        # Not a refusal - a question, asked with the platform's own rule attached so the
+        # answer is informed. The operator may use any platform the pipeline can drive.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(refusals[0] if refusals else f"{body.platform} cannot be used for this client."),
+            detail=(
+                selection.advisories[0]
+                + "  Re-submit with acknowledgePlatformAdvisory=true to use it anyway."
+            ),
+        )
+    if not selection.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                selection.blocked[0]
+                if selection.blocked
+                else f"{body.platform} cannot be used for this client."
+            ),
         )
 
     # The one campaign guard this door still lacked: the burst cap. A campaign request
@@ -686,14 +703,21 @@ def _history(repo: Any, client_id: str) -> list[Any]:
     return out
 
 
-def _eligible_for(repo: Any, client_id: str, selected: list[str]) -> tuple[list[str], list[str]]:
-    """Narrow the operator's selection to what this client may lawfully publish to.
+def _eligible_for(
+    repo: Any, client_id: str, selected: list[str], *, acknowledged: bool = False
+) -> Any:
+    """Narrow the operator's selection into plan / refuse / ask.
 
-    Returns (allowed, refusals). Refusals are RETURNED rather than silently dropped: a
-    selection quietly shrunk from thirty platforms to four is a lie the operator would
+    Returns a ``SelectionVerdict``. Refusals are RETURNED rather than silently dropped:
+    a selection quietly shrunk from thirty platforms to four is a lie the operator would
     discover weeks later, and the platform's own reason is what teaches the rule.
+
+    ``acknowledged`` is the operator saying "I have read that platform's rule and I am
+    choosing it anyway" - it moves the JUDGEMENT states (topical mismatch, unreviewed
+    terms) into ``allowed``. It can never move a missing publisher or a missing
+    credential, which are facts about the machine rather than opinions about fit.
     """
-    from app.services.web2_eligibility import evaluate_catalog, refuse_reason
+    from app.services.web2_eligibility import evaluate_catalog, resolve_selection
 
     scope = repo.client_web2_scope(client_id)
     # The connected set comes from ACCOUNTS, never from the operator's own selection.
@@ -707,21 +731,31 @@ def _eligible_for(repo: Any, client_id: str, selected: list[str]) -> tuple[list[
         client_scope=scope,
         connected_platforms=repo.connected_platforms_for(client_id),
     )
-    allowed: list[str] = []
-    refusals: list[str] = []
-    for platform in selected:
-        reason = refuse_reason(board, platform)
-        if reason:
-            refusals.append(f"{platform}: {reason}")
-        else:
-            allowed.append(platform)
-    return allowed, refusals
+    return resolve_selection(board, selected, acknowledged=acknowledged)
 
 
 def _build_plan(repo: Any, body: Web2CampaignRequest, client_name: str) -> Any:
     from app.services.web2_campaign import CampaignRefusedError, plan_campaign
 
-    allowed, refusals = _eligible_for(repo, body.client_id, list(body.platforms))
+    selection = _eligible_for(
+        repo, body.client_id, list(body.platforms),
+        acknowledged=body.acknowledge_platform_advisories,
+    )
+    allowed, refusals = selection.allowed, selection.blocked
+    # An UNACKNOWLEDGED judgement platform stops the request and asks, rather than
+    # being dropped from the plan behind the operator's back. Silently shrinking a
+    # ten-platform selection to four is how the module taught operators that their
+    # choices did not matter; the platform's own rule is quoted so the answer is
+    # informed, and one acknowledgement covers the campaign.
+    if selection.advisories:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "These platforms need your explicit go-ahead for this client: "
+                + "  ".join(selection.advisories)
+                + "  Re-submit with acknowledgePlatformAdvisories=true to use them."
+            ),
+        )
     if not allowed and refusals:
         # The per-platform reasons are the whole value here. Falling through to the
         # planner's generic "restricted by their own content policies" would name the
@@ -1186,6 +1220,123 @@ async def create_web2_account(
     return Web2AccountResponse.from_row(
         row, required=required, complete=not spec.missing_fields()
     )
+
+
+_IDENTITY_VAULT_PROVIDER = "web2:mailbox"
+
+
+def _identity_response(row: dict[str, Any]) -> Web2ClientIdentityResponse:
+    """Shape one identity row, resolving whether a mailbox password is actually held.
+
+    The vault is CONSULTED rather than trusting the row's label column: a label written
+    while the seal failed would otherwise report a ready mailbox that cannot open, and
+    the builder would queue signups it can never verify.
+    """
+    from app.services.vault import find_secret
+
+    label = str(row.get("web2_imap_vault_label") or "")
+    provider = str(row.get("web2_imap_vault_provider") or "")
+    held = bool(label and provider and find_secret(provider=provider, label=label))
+    return Web2ClientIdentityResponse.from_row(row, password_held=held)
+
+
+@router.get(
+    "/offpage/web2/clients/{client_id}/identity",
+    response_model=Web2ClientIdentityResponse,
+)
+async def get_web2_client_identity(
+    client_id: str, repo: OffpageRepoDep, _actor: ViewReports
+) -> Web2ClientIdentityResponse:
+    """The standing publishing identity for one client - who its accounts are, where
+    their verification mail lands, and whether the builder can read that mailbox.
+
+    Never returns the mailbox password, only whether one is sealed."""
+    row = await asyncio.to_thread(repo.client_web2_identity, client_id)
+    if row is None:
+        raise _CLIENT_NOT_FOUND
+    return await asyncio.to_thread(_identity_response, row)
+
+
+@router.put(
+    "/offpage/web2/clients/{client_id}/identity",
+    response_model=Web2ClientIdentityResponse,
+)
+async def put_web2_client_identity(
+    client_id: str, body: Web2ClientIdentityRequest, repo: OffpageRepoDep, actor: Lead
+) -> Web2ClientIdentityResponse:
+    """Set the identity every future signup for this client reuses (lead-only).
+
+    THE RULE THIS ENFORCES, and why it is not merely advice: a per-client account must
+    not register on the agency's shared catch-all domain. Aliases minted per (platform,
+    client) on one domain share a platform prefix, a client-id hash and a registrant
+    domain, so suspending ONE account hands a trust-and-safety team the query that finds
+    every other client (R2-08). That footprint is invisible to the similarity gate and
+    no content quality fixes it, so the refusal is structural rather than a warning.
+
+    The mailbox password is sealed into the vault and never read back. A blank password
+    LEAVES an existing seal untouched - dropping a working credential because a form
+    round-tripped an empty field is a silent failure, so clearing is explicit.
+    """
+    from app.cli.web2_accounts import _shared_domains
+    from app.services.vault import add_key
+
+    existing = await asyncio.to_thread(repo.client_web2_identity, client_id)
+    if existing is None:
+        raise _CLIENT_NOT_FOUND
+
+    email = body.contact_email.strip()
+    if email:
+        domain = email.rpartition("@")[2].lower()
+        if not domain or "@" not in email:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"{email!r} is not an email address.",
+            )
+        shared = {d.lower() for d in await asyncio.to_thread(_shared_domains) if d}
+        if domain in shared:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"{domain} is the agency's shared catch-all. A per-client account "
+                    "must register on the CLIENT's own domain - one suspension on a "
+                    "shared domain exposes every client that shares it (R2-08). Use an "
+                    "address on the client's domain, or leave this blank."
+                ),
+            )
+
+    label = str(existing.get("web2_imap_vault_label") or "")
+    provider = str(existing.get("web2_imap_vault_provider") or "")
+    if body.clear_imap_password:
+        label, provider = "", ""
+    elif body.imap_password.strip():
+        label = label or f"{client_id}:mailbox"
+        provider = _IDENTITY_VAULT_PROVIDER
+        await asyncio.to_thread(
+            add_key,
+            provider=provider,
+            label=label,
+            secret=body.imap_password.strip(),
+            kind="client_access",
+        )
+
+    row = await asyncio.to_thread(
+        repo.set_client_web2_identity,
+        client_id,
+        handle_base=body.handle_base.strip(),
+        contact_email=email,
+        imap_host=body.imap_host.strip(),
+        imap_port=body.imap_port,
+        imap_user=body.imap_user.strip(),
+        vault_provider=provider,
+        vault_label=label,
+    )
+    if row is None:
+        raise _CLIENT_NOT_FOUND
+    await record_activity(
+        actor, kind="client", action="set the Web 2.0 publishing identity",
+        target=str(row.get("name") or ""), entity_type="client", entity_id=client_id,
+    )
+    return await asyncio.to_thread(_identity_response, row)
 
 
 @router.get("/offpage/web2/accounts", response_model=list[Web2AccountResponse])

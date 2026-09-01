@@ -46,6 +46,9 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   // only this client knows). Collecting only the first left every UI-built campaign
   // holding at review with an unfillable gap - measured on a real client draft.
   const [uniqueData, setUniqueData] = useState("");
+  // One answer covering every advisory platform in THIS campaign. Cleared whenever the
+  // client or the platform set changes, so it can never outlive what it answered for.
+  const [ackAdvisories, setAckAdvisories] = useState(false);
   const [created, setCreated] = useState<{ id: string; total: number } | null>(null);
   const [error, setError] = useState("");
   // The inputs AS THEY WERE when the quote was taken. Without this the operator can
@@ -65,6 +68,9 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
     !!clientId && topics.length > 0 && selected.size > 0 && targetUrl.trim().startsWith("http");
 
   function toggle(platform: string) {
+    // Changing the platform set retracts the acknowledgement: it answered a specific
+    // list of warnings, and a different list is a different question.
+    setAckAdvisories(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(platform)) next.delete(platform);
@@ -87,6 +93,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
       pacing,
       proofPoints: proofLines.slice(0, 12),
       uniqueData: lines(uniqueData).slice(0, 12),
+      acknowledgePlatformAdvisories: ackAdvisories,
     };
   }
 
@@ -165,7 +172,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
           <div className="wiz-body">
             <div className="fld">
               <label>Client</label>
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setSelected(new Set()); }}>
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setSelected(new Set()); setAckAdvisories(false); }}>
                 <option value="">Choose a client…</option>
                 {clientOptions.map((c) => (
                   <option key={c.id} value={c.id}>{c.cn}</option>
@@ -234,6 +241,8 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                 clientId={clientId || undefined}
                 selected={selected}
                 onToggle={toggle}
+                acknowledged={ackAdvisories}
+                onAcknowledgedChange={setAckAdvisories}
                 hint={(eligibleCount) => (
                   <div className="fld-hint">
                     <b>{selected.size}</b> of {eligibleCount} eligible selected. Spreading across

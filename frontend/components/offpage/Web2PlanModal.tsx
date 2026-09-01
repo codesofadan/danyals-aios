@@ -41,6 +41,10 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
   const [targetUrl, setTargetUrl] = useState("");
   const [pageType, setPageType] = useState<"service" | "blog" | "local">("blog");
   const [proof, setProof] = useState("");
+  // The operator's answer to "this platform's own rules argue against it for this
+  // client". Reset with the platform, so an acknowledgement never outlives the choice
+  // it was given for.
+  const [ackAdvisory, setAckAdvisory] = useState(false);
 
   const plan = usePlanWeb2();
   const anchorCheck = useCheckWeb2Anchor();
@@ -50,6 +54,7 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
   // Changing the client re-scopes the board, so a platform chosen for the previous
   // client must not survive — it may not even be offered to this one.
   useEffect(() => { setPlatform(""); }, [clientId]);
+  useEffect(() => { setAckAdvisory(false); }, [platform]);
   // Any edit invalidates a verdict about the old text.
   useEffect(() => { setAnchorVerdict(null); }, [anchor, targetUrl, topic, clientId]);
 
@@ -79,6 +84,7 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
         clientId, platform: platform as Web2Platform, anchor: anchor.trim(),
         targetUrl: targetUrl.trim(), pageType, topic: topic.trim(),
         proofPoints: proofLines.slice(0, 12),
+        acknowledgePlatformAdvisory: ackAdvisory,
       },
       { onSuccess: (row) => setCreated({ id: row.id, platform: row.platform }) },
     );
@@ -142,6 +148,8 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
                 clientId={clientId || undefined}
                 selected={platform ? new Set([platform]) : new Set()}
                 onToggle={(key) => setPlatform(key === platform ? "" : key)}
+                acknowledged={ackAdvisory}
+                onAcknowledgedChange={setAckAdvisory}
                 hint={() => (
                   <>
                     {issue && (

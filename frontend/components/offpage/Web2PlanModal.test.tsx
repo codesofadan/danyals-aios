@@ -114,18 +114,32 @@ describe("building one property", () => {
     renderModal();
     await chooseClient();
     expect(await screen.findByRole("button", { name: /Blogger/i })).toBeInTheDocument();
-    // Not selectable: one needs a credential, the other is refused for this client.
+
+    // JUDGEMENT states are the operator's call, so they are PICKABLE — this is what
+    // makes every platform the pipeline can drive reachable for every client. A
+    // topical mismatch (dev.to) and an unreviewed platform (Plurk) both appear.
+    expect(screen.getByRole("button", { name: /dev\.to/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Plurk/i })).toBeInTheDocument();
+
+    // FACTS about the machine stay unpickable: no credential, no publisher. No
+    // acknowledgement conjures either, so offering them would queue work that can
+    // only fail after the drafting spend.
     expect(screen.queryByRole("button", { name: /^Tumblr/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^dev\.to/i })).not.toBeInTheDocument();
-    // ...but every non-eligible row is still explained rather than silently dropped,
-    // and each of the four non-eligible states keeps its own honest label. In
-    // particular a row nobody has adjudicated says so — it is never dressed up as a
-    // reviewed policy verdict.
+    expect(screen.queryByRole("button", { name: /^Wix/i })).not.toBeInTheDocument();
     expect(screen.getByText(/connect an account/i)).toBeInTheDocument();
-    expect(screen.getByText(/not suitable for this client/i)).toBeInTheDocument();
-    expect(screen.getByText(/terms read 2026-08-23/i)).toBeInTheDocument();
-    expect(screen.getByText(/not yet reviewed/i)).toBeInTheDocument();
     expect(screen.getByText(/no publisher built yet/i)).toBeInTheDocument();
+  });
+
+  it("asks for an acknowledgement, quoting the platform's own rule, before using it", async () => {
+    renderModal();
+    await chooseClient();
+    fireEvent.click(await screen.findByRole("button", { name: /dev\.to/i }));
+    // The rule itself is quoted — an operator who reads "restricted to developer
+    // clients" learns the rule; one who reads "are you sure?" learns nothing.
+    expect(screen.getByText(/Restricted to developer clients/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: /choosing them for this client anyway/i }),
+    ).not.toBeChecked();
   });
 
   it("never shows success when the server refused", async () => {
