@@ -50,13 +50,20 @@ self-hosted `.crx` by enterprise policy, or load unpacked for a small team.
 Mint a token in the dashboard (Settings → Extension), paste it into the panel along
 with the dashboard's URL. The token is shown **once**.
 
-**A non-localhost dashboard needs one permission grant.** `host_permissions` in the
-manifest covers `http://localhost:8000` and nothing else, so pairing against the
-deployed dashboard asks Chrome for access to that origin at the moment you press
-Pair — choose **Allow**. Decline it and the panel says so rather than pairing into an
-origin every request would be blocked from reaching. The grant is remembered per
-origin, and it is drawn from `optional_host_permissions`, so it is the operator's
-decision rather than a blanket permission asked for at install time.
+**Use the API address the dashboard shows you** (Settings → Extension prints it, and
+every minted token carries it). Never type one from memory: this tree has run
+backends on :8000 and :8099 in the same week, and pairing against the wrong one is a
+silent dead end. Loopback (`localhost` / `127.0.0.1`, ANY port) is granted portlessly
+in the manifest; prefer `127.0.0.1` — on macOS `localhost` resolves to ::1 first,
+where an IPv4-bound server refuses.
+
+**A non-loopback dashboard needs one permission grant**, drawn from
+`optional_host_permissions` at the moment you press Pair — choose **Allow**.
+
+**When pairing fails, the panel now says WHICH thing broke** — server unreachable
+(with the ::1 hint), blocked by the browser/CORS (with this device's id and the exact
+`EXTENSION_ORIGINS=` line for `backend/.env`), a bad/expired token, or a server
+error — instead of the bare "Failed to fetch" that once meant any of the four.
 
 ## The credential, honestly
 
