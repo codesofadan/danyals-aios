@@ -75,8 +75,12 @@ async def resolve_operator(
 
     # The per-user revocation epoch: a password change or a suspension already calls
     # `revoke_all_for_user`, so offboarding kills every paired extension with no new code
-    # on that path. Fails OPEN by contract - the Postgres checks inside
-    # `verify_operator_token` are what actually hold the line.
+    # on that path. Fails CLOSED: a paired extension is a long-lived plaintext-on-disk
+    # credential whose only FAST kill switch lives in Redis — this check ran silently
+    # skipped for days on this very box (the API had no REDIS_URL), which quietly
+    # downgraded revocation to "whenever the token expires". The Postgres checks inside
+    # `verify_operator_token` (expiry, per-token revoked flag) still ran first and are
+    # unaffected; what refuses here is only the epoch check being UNANSWERABLE.
     try:
         if await is_revoked(
             redis, jti=None, user_id=principal.user_id, issued_at=principal.issued_at
@@ -85,7 +89,14 @@ async def resolve_operator(
     except HTTPException:
         raise
     except Exception:
-        logger.info("operator_token_denylist_unavailable")
+        logger.warning("operator_token_denylist_unavailable_failing_closed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Cannot verify token revocation right now (Redis is unreachable from the "
+                "API). Start Redis / fix REDIS_URL on the server, then try again."
+            ),
+        ) from None
 
     # Reuse auth.py's own loader so the row shape and the RLS bootstrap-self-read stay
     # in one place. A divergent second loader here would be a second thing to keep right.

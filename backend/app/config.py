@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     # the one way to get this badly wrong - so it is made unrepresentable rather than
     # documented.
     extension_origins: str = ""
+    # The API base the extension should be paired against, e.g. "https://app.qanry.com".
+    # Blank -> derived from the incoming request's own scheme+host, which through the
+    # dashboard's same-origin rewrite IS the live backend's address. Set it in prod when
+    # a proxy mangles Host. Exists because the 2026-09-01 pairing outage was partly an
+    # operator pointing the extension at a STALE backend on another port: the server is
+    # the only party that knows where it lives, so it says so instead of being guessed.
+    extension_pair_api_base: str = ""
     trusted_hosts: str = "*"
     # Public origin the API is reachable at (e.g. https://app.qanry.com), used to
     # build ABSOLUTE URLs for server-hosted files that must load with NO auth header
@@ -972,8 +979,13 @@ class Settings(BaseSettings):
         The extension entries are additional EXACT strings, never a wildcard and never a
         regex, so the browser app's posture is unchanged by their presence."""
         origins = [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
-        origins += [o.strip() for o in self.extension_origins.split(",") if o.strip()]
+        origins += self.extension_origins_list
         return origins
+
+    @property
+    def extension_origins_list(self) -> list[str]:
+        """Just the allow-listed extension origins, for surfaces that report them."""
+        return [o.strip() for o in self.extension_origins.split(",") if o.strip()]
 
     @property
     def trusted_hosts_list(self) -> list[str]:

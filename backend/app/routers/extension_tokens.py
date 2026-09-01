@@ -16,9 +16,10 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.config import Settings, get_settings
 from app.core.auth import CurrentUser, require_staff
 from app.services.activity import record_activity
 from app.services.operator_tokens import (
@@ -59,6 +60,12 @@ class ExtensionTokenMinted(BaseModel):
     scopes: list[str]
     expires_at: str = Field(serialization_alias="expiresAt")
     device_label: str = Field(serialization_alias="deviceLabel")
+    # The address the extension must be paired against, stated BY THE SERVER. The
+    # 2026-09-01 pairing outage was partly an operator pointing the extension at a stale
+    # backend on another port — a token and the address it works against now travel
+    # together, so the instructions can never name a different server than the one that
+    # minted the credential.
+    api_base: str = Field(serialization_alias="apiBase")
     # Said in the response, not only in the docs: the operator sees this at the exact
     # moment it matters.
     warning: str = (
@@ -84,8 +91,44 @@ def _iso(value: Any) -> str:
     return iso() if callable(iso) else str(value or "")
 
 
+def _pair_api_base(settings: Settings, request: Request) -> str:
+    """The address the extension should call, stated by the server itself.
+
+    Configured (`EXTENSION_PAIR_API_BASE`) wins; otherwise it is derived from the
+    request's own scheme+host — the dashboard reaches this API through a same-origin
+    rewrite whose upstream IS the live backend, so the Host the API sees here is the
+    address that works. Never guessed client-side."""
+    configured = settings.extension_pair_api_base.strip().rstrip("/")
+    if configured:
+        return configured
+    return f"{request.url.scheme}://{request.url.netloc}"
+
+
+class PairingInfo(BaseModel):
+    """What Settings → Extension renders beside the pairing instructions."""
+
+    api_base: str = Field(serialization_alias="apiBase")
+    # The chrome-extension:// origins the API's CORS layer currently allows. Empty is
+    # normal in dev (loopback host permissions cover it); the settings screen uses this
+    # to show whether a pasted extension id is already allow-listed.
+    allowed_extension_origins: list[str] = Field(serialization_alias="allowedExtensionOrigins")
+
+
+@router.get("/pairing-info", response_model=PairingInfo)
+async def pairing_info(request: Request, actor: Staff) -> PairingInfo:
+    """The facts an operator needs BEFORE minting: where to point the extension, and
+    which extension identities the server already trusts for CORS."""
+    settings = get_settings()
+    return PairingInfo(
+        api_base=_pair_api_base(settings, request),
+        allowed_extension_origins=settings.extension_origins_list,
+    )
+
+
 @router.post("/tokens", response_model=ExtensionTokenMinted, status_code=status.HTTP_201_CREATED)
-async def mint_extension_token(body: ExtensionTokenRequest, actor: Staff) -> ExtensionTokenMinted:
+async def mint_extension_token(
+    body: ExtensionTokenRequest, request: Request, actor: Staff
+) -> ExtensionTokenMinted:
     """Pair a browser extension to YOUR OWN account.
 
     Self-service on purpose: an operator whose 12-hour token expires mid-shift must be
@@ -117,6 +160,7 @@ async def mint_extension_token(body: ExtensionTokenRequest, actor: Staff) -> Ext
         scopes=capped,
         expires_at=_iso(row.get("expires_at")),
         device_label=str(row.get("device_label") or ""),
+        api_base=_pair_api_base(get_settings(), request),
     )
 
 

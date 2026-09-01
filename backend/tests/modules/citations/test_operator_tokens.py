@@ -212,3 +212,128 @@ def test_the_route_mints_at_the_default_lifetime() -> None:
     src = inspect.getsource(mod.mint_extension_token)
     assert "ttl_seconds=DEFAULT_TTL_SECONDS" in src
     assert "body.ttl_seconds" not in src
+
+
+# --------------------------------------------------------------------------- #
+# The server states where it lives (2026-09-01: the extension was pointed at a
+# STALE backend on another port, and nothing on either side could say so).
+# --------------------------------------------------------------------------- #
+
+
+def _request_with_host(host: str) -> object:
+    from starlette.requests import Request as StarletteRequest
+
+    return StarletteRequest(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/extension/tokens",
+            "query_string": b"",
+            "headers": [(b"host", host.encode())],
+        }
+    )
+
+
+def test_the_pair_base_is_derived_from_the_request_the_server_actually_answered() -> None:
+    """Through the dashboard's same-origin rewrite, the Host this API sees IS the live
+    backend's own address — the one string the operator needed that night."""
+    from app.config import Settings
+    from app.routers.extension_tokens import _pair_api_base
+
+    settings = Settings(_env_file=None)
+    assert _pair_api_base(settings, _request_with_host("127.0.0.1:8099")) == "http://127.0.0.1:8099"  # type: ignore[arg-type]
+
+
+def test_a_configured_pair_base_wins_and_is_normalized() -> None:
+    from app.config import Settings
+    from app.routers.extension_tokens import _pair_api_base
+
+    settings = Settings(_env_file=None, extension_pair_api_base="https://app.qanry.com/")
+    assert _pair_api_base(settings, _request_with_host("127.0.0.1:8099")) == "https://app.qanry.com"  # type: ignore[arg-type]
+
+
+def test_the_minted_response_carries_the_api_base_beside_the_token() -> None:
+    """A token and the address it works against travel together — drop the field and
+    the pairing instructions can once again name a different server than the minter."""
+    from app.routers.extension_tokens import ExtensionTokenMinted, PairingInfo
+
+    minted_aliases = {f.serialization_alias for f in ExtensionTokenMinted.model_fields.values()}
+    assert "apiBase" in minted_aliases
+    info_aliases = {f.serialization_alias for f in PairingInfo.model_fields.values()}
+    assert {"apiBase", "allowedExtensionOrigins"} <= info_aliases
+
+
+# --------------------------------------------------------------------------- #
+# Revocation outages refuse; they never quietly allow.
+# --------------------------------------------------------------------------- #
+
+
+class _FakePrincipal:
+    user_id = "u-1"
+    issued_at = datetime.now(UTC)
+
+    def has(self, scope: str) -> bool:
+        return scope == "citation_queue"
+
+
+async def test_denylist_outage_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This exact check ran silently skipped for days (the API had no REDIS_URL), which
+    downgraded revocation to 'whenever the token expires'. A Redis outage must refuse
+    with an actionable 503 — restore the old swallow and the load succeeds instead,
+    which is what makes this test red rather than vacuous."""
+    from fastapi import HTTPException
+
+    from app.modules.citations import operator_auth as oa
+
+    monkeypatch.setattr(oa, "verify_operator_token", lambda raw: _FakePrincipal())
+
+    async def _redis_down(*args: object, **kwargs: object) -> bool:
+        raise ConnectionError("redis unreachable")
+
+    monkeypatch.setattr(oa, "is_revoked", _redis_down)
+    # If the outage were swallowed, resolution would continue into this loader and
+    # SUCCEED — so the happy loader is what proves the refusal is real.
+    monkeypatch.setattr(oa, "_load_user_row", lambda uid: _user_row())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await oa.resolve_operator(
+            request=None, settings=None, redis=None, credentials=None,  # type: ignore[arg-type]
+            x_operator_token="aop_pref_secret",
+        )
+    assert excinfo.value.status_code == 503
+    assert "revocation" in str(excinfo.value.detail)
+
+
+def _user_row() -> dict[str, object]:
+    return {
+        "id": "u-1",
+        "email": "op@example.com",
+        "role": "manager",
+        "status": "active",
+        "name": "Operator",
+        "client_id": None,
+    }
+
+
+async def test_a_working_denylist_still_resolves_the_operator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the fail-closed change: refusing on outage must not have
+    broken the ordinary path."""
+    from app.modules.citations import operator_auth as oa
+
+    monkeypatch.setattr(oa, "verify_operator_token", lambda raw: _FakePrincipal())
+
+    async def _not_revoked(*args: object, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(oa, "is_revoked", _not_revoked)
+    monkeypatch.setattr(oa, "_load_user_row", lambda uid: _user_row())
+
+    user = await oa.resolve_operator(
+        request=None, settings=None, redis=None, credentials=None,  # type: ignore[arg-type]
+        x_operator_token="aop_pref_secret",
+    )
+    assert user.id == "u-1"
+    assert user.role == "manager"
