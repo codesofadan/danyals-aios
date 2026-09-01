@@ -27,6 +27,12 @@ export default function ClientReports() {
   const [errorId, setErrorId] = useState<string | null>(null);
 
   const available = deliverablesQ.data ?? [];
+  // A FAILED FETCH IS NOT AN EMPTY LIBRARY - but it only replaces the list when
+  // there is nothing to show. react-query keeps the last good data across a failed
+  // BACKGROUND refetch, so branching on isError alone would blank out a working
+  // report list the moment one poll failed. That would break the reports library
+  // the brief lists as working, in the name of fixing an empty state.
+  const loadFailed = deliverablesQ.isError && deliverablesQ.data === undefined;
   // Only "ready" deliverables are downloadable — the backend 404s a download
   // while status === "generating", so an in-progress row must not be counted as
   // "ready" in the header.
@@ -69,7 +75,12 @@ export default function ClientReports() {
         focus={
           <>
             <span className="cl-focus-k">Reports library</span>
-            <span className="cl-focus-v">{readyCount} report{readyCount === 1 ? "" : "s"} ready</span>
+            {/* The header asserts a count independently of the body, so a failure
+                has to silence it too - otherwise the page says "0 reports ready"
+                beside an error, which is the same false claim in a second place. */}
+            <span className="cl-focus-v">
+              {loadFailed ? "—" : `${readyCount} report${readyCount === 1 ? "" : "s"} ready`}
+            </span>
             <span className="cl-focus-note">
               <span className="material-symbols-rounded">download</span>Download or view any report
             </span>
@@ -89,6 +100,26 @@ export default function ClientReports() {
           <div className="pt-empty sm">
             <span className="material-symbols-rounded spin">progress_activity</span>
             <div className="pt-empty-t">Loading your reports…</div>
+          </div>
+        ) : loadFailed ? (
+          // Checked BEFORE the empty branch: the `?? []` fallback above would
+          // otherwise win and tell a client with a dozen reports they have none.
+          <div className="pt-empty sm">
+            <span className="material-symbols-rounded">error</span>
+            <div className="pt-empty-t">Couldn&apos;t load your reports</div>
+            <div className="pt-empty-s">There was a problem reaching the server.</div>
+            <button
+              className="primary-btn sm"
+              type="button"
+              onClick={() => void deliverablesQ.refetch()}
+              disabled={deliverablesQ.isFetching}
+              style={{ marginTop: 12 }}
+            >
+              <span className={`material-symbols-rounded${deliverablesQ.isFetching ? " spin" : ""}`}>
+                {deliverablesQ.isFetching ? "progress_activity" : "refresh"}
+              </span>
+              {deliverablesQ.isFetching ? "Retrying…" : "Retry"}
+            </button>
           </div>
         ) : available.length === 0 ? (
           <div className="pt-empty sm">
