@@ -216,12 +216,14 @@ export type Web2Property = {
 // --- Web 2.0 campaigns + the per-client platform board -------------------------
 
 /**
- * One row of the three-state platform board.
+ * One row of the five-state platform board.
  *
  * `not_connected` and `not_eligible` are deliberately different states: the first is a
  * missing credential an operator can go and fix, the second is a judgement about this
  * client that no credential changes. Collapsing them into one "unavailable" would send
- * someone hunting for a token that could not help.
+ * someone hunting for a token that could not help. `not_reviewed` (nobody has read the
+ * platform's terms yet — a safe default, not a verdict) and `not_supported` (no
+ * publisher code) are split out of `not_eligible` for the same honesty reason.
  */
 /** What `POST /offpage/web2/anchor-check` accepts — an anchor can be checked before a
  *  platform or any proof has been decided. */
@@ -243,9 +245,12 @@ export type Web2AnchorCheck = {
 export type Web2PlatformStatusRow = {
   name: string;
   platform: string | null;
-  status: "eligible" | "not_connected" | "not_eligible";
+  status: "eligible" | "not_connected" | "not_eligible" | "not_reviewed" | "not_supported";
   reason: string;
   authorityTier: string;
+  /** ISO date the platform's terms were last read ("" = never) and the source read. */
+  termsCheckedOn?: string;
+  termsSourceUrl?: string;
   //: How to connect it, carried on the row that says it is not connected. A board that
   //: reports a gap without saying how to close it is a dead end wearing a call to action.
   setupUrl?: string;

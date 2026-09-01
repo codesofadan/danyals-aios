@@ -762,12 +762,14 @@ async def web2_platform_board(
     actor: ViewReports,
     client_id: Annotated[str, Query(alias="clientId", min_length=1)],
 ) -> list[Web2PlatformStatusResponse]:
-    """The three-state platform board for one client (WEB2-012).
+    """The five-state platform board for one client (WEB2-012).
 
     Every catalogue row is returned, with a reason on the ones this client may not use.
     Hiding them would make the product look smaller than it is AND leave the operator
     guessing; showing them with the platform's own policy attached is what lets a
-    50+ platform catalogue be offered honestly.
+    50+ platform catalogue be offered honestly. Honesty cuts both ways: a row nobody
+    has adjudicated reports ``not_reviewed`` (a safe default), never a fabricated
+    policy verdict, and a row without publisher code reports ``not_supported``.
     """
     from app.services.web2_eligibility import evaluate_catalog
 
@@ -798,6 +800,8 @@ async def web2_platform_board(
             Web2PlatformStatusResponse(
                 name=v.name, platform=v.platform_enum, status=v.status, reason=v.reason,
                 authority=v.authority_tier,
+                terms_checked_on=v.terms_checked_on,
+                terms_source_url=v.terms_source_url,
                 setup_url=guide.where if guide else "",
                 setup_steps=guide.steps if guide else "",
                 setup_cost=guide.cost if guide else "",

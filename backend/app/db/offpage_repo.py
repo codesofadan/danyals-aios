@@ -380,7 +380,8 @@ class OffpageRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "select name, platform_enum, ownership_tier, topical_scope, "
-                "       automation_ready, authority_tier, terms_position "
+                "       automation_ready, authority_tier, terms_position, "
+                "       terms_checked_on, terms_source_url "
                 "from public.web2_platforms order by authority_tier, name"
             )
             return list(cur.fetchall())

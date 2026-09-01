@@ -414,9 +414,14 @@ class Web2PlatformStatusResponse(BaseModel):
 
     name: str
     platform: str | None = None
-    status: Literal["eligible", "not_connected", "not_eligible"]
+    status: Literal["eligible", "not_connected", "not_eligible", "not_reviewed", "not_supported"]
     reason: str = ""
     authority: str = Field(default="", serialization_alias="authorityTier")
+    #: When the platform's terms were last read by a human (ISO date, "" = never) and
+    #: where. `not_reviewed` vs `not_eligible` is the difference between "nobody has
+    #: looked" and "we looked and it said no" - the date is the evidence for the second.
+    terms_checked_on: str = Field(default="", serialization_alias="termsCheckedOn")
+    terms_source_url: str = Field(default="", serialization_alias="termsSourceUrl")
     #: HOW TO CONNECT IT, carried on the row that says it is not connected. Telling an
     #: operator a platform is unconnected without telling them what to do about it is
     #: what left provisioning an engineer's errand and clients sitting at zero platforms.

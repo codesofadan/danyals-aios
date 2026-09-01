@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Literal
 
 TIER_PER_CLIENT = "per_client"
@@ -35,17 +36,23 @@ TIER_DO_NOT_USE = "do_not_use"
 # unclassified client still has a usable set rather than an empty board.
 SCOPE_AGNOSTIC = "agnostic"
 
-Status = Literal["eligible", "not_connected", "not_eligible"]
+Status = Literal["eligible", "not_connected", "not_eligible", "not_reviewed", "not_supported"]
 
 
 @dataclass(frozen=True)
 class PlatformVerdict:
-    """One row of the three-state board (WEB2-012).
+    """One row of the five-state board (WEB2-012).
 
     ``not_connected`` is deliberately distinct from ``not_eligible``: the first is a
     missing credential an operator can go and fix in ten minutes, the second is a
     judgement about this client that no credential changes. Collapsing them into one
     "unavailable" state would send operators hunting for a token that would not help.
+
+    ``not_reviewed`` and ``not_supported`` were split OUT of ``not_eligible`` for the
+    same honesty reason: 72 of the 90 catalogue rows sit at the migration DEFAULT of
+    ``do_not_use`` because nobody has read their terms yet, and presenting that default
+    as a reviewed policy verdict ("its own terms make a placement indefensible") was a
+    lie the board told with a straight face. A safe default is not a judgement.
     """
 
     name: str
@@ -56,6 +63,8 @@ class PlatformVerdict:
     topical_scope: str = ""
     authority_tier: str = ""
     terms_position: str = ""
+    terms_checked_on: str = ""
+    terms_source_url: str = ""
 
     @property
     def eligible(self) -> bool:
@@ -77,6 +86,12 @@ def evaluate_platform(
     tier = str(row.get("ownership_tier") or TIER_DO_NOT_USE)
     scope = str(row.get("topical_scope") or "")
     terms = str(row.get("terms_position") or "")
+    checked_on = row.get("terms_checked_on")
+    checked_on_iso = checked_on.isoformat() if isinstance(checked_on, date) else str(checked_on or "")
+    # Migration 0103 stamped terms_checked_on on every row a human actually adjudicated,
+    # so its absence IS the "never reviewed" signal. A written terms_position counts as
+    # review too - someone read something to write it.
+    reviewed = bool(checked_on) or bool(terms)
 
     def verdict(status: Status, reason: str) -> PlatformVerdict:
         return PlatformVerdict(
@@ -88,11 +103,13 @@ def evaluate_platform(
             topical_scope=scope,
             authority_tier=str(row.get("authority_tier") or ""),
             terms_position=terms,
+            terms_checked_on=checked_on_iso,
+            terms_source_url=str(row.get("terms_source_url") or ""),
         )
 
     if not row.get("automation_ready"):
         return verdict(
-            "not_eligible",
+            "not_supported",
             "No publisher exists for this platform yet - it is a catalogued build "
             "target, not something the pipeline can drive.",
         )
@@ -101,16 +118,23 @@ def evaluate_platform(
         # catalogue says it is ready. Reporting it eligible would offer a platform that
         # fails at plan time.
         return verdict(
-            "not_eligible",
+            "not_supported",
             "This catalogue entry has no publishing-enum mapping, so the pipeline "
             "cannot target it.",
+        )
+    if tier == TIER_DO_NOT_USE and not reviewed:
+        return verdict(
+            "not_reviewed",
+            "Not yet reviewed: nobody has read this platform's terms, so it stays "
+            "unusable by default. A safe default, not a verdict - reviewing its terms "
+            "is what would settle it.",
         )
     if tier == TIER_DO_NOT_USE:
         return verdict(
             "not_eligible",
             terms
-            or "Excluded: its own terms, its link value, or its content model make a "
-            "placement here indefensible.",
+            or "Excluded on review: its own terms, its link value, or its content "
+            "model make a placement here indefensible.",
         )
     if scope != SCOPE_AGNOSTIC and scope != client_scope:
         return verdict(
