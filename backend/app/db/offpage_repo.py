@@ -445,7 +445,7 @@ class OffpageRepo:
     #: The mailbox password is NEVER selected here - only its vault coordinates.
     _IDENTITY_COLUMNS = (
         "web2_handle_base, web2_contact_email, web2_imap_host, web2_imap_port, "
-        "web2_imap_user, web2_imap_vault_provider, web2_imap_vault_label"
+        "web2_imap_user, web2_imap_vault_provider, web2_imap_vault_label, web2_brief"
     )
 
     def client_web2_identity(self, client_id: str) -> dict[str, Any] | None:
@@ -454,6 +454,17 @@ class OffpageRepo:
                 f"select id, name, {self._IDENTITY_COLUMNS} "
                 "from public.clients where id = %s",
                 (client_id,),
+            )
+            return cur.fetchone()
+
+    def set_client_web2_brief(self, client_id: str, brief: dict[str, Any]) -> dict[str, Any] | None:
+        """Replace the standing grounding pack. Campaigns COPY it at create time, so a
+        later edit never rewrites what an already-drafted article was grounded against."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.clients set web2_brief = %s "
+                f"where id = %s returning id, name, {self._IDENTITY_COLUMNS}",
+                (Jsonb(brief), client_id),
             )
             return cur.fetchone()
 

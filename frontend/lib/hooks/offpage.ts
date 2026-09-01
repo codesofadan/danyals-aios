@@ -398,6 +398,11 @@ export type Web2ClientIdentity = {
   imapUser: string;
   imapPasswordHeld: boolean;
   mailboxReady: boolean;
+  /** The standing grounding pack every campaign for this client reuses. */
+  proofPoints: string[];
+  testimonials: string[];
+  uniqueData: string[];
+  services: string[];
 };
 
 export type Web2ClientIdentityInput = {
@@ -409,6 +414,10 @@ export type Web2ClientIdentityInput = {
   /** Write-only. Blank LEAVES an existing seal alone; clearing is explicit. */
   imapPassword?: string;
   clearImapPassword?: boolean;
+  proofPoints?: string[];
+  testimonials?: string[];
+  uniqueData?: string[];
+  services?: string[];
 };
 
 export function useWeb2ClientIdentity(clientId?: string) {

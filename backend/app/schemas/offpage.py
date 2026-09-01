@@ -599,6 +599,13 @@ class Web2ClientIdentityRequest(BaseModel):
     #: `clearImapPassword`, so an accidental blank can never silently drop a credential.
     imap_password: str = Field(default="", alias="imapPassword", max_length=512)
     clear_imap_password: bool = Field(default=False, alias="clearImapPassword")
+    #: The standing grounding pack every campaign for this client reuses. A draft
+    #: written without these holds at review on [NEEDS:] gaps and cannot publish, so
+    #: storing them once per client is what makes the grounded path the easy one.
+    proof_points: list[str] = Field(default_factory=list, alias="proofPoints", max_length=12)
+    testimonials: list[str] = Field(default_factory=list, max_length=12)
+    unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
+    services: list[str] = Field(default_factory=list, max_length=20)
 
 
 class Web2ClientIdentityResponse(BaseModel):
@@ -616,12 +623,28 @@ class Web2ClientIdentityResponse(BaseModel):
     #: Whether the builder can read this client's mailbox unaided. False is a normal
     #: state, not a fault: verification then degrades to the operator reading the inbox.
     mailbox_ready: bool = Field(default=False, serialization_alias="mailboxReady")
+    proof_points: list[str] = Field(default_factory=list, serialization_alias="proofPoints")
+    testimonials: list[str] = Field(default_factory=list)
+    unique_data: list[str] = Field(default_factory=list, serialization_alias="uniqueData")
+    services: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: dict[str, Any], *, password_held: bool) -> Web2ClientIdentityResponse:
         host = str(row.get("web2_imap_host") or "")
         user = str(row.get("web2_imap_user") or "")
+        brief = row.get("web2_brief") or {}
+        if not isinstance(brief, dict):  # a malformed document degrades to empty
+            brief = {}
+
+        def _list(key: str) -> list[str]:
+            values = brief.get(key)
+            return [str(v) for v in values if str(v).strip()] if isinstance(values, list) else []
+
         return cls(
+            proof_points=_list("proof_points"),
+            testimonials=_list("testimonials"),
+            unique_data=_list("unique_data"),
+            services=_list("services"),
             client_id=str(row.get("id") or ""),
             client=str(row.get("name") or ""),
             handle_base=str(row.get("web2_handle_base") or ""),

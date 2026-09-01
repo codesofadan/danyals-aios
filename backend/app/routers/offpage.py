@@ -910,13 +910,26 @@ async def create_web2_campaign(
     def _lines(items: list[str]) -> list[str]:
         return [s.strip() for s in items if isinstance(s, str) and s.strip()]
 
+    # The REQUEST wins where it says something; the client's standing brief fills the
+    # rest. Without this fallback the wizard starts empty for every campaign of every
+    # client, so the grounding facts are retyped fifty times or - far more likely -
+    # skipped, and the campaign parks unpublishable on [NEEDS:] gaps.
+    stored = await asyncio.to_thread(repo.client_web2_identity, body.client_id)
+    stored_brief = (stored or {}).get("web2_brief") or {}
+    if not isinstance(stored_brief, dict):
+        stored_brief = {}
+
     source_pack: dict[str, Any] = {"client_name": name}
     for key, values in (
         ("proof_points", body.proof_points), ("testimonials", body.testimonials),
         ("unique_data", body.unique_data), ("services", body.services),
     ):
-        if _lines(values):
-            source_pack[key] = _lines(values)
+        chosen = _lines(values)
+        if not chosen:
+            fallback = stored_brief.get(key)
+            chosen = _lines(fallback) if isinstance(fallback, list) else []
+        if chosen:
+            source_pack[key] = chosen
 
     campaign = await asyncio.to_thread(
         repo.create_campaign,
@@ -1321,6 +1334,17 @@ async def put_web2_client_identity(
             secret=body.imap_password.strip(),
             kind="client_access",
         )
+
+    def _clean(values: list[str]) -> list[str]:
+        return [v.strip() for v in values if isinstance(v, str) and v.strip()]
+
+    brief = {
+        "proof_points": _clean(body.proof_points),
+        "testimonials": _clean(body.testimonials),
+        "unique_data": _clean(body.unique_data),
+        "services": _clean(body.services),
+    }
+    await asyncio.to_thread(repo.set_client_web2_brief, client_id, brief)
 
     row = await asyncio.to_thread(
         repo.set_client_web2_identity,

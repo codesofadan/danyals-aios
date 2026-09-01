@@ -312,6 +312,7 @@ def test_citation_factory_builds_real_with_key() -> None:
 
 
 _BLANK_IDENTITY: dict[str, Any] = {
+    "web2_brief": {},
     "web2_handle_base": "", "web2_contact_email": "", "web2_imap_host": "",
     "web2_imap_port": 993, "web2_imap_user": "",
     "web2_imap_vault_provider": "", "web2_imap_vault_label": "",
@@ -411,11 +412,18 @@ class FakeOffpageRepo:
             return None
         return {"id": client_id, "name": name, **self.identity.get(client_id, _BLANK_IDENTITY)}
 
+    def set_client_web2_brief(self, client_id: str, brief: dict[str, Any]) -> dict[str, Any] | None:
+        if self.client_names.get(client_id) is None:
+            return None
+        self.identity.setdefault(client_id, dict(_BLANK_IDENTITY))["web2_brief"] = brief
+        return {"id": client_id, "name": self.client_names[client_id], **self.identity[client_id]}
+
     def set_client_web2_identity(self, client_id: str, **kw: Any) -> dict[str, Any] | None:
         name = self.client_names.get(client_id)
         if name is None:
             return None
         self.identity[client_id] = {
+            "web2_brief": self.identity.get(client_id, {}).get("web2_brief", {}),
             "web2_handle_base": kw["handle_base"],
             "web2_contact_email": kw["contact_email"],
             "web2_imap_host": kw["imap_host"],
@@ -2118,3 +2126,51 @@ async def test_the_provisioning_queue_is_readable_by_staff_and_written_by_leads(
         json={"clientId": "cl-1", "platforms": ["Blogger"]},
     )
     assert started.status_code == 403, "queueing work is a lead's call"
+
+
+async def test_a_campaign_falls_back_to_the_clients_stored_brief(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """The wizard starts empty on every run, so grounding facts were retyped for every
+    campaign of every client - or, at twenty clients, skipped, which parks the whole
+    campaign unpublishable on [NEEDS:] gaps. Stored once, they now travel by default."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    repo.identity["cl-1"] = {
+        **_BLANK_IDENTITY,
+        "web2_brief": {
+            "proof_points": ["Cleared 400 drains in 2025"],
+            "unique_data": ["The named bottleneck was the real one 3 times in 10"],
+        },
+    }
+    wire("manager", "u-lead")
+
+    body = _campaign_body()
+    body.pop("proofPoints", None)
+    body.pop("uniqueData", None)
+    resp = await client.post("/api/v1/offpage/web2/campaigns", json=body)
+
+    assert resp.status_code == 201, resp.text
+    packs = [r.get("source_pack") or {} for r in repo.created_web2]
+    assert packs, "the campaign created properties"
+    assert packs[0]["proof_points"] == ["Cleared 400 drains in 2025"]
+    assert packs[0]["unique_data"] == ["The named bottleneck was the real one 3 times in 10"]
+
+
+async def test_an_explicit_campaign_value_still_beats_the_stored_brief(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """The stored brief is a default, not a ceiling - a campaign about one project must
+    be able to say so without editing the client."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    repo.identity["cl-1"] = {**_BLANK_IDENTITY, "web2_brief": {"proof_points": ["stored"]}}
+    wire("manager", "u-lead")
+
+    resp = await client.post(
+        "/api/v1/offpage/web2/campaigns",
+        json={**_campaign_body(), "proofPoints": ["this campaign only"]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert repo.created_web2[0]["source_pack"]["proof_points"] == ["this campaign only"]

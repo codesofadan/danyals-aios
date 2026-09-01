@@ -8,6 +8,7 @@ import {
 } from "@/lib/hooks/offpage";
 import { type Web2PacingMode } from "@/lib/offpage";
 import Web2PlatformPicker from "./Web2PlatformPicker";
+import { useWeb2ClientIdentity } from "@/lib/hooks/offpage";
 
 /**
  * Build a whole Web 2.0 campaign in one pass: client -> topics -> platforms -> pacing
@@ -57,6 +58,11 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   // must be the thing that gets created, so a quote is invalidated the moment any input
   // that shaped it changes.
   const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
+
+  // The client's STANDING brief. The server already falls back to it, so leaving these
+  // blank is safe; showing what will be used stops the operator wondering whether the
+  // draft will be grounded.
+  const identityQ = useWeb2ClientIdentity(clientId || undefined);
 
   const estimate = useEstimateWeb2Campaign();
   const create = useCreateWeb2Campaign();
@@ -279,6 +285,12 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
               <div className="fld-hint">
                 Without real proof the writer leaves <code>[NEEDS:]</code> gaps and the draft holds at
                 review, un-publishable.
+                {!proof.trim() && (identityQ.data?.proofPoints?.length ?? 0) > 0 && (
+                  <>
+                    {" "}Leave blank and this client&rsquo;s stored brief is used:{" "}
+                    <b>{identityQ.data!.proofPoints.length} point(s)</b> already on file.
+                  </>
+                )}
               </div>
             </div>
 
@@ -290,6 +302,12 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                 The <b>differentiation</b> angle. Proof above answers &ldquo;why choose them&rdquo;; this
                 answers &ldquo;what makes this different&rdquo; — a separate <code>[NEEDS:]</code> gap,
                 and the one that most often holds a draft at review.
+                {!uniqueData.trim() && (identityQ.data?.uniqueData?.length ?? 0) > 0 && (
+                  <>
+                    {" "}Leave blank and this client&rsquo;s stored brief is used:{" "}
+                    <b>{identityQ.data!.uniqueData.length} on file</b>.
+                  </>
+                )}
               </div>
             </div>
 

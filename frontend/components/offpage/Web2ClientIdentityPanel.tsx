@@ -16,6 +16,10 @@ import { useSaveWeb2ClientIdentity, useWeb2ClientIdentity } from "@/lib/hooks/of
  * registrant domain — so a platform that suspends ONE account can enumerate every other
  * client we run. Registering on the client's own domain removes that join entirely.
  */
+function lines(value: string): string[] {
+  return value.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 12);
+}
+
 export default function Web2ClientIdentityPanel({ clientId }: { clientId?: string }) {
   const q = useWeb2ClientIdentity(clientId);
   const save = useSaveWeb2ClientIdentity(clientId);
@@ -25,6 +29,8 @@ export default function Web2ClientIdentityPanel({ clientId }: { clientId?: strin
   const [imapHost, setImapHost] = useState("");
   const [imapUser, setImapUser] = useState("");
   const [imapPassword, setImapPassword] = useState("");
+  const [proof, setProof] = useState("");
+  const [uniqueData, setUniqueData] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -36,6 +42,8 @@ export default function Web2ClientIdentityPanel({ clientId }: { clientId?: strin
     setImapHost(d?.imapHost ?? "");
     setImapUser(d?.imapUser ?? "");
     setImapPassword("");
+    setProof((d?.proofPoints ?? []).join("\n"));
+    setUniqueData((d?.uniqueData ?? []).join("\n"));
     setError("");
     setSaved(false);
   }, [q.data, clientId]);
@@ -61,6 +69,8 @@ export default function Web2ClientIdentityPanel({ clientId }: { clientId?: strin
         // Blank leaves any existing sealed password alone — the server treats an empty
         // field as "unchanged", so editing the handle cannot drop a working mailbox.
         ...(imapPassword.trim() ? { imapPassword: imapPassword.trim() } : {}),
+        proofPoints: lines(proof),
+        uniqueData: lines(uniqueData),
       });
       setImapPassword("");
       setSaved(true);
@@ -144,6 +154,31 @@ export default function Web2ClientIdentityPanel({ clientId }: { clientId?: strin
             signup itself. Without it, everything still works — you just click the
             confirmation link yourself.
           </div>
+        </div>
+
+        <div className="fld">
+          <label>Proof &amp; first-hand experience — one per line</label>
+          <textarea
+            rows={3}
+            value={proof}
+            onChange={(e) => setProof(e.target.value)}
+            placeholder={"Real projects, results, credentials.\ne.g. Cleared 400 drains in 2025\ne.g. 25-year workmanship warranty"}
+          />
+          <div className="fld-hint">
+            Stored once per client. Every campaign grounds its articles against these, so
+            you never retype them — a draft written without them holds at review with
+            [NEEDS:] gaps and cannot publish.
+          </div>
+        </div>
+
+        <div className="fld">
+          <label>What only this client knows — one per line</label>
+          <textarea
+            rows={2}
+            value={uniqueData}
+            onChange={(e) => setUniqueData(e.target.value)}
+            placeholder={"The insight nobody else can write.\ne.g. The named bottleneck was the real one 3 times in 10"}
+          />
         </div>
 
         {error && (
