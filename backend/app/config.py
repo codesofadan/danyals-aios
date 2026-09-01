@@ -702,11 +702,33 @@ class Settings(BaseSettings):
     # All optional + never required in prod: until host/user/password land the mailbox
     # factory returns None and every signup DEGRADES to "hold for manual account
     # creation". The password is a SecretStr (never logged / never in a repr). ---
-    mailbox_imap_host: str | None = None       # e.g. imap.hostinger.com
+    # WHICH NAMES ARE LIVE: `imap_mailbox_from_settings` builds the mailbox from the
+    # `citation_imap_*` family below - it is ONE shared mailbox serving both modules,
+    # despite the citation_ prefix. The `mailbox_imap_*` names here were declared for
+    # web2 and read by NOTHING, so configuring them produced a permanently-None mailbox
+    # and every signup degraded silently to "hold". They are kept as ALIASES only:
+    # `resolved_imap()` prefers whichever family is populated, so either name works.
+    mailbox_imap_host: str | None = None       # alias of citation_imap_host
     mailbox_imap_port: int = 993               # IMAPS
-    mailbox_imap_user: str | None = None       # the catch-all mailbox login (full address)
-    mailbox_imap_password: SecretStr | None = None
+    mailbox_imap_user: str | None = None       # alias of citation_imap_user
+    mailbox_imap_password: SecretStr | None = None  # alias of citation_imap_password
     mailbox_catchall_domain: str | None = None  # domain the per-signup aliases live on
+
+    def resolved_imap(self) -> tuple[str, int, str, str]:
+        """The catch-all mailbox connection, from whichever settings family is filled.
+
+        Two families name one mailbox (see above). Returning ``("", 0, "", "")`` when
+        neither is configured keeps the caller's degrade path intact - an unconfigured
+        mailbox HOLDS a signup, it never crashes.
+        """
+        host = self.citation_imap_host or self.mailbox_imap_host or ""
+        user = self.citation_imap_user or self.mailbox_imap_user or ""
+        secret = self.citation_imap_password or self.mailbox_imap_password
+        password = secret.get_secret_value() if secret is not None else ""
+        port = self.citation_imap_port or self.mailbox_imap_port or 993
+        if not host or not user or not password:
+            return ("", 0, "", "")
+        return (host, port, user, password)
 
     # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: direct
     # APIs (Bing Places / Foursquare), aggregator pushes, and a self-hosted Playwright

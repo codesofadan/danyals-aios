@@ -148,6 +148,21 @@ def test_imap_mailbox_from_settings_built_when_configured() -> None:
     assert isinstance(mailbox, ImapMailbox)
 
 
+def test_imap_mailbox_accepts_either_settings_family() -> None:
+    """One mailbox was declared under TWO names. `mailbox_imap_*` is the family the
+    config comment offers for web2 signup, but only `citation_imap_*` was ever read -
+    so configuring the documented names built no mailbox and every signup degraded to
+    "hold" with nothing to explain why. Either name must now work."""
+    mailbox = imap_mailbox_from_settings(
+        _settings(
+            mailbox_imap_host="imap.example",
+            mailbox_imap_user="catchall@mail.example",
+            mailbox_imap_password="s3cret",
+        )
+    )
+    assert isinstance(mailbox, ImapMailbox)
+
+
 def test_signup_bot_from_settings_none_without_mailbox_or_domain() -> None:
     # No mailbox -> None even if a domain is set.
     assert (

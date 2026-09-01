@@ -269,15 +269,16 @@ def imap_mailbox_from_settings(settings: Settings) -> ImapMailbox | None:
     """The catch-all mailbox client, or ``None`` when unconfigured (host/user/password
     missing) -- the signup flow then DEGRADES (a signup HOLDS as blocked), it never
     crashes. Mirrors ``captcha_solver_from_settings`` / ``citation_bot_from_settings``."""
-    host = settings.citation_imap_host
-    user = settings.citation_imap_user
-    password = settings.citation_imap_password
+    # Resolved across BOTH settings families: the mailbox was declared twice (see
+    # config.resolved_imap) and only one name was ever read, so configuring the other
+    # produced a None mailbox and a silently-held signup.
+    host, port, user, password = settings.resolved_imap()
     if not host or not user or not password:
         logger.info("imap_mailbox_degraded", reason="unconfigured")
         return None
     return ImapMailbox(
         host=host,
-        port=settings.citation_imap_port,
+        port=port,
         user=user,
-        password=password.get_secret_value(),
+        password=password,
     )
