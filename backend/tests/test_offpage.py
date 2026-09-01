@@ -331,6 +331,7 @@ class FakeOffpageRepo:
         self.web2_by_id: dict[str, dict[str, Any]] = {}
         self.client_names: dict[str, str] = {}
         self.identity: dict[str, dict[str, Any]] = {}
+        self.provision: dict[str, dict[str, Any]] = {}
         self.created_web2: list[dict[str, Any]] = []
         # --- campaigns ---
         self.campaigns: dict[str, dict[str, Any]] = {}
@@ -369,6 +370,40 @@ class FakeOffpageRepo:
 
     def client_web2_scope(self, client_id: str) -> str:
         return self.client_scope
+
+    def list_provision_items(self, client_id: str | None = None) -> list[dict[str, Any]]:
+        rows = list(self.provision.values())
+        if client_id:
+            rows = [r for r in rows if r.get("client_id") == client_id]
+        return rows
+
+    def get_provision_item(self, item_id: str) -> dict[str, Any] | None:
+        return self.provision.get(item_id)
+
+    def create_provision_item(self, **kw: Any) -> dict[str, Any] | None:
+        live = [
+            r for r in self.provision.values()
+            if r["client_id"] == kw["client_id"] and r["platform"] == kw["platform"]
+            and r["status"] != "cancelled"
+        ]
+        if live:
+            return None  # the partial unique index refuses a duplicate
+        item_id = f"pv-{len(self.provision) + 1}"
+        row = {
+            "id": item_id, "client_name": self.client_names.get(kw["client_id"], ""),
+            "verify_link": "", "account_id": None, **kw,
+        }
+        self.provision[item_id] = row
+        return row
+
+    def update_provision_item(
+        self, item_id: str, *, status: str, note: str = "", **fields: Any
+    ) -> dict[str, Any] | None:
+        row = self.provision.get(item_id)
+        if row is None:
+            return None
+        row.update({"status": status, "note": note, **fields})
+        return row
 
     def client_web2_identity(self, client_id: str) -> dict[str, Any] | None:
         name = self.client_names.get(client_id)
@@ -1957,3 +1992,129 @@ async def test_setting_a_client_identity_is_lead_only(
         "/api/v1/offpage/web2/clients/cl-1/identity", json={"handleBase": "acme"}
     )
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# The account provisioning queue (0123) - the unit of work that makes it scale.
+# --------------------------------------------------------------------------- #
+def _with_identity(repo: FakeOffpageRepo) -> None:
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    repo.identity["cl-1"] = {
+        "web2_handle_base": "leedsdrainage", "web2_contact_email": "web@leedsdrainage.co.uk",
+        "web2_imap_host": "imap.leedsdrainage.co.uk", "web2_imap_port": 993,
+        "web2_imap_user": "web@leedsdrainage.co.uk",
+        "web2_imap_vault_provider": "web2:mailbox", "web2_imap_vault_label": "cl-1:mailbox",
+    }
+
+
+async def test_queueing_a_run_assigns_lanes_and_carries_the_setup_guide(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """One request turns 'this client should publish on N platforms' into N tracked
+    items - the thing that had no representation at all before, which is why
+    provisioning twenty clients had no progress to resume."""
+    _with_identity(repo)
+    wire("manager", "u-lead")
+
+    resp = await client.post(
+        "/api/v1/offpage/web2/provisioning",
+        json={"clientId": "cl-1", "platforms": ["Telegra.ph", "Blogger"]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    by_platform = {r["platform"]: r for r in resp.json()}
+    assert by_platform["Telegra.ph"]["lane"] == "auto", "a drivable API signup"
+    assert by_platform["Blogger"]["lane"] == "guided", "a human creates this one"
+    assert by_platform["Blogger"]["handle"] == "leedsdrainage"
+    assert by_platform["Blogger"]["registrationEmail"] == "web@leedsdrainage.co.uk"
+    # The guide travels WITH the work item, so nobody hunts for instructions.
+    assert "google" in by_platform["Blogger"]["setupUrl"].lower()
+
+
+async def test_re_running_the_builder_does_not_duplicate_work_in_flight(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    _with_identity(repo)
+    wire("manager", "u-lead")
+    body = {"clientId": "cl-1", "platforms": ["Blogger"]}
+
+    await client.post("/api/v1/offpage/web2/provisioning", json=body)
+    again = await client.post("/api/v1/offpage/web2/provisioning", json=body)
+
+    assert again.status_code == 201
+    assert len([r for r in again.json() if r["platform"] == "Blogger"]) == 1
+
+
+async def test_an_item_is_queued_blocked_when_the_client_has_no_identity_yet(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """The operator still sees everything they asked for, with the ONE missing
+    prerequisite named - rather than a refusal that explains nothing."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("manager", "u-lead")
+
+    resp = await client.post(
+        "/api/v1/offpage/web2/provisioning",
+        json={"clientId": "cl-1", "platforms": ["Blogger"]},
+    )
+
+    assert resp.status_code == 201
+    item = resp.json()[0]
+    assert item["status"] == "blocked"
+    assert "identity" in item["note"].lower()
+
+
+async def test_an_item_cannot_reach_live_without_a_credential(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """An account that reports live with nothing sealed shows green on the board and
+    cannot publish - the measured failure the usable-account SQL was written after."""
+    _with_identity(repo)
+    wire("manager", "u-lead")
+    await client.post(
+        "/api/v1/offpage/web2/provisioning",
+        json={"clientId": "cl-1", "platforms": ["Blogger"]},
+    )
+    item_id = next(iter(repo.provision))
+    repo.provision[item_id]["status"] = "awaiting_credential"
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/provisioning/{item_id}", json={"status": "live"}
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "credential" in resp.text.lower()
+    assert repo.provision[item_id]["status"] == "awaiting_credential", "no silent move"
+
+
+async def test_a_step_with_real_work_in_it_cannot_be_skipped(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    _with_identity(repo)
+    wire("manager", "u-lead")
+    await client.post(
+        "/api/v1/offpage/web2/provisioning",
+        json={"clientId": "cl-1", "platforms": ["Blogger"]},
+    )
+    item_id = next(iter(repo.provision))  # sits at identity_ready
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/provisioning/{item_id}",
+        json={"status": "live", "credential": {"oauth_token": "t", "blog_id": "1"}},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "identity_ready" in resp.text
+
+
+async def test_the_provisioning_queue_is_readable_by_staff_and_written_by_leads(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    _with_identity(repo)
+    wire("specialist", "u-staff")
+    assert (await client.get("/api/v1/offpage/web2/provisioning")).status_code == 200
+    started = await client.post(
+        "/api/v1/offpage/web2/provisioning",
+        json={"clientId": "cl-1", "platforms": ["Blogger"]},
+    )
+    assert started.status_code == 403, "queueing work is a lead's call"

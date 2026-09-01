@@ -12,6 +12,7 @@ import {
 import type { Web2Account } from "@/lib/offpage";
 import { Web2SetupGuideList } from "./Web2PlatformPicker";
 import Web2ClientIdentityPanel from "./Web2ClientIdentityPanel";
+import Web2AccountBuilder from "./Web2AccountBuilder";
 
 /**
  * The connection board — which publishing accounts exist and whether they still work.
@@ -61,6 +62,7 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
         </p>
         <button className="op-act" onClick={() => setAdding(true)}>Register an account</button>
         <Web2ClientIdentityPanel clientId={clientId} />
+        <Web2AccountBuilder clientId={clientId} />
         <ConnectGuides clientId={clientId} />
       </div>
     );
@@ -77,6 +79,7 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
         <RegisterAccountForm clientId={clientId} onDone={() => setAdding(false)} />
       )}
       <Web2ClientIdentityPanel clientId={clientId} />
+      <Web2AccountBuilder clientId={clientId} />
       <ConnectGuides clientId={clientId} />
       <table className="tbl op-tbl w2-ledger">
         <thead>

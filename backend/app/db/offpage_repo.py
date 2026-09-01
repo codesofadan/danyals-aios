@@ -483,6 +483,80 @@ class OffpageRepo:
             )
             return cur.fetchone()
 
+    # --- the account provisioning queue (0123) --------------------------------
+    def list_provision_items(self, client_id: str | None = None) -> _Rows:
+        """The queue, newest first. Client-scoped when asked."""
+        query = (
+            "select i.*, c.name as client_name from public.web2_provision_items i "
+            "join public.clients c on c.id = i.client_id"
+        )
+        params: list[Any] = []
+        if client_id:
+            query += " where i.client_id = %s"
+            params.append(client_id)
+        query += " order by i.created_at desc, i.platform"
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
+    def get_provision_item(self, item_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select i.*, c.name as client_name from public.web2_provision_items i "
+                "join public.clients c on c.id = i.client_id where i.id = %s",
+                (item_id,),
+            )
+            return cur.fetchone()
+
+    def create_provision_item(
+        self,
+        *,
+        client_id: str,
+        platform: str,
+        lane: str,
+        status: str,
+        handle: str,
+        registration_email: str,
+        signup_url: str,
+        note: str,
+    ) -> dict[str, Any] | None:
+        """Queue one (client, platform). Returns None when one is already in flight -
+        the partial unique index is the authority, so a concurrent second builder run
+        loses the race cleanly instead of raising."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "insert into public.web2_provision_items "
+                "  (client_id, platform, lane, status, handle, registration_email, "
+                "   signup_url, note) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s) "
+                "on conflict do nothing returning *",
+                (client_id, platform, lane, status, handle, registration_email,
+                 signup_url, note),
+            )
+            return cur.fetchone()
+
+    def update_provision_item(
+        self, item_id: str, *, status: str, note: str = "", **fields: Any
+    ) -> dict[str, Any] | None:
+        """Move one item. `status` is always written; the optional fields (verify_link,
+        verify_found_at, account_id) are written only when supplied, so a status move
+        never blanks what an earlier step recorded."""
+        sets = ["status = %s", "note = %s"]
+        params: list[Any] = [status, note]
+        for column in ("verify_link", "verify_found_at", "account_id", "handle"):
+            if column in fields:
+                sets.append(f"{column} = %s")
+                params.append(fields[column])
+        params.append(item_id)
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.web2_provision_items set "
+                + ", ".join(sets)
+                + " where id = %s returning *",
+                params,
+            )
+            return cur.fetchone()
+
     def pacing_caps_row(self) -> dict[str, Any] | None:
         with rls_connection(self._user_id) as cur:
             cur.execute("select * from public.web2_pacing_settings where id = 1")

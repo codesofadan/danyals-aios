@@ -634,6 +634,71 @@ class Web2ClientIdentityResponse(BaseModel):
         )
 
 
+class Web2ProvisionStartRequest(BaseModel):
+    """Queue account creation for one client across N platforms (lead-only)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str = Field(min_length=1, alias="clientId")
+    platforms: list[str] = Field(default_factory=list, max_length=60)
+
+
+class Web2ProvisionItemResponse(BaseModel):
+    """One account we intend to bring to life, and who is holding the ball.
+
+    The states are distinct because the WAITS are distinct and differently owned: we
+    decide the identity, a human or an API creates the account, the PLATFORM sends mail
+    on its own schedule, and only then is there a token to seal. A single done/not-done
+    flag is what makes an operator re-read a guide to work out where they got to.
+    """
+
+    id: str
+    client: str
+    client_id: str = Field(serialization_alias="clientId")
+    platform: str
+    status: str
+    lane: str
+    handle: str = ""
+    registration_email: str = Field(default="", serialization_alias="registrationEmail")
+    setup_url: str = Field(default="", serialization_alias="setupUrl")
+    #: The confirmation link the mailbox watcher found, so nobody hunts for it.
+    verify_link: str = Field(default="", serialization_alias="verifyLink")
+    note: str = ""
+    account_id: str = Field(default="", serialization_alias="accountId")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Web2ProvisionItemResponse:
+        return cls(
+            id=str(row.get("id") or ""),
+            client=str(row.get("client_name") or ""),
+            client_id=str(row.get("client_id") or ""),
+            platform=str(row.get("platform") or ""),
+            status=str(row.get("status") or ""),
+            lane=str(row.get("lane") or "guided"),
+            handle=str(row.get("handle") or ""),
+            registration_email=str(row.get("registration_email") or ""),
+            setup_url=str(row.get("signup_url") or ""),
+            verify_link=str(row.get("verify_link") or ""),
+            note=str(row.get("note") or ""),
+            account_id=str(row.get("account_id") or ""),
+        )
+
+
+class Web2ProvisionAdvanceRequest(BaseModel):
+    """Move one queue item. The credential arrives here on the final step."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: str = Field(min_length=1)
+    note: str = ""
+    #: Supplied when moving to `live`: sealed into the vault, an account row created,
+    #: and never read back.
+    credential: dict[str, str] = Field(default_factory=dict)
+    #: The account's real name/URL on the platform, recorded on the account row.
+    handle: str = ""
+    property_url: str = Field(default="", alias="propertyUrl")
+
+
 class Web2AccountResponse(BaseModel):
     """One publishing account on the operator's connection board.
 

@@ -436,6 +436,68 @@ export function useSaveWeb2ClientIdentity(clientId?: string) {
   });
 }
 
+/** One account we intend to bring to life, and who is holding the ball right now. */
+export type Web2ProvisionItem = {
+  id: string;
+  client: string;
+  clientId: string;
+  platform: string;
+  status:
+    | "queued" | "identity_ready" | "awaiting_account" | "awaiting_verification"
+    | "awaiting_credential" | "live" | "blocked" | "cancelled";
+  lane: "auto" | "guided";
+  handle: string;
+  registrationEmail: string;
+  setupUrl: string;
+  verifyLink: string;
+  note: string;
+  accountId: string;
+};
+
+export function useWeb2Provisioning(clientId?: string) {
+  return useQuery({
+    queryKey: ["web2-provisioning", clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2ProvisionItem[]>(
+        `/offpage/web2/provisioning${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`,
+      ),
+  });
+}
+
+/** Queue account creation for a client across N platforms. Idempotent: platforms
+ *  already in flight come back unchanged rather than duplicated. */
+export function useStartWeb2Provisioning() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { clientId: string; platforms: string[] }) =>
+      api.post<Web2ProvisionItem[]>("/offpage/web2/provisioning", body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["web2-provisioning"] });
+    },
+  });
+}
+
+/** Move one item along. The credential travels on the final step to `live`, where it
+ *  is sealed server-side and an account row is created. */
+export function useAdvanceWeb2Provisioning() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: {
+      id: string;
+      status: string;
+      note?: string;
+      credential?: Record<string, string>;
+      handle?: string;
+      propertyUrl?: string;
+    }) => api.post<Web2ProvisionItem>(`/offpage/web2/provisioning/${id}`, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["web2-provisioning"] });
+      void qc.invalidateQueries({ queryKey: ["web2-accounts"] });
+      void qc.invalidateQueries({ queryKey: WEB2_BOARD_KEY });
+    },
+  });
+}
+
 /** The platform catalogue, including the credential shape each platform needs. */
 export function useWeb2Catalog() {
   return useQuery({

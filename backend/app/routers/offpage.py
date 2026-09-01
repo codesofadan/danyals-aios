@@ -66,6 +66,9 @@ from app.schemas.offpage import (
     Web2PlatformCatalogResponse,
     Web2PlatformStatusResponse,
     Web2PropertyResponse,
+    Web2ProvisionAdvanceRequest,
+    Web2ProvisionItemResponse,
+    Web2ProvisionStartRequest,
     Web2ReviewRequest,
     action_for,
 )
@@ -1337,6 +1340,193 @@ async def put_web2_client_identity(
         target=str(row.get("name") or ""), entity_type="client", entity_id=client_id,
     )
     return await asyncio.to_thread(_identity_response, row)
+
+
+@router.post(
+    "/offpage/web2/provisioning",
+    response_model=list[Web2ProvisionItemResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_web2_provisioning(
+    body: Web2ProvisionStartRequest, repo: OffpageRepoDep, actor: Lead
+) -> list[Web2ProvisionItemResponse]:
+    """Queue account creation for one client across N platforms (lead-only).
+
+    THE UNIT OF WORK THIS ADDS. Before this, provisioning nine platforms for a client
+    was nine unrelated form posts with no shared state - nothing recorded an account we
+    INTENDED, so there was no progress to resume, nothing to hand over, and no answer to
+    "what is left?". At one client that is friction; at twenty it is why the module sat
+    idle with four platforms connected.
+
+    Idempotent: a platform already in flight is reported as skipped rather than
+    duplicated, so re-running the builder after connecting two accounts is safe.
+    """
+    from app.services.web2_provisioning import GUIDES
+    from app.services.web2_provisioning_queue import IdentityFacts, plan_items
+
+    identity_row = await asyncio.to_thread(repo.client_web2_identity, body.client_id)
+    if identity_row is None:
+        raise _CLIENT_NOT_FOUND
+    identity = IdentityFacts.from_row(identity_row)
+    existing = await asyncio.to_thread(repo.list_provision_items, body.client_id)
+    plan = plan_items(body.platforms, identity=identity, existing=existing)
+
+    created: list[dict[str, Any]] = []
+    for entry in plan:
+        if entry.get("action") != "queued":
+            continue
+        platform = str(entry["platform"])
+        guide = GUIDES.get(platform)
+        row = await asyncio.to_thread(
+            repo.create_provision_item,
+            client_id=body.client_id,
+            platform=platform,
+            lane=str(entry["lane"]),
+            status=str(entry["status"]),
+            handle=str(entry["handle"]),
+            registration_email=str(entry["registration_email"]),
+            signup_url=guide.where if guide else "",
+            note=str(entry["note"]),
+        )
+        if row is not None:
+            created.append(row)
+
+    if created:
+        await record_activity(
+            actor, kind="client",
+            action=f"queued {len(created)} Web 2.0 account(s) for setup",
+            target=str(identity_row.get("name") or ""),
+            entity_type="client", entity_id=body.client_id,
+        )
+    rows = await asyncio.to_thread(repo.list_provision_items, body.client_id)
+    return [Web2ProvisionItemResponse.from_row(r) for r in rows]
+
+
+@router.get("/offpage/web2/provisioning", response_model=list[Web2ProvisionItemResponse])
+async def list_web2_provisioning(
+    repo: OffpageRepoDep,
+    _actor: ViewReports,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+) -> list[Web2ProvisionItemResponse]:
+    """The account-building queue: what is intended, in flight, blocked, or done."""
+    rows = await asyncio.to_thread(repo.list_provision_items, client_id)
+    return [Web2ProvisionItemResponse.from_row(r) for r in rows]
+
+
+@router.post(
+    "/offpage/web2/provisioning/{item_id}",
+    response_model=Web2ProvisionItemResponse,
+)
+async def advance_web2_provisioning(
+    item_id: str,
+    body: Web2ProvisionAdvanceRequest,
+    repo: OffpageRepoDep,
+    actor: Lead,
+) -> Web2ProvisionItemResponse:
+    """Move one queue item to its next state (lead-only).
+
+    The final move to ``live`` is the one that matters: it registers the real
+    ``web2_accounts`` row and seals the credential, through the SAME ``build_spec`` the
+    CLI and the register endpoint use - so R2-08's identity rules cannot drift by being
+    enforced in three places. Reaching ``live`` without a credential is refused by the
+    state machine, because an account that reports live with nothing sealed is exactly
+    the green-board-empty-vault failure the usable-account SQL was written after.
+    """
+    from app.services.web2_provisioning_queue import TransitionRefusedError, next_status
+
+    row = await asyncio.to_thread(repo.get_provision_item, item_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Provisioning item not found"
+        )
+    try:
+        target = next_status(str(row.get("status") or ""), body.status)
+    except TransitionRefusedError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
+        ) from refused
+
+    fields: dict[str, Any] = {}
+    if target == "live":
+        account_id = await _register_provisioned_account(row, body)
+        fields["account_id"] = account_id
+
+    handle = body.handle.strip()
+    if handle:
+        fields["handle"] = handle
+
+    updated = await asyncio.to_thread(
+        repo.update_provision_item, item_id, status=target, note=body.note.strip(), **fields
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Provisioning item not found"
+        )
+    await record_activity(
+        actor, kind="client",
+        action=f"moved {row.get('platform')} account setup to {target}",
+        target=str(row.get("client_name") or ""),
+        entity_type="client", entity_id=str(row.get("client_id") or ""),
+    )
+    return Web2ProvisionItemResponse.from_row(updated)
+
+
+async def _register_provisioned_account(
+    row: dict[str, Any], body: Web2ProvisionAdvanceRequest
+) -> str:
+    """Create the real account row + seal its credential, reusing the register path.
+
+    Not a second implementation: ``build_spec`` is the same function the CLI and the
+    register endpoint call, so the handle/email hygiene rules hold identically however
+    an account arrives. Two copies would drift, and the drift is a footprint months
+    later rather than a test failure today.
+    """
+    from app.cli.web2_accounts import (
+        HandleRejectedError,
+        _shared_domains,
+        build_spec,
+        insert_account,
+    )
+    from app.services.vault import add_key
+    from integrations.web2_credentials import VAULT_KIND_CLIENT_ACCESS, vault_provider_for
+
+    credential = {k: v for k, v in body.credential.items() if str(v).strip()}
+    if not credential:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Going live needs the platform credential. An account that reports live "
+                "with nothing sealed shows green on the board and cannot publish."
+            ),
+        )
+    try:
+        spec = await asyncio.to_thread(
+            lambda: build_spec(
+                platform=str(row.get("platform") or ""),
+                ownership="per_client",
+                handle=body.handle.strip() or str(row.get("handle") or ""),
+                client_id=str(row.get("client_id") or ""),
+                registration_email=str(row.get("registration_email") or ""),
+                property_url=body.property_url.strip(),
+                max_properties=1,
+                credential=credential,
+                shared_domains=_shared_domains(),
+            )
+        )
+    except (HandleRejectedError, ValueError) as refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
+        ) from refused
+
+    account_id = await asyncio.to_thread(insert_account, spec)
+    await asyncio.to_thread(
+        add_key,
+        provider=vault_provider_for(spec.platform),
+        label=account_id,
+        secret=json.dumps(spec.credential),
+        kind=VAULT_KIND_CLIENT_ACCESS,
+    )
+    return account_id
 
 
 @router.get("/offpage/web2/accounts", response_model=list[Web2AccountResponse])
