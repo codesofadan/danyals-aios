@@ -341,8 +341,8 @@ async def web2_catalog(
     the web2 analogue of the citation-directory catalog. Reference data, so it is
     staff-readable (``view_reports``); a portal client is 403'd out of the namespace.
 
-    Returns the rows plus a rollup header (total, how many ``automationReady`` - the 17
-    with a real publisher today - and a per-``authType`` breakdown). ``authType`` /
+    Returns the rows plus a rollup header (total, how many ``automationReady`` - i.e.
+    hold a real publisher class - and a per-``authType`` breakdown). ``authType`` /
     ``authorityTier`` / ``automationReady`` narrow the board."""
     rows = await asyncio.to_thread(
         repo.list_web2_platforms,
@@ -787,7 +787,13 @@ async def web2_platform_board(
 
     out: list[Web2PlatformStatusResponse] = []
     for v in board:
-        guide = GUIDES.get(v.name)
+        # Both GUIDES and PLATFORM_CREDENTIAL_FIELDS are keyed by the publishing enum's
+        # label; the catalogue name usually equals it, but instance-qualified rows
+        # ("Mastodon (mastodon.social)") only resolve through platform_enum.
+        guide = GUIDES.get(v.name) or (GUIDES.get(v.platform_enum) if v.platform_enum else None)
+        credential_fields = PLATFORM_CREDENTIAL_FIELDS.get(v.name) or (
+            PLATFORM_CREDENTIAL_FIELDS.get(v.platform_enum, ()) if v.platform_enum else ()
+        )
         out.append(
             Web2PlatformStatusResponse(
                 name=v.name, platform=v.platform_enum, status=v.status, reason=v.reason,
@@ -797,7 +803,7 @@ async def web2_platform_board(
                 setup_cost=guide.cost if guide else "",
                 setup_blocker=guide.blocker if guide else "",
                 account_needed=guide.account_needed if guide else "",
-                credential_fields=list(PLATFORM_CREDENTIAL_FIELDS.get(v.name, ())),
+                credential_fields=list(credential_fields),
             )
         )
     return out

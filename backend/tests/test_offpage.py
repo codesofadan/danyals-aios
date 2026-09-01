@@ -1084,6 +1084,26 @@ async def test_the_platform_board_shows_every_row_with_a_reason(
     assert next(r for r in board if r["name"] == "Blogger")["status"] == "eligible"
 
 
+async def test_the_platform_board_resolves_credentials_for_instance_qualified_rows(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """A catalogue row named "Mastodon (mastodon.social)" still keys guides and
+    credential fields through its ``platform_enum``. Keying by the display name alone
+    sent the operator to connect an account with an EMPTY field list."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("specialist", "u-staff")
+    repo.catalog_rows.append(
+        {
+            "name": "Mastodon (mastodon.social)", "platform_enum": "Mastodon",
+            "ownership_tier": "house", "topical_scope": "agnostic",
+            "automation_ready": True, "authority_tier": "medium", "terms_position": "",
+        }
+    )
+    board = (await client.get("/api/v1/offpage/web2/platform-board?clientId=cl-1")).json()
+    row = next(r for r in board if r["name"] == "Mastodon (mastodon.social)")
+    assert row["credentialFields"] == ["access_token", "instance_url"]
+
+
 async def test_a_campaign_is_refused_for_a_platform_with_no_connected_account(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
 ) -> None:

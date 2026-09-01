@@ -52,7 +52,9 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
       <div className="op-empty">
         <p style={{ margin: "0 0 10px" }}>
           No publishing accounts yet. Create the account on the platform by hand (once), then
-          register it here — everything after that is automated.
+          register it here — publishing then runs through the platform&rsquo;s API, with every
+          article still approved by a lead (Tumblr requires that approval per post, by its own
+          API licence).
         </p>
         <button className="op-act" onClick={() => setAdding(true)}>Register an account</button>
       </div>

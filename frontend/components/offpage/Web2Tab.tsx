@@ -96,7 +96,8 @@ export default function Web2Tab() {
       <div className="panel-h">
         <div className="panel-hint">
           <span className="material-symbols-rounded">rocket_launch</span>
-          Branded articles published via official platform APIs — link verified live.
+          Branded articles published via official platform APIs — links re-checked by the link
+          monitor after publish.
         </div>
         {/* ACTIONS only. The view tabs moved to their own row below: navigation and
             actions were sharing one flex line with two segmented controls and two

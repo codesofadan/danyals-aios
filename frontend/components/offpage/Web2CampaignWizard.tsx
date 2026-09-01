@@ -184,8 +184,9 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
               </select>
               <div className="fld-hint">
                 The client decides which platforms are available. Eligibility is computed from
-                their industry against each platform&rsquo;s own posting rules — a local trade and a
-                software company do not get the same list.
+                the client&rsquo;s declared topical scope (set on the client record; new clients
+                default to the topic-agnostic set) against each platform&rsquo;s own posting rules —
+                a local trade and a software company do not get the same list.
               </div>
             </div>
 
@@ -390,7 +391,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
                   <b>${quoted.estimatedCostUsd.toFixed(2)}</b> in drafting ·{" "}
                   {quoted.projectedCompletion
                     ? <>last one publishes <b>{new Date(quoted.projectedCompletion).toLocaleDateString()}</b></>
-                    : <>all publish <b>as soon as you approve</b></>}
+                    : <>all are <b>queued the moment you approve</b> — they go out as fast as the publish worker runs</>}
                 </div>
                 {quoted.notes.length > 0 && (
                   <ul style={{ margin: "8px 0 0 16px" }} className="fld-hint">
