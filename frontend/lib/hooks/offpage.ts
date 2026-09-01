@@ -19,7 +19,6 @@ import type {
   BusinessProfile,
   BusinessProfileInput,
   Citation,
-  CitationAction,
   CitationCampaignInput,
   CitationCampaignResult,
   CitationEngineBoard,
@@ -63,10 +62,17 @@ export function useBacklinks() {
 }
 
 /** The local directory / NAP listings (now carrying submission-pipeline fields too). */
-export function useCitations() {
+export function useCitations(clientId?: string) {
   return useQuery({
-    queryKey: CITATIONS_KEY,
-    queryFn: () => api.get<Citation[]>("/offpage/citations"),
+    // Client-scoped when a client is chosen. The unscoped call returns a 50-row
+    // GLOBAL page — rendering that under a client-scoped journey was how 45 fresh
+    // rows could "not come back" (they sorted below the fold of other clients'
+    // rows). The server has had the filter all along; the UI just never passed it.
+    queryKey: [...CITATIONS_KEY, clientId ?? "all"],
+    queryFn: () =>
+      api.get<Citation[]>(
+        clientId ? `/offpage/citations?clientId=${encodeURIComponent(clientId)}` : "/offpage/citations",
+      ),
   });
 }
 
@@ -89,34 +95,11 @@ export function useOffpageKpis() {
   });
 }
 
-/**
- * Reconcile many NAP listings to `consistent` in one shot (a batch Submit/Update).
- * Lead-only at the backend. `retry: 0` (client default) so a transient failure never
- * silently double-submits. On success the citations list + KPIs refetch.
- */
-export function useBulkUpdateCitations() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (ids: string[]) => api.post<Citation[]>("/offpage/citations/bulk", { ids }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
-      void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
-    },
-  });
-}
-
-/** Mark ONE listing handled (Submit a missing one / Update a drifted one). Lead-only. */
-export function useActOnCitation() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, action }: { id: string; action: CitationAction }) =>
-      api.post<Citation>(`/offpage/citations/${id}/action`, { action }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
-      void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
-    },
-  });
-}
+// DELETED 2026-09-02: useActOnCitation / useBulkUpdateCitations. They drove the
+// per-row "Submit"/"Update" buttons that wrote submit_status='submitted' on a click —
+// an assertion dressed as a delivery. The backend routes remain (the
+// /aios-citation-builder skill's reconcile flow uses them, with a human confirming);
+// the dashboard offers no assertion path any more.
 
 /** Flag every backlink at/above the spam threshold as toxic (disavow queue). Lead-only. */
 export function useFlagToxicBacklinks() {
@@ -283,6 +266,7 @@ export function useCreateCitationCampaign() {
       void qc.invalidateQueries({ queryKey: CITATIONS_KEY });
       void qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
       void qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
+      void qc.invalidateQueries({ queryKey: CITATION_CAMPAIGNS_KEY });
     },
   });
 }
@@ -302,6 +286,10 @@ export type Web2PlanInput = {
   testimonials?: string[];
   uniqueData?: string[];
   services?: string[];
+  /** "This platform's own rules argue against it for this client, and I'm choosing it
+   *  anyway." Unlocks a topical mismatch or an unreviewed platform; it can never
+   *  conjure a missing publisher or credential. */
+  acknowledgePlatformAdvisory?: boolean;
 };
 
 export function usePlanWeb2() {
@@ -487,6 +475,90 @@ export function useCreateWeb2Campaign() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: WEB2_CAMPAIGNS_KEY });
       void qc.invalidateQueries({ queryKey: WEB2_KEY });
+    },
+  });
+}
+
+// --- citation campaigns (0120): the batch as a durable, pollable thing --------
+
+export const CITATION_CAMPAIGNS_KEY = ["citation-builder", "campaigns"] as const;
+
+export type CampaignSummary = {
+  id: string;
+  client: string;
+  createdAt: string;
+  requested: number;
+  queued: number;
+  liveCount: number;
+  estimatedCost: number;
+};
+
+export type CampaignRow = {
+  id: string;
+  directory: string;
+  submitStatus: string;
+  blockedReason: string;
+  liveUrl: string;
+  detail: string;
+};
+
+export type CampaignRollup = {
+  id: string;
+  client: string;
+  createdAt: string;
+  requested: number;
+  queued: number;
+  estimatedCost: number;
+  byStatus: Record<string, number>;
+  byBlockedReason: Record<string, number>;
+  stuck: number;
+  liveUrls: { directory: string; url: string; status: string }[];
+  skipped: { directory: string; reason: string; detail?: string; clause?: string }[];
+  rows: CampaignRow[];
+};
+
+/** Recent campaigns, newest first — how the workspace finds the current one
+ *  without the operator holding an id. */
+export function useCitationCampaigns(clientId?: string) {
+  return useQuery({
+    queryKey: [...CITATION_CAMPAIGNS_KEY, clientId ?? "all"],
+    queryFn: () =>
+      api.get<CampaignSummary[]>(
+        clientId
+          ? `/citation-builder/campaigns?clientId=${encodeURIComponent(clientId)}`
+          : "/citation-builder/campaigns",
+      ),
+    enabled: clientId !== undefined,
+  });
+}
+
+/** One campaign's live rollup. Polls every 4s while any row is non-terminal — the
+ *  CitationAuditProgress cadence, the house pattern for "watch it go". */
+export function useCampaignRollup(campaignId: string | undefined) {
+  return useQuery({
+    queryKey: [...CITATION_CAMPAIGNS_KEY, "rollup", campaignId ?? ""],
+    queryFn: () => api.get<CampaignRollup>(`/citation-builder/campaigns/${campaignId}`),
+    enabled: !!campaignId,
+    placeholderData: (prev) => prev, // never blank the board between polls
+    refetchInterval: (query) => {
+      const roll = query.state.data as CampaignRollup | undefined;
+      if (!roll) return 4000;
+      const moving = (roll.byStatus["queued"] ?? 0) + (roll.byStatus["submitting"] ?? 0);
+      return moving > 0 ? 4000 : false;
+    },
+  });
+}
+
+/** POST /citation-builder/recheck — the VISIBLE liveness trigger (beat stays off by
+ *  owner decision, so re-checks run when a person asks, and say what they did). */
+export function useRecheckCitations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ checked: number; changed: number }>("/citation-builder/recheck", {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+      qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
+      qc.invalidateQueries({ queryKey: CITATION_CAMPAIGNS_KEY });
     },
   });
 }

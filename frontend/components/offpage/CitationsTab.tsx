@@ -4,17 +4,25 @@ import { useMemo, useState } from "react";
 import {
   NAP_META,
   SKIP_REASON_LABEL,
-  SUBMIT_STATUS_META,
   type Citation,
   type CitationSkip,
   type CitationSkipReason,
   type NapStatus,
 } from "@/lib/offpage";
-import { useActOnCitation, useBulkUpdateCitations, useCitations, useCitationGap, useRunCitationAudit, useClearCitations } from "@/lib/hooks/offpage";
+import { blockedReasonLabel, citationStatusMeta } from "@/lib/citationStatus";
+import {
+  useAuditPlan,
+  useCitations,
+  useCitationCampaigns,
+  useCitationGap,
+  useClearCitations,
+  useRecheckCitations,
+  useRunCitationAudit,
+} from "@/lib/hooks/offpage";
 import CitationAuditProgress from "./CitationAuditProgress";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
-import AuditPlanPanel from "./AuditPlanPanel";
+import CampaignBoard from "./CampaignBoard";
 import w from "./Wave4.module.css";
 
 const NAP_SOURCE_LABEL: Record<string, string> = {
@@ -34,10 +42,6 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 
 export default function CitationsTab() {
   const [filter, setFilter] = useState<FilterKey>("all");
-  const citationsQ = useCitations();
-  const list: Citation[] = citationsQ.data ?? [];
-  const bulk = useBulkUpdateCitations();
-  const act = useActOnCitation();
   // Tone travels with the message: for a while every FAILURE here rendered in the
   // success green with a checkmark, which is how a refused campaign read as done.
   const [flash, setFlashState] = useState<{ tone: "ok" | "warn" | "err"; msg: string } | null>(null);
@@ -52,6 +56,13 @@ export default function CitationsTab() {
   const gap = gapQ.data;
   const runAudit = useRunCitationAudit();
   const clearCitations = useClearCitations();
+  const recheck = useRecheckCitations();
+  // The monitor table is CLIENT-SCOPED. It used to be a 50-row GLOBAL page under a
+  // client-scoped journey, so a fresh campaign's rows could simply not appear.
+  const citationsQ = useCitations(gapClient || undefined);
+  const list: Citation[] = citationsQ.data ?? [];
+  const planQ = useAuditPlan(gapClient || undefined);
+  const campaignsQ = useCitationCampaigns(gapClient || undefined);
 
   // The honest split of what "covered" contains. `submitted` means a form was sent and
   // nothing has confirmed a listing came back — Data Axle runs teleresearch for up to
@@ -120,28 +131,16 @@ export default function CitationsTab() {
     });
   }
 
-  // Mark ONE listing handled — Submit a missing one or Update a drifted one.
-  function actOnRow(c: Citation) {
-    if (act.isPending) return;
-    act.mutate(
-      { id: c.id, action: c.action },
-      {
-        onSuccess: () => {
-          setFlash("ok", `${c.action === "Submit" ? "Submitted" : "Updated"} ${c.directory} — NAP synced.`, 3200);
-        },
-        onError: (err) => {
-          setFlash("err", `${c.action} failed — ${(err as Error)?.message ?? "try again"}.`, 3200);
-        },
-      },
-    );
-  }
+  // DELETED 2026-09-02: the per-row "Submit"/"Update" buttons (and their bulk
+  // variant). They wrote submit_status='submitted' on a CLICK and flashed
+  // "Submitted — NAP synced" in green — a database flag dressed as a delivery, on
+  // the very page whose header says a listing only counts when we fetched it. The
+  // real paths are the campaign (below) and the human queue; assertions are gone.
 
   const rows = useMemo(
     () => list.filter((c) => filter === "all" || c.nap === filter),
     [list, filter],
   );
-
-  const inconsistentCount = list.filter((c) => c.nap === "inconsistent").length;
 
   // The handoff queue: accounts the bot created + prepared that a human finishes in
   // the browser with one click (directories that can't be fully auto-published).
@@ -149,21 +148,6 @@ export default function CitationsTab() {
     () => list.filter((c) => c.submitStatus === "ready_for_human"),
     [list],
   );
-
-  // Bulk update — push every drifted listing back to consistent (human-approved run).
-  // Backend resolves each id to `consistent`, then the list refetches for fresh state.
-  function bulkUpdate() {
-    if (inconsistentCount === 0 || bulk.isPending) return;
-    const ids = list.filter((c) => c.nap === "inconsistent").map((c) => c.id);
-    bulk.mutate(ids, {
-      onSuccess: () => {
-        setFlash("ok", `Reconciled ${inconsistentCount} inconsistent listing${inconsistentCount > 1 ? "s" : ""} — NAP synced.`, 3200);
-      },
-      onError: (err) => {
-        setFlash("err", `Bulk update failed — ${(err as Error)?.message ?? "try again"}.`, 3200);
-      },
-    });
-  }
 
   return (
     <div className="panel-in">
@@ -185,6 +169,40 @@ export default function CitationsTab() {
             {flash.tone === "ok" ? "task_alt" : flash.tone === "warn" ? "warning" : "error"}
           </span>
           {flash.msg}
+        </div>
+      )}
+
+      {/* ───────── The journey rail: where THIS client is, derived from data ───────── */}
+      {gapClient && (
+        <div className={w.rollup} style={{ marginBottom: 10, flexWrap: "wrap" }}>
+          {(() => {
+            const hasNap = !!gap?.hasNap;
+            const audited = (gap?.existingCount ?? 0) > 0 || auditCollapsed;
+            const planned = (gap?.missingCount ?? 0) > 0 || audited;
+            const approved = (campaignsQ.data?.length ?? 0) > 0;
+            const liveCount = gap?.liveUrls.length ?? 0;
+            const steps: { label: string; done: boolean; hint: string }[] = [
+              { label: "1 Profile", done: hasNap, hint: hasNap ? "NAP on file" : "add NAP (Clients → Edit)" },
+              { label: "2 Audit", done: audited, hint: audited ? `${gap?.existingCount ?? 0} existing found` : "run the audit below" },
+              { label: "3 Plan", done: planned && audited, hint: `${gap?.missingCount ?? 0} missing` },
+              { label: "4 Approve", done: approved, hint: approved ? "campaign queued" : "review & queue a build" },
+              { label: "5 Track", done: liveCount > 0, hint: `${liveCount} live` },
+            ];
+            const activeIdx = steps.findIndex((st) => !st.done);
+            return steps.map((st, i) => (
+              <span
+                key={st.label}
+                className={`status-pill ${st.done ? "ok" : i === activeIdx ? "info" : "mut"}`}
+                title={st.hint}
+              >
+                {st.done ? "✓ " : ""}{st.label}
+              </span>
+            ));
+          })()}
+          <span className="op-muted" style={{ fontSize: 12 }}>
+            hover a step for what it needs — the rail is derived from this client&apos;s data,
+            never asserted
+          </span>
         </div>
       )}
 
@@ -311,8 +329,8 @@ export default function CitationsTab() {
               <div className={w.statLbl}>Existing citations</div>
             </div>
             <div className={w.stat}>
-              <div className={w.statNum}>{gap.coveredCount}</div>
-              <div className={w.statLbl}>Covered (in-flight or live)</div>
+              <div className={w.statNum}>{gap.bySubmitStatus["ready_for_human"] ?? 0}</div>
+              <div className={w.statLbl}>In your team&apos;s queue</div>
             </div>
             <div className={w.stat}>
               <div className={w.statNum}>{gap.missingCount}</div>
@@ -337,6 +355,16 @@ export default function CitationsTab() {
               </div>
             )}
           </div>
+
+          {(gap.stuck?.length ?? 0) > 0 && (
+            <div className="op-note crit" style={{ marginTop: 8 }}>
+              {gap.stuck.length} attempt{gap.stuck.length === 1 ? "" : "s"} ha
+              {gap.stuck.length === 1 ? "s" : "ve"} sat unmoved past the staleness
+              threshold ({gap.stuck.map((st) => st.directory).slice(0, 6).join(", ")}
+              {gap.stuck.length > 6 ? "…" : ""}) — usually no worker is consuming the
+              queue. Run scripts/dev-doctor.sh before trusting anything else here.
+            </div>
+          )}
 
           {gap.missing.length > 0 && (
             <>
@@ -427,12 +455,35 @@ export default function CitationsTab() {
         </div>
       )}
 
-      {/* The prioritized audit plan (generic → country → niche) for the chosen client. */}
-      <AuditPlanPanel clientId={gapClient || undefined} />
+      {/* Build order at a glance. This REPLACES the ~226-row AuditPlanPanel dump —
+          picking a client used to unload the whole catalog onto the screen before any
+          action, which is most of what "a lot of directories were shown" meant. The
+          counts reuse the same audit-plan endpoint; the full list lives inside the
+          campaign approval, where choosing among directories is actually the task. */}
+      {gapClient && planQ.data && (
+        <div className="op-muted" style={{ marginBottom: 10 }}>
+          Build order:{" "}
+          {(["generic", "country", "niche"] as const).map((k, i) => {
+            const bucket = planQ.data![k];
+            const done = bucket.filter((d) => d.status === "built").length;
+            return (
+              <span key={k}>
+                {i > 0 && " · "}
+                <b>{k[0].toUpperCase() + k.slice(1)}</b> {done}/{bucket.length}
+              </span>
+            );
+          })}{" "}
+          — Generic → Country → Niche, the same order a campaign queues.
+        </div>
+      )}
 
-      {/* ───────── Monitor — all listings ───────── */}
+      {/* ───────── Track — what happened to the latest build ───────── */}
+      <CampaignBoard clientId={gapClient || undefined} />
+
+      {/* ───────── Monitor — this client's listings (read-only truth) ───────── */}
       <div className={w.stepH} style={{ marginTop: 8, flexWrap: "wrap" }}>
-        <span className="material-symbols-rounded">table_rows</span> All listings
+        <span className="material-symbols-rounded">table_rows</span>
+        {gapClient ? "This client's listings" : "All listings (pick a client to scope)"}
         <div className="op-toolset" style={{ marginLeft: "auto" }}>
           <div className="seg">
             {FILTERS.map((f) => (
@@ -441,9 +492,21 @@ export default function CitationsTab() {
               </button>
             ))}
           </div>
-          <button className="ghostbtn" onClick={bulkUpdate} disabled={inconsistentCount === 0 || bulk.isPending}>
-            <span className="material-symbols-rounded">sync</span>
-            {bulk.isPending ? "Syncing…" : `Bulk update (${inconsistentCount})`}
+          <button
+            className="ghostbtn"
+            onClick={() =>
+              recheck.mutate(undefined, {
+                onSuccess: (r) =>
+                  setFlash("ok", `Re-checked ${r.checked} live listing${r.checked === 1 ? "" : "s"} — ${r.changed} changed state.`),
+                onError: (err) =>
+                  setFlash("err", `Re-check failed — ${(err as Error)?.message ?? "try again"}.`),
+              })
+            }
+            disabled={recheck.isPending}
+            title="Fetch every live listing's URL again and verify the business is still on the page. Visible trigger by design — no silent schedule."
+          >
+            <span className="material-symbols-rounded">refresh</span>
+            {recheck.isPending ? "Re-checking…" : "Re-check live listings"}
           </button>
         </div>
       </div>
@@ -452,67 +515,75 @@ export default function CitationsTab() {
         <table className="tbl op-tbl">
           <thead>
             <tr>
-              <th>Client</th>
+              {!gapClient && <th>Client</th>}
               <th>Directory</th>
               <th>NAP status</th>
-              <th>Detail</th>
-              <th>State / action</th>
-              <th>Submission</th>
+              <th>Status</th>
+              <th>Why / detail</th>
+              <th>Live URL</th>
+              <th>Proof</th>
             </tr>
           </thead>
           <tbody>
             {citationsQ.isLoading && (
-              <tr><td colSpan={6} className="op-empty">Loading citations…</td></tr>
+              <tr><td colSpan={7} className="op-empty">Loading citations…</td></tr>
             )}
             {citationsQ.isError && !citationsQ.isLoading && (
-              <tr><td colSpan={6} className="op-empty">Couldn&apos;t load citations — {(citationsQ.error as Error)?.message ?? "try again"}.</td></tr>
+              <tr><td colSpan={7} className="op-empty">Couldn&apos;t load citations — {(citationsQ.error as Error)?.message ?? "try again"}.</td></tr>
             )}
             {!citationsQ.isLoading && !citationsQ.isError && rows.map((c) => {
               const meta = NAP_META[c.nap];
-              const submitMeta = SUBMIT_STATUS_META[c.submitStatus];
+              const submitMeta = citationStatusMeta(c.submitStatus);
               return (
                 <tr key={c.id}>
-                  <td className="op-strong">{c.client}</td>
+                  {!gapClient && <td className="op-strong">{c.client}</td>}
                   <td>
                     <span className="op-dir">
                       <span className="material-symbols-rounded">location_on</span>{c.directory}
                     </span>
                   </td>
                   <td><span className={`status-pill ${meta.cls}`}>{meta.label}</span></td>
-                  <td className="op-muted">{c.note}</td>
                   <td>
-                    {/* A settled listing (live/submitted or verified, NAP consistent) has no action —
-                        show a done state, not a clickable "Submit". Only offer the action when there's
-                        actually work: not yet submitted, or a drifted NAP to re-sync. */}
-                    {(c.submitStatus === "submitted" || c.submitStatus === "verified") && c.nap !== "inconsistent" ? (
-                      <span className="op-act done" aria-disabled="true">
-                        <span className="material-symbols-rounded">check_circle</span>Done
-                      </span>
-                    ) : (
-                      <button
-                        className={c.action === "Submit" ? "op-act submit" : "op-act update"}
-                        onClick={() => actOnRow(c)}
-                        disabled={act.isPending}
+                    {c.submitStatus === "ready_for_human" ? (
+                      <a
+                        className="op-url"
+                        href={`/admin/citations/queue${gapClient ? `?client=${encodeURIComponent(gapClient)}` : ""}`}
+                        title={submitMeta.meaning}
                       >
-                        <span className="material-symbols-rounded">
-                          {c.action === "Submit" ? "add_location_alt" : "edit_location_alt"}
-                        </span>{c.action}
-                      </button>
+                        <span className={`status-pill ${submitMeta.tone}`}>{submitMeta.label} →</span>
+                      </a>
+                    ) : (
+                      <span className={`status-pill ${submitMeta.tone}`} title={submitMeta.meaning}>
+                        {submitMeta.label}
+                      </span>
+                    )}
+                  </td>
+                  <td className="op-muted" style={{ whiteSpace: "normal", maxWidth: 360 }}>
+                    {c.blockedReason ? blockedReasonLabel(c.blockedReason) : c.note}
+                  </td>
+                  <td>
+                    {c.liveUrl ? (
+                      <a className="op-url" href={c.liveUrl} target="_blank" rel="noreferrer">
+                        open <span className="material-symbols-rounded">open_in_new</span>
+                      </a>
+                    ) : (
+                      <span className="op-muted">—</span>
                     )}
                   </td>
                   <td>
-                    <span className={`status-pill ${submitMeta.cls}`}>{submitMeta.label}</span>
-                    {c.proofUrl && (
-                      <a className="op-url" href={c.proofUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>
+                    {c.proofUrl ? (
+                      <a className="op-url" href={c.proofUrl} target="_blank" rel="noreferrer" title="submission screenshot">
                         <span className="material-symbols-rounded">image</span>
                       </a>
+                    ) : (
+                      <span className="op-muted">—</span>
                     )}
                   </td>
                 </tr>
               );
             })}
             {!citationsQ.isLoading && !citationsQ.isError && rows.length === 0 && (
-              <tr><td colSpan={6} className="op-empty">No citations match this filter.</td></tr>
+              <tr><td colSpan={7} className="op-empty">No citations match this filter.</td></tr>
             )}
           </tbody>
         </table>

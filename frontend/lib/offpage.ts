@@ -582,6 +582,10 @@ export type CitationGap = {
   resolvedVertical: string | null;
   existingCount: number;
   coveredCount: number;
+  // In-flight (queued/submitting, fresh) dedupes from missing but is NOT covered;
+  // stale in-flight rows are listed in `stuck` by directory — the no-worker signal.
+  inFlightCount: number;
+  stuck: { directory: string; status: string }[];
   missingCount: number;
   missing: Directory[];
   liveUrls: CitationLiveUrl[];
@@ -625,7 +629,9 @@ export const SKIP_REASON_LABEL: Record<CitationSkipReason, string> = {
 // GET /citation-builder/clients/{id}/audit-plan — the geo/niche/generic citation
 // audit, PRIORITIZED Generic → Country → Niche. Each directory is tagged built|missing
 // (the same covering rule gap-analysis uses). Read-only, degrade-safe server-side.
-export type AuditPlanStatus = "built" | "missing";
+// in_flight = an attempt is pending (deduped, not built); stuck = it sat unmoved
+// past the staleness threshold. Neither may ever render as "built" (2026-09-01).
+export type AuditPlanStatus = "built" | "missing" | "in_flight" | "stuck";
 
 export type AuditPlanItem = {
   directoryName: string;
