@@ -529,17 +529,78 @@ def execute_liveness_recheck(
 # Celery entry point (thin; import the app lazily-free at module load, per the
 # worker template).
 # --------------------------------------------------------------------------- #
-from app.jobs import JobOutcome, JobQueue  # noqa: E402 - after the pure core
+from app.jobs import JobOutcome, JobQueue, JobTarget  # noqa: E402 - after the pure core
 from app.jobs.celery_task import aios_job  # noqa: E402 - after the pure core
 from app.jobs.contract import JobContext  # noqa: E402 - after the pure core
-from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
 
 
-@celery_app.task(name="citation_submit")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
-def citation_submit_job(citation_id: str) -> dict[str, Any]:
-    """Entry point: submit one queued citation row."""
-    settings = get_settings()
-    return execute_citation_submit(service_citations_store(), settings, citation_id)
+def _submit_target(citation_id: str, client_id: str = "", campaign_id: str = "") -> JobTarget:
+    """Idempotency = the row x the campaign that queued it. A double-POSTed campaign
+    cannot run a row twice; a LATER campaign that legitimately requeues the same
+    citation gets a fresh key."""
+    return JobTarget(
+        idempotency_key=f"citations.submit:{citation_id}:{campaign_id or 'manual'}",
+        client_id=client_id or None,
+        scope_id=citation_id,
+    )
+
+
+def _submit_outcome(result: dict[str, Any]) -> JobOutcome:
+    """Map the pure core's state vocabulary onto the contract's five outcomes.
+
+    Doctrine: ``is_success()`` may be true only when a submission actually went out.
+    ``ready_for_human`` is a routing verdict, not a delivery — it renders as blocked
+    with its reason so Operations can aggregate "43 waiting on no_verified_spec"."""
+    state = str(result.get("state") or "error")
+    reason = str(result.get("reason") or "")
+    if state in ("submitted", "verified"):
+        return JobOutcome.completed(detail=f"submitted ({reason or 'engine ok'})", result=result)
+    if state in ("unchanged", "skipped"):
+        # An idempotent no-op on a row already terminal / already moving.
+        return JobOutcome.completed(detail=f"no-op: {reason}", result=result)
+    if state == "ready_for_human":
+        return JobOutcome.blocked(
+            reason_code=reason or "ready_for_human",
+            reason=f"routed to the operator queue: {reason or 'a person finishes this one'}",
+            result=result,
+        )
+    if state == "blocked":
+        return JobOutcome.blocked(
+            reason_code=reason or "blocked", reason=reason or "refused by policy", result=result
+        )
+    return JobOutcome.failed(
+        error_type=state if state in ("failed", "error") else "unexpected_state",
+        error_message=reason,
+        result=result,
+    )
+
+
+@aios_job(
+    # The pinned task name is unchanged, so in-flight messages survive the migration
+    # (the same move citation_liveness_recheck made below).
+    name="citation_submit",
+    job_name="citations.submit",
+    # BROWSER: a real submit is minutes of headless Chromium, which is exactly the
+    # envelope this queue owns; today's spec-less classification runs are milliseconds,
+    # which it also serves fine.
+    queue=JobQueue.BROWSER,
+    # ONE attempt: execute_citation_submit already owns never-re-raise / never-
+    # double-spend. The contract adds the ledger row, dead-letter and reaper coverage
+    # this task ran without — a bare @celery_app.task wrote NO job_runs row, so a
+    # 45-row campaign was invisible in Operations and, with no worker consuming the
+    # queue, indistinguishable from a platform that was merely idle (2026-09-01).
+    max_attempts=1,
+    client_concurrency=2,
+    scope_type="citation",
+    target=_submit_target,
+)
+def citation_submit_job(
+    ctx: JobContext, citation_id: str, client_id: str = "", campaign_id: str = ""
+) -> JobOutcome:
+    """Entry point: submit one queued citation row, under the job contract."""
+    ctx.checkpoint()
+    result = execute_citation_submit(service_citations_store(), get_settings(), citation_id)
+    return _submit_outcome(result)
 
 
 @aios_job(

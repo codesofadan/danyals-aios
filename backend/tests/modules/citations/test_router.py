@@ -249,7 +249,12 @@ def wire(
     svc_store: _FakeServiceCitationsStore,
 ) -> Callable[[str], None]:
     app.dependency_overrides[get_citations_repo] = lambda: repo
-    app.dependency_overrides[get_citation_enqueuer] = lambda: enqueued.append
+    # The real enqueuer now takes (citation_id, *, client_id, correlation_id) so the
+    # job ledger can attribute the row; the recorder keeps only the id the tests
+    # assert on but must ACCEPT the kwargs or every dispatch 500s.
+    app.dependency_overrides[get_citation_enqueuer] = lambda: (
+        lambda citation_id, **kw: enqueued.append(citation_id)
+    )
     # Returns the idempotency key, as the real enqueuer does - the router resolves the
     # job run from it so the 202 carries an id the caller can poll.
     app.dependency_overrides[get_audit_enqueuer] = lambda: (

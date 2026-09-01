@@ -20,6 +20,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -109,20 +110,30 @@ _PROFILE_NOT_FOUND = HTTPException(
 _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
 
-def get_citation_enqueuer() -> Callable[[str], None]:
-    """Dependency: enqueue the citation-submit worker (overridable in tests). The
-    task module is imported lazily so the API process never pulls in Celery just to
-    import this router (mirrors ``offpage.py``'s enqueuer dependencies)."""
+def get_citation_enqueuer() -> Callable[..., None]:
+    """Dependency: enqueue the citation-submit worker (overridable in tests).
 
-    def _enqueue(citation_id: str) -> None:
-        from app.modules.citations.tasks import citation_submit_job
+    Goes through ``app.jobs.celery_task.enqueue``, not ``.delay()``: enqueue writes the
+    ``job_runs`` row AT SEND TIME, which is what makes a 45-row campaign visible in
+    Operations even when no worker is running — the bare ``.delay()`` this used to be
+    left the whole campaign without a single ledger row (2026-09-01). The correlation
+    id groups a campaign's fan-out into one reassemblable unit."""
 
-        citation_submit_job.delay(citation_id)
+    def _enqueue(citation_id: str, *, client_id: str = "", correlation_id: str = "") -> None:
+        from app.jobs.celery_task import enqueue as contract_enqueue
+
+        contract_enqueue(
+            "citation_submit",
+            citation_id,
+            client_id=client_id,
+            campaign_id=correlation_id,
+            correlation_id=correlation_id or None,
+        )
 
     return _enqueue
 
 
-CitationEnqueuerDep = Annotated[Callable[[str], None], Depends(get_citation_enqueuer)]
+CitationEnqueuerDep = Annotated[Callable[..., None], Depends(get_citation_enqueuer)]
 
 
 def get_audit_enqueuer() -> Callable[[str, str, str], str]:
@@ -473,6 +484,9 @@ async def create_campaign(
     skipped_manual = sum(1 for r in all_market_rows if r.get("tier") == "manual_only")
     fresh = [d for d in selection.selected if str(d["id"]) not in existing]
 
+    # One id for the whole fan-out. W1.2 replaces this with the citation_campaigns
+    # row id; until then a fresh uuid still groups the batch in job_runs.
+    campaign_correlation = str(uuid4())
     queued_ids: list[str] = []
     for directory in fresh:
         did = str(directory["id"])
@@ -495,7 +509,7 @@ async def create_campaign(
         if row is None:
             continue
         queued_ids.append(str(row["id"]))
-        enqueue(str(row["id"]))
+        enqueue(str(row["id"]), client_id=body.client_id, correlation_id=campaign_correlation)
 
     settings = get_settings()
     estimated_cost = estimate_campaign_cost(fresh, settings)
