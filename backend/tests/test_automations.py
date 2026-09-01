@@ -192,6 +192,12 @@ class FakeStore:
     def claim_due(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         at = now or datetime.now(UTC)
         due = [r for r in self.rows if r["enabled"] and r["next_due_at"] and r["next_due_at"] <= at]
+        # SNAPSHOT BEFORE ADVANCING, as the real store does: claim_due SELECTs the
+        # due rows and only then updates next_due_at, so what the caller receives is
+        # the time the run was DUE. Returning the mutated dicts (as this fake used
+        # to) would hand the dispatcher the NEXT fire time and quietly invert every
+        # assertion about scheduled_at.
+        claimed = [dict(r) for r in due]
         for r in due:
             r["next_due_at"] = next_due(
                 schedule_kind=r["schedule_kind"],
@@ -199,7 +205,7 @@ class FakeStore:
                 cron_expr=r["cron_expr"],
                 after=at,
             )
-        return due
+        return claimed
 
     def record_run(self, automation_id: str, run_id: str | None) -> None:
         self.recorded.append((automation_id, run_id))
@@ -369,3 +375,60 @@ def test_a_notification_channel_being_down_does_not_retry_forever() -> None:
 
     execute_dispatch(store, enqueue=_Enqueued(), notify=boom, now=AT)
     assert store.notified == [("a-1", "r-1")]
+
+
+# --------------------------------------------------------------------------- #
+# §25 — an execution records the time it was SUPPOSED to run.
+#
+# The fire time survived only inside the idempotency key's text, which is
+# parseable but not a column anything can query, sort or display. Without it
+# "did this run late?" has no answer, because a start time on its own is only
+# late relative to something.
+# --------------------------------------------------------------------------- #
+def test_a_dispatched_run_records_when_it_was_due() -> None:
+    store = FakeStore([_row()])
+    enq = _Enqueued()
+    execute_dispatch(store, enqueue=enq, notify=_noop_notify, now=AT)
+
+    assert enq.calls[0]["scheduled_at"] == AT
+
+
+def test_the_due_time_is_the_fire_time_not_the_next_one() -> None:
+    """The trap. claim_due advances next_due_at in the same breath as claiming, so a
+    fake that returns the mutated row - or an implementation that reads the row back
+    after advancing - would record the NEXT occurrence and report every run as an
+    hour early. Asserted against a row whose next fire is a long way from its due
+    time, so the two cannot be confused."""
+    store = FakeStore([_row(interval_seconds=86_400)])
+    enq = _Enqueued()
+    execute_dispatch(store, enqueue=enq, notify=_noop_notify, now=AT)
+
+    assert enq.calls[0]["scheduled_at"] == AT
+    assert enq.calls[0]["scheduled_at"] != store.rows[0]["next_due_at"]
+
+
+def test_a_late_run_records_the_window_it_missed_not_the_tick() -> None:
+    """The case the column exists for: the dispatcher was down, and the run fires an
+    hour after it was due. Recording the tick would make it look punctual."""
+    due = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    late = datetime(2026, 9, 1, 2, 0, tzinfo=UTC)
+    store = FakeStore([_row(next_due_at=due)])
+    enq = _Enqueued()
+    execute_dispatch(store, enqueue=enq, notify=_noop_notify, now=late)
+
+    assert enq.calls[0]["scheduled_at"] == due, "the tick time was recorded as the due time"
+
+
+def test_the_key_identifies_the_occurrence_so_a_catch_up_does_not_double_fire() -> None:
+    """Two attempts at the same missed window must collapse onto one run. A
+    tick-derived key would treat the catch-up as new work - and for a paid capability
+    that is a second charge for one scheduled occurrence."""
+    due = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    first = _Enqueued()
+    execute_dispatch(FakeStore([_row(next_due_at=due)]), enqueue=first,
+                     notify=_noop_notify, now=datetime(2026, 9, 1, 2, 0, tzinfo=UTC))
+    second = _Enqueued()
+    execute_dispatch(FakeStore([_row(next_due_at=due)]), enqueue=second,
+                     notify=_noop_notify, now=datetime(2026, 9, 1, 3, 30, tzinfo=UTC))
+
+    assert first.calls[0]["idempotency_key"] == second.calls[0]["idempotency_key"]

@@ -91,9 +91,16 @@ def execute_dispatch(
             skipped.append(automation_id)
             continue
 
-        # The SCHEDULED time, not the dispatch time, so a retried tick a few seconds
-        # later derives the same key and collapses onto the same run.
-        stamp = at.strftime("%Y-%m-%dT%H:%M")
+        # WHEN THIS RUN WAS DUE - taken from the row as claimed. claim_due SELECTs
+        # the due rows and only then advances next_due_at, so this is the fire time,
+        # not the next one. It is what makes "did it run late?" answerable: comparing
+        # a start against the TICK would only ever measure the dispatcher's own lag.
+        due_at = row.get("next_due_at") or at
+        # The key identifies the OCCURRENCE, so two attempts at the same scheduled
+        # fire collapse onto one run - including a catch-up after the dispatcher was
+        # down, which a tick-derived stamp would treat as a new unit of work. This is
+        # what the module docstring's third guard has always claimed it does.
+        stamp = due_at.strftime("%Y-%m-%dT%H:%M")
         params = dict(row["params"] or {})
         targets = _client_ids(params) if cap.scope == "client" else [None]
 
@@ -107,9 +114,15 @@ def execute_dispatch(
                         client_id,
                         correlation_id=automation_id,
                         idempotency_key=key,
+                        scheduled_at=due_at,
                     )
                 else:
-                    enqueue(cap.task, correlation_id=automation_id, idempotency_key=key)
+                    enqueue(
+                        cap.task,
+                        correlation_id=automation_id,
+                        idempotency_key=key,
+                        scheduled_at=due_at,
+                    )
                 last_run_id = key
                 dispatched += 1
             except Exception as exc:

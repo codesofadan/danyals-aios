@@ -80,6 +80,11 @@ export type JobRun = {
   /** The liveness signal the reaper reads — a stale heartbeat is a reclaimed run. */
   heartbeatAt: string | null;
   scheduledFor: string | null;
+  /** When this run was DUE, for scheduled work (an automation's fire time). Distinct
+   *  from `scheduledFor`, which is the retry/deferral due time and is cleared once the
+   *  run starts. Null for anything nobody scheduled — comparing it to `startedAt` is
+   *  what answers "did it run late?". */
+  scheduledAt: string | null;
   /** Cancellation is COOPERATIVE: this flag is set, the job stops at a checkpoint. */
   cancelRequested: boolean;
   durationSeconds: number | null;

@@ -139,3 +139,49 @@ def test_no_business_job_was_pasted_into_the_live_beat_table() -> None:
         "reap-stale-job-runs",
     }
     assert "nightly-backup" not in celery_app.conf.beat_schedule
+
+
+@pytest.mark.unit
+def test_the_worker_can_import_every_task_module_in_its_own_order() -> None:
+    """A circular import that only the WORKER hits is invisible to every other test.
+
+    Tests import the FastAPI app first, so `app.modules` is fully initialised before
+    anything else asks for it. A Celery worker does the opposite: it imports task
+    modules, which pull repos, which can pull `app.modules` mid-initialisation. Two
+    such cycles were shipped during this work and both were found by running a
+    worker, not by the suite:
+
+      * app.db.offpage_repo -> app.modules.citations.service -> app.modules.__init__
+        -> tool_workspaces.router -> app.db.offpage_repo (partially initialised)
+      * app.modules.tool_workspaces.router -> app.routers.tasks -> app.routers.__init__
+        -> app.modules (partially initialised)
+
+    Both broke worker STARTUP, which means no background job runs at all - the loudest
+    possible failure, reached only in production. This is the cheapest place to catch
+    the next one.
+
+    Subprocess, because import order is process-global: by the time this test file
+    runs, the app is long since imported and the cycle cannot reproduce in-process.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from workers.celery_app import celery_app;"
+            "celery_app.loader.import_default_modules();"
+            "print('OK')",
+        ],
+        cwd=backend,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert "OK" in proc.stdout, (
+        "a Celery worker cannot import its own task modules - background jobs would "
+        f"not run at all.\n{proc.stderr[-2000:]}"
+    )

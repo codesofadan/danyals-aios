@@ -69,7 +69,7 @@ from app.modules.tool_workspaces.service import (
     build_technical_audit_workspace,
 )
 from app.rbac import ROLE_ORDER
-from app.routers.tasks import _LEAD_ROLES
+from app.rbac.matrix import role_has_perm
 from app.schemas.audits import compute_audit_stats
 from app.schemas.tool_workspace import ToolExtraResponse
 from app.services.team_metrics import TeamMetricsDep
@@ -200,7 +200,12 @@ async def task_board_workspace(
     template - so pinning only the /tasks route would have left a team member one
     click away from the whole board, with the leak looking closed.
     """
-    scope = None if _user.role in _LEAD_ROLES else _user.id
+    # Asked as a PERMISSION, not a role list. `app.routers.tasks` cannot be imported
+    # here - a module router importing a top-level router closes the cycle
+    # app.modules -> tool_workspaces -> app.routers -> app.modules, which breaks the
+    # WORKER (it imports task modules first) while every test stays green, because
+    # tests import the FastAPI app first. `app.rbac.matrix` is a leaf.
+    scope = None if role_has_perm(_user.role, "assign_tasks") else _user.id
     board = await asyncio.to_thread(
         repo.list_board_tasks, assignee=scope, limit=WORKSPACE_ROW_LIMIT, offset=0
     )

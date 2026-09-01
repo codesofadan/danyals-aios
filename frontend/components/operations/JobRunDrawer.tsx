@@ -231,6 +231,10 @@ export default function JobRunDrawer({
               <Fact k="Cost" v={usd(run.costUsd, 2)} />
               <Fact k="Scope" v={run.scopeType ? `${run.scopeType}${run.scopeId ? ` · ${run.scopeId}` : ""}` : "—"} mono />
               <Fact k="Created" v={whenText(run.createdAt)} />
+              {/* Scheduled work only. Shown beside Started so "was it late?" is a
+                  glance rather than an arithmetic exercise; absent for a run nobody
+                  scheduled, because a manual run has no due time to be late against. */}
+              {run.scheduledAt && <Fact k="Due at" v={whenText(run.scheduledAt)} />}
               <Fact k="Started" v={whenText(run.startedAt)} />
               <Fact k="Finished" v={whenText(run.finishedAt)} />
               <Fact k="Last heartbeat" v={whenText(run.heartbeatAt)} />

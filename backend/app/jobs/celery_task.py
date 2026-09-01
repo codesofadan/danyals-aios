@@ -47,6 +47,7 @@ from __future__ import annotations
 import functools
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 from typing import Any, Final
 from uuid import uuid4
 
@@ -249,6 +250,7 @@ def _precreate_run(
     parent_run_id: str | None,
     idempotency_key: str | None,
     celery_task_id: str,
+    scheduled_at: datetime | None,
 ) -> str | None:
     """Write the ``queued`` run row at SEND time. Returns the key actually used.
 
@@ -283,6 +285,7 @@ def _precreate_run(
         scope_type=spec.scope_type,
         scope_id=job_target.scope_id,
         max_attempts=spec.max_attempts,
+        scheduled_at=scheduled_at,
     )
     return key
 
@@ -294,6 +297,7 @@ def enqueue(
     parent_run_id: str | None = None,
     idempotency_key: str | None = None,
     countdown: float | None = None,
+    scheduled_at: datetime | None = None,
     **kwargs: Any,
 ) -> str:
     """Send a job, propagating the correlation id so a fan-out stays reassemblable.
@@ -337,6 +341,7 @@ def enqueue(
             parent_run_id=parent_run_id,
             idempotency_key=idempotency_key,
             celery_task_id=task_id,
+            scheduled_at=scheduled_at,
         )
     except Exception as exc:
         logger.error(

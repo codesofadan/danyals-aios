@@ -84,6 +84,11 @@ class JobRunResponse(BaseModel):
     finished_at: str | None = Field(default=None, serialization_alias="finishedAt")
     heartbeat_at: str | None = Field(default=None, serialization_alias="heartbeatAt")
     scheduled_for: str | None = Field(default=None, serialization_alias="scheduledFor")
+    #: When this run was DUE, for scheduled work. Distinct from `scheduledFor`, which
+    #: is the retry/deferral due time and is cleared once the run starts. NULL for a
+    #: run nobody scheduled - a manual run has no scheduled time, and inventing one
+    #: would make every hand-started job look punctual.
+    scheduled_at: str | None = Field(default=None, serialization_alias="scheduledAt")
     cancel_requested: bool = Field(default=False, serialization_alias="cancelRequested")
     duration_seconds: float | None = Field(default=None, serialization_alias="durationSeconds")
 
@@ -120,6 +125,7 @@ class JobRunResponse(BaseModel):
             finished_at=_iso(row.get("finished_at")),
             heartbeat_at=_iso(row.get("heartbeat_at")),
             scheduled_for=_iso(row.get("scheduled_for")),
+            scheduled_at=_iso(row.get("scheduled_at")),
             cancel_requested=row.get("cancel_requested_at") is not None,
             duration_seconds=_duration_seconds(row.get("started_at"), row.get("finished_at")),
             result=row.get("result"),

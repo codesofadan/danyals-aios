@@ -21,6 +21,7 @@ the transition happen inside one transaction under one advisory lock.
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Final
 
@@ -47,7 +48,7 @@ _DETAIL_MAX: Final[int] = 200
 _RUN_COLUMNS: Final[str] = (
     "id, job_name, task, queue, idempotency_key, correlation_id, parent_run_id, "
     "celery_task_id, client_id, client_name, scope_type, scope_id, status, attempt, "
-    "max_attempts, scheduled_for, started_at, finished_at, heartbeat_at, "
+    "max_attempts, scheduled_for, scheduled_at, started_at, finished_at, heartbeat_at, "
     "cancel_requested_at, cancel_requested_by, detail, reason, reason_code, error_type, "
     "error_message, cost_usd, result, created_at, updated_at"
 )
@@ -72,6 +73,7 @@ class JobRunsStore:
         scope_type: str,
         scope_id: str | None,
         max_attempts: int,
+        scheduled_at: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Create the run row, or find the one that already owns this unit of work.
 
@@ -93,8 +95,9 @@ class JobRunsStore:
             cur.execute(
                 "insert into public.job_runs ("
                 "  job_name, task, queue, idempotency_key, correlation_id, parent_run_id,"
-                "  celery_task_id, client_id, client_name, scope_type, scope_id, max_attempts"
-                ") values (%s, %s, %s::public.job_queue, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "  celery_task_id, client_id, client_name, scope_type, scope_id, max_attempts,"
+                "  scheduled_at"
+                ") values (%s, %s, %s::public.job_queue, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "on conflict (idempotency_key) where idempotency_key is not null do nothing "
                 f"returning {_RUN_COLUMNS}",
                 (
@@ -110,6 +113,7 @@ class JobRunsStore:
                     scope_type,
                     scope_id,
                     max_attempts,
+                    scheduled_at,
                 ),
             )
             inserted = cur.fetchone()
