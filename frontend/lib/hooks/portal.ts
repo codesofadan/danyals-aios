@@ -85,7 +85,21 @@ export function useUpdateMe() {
 
 export type ChangePasswordInput = { current_password: string; new_password: string };
 
-/** POST /me/password — the caller's own password change (current verified server-side). */
+/**
+ * POST /me/password — the caller's own password change (current verified server-side).
+ *
+ * CALLER-LESS today: the Current/New password block was removed from Settings on
+ * the owner's instruction (see the comment in `components/settings/AccountSettings.tsx`),
+ * so passwords are reset by an owner/admin from Team Management. Kept because
+ * restoring that block is then a UI-only change.
+ *
+ * Whoever restores it must handle one thing: a successful change ENDS EVERY SESSION,
+ * including the one that made the request. The very next authenticated call 401s and
+ * the app bounces to `/login?expired=1`. That is deliberate — a bearer token never
+ * re-checks the password, so anything less would leave a stolen session alive after
+ * the password was changed to kill it. Send the user to the login screen on success
+ * rather than leaving them on a page whose next fetch will fail.
+ */
 export function useChangePassword() {
   return useMutation({
     mutationFn: (input: ChangePasswordInput) => api.post<void>("/me/password", input),

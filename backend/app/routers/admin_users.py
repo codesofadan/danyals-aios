@@ -308,14 +308,20 @@ async def invite_member(
     body: InviteMemberRequest,
     current: ManageTeam,
 ) -> MemberInviteResponse:
-    """Add a team member with one-time credentials (mirrors the wizard).
+    """Add a team member with server-generated credentials (mirrors the wizard).
 
     Picks a role template (or an explicit feature list) to seed ``user_feature_grants``,
-    provisions with reset-on-first-login + 2FA-on-first-login flags, and returns
-    ``{username, tempPassword}`` ONCE (only the argon2id hash is stored). The wizard
-    that already DISPLAYED a credential pair sends that same pair in the body — the
-    stored hash must match what the admin copied; absent fields are server-generated.
-    Owner-only for owner/admin roles (escalation guard).
+    stamps the ``must_reset`` / ``must_setup_2fa`` intent flags, and returns
+    ``{username, tempPassword}`` in the response. The wizard that already DISPLAYED a
+    credential pair sends that same pair in the body — the stored hash must match what
+    the admin copied; absent fields are server-generated. Owner-only for owner/admin
+    roles (escalation guard).
+
+    The password is NOT single-use, whatever the field name suggests: nothing enforces
+    ``must_reset``, so it keeps working until an owner/admin rotates it from Team
+    Management. It is recoverable rather than shown-once — ``provision_user`` also
+    seals an AES-256-GCM copy, which ``GET /admin/users/{id}/credentials`` reopens.
+    See the comment at the ``notify`` call below for why both facts are stated here.
     """
     if body.role in _ELEVATED_ROLES and not current.is_owner:
         raise HTTPException(
@@ -360,9 +366,23 @@ async def invite_member(
         current, kind="member", action="invited member", target=body.name, meta=body.role,
         entity_type="user", entity_id=str(row["id"]),
     )
-    # Send the invitation email with the ONE-TIME credentials (best-effort). The
-    # temp password is reset-on-first-login (must_reset=True) so it is single-use;
-    # the admin also still sees the pair once in the response to copy manually.
+    # Send the invitation email with the credentials (best-effort); the admin also
+    # sees the pair in the response to copy manually.
+    #
+    # `must_reset` / `must_setup_2fa` above are RECORDED, NOT ENFORCED. Nothing
+    # reads either column — not `login()`, not `get_current_user`, not one line of
+    # frontend — so no reset is demanded and no 2FA enrolment is triggered. They
+    # are kept because they are the correct record of intent for the day a reset
+    # screen exists; until then, read them as a note, never as a control.
+    #
+    # This copy used to promise both ("you'll be asked to set a new password",
+    # "only works once") and neither was true: the same password signs in again
+    # tomorrow, and self-service password change was REMOVED from the product on
+    # the owner's instruction (see `AccountSettings.tsx`), so the person receiving
+    # this mail has no way to change it themselves even if they want to. Telling
+    # them to expect a prompt that will never appear sends them looking for a
+    # screen that does not exist. The words now match the product: this is the
+    # password, keep it, and an owner/admin rotates it from Team Management.
     await notify(
         str(row["id"]),
         kind="member_welcome",
@@ -370,9 +390,10 @@ async def invite_member(
         body=(
             f"Hi {body.name}, an account has been created for you ({body.role}).\n\n"
             f"Username: {username}\n"
-            f"Temporary password: {temp_password}\n\n"
-            "Sign in to your team portal and you'll be asked to set a new password. "
-            "This temporary password only works once."
+            f"Password: {temp_password}\n\n"
+            "Sign in to your team portal with these details, and keep them somewhere "
+            "safe — this is your password from now on. If you ever need it changed, "
+            "an owner or admin resets it for you from Team Management."
         ),
     )
     return MemberInviteResponse(

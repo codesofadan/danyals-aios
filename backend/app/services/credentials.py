@@ -1,14 +1,17 @@
-"""One-time credential generation for the Add-Member invite flow (Part 7 / 7F-4).
+"""Credential generation for the Add-Member invite flow (Part 7 / 7F-4).
 
 The Add-Member wizard hands a new teammate a generated username + a strong
-temporary password, shown to the admin exactly once. This module is the
-SERVER-SIDE, cryptographically-random counterpart of the wizard's client-side
+password. This module is the SERVER-SIDE, cryptographically-random counterpart
+of the wizard's client-side
 ``genUsername`` / ``genPassword`` (``frontend/components/team/AddMemberWizard.tsx``):
 usernames follow the same ``first.last`` shape, and passwords keep the readable
 ``Adjective-Noun####$`` skeleton but draw every choice from :mod:`secrets` and add
 a hex tail so the result is high-entropy, not guessable from the two short word
-lists. The plaintext is returned to the caller ONCE and never stored - only its
-argon2id hash is persisted (see :mod:`app.services.provisioning`).
+lists. The plaintext is returned to the caller and is ALSO recoverable later:
+:func:`app.services.provisioning.provision_user` persists the argon2id hash AND an
+AES-256-GCM sealed copy that ``GET /admin/users/{id}/credentials`` reopens for an
+owner/admin. It is not shown-once, and it is not single-use — nothing enforces the
+``must_reset`` flag the invite stamps, so it stays valid until someone rotates it.
 """
 
 from __future__ import annotations

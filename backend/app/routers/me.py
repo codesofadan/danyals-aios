@@ -15,8 +15,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import CurrentUser, require_perm
+from app.core.deps import RedisDep, SettingsDep
 from app.db.database import DatabaseNotConfiguredError, privileged_connection
 from app.db.tasks_repo import TasksRepoDep
+from app.logging_setup import get_logger
 from app.schemas.identity import (
     ChangePasswordRequest,
     MemberResponse,
@@ -24,8 +26,12 @@ from app.schemas.identity import (
     UserGrantsResponse,
 )
 from app.services.activity import record_activity
-from app.services.passwords import hash_password, verify_password
+from app.services.login_credentials import set_password
+from app.services.passwords import verify_password
 from app.services.team_metrics import ZERO_METRICS, TeamMetricsDep
+from app.services.token_denylist import revoke_all_for_user
+
+logger = get_logger("app.me.routes")
 
 router = APIRouter(tags=["me"])
 
@@ -103,11 +109,6 @@ def _lookup_own_password_hash(user_id: str) -> str | None:
         return row["password_hash"] if row else None
 
 
-def _set_own_password(user_id: str, new_hash: str) -> None:
-    with privileged_connection() as cur:
-        cur.execute("update auth.users set password_hash = %s where id = %s", (new_hash, user_id))
-
-
 @router.get("/me", response_model=MemberResponse)
 async def get_me(repo: TasksRepoDep, metrics: TeamMetricsDep, user: ViewReports) -> MemberResponse:
     """Return the caller's own team record with live counts + real metrics."""
@@ -131,11 +132,35 @@ async def update_me(
 
 
 @router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
-async def change_my_password(body: ChangePasswordRequest, user: ViewReports) -> None:
+async def change_my_password(
+    body: ChangePasswordRequest,
+    user: ViewReports,
+    redis: RedisDep,
+    settings: SettingsDep,
+) -> None:
     """Change the caller's own password. The current password is verified
     server-side first (never trusted from a prior screen); a mismatch is a 400, not
     a 401 (this is an authenticated self-service action, not a login attempt, so
-    there is no user-enumeration concern to hide behind a generic status)."""
+    there is no user-enumeration concern to hide behind a generic status).
+
+    Writes through :func:`app.services.login_credentials.set_password`, the SAME
+    helper the two admin-driven rotations use, rather than touching
+    ``auth.users.password_hash`` directly. That is the whole point of the call: a
+    password lives in TWO places — the argon2id hash that authenticates, and the
+    AES-256-GCM sealed copy an owner/admin opens from "Show login". Writing only
+    the hash left the sealed copy holding the PREVIOUS password, so Team
+    Management went on displaying, and an admin went on sending out, a credential
+    that no longer opened anything — silently, and looking authoritative. One
+    writer for one fact is the only arrangement that cannot drift.
+
+    **Changing your password ends every session, including this one.** A bearer
+    token never consults the password again, so without this a person changing a
+    password *because it was compromised* would leave the thief's session alive
+    for the token's full multi-day life — which is precisely the reason the two
+    admin rotations already revoke, and there is no argument for the self-service
+    path being the weaker of the three. The caller signs in again with the new
+    password; the login page already renders that bounce as "session expired".
+    """
     try:
         stored_hash = await asyncio.to_thread(_lookup_own_password_hash, user.id)
     except DatabaseNotConfiguredError as exc:
@@ -143,8 +168,22 @@ async def change_my_password(body: ChangePasswordRequest, user: ViewReports) -> 
     if stored_hash is None or not verify_password(stored_hash, body.current_password.get_secret_value()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
-    new_hash = hash_password(body.new_password.get_secret_value())
-    await asyncio.to_thread(_set_own_password, user.id, new_hash)
+    if not await asyncio.to_thread(set_password, user.id, body.new_password.get_secret_value()):
+        # `set_password` returns False only for an id with no `auth.users` row — the
+        # caller authenticated a moment ago, so this means the account was deleted
+        # mid-request. Say so rather than reporting a change that did not land.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="This account no longer exists"
+        )
+
+    # Best-effort by design, matching the admin rotations: the password has ALREADY
+    # changed in Postgres, so failing the request here would tell the caller their
+    # change did not happen when it did. Logged loudly so the gap is visible.
+    if not await revoke_all_for_user(
+        redis, user_id=user.id, max_token_ttl=settings.jwt_access_ttl_seconds
+    ):
+        logger.warning("own_password_change_token_revocation_unavailable", user_id=user.id)
+
     await record_activity(user, kind="access", action="changed own password", target=user.name)
 
 
