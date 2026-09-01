@@ -56,6 +56,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["audit_engine"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"checklists" = "checklists"
+"templates" = "templates"
+"knowledge" = "knowledge"
+"branding.json" = "branding.json"
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"

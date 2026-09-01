@@ -52,3 +52,6 @@ whatsapp chats, media and calls/
 # Next also rewrites frontend/tsconfig.json to `include` their types/ on every such
 # build; that edit is an artifact, not a source change - revert it, do not commit it.
 .next-*/
+# build artifacts
+0_build.txt
+logs.zip

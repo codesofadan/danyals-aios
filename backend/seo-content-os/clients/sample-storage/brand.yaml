@@ -1,0 +1,186 @@
+# ============================================================================
+# DEMONSTRATION CLIENT - FICTIONAL. Built 2026-07-23 PKT to exercise the
+# self-storage vertical end to end. Every specific below (business name, address,
+# phone, camera counts, temperature range, prices, review counts, manager name,
+# break-in-free counter) is SAMPLE data standing in for what a real SME interview
+# would supply. Phone numbers use the 555 reserved range; the domain is a
+# placeholder. In production, storage_lint.py + the self-storage overlay require
+# these to be the client's real, externally-verifiable values. Do not publish.
+# ============================================================================
+
+client:
+  slug: "sample-storage"
+  legal_name: "Anchor Self Storage LLC [SAMPLE]"
+  brand_name: "Anchor Self Storage"
+  founded_year: "2011"          # [SAMPLE]
+  primary_url: "https://www.anchorselfstorage.example"   # placeholder domain
+
+# --- Multi-location: two real staffed Austin-metro facilities, each its own GBP. ---
+locations:
+  - name: "Anchor Self Storage - Round Rock [SAMPLE]"
+    phone: "(512) 555-0148"
+    street: "2100 N Mays St"
+    city: "Round Rock"
+    state_region: "TX"
+    postal_code: "78664"
+    geo: { lat: "30.5266", lng: "-97.6789" }
+  - name: "Anchor Self Storage - Pflugerville [SAMPLE]"
+    phone: "(512) 555-0172"
+    street: "18601 FM 685"
+    city: "Pflugerville"
+    state_region: "TX"
+    postal_code: "78660"
+    geo: { lat: "30.4515", lng: "-97.6200" }
+
+nap:                            # canonical NAP for brand-wide pages (the Round Rock flagship)
+  name: "Anchor Self Storage"
+  phone: "(512) 555-0148"
+  street: "2100 N Mays St"
+  city: "Round Rock"
+  state_region: "TX"
+  postal_code: "78664"
+  country: "USA"
+  geo: { lat: "30.5266", lng: "-97.6789" }
+
+schema:
+  local_business_type: "SelfStorage"            # the schema.org subtype (NOT bare LocalBusiness)
+  price_range: "$29-$249/mo"
+  opening_hours: ["Mo-Fr 09:00-18:00", "Sa 09:00-17:00"]   # OFFICE hours; gate access is separate (storage.access_hours)
+  same_as:
+    - "https://www.google.com/maps/anchorselfstorage-roundrock.example"
+    - "https://www.facebook.com/anchorselfstorage.example"
+
+services:                       # storage types + audiences, in the operator's own words
+  - "Climate-controlled storage units"
+  - "Drive-up (roll-up door) storage units"
+  - "Vehicle, RV and boat storage"
+  - "Business and inventory storage"
+  - "Student storage"
+
+service_areas: ["Round Rock", "Pflugerville", "Hutto", "Georgetown", "Wells Branch"]
+primary_city: "Round Rock"      # anchor city (main NAP line); in service_areas
+
+# --- Self-storage specifics ---
+storage:
+  operator_type: "multi_facility"
+  unit_sizes: ["5x5", "5x10", "10x10", "10x15", "10x20"]
+  storage_types: ["climate-controlled", "drive-up", "vehicle", "business"]
+  audiences: ["student", "business"]
+  live_inventory: true          # [SAMPLE] the site feeds live per-unit price + availability from the PMS
+  access_hours: "6am-10pm daily"
+  office_hours: "Mon-Fri 9am-6pm, Sat 9am-5pm, closed Sunday"
+  gate_access_24h: false
+  climate_control:
+    offered: true
+    temp_range_f: "55-80"       # [SAMPLE] the real held range from the thermostat
+    humidity_control: true      # [SAMPLE] HVAC + dehumidifiers, not temperature only -> moisture copy is permitted (SS-5)
+  security_features:
+    - { feature: cameras, spec: "28 HD cameras, recorded 24/7, footage stored 90 days", source: SME }
+    - { feature: gate, spec: "gated keypad entry with a per-tenant code logged on entry and exit", source: SME }
+    - { feature: alarms, spec: "individually alarmed climate units", source: SME }
+    - { feature: lighting, spec: "motion-activated LED lighting in every interior hallway", source: SME }
+    - { feature: manager, spec: "on-site manager Tue-Sat, daily aisle walk", source: SME }
+  break_in_free_since: "2021-03-14"   # [SAMPLE] a real tracked start date; rendered as a dated counter, never invented
+  move_in_special:
+    offer: "first month free"
+    admin_fee: "$25"            # [SAMPLE] still due at move-in; disclosed in-line with the "free" claim (SS-6)
+    required_add_ons: "a protection plan or proof of your own renters/homeowners coverage"
+    end_date: ""               # a standing offer, no fixed end date
+  admin_fee: "$25"
+  deposit_required: false
+  month_to_month: true
+  tenant_protection_type: "protection_plan"   # a self-indemnity plan -> may NEVER be called "insurance" (SS-1)
+  insurance_license: {}         # not held; the facility sells a protection plan, not licensed insurance
+  rate_guarantee: ""            # standard month-to-month, ECRI applies -> NO "rate locked" claim (SS-8)
+  advertised_late_fee: ""       # not advertised in copy (TX uses a "reasonable" standard; confirm live if quoted)
+  lien_statute: "TX Property Code ch. 59"   # any auction/lien-timeline copy must trace here (14-day notice, 2 weekly publications)
+  ada_verified: false           # NOT verified -> no "ADA compliant / wheelchair accessible" claim may ship (SS-12)
+  manager: { name: "Dana Reyes [SAMPLE]", title: "Facility Manager", cssm: true, cssm_date: "2023-09", detail: "manages the Round Rock flagship; grew up in Hutto" }
+
+# --- Google Business Profile ---
+gbp:
+  primary_category: "Self-storage facility"
+  secondary_categories:
+    - "Storage facility"
+    - "Automobile storage facility"
+    - "Moving supply store"
+  services:
+    - "Climate controlled storage"
+    - "Drive-up storage"
+    - "RV storage"
+    - "Boat storage"
+    - "Business storage"
+
+brand_terms: ["Anchor Self Storage", "Anchor Storage Round Rock", "Anchor Storage Pflugerville"]
+
+# --- Entity ---
+entity:
+  central_entity: "Anchor Self Storage self-storage"    # brand + primary category
+  source_context: "Two-facility independent self-storage operator in the Austin metro (Round Rock + Pflugerville); revenue from month-to-month unit rentals, the admin fee, and the tenant protection plan [SAMPLE]"
+  canonical_description: "Anchor Self Storage is an independent, family-owned self-storage operator with two staffed facilities in Round Rock and Pflugerville, Texas, offering climate-controlled, drive-up, and vehicle storage with live online pricing. [SAMPLE]"
+  same_as:
+    - "https://www.google.com/maps/anchorselfstorage-roundrock.example"
+    - "https://www.facebook.com/anchorselfstorage.example"
+  kgmid: ""
+  parent_org: ""
+  memberships:
+    - { org: "Texas Self Storage Association", type: trade_association, verify_url: "https://www.txselfstorage.org/" }   # [SAMPLE membership]
+
+# --- Competitive set (SAMPLE): never strawman. ---
+competitive_set:
+  - name: "Public Storage - Round Rock [national brand]"
+    url: "https://www.publicstorage.com/"
+    strength: "National brand authority, live inventory, deep ad budget"
+    gap_we_fill: "Generic national copy; no named on-site manager, no dated break-in-free record, no local Round Rock specifics"
+  - name: "A regional storage chain [SAMPLE]"
+    url: "https://regional-storage.example"
+    strength: "Several metro facilities, decent review volume"
+    gap_we_fill: "Templated per-facility pages; climate 'available' with no held range; no local block per building"
+
+# --- E-E-A-T assets (SAMPLE; production values from the SME interview). ---
+eeat:
+  credentials:
+    - "Facility manager Dana Reyes is a Certified Self Storage Manager (CSSM, SSA), certified 2023-09 [SAMPLE]"
+    - "Member, Texas Self Storage Association [SAMPLE]"
+  team:
+    - { name: "Dana Reyes [SAMPLE]", role: "Facility Manager, Round Rock", years: 6, detail: "CSSM; runs the daily aisle walk and checks the climate thermostats each Monday" }
+  proof:
+    - "4.7 average across 380+ Google reviews across two locations [SAMPLE]"
+    - "1,240+ days without a security breach as of 2026-07 (tracked since 2021-03-14) [SAMPLE]"
+    - "Climate units held at 55-80F with dehumidification, checked weekly [SAMPLE]"
+  differentiators:
+    - "Named on-site CSSM manager, not a call center [SAMPLE]"
+    - "Live online pricing and availability from the PMS; the web rate you see is the rate you rent [SAMPLE]"
+    - "Dated break-in-free counter and 28 recorded cameras, not a 'safe and secure' slogan [SAMPLE]"
+  media:                        # dated first-party facility photos (Experience marker 1) - production requires the real assets
+    - { url: "sample-roundrock-gate-keypad.jpg", caption: "Round Rock gate and keypad [SAMPLE]", geotag: "Round Rock, TX", date: "2026-06" }
+    - { url: "sample-roundrock-climate-hallway.jpg", caption: "Round Rock climate corridor, unit numbers visible [SAMPLE]", geotag: "Round Rock, TX", date: "2026-06" }
+  reviews:
+    - { platform: "Google", count: 214, rating: 4.7, profile_url: "https://maps.google.com/anchor-roundrock.example" }   # [SAMPLE]
+    - { platform: "Google", count: 168, rating: 4.6, profile_url: "https://maps.google.com/anchor-pflugerville.example" }   # [SAMPLE]
+
+# --- Voice ---
+voice:
+  one_line_direction: "Plain, local, owner-present. Sounds like Dana at the counter: facts, gate hours, dollar amounts, no corporate polish."
+  reading_level: "Grade 6-7"
+  tone_by_context:
+    pricing: "matter-of-fact, fees stated up front"
+    security: "specific mechanisms, never 'safe and secure'"
+    size: "rooms and boxes, direct-answer first"
+  banned_phrases: ["peace of mind", "safe and secure", "space solutions", "storage made easy", "your belongings are safe", "state-of-the-art"]
+  good_examples:
+    - "A 10x10 holds a one-bedroom apartment: bed, sofa, dresser, and about 100 boxes. Not sure? Most people size up one step."
+    - "Gate access is 6am to 10pm daily, with a code that logs every entry and exit. 28 cameras, recorded around the clock."
+  off_brand_examples:
+    - "Anchor Self Storage offers premier space solutions with the peace of mind that your belongings are safe and secure."
+    - "Our state-of-the-art facility keeps your treasured possessions protected."
+
+guardrails:
+  banned_competitor_mentions: []
+  compliance_notes: "Self-storage overlay applies. Protection plan is NOT insurance (SS-1): never say insurance/coverage/policy for it. No absolute-security claim (SS-3); use the real camera/gate/alarm specs. Disclose the $25 admin fee in-line with 'first month free' (SS-6). No 'rate locked' (SS-8; ECRI applies). No ADA-accessible claim (ada_verified is false, SS-12). Any lien/auction timeline must trace to TX Property Code ch. 59 (SS-11)."
+  review_pii_rule: "Never publish a reviewer's full name or identifying detail without consent."
+
+vertical: "self-storage"        # the overlay filename token (knowledge/verticals/self-storage.md)
+trade_is_ymyl: false            # self-storage is not YMYL; the overlay is still mandatory
+
+case_log: []

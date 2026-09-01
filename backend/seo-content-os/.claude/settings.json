@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Permissions relaxed 2026-07-23 PKT at Zain's request: no prompt on any file create/edit anywhere in the project. Security deny wall (secrets, rm -rf, force-push, curl|sh) is deliberately untouched.",
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/*.py:*)",
+      "Bash(python D:\\SEO-CONTENT-OS\\scripts\\*.py:*)",
+      "Read(D:\\SEO-CONTENT-OS\\**)",
+      "Write(D:\\SEO-CONTENT-OS\\**)",
+      "Edit(D:\\SEO-CONTENT-OS\\**)",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/credentials.json)",
+      "Read(**/*service_account*.json)",
+      "Bash(rm -rf:*)",
+      "Bash(Remove-Item -Recurse -Force:*)",
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/SEO-CONTENT-OS/.claude/hooks/block_em_dash.py",
+            "comment": "Block em-dash (U+2014) before it lands on disk - hard founder preference"
+          }
+        ]
+      }
+    ]
+  }
+}
