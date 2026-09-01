@@ -439,6 +439,50 @@ class OffpageRepo:
             row = cur.fetchone()
         return str(row["web2_topical_scope"]) if row else "agnostic"
 
+    #: The standing per-client publishing identity every signup reuses (0122): the
+    #: brand handle stem, the CLIENT-domain address platform mail lands on, and the
+    #: IMAP coordinates that let the builder read a verification link automatically.
+    #: The mailbox password is NEVER selected here - only its vault coordinates.
+    _IDENTITY_COLUMNS = (
+        "web2_handle_base, web2_contact_email, web2_imap_host, web2_imap_port, "
+        "web2_imap_user, web2_imap_vault_provider, web2_imap_vault_label"
+    )
+
+    def client_web2_identity(self, client_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                f"select id, name, {self._IDENTITY_COLUMNS} "
+                "from public.clients where id = %s",
+                (client_id,),
+            )
+            return cur.fetchone()
+
+    def set_client_web2_identity(
+        self,
+        client_id: str,
+        *,
+        handle_base: str,
+        contact_email: str,
+        imap_host: str,
+        imap_port: int,
+        imap_user: str,
+        vault_provider: str,
+        vault_label: str,
+    ) -> dict[str, Any] | None:
+        """Write the identity. Lead-gated at the route; RLS re-checks at the table."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.clients set web2_handle_base = %s, web2_contact_email = %s, "
+                "  web2_imap_host = %s, web2_imap_port = %s, web2_imap_user = %s, "
+                "  web2_imap_vault_provider = %s, web2_imap_vault_label = %s "
+                f"where id = %s returning id, name, {self._IDENTITY_COLUMNS}",
+                (
+                    handle_base, contact_email, imap_host, imap_port, imap_user,
+                    vault_provider, vault_label, client_id,
+                ),
+            )
+            return cur.fetchone()
+
     def pacing_caps_row(self) -> dict[str, Any] | None:
         with rls_connection(self._user_id) as cur:
             cur.execute("select * from public.web2_pacing_settings where id = 1")
