@@ -196,57 +196,72 @@ def test_engine_status_all_missing_on_keyless_settings(
     monkeypatch.setattr(cs, "playwright_bot_available", lambda: False)
     settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
     engines = {e.key: e for e in citation_engine_status(settings)}
-    assert engines["bing_places"].connected is False
-    assert engines["playwright_bot"].connected is False  # optional extra, never a key
-    # every engine carries an honest reason
+    assert engines["playwright_bot"].connected is False
+    assert engines["data_axle"].connected is False
+    assert engines["gbp"].connected is False
+    # every engine carries an honest reason and (where a config could help) names it
     for e in engines.values():
         assert e.reason
-    # A RETIRED engine names NO required config, on purpose: listing a key implies
-    # "set this and it works", and no key can enable an endpoint that returns 404.
-    for key in ("bing_places", "foursquare"):
-        assert engines[key].required_config == ()
-        assert "RETIRED" in engines[key].label
-    for key, e in engines.items():
-        if key not in ("bing_places", "foursquare"):
-            assert e.required_config
+    assert engines["gbp"].required_config == ()  # no key can help: no engine exists
 
 
-def test_a_key_cannot_reconnect_a_retired_engine() -> None:
-    """Bing Places and Foursquare are RETIRED, not merely unconfigured.
+def test_the_ghost_engines_stay_off_the_board_but_their_story_survives() -> None:
+    """Bing/Foursquare rows are DELETED (a status board is for things that can change
+    state; 'no key can enable an endpoint that does not exist' is not a state). The
+    retirement record — including that FOURSQUARE_API_KEY is still live for DISCOVERY —
+    moves to the module docstring, and this holds it there so nobody deletes the key
+    on the strength of a missing row."""
+    import inspect
 
-    This test used to assert that setting BING_PLACES_API_KEY flips the board to
-    CONNECTED. It must not: the coded write endpoints return 404 to a live probe
-    (2026-08-23), so a key buys nothing. Reporting CONNECTED would tell an operator a
-    submission path exists when the submitter has been deleted."""
-    settings = Settings(  # type: ignore[call-arg]
-        _env_file=None, app_env="dev",
-        bing_places_api_key="k",
-        foursquare_api_key="k",
+    import integrations.citation_status as cs
+
+    settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
+    keys = {e.key for e in citation_engine_status(settings)}
+    assert not ({"bing_places", "foursquare"} & keys)
+    doc = inspect.getdoc(cs) or ""
+    assert "404" in doc and "DISCOVERY" in doc and "Retired 2026-08-23" in doc.replace("retired 2026-08-23", "Retired 2026-08-23")
+
+
+def test_the_board_headline_is_the_whitelist_not_the_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"3/5 connected" once coexisted with ZERO machine-submittable directories. The
+    binding constraint now leads the board, and an installed bot with no earned spec
+    is NOT connected."""
+    import integrations.citation_status as cs
+    from integrations.citation_status import citation_engine_board
+
+    monkeypatch.setattr(cs, "playwright_bot_available", lambda: True)
+    settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
+
+    empty = citation_engine_board(settings, active_spec_count=0)
+    assert empty.machine_submittable_directories == 0
+    assert {e.key: e.connected for e in empty.engines}["playwright_bot"] is False
+    assert "operator queue" in {e.key: e for e in empty.engines}["playwright_bot"].reason
+
+    earned = citation_engine_board(settings, active_spec_count=3)
+    assert earned.machine_submittable_directories == 3
+    assert {e.key: e.connected for e in earned.engines}["playwright_bot"] is True
+
+
+def test_data_axle_lights_by_config_alone() -> None:
+    """O-2's activation contract: key + a REAL per-Add rate flips the engine on with
+    no code change — and a key without a price stays off, naming the env var."""
+    keyed_unpriced = Settings(  # type: ignore[call-arg]
+        _env_file=None, app_env="dev", data_axle_api_key="k",
     )
-    engines = {e.key: e for e in citation_engine_status(settings)}
-    assert engines["bing_places"].connected is False
-    assert engines["foursquare"].connected is False
-    assert "404" in engines["bing_places"].reason
-    # FOURSQUARE_API_KEY is still live for DISCOVERY (a read path) - the reason says so,
-    # so nobody deletes the key while something still depends on it.
-    assert "DISCOVERY" in engines["foursquare"].reason
+    engines = {e.key: e for e in citation_engine_status(keyed_unpriced)}
+    assert engines["data_axle"].connected is False
+    assert "DATA_AXLE_ADD_COST_ESTIMATE" in engines["data_axle"].reason
+
+    priced = Settings(  # type: ignore[call-arg]
+        _env_file=None, app_env="dev", data_axle_api_key="k",
+        data_axle_add_cost_estimate=5.0,
+    )
+    engines = {e.key: e for e in citation_engine_status(priced)}
+    assert engines["data_axle"].connected is True
 
 
-# --------------------------------------------------------------------------- #
-# Determinism: the cap must not decide what counts as covered.
-#
-# QA ran the same client's citation audit twice and read two different answers:
-# "4 existing / 4 covered / 45 missing", then "4 built / 41 missing". Nothing about
-# the client or the catalog had changed.
-#
-# The cause was the ORDER of two steps. The selection capped the catalog to 45
-# first, and covered directories were subtracted from that 45 afterwards - so
-# whether a covered listing reduced `missing` depended on whether it happened to
-# sit inside the top 45 of the build order. Four covered rows inside it gave 41;
-# the same four outside it gave 45, with `covered_count` reading 4 either way.
-#
-# The fix subtracts first and caps second, so the cap means "the next N to build"
-# and the number moves only when the coverage or the catalog really does.
 # --------------------------------------------------------------------------- #
 def _catalog(n: int) -> list[dict[str, Any]]:
     """n directories in a STABLE build order: d000 sorts first, d049 last."""

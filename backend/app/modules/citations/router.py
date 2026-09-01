@@ -835,14 +835,31 @@ async def web2_status(_user: ViewReports) -> Web2StatusResponse:
 
 @router.get("/engine-status", response_model=EngineStatusBoardResponse)
 async def engine_status(_user: ViewReports) -> EngineStatusBoardResponse:
-    """The citation-ENGINE status board: each submission engine (Bing/Foursquare direct
-    API, the CAPTCHA solver, the self-hosted bot, the proxy)
-    CONNECTED vs MISSING, with the reason and the external-API caveat. Derived from
-    settings presence only - never a live probe, never a spend."""
-    board = citation_engine_board(get_settings())
+    """The citation-ENGINE status board — the WHITELIST COUNT first (the binding
+    constraint: how many directories a machine may submit to today), then each real
+    engine CONNECTED vs MISSING with the reason and the external-API caveat. Derived
+    from settings + the earned-spec count - never a live probe, never a spend."""
+
+    def _active_spec_count() -> int:
+        from integrations.citation_bot import active_form_specs
+
+        return len(active_form_specs())
+
+    def _signup_spec_count() -> int:
+        from integrations.citation_signup import SIGNUP_SPECS
+
+        return len(SIGNUP_SPECS)
+
+    board = citation_engine_board(
+        get_settings(),
+        active_spec_count=await asyncio.to_thread(_active_spec_count),
+        signup_spec_count=_signup_spec_count(),
+    )
     return EngineStatusBoardResponse(
         connected_count=board.connected_count,
         total_count=board.total_count,
+        machine_submittable_directories=board.machine_submittable_directories,
+        whitelist_note=board.whitelist_note,
         engines=[
             EngineStatusResponse(
                 key=e.key,

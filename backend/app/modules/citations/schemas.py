@@ -459,8 +459,15 @@ class EngineStatusResponse(BaseModel):
 
 
 class EngineStatusBoardResponse(BaseModel):
-    """The citation-engine status board: each engine CONNECTED vs MISSING, with reasons."""
+    """The citation-engine status board: the whitelist headline first, then each real
+    engine CONNECTED vs MISSING with reasons. "3/5 connected" once coexisted with zero
+    machine-submittable directories because the binding constraint was not on the
+    board at all."""
 
+    machine_submittable_directories: int = Field(
+        default=0, serialization_alias="machineSubmittableDirectories"
+    )
+    whitelist_note: str = Field(default="", serialization_alias="whitelistNote")
     connected_count: int = Field(serialization_alias="connectedCount")
     total_count: int = Field(serialization_alias="totalCount")
     engines: list[EngineStatusResponse]
