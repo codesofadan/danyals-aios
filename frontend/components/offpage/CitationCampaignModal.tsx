@@ -5,6 +5,7 @@ import { useClients } from "@/lib/hooks/clients";
 import {
   useBusinessProfiles,
   useCitationEngineStatus,
+  useSpecBoard,
   useCitationGap,
   useCitationQueue,
   useCreateBusinessProfile,
@@ -92,6 +93,15 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
   );
   const engineQ = useCitationEngineStatus();
   const queueBoardQ = useCitationQueue();
+  const specBoardQ = useSpecBoard();
+  // Directory ids with an ACTIVE earned spec — the bot really will attempt these.
+  const activeSpecDirs = useMemo(
+    () =>
+      new Set(
+        (specBoardQ.data?.specs ?? []).filter((sp) => sp.active).map((sp) => sp.directoryId),
+      ),
+    [specBoardQ.data],
+  );
 
   // The honest split: where each selected directory will actually go. Derived from
   // the engine board (transport) — the earned-spec whitelist decides the bot rows,
@@ -112,12 +122,14 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
         else team += 1; // keyless → routed to the operator queue
       } else if (method.startsWith("api:")) {
         team += 1; // gbp & friends: no engine written → queue
+      } else if (activeSpecDirs.has(d.id)) {
+        auto += 1; // an EARNED spec: the bot really attempts this one
       } else {
-        team += 1; // bot tiers: with an empty whitelist this is queue work
+        team += 1; // bot tiers without an earned spec are queue work
       }
     }
     return { auto, team, held, specCount };
-  }, [selected, engineQ.data]);
+  }, [selected, engineQ.data, activeSpecDirs]);
 
   const canSaveProfile = businessName.trim().length > 1 && addressLine1.trim().length > 1 && city.trim().length > 0;
   const canDispatch = !!clientId && !!profileId && markets.size > 0 && tiers.size > 0;
@@ -455,8 +467,8 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                         const badge =
                           method === "api:data_axle"
                             ? { label: "held — unpriced", cls: "warn" }
-                            : method.startsWith("api:")
-                              ? { label: "your team", cls: "info" }
+                            : activeSpecDirs.has(d.id)
+                              ? { label: "bot — spec earned", cls: "ok" }
                               : { label: "your team", cls: "info" };
                         return (
                           <label key={d.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 2px", cursor: "pointer" }}>

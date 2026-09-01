@@ -26,6 +26,9 @@ import type {
   Directory,
   DirectoryTier,
   QueueBlockReason,
+  SpecBoard,
+  SpecCreateInput,
+  DirectorySpec,
   Web2AccountCreate,
   Web2Catalog,
   QueueBoard,
@@ -382,6 +385,57 @@ export function useWeb2Accounts(clientId?: string) {
   });
 }
 
+/** One client's standing Web 2.0 publishing identity: the brand handle stem, the
+ *  CLIENT-domain address platform verification mail lands on, and whether the builder
+ *  can read that mailbox. Never carries the mailbox password — only `imapPasswordHeld`. */
+export type Web2ClientIdentity = {
+  clientId: string;
+  client: string;
+  handleBase: string;
+  contactEmail: string;
+  imapHost: string;
+  imapPort: number;
+  imapUser: string;
+  imapPasswordHeld: boolean;
+  mailboxReady: boolean;
+};
+
+export type Web2ClientIdentityInput = {
+  handleBase?: string;
+  contactEmail?: string;
+  imapHost?: string;
+  imapPort?: number;
+  imapUser?: string;
+  /** Write-only. Blank LEAVES an existing seal alone; clearing is explicit. */
+  imapPassword?: string;
+  clearImapPassword?: boolean;
+};
+
+export function useWeb2ClientIdentity(clientId?: string) {
+  return useQuery({
+    queryKey: ["web2-identity", clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2ClientIdentity>(
+        `/offpage/web2/clients/${encodeURIComponent(clientId!)}/identity`,
+      ),
+    enabled: !!clientId,
+  });
+}
+
+export function useSaveWeb2ClientIdentity(clientId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Web2ClientIdentityInput) =>
+      api.put<Web2ClientIdentity>(
+        `/offpage/web2/clients/${encodeURIComponent(clientId!)}/identity`,
+        body,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["web2-identity", clientId ?? ""] });
+    },
+  });
+}
+
 /** The platform catalogue, including the credential shape each platform needs. */
 export function useWeb2Catalog() {
   return useQuery({
@@ -476,6 +530,77 @@ export function useCreateWeb2Campaign() {
       void qc.invalidateQueries({ queryKey: WEB2_CAMPAIGNS_KEY });
       void qc.invalidateQueries({ queryKey: WEB2_KEY });
     },
+  });
+}
+
+// --- the earned whitelist: spec hooks (the teach-the-bot loop, W4.1) -----------
+
+export const SPEC_BOARD_KEY = ["citation-builder", "specs"] as const;
+
+export function useSpecBoard() {
+  return useQuery({
+    queryKey: SPEC_BOARD_KEY,
+    queryFn: () => api.get<SpecBoard>("/citation-builder/specs"),
+  });
+}
+
+function invalidateSpecs(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: SPEC_BOARD_KEY });
+  qc.invalidateQueries({ queryKey: ENGINE_STATUS_KEY });
+}
+
+/** File a NEW spec revision — always INACTIVE; it has earned nothing yet. */
+export function useCreateSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SpecCreateInput) =>
+      api.post<DirectorySpec>("/citation-builder/specs", body),
+    onSuccess: () => invalidateSpecs(qc),
+  });
+}
+
+/** The dated, write-once human DOM check. Sign it only having compared each selector
+ *  with the open form. */
+export function useVerifySpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ specId, notes }: { specId: string; notes?: string }) =>
+      api.post<DirectorySpec>(`/citation-builder/specs/${specId}/verify`, {
+        selectors: [],
+        notes: notes ?? "",
+      }),
+    onSuccess: () => invalidateSpecs(qc),
+  });
+}
+
+/** Record the first submission with this exact spec that produced a public listing
+ *  URL. The server probes the URL before recording it. */
+export function useSpecFirstLive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ specId, liveUrl }: { specId: string; liveUrl: string }) =>
+      api.post<DirectorySpec>(`/citation-builder/specs/${specId}/first-live`, { liveUrl }),
+    onSuccess: () => invalidateSpecs(qc),
+  });
+}
+
+/** Activate: the DB CHECK refuses unless BOTH halves are earned. Promotes the
+ *  directory to route B in the same transaction — the only thing that ever does. */
+export function useActivateSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (specId: string) =>
+      api.post<DirectorySpec>(`/citation-builder/specs/${specId}/activate`, {}),
+    onSuccess: () => invalidateSpecs(qc),
+  });
+}
+
+export function useDeactivateSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ specId, reason }: { specId: string; reason: string }) =>
+      api.post<DirectorySpec>(`/citation-builder/specs/${specId}/deactivate`, { reason }),
+    onSuccess: () => invalidateSpecs(qc),
   });
 }
 

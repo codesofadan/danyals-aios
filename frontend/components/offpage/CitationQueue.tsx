@@ -16,6 +16,7 @@ import {
 } from "@/lib/hooks/offpage";
 import { useClients } from "@/lib/hooks/clients";
 import ExtensionCallout from "./ExtensionCallout";
+import SpecDrawer from "./SpecDrawer";
 import w from "./Wave4.module.css";
 
 // The operator's working surface. Two numbers govern the cost of a live citation: what
@@ -64,6 +65,13 @@ export default function CitationQueue() {
     setFlashState({ tone, msg });
   }
   const [copied, setCopied] = useState<string | null>(null);
+  // The teach-the-bot handoff: set when a completion is ACCEPTED, because at that
+  // moment the operator has produced exactly what the earned-whitelist contract
+  // demands — a human who saw the live form, and a listing URL the server verified.
+  const [teach, setTeach] = useState<{
+    directoryId: string; directory: string; addUrl: string; liveUrl: string;
+  } | null>(null);
+  const [showDrawer, setShowDrawer] = useState(false);
 
   // Elapsed time on the current item. Ticks locally; banked on every heartbeat and on
   // every exit, so the server total survives a closed tab.
@@ -151,6 +159,14 @@ export default function CitationQueue() {
         onSuccess: (res) => {
           if (res.accepted) {
             setFlash("ok", `Live — verified on the page in ${mmss(elapsed)}.`);
+            if (item.directoryId) {
+              setTeach({
+                directoryId: item.directoryId,
+                directory: item.directory,
+                addUrl: item.addUrl,
+                liveUrl: liveUrl.trim(),
+              });
+            }
             reset();
           } else {
             // NOT an error. The commonest cause is a directory that accepted the
@@ -219,6 +235,30 @@ export default function CitationQueue() {
     <div>
       <ExtensionCallout />
       {flash && <div className={`op-note ${flash.tone === "err" ? "crit" : flash.tone}`}>{flash.msg}</div>}
+
+      {teach && !showDrawer && (
+        <div className="op-note ok" style={{ marginBottom: 10 }}>
+          <b>Make {teach.directory} automatic next time?</b> You just proved this form by
+          hand — record its field selectors (2–3 minutes with the form still open) and the
+          bot does this directory for every future client.
+          <div className="op-toolset" style={{ marginTop: 8 }}>
+            <button className="primary-btn" onClick={() => setShowDrawer(true)}>
+              <span className="material-symbols-rounded">school</span>
+              Teach the bot
+            </button>
+            <button className="ghostbtn" onClick={() => setTeach(null)}>Not now</button>
+          </div>
+        </div>
+      )}
+      {teach && showDrawer && (
+        <SpecDrawer
+          directoryId={teach.directoryId}
+          directoryName={teach.directory}
+          prefillUrl={teach.addUrl}
+          firstLiveUrl={teach.liveUrl}
+          onClose={() => { setShowDrawer(false); setTeach(null); }}
+        />
+      )}
 
       {boardQ.isError && (
         <div className="op-note crit" style={{ marginBottom: 10 }}>

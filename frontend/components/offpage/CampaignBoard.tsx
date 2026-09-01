@@ -114,8 +114,8 @@ export default function CampaignBoard({ clientId }: { clientId?: string }) {
             </div>
           )}
 
-          {teamCount > 0 && (
-            <div className="op-toolset" style={{ marginTop: 10 }}>
+          <div className="op-toolset" style={{ marginTop: 10 }}>
+            {teamCount > 0 && (
               <a
                 className="primary-btn"
                 href={`/admin/citations/queue?client=${encodeURIComponent(clientId)}`}
@@ -124,8 +124,16 @@ export default function CampaignBoard({ clientId }: { clientId?: string }) {
                 <span className="material-symbols-rounded">play_arrow</span>
                 Work the queue ({teamCount} waiting for this client)
               </a>
-            </div>
-          )}
+            )}
+            <a
+              className="ghostbtn"
+              href={`/admin/citations/report/${encodeURIComponent(clientId)}`}
+              style={{ textDecoration: "none" }}
+            >
+              <span className="material-symbols-rounded">description</span>
+              Client report
+            </a>
+          </div>
 
           {Object.keys(roll.byBlockedReason).length > 0 && (
             <div style={{ marginTop: 10 }}>

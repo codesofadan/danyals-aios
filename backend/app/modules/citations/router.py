@@ -1009,6 +1009,7 @@ def _queue_item(row: dict[str, Any]) -> QueueItemResponse:
         citation_id=str(row.get("id")),
         client=str(row.get("client_name") or ""),
         directory=str(row.get("directory_name") or row.get("directory") or ""),
+        directory_id=str(row.get("directory_id") or ""),
         directory_url=str(row.get("directory_url") or ""),
         add_url=str(row.get("directory_add_url") or ""),
         fields=_queue_fields(row),

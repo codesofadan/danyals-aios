@@ -5,7 +5,7 @@
 // exact reason and an honest note that even a connected provider can be refused by the
 // EXTERNAL API. Reads /citation-builder/web2-status + /engine-status; degrades cleanly.
 
-import { useCitationEngineStatus, useWeb2Status } from "@/lib/hooks/offpage";
+import { useWeb2Status } from "@/lib/hooks/offpage";
 import { PLATFORM_ISSUES, type Web2Platform } from "@/lib/offpage";
 import w from "./Wave4.module.css";
 
@@ -16,9 +16,7 @@ function StatusDot({ connected, draftOnly }: { connected: boolean; draftOnly?: b
 
 export default function Web2StatusBoard() {
   const web2Q = useWeb2Status();
-  const engineQ = useCitationEngineStatus();
   const web2 = web2Q.data;
-  const engines = engineQ.data;
 
   return (
     <div>
@@ -99,42 +97,16 @@ export default function Web2StatusBoard() {
         </details>
       )}
 
-      {/* Citation submission engines */}
-      <div className={w.rollup} style={{ marginTop: 20 }}>
-        <span><b>Citation engines</b> - direct APIs, the solver &amp; bot</span>
-        {engines && (
-          <span><b>{engines.connectedCount}</b> connected · {engines.totalCount} engines</span>
-        )}
+      {/* The citation-engine board MOVED (2026-09-02) to the Citations page's
+          Automation panel, where the earned-whitelist headline gives it context. It
+          lived here under a tab named "API status" on the Web 2.0 page — the one
+          screen that could answer "can citations submit?" was inside a different
+          module, behind a name that mentioned neither. */}
+      <div className="op-muted" style={{ marginTop: 20 }}>
+        Citation submission engines now live on{" "}
+        <a className="op-url" href="/admin/citations">the Citations page</a> under
+        Automation — beside the earned-spec whitelist that actually governs them.
       </div>
-
-      {engineQ.isLoading && <div className="op-muted">Loading engine status…</div>}
-      {engineQ.isError && (
-        <div className="op-muted">
-          Couldn&apos;t load engine status - {(engineQ.error as Error)?.message ?? "try again"}.
-        </div>
-      )}
-      {engines && (
-        <div className={w.board}>
-          {engines.engines.map((e) => (
-            <div key={e.key} className={w.card}>
-              <div className={w.cardHead}>
-                <span className={w.cardName}>{e.label}</span>
-                <span>
-                  <StatusDot connected={e.connected} />
-                  <span className={`status-pill ${e.connected ? "ok" : "warn"}`} style={{ marginLeft: 6 }}>
-                    {e.connected ? "Connected" : "Missing"}
-                  </span>
-                </span>
-              </div>
-              <div className={w.reason}>{e.reason}</div>
-              {e.requiredConfig.length > 0 && (
-                <div className={w.meta}>Needs: {e.requiredConfig.join(", ")}</div>
-              )}
-              {e.externalNote && <div className={w.external}>{e.externalNote}</div>}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

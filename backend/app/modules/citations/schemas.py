@@ -507,6 +507,9 @@ class QueueItemResponse(BaseModel):
     citation_id: str = Field(serialization_alias="citationId")
     client: str
     directory: str
+    # The catalog row this item builds — what the teach-the-bot flow files a spec
+    # against after a verified completion (W4.1). Empty for a legacy monitoring row.
+    directory_id: str = Field(default="", serialization_alias="directoryId")
     directory_url: str = Field(serialization_alias="directoryUrl")
     # The verified deep link to the add-listing form. Empty when the catalogue has never
     # had one probed - the operator then starts from the directory's home page, and the

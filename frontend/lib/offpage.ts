@@ -735,6 +735,49 @@ export type CitationEngineBoard = {
   engines: CitationEngineStatus[];
 };
 
+// --- the earned whitelist (0108/0110): specs, and what each has earned ---------
+// A directory becomes machine-submittable ONLY here: a dated human DOM check
+// (verify) + one submission that produced a public listing URL (first-live) =
+// activate. The queue's "teach the bot" flow files these.
+
+export type DirectorySpec = {
+  id: string;
+  directoryId: string;
+  directoryName: string;
+  url: string;
+  fieldCount: number;
+  active: boolean;
+  verified: boolean;
+  verifiedAt: string | null;
+  hasFirstLiveUrl: boolean;
+  firstLiveUrl: string;
+  successCount: number;
+  failureCount: number;
+  drifted: boolean;
+  driftSelector: string;
+  deactivatedReason: string;
+  /** What still has to happen before this spec may run. Empty when active. */
+  blocking: string[];
+};
+
+export type SpecBoard = {
+  active: number;
+  verifiedNotLive: number;
+  unverified: number;
+  drifted: number;
+  specs: DirectorySpec[];
+};
+
+export type SpecFieldInput = { selector: string; valueKey: string };
+
+export type SpecCreateInput = {
+  directoryId: string;
+  url: string;
+  fields: SpecFieldInput[];
+  submitSelector: string;
+  successIndicator?: string;
+};
+
 // --- the human work queue (0110) ---------------------------------------------
 // Route C — a human working a directory by hand — is ~200 of the 226 catalogue rows and
 // 56% of the loaded cost per live citation. The queue exists to make the minutes per item
@@ -750,6 +793,8 @@ export type QueueItem = {
   citationId: string;
   client: string;
   directory: string;
+  /** The catalog row this item builds — what "teach the bot" files a spec against. */
+  directoryId: string;
   directoryUrl: string;
   /** The verified deep link to the add-listing form. Empty when the catalogue has never
    *  had one probed — the UI must say so rather than render an empty link. */

@@ -46,6 +46,7 @@ function heldItem(over: Partial<QueueItem> = {}): QueueItem {
     citationId: "cit-1",
     client: "Leeds Drainage",
     directory: "Hotfrog",
+    directoryId: "dir-hotfrog",
     directoryUrl: "https://hotfrog.example",
     addUrl: "https://hotfrog.example/add",
     fields: [{ key: "business_name", label: "Business name", value: "Leeds Drainage" }],

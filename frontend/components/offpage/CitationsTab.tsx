@@ -23,6 +23,7 @@ import CitationAuditProgress from "./CitationAuditProgress";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
 import CampaignBoard from "./CampaignBoard";
+import AutomationPanel from "./AutomationPanel";
 import w from "./Wave4.module.css";
 
 const NAP_SOURCE_LABEL: Record<string, string> = {
@@ -384,7 +385,11 @@ export default function CitationsTab() {
             <>
               <div className="op-muted" style={{ marginTop: 10 }}>
                 Live listings — each URL below was fetched and found to carry this
-                business&apos;s name and its phone or address:
+                business&apos;s name and its phone or address (
+                <a className="op-url" href={`/admin/citations/report/${gapClient}`}>
+                  client report
+                </a>
+                ):
               </div>
               {gap.liveUrls.slice(0, 12).map((u, i) => (
                 <div key={i} className={w.urlRow}>
@@ -479,6 +484,9 @@ export default function CitationsTab() {
 
       {/* ───────── Track — what happened to the latest build ───────── */}
       <CampaignBoard clientId={gapClient || undefined} />
+
+      {/* ───────── Automation — the earned whitelist, and the payoff counter ───────── */}
+      <AutomationPanel />
 
       {/* ───────── Monitor — this client's listings (read-only truth) ───────── */}
       <div className={w.stepH} style={{ marginTop: 8, flexWrap: "wrap" }}>
