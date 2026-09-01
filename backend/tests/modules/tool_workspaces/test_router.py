@@ -74,7 +74,12 @@ def _message(resp: httpx.Response) -> str:
     return str(resp.json()["error"]["message"])
 
 
-def _user(role: str, uid: str = "00000000-0000-0000-0000-0000000000a1") -> CurrentUser:
+#: The identity `wire` hands every route; the task-board tests assert the scope
+#: the router derives from it.
+_UID = "00000000-0000-0000-0000-0000000000a1"
+
+
+def _user(role: str, uid: str = _UID) -> CurrentUser:
     return CurrentUser(
         id=uid, email="op@aios.dev", role=role, status="active",  # type: ignore[arg-type]
         name="Op", title="", avatar_color="#000", phone="", two_fa=False,
@@ -145,12 +150,19 @@ class _FakeReports:
 
 class _FakeTasks:
     rows: ClassVar[list[dict[str, Any]]] = []
+    #: What the router asked to be scoped to. None = the whole board.
+    board_scope: ClassVar[list[Any]] = []
 
     def list_board_tasks(self, **kwargs: Any) -> list[dict[str, Any]]:
-        return list(self.rows)
+        _FakeTasks.board_scope.append(kwargs.get("assignee"))
+        rows = list(self.rows)
+        who = kwargs.get("assignee")
+        return [r for r in rows if r.get("assignee_id") == who] if who else rows
 
     def list_tasks(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return list(self.rows)
+        who = args[0] if args else kwargs.get("assignee_id")
+        rows = list(self.rows)
+        return [r for r in rows if r.get("assignee_id") == who] if who else rows
 
 
 class _FakeClients:
@@ -562,3 +574,65 @@ async def test_no_workspace_route_answers_a_mutating_verb(
     for method in ("POST", "PATCH", "DELETE"):
         resp = await client.request(method, path, json={})
         assert resp.status_code == 405, f"{method} {path} -> {resp.status_code}"
+
+
+# --------------------------------------------------------------------------- #
+# §19 — the task board's SECOND DOOR.
+#
+# Pinning GET /tasks alone would have left the leak open here: this workspace
+# serves the same ledger as a Task|Client|Assignee|Status table, it is reachable
+# from the team portal, and it is gated on the `task_board` FEATURE grant - which
+# the standard onboarding path WRITES from a role template rather than leaving off.
+# So a team member was one click away from the whole board while the route looked
+# fixed.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("role", ["specialist", "analyst", "viewer"])
+async def test_the_task_board_workspace_confines_a_non_lead(
+    client: httpx.AsyncClient,
+    wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+) -> None:
+    monkeypatch.setattr(_FakeTasks, "board_scope", [])
+    monkeypatch.setattr(
+        _FakeTasks, "rows",
+        [
+            {"id": "t1", "code": "J-1", "title": "Mine", "assignee_id": _UID,
+             "assignee_name": "Op", "status": "todo", "client_name": "A", "type": "audit",
+             "priority": "med", "created_at": None, "due_date": None},
+            {"id": "t2", "code": "J-2", "title": "Someone else's", "assignee_id": "other",
+             "assignee_name": "Other", "status": "todo", "client_name": "B", "type": "audit",
+             "priority": "med", "created_at": None, "due_date": None},
+        ],
+    )
+    wire(role)
+
+    resp = await client.get("/api/v1/task-board/workspace")
+
+    assert resp.status_code == 200
+    assert _FakeTasks.board_scope == [_UID], "the workspace asked for the whole board"
+    assert "Someone else's" not in resp.text
+
+
+@pytest.mark.parametrize("role", ["owner", "admin", "manager"])
+async def test_the_task_board_workspace_still_shows_a_lead_everything(
+    client: httpx.AsyncClient,
+    wire: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+) -> None:
+    monkeypatch.setattr(_FakeTasks, "board_scope", [])
+    monkeypatch.setattr(
+        _FakeTasks, "rows",
+        [
+            {"id": "t2", "code": "J-2", "title": "Someone else's", "assignee_id": "other",
+             "assignee_name": "Other", "status": "todo", "client_name": "B", "type": "audit",
+             "priority": "med", "created_at": None, "due_date": None},
+        ],
+    )
+    wire(role)
+
+    resp = await client.get("/api/v1/task-board/workspace")
+
+    assert resp.status_code == 200
+    assert _FakeTasks.board_scope == [None], "a lead was scoped to their own queue"

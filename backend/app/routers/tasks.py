@@ -102,8 +102,26 @@ async def list_tasks(
     assignee: Annotated[str | None, Query()] = None,
 ) -> list[TaskResponse]:
     """List tasks (created_at desc). ``mine=true`` scopes to the caller; an
-    explicit ``assignee`` scopes to that user; otherwise the whole board."""
-    scope = _user.id if mine else assignee
+    explicit ``assignee`` scopes to that user; otherwise the whole board.
+
+    ONLY A LEAD SEES THE WHOLE BOARD. `view_reports` is held by all six staff
+    roles, so gating on it alone let any team member list every task for every
+    client - which is the visibility rule the brief asks to be enforced
+    server-side rather than by hiding frontend components. A non-lead is pinned
+    to their own queue here, in the route, so the pin holds for any caller: the
+    dashboard, a script, curl with a valid token.
+
+    A non-lead asking for someone else's queue is REFUSED rather than silently
+    re-scoped to their own - a silent narrowing would show them an empty board
+    and let them conclude that person has no work.
+    """
+    lead = _is_lead(_user)
+    if not lead and assignee and assignee != _user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only see your own tasks.",
+        )
+    scope = _user.id if (mine or not lead) else assignee
     rows = await asyncio.to_thread(repo.list_tasks, scope, limit=page.limit, offset=page.offset)
     return [TaskResponse.from_row(r) for r in rows]
 

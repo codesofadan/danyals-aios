@@ -44,7 +44,9 @@ class TasksRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
-    def list_board_tasks(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+    def list_board_tasks(
+        self, *, assignee: str | None = None, limit: int | None = None, offset: int = 0
+    ) -> _Rows:
         """The board newest-first, each row carrying its assignee's DISPLAY NAME.
 
         Additive read for the ``task_board`` tool workspace (Part 8 Phase 2.5). Every
@@ -63,9 +65,15 @@ class TasksRepo:
             "select t.*, coalesce(u.name, '') as assignee_name "
             "from public.tasks t "
             "left join public.users u on u.id = t.assignee_id "
-            "order by t.created_at desc"
         )
         params: list[Any] = []
+        # `assignee` scopes the board to one person. RLS lets any staff member read
+        # every task, so without this the tool workspace hands a team member the
+        # whole board - the same leak the /tasks route carries, through a second door.
+        if assignee is not None:
+            query += "where t.assignee_id = %s "
+            params.append(assignee)
+        query += "order by t.created_at desc"
         if limit is not None:
             query += " limit %s offset %s"
             params += [limit, offset]

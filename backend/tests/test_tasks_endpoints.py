@@ -493,3 +493,81 @@ async def test_lead_patch_sets_and_clears_proof_url(
     resp = await client.patch("/api/v1/tasks/J-1", json={"proof_url": ""})
     assert resp.status_code == 200
     assert resp.json()["proofUrl"] == ""
+
+
+# --------------------------------------------------------------------------- #
+# §19 — a team member sees their own queue, not the whole board.
+#
+# `view_reports` is held by ALL SIX staff roles (rbac/matrix.py), so gating the
+# list on it alone let any specialist, analyst or viewer enumerate every task for
+# every client: the assignee, the client name and the work, across the roster.
+# The brief asks for this to be enforced server-side rather than by hiding
+# frontend components - so it is pinned in the route, where curl reaches it too.
+# --------------------------------------------------------------------------- #
+async def test_a_member_listing_tasks_gets_only_their_own(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(assignee_id="u-1")
+    repo.seed(assignee_id="u-2")
+    wire("specialist", "u-1")
+
+    resp = await client.get("/api/v1/tasks")  # no mine=, no assignee=
+
+    assert resp.status_code == 200
+    assert repo.listed_scope == "u-1", "a non-lead was handed the unscoped board"
+    assert all(t["assignee"] == "u-1" for t in resp.json())
+
+
+@pytest.mark.parametrize("role", ["specialist", "analyst", "viewer"])
+async def test_every_non_lead_role_is_confined(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None], role: str
+) -> None:
+    """All six staff roles hold view_reports; only three of them are leads."""
+    repo.seed(assignee_id="u-2")
+    wire(role, "u-1")
+
+    await client.get("/api/v1/tasks")
+
+    assert repo.listed_scope == "u-1"
+
+
+@pytest.mark.parametrize("role", ["owner", "admin", "manager"])
+async def test_a_lead_still_sees_the_whole_board(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None], role: str
+) -> None:
+    """The admin task board is a confirmed-working feature. Narrowing the leak must
+    not narrow it - a lead with no filter still gets everything."""
+    repo.seed(assignee_id="u-1")
+    repo.seed(assignee_id="u-2")
+    wire(role, "u-lead")
+
+    resp = await client.get("/api/v1/tasks")
+
+    assert resp.status_code == 200
+    assert repo.listed_scope is None, "a lead was scoped to their own queue"
+    assert len(resp.json()) == 2
+
+
+async def test_a_member_asking_for_someone_elses_queue_is_refused(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    """Refused, not silently re-scoped. A silent narrowing would return an empty
+    board and let them conclude that person has no work assigned."""
+    repo.seed(assignee_id="u-2")
+    wire("specialist", "u-1")
+
+    resp = await client.get("/api/v1/tasks", params={"assignee": "u-2"})
+
+    assert resp.status_code == 403
+
+
+async def test_a_member_may_still_ask_for_their_own_queue_explicitly(
+    client: httpx.AsyncClient, repo: FakeTasksRepo, wire: Callable[..., None]
+) -> None:
+    repo.seed(assignee_id="u-1")
+    wire("specialist", "u-1")
+
+    resp = await client.get("/api/v1/tasks", params={"assignee": "u-1"})
+
+    assert resp.status_code == 200
+    assert repo.listed_scope == "u-1"

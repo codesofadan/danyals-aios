@@ -69,6 +69,7 @@ from app.modules.tool_workspaces.service import (
     build_technical_audit_workspace,
 )
 from app.rbac import ROLE_ORDER
+from app.routers.tasks import _LEAD_ROLES
 from app.schemas.audits import compute_audit_stats
 from app.schemas.tool_workspace import ToolExtraResponse
 from app.services.team_metrics import TeamMetricsDep
@@ -191,9 +192,19 @@ async def task_board_workspace(
     repo: TasksRepoDep, _feat: TaskBoardFeature, _user: ViewReports
 ) -> ToolExtraResponse:
     """The task-board workspace (``lib/tools.ts`` ``task_board``): KPI tiles + the
-    team-tasks table (cols ``Task|Client|Assignee|Status``) + the CTA."""
-    board = await asyncio.to_thread(repo.list_board_tasks, limit=WORKSPACE_ROW_LIMIT, offset=0)
-    all_tasks = await asyncio.to_thread(repo.list_tasks)
+    team-tasks table (cols ``Task|Client|Assignee|Status``) + the CTA.
+
+    SCOPED THE SAME WAY ``GET /tasks`` IS. This is the second door onto the same
+    ledger: it is reachable from the team portal, it is gated on the `task_board`
+    FEATURE grant, and the standard onboarding path WRITES those grants from a role
+    template - so pinning only the /tasks route would have left a team member one
+    click away from the whole board, with the leak looking closed.
+    """
+    scope = None if _user.role in _LEAD_ROLES else _user.id
+    board = await asyncio.to_thread(
+        repo.list_board_tasks, assignee=scope, limit=WORKSPACE_ROW_LIMIT, offset=0
+    )
+    all_tasks = await asyncio.to_thread(repo.list_tasks, scope)
     return build_task_board_workspace(board, all_tasks)
 
 
