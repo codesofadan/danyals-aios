@@ -551,9 +551,14 @@ export type CitationCampaignInput = {
   cap?: number;
   minAuthority?: number;
   includeMarketplaces?: boolean;
+  // Audit-first "build only these": explicit missing-directory ids from the approval
+  // list. Bypasses the cap/authority filters — an explicit choice is not second-guessed.
+  directoryIds?: string[];
 };
 
 export type CitationCampaignResult = {
+  // The campaign's durable id (0120) — what the Track board polls.
+  campaignId: string;
   queued: number;
   alreadyQueued: number;
   skippedManualOnly: number;
@@ -721,6 +726,10 @@ export type CitationEngineStatus = {
 };
 
 export type CitationEngineBoard = {
+  // The binding constraint, first: how many directories a machine may submit to today
+  // (= active earned specs). Engines below are transport.
+  machineSubmittableDirectories: number;
+  whitelistNote: string;
   connectedCount: number;
   totalCount: number;
   engines: CitationEngineStatus[];

@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useClients } from "@/lib/hooks/clients";
 import {
   useBusinessProfiles,
+  useCitationEngineStatus,
+  useCitationGap,
+  useCitationQueue,
   useCreateBusinessProfile,
   useCreateCitationCampaign,
   useDirectories,
@@ -76,6 +79,46 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
   const previewQ = useDirectories({ market: Array.from(markets), tier: Array.from(tiers) });
   const previewCount = previewQ.data?.length ?? 0;
 
+  // THE APPROVAL LIST. When the client has been audited, the gap's `missing` set (in
+  // build order, vertical/authority/marketplace rules already applied) is shown as
+  // selectable rows — the choice the backend's directoryIds field always supported and
+  // the UI never offered. Without an audit, the markets/tiers flow below still works.
+  const gapQ = useCitationGap(clientId || undefined);
+  const missing = useMemo(() => gapQ.data?.missing ?? [], [gapQ.data?.missing]);
+  const [deselected, setDeselected] = useState<Set<string>>(new Set());
+  const selected = useMemo(
+    () => missing.filter((d) => !deselected.has(d.id)),
+    [missing, deselected],
+  );
+  const engineQ = useCitationEngineStatus();
+  const queueBoardQ = useCitationQueue();
+
+  // The honest split: where each selected directory will actually go. Derived from
+  // the engine board (transport) — the earned-spec whitelist decides the bot rows,
+  // and with it empty every bot-tier row is your team's work.
+  const split = useMemo(() => {
+    const engines = new Map((engineQ.data?.engines ?? []).map((e) => [e.key, e.connected]));
+    const specCount = engineQ.data?.machineSubmittableDirectories ?? 0;
+    let auto = 0;
+    let team = 0;
+    const held: { name: string; why: string }[] = [];
+    for (const d of selected) {
+      const method = d.submitMethod || "";
+      if (method === "api:data_axle") {
+        if (engines.get("data_axle")) auto += 1;
+        else held.push({ name: d.name, why: "needs a lead-approved price (Data Axle rate not on file)" });
+      } else if (method === "api:apple_business") {
+        if (engines.get("apple_business")) auto += 1;
+        else team += 1; // keyless → routed to the operator queue
+      } else if (method.startsWith("api:")) {
+        team += 1; // gbp & friends: no engine written → queue
+      } else {
+        team += 1; // bot tiers: with an empty whitelist this is queue work
+      }
+    }
+    return { auto, team, held, specCount };
+  }, [selected, engineQ.data]);
+
   const canSaveProfile = businessName.trim().length > 1 && addressLine1.trim().length > 1 && city.trim().length > 0;
   const canDispatch = !!clientId && !!profileId && markets.size > 0 && tiers.size > 0;
 
@@ -119,6 +162,10 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
         clientId, businessProfileId: profileId,
         markets: Array.from(markets), tiers: Array.from(tiers),
         includeMarketplaces,
+        // Audit-first: build EXACTLY what the operator approved from the missing
+        // list. Only when no audit backs the modal does the server's own selection
+        // run unpinned.
+        ...(missing.length > 0 ? { directoryIds: selected.map((d) => d.id) } : {}),
       },
       { onSuccess: (body) => setResult(body) },
     );
@@ -164,8 +211,12 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
               <label>Estimated cost (R5 pre-check — each row still cost-gates individually)</label>
               <div className="op-strong">${result.estimatedCost.toFixed(4)}</div>
             </div>
+            <div className="op-muted" style={{ whiteSpace: "normal", marginTop: 6 }}>
+              The Track board on the Citations page is already polling this build —
+              close this and watch each directory settle there.
+            </div>
             <div className="modal-f">
-              <button className="primary-btn" onClick={onClose}>Done</button>
+              <button className="primary-btn" onClick={onClose}>Done — go to the board</button>
             </div>
           </div>
         ) : (
@@ -392,16 +443,91 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                     often charge — excluded by default; opt in deliberately.
                   </div>
                 </div>
-                <div className="op-muted" style={{ whiteSpace: "normal" }}>
-                  {previewQ.isLoading
-                    ? "Counting matching directories…"
-                    : previewQ.isError
-                      ? "Couldn't count matching directories — the estimate below still applies on dispatch."
-                      : `${previewCount} directories match this market/tier before vertical + authority filtering.`}{" "}
-                  The campaign auto-matches the client&apos;s industry, drops the
-                  sub-DA-30 tail, builds in authority order and caps at ~45 — the exact queued
-                  count and what was excluded are confirmed on dispatch.
-                </div>
+                {missing.length > 0 ? (
+                  <div className="fld">
+                    <label>
+                      Choose the directories ({selected.length} of {missing.length} missing, in build order)
+                    </label>
+                    <div style={{ maxHeight: 240, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8 }}>
+                      {missing.map((d) => {
+                        const on = !deselected.has(d.id);
+                        const method = d.submitMethod || "";
+                        const badge =
+                          method === "api:data_axle"
+                            ? { label: "held — unpriced", cls: "warn" }
+                            : method.startsWith("api:")
+                              ? { label: "your team", cls: "info" }
+                              : { label: "your team", cls: "info" };
+                        return (
+                          <label key={d.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 2px", cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => {
+                                const next = new Set(deselected);
+                                if (on) next.add(d.id);
+                                else next.delete(d.id);
+                                setDeselected(next);
+                              }}
+                            />
+                            <span className="op-strong" style={{ whiteSpace: "normal" }}>{d.name}</span>
+                            <span className="op-muted" style={{ fontSize: 11 }}>{d.market} · {TIER_META[d.tier]?.label ?? d.tier}</span>
+                            <span className={`status-pill ${badge.cls}`} style={{ marginLeft: "auto" }}>{badge.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="op-muted" style={{ whiteSpace: "normal" }}>
+                    {gapQ.isLoading
+                      ? "Loading this client's missing directories…"
+                      : "No audit backs this build yet — the server will select by market/tier with the strategy defaults. Run a citation audit first to choose exact directories."}{" "}
+                    {previewQ.isLoading
+                      ? "Counting matching directories…"
+                      : previewQ.isError
+                        ? ""
+                        : `${previewCount} directories match this market/tier before vertical + authority filtering.`}
+                  </div>
+                )}
+
+                {/* THE HONEST SPLIT — what will actually happen, said BEFORE the money
+                    button, not discovered by polling nothing afterwards. */}
+                {selected.length > 0 && (
+                  <div className="op-note warn" style={{ marginTop: 8 }}>
+                    <b>Ready to build {selected.length} directories:</b>
+                    <div style={{ marginTop: 4 }}>
+                      • <b>{split.auto}</b> will be attempted automatically.
+                      {split.specCount === 0 && split.auto === 0 && (
+                        <> No directory has an earned form spec yet — each one your team
+                        finishes by hand can be taught to the bot afterwards.</>
+                      )}
+                    </div>
+                    <div>
+                      • <b>{split.team}</b> will go to your team&apos;s queue — every field
+                      pre-filled, each verified live by fetching its URL before it counts.
+                      {queueBoardQ.data?.medianSeconds != null ? (
+                        <> Estimated operator time ~
+                        {Math.round((split.team * queueBoardQ.data.medianSeconds) / 60)} min
+                        at the measured median.</>
+                      ) : (
+                        <> Time not yet measured — the queue measures it as you work.</>
+                      )}
+                    </div>
+                    {split.held.length > 0 && (
+                      <div>
+                        • <b>{split.held.length}</b> won&apos;t be attempted:{" "}
+                        {split.held.slice(0, 3).map((h) => h.name).join(", ")}
+                        {split.held.length > 3 ? "…" : ""} — {split.held[0].why}.
+                      </div>
+                    )}
+                    <div style={{ marginTop: 4 }}>
+                      Fees today: <b>$0.00</b> — no paid engine can run for this selection;
+                      the response confirms the estimate, and each row still cost-gates
+                      individually.
+                    </div>
+                  </div>
+                )}
                 {createCampaign.isError && (
                   <div className="op-note crit" style={{ marginTop: 8 }}>
                     Couldn&apos;t queue the campaign —{" "}
@@ -411,9 +537,17 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                 )}
                 <div className="modal-f">
                   <button type="button" className="ghostbtn" onClick={onClose}>Cancel</button>
-                  <button className="primary-btn" onClick={dispatch} disabled={!canDispatch || createCampaign.isPending}>
+                  <button
+                    className="primary-btn"
+                    onClick={dispatch}
+                    disabled={!canDispatch || createCampaign.isPending || (missing.length > 0 && selected.length === 0)}
+                  >
                     <span className="material-symbols-rounded">rocket_launch</span>
-                    {createCampaign.isPending ? "Queuing…" : "Queue campaign"}
+                    {createCampaign.isPending
+                      ? "Queuing…"
+                      : missing.length > 0
+                        ? `Queue ${selected.length} directories`
+                        : "Queue campaign"}
                   </button>
                 </div>
               </>
