@@ -11,6 +11,7 @@ Every enum here is verbatim from ``db/migrations/0045_citation_web2_automation.s
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -234,6 +235,9 @@ class CitationCampaignResponse(BaseModel):
     R5 cost estimate for the WHOLE batch (a lead reviews this before it runs - the
     ``citations`` dial defaults to ``byhand`` for exactly this reason)."""
 
+    # The campaign's durable id (0120) — what the board polls. Empty only when the
+    # identity row could not be written (the batch still queued; degrade, don't refuse).
+    campaign_id: str = Field(default="", serialization_alias="campaignId")
     queued: int
     already_queued: int = Field(serialization_alias="alreadyQueued")
     skipped_manual_only: int = Field(serialization_alias="skippedManualOnly")
@@ -245,6 +249,68 @@ class CitationCampaignResponse(BaseModel):
     excluded_low_authority: int = Field(default=0, serialization_alias="excludedLowAuthority")
     excluded_marketplace: int = Field(default=0, serialization_alias="excludedMarketplace")
     capped: int = 0
+
+
+# --- campaign identity (0120) -----------------------------------------------------
+
+
+class CampaignSummaryResponse(BaseModel):
+    """One row of the campaign list: enough to find the current campaign and read
+    its headline without fetching the rollup."""
+
+    id: str
+    client: str
+    created_at: str = Field(serialization_alias="createdAt")
+    requested: int
+    queued: int
+    live_count: int = Field(serialization_alias="liveCount")
+    estimated_cost: float = Field(serialization_alias="estimatedCost")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> CampaignSummaryResponse:
+        created = row.get("created_at")
+        return cls(
+            id=str(row["id"]),
+            client=str(row.get("client_name") or ""),
+            created_at=created.isoformat() if isinstance(created, datetime) else str(created or ""),
+            requested=int(row.get("requested") or 0),
+            queued=int(row.get("queued") or 0),
+            live_count=int(row.get("live_count") or 0),
+            estimated_cost=float(row.get("estimated_cost") or 0.0),
+        )
+
+
+class CampaignRowResponse(BaseModel):
+    """One directory's row on the campaign board."""
+
+    id: str
+    directory: str
+    submit_status: str = Field(serialization_alias="submitStatus")
+    blocked_reason: str = Field(default="", serialization_alias="blockedReason")
+    live_url: str = Field(default="", serialization_alias="liveUrl")
+    detail: str = ""
+
+
+class CampaignRollupResponse(BaseModel):
+    """The campaign board: identity + per-status/per-reason rollups + every row.
+
+    Computed LIVE from the citations table (the rows are the truth; the campaign row
+    is identity + the persisted skip ledger). ``stuck`` counts in-flight rows whose
+    ``updated_at`` sat unmoved past the staleness threshold — the "no worker is
+    consuming this" signal that turned 2026-09-01 into an evening of guessing."""
+
+    id: str
+    client: str
+    created_at: str = Field(serialization_alias="createdAt")
+    requested: int
+    queued: int
+    estimated_cost: float = Field(serialization_alias="estimatedCost")
+    by_status: dict[str, int] = Field(serialization_alias="byStatus")
+    by_blocked_reason: dict[str, int] = Field(serialization_alias="byBlockedReason")
+    stuck: int
+    live_urls: list[CitationLiveUrl] = Field(serialization_alias="liveUrls")
+    skipped: list[CitationSkip] = Field(default_factory=list)
+    rows: list[CampaignRowResponse]
 
 
 # --- gap analysis ----------------------------------------------------------------

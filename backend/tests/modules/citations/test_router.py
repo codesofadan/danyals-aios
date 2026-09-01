@@ -90,6 +90,7 @@ class FakeCitationsRepo:
         # plus a record of every change event + flag the router produced.
         self.profile_citations: dict[str, list[dict[str, Any]]] = {}
         self.nap_changes: list[dict[str, Any]] = []
+        self.campaigns: dict[str, dict[str, Any]] = {}
         self._next_id = 1
 
     def client_business_profile_for(self, client_id: str) -> dict[str, Any] | None:
@@ -188,7 +189,9 @@ class FakeCitationsRepo:
         # populate `requeueable` directly when exercising the retry path.
         return dict(self.requeueable.get(client_id, {}))
 
-    def requeue_citation(self, citation_id: str) -> dict[str, Any] | None:
+    def requeue_citation(
+        self, citation_id: str, campaign_id: str | None = None
+    ) -> dict[str, Any] | None:
         row = {"id": citation_id, "submit_status": "queued", "error": ""}
         self.requeued.append(citation_id)
         return row
@@ -199,6 +202,31 @@ class FakeCitationsRepo:
         row = {"id": row_id, **kwargs}
         self.queued.append(row)
         return row
+
+    # --- campaign identity (0120) ------------------------------------------------
+    def create_campaign(self, **kwargs: Any) -> dict[str, Any] | None:
+        row = {"id": f"camp-{self._next_id}", "queued": 0, "estimated_cost": 0.0,
+               "skipped": [], "created_at": None, **kwargs}
+        self._next_id += 1
+        self.campaigns[row["id"]] = row
+        return row
+
+    def finalize_campaign(self, campaign_id: str, **kwargs: Any) -> None:
+        self.campaigns.get(campaign_id, {}).update(kwargs)
+
+    def list_campaigns(self, client_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        rows = [
+            {**c, "live_count": 0}
+            for c in self.campaigns.values()
+            if client_id is None or c.get("client_id") == client_id
+        ]
+        return rows[:limit]
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
+        return self.campaigns.get(campaign_id)
+
+    def campaign_citations(self, campaign_id: str) -> list[dict[str, Any]]:
+        return [r for r in self.queued if r.get("campaign_id") == campaign_id]
 
 
 def _user(role: str, uid: str = "00000000-0000-0000-0000-0000000000a1") -> CurrentUser:

@@ -329,21 +329,25 @@ class CitationsRepo:
             )
             return {str(r["directory_id"]): str(r["id"]) for r in cur.fetchall()}
 
-    def requeue_citation(self, citation_id: str) -> dict[str, Any] | None:
+    def requeue_citation(
+        self, citation_id: str, campaign_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Reset one blocked/failed row back to ``queued`` (clearing the stale
         error AND the stale blocked_reason) so the submit worker picks it up again.
 
         blocked_reason used to survive the reset, so a requeued row carried last
         campaign's verdict into its fresh life — and any surface mapping the code to
-        a sentence explained a hold that no longer existed."""
+        a sentence explained a hold that no longer existed. The requeue also restamps
+        campaign_id: the row now belongs to the campaign that revived it."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.citations "
                 "set submit_status = 'queued', error = '', blocked_reason = '', "
-                "    action = 'Submit' "
+                "    action = 'Submit', "
+                "    campaign_id = coalesce(%s::uuid, campaign_id) "
                 "where id = %s and submit_status in ('blocked', 'failed') "
                 "returning *",
-                (citation_id,),
+                (campaign_id, citation_id),
             )
             return cur.fetchone()
 
@@ -356,6 +360,7 @@ class CitationsRepo:
         directory_name: str,
         business_profile_id: str,
         submit_method: str,
+        campaign_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Insert one queued citation row for a campaign. ``directory`` (the legacy
         free-text column the existing ``GET /offpage/citations`` read endpoint
@@ -366,12 +371,92 @@ class CitationsRepo:
             cur.execute(
                 "insert into public.citations "
                 "(client_id, client_name, directory, nap_status, action, "
-                " directory_id, business_profile_id, submit_status, submit_method) "
-                "values (%s, %s, %s, 'missing', 'Submit', %s, %s, 'queued', %s) "
+                " directory_id, business_profile_id, submit_status, submit_method, "
+                " campaign_id) "
+                "values (%s, %s, %s, 'missing', 'Submit', %s, %s, 'queued', %s, %s) "
                 "returning *",
-                (client_id, client_name, directory_name, directory_id, business_profile_id, submit_method),
+                (client_id, client_name, directory_name, directory_id,
+                 business_profile_id, submit_method, campaign_id),
             )
             return cur.fetchone()
+
+
+    # --- campaigns (0120): the batch as a durable thing --------------------------
+    def create_campaign(
+        self,
+        *,
+        client_id: str,
+        client_name: str,
+        created_by: str,
+        requested: int,
+        params: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Insert the campaign identity BEFORE the fan-out, so every queued row can
+        carry its id and a crash mid-loop still leaves an inspectable record."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "insert into public.citation_campaigns "
+                "(client_id, client_name, created_by, requested, params) "
+                "values (%s, %s, %s, %s, %s) returning *",
+                (client_id, client_name, created_by, requested, Jsonb(params)),
+            )
+            return cur.fetchone()
+
+    def finalize_campaign(
+        self,
+        campaign_id: str,
+        *,
+        queued: int,
+        estimated_cost: float,
+        skipped: list[dict[str, str]],
+    ) -> None:
+        """Record what actually happened: rows queued, the estimate shown, and the
+        full skip ledger that used to evaporate with the HTTP response."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.citation_campaigns "
+                "set queued = %s, estimated_cost = %s, skipped = %s where id = %s",
+                (queued, estimated_cost, Jsonb(skipped), campaign_id),
+            )
+
+    def list_campaigns(self, client_id: str | None = None, limit: int = 20) -> _Rows:
+        query = (
+            "select c.*, "
+            "  (select count(*) from public.citations ct "
+            "     where ct.campaign_id = c.id and ct.submit_status in ('live','verified')) "
+            "  as live_count "
+            "from public.citation_campaigns c"
+        )
+        params: list[Any] = []
+        if client_id is not None:
+            query += " where c.client_id = %s"
+            params.append(client_id)
+        query += " order by c.created_at desc limit %s"
+        params.append(limit)
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.citation_campaigns where id = %s limit 1",
+                (campaign_id,),
+            )
+            return cur.fetchone()
+
+    def campaign_citations(self, campaign_id: str) -> _Rows:
+        """Every row the campaign queued, for the rollup — computed LIVE from the
+        citations table so the campaign record can never disagree with the rows."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, directory, submit_status, blocked_reason, error, "
+                "       live_url, updated_at "
+                "from public.citations where campaign_id = %s "
+                "order by directory",
+                (campaign_id,),
+            )
+            return cur.fetchall()
 
 
 class CitationQueueRepo:

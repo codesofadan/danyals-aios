@@ -20,7 +20,6 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -46,6 +45,9 @@ from app.modules.citations.schemas import (
     AuditPlanResponse,
     BusinessProfileRequest,
     BusinessProfileResponse,
+    CampaignRollupResponse,
+    CampaignRowResponse,
+    CampaignSummaryResponse,
     CitationCampaignRequest,
     CitationCampaignResponse,
     CitationLiveUrl,
@@ -81,6 +83,7 @@ from app.modules.citations.service import (
     job_from_row,
     select_campaign_directories,
     submit_method_label,
+    summarize_campaign_rows,
 )
 from app.modules.citations.verticals import normalize_vertical
 from app.services.activity import record_activity
@@ -484,9 +487,26 @@ async def create_campaign(
     skipped_manual = sum(1 for r in all_market_rows if r.get("tier") == "manual_only")
     fresh = [d for d in selection.selected if str(d["id"]) not in existing]
 
-    # One id for the whole fan-out. W1.2 replaces this with the citation_campaigns
-    # row id; until then a fresh uuid still groups the batch in job_runs.
-    campaign_correlation = str(uuid4())
+    # THE CAMPAIGN IS A THING (0120). Created BEFORE the fan-out so every queued row
+    # carries its id, the job ledger groups on it, and a crash mid-loop still leaves
+    # an inspectable record instead of orphan rows.
+    campaign_row = await asyncio.to_thread(
+        repo.create_campaign,
+        client_id=body.client_id,
+        client_name=name,
+        created_by=actor.id,
+        requested=len(selection.selected),
+        params={
+            "markets": markets,
+            "tiers": sorted(tiers),
+            "cap": cap,
+            "minAuthority": min_authority,
+            "vertical": vertical,
+            "includeMarketplaces": body.include_marketplaces,
+            "directoryIds": [str(d) for d in (body.directory_ids or [])],
+        },
+    )
+    campaign_id = str(campaign_row["id"]) if campaign_row else ""
     queued_ids: list[str] = []
     for directory in fresh:
         did = str(directory["id"])
@@ -495,7 +515,7 @@ async def create_campaign(
         # cost-gate hold must not permanently fence a directory off.
         stale_id = requeueable.get(did)
         if stale_id is not None:
-            row = await asyncio.to_thread(repo.requeue_citation, stale_id)
+            row = await asyncio.to_thread(repo.requeue_citation, stale_id, campaign_id or None)
         else:
             row = await asyncio.to_thread(
                 repo.queue_citation,
@@ -505,19 +525,31 @@ async def create_campaign(
                 directory_name=str(directory.get("name", "")),
                 business_profile_id=business_profile_id,
                 submit_method=submit_method_label(directory),
+                campaign_id=campaign_id or None,
             )
         if row is None:
             continue
         queued_ids.append(str(row["id"]))
-        enqueue(str(row["id"]), client_id=body.client_id, correlation_id=campaign_correlation)
+        enqueue(str(row["id"]), client_id=body.client_id, correlation_id=campaign_id)
 
     settings = get_settings()
     estimated_cost = estimate_campaign_cost(fresh, settings)
+    # Persist what actually happened — including the skip ledger that used to
+    # evaporate with this HTTP response.
+    if campaign_id:
+        await asyncio.to_thread(
+            repo.finalize_campaign,
+            campaign_id,
+            queued=len(queued_ids),
+            estimated_cost=estimated_cost,
+            skipped=list(selection.skipped),
+        )
     await record_activity(
         actor, kind="content", action=f"queued a citation campaign ({len(queued_ids)} directories)",
         target=name, entity_type="client", entity_id=body.client_id,
     )
     return CitationCampaignResponse(
+        campaign_id=campaign_id,
         queued=len(queued_ids),
         already_queued=len(selection.selected) - len(fresh),
         skipped_manual_only=skipped_manual,
@@ -528,6 +560,62 @@ async def create_campaign(
         excluded_low_authority=selection.excluded_low_authority,
         excluded_marketplace=selection.excluded_marketplace,
         capped=selection.capped,
+    )
+
+
+# --- campaign identity (0120): list + rollup --------------------------------------
+
+
+@router.get("/campaigns", response_model=list[CampaignSummaryResponse])
+async def list_campaigns(
+    repo: CitationsRepoDep,
+    _user: ViewReports,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+) -> list[CampaignSummaryResponse]:
+    """Recent campaigns, newest first — how the workspace finds the current one
+    without the operator holding an id."""
+    rows = await asyncio.to_thread(repo.list_campaigns, client_id)
+    return [CampaignSummaryResponse.from_row(r) for r in rows]
+
+
+@router.get("/campaigns/{campaign_id}", response_model=CampaignRollupResponse)
+async def campaign_rollup(
+    campaign_id: str, repo: CitationsRepoDep, _user: ViewReports
+) -> CampaignRollupResponse:
+    """The campaign board: per-status and per-reason rollups plus every row, computed
+    LIVE from the citations table so this can never disagree with the rows. ``stuck``
+    counts in-flight rows whose updated_at sat unmoved past the staleness threshold —
+    the "no worker is consuming this" signal."""
+    campaign = await asyncio.to_thread(repo.get_campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    rows = await asyncio.to_thread(repo.campaign_citations, campaign_id)
+    rollup = summarize_campaign_rows(rows, now=datetime.now(UTC))
+    created = campaign.get("created_at")
+    skipped_raw = campaign.get("skipped") or []
+    return CampaignRollupResponse(
+        id=str(campaign["id"]),
+        client=str(campaign.get("client_name") or ""),
+        created_at=created.isoformat() if isinstance(created, datetime) else str(created or ""),
+        requested=int(campaign.get("requested") or 0),
+        queued=int(campaign.get("queued") or 0),
+        estimated_cost=float(campaign.get("estimated_cost") or 0.0),
+        by_status=rollup["by_status"],
+        by_blocked_reason=rollup["by_blocked_reason"],
+        stuck=rollup["stuck"],
+        live_urls=[CitationLiveUrl(**u) for u in rollup["live_urls"]],
+        skipped=[CitationSkip(**sk) for sk in skipped_raw if isinstance(sk, dict)],
+        rows=[
+            CampaignRowResponse(
+                id=str(r["id"]),
+                directory=str(r.get("directory") or ""),
+                submit_status=str(r.get("submit_status") or "not_started"),
+                blocked_reason=str(r.get("blocked_reason") or ""),
+                live_url=str(r.get("live_url") or ""),
+                detail=str(r.get("error") or "")[:300],
+            )
+            for r in rows
+        ],
     )
 
 

@@ -729,6 +729,41 @@ def build_audit_plan(
     return plan
 
 
+def summarize_campaign_rows(
+    rows: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+    stuck_after_minutes: int = DEFAULT_STUCK_AFTER_MINUTES,
+) -> dict[str, Any]:
+    """Pure rollup of a campaign's citation rows: per-status counts, per-reason counts
+    for the held rows, the stuck tally, and the live URLs. The board renders exactly
+    this; computing it from the rows means the campaign record can never disagree
+    with them."""
+    by_status: dict[str, int] = {}
+    by_reason: dict[str, int] = {}
+    stuck = 0
+    live_urls: list[dict[str, str]] = []
+    for row in rows:
+        submit = str(row.get("submit_status") or "not_started")
+        by_status[submit] = by_status.get(submit, 0) + 1
+        reason = str(row.get("blocked_reason") or "")
+        if reason and submit in ("blocked", "ready_for_human"):
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+        if submit in _IN_FLIGHT_SUBMIT and _is_stale(row, now, stuck_after_minutes):
+            stuck += 1
+        live = str(row.get("live_url") or "")
+        if submit in _LIVE_SUBMIT and live:
+            live_urls.append(
+                {"directory": str(row.get("directory") or ""), "url": live, "status": submit}
+            )
+    return {
+        "by_status": by_status,
+        "by_blocked_reason": by_reason,
+        "stuck": stuck,
+        "live_urls": live_urls,
+    }
+
+
 def job_from_row(row: dict[str, Any]) -> CitationJob:
     """Build the engine-facing ``CitationJob`` from a joined citation+directory+
     business_profile row (see ``repo.load_citation_with_directory``)."""
