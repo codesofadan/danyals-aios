@@ -209,6 +209,38 @@ def projected_completion(schedule: Sequence[tuple[str, datetime]]) -> datetime |
     return max((slot for _id, slot in schedule), default=None)
 
 
+def burst_refusal(
+    *, now: datetime, history: Sequence[Placement], caps: PacingCaps
+) -> str | None:
+    """Why one MORE single property may not be created for this client right now.
+
+    The campaign door caps one request at ``max_properties_per_client_campaign``; the
+    single-property door had no cap at all, so calling it N times recreated exactly the
+    burst the campaign cap exists to stop. Same ceiling, expressed per rolling window:
+    at most the campaign cap within ``min_days_between_client_properties`` days.
+
+    Counts only placements carrying a timestamp (the caller's history already drops
+    unstamped drafts), so the cap guards the LIVE footprint; drafting spend is gated
+    separately. A future-scheduled placement counts - it is part of the same burst.
+    Returns the refusal string, or ``None`` when the property may be created.
+    """
+    cap = caps.max_properties_per_client_campaign
+    if cap <= 0:  # the cap is lifted deliberately (settings), not silently
+        return None
+    window_days = caps.min_days_between_client_properties
+    floor = _utc(now) - timedelta(days=window_days)
+    recent = sum(1 for p in history if _utc(p.published_at) >= floor)
+    if recent < cap:
+        return None
+    return (
+        f"This client already has {recent} Web 2.0 propert"
+        f"{'y' if recent == 1 else 'ies'} placed or scheduled in the last {window_days} "
+        f"days - the same ceiling a campaign is held to ({cap} per {window_days} days). "
+        "A burst of singles reads exactly like an unpaced campaign. Raise the pacing cap "
+        "deliberately in settings if this client genuinely warrants more."
+    )
+
+
 def _same_day(a: datetime, b: datetime) -> bool:
     return _utc(a).date() == _utc(b).date()
 

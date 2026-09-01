@@ -786,6 +786,36 @@ async def test_the_single_property_route_refuses_a_platform_with_no_account(
     assert writes == []
 
 
+async def test_the_single_property_route_is_held_to_the_campaign_burst_ceiling(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """A campaign request is capped at max_properties_per_client_campaign, but N calls
+    to /plan were uncapped - the identical burst through a different door. At the cap,
+    the door refuses BEFORE anything is created or spent, naming the ceiling."""
+    from datetime import UTC, datetime, timedelta
+
+    repo.client_names = {"cl-1": "Acme Roofing"}
+    repo.pacing_caps_row = lambda: {  # type: ignore[method-assign]
+        "publish_jitter_max_hours": 0, "max_properties_per_client_campaign": 2,
+        "min_days_between_client_properties": 14,
+    }
+    recent = datetime.now(UTC) - timedelta(days=1)
+    repo.client_publish_history = lambda client_id, days=120: [  # type: ignore[method-assign]
+        {"id": "w2-a", "platform": "Blogger", "published_at": recent},
+        {"id": "w2-b", "platform": "Tumblr", "published_at": recent},
+    ]
+    writes, _ = web2_enqueues
+    wire("manager", "u-lead")
+
+    resp = await client.post("/api/v1/offpage/web2/plan", json=_plan_body())
+
+    assert resp.status_code == 422, resp.text
+    assert "2 per 14 days" in resp.text
+    assert repo.created_web2 == [], "nothing may be created past the ceiling"
+    assert writes == [], "and nothing may be queued to spend on"
+
+
 async def test_web2_plan_is_lead_only(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]],

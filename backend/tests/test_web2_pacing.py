@@ -21,6 +21,7 @@ import pytest
 from app.services.web2_pacing import (
     PacingCaps,
     Placement,
+    burst_refusal,
     earliest_slot,
     projected_completion,
     schedule_campaign,
@@ -197,3 +198,47 @@ def test_loosened_caps_genuinely_compress_the_schedule() -> None:
         properties=props,
     )
     assert projected_completion(loose) < projected_completion(tight)  # type: ignore[operator]
+
+
+# --------------------------------------------------------------------------- #
+# The single-property burst cap (parity with the campaign door).
+# --------------------------------------------------------------------------- #
+def _placed(days_ago: float) -> Placement:
+    return Placement(published_at=NOW - timedelta(days=days_ago), client_id=CLIENT)
+
+
+def test_a_client_under_the_cap_may_add_a_single_property() -> None:
+    caps = PacingCaps(max_properties_per_client_campaign=4, min_days_between_client_properties=14)
+    assert burst_refusal(now=NOW, history=[_placed(1), _placed(2)], caps=caps) is None
+
+
+def test_singles_are_held_to_the_same_ceiling_as_a_campaign() -> None:
+    """N calls to /plan is the same burst as one N-property campaign through another
+    door. At the cap, the door closes with the ceiling named."""
+    caps = PacingCaps(max_properties_per_client_campaign=3, min_days_between_client_properties=14)
+    refusal = burst_refusal(
+        now=NOW, history=[_placed(1), _placed(3), _placed(5)], caps=caps
+    )
+    assert refusal is not None
+    assert "3 per 14 days" in refusal
+
+
+def test_old_placements_age_out_of_the_burst_window() -> None:
+    """The cap is a pace, not a lifetime quota: work older than the window is exactly
+    the low-and-slow pattern the module wants."""
+    caps = PacingCaps(max_properties_per_client_campaign=2, min_days_between_client_properties=14)
+    history = [_placed(20), _placed(30), _placed(1)]
+    assert burst_refusal(now=NOW, history=history, caps=caps) is None
+
+
+def test_a_future_scheduled_placement_counts_toward_the_burst() -> None:
+    caps = PacingCaps(max_properties_per_client_campaign=2, min_days_between_client_properties=14)
+    history = [_placed(1), _placed(-2)]  # one placed yesterday, one scheduled in 2 days
+    assert burst_refusal(now=NOW, history=history, caps=caps) is not None
+
+
+def test_a_lifted_cap_disables_the_burst_guard_deliberately() -> None:
+    """cap <= 0 is the operator's explicit choice in settings - the same convention the
+    campaign planner honours - not a silent failure mode."""
+    caps = PacingCaps(max_properties_per_client_campaign=0)
+    assert burst_refusal(now=NOW, history=[_placed(0.1)] * 50, caps=caps) is None

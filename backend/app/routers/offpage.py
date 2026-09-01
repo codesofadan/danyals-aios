@@ -438,6 +438,23 @@ async def plan_web2(
             detail=(refusals[0] if refusals else f"{body.platform} cannot be used for this client."),
         )
 
+    # The one campaign guard this door still lacked: the burst cap. A campaign request
+    # is capped at max_properties_per_client_campaign, but N calls to this route were
+    # uncapped - the same burst through a different door.
+    from app.services.web2_pacing import burst_refusal
+
+    pacing_refusal = await asyncio.to_thread(
+        lambda: burst_refusal(
+            now=datetime.now(UTC),
+            history=_history(repo, body.client_id),
+            caps=_pacing_caps(repo),
+        )
+    )
+    if pacing_refusal:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=pacing_refusal
+        )
+
     # R2-14: an exact-match commercial anchor has no editorial justification, and catching
     # it at review means discarding paid work rather than preventing it.
     from app.services.web2_anchor import check_anchor
