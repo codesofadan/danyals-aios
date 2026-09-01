@@ -66,6 +66,7 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
     if (!clientId || ensureProfile.isPending) return;
     ensureProfile.mutate(clientId, { onSuccess: (row) => setProfileId(row.id) });
   }
+  // (its isError is rendered beside the button below)
 
   const [markets, setMarkets] = useState<Set<BusinessMarket>>(new Set(["US", "GLOBAL"]));
   const [tiers, setTiers] = useState<Set<DirectoryTier>>(new Set(AUTOMATABLE_TIERS));
@@ -312,6 +313,11 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                   <button type="submit" className="primary-btn" disabled={!canSaveProfile || createProfile.isPending}>
                     {createProfile.isPending ? "Saving…" : "Save profile"}
                   </button>
+                  {createProfile.isError && (
+                    <div className="op-note crit" style={{ marginTop: 8 }}>
+                      Couldn&apos;t save the profile — {(createProfile.error as Error)?.message ?? "try again"}.
+                    </div>
+                  )}
                 </div>
               </form>
             )}
@@ -386,12 +392,23 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                     often charge — excluded by default; opt in deliberately.
                   </div>
                 </div>
-                <div className="op-muted">
-                  {previewCount} directories match this market/tier before vertical + authority
-                  filtering. The campaign auto-matches the client&apos;s industry, drops the
+                <div className="op-muted" style={{ whiteSpace: "normal" }}>
+                  {previewQ.isLoading
+                    ? "Counting matching directories…"
+                    : previewQ.isError
+                      ? "Couldn't count matching directories — the estimate below still applies on dispatch."
+                      : `${previewCount} directories match this market/tier before vertical + authority filtering.`}{" "}
+                  The campaign auto-matches the client&apos;s industry, drops the
                   sub-DA-30 tail, builds in authority order and caps at ~45 — the exact queued
                   count and what was excluded are confirmed on dispatch.
                 </div>
+                {createCampaign.isError && (
+                  <div className="op-note crit" style={{ marginTop: 8 }}>
+                    Couldn&apos;t queue the campaign —{" "}
+                    {(createCampaign.error as Error)?.message ?? "try again"}. Nothing was
+                    queued and nothing was charged.
+                  </div>
+                )}
                 <div className="modal-f">
                   <button type="button" className="ghostbtn" onClick={onClose}>Cancel</button>
                   <button className="primary-btn" onClick={dispatch} disabled={!canDispatch || createCampaign.isPending}>

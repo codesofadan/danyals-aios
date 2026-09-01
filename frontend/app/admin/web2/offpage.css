@@ -18,7 +18,10 @@
 /* --- table extras ------------------------------------------------------- */
 .op-tbl { min-width: 720px; }
 .op-strong { font-weight: 700; color: var(--ink); white-space: nowrap; }
-.op-muted { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Table-cell style. nowrap is scoped to tables below — this class kept getting
+   borrowed for explanatory PARAGRAPHS, which then rendered as one clipped line. */
+.op-muted { color: var(--muted); font-variant-numeric: tabular-nums; }
+.op-tbl .op-muted { white-space: nowrap; }
 .op-domain { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--lilac); }
 .op-anchor { color: var(--body); }
 .op-empty { text-align: center; color: var(--muted); padding: 26px 0 !important; font-weight: 600; }
@@ -71,12 +74,23 @@
 .w2-plat-check { font-size: 18px; color: var(--muted); }
 .w2-plat.on .w2-plat-check { color: var(--violet, #7b69ee); }
 
-/* bulk-update confirmation flash */
+/* action-result flash. Default = success green; err/warn variants exist because for a
+   while EVERY failure rendered in this green with a checkmark — an operator watching a
+   campaign refuse was told, visually, that it worked. An onError handler may only ever
+   use .err. */
 .op-flash { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 14px;
   border-radius: 11px; font-size: 12.5px; font-weight: 700; color: var(--ok);
   background: color-mix(in srgb, var(--ok) 10%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 28%, transparent);
   animation: op-fade .28s ease; }
 .op-flash .material-symbols-rounded { font-size: 18px; }
+.op-flash.err { color: var(--crit);
+  background: color-mix(in srgb, var(--crit) 10%, transparent);
+  border-color: color-mix(in srgb, var(--crit) 28%, transparent); }
+.op-flash.warn { color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+/* Authored sentences with a tone belong in .op-note / .op-token — defined in
+   globals.css (the Settings screen needs them too), NOT here. */
 
 /* --- web 2.0: platform + url ------------------------------------------- */
 .op-plat { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--ink); white-space: nowrap; }

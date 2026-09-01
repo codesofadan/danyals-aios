@@ -38,7 +38,13 @@ export default function CitationsTab() {
   const list: Citation[] = citationsQ.data ?? [];
   const bulk = useBulkUpdateCitations();
   const act = useActOnCitation();
-  const [flash, setFlash] = useState<string | null>(null);
+  // Tone travels with the message: for a while every FAILURE here rendered in the
+  // success green with a checkmark, which is how a refused campaign read as done.
+  const [flash, setFlashState] = useState<{ tone: "ok" | "warn" | "err"; msg: string } | null>(null);
+  function setFlash(tone: "ok" | "warn" | "err", msg: string, ms = 4200) {
+    setFlashState({ tone, msg });
+    window.setTimeout(() => setFlashState(null), ms);
+  }
   const [showCampaign, setShowCampaign] = useState(false);
   const [gapClient, setGapClient] = useState("");
   const clientsQ = useClients();
@@ -84,16 +90,14 @@ export default function CitationsTab() {
         // for it only when the ledger could not be read back - the sweep is still
         // queued, but nothing can report on it, and a panel that stays empty for
         // that reason must not read as "nothing is happening".
-        setFlash(
-          r?.jobRunId
-            ? (r?.detail ?? "Citation audit queued — discovering existing vs missing.")
-            : "Audit queued, but its run could not be recorded — there is nothing to follow here. Check Operations, or re-run it.",
-        );
-        window.setTimeout(() => setFlash(null), 4200);
+        if (r?.jobRunId) {
+          setFlash("ok", r?.detail ?? "Citation audit queued — discovering existing vs missing.");
+        } else {
+          setFlash("warn", "Audit queued, but its run could not be recorded — there is nothing to follow here. Check Operations, or re-run it.");
+        }
       },
       onError: (err) => {
-        setFlash(`Audit couldn't start — ${(err as Error)?.message ?? "add the client's NAP first"}.`);
-        window.setTimeout(() => setFlash(null), 4200);
+        setFlash("err", `Audit couldn't start — ${(err as Error)?.message ?? "add the client's NAP first"}.`);
       },
     });
   }
@@ -104,12 +108,10 @@ export default function CitationsTab() {
     if (!window.confirm("Remove ALL citation rows for this client? It can then be re-audited fresh.")) return;
     clearCitations.mutate(gapClient, {
       onSuccess: (r) => {
-        setFlash(`Cleared ${r?.removed ?? 0} citation row(s) — run an audit to rediscover.`);
-        window.setTimeout(() => setFlash(null), 4200);
+        setFlash("ok", `Cleared ${r?.removed ?? 0} citation row(s) — run an audit to rediscover.`);
       },
       onError: (err) => {
-        setFlash(`Clear failed — ${(err as Error)?.message ?? "try again"}.`);
-        window.setTimeout(() => setFlash(null), 4200);
+        setFlash("err", `Clear failed — ${(err as Error)?.message ?? "try again"}.`);
       },
     });
   }
@@ -121,12 +123,10 @@ export default function CitationsTab() {
       { id: c.id, action: c.action },
       {
         onSuccess: () => {
-          setFlash(`${c.action === "Submit" ? "Submitted" : "Updated"} ${c.directory} — NAP synced.`);
-          window.setTimeout(() => setFlash(null), 3200);
+          setFlash("ok", `${c.action === "Submit" ? "Submitted" : "Updated"} ${c.directory} — NAP synced.`, 3200);
         },
         onError: (err) => {
-          setFlash(`${c.action} failed — ${(err as Error)?.message ?? "try again"}.`);
-          window.setTimeout(() => setFlash(null), 3200);
+          setFlash("err", `${c.action} failed — ${(err as Error)?.message ?? "try again"}.`, 3200);
         },
       },
     );
@@ -153,12 +153,10 @@ export default function CitationsTab() {
     const ids = list.filter((c) => c.nap === "inconsistent").map((c) => c.id);
     bulk.mutate(ids, {
       onSuccess: () => {
-        setFlash(`Reconciled ${inconsistentCount} inconsistent listing${inconsistentCount > 1 ? "s" : ""} — NAP synced.`);
-        window.setTimeout(() => setFlash(null), 3200);
+        setFlash("ok", `Reconciled ${inconsistentCount} inconsistent listing${inconsistentCount > 1 ? "s" : ""} — NAP synced.`, 3200);
       },
       onError: (err) => {
-        setFlash(`Bulk update failed — ${(err as Error)?.message ?? "try again"}.`);
-        window.setTimeout(() => setFlash(null), 3200);
+        setFlash("err", `Bulk update failed — ${(err as Error)?.message ?? "try again"}.`, 3200);
       },
     });
   }
@@ -178,8 +176,11 @@ export default function CitationsTab() {
       )}
 
       {flash && (
-        <div className="op-flash">
-          <span className="material-symbols-rounded">task_alt</span>{flash}
+        <div className={`op-flash ${flash.tone === "ok" ? "" : flash.tone}`}>
+          <span className="material-symbols-rounded">
+            {flash.tone === "ok" ? "task_alt" : flash.tone === "warn" ? "warning" : "error"}
+          </span>
+          {flash.msg}
         </div>
       )}
 
@@ -191,7 +192,11 @@ export default function CitationsTab() {
             Audited&nbsp;<b>{gap?.client ?? "client"}</b>
           </span>
           <span className="op-muted" style={{ fontSize: 13 }}>
-            {gap?.existingCount ?? 0} existing · {gap?.missingCount ?? 0} missing from catalog
+            {gapQ.isLoading
+              ? "counting…"
+              : gapQ.isError
+                ? "gap analysis unavailable — retry from Change client"
+                : `${gap?.existingCount ?? 0} existing · ${gap?.missingCount ?? 0} missing from catalog`}
           </span>
           <button className="ghostbtn" style={{ marginLeft: "auto" }} onClick={() => setAuditCollapsed(false)}>
             <span className="material-symbols-rounded">tune</span> Change client / re-audit

@@ -47,7 +47,12 @@ export default function CitationQueue() {
   const [blockReason, setBlockReason] = useState<QueueBlockReason>("captcha_wall");
   const [showBlock, setShowBlock] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  // Tone travels with the message — the old single-string flash rendered clipboard
+  // failures and "queue empty" in the same success green as a verified listing.
+  const [flash, setFlashState] = useState<{ tone: "ok" | "warn" | "err"; msg: string } | null>(null);
+  function setFlash(tone: "ok" | "warn" | "err", msg: string) {
+    setFlashState({ tone, msg });
+  }
   const [copied, setCopied] = useState<string | null>(null);
 
   // Elapsed time on the current item. Ticks locally; banked on every heartbeat and on
@@ -115,7 +120,10 @@ export default function CitationQueue() {
       onSuccess: (next) => {
         reset();
         setItem(next);
-        if (!next) setFlash("Nothing waiting — the queue is empty.");
+        if (!next) setFlash("warn", "Nothing waiting — the queue is empty.");
+      },
+      onError: (err) => {
+        setFlash("err", `Couldn't take an item — ${(err as Error)?.message ?? "try again"}.`);
       },
     });
   }
@@ -132,7 +140,7 @@ export default function CitationQueue() {
       {
         onSuccess: (res) => {
           if (res.accepted) {
-            setFlash(`Live — verified on the page in ${mmss(elapsed)}.`);
+            setFlash("ok", `Live — verified on the page in ${mmss(elapsed)}.`);
             reset();
           } else {
             // NOT an error. The commonest cause is a directory that accepted the
@@ -140,6 +148,17 @@ export default function CitationQueue() {
             // live yet" is the honest answer and the right move is Release.
             setRefusal(res.reason || "The business wasn't found on that page.");
           }
+        },
+        onError: (err) => {
+          // A thrown failure is different from a refusal: the check itself never ran.
+          // The likeliest cause mid-shift is an expired claim lease (the server 409s).
+          const msg = (err as Error)?.message ?? "";
+          setFlash(
+            "err",
+            /expired|claim/i.test(msg)
+              ? "Your claim on this item expired — it went back to the queue. Take it again."
+              : `Couldn't check that URL — ${msg || "try again"}.`,
+          );
         },
       },
     );
@@ -151,8 +170,11 @@ export default function CitationQueue() {
       { citationId: item.citationId, reason: blockReason, detail: note, workedSeconds: unbanked() },
       {
         onSuccess: () => {
-          setFlash("Recorded as blocked. That's a useful answer — thank you.");
+          setFlash("ok", "Recorded as blocked. That's a useful answer — thank you.");
           reset();
+        },
+        onError: (err) => {
+          setFlash("err", `Couldn't record the block — ${(err as Error)?.message ?? "try again"}.`);
         },
       },
     );
@@ -162,7 +184,12 @@ export default function CitationQueue() {
     if (!item) return;
     release.mutate(
       { citationId: item.citationId, workedSeconds: unbanked() },
-      { onSuccess: () => { setFlash("Item returned to the queue."); reset(); } },
+      {
+        onSuccess: () => { setFlash("ok", "Item returned to the queue."); reset(); },
+        onError: (err) => {
+          setFlash("err", `Couldn't put it back — ${(err as Error)?.message ?? "try again"}.`);
+        },
+      },
     );
   }
 
@@ -172,7 +199,7 @@ export default function CitationQueue() {
       setCopied(key);
       setTimeout(() => setCopied((c) => (c === key ? null : c)), 1200);
     } catch {
-      setFlash("Couldn't reach the clipboard — select and copy manually.");
+      setFlash("warn", "Couldn't reach the clipboard — select and copy manually.");
     }
   }
 
@@ -180,7 +207,13 @@ export default function CitationQueue() {
 
   return (
     <div>
-      {flash && <div className={w.napFlash}>{flash}</div>}
+      {flash && <div className={`op-note ${flash.tone === "err" ? "crit" : flash.tone}`}>{flash.msg}</div>}
+
+      {boardQ.isError && (
+        <div className="op-note crit" style={{ marginBottom: 10 }}>
+          The queue board couldn&apos;t load — {(boardQ.error as Error)?.message ?? "retry shortly"}.
+        </div>
+      )}
 
       <div className={w.stats}>
         <div className={w.stat}>
@@ -193,7 +226,11 @@ export default function CitationQueue() {
         </div>
         <div className={w.stat}>
           <div className={w.statNum}>
-            {board?.medianSeconds != null ? mmss(board.medianSeconds) : "not yet measured"}
+            {board?.medianSeconds != null
+              ? mmss(board.medianSeconds)
+              : board
+                ? "not yet measured"
+                : "—"}
           </div>
           <div className={w.statLbl}>Median time per finished item</div>
         </div>
@@ -211,7 +248,7 @@ export default function CitationQueue() {
       {item && (
         <div className={w.step} style={{ marginTop: 14 }}>
           {item.prohibitedWarning && (
-            <div className="status-pill op-crit" style={{ display: "block", padding: 12 }}>
+            <div className="op-note crit">
               <b>Do not submit.</b> {item.prohibitedWarning}
             </div>
           )}
@@ -227,9 +264,12 @@ export default function CitationQueue() {
           <div className={w.rollup}>
             <span>Why it needs a person: <b>{item.queuedBecause}</b></span>
             {item.humanAttempts > 1 && (
-              <span className="status-pill warn">
-                Attempt {item.humanAttempts} — someone has tried this before
-              </span>
+              <>
+                <span className="status-pill warn">attempt {item.humanAttempts}</span>
+                <span className="op-muted" style={{ fontSize: 12 }}>
+                  someone has tried this before — their note may say why it stalled
+                </span>
+              </>
             )}
           </div>
 
@@ -240,7 +280,7 @@ export default function CitationQueue() {
                 Open the add-listing form
               </a>
             ) : (
-              <span className="status-pill warn">
+              <span className="op-note warn">
                 No verified add-listing URL on file — start from{" "}
                 <a className="op-url" href={`https://${item.directoryUrl}`} target="_blank" rel="noreferrer">
                   {item.directoryUrl}
@@ -286,7 +326,7 @@ export default function CitationQueue() {
           />
 
           {refusal && (
-            <div className="status-pill warn" style={{ display: "block", marginTop: 8, padding: 10 }}>
+            <div className="op-note warn" style={{ marginTop: 8 }}>
               <b>Not accepted yet:</b> {refusal}
               <div style={{ marginTop: 4 }} className="op-muted">
                 If the directory hasn&apos;t published it yet, that&apos;s normal — put the

@@ -416,7 +416,11 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 .pill-tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
 .pill-tag.info { color: var(--c4); background: color-mix(in srgb, var(--c4) 12%, transparent); border-color: color-mix(in srgb, var(--c4) 30%, transparent); }
 
-/* status pills (subscription / ticket state) */
+/* status pills (subscription / ticket state).
+   LABELS ONLY — one to three words from a meta map, never an authored sentence.
+   capitalize+nowrap is correct for "Active" and catastrophic for prose: it once
+   Title-Cased a security warning and its token into a single unwrappable line.
+   Sentences go in .op-note below. */
 .status-pill { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
   text-transform: capitalize; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .status-pill.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
@@ -426,6 +430,23 @@ body.nav-pinned .main { margin-left: max(calc(var(--rail-gap) + var(--rail-open)
 /* `crit` exists so a DEGRADED outcome cannot share a colour with a successful one - a
    campaign that delivered 28 of 30 properties is not a green tick. */
 .status-pill.crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 14%, transparent); }
+
+/* Multi-line note blocks — the home for authored SENTENCES that need a tone.
+   The pill's opposite on every property that mangled prose: sentence case, wraps,
+   readable size. */
+.op-note { display: block; padding: 10px 12px; border-radius: 11px; font-size: 12.5px;
+  line-height: 1.55; font-weight: 600; text-transform: none; white-space: normal; }
+.op-note.ok   { color: var(--ok);   background: color-mix(in srgb, var(--ok) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 26%, transparent); }
+.op-note.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent); }
+.op-note.crit { color: var(--crit); background: color-mix(in srgb, var(--crit) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crit) 28%, transparent); }
+
+/* A token / id / origin is verbatim text: monospace, wraps anywhere, selects whole. */
+.op-token { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  word-break: break-all; white-space: normal; text-transform: none; user-select: all;
+  display: block; margin: 8px 0; }
 
 /* tier chip */
 .tier-chip { display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; letter-spacing: .02em;

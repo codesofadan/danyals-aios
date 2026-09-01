@@ -22,7 +22,16 @@ type MintedToken = {
   scopes: string[];
   expiresAt: string;
   deviceLabel: string;
+  /** The address the extension must be paired against — stated by the server that
+   *  minted the token, never guessed. (The 2026-09-01 outage: extension on :8000,
+   *  dashboard on :8099, and no surface anywhere could say so.) */
+  apiBase: string;
   warning: string;
+};
+
+type PairingInfo = {
+  apiBase: string;
+  allowedExtensionOrigins: string[];
 };
 
 type TokenRow = {
@@ -54,6 +63,13 @@ export default function ExtensionTab() {
   const tokensQ = useQuery({
     queryKey: ["extension-tokens"],
     queryFn: () => api.get<TokenRow[]>("/extension/tokens"),
+    // "Last seen" should move while an operator tests a fresh pairing next door.
+    refetchInterval: 30_000,
+  });
+
+  const pairingQ = useQuery({
+    queryKey: ["extension-pairing-info"],
+    queryFn: () => api.get<PairingInfo>("/extension/pairing-info"),
   });
 
   const mint = useMutation({
@@ -105,27 +121,32 @@ export default function ExtensionTab() {
           </button>
         </div>
         {mint.isError && (
-          <div className="status-pill op-crit" style={{ display: "block", marginTop: 10, padding: 10 }}>
-            {(mint.error as Error).message}
+          <div className="op-note crit" style={{ marginTop: 10 }}>
+            Couldn&apos;t create a token — {(mint.error as Error).message}
           </div>
         )}
 
+        <div className="op-muted" style={{ marginTop: 12, fontSize: 12.5 }}>
+          API address to paste into the panel beside the token:{" "}
+          {pairingQ.isLoading ? (
+            <em>asking the server…</em>
+          ) : pairingQ.data?.apiBase ? (
+            <code className="op-token" style={{ display: "inline", margin: 0 }}>
+              {pairingQ.data.apiBase}
+            </code>
+          ) : (
+            <em>
+              unavailable — ask an admin; a guessed address is how pairing fails silently
+            </em>
+          )}
+        </div>
+
         {minted && (
-          <div
-            className="status-pill warn"
-            style={{ display: "block", marginTop: 12, padding: 12 }}
-          >
+          // .op-note, never .status-pill: this is a sentence plus a secret, and the pill's
+          // capitalize+nowrap once rendered the warning Title-Cased on one unwrappable line.
+          <div className="op-note warn" style={{ marginTop: 12 }}>
             <b>{minted.warning}</b>
-            <div
-              style={{
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                wordBreak: "break-all",
-                margin: "8px 0",
-                userSelect: "all",
-              }}
-            >
-              {minted.token}
-            </div>
+            <span className="op-token">{minted.token}</span>
             <button
               className="ghostbtn"
               onClick={async () => {
@@ -141,8 +162,9 @@ export default function ExtensionTab() {
               {copied ? "Copied" : "Copy"}
             </button>
             <div className="op-muted" style={{ marginTop: 8, fontSize: 12 }}>
-              Paste it into the extension&apos;s side panel. It expires {when(minted.expiresAt)} —
-              about one shift — and can reach the citation queue and nothing else.
+              Open the extension&apos;s side panel and paste the token with this address:{" "}
+              <code>{minted.apiBase}</code>. It expires {when(minted.expiresAt)} — about one
+              shift — and can reach the citation queue and nothing else.
             </div>
           </div>
         )}
@@ -169,6 +191,12 @@ export default function ExtensionTab() {
           <div className="op-muted">No devices paired yet.</div>
         )}
 
+        {revoke.isError && (
+          <div className="op-note crit" style={{ marginBottom: 8 }}>
+            Couldn&apos;t revoke that device — {(revoke.error as Error).message}
+          </div>
+        )}
+
         {rows.map((t) => {
           const dead = t.revoked || isExpired(t.expiresAt);
           return (
@@ -188,9 +216,12 @@ export default function ExtensionTab() {
               <span className={`status-pill ${dead ? "mut" : "ok"}`}>
                 {t.revoked ? "revoked" : isExpired(t.expiresAt) ? "expired" : "active"}
               </span>
+              {/* Minted but never authenticated is the exact signature of a pairing
+                  that failed in the browser — amber, because waiting won't fix it. */}
+              {!t.lastUsedAt && !dead && <span className="status-pill warn">never connected</span>}
               <span className="op-muted" style={{ fontSize: 12 }}>
-                {t.lastUsedAt ? `last used ${when(t.lastUsedAt)}` : "never used"} · expires{" "}
-                {when(t.expiresAt)}
+                {t.lastUsedAt ? `last seen ${when(t.lastUsedAt)}` : "no successful request yet"} ·
+                expires {when(t.expiresAt)}
               </span>
               {!dead && (
                 <button

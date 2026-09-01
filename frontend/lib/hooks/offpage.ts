@@ -546,7 +546,13 @@ export function useCompleteQueueItem() {
     onSuccess: (result) => {
       if (result.accepted) {
         qc.invalidateQueries({ queryKey: ["citation-queue"] });
-        qc.invalidateQueries({ queryKey: ["citations"] });
+        // The REAL keys. This used to invalidate ["citations"] — a key that matches
+        // nothing (the board's key is ["offpage","citations"]) — so finishing an item
+        // never refreshed the citations page and the two screens diverged until a hard
+        // reload. Gap + KPIs move too: a verified listing changes both.
+        qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+        qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
+        qc.invalidateQueries({ queryKey: OFFPAGE_KPIS_KEY });
       }
     },
   });
@@ -574,6 +580,9 @@ export function useBlockQueueItem() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["citation-queue"] });
+      // A block flips the row to `blocked` — the citations board and the gap must see it.
+      qc.invalidateQueries({ queryKey: CITATIONS_KEY });
+      qc.invalidateQueries({ queryKey: CITATION_GAP_KEY });
     },
   });
 }
