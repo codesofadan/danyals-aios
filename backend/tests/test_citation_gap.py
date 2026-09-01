@@ -403,3 +403,85 @@ def test_an_aliased_discovery_row_suppresses_the_catalog_entry_it_covers() -> No
 
     assert gap.covered_count == 2
     assert [d["id"] for d in gap.missing] == ["d3"]
+
+
+# --------------------------------------------------------------------------- #
+# queued is IN FLIGHT, stale-queued is STUCK — never "covered", never "built".
+# (2026-09-01: 45 rows refused in 0.9s; the ones left `queued` counted as covered
+# and the audit plan rendered their directories "built". This section re-creates
+# that exact lie and goes red if `_COVERING_SUBMIT` is ever re-unified.)
+# --------------------------------------------------------------------------- #
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+_NOW = datetime(2026, 9, 1, 18, 40, tzinfo=UTC)
+
+
+def _queued_row(minutes_old: int, *, did: str = "d1", name: str = "Yelp") -> dict[str, Any]:
+    return {
+        "id": f"c-{did}", "directory": name, "directory_id": did, "submit_status": "queued",
+        "nap_status": "missing", "proof_url": "",
+        "updated_at": _NOW - timedelta(minutes=minutes_old),
+    }
+
+
+def test_a_fresh_queued_row_is_in_flight_not_covered_and_not_missing() -> None:
+    directories = [_dir("d1", "Yelp"), _dir("d2", "Hotfrog")]
+    gap = compute_citation_gap(
+        directories=directories, existing_citations=[_queued_row(1)], now=_NOW
+    )
+    assert gap.in_flight_count == 1
+    assert gap.covered_count == 0  # nothing has been DELIVERED
+    assert gap.stuck == []
+    # deduped: a campaign must not double-queue it, so it is not "missing" either
+    assert {d["name"] for d in gap.missing} == {"Hotfrog"}
+
+
+def test_a_stale_queued_row_is_reported_stuck_by_name() -> None:
+    gap = compute_citation_gap(
+        directories=[_dir("d1", "Yelp")], existing_citations=[_queued_row(20)], now=_NOW
+    )
+    assert gap.stuck == [{"directory": "Yelp", "status": "queued"}]
+    assert gap.in_flight_count == 1
+    assert gap.covered_count == 0
+
+
+def test_without_a_clock_nothing_is_stuck_because_unknown_is_not_stuck() -> None:
+    gap = compute_citation_gap(
+        directories=[_dir("d1", "Yelp")], existing_citations=[_queued_row(20)]
+    )
+    assert gap.stuck == []
+    assert gap.in_flight_count == 1
+
+
+def test_the_audit_plan_never_tags_a_queued_directory_built() -> None:
+    directories = [_dir("d1", "Yelp"), _dir("d2", "Hotfrog")]
+    plan = build_audit_plan(
+        directories=directories,
+        existing_citations=[_queued_row(1, did="d1", name="Yelp")],
+        now=_NOW,
+    )
+    statuses = {r["name"]: r["_status"] for r in plan.country}
+    assert statuses["Yelp"] == "in_flight"  # NOT "built" — the 2026-09-01 lie
+    assert statuses["Hotfrog"] == "missing"
+
+
+def test_the_audit_plan_tags_a_stale_queued_directory_stuck() -> None:
+    plan = build_audit_plan(
+        directories=[_dir("d1", "Yelp")],
+        existing_citations=[_queued_row(25, did="d1", name="Yelp")],
+        now=_NOW,
+    )
+    assert [r["_status"] for r in plan.country] == ["stuck"]
+
+
+def test_a_delivered_row_still_tags_built() -> None:
+    plan = build_audit_plan(
+        directories=[_dir("d1", "Yelp")],
+        existing_citations=[{
+            "id": "c1", "directory": "Yelp", "directory_id": "d1",
+            "submit_status": "live", "nap_status": "consistent", "proof_url": "",
+            "live_url": "https://yelp.example/biz/1",
+        }],
+        now=_NOW,
+    )
+    assert [r["_status"] for r in plan.country] == ["built"]

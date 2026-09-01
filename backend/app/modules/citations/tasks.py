@@ -354,7 +354,19 @@ def execute_citation_submit(
         decision = _gate().evaluate(ctx)
         if not decision.allowed:
             store.update_citation(
-                citation_id, {"submit_status": "blocked", "error": f"spend_blocked:{decision.outcome}"}
+                citation_id,
+                {
+                    "submit_status": "blocked",
+                    # The stable machine code lives in blocked_reason (the rollups and
+                    # the UI's sentence map group on it); the gate's specific outcome
+                    # stays in error. This used to write NO reason at all — the one
+                    # blocked state 0106 §0.5 says must not exist.
+                    "blocked_reason": "spend_blocked",
+                    "error": (
+                        f"spend_blocked:{decision.outcome} - nothing was sent and "
+                        "nothing was charged"
+                    ),
+                },
             )
             logger.info("citation_submit_blocked", citation_id=citation_id, outcome=decision.outcome)
             return {"state": "blocked", "reason": decision.outcome}

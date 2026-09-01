@@ -331,11 +331,16 @@ class CitationsRepo:
 
     def requeue_citation(self, citation_id: str) -> dict[str, Any] | None:
         """Reset one blocked/failed row back to ``queued`` (clearing the stale
-        error) so the submit worker picks it up again."""
+        error AND the stale blocked_reason) so the submit worker picks it up again.
+
+        blocked_reason used to survive the reset, so a requeued row carried last
+        campaign's verdict into its fresh life — and any surface mapping the code to
+        a sentence explained a hold that no longer existed."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.citations "
-                "set submit_status = 'queued', error = '', action = 'Submit' "
+                "set submit_status = 'queued', error = '', blocked_reason = '', "
+                "    action = 'Submit' "
                 "where id = %s and submit_status in ('blocked', 'failed') "
                 "returning *",
                 (citation_id,),

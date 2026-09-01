@@ -9,6 +9,7 @@ queued row's ``submit_method`` routes to.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.config import Settings
@@ -425,14 +426,25 @@ def derive_business_profile_fields(client_nap: dict[str, Any]) -> dict[str, Any]
 # Gap analysis: what is already cited vs what the catalog says is still missing.
 # PURE (no DB, no network) so the whole decision is unit-testable.
 # --------------------------------------------------------------------------- #
-# A citation row COVERS its directory when it is in-flight or live; a blocked/failed/
-# never-started+missing row does NOT (it is retryable - still a gap to close).
-# `drifted` covers: the listing EXISTS, its NAP has merely gone stale, so the fix is a
-# correction and not a fresh build. `delisted` does NOT cover: the listing is gone, and
+# A citation row DEDUPES its directory (keeps it out of `missing`) when it is in-flight
+# or done; a blocked/failed/never-started+missing row does NOT (retryable - still a gap).
+# `drifted` counts as done: the listing EXISTS, its NAP has merely gone stale, so the fix
+# is a correction and not a fresh build. `delisted` does NOT: the listing is gone, and
 # that directory is an open gap again.
-_COVERING_SUBMIT: frozenset[str] = frozenset(
-    {"queued", "submitting", "submitted", "verified", "live", "drifted"}
-)
+#
+# DONE vs IN-FLIGHT is the 2026-09-01 lesson. These used to be one set, so a row stuck
+# at `queued` forever (no worker consumed its task) counted as COVERED and its directory
+# rendered "built" - 45 refused rows read as 45 built listings. In-flight now dedupes
+# (never re-offered to a campaign) but is REPORTED as its own thing, and an in-flight row
+# whose `updated_at` has gone stale is reported as STUCK, never as coverage.
+_DONE_SUBMIT: frozenset[str] = frozenset({"submitted", "verified", "live", "drifted"})
+_IN_FLIGHT_SUBMIT: frozenset[str] = frozenset({"queued", "submitting"})
+_COVERING_SUBMIT: frozenset[str] = _DONE_SUBMIT | _IN_FLIGHT_SUBMIT
+
+#: An in-flight row older than this is STUCK. The dispatcher classifies a row in under a
+#: second and a Playwright submit runs minutes, so a quarter hour of silence means the
+#: pipeline, not the work.
+DEFAULT_STUCK_AFTER_MINUTES = 15
 # ONLY `live` earns a place in `live_urls`. `submitted` means a form was sent and nothing
 # has confirmed a listing came back: Data Axle runs teleresearch for up to three business
 # days, Apple returns state SUBMITTED, GBP needs verification before it appears at all,
@@ -457,14 +469,40 @@ def _norm_directory(name: str) -> str:
 
 
 def _row_covers(row: dict[str, Any]) -> bool:
-    """Whether an existing citation counts as coverage of its directory. A monitoring
-    row that FOUND a listing (nap consistent/inconsistent) covers it; a submission row
-    that is queued/live covers it; a blocked/failed row is an open gap, not coverage."""
+    """Whether an existing citation counts as DELIVERED coverage of its directory. A
+    monitoring row that FOUND a listing (nap consistent/inconsistent) covers it; a
+    submission row that is done (submitted/verified/live/drifted) covers it; a
+    blocked/failed row is an open gap; an in-flight row is neither (its caller reports
+    it separately)."""
     submit = str(row.get("submit_status") or "not_started")
     nap = str(row.get("nap_status") or "")
-    if submit in _COVERING_SUBMIT:
+    if submit in _DONE_SUBMIT:
         return True
+    if submit in _IN_FLIGHT_SUBMIT:
+        return False
     return submit not in ("failed", "blocked") and nap in _COVERING_NAP
+
+
+def _mark_covered(row: dict[str, Any], ids: set[str], names: set[str]) -> None:
+    did = row.get("directory_id")
+    if did:
+        ids.add(str(did))
+    name = str(row.get("directory") or "")
+    if name:
+        names.add(canonical_norm(name))
+
+
+def _is_stale(row: dict[str, Any], now: datetime | None, stuck_after_minutes: int) -> bool:
+    """Whether an in-flight row has sat unmoved past the threshold. Without `now` (a
+    caller that does not care about staleness) nothing is stale - the answer is then
+    "unknown", and unknown must not read as stuck."""
+    if now is None:
+        return False
+    updated = row.get("updated_at")
+    if not isinstance(updated, datetime):
+        return False
+    anchored = updated if updated.tzinfo else updated.replace(tzinfo=UTC)
+    return (now - anchored) >= timedelta(minutes=stuck_after_minutes)
 
 
 @dataclass
@@ -475,6 +513,11 @@ class CitationGap:
 
     existing_count: int = 0
     covered_count: int = 0
+    # In-flight (queued/submitting, fresh): deduped from `missing` but NOT covered.
+    in_flight_count: int = 0
+    # In-flight rows whose updated_at went stale - the "no worker is consuming this"
+    # signal, listed by name so an operator can say WHICH directories are wedged.
+    stuck: list[dict[str, str]] = field(default_factory=list)
     missing: list[dict[str, Any]] = field(default_factory=list)
     live_urls: list[dict[str, str]] = field(default_factory=list)
     by_submit_status: dict[str, int] = field(default_factory=dict)
@@ -493,6 +536,8 @@ def compute_citation_gap(
     cap: int | None = DEFAULT_CAMPAIGN_CAP,
     min_authority: int | None = DEFAULT_MIN_AUTHORITY,
     include_marketplaces: bool = False,
+    now: datetime | None = None,
+    stuck_after_minutes: int = DEFAULT_STUCK_AFTER_MINUTES,
 ) -> CitationGap:
     """Reconcile existing citations against the catalog and report the gap.
 
@@ -524,14 +569,19 @@ def compute_citation_gap(
             gap.live_urls.append(
                 {"directory": str(row.get("directory") or ""), "url": live, "status": submit}
             )
-        if _row_covers(row):
+        if submit in _IN_FLIGHT_SUBMIT:
+            # Dedupes (a campaign must not double-queue it) but is NOT coverage: nothing
+            # has been delivered. Stale in-flight is reported by name - it is the exact
+            # signature of a dispatch nobody is consuming.
+            gap.in_flight_count += 1
+            if _is_stale(row, now, stuck_after_minutes):
+                gap.stuck.append(
+                    {"directory": str(row.get("directory") or ""), "status": submit}
+                )
+            _mark_covered(row, covered_ids, covered_names)
+        elif _row_covers(row):
             gap.covered_count += 1
-            did = row.get("directory_id")
-            if did:
-                covered_ids.add(str(did))
-            name = str(row.get("directory") or "")
-            if name:
-                covered_names.add(canonical_norm(name))
+            _mark_covered(row, covered_ids, covered_names)
 
     candidates = automatable_directories(directories)
     # SUBTRACT WHAT IS COVERED, THEN CAP. The order is the whole correctness of this
@@ -610,9 +660,11 @@ def build_audit_plan(
     vertical: str | None = None,
     min_authority: int | None = DEFAULT_MIN_AUTHORITY,
     include_marketplaces: bool = False,
+    now: datetime | None = None,
+    stuck_after_minutes: int = DEFAULT_STUCK_AFTER_MINUTES,
 ) -> AuditPlan:
     """Group the client's relevant catalog into Generic -> Country -> Niche and tag each
-    directory built|missing.
+    directory built | missing | in_flight | stuck.
 
     Reuses the EXISTING selection + gap logic rather than re-ranking: the ordered
     universe is ``select_campaign_directories`` (no cap - the whole plan is shown), and a
@@ -636,12 +688,38 @@ def build_audit_plan(
         cap=None,
         min_authority=min_authority,
         include_marketplaces=include_marketplaces,
+        now=now,
+        stuck_after_minutes=stuck_after_minutes,
     )
     missing_ids = {str(d.get("id")) for d in gap.missing}
 
+    # Which directories have an IN-FLIGHT (or stale in-flight) row. A queued row must
+    # never tag its directory "built" - that is how 45 refused rows once rendered as 45
+    # built listings.
+    in_flight_keys: set[str] = set()
+    stuck_keys: set[str] = set()
+    stuck_names = {canonical_norm(x["directory"]) for x in gap.stuck}
+    for c in existing_citations:
+        if str(c.get("submit_status") or "") not in _IN_FLIGHT_SUBMIT:
+            continue
+        keys = {str(c["directory_id"])} if c.get("directory_id") else set()
+        name = canonical_norm(str(c.get("directory") or ""))
+        if name:
+            keys.add(name)
+        target = stuck_keys if name in stuck_names else in_flight_keys
+        target |= keys
+
+    def _status_of(row: dict[str, Any]) -> str:
+        keys = {str(row.get("id")), canonical_norm(str(row.get("name") or ""))}
+        if keys & stuck_keys:
+            return "stuck"
+        if keys & in_flight_keys:
+            return "in_flight"
+        return "missing" if str(row.get("id")) in missing_ids else "built"
+
     plan = AuditPlan()
     for row in selection.selected:
-        row = {**row, "_status": "missing" if str(row.get("id")) in missing_ids else "built"}
+        row = {**row, "_status": _status_of(row)}
         if row.get("verticals"):
             plan.niche.append(row)
         elif str(row.get("market")) == "GLOBAL":

@@ -558,7 +558,10 @@ async def gap_analysis(
     directories = await asyncio.to_thread(repo.list_directories, markets=markets, tiers=None)
     existing = await asyncio.to_thread(repo.list_citations_for_client, client_id)
     gap = compute_citation_gap(
-        directories=directories, existing_citations=existing, vertical=vertical
+        directories=directories,
+        existing_citations=existing,
+        vertical=vertical,
+        now=datetime.now(UTC),
     )
     return GapAnalysisResponse(
         client=str(client.get("name") or ""),
@@ -568,6 +571,8 @@ async def gap_analysis(
         resolved_vertical=vertical,
         existing_count=gap.existing_count,
         covered_count=gap.covered_count,
+        in_flight_count=gap.in_flight_count,
+        stuck=gap.stuck,
         missing_count=len(gap.missing),
         missing=[DirectoryResponse.from_row(d) for d in gap.missing],
         live_urls=[CitationLiveUrl(**u) for u in gap.live_urls],
@@ -609,7 +614,12 @@ async def audit_plan(
     vertical = normalize_vertical(str(client.get("industry") or ""))
     directories = await asyncio.to_thread(repo.list_directories, markets=[market, "GLOBAL"], tiers=None)
     existing = await asyncio.to_thread(repo.list_citations_for_client, client_id)
-    plan = build_audit_plan(directories=directories, existing_citations=existing, vertical=vertical)
+    plan = build_audit_plan(
+        directories=directories,
+        existing_citations=existing,
+        vertical=vertical,
+        now=datetime.now(UTC),
+    )
 
     def _items(rows: list[dict[str, Any]]) -> list[AuditPlanItem]:
         return [AuditPlanItem.from_directory(r, status=r["_status"]) for r in rows]

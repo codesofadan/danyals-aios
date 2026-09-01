@@ -293,6 +293,11 @@ class GapAnalysisResponse(BaseModel):
     resolved_vertical: str | None = Field(default=None, serialization_alias="resolvedVertical")
     existing_count: int = Field(serialization_alias="existingCount")
     covered_count: int = Field(serialization_alias="coveredCount")
+    # In-flight rows dedupe from `missing` but are NOT covered - nothing was delivered
+    # yet. Stale ones are listed in `stuck` by directory name: the "no worker is
+    # consuming this" signal (2026-09-01: 45 queued rows once read as covered/built).
+    in_flight_count: int = Field(default=0, serialization_alias="inFlightCount")
+    stuck: list[dict[str, str]] = Field(default_factory=list)
     missing_count: int = Field(serialization_alias="missingCount")
     missing: list[DirectoryResponse]
     live_urls: list[CitationLiveUrl] = Field(serialization_alias="liveUrls")
@@ -313,10 +318,14 @@ class AuditPlanItem(BaseModel):
     market: BusinessMarket
     tier: DirectoryTier
     url: str
-    status: Literal["built", "missing"]
+    # `in_flight` = an attempt is pending (deduped, not built). `stuck` = that attempt
+    # has sat unmoved past the staleness threshold. Neither may render as "built".
+    status: Literal["built", "missing", "in_flight", "stuck"]
 
     @classmethod
-    def from_directory(cls, row: dict[str, Any], *, status: Literal["built", "missing"]) -> AuditPlanItem:
+    def from_directory(
+        cls, row: dict[str, Any], *, status: Literal["built", "missing", "in_flight", "stuck"]
+    ) -> AuditPlanItem:
         market, tier = row.get("market"), row.get("tier")
         return cls(
             directory_name=str(row.get("name") or ""),
