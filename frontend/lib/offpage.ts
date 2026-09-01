@@ -97,8 +97,14 @@ export type Citation = {
   action: CitationAction;
   note: string; // what drifted / listing detail
   submitStatus: CitationSubmitStatus;
-  proofUrl: string; // a submission's screenshot/receipt artifact (blank if none)
+  // The API path of the proof reader (GET .../citations/{id}/proof), blank if none.
+  // It used to carry the raw storage KEY, which rendered as a link that 404'd forever.
+  proofUrl: string;
   handoffUrl: string; // ready_for_human: the page a human opens to finish the listing
+  // The public listing URL — set only after a fetch-verified completion. THE deliverable.
+  liveUrl: string;
+  // Machine-readable hold reason ("" unless on hold) → sentence via lib/citationStatus.ts.
+  blockedReason: string;
 };
 
 // --- Web 2.0 automation -----------------------------------------------------

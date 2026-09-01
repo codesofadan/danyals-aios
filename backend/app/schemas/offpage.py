@@ -79,7 +79,12 @@ _NAP_STATUSES: frozenset[str] = frozenset({"consistent", "inconsistent", "missin
 _CITATION_ACTIONS: frozenset[str] = frozenset({"Submit", "Update"})
 _CITATION_SUBMIT_STATUSES: frozenset[str] = frozenset(
     {"not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked",
-     "ready_for_human"}
+     "ready_for_human",
+     # 0106's earned states. These were MISSING here while present in the Literal five
+     # lines up, so `from_row`'s guard coerced a genuinely fetch-verified `live` row —
+     # the only status this module actually earns — to "not_started" on the wire. The
+     # one screen that listed citations could therefore never show a success.
+     "live", "drifted", "delisted"}
 )
 # Verbatim from integrations.web2_publishers.WEB2_PLATFORMS (7B-4's platform expansion).
 _WEB2_PLATFORMS: frozenset[str] = frozenset(
@@ -170,6 +175,12 @@ class CitationResponse(BaseModel):
     submit_status: CitationSubmitStatus = Field(serialization_alias="submitStatus")
     proof_url: str = Field(serialization_alias="proofUrl")
     handoff_url: str = Field(default="", serialization_alias="handoffUrl")
+    # 0106's public listing URL — the thing a client can open and track. Empty until a
+    # completion was fetch-verified. This is NOT proof_url (a screenshot).
+    live_url: str = Field(default="", serialization_alias="liveUrl")
+    # Why a row is on hold, as the machine-readable code the frontend maps to a
+    # sentence (lib/citationStatus.ts). Empty for rows that are not blocked.
+    blocked_reason: str = Field(default="", serialization_alias="blockedReason")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> CitationResponse:
@@ -185,6 +196,13 @@ class CitationResponse(BaseModel):
         submit_status_v: CitationSubmitStatus = (
             submit_status if submit_status in _CITATION_SUBMIT_STATUSES else "not_started"
         )
+        # `citations.proof_url` stores a RELATIVE STORAGE KEY (evidence.py). It used to
+        # be serialized raw, so the UI linked "/admin/citations/ab12cd34.png" — a 404,
+        # every time, on the one column labelled "proof". Emit the real reader instead.
+        proof_key = str(row.get("proof_url") or "")
+        proof_link = (
+            f"/api/v1/citation-builder/citations/{row['id']}/proof" if proof_key else ""
+        )
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
@@ -192,8 +210,10 @@ class CitationResponse(BaseModel):
             nap=nap_v,
             action=action_v,
             submit_status=submit_status_v,
-            proof_url=row.get("proof_url", ""),
+            proof_url=proof_link,
             handoff_url=row.get("handoff_url", ""),
+            live_url=str(row.get("live_url") or ""),
+            blocked_reason=str(row.get("blocked_reason") or ""),
             note=row.get("note", ""),
         )
 
