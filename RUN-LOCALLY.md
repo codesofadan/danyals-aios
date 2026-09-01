@@ -1,13 +1,24 @@
 # Running AIOS locally
 
-Five double-click batch files at the repo root:
+**Windows:** five double-click batch files at the repo root (table below).
+**macOS / Linux:** two scripts do the same job —
+
+```bash
+scripts/dev-doctor.sh   # health check: stray servers, starved worker queues, wiring
+scripts/dev-up.sh       # starts backend :8000 + a full-coverage worker + frontend :3000
+```
+
+The doctor exists because this tree once ran TWO backends (:8000 stale, :8099 live)
+and three workers that all consumed the same queue while two queues starved — and
+nothing anywhere said so. Run it whenever things feel "quiet". It only reports;
+kill commands are printed, never executed (concurrent sessions share this checkout).
 
 | File | What it does |
 |---|---|
 | **Start-Dashboard.bat** | Runs the dashboard UI on `http://localhost:3000` and opens your browser. |
 | **Start-Backend.bat** | Runs the local backend (the engine) on `http://localhost:8000`. |
 | **Start-Worker.bat** | Runs the job worker that actually executes background work. |
-| **Finish-Citations.bat** | Opens each ready citation in a real browser (logged-in + pre-filled) for the final click. |
+| **Finish-Citations.bat** | ⚠️ Superseded — use the **Citation queue** page (`/admin/citations/queue`) + the Citation Assistant extension instead. The queue tracks who did what and verifies live URLs; this script predates it. |
 | **Build-Extension.bat** | Builds the Citation Assistant browser extension and prints the folder to load into Chrome. |
 
 ## The worker is not optional
