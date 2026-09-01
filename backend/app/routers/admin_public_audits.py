@@ -30,6 +30,8 @@ from app.core.auth import CurrentUser, require_perm
 from app.core.pagination import PageDep
 from app.db.database import DatabaseNotConfiguredError, rls_connection
 from app.logging_setup import get_logger
+from app.routers.public import PublicArtifactStoreDep
+from app.services.audit_artifacts import LocalArtifactStore, honest_artifact_flags
 
 router = APIRouter(prefix="/admin/public-audits", tags=["admin"])
 logger = get_logger("app.admin_public_audits")
@@ -66,11 +68,19 @@ class PublicAuditLead(BaseModel):
     updated_at: str | None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> PublicAuditLead:
+    def from_row(
+        cls, row: dict[str, Any], store: LocalArtifactStore | None = None
+    ) -> PublicAuditLead:
         def _iso(value: Any) -> str | None:
             return value.isoformat() if isinstance(value, datetime) else (str(value) if value else None)
 
         created = _iso(row.get("created_at")) or ""
+        # NOT `bool(row["pdf_path"])`. A public audit reaches status "done" even when
+        # the artifact copy never happened - `audit_artifact_dir` is unset by default,
+        # so `_store_artifacts` returns (None, None) and the run still completes. The
+        # columns then say a report exists while the disk says otherwise, and the
+        # operator gets a download button that 404s. Ask the store.
+        pdf_ok, json_ok = honest_artifact_flags(store, row)
         return cls(
             id=str(row["id"]),
             email=str(row["email"]),
@@ -79,8 +89,8 @@ class PublicAuditLead(BaseModel):
             score=row.get("score"),
             source=str(row.get("source") or "landing"),
             report_token=str(row["report_token"]),
-            has_pdf=bool(row.get("pdf_path")),
-            has_report=bool(row.get("json_path")),
+            has_pdf=pdf_ok,
+            has_report=json_ok,
             run_uuid=(str(row["run_uuid"]) if row.get("run_uuid") else None),
             error=(str(row["error"]) if row.get("error") else None),
             created_at=created,
@@ -103,11 +113,49 @@ def _fetch_leads(user_id: str, *, limit: int, offset: int) -> list[dict[str, Any
         return cur.fetchall()
 
 
+def _fetch_lead_by_token(user_id: str, report_token: str) -> dict[str, Any] | None:
+    """Read ONE free-audit lead by its report token, on the same RLS-scoped staff path.
+
+    ``report_token`` is ``not null unique`` (0015), so this is an index scan.
+    """
+    with rls_connection(user_id) as cur:
+        cur.execute(
+            "select * from public.public_audits where report_token = %s limit 1",
+            (report_token,),
+        )
+        return cur.fetchone()
+
+
 @router.get("", response_model=list[PublicAuditLead])
-async def list_public_audits(page: PageDep, user: ViewReports) -> list[PublicAuditLead]:
+async def list_public_audits(
+    page: PageDep, user: ViewReports, store: PublicArtifactStoreDep
+) -> list[PublicAuditLead]:
     """List the free-audit leads captured by the public funnel (staff-only)."""
     try:
         rows = await asyncio.to_thread(_fetch_leads, user.id, limit=page.limit, offset=page.offset)
     except DatabaseNotConfiguredError as exc:
         raise _DB_NOT_CONFIGURED from exc
-    return [PublicAuditLead.from_row(r) for r in rows]
+    return [PublicAuditLead.from_row(r, store) for r in rows]
+
+
+@router.get("/{report_token}", response_model=PublicAuditLead)
+async def get_public_audit(
+    report_token: str, user: ViewReports, store: PublicArtifactStoreDep
+) -> PublicAuditLead:
+    """One free-audit lead by its report token (staff-only).
+
+    WHY THIS EXISTS. The lead detail page used to find its lead by scanning the
+    paginated list, so a link to any lead outside the newest page resolved to
+    "not found" - a shared link silently rotted as the funnel filled up. The
+    token is the lead's identity; reading by it is the fix.
+
+    Same dep, same seam and same policy as the list, so a portal client still
+    sees nothing here.
+    """
+    try:
+        row = await asyncio.to_thread(_fetch_lead_by_token, user.id, report_token)
+    except DatabaseNotConfiguredError as exc:
+        raise _DB_NOT_CONFIGURED from exc
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    return PublicAuditLead.from_row(row, store)

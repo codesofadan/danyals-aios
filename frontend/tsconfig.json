@@ -35,8 +35,8 @@
     ".next-restructure/types/**/*.ts",
     ".next-web2demo/types/**/*.ts",
     ".next/types/**/*.ts",
-    "next-env.d.ts"
-    
+    "next-env.d.ts",
+    ".next-portal/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

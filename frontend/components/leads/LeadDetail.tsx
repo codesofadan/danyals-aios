@@ -14,7 +14,7 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
-import { useLeads, type PublicAuditLead } from "@/lib/hooks/leads";
+import { useLead, type PublicAuditLead } from "@/lib/hooks/leads";
 import { downloadFile, getReportHtml } from "@/lib/api";
 import { formatWhen, relativeTime } from "@/lib/format";
 import DetailShell from "@/components/ui/DetailShell";
@@ -26,15 +26,17 @@ const STATUS_CLS: Record<PublicAuditLead["status"], string> = {
 };
 
 export default function LeadDetail({ token }: { token: string }) {
-  const leadsQ = useLeads();
+  // Read by token, not by scanning the newest page of the inbox: an older lead's
+  // link used to resolve to "no lead for this token" while its report existed.
+  const leadQ = useLead(token);
   const [viewing, setViewing] = useState(false);
-  const lead = leadsQ.data?.find((l) => l.report_token === token);
+  const lead = leadQ.data;
   const loadReport = useCallback(
     () => getReportHtml(`/public/audits/${token}/report.html`),
     [token],
   );
 
-  if (leadsQ.isError) {
+  if (leadQ.isError) {
     return (
       <section className="card" style={{ maxWidth: 520, margin: "48px auto", textAlign: "center", padding: 28 }}>
         <div className="ct">Couldn&apos;t load the lead</div>
@@ -42,7 +44,7 @@ export default function LeadDetail({ token }: { token: string }) {
       </section>
     );
   }
-  if (leadsQ.isLoading) {
+  if (leadQ.isLoading) {
     return <div role="status" style={{ padding: 48, textAlign: "center", color: "var(--muted)" }}>Loading lead…</div>;
   }
   if (!lead) {
