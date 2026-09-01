@@ -369,14 +369,19 @@ class CitationsRepo:
         monitoring-originated one."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
+                # `route` is stamped from the directory's own route at queue time —
+                # 0106 promised it "recorded per unit so a client report can say HOW
+                # each listing was built", and until 0121 nothing ever wrote it.
                 "insert into public.citations "
                 "(client_id, client_name, directory, nap_status, action, "
                 " directory_id, business_profile_id, submit_status, submit_method, "
-                " campaign_id) "
-                "values (%s, %s, %s, 'missing', 'Submit', %s, %s, 'queued', %s, %s) "
+                " campaign_id, route) "
+                "values (%s, %s, %s, 'missing', 'Submit', %s, %s, 'queued', %s, %s, "
+                "        coalesce((select d.route from public.directories d "
+                "                  where d.id = %s), 'C')) "
                 "returning *",
                 (client_id, client_name, directory_name, directory_id,
-                 business_profile_id, submit_method, campaign_id),
+                 business_profile_id, submit_method, campaign_id, directory_id),
             )
             return cur.fetchone()
 

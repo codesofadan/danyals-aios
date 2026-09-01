@@ -45,7 +45,7 @@ CitationAction = Literal["Submit", "Update"]
 # public.citation_submit_status (0045) / frontend CitationSubmitStatus (offpage.ts).
 CitationSubmitStatus = Literal[
     "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked",
-    "ready_for_human",  # account created + listing prepared; a human finishes at handoff_url
+    "ready_for_human",  # a person finishes this via the operator queue (0110)
     # 0106. `submitted` STOPS meaning done: every write path we have returns it honestly
     # and none can promise more (Data Axle runs teleresearch for up to three business
     # days, Apple returns state SUBMITTED, GBP needs verification before it appears).
@@ -174,7 +174,6 @@ class CitationResponse(BaseModel):
     note: str
     submit_status: CitationSubmitStatus = Field(serialization_alias="submitStatus")
     proof_url: str = Field(serialization_alias="proofUrl")
-    handoff_url: str = Field(default="", serialization_alias="handoffUrl")
     # 0106's public listing URL — the thing a client can open and track. Empty until a
     # completion was fetch-verified. This is NOT proof_url (a screenshot).
     live_url: str = Field(default="", serialization_alias="liveUrl")
@@ -211,7 +210,6 @@ class CitationResponse(BaseModel):
             action=action_v,
             submit_status=submit_status_v,
             proof_url=proof_link,
-            handoff_url=row.get("handoff_url", ""),
             live_url=str(row.get("live_url") or ""),
             blocked_reason=str(row.get("blocked_reason") or ""),
             note=row.get("note", ""),

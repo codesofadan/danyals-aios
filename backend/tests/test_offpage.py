@@ -52,9 +52,9 @@ pytestmark = pytest.mark.unit
 _BACKLINK_KEYS = {"id", "client", "refDomain", "anchor", "authority", "spam", "firstSeen", "status"}
 _CITATION_KEYS = {
     "id", "client", "directory", "nap", "action", "note", "submitStatus", "proofUrl",
-    "handoffUrl",
     # 0106 on the wire (2026-09-02): the public listing URL a client can open, and the
-    # machine-readable hold reason the UI maps to a sentence.
+    # machine-readable hold reason the UI maps to a sentence. handoffUrl left with its
+    # column (0121): no writer ever existed and the queue serves add_url instead.
     "liveUrl", "blockedReason",
 }
 _WEB2_KEYS = {

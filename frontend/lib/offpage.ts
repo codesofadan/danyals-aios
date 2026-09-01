@@ -58,8 +58,8 @@ export type CitationSubmitStatus =
   | "not_started" | "queued" | "submitting" | "submitted" | "verified" | "failed" | "blocked"
   // ready_for_human: an operator's queue item. TWO paths reach it, and since 2026-08-30
   // the second is by far the common one:
-  //   1. the bot created the account and prepared the listing, and a human finishes at
-  //      handoffUrl (the original 0064 handoff);
+  //   1. the bot created the account and prepared the listing, and a human finishes it
+  //      from the operator queue (the original 0064 handoff, column dropped in 0121);
   //   2. the machine could not act at all - no engine, or no EARNED form spec - so the
   //      row becomes human work instead of parking in `blocked`. With zero active specs
   //      in the catalogue this is nearly every bot-tier directory, and it is what gives
@@ -100,7 +100,6 @@ export type Citation = {
   // The API path of the proof reader (GET .../citations/{id}/proof), blank if none.
   // It used to carry the raw storage KEY, which rendered as a link that 404'd forever.
   proofUrl: string;
-  handoffUrl: string; // ready_for_human: the page a human opens to finish the listing
   // The public listing URL — set only after a fetch-verified completion. THE deliverable.
   liveUrl: string;
   // Machine-readable hold reason ("" unless on hold) → sentence via lib/citationStatus.ts.

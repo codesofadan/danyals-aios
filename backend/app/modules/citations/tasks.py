@@ -378,7 +378,16 @@ def execute_citation_submit(
         except Exception as exc:  # a provider crash still marks failed - never stuck, never re-raised
             _gate().commit(ctx, ctx.estimated_cost)  # the attempt still incurred the metered cost
             logger.exception("citation_submit_provider_error", citation_id=citation_id)
-            store.update_citation(citation_id, {"submit_status": "failed", "error": f"{exc!r}"[:_ERROR_MAX]})
+            store.update_citation(
+                citation_id,
+                {
+                    "submit_status": "failed",
+                    "error": f"{exc!r}"[:_ERROR_MAX],
+                    # The per-row answer to "what did this listing cost" (0121): the
+                    # committed estimate, mirroring what cost_log just recorded.
+                    "cost": ctx.estimated_cost,
+                },
+            )
             return {"state": "failed", "reason": f"{exc!r}"[:_ERROR_MAX]}
 
         # The self-hosted bot only drives directories it has a FormSpec for, and a
@@ -392,6 +401,8 @@ def execute_citation_submit(
             "submit_status": result.status,
             "proof_url": result.proof_url,
             "error": result.error[:_ERROR_MAX],
+            # Per-row cost (0121): what this attempt committed, mirroring cost_log.
+            "cost": ctx.estimated_cost,
         }
         if result.external_ref:
             fields["external_ref"] = result.external_ref
