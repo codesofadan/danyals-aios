@@ -5,9 +5,9 @@ import { useClients } from "@/lib/hooks/clients";
 import {
   useCreateWeb2Campaign,
   useEstimateWeb2Campaign,
-  useWeb2PlatformBoard,
 } from "@/lib/hooks/offpage";
-import { PLATFORM_META, type Web2PacingMode, type Web2Platform } from "@/lib/offpage";
+import { type Web2PacingMode } from "@/lib/offpage";
+import Web2PlatformPicker from "./Web2PlatformPicker";
 
 /**
  * Build a whole Web 2.0 campaign in one pass: client -> topics -> platforms -> pacing
@@ -55,19 +55,8 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   // that shaped it changes.
   const [quotedSignature, setQuotedSignature] = useState<string | null>(null);
 
-  const boardQ = useWeb2PlatformBoard(clientId || undefined);
   const estimate = useEstimateWeb2Campaign();
   const create = useCreateWeb2Campaign();
-
-  const board = boardQ.data ?? [];
-  const eligible = board.filter((r) => r.status === "eligible");
-  // Two DIFFERENT problems, so two lists. `not_connected` is a missing credential an
-  // operator fixes in ten minutes; `not_eligible` is a judgement about this client that
-  // no credential changes. Collapsing them into one "unavailable" list buries the
-  // actionable rows under the permanent ones and sends people hunting for a token that
-  // would not help.
-  const needsAccount = board.filter((r) => r.status === "not_connected");
-  const blocked = board.filter((r) => r.status === "not_eligible");
 
   const topics = lines(topicsText);
   const anchors = lines(anchorsText);
@@ -241,108 +230,27 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
             {/* Platform board — server-computed per client, nothing hidden. */}
             <div className="fld">
               <label style={{ margin: 0 }}>Platforms</label>
-              {!clientId ? (
-                <div className="fld-hint">Choose a client to see which platforms they may publish to.</div>
-              ) : boardQ.isLoading ? (
-                <div className="fld-hint">Loading the platform board…</div>
-              ) : (
-                <>
-                  <div className="w2-plat-grid">
-                    {eligible.map((row) => {
-                      const key = row.platform ?? row.name;
-                      const on = selected.has(key);
-                      const meta = PLATFORM_META[key as Web2Platform];
-                      return (
-                        <button type="button" key={key} onClick={() => toggle(key)}
-                          className={`w2-plat${on ? " on" : ""}`} aria-pressed={on}>
-                          <span className="op-plat-ic" style={{ background: meta?.c ?? "#64748b" }}>
-                            <span className="material-symbols-rounded" style={{ fontSize: 14 }}>
-                              {meta?.icon ?? "public"}
-                            </span>
-                          </span>
-                          <span className="w2-plat-name">{row.name}</span>
-                          <span className="material-symbols-rounded w2-plat-check">
-                            {on ? "check_circle" : "radio_button_unchecked"}
-                          </span>
-                        </button>
-                      );
-                    })}
+              <Web2PlatformPicker
+                clientId={clientId || undefined}
+                selected={selected}
+                onToggle={toggle}
+                hint={(eligibleCount) => (
+                  <div className="fld-hint">
+                    <b>{selected.size}</b> of {eligibleCount} eligible selected. Spreading across
+                    more platforms finishes sooner <em>and</em> leaves a lighter footprint.
                   </div>
-                  {eligible.length === 0 ? (
-                    // "0 of 0 eligible selected" over an empty grid is not an
-                    // explanation. Nothing here is broken - this client has no
-                    // CONNECTED account on any platform it is allowed to use - and
-                    // saying which of the two reasons applies is the difference
-                    // between a ten-minute fix and a bug hunt.
-                    <div className="fld-hint">
-                      <b>No platform is ready for this client yet.</b>{" "}
-                      {needsAccount.length > 0 && (
-                        <>
-                          {needsAccount.length} platform(s) this client may use have no
-                          connected account — add one under <b>Accounts</b>, with this
-                          client selected.{" "}
-                        </>
-                      )}
-                      {blocked.length > 0 && (
-                        <>
-                          {blocked.length} more are not eligible for this client&rsquo;s
-                          scope or tier (listed below).
-                        </>
-                      )}
-                      {needsAccount.length === 0 && blocked.length === 0 && (
-                        <>No platforms are configured at all.</>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="fld-hint">
-                      <b>{selected.size}</b> of {eligible.length} eligible selected. Spreading across
-                      more platforms finishes sooner <em>and</em> leaves a lighter footprint.
-                    </div>
-                  )}
-
-                  {needsAccount.length > 0 && (
-                    <details className="fld-hint" style={{ marginTop: 8 }} open={eligible.length === 0}>
-                      <summary>
-                        {needsAccount.length} more platform(s) this client may use — connect an account
-                      </summary>
-                      <ul style={{ margin: "8px 0 0 16px" }}>
-                        {needsAccount.map((row) => (
-                          <li key={row.name} style={{ marginBottom: 8 }}>
-                            <b>{row.name}</b>
-                            {row.setupCost && !/^free/i.test(row.setupCost) && (
-                              <span style={{ color: "#92400e" }}> — {row.setupCost}</span>
-                            )}
-                            {row.setupBlocker && (
-                              <div style={{ color: "#92400e", marginTop: 2 }}>⚠ {row.setupBlocker}</div>
-                            )}
-                            {row.setupSteps && <div style={{ marginTop: 2 }}>{row.setupSteps}</div>}
-                            {row.setupUrl && (
-                              <div style={{ marginTop: 2 }}>
-                                <a href={row.setupUrl} target="_blank" rel="noopener noreferrer">
-                                  {row.setupUrl}
-                                </a>
-                              </div>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-
-                  {blocked.length > 0 && (
-                    <details className="fld-hint" style={{ marginTop: 8 }}>
-                      <summary>{blocked.length} platform(s) not available for this client — why</summary>
-                      <ul style={{ margin: "8px 0 0 16px" }}>
-                        {blocked.map((row) => (
-                          <li key={row.name} style={{ marginBottom: 4 }}>
-                            <b>{row.name}</b> — {row.reason}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </>
-              )}
+                )}
+                emptyEligibleHint={
+                  // "0 of 0 eligible selected" over an empty grid is not an explanation.
+                  // Nothing here is broken - this client has no CONNECTED account on any
+                  // platform it is allowed to use. The lists below say which fix applies.
+                  <div className="fld-hint">
+                    <b>No platform is ready for this client yet.</b> If platforms this
+                    client may use are listed below, add an account under <b>Accounts</b>{" "}
+                    with this client selected — that is a ten-minute fix, not a bug.
+                  </div>
+                }
+              />
             </div>
 
             {/* The pace SELECTOR is gone by decision (2026-08-29): approved campaigns
@@ -418,15 +326,13 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
             {!quoted && (
               <div className="fld-hint" style={{ textAlign: "right" }}>
                 {!canQuote
-                  ? eligible.length === 0
-                    ? "No connected platform for this client — connect an account under Accounts before creating a campaign."
-                    : selected.size === 0
-                      ? "Choose at least one platform above."
-                      : topics.length === 0
-                        ? "Add at least one topic — one per line."
-                        : !targetUrl.trim().startsWith("http")
-                          ? "Add the target URL these properties will link to."
-                          : "Choose a client to continue."
+                  ? selected.size === 0
+                    ? "Choose at least one platform above — if none are offered, connect an account under Accounts first."
+                    : topics.length === 0
+                      ? "Add at least one topic — one per line."
+                      : !targetUrl.trim().startsWith("http")
+                        ? "Add the target URL these properties will link to."
+                        : "Choose a client to continue."
                   : quoteWentStale
                     ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
                     : "Get a quote first — it shows the cost and the finish date before anything is created."}

@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useClients } from "@/lib/hooks/clients";
-import { useCheckWeb2Anchor, usePlanWeb2, useWeb2PlatformBoard } from "@/lib/hooks/offpage";
-import { PLATFORM_ISSUES, PLATFORM_META, type Web2Platform } from "@/lib/offpage";
+import { useCheckWeb2Anchor, usePlanWeb2 } from "@/lib/hooks/offpage";
+import { PLATFORM_ISSUES, type Web2Platform } from "@/lib/offpage";
+import Web2PlatformPicker from "./Web2PlatformPicker";
 
 // Build ONE Web 2.0 property.
 //
@@ -40,15 +41,6 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
   const [targetUrl, setTargetUrl] = useState("");
   const [pageType, setPageType] = useState<"service" | "blog" | "local">("blog");
   const [proof, setProof] = useState("");
-
-  const boardQ = useWeb2PlatformBoard(clientId || undefined);
-  const board = useMemo(() => boardQ.data ?? [], [boardQ.data]);
-  // Two DIFFERENT problems, so two lists — the same split the campaign wizard makes.
-  // `not_connected` is a missing credential an operator fixes in ten minutes;
-  // `not_eligible` is a judgement about this client that no credential changes.
-  const eligible = board.filter((r) => r.status === "eligible");
-  const needsAccount = board.filter((r) => r.status === "not_connected");
-  const blocked = board.filter((r) => r.status === "not_eligible");
 
   const plan = usePlanWeb2();
   const anchorCheck = useCheckWeb2Anchor();
@@ -146,109 +138,25 @@ export default function Web2PlanModal({ onClose }: { onClose: () => void }) {
             {/* Platform — exactly what the SERVER says this client may publish to. */}
             <div className="fld">
               <label style={{ margin: 0 }}>Platform</label>
-              {!clientId ? (
-                <div className="fld-hint">Choose a client to see which platforms they may publish to.</div>
-              ) : boardQ.isLoading ? (
-                <div className="fld-hint">Loading the platform board…</div>
-              ) : boardQ.isError ? (
-                <div className="fld-hint" style={{ color: "var(--warn)" }} role="alert">
-                  Couldn&apos;t load the platform board — {(boardQ.error as Error)?.message ?? "try again"}.
-                </div>
-              ) : (
-                <>
-                  {eligible.length === 0 ? (
-                    <div className="fld-hint" style={{ color: "var(--warn)" }}>
-                      No platform is currently available for this client. Connect an account
-                      below, then come back — planning against an unavailable platform is
-                      refused by the server.
+              <Web2PlatformPicker
+                clientId={clientId || undefined}
+                selected={platform ? new Set([platform]) : new Set()}
+                onToggle={(key) => setPlatform(key === platform ? "" : key)}
+                hint={() => (
+                  <>
+                    {issue && (
+                      <div className="fld-hint" style={{ color: "#92400e", marginTop: 6 }}>
+                        ⚠ {issue}
+                      </div>
+                    )}
+                    <div className="fld-hint">
+                      Building on more than one platform? Use <b>New campaign</b> — it takes a
+                      distinct topic per article and rotates the writing framework, so the
+                      properties are not near-identical.
                     </div>
-                  ) : (
-                    <div className="w2-plat-grid">
-                      {eligible.map((row) => {
-                        const key = row.platform ?? row.name;
-                        const on = platform === key;
-                        const meta = PLATFORM_META[key as Web2Platform];
-                        const flagged = PLATFORM_ISSUES[key as Web2Platform];
-                        return (
-                          <button
-                            type="button" key={key} onClick={() => setPlatform(key)}
-                            className={`w2-plat${on ? " on" : ""}`} aria-pressed={on}
-                            title={flagged ?? undefined}
-                          >
-                            <span className="op-plat-ic" style={{ background: meta?.c ?? "#64748b" }}>
-                              <span className="material-symbols-rounded" style={{ fontSize: 14 }}>
-                                {meta?.icon ?? "public"}
-                              </span>
-                            </span>
-                            <span className="w2-plat-name">
-                              {row.name}
-                              {/* A house account that exists but cannot publish, flagged
-                                  where it is CHOSEN — it used to appear only on the
-                                  API-status board, which nobody reads while planning. */}
-                              {flagged && <span style={{ color: "#92400e" }}> *</span>}
-                            </span>
-                            <span className="material-symbols-rounded w2-plat-check">
-                              {on ? "check_circle" : "radio_button_unchecked"}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {issue && (
-                    <div className="fld-hint" style={{ color: "#92400e", marginTop: 6 }}>
-                      ⚠ {issue}
-                    </div>
-                  )}
-                  <div className="fld-hint">
-                    Building on more than one platform? Use <b>New campaign</b> — it takes a
-                    distinct topic per article and rotates the writing framework, so the
-                    properties are not near-identical.
-                  </div>
-
-                  {needsAccount.length > 0 && (
-                    <details className="fld-hint" style={{ marginTop: 8 }} open={eligible.length === 0}>
-                      <summary>
-                        {needsAccount.length} more platform(s) this client may use — connect an account
-                      </summary>
-                      <ul style={{ margin: "8px 0 0 16px" }}>
-                        {needsAccount.map((row) => (
-                          <li key={row.name} style={{ marginBottom: 8 }}>
-                            <b>{row.name}</b>
-                            {row.setupCost && !/^free/i.test(row.setupCost) && (
-                              <span style={{ color: "#92400e" }}> — {row.setupCost}</span>
-                            )}
-                            {row.setupBlocker && (
-                              <div style={{ color: "#92400e", marginTop: 2 }}>⚠ {row.setupBlocker}</div>
-                            )}
-                            {row.setupSteps && <div style={{ marginTop: 2 }}>{row.setupSteps}</div>}
-                            {row.setupUrl && (
-                              <div style={{ marginTop: 2 }}>
-                                <a href={row.setupUrl} target="_blank" rel="noopener noreferrer">
-                                  {row.setupUrl}
-                                </a>
-                              </div>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-
-                  {blocked.length > 0 && (
-                    <details className="fld-hint" style={{ marginTop: 8 }}>
-                      <summary>{blocked.length} platform(s) not available for this client — why</summary>
-                      <ul style={{ margin: "8px 0 0 16px" }}>
-                        {blocked.map((row) => (
-                          <li key={row.name} style={{ marginBottom: 4 }}>
-                            <b>{row.name}</b> — {row.reason}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </>
-              )}
+                  </>
+                )}
+              />
             </div>
 
             <div className="fld">

@@ -103,11 +103,21 @@ export default function Web2Tab() {
             actions were sharing one flex line with two segmented controls and two
             buttons, which crowded on any laptop-width screen. */}
         <div className="op-toolset">
-          <button className="ghost-btn" onClick={() => setShowPlan(true)}>
+          {/* Two doors on purpose, not an accident of history: ONE property gets
+              per-property review (the only path Tumblr's API licence permits), while a
+              CAMPAIGN batches N distinct topics behind one quote and one approval.
+              Merging them would route Tumblr singles through campaign approval. */}
+          <button
+            className="ghost-btn" onClick={() => setShowPlan(true)}
+            title="One article on one platform — reviewed and approved individually. Tumblr must go this way."
+          >
             <span className="material-symbols-rounded">add</span>
-            Single property
+            One property
           </button>
-          <button className="primary-btn" onClick={() => setShowCampaign(true)}>
+          <button
+            className="primary-btn" onClick={() => setShowCampaign(true)}
+            title="A batch across platforms — a distinct topic per article, one quote, one approval, capped per campaign."
+          >
             <span className="material-symbols-rounded">campaign</span>
             New campaign
           </button>
@@ -120,7 +130,7 @@ export default function Web2Tab() {
           <button className={view === "campaigns" ? "on" : undefined} onClick={() => setView("campaigns")}>Campaigns</button>
           <button className={view === "links" ? "on" : undefined} onClick={() => setView("links")}>Links built</button>
           <button className={view === "accounts" ? "on" : undefined} onClick={() => setView("accounts")}>Accounts</button>
-            <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>API status</button>
+            <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>Integrations</button>
         </div>
         {view === "ledger" && (
           <div className="seg w2-tabs-right">

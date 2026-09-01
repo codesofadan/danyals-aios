@@ -42,7 +42,20 @@ export default function Web2StatusBoard() {
           platform is treated as MISSING until it loads.
         </div>
       )}
+      {/* This board answers "which credentials exist in the vault?" — an integrations
+          question. "Which platforms may THIS client use, and why not?" is a different
+          question, answered per client on the platform board inside One property / New
+          campaign. Rendering all ~54 credential slots open here made the two easy to
+          confuse, so the full grid is behind a fold. */}
+      <div className="op-muted" style={{ margin: "6px 0 10px" }}>
+        Per-client availability, reasons, and setup guides live on the platform board —
+        open <b>One property</b> or <b>New campaign</b> and choose the client.
+      </div>
       {web2 && (
+        <details>
+          <summary className="op-muted" style={{ cursor: "pointer", marginBottom: 8 }}>
+            Show all {web2.totalCount} platform credential slots
+          </summary>
         <div className={w.board}>
           {web2.platforms.map((p) => {
             const issue = PLATFORM_ISSUES[p.platform as Web2Platform];
@@ -83,6 +96,7 @@ export default function Web2StatusBoard() {
             );
           })}
         </div>
+        </details>
       )}
 
       {/* Citation submission engines */}

@@ -28,6 +28,12 @@ vi.mock("@/lib/api", () => ({
           {
             name: "dev.to", platform: "dev.to", status: "not_eligible",
             reason: "Restricted to developer clients.", authorityTier: "medium",
+            termsCheckedOn: "2026-08-23",
+          },
+          {
+            name: "Plurk", platform: "Plurk", status: "not_reviewed",
+            reason: "Not yet reviewed: nobody has read this platform's terms.",
+            authorityTier: "low",
           },
         ];
       }
@@ -176,9 +182,12 @@ describe("Web2CampaignWizard", () => {
   it("shows why an ineligible platform is not offered instead of hiding it", async () => {
     renderWizard();
     await fillMinimum("one");
-    expect(screen.getByText(/1 platform\(s\) not available/i)).toBeTruthy();
-    fireEvent.click(screen.getByText(/not available for this client/i));
+    expect(screen.getByText(/1 platform\(s\) not suitable/i)).toBeTruthy();
+    fireEvent.click(screen.getByText(/not suitable for this client/i));
     expect(screen.getByText(/Restricted to developer clients/i)).toBeTruthy();
+    // A row nobody has adjudicated is named as unreviewed, never folded into the
+    // reviewed exclusions.
+    expect(screen.getByText(/1 platform\(s\) not yet reviewed/i)).toBeTruthy();
   });
 
   it("keeps a quote alive when the operator edits the copy it never priced", async () => {

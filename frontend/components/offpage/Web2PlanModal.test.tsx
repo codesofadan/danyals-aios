@@ -36,6 +36,16 @@ vi.mock("@/lib/api", () => ({
           {
             name: "dev.to", platform: "dev.to", status: "not_eligible",
             reason: "Restricted to developer clients.", authorityTier: "medium",
+            termsCheckedOn: "2026-08-23",
+          },
+          {
+            name: "Plurk", platform: "Plurk", status: "not_reviewed",
+            reason: "Not yet reviewed: nobody has read this platform's terms.",
+            authorityTier: "low",
+          },
+          {
+            name: "Wix", platform: null, status: "not_supported",
+            reason: "No publisher exists for this platform yet.", authorityTier: "low",
           },
         ];
       }
@@ -107,9 +117,15 @@ describe("building one property", () => {
     // Not selectable: one needs a credential, the other is refused for this client.
     expect(screen.queryByRole("button", { name: /^Tumblr/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^dev\.to/i })).not.toBeInTheDocument();
-    // ...but both are still explained rather than silently dropped.
+    // ...but every non-eligible row is still explained rather than silently dropped,
+    // and each of the four non-eligible states keeps its own honest label. In
+    // particular a row nobody has adjudicated says so — it is never dressed up as a
+    // reviewed policy verdict.
     expect(screen.getByText(/connect an account/i)).toBeInTheDocument();
-    expect(screen.getByText(/not available for this client/i)).toBeInTheDocument();
+    expect(screen.getByText(/not suitable for this client/i)).toBeInTheDocument();
+    expect(screen.getByText(/terms read 2026-08-23/i)).toBeInTheDocument();
+    expect(screen.getByText(/not yet reviewed/i)).toBeInTheDocument();
+    expect(screen.getByText(/no publisher built yet/i)).toBeInTheDocument();
   });
 
   it("never shows success when the server refused", async () => {
