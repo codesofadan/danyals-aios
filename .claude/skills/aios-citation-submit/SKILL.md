@@ -17,17 +17,33 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 
 **What you'll be asked for:** the client's **real** Name / Address / Phone / Website (exactly as it appears on their Google listing). If you don't know it, stop and ask the client — never guess, because a wrong address sent to 50 directories is 50 mistakes.
 
-**What happens:** the system creates the listings automatically. Two outcomes per directory:
-- **Auto-listed** — the whole thing is done for you; you get a live link.
-- **Needs one click** — some directories (with tricky "are you a robot?" checks or category pickers) get filled in and logged in for you, and then hand you a ready-to-go browser page where you just click **Publish**. This is normal and expected — it's the safe way to finish the ones that fight automation.
+**What happens (the honest version, 2026-09-02):** the campaign CLASSIFIES each
+directory and routes it. Today, with the earned-spec whitelist empty and no
+aggregator/API credentials on file, **virtually every row becomes work in your team's
+queue** (`/admin/citations/queue`, accelerated by the Citation Assistant extension) —
+every field pre-filled, and a listing counts as **Live** only after the server fetches
+its public URL and finds the business on the page. Per directory the outcomes are:
+- **Your team's queue** (`ready_for_human`) — the common case; a person finishes it
+  and pastes the live URL, which the platform verifies by fetching.
+- **Attempted automatically** — only for a directory with an ACTIVE earned spec
+  (bot) or a configured API engine (Data Axle needs the O-2 rate on file; Apple needs
+  keys; GBP has NO engine written). Zero of these exist until specs are earned or
+  credentials land — the campaign response's split says exactly how many.
+- **On hold** (`blocked`) — deliberately not attempted, with a machine-readable
+  reason (terms prohibit it, no NAP, an unpriced spend needs a lead, cost gate).
 
-**How long:** a batch of directories runs in the background; you check progress, you don't wait staring at it.
+Nothing "auto-lists with a live link" today; anything claiming so is describing
+engines that are not configured.
+
+**How long:** classification is near-instant; the human queue moves at your team's
+pace, and the campaign board (`GET /citation-builder/campaigns/{id}`) shows the
+rollup live.
 
 **When NOT to use it:** if you only want to *check* existing listings (not create new ones), use `/aios-citation-builder` instead.
 
 ---
 
-**Purpose.** Get `$client` an actual, new NAP listing across the citation-directory catalog — via a direct API (Bing Places / Foursquare), an aggregator push (Data Axle), or the self-hosted Playwright bot (bot_fillable / captcha_assisted directories) — not just reconcile a monitoring board. This is the skill that DOES the work `/aios-citation-builder` assumes already happened out-of-band.
+**Purpose.** Get `$client` an actual, new NAP listing across the citation-directory catalog — routed per directory to the operator queue (the near-universal path today), the self-hosted Playwright bot (ONLY for directories with an ACTIVE earned spec), or an API engine (Data Axle: blocked until the O-2 per-Add rate is configured; Apple Business Connect: keyless today; GBP: no engine written; Bing/Foursquare submitters were DELETED — their write endpoints do not exist). This is the skill that STARTS the work `/aios-citation-builder` assumes already happened out-of-band.
 
 **Who runs it.** Every write (`business-profiles`, `campaigns`) is LEAD-only (owner/admin/manager). A non-lead call 403s - report "requires a LEAD", STOP. Reading the catalog/profiles needs `view_reports`.
 
@@ -37,7 +53,7 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 - `$market` - optional filter: `US`, `UK`, `CA`, `AU`, or `GLOBAL` (default: the business profile's own market + `GLOBAL`).
 - `$tier` - optional filter: `aggregator`, `api`, `bot_fillable`, `captcha_assisted` (default: all four - `manual_only` NEVER queues, there is no worker path for it).
 - `AIOS_API_BASE` (default `http://localhost:8000/api/v1`) and `AIOS_TOKEN` (EdDSA bearer).
-- Dispatch spends real (if small) money per directory through the `citations` money-dial (cost-gated: dial -> client cap -> daily spend-stop). It defaults to `byhand` - review the estimate before queuing a large batch.
+- Dispatch spends real (if small) money per directory through the `citations` money-dial (cost-gated: dial -> client cap -> spend halt). The dial defaults to `api` (a recorded client decision); the earned-spec whitelist is what actually bounds bot spend, and the response's estimate is what a LEAD reviews before a large batch.
 
 **Trigger.** "Submit citations / build citations / citation campaign / get listed on directories / citation automation".
 
@@ -50,15 +66,15 @@ Copy this checklist and check items off as you go:
 - [ ] Step 3: Preview the directory catalog for the requested market/tier (GET /citation-builder/directories)
 - [ ] Step 4: STOP - present the plan (directory count, tiers, estimated cost) for a LEAD's go
 - [ ] Step 5: On explicit LEAD go -> dispatch the campaign (POST /citation-builder/campaigns)
-- [ ] Step 6: Report queued/alreadyQueued/skippedManualOnly; point to /offpage/citations for live progress
+- [ ] Step 6: Report the response split; poll GET /citation-builder/campaigns/{campaignId} for the rollup
 ```
 
 1. **Check for a business profile.** Run `aios_client.py get /citation-builder/business-profiles?clientId=<id>`. If one exists, use its id. If several, prefer the one marked `isPrimary`.
 2. **No profile yet -> get the real NAP first.** Do NOT invent business_name/address/phone. Ask the operator, or read it from the client's own site/GBP if already grounded elsewhere in context. Then `aios_client.py post /citation-builder/business-profiles --json '{"clientId":"<id>","businessName":"<name>","addressLine1":"<addr>","city":"<city>","region":"<state>","postalCode":"<zip>","market":"<US|UK|CA|AU>","phone":"<phone>","websiteUrl":"<url>"}'`.
 3. **Preview the catalog.** Run `aios_client.py get /citation-builder/directories?market=<m>&tier=<t>` (repeat `market=`/`tier=` for multiple values) to see what will be targeted - note the tier mix (direct API vs bot-fillable vs CAPTCHA-assisted) and that `manual_only` rows are never included.
 4. **STOP for the LEAD.** Present: directory count by tier, the markets covered, and the R5 cost estimate the dispatch call will report (roughly directory-count × $0.005-0.01). Do NOT dispatch without explicit confirmation - a campaign can queue dozens of directories and each spends, however small.
-5. **Dispatch on confirmation.** `aios_client.py post /citation-builder/campaigns --json '{"clientId":"<id>","businessProfileId":"<bp-id>","markets":["<market>",...],"tiers":["<tier>",...]}'` (omit `markets`/`tiers` for the defaults). Returns `{queued, alreadyQueued, skippedManualOnly, estimatedCost, citationIds}` immediately - the actual submissions run asynchronously per row afterward.
-6. **Report and point to progress.** Each queued row cost-gates + submits independently; check `aios_client.py get /offpage/citations?clientId=<id>` afterward (poll, do not block) for `submitStatus` (`queued -> submitting -> submitted|verified|failed|blocked`) and `proofUrl` (a screenshot/receipt once a Playwright submit completes).
+5. **Dispatch on confirmation.** `aios_client.py post /citation-builder/campaigns --json '{"clientId":"<id>","businessProfileId":"<bp-id>","markets":["<market>",...],"tiers":["<tier>",...]}'` (omit `markets`/`tiers` for the defaults). Returns `{campaignId, queued, alreadyQueued, skippedManualOnly, estimatedCost, citationIds}` immediately - each row is then classified asynchronously.
+6. **Report and point to progress.** Poll `aios_client.py get /citation-builder/campaigns/<campaignId>` (the rollup: `byStatus`, `byBlockedReason`, `stuck`, `liveUrls`, the persisted skip ledger, and every row). Real terminal states: most rows land `ready_for_human` (your team's queue does them); `live` appears ONLY after a completion whose public URL the server fetched and verified; `verified` is a re-checked live. Do not treat `submitted` as done, and expect `queued -> ready_for_human` within seconds — a row stuck at `queued` means no worker is consuming the queue (run scripts/dev-doctor.sh).
 
 ## Decision points
 - If the caller is not a LEAD -> `business-profiles`/`campaigns` 403s -> report "requires a LEAD", STOP.

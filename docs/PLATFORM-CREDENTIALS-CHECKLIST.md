@@ -86,7 +86,11 @@ US · UK · CA · AU grouped below. (Status from my live scan: many need per-sit
 **CA:** 411.ca · Ourbis · ProfileCanada · Weblocal.ca · Cylex Canada · Canadian Business Directory
 **AU:** True Local · StartLocal · Aussie Web · Local.com.au · White Pages AU · Cylex AU · Local Search
 
-Full URLs for all 50 are in `backend/integrations/citation_bot.py` (`FORM_SPECS`) — I can export them as a spreadsheet if useful.
+The production target list is NOT `FORM_SPECS` (that 50-entry dict is dead code — the
+bot reads only `public.directory_specs WHERE active`, the earned whitelist that starts
+empty; a directory joins it via `/citation-builder/specs` verify → first-live →
+activate). Browse the live catalog with `GET /citation-builder/directories`, and the
+earned whitelist with `GET /citation-builder/specs`.
 
 ---
 

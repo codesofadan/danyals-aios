@@ -85,12 +85,19 @@ proxy spend. Every off-page query is pinned to the client's own profile
   any of them is approved; publish pacing spreads a campaign over days rather than
   minutes; and eligibility is computed per client from the platform's own terms, so the
   full catalogue stays visible with a reason on every row it may not use.
-- Dial: **`backlinks`** (monitoring + Web2 publish, default byhand), **`citations`**
-  (auto-submit, CAPTCHA+proxy spend, default api).
+- Dials: **`backlinks`** (monitoring, default byhand), **`citations`** (submission
+  spend — earned specs only, default api), **`citation_discovery`** (the citation
+  audit's listing pull, default api — split from backlinks 2026-09-02 because the
+  byhand default silently blocked every citation audit).
 - Keys: `SERPER_API_KEY`; Web2 credentials live in the vault as `web2:<Platform>` with
   `label = <web2_accounts.id>` (migration `0100`; the `WEB2_HOUSE_CREDENTIALS_JSON`
-  fan-out was removed 2026-08-25 under R2-06); citations `BING_PLACES_API_KEY`/`FOURSQUARE_API_KEY`/
-  `CAPTCHA_SOLVER_API_KEY`/proxy/`APIFY_*`. Full: `backend/docs/CITATIONS-WEB2-CREDENTIALS.md`.
+  fan-out was removed 2026-08-25 under R2-06); citations `DATA_AXLE_API_KEY` +
+  `DATA_AXLE_ADD_COST_ESTIMATE` (both required — O-2), `APPLE_BUSINESS_API_KEY` +
+  `APPLE_BUSINESS_ORG_ID`, `CAPTCHA_SOLVER_*`, `CITATION_PROXY_URL`, `CITATION_IMAP_*`
+  + `CITATION_MAIL_DOMAIN` (signup bot, off pending the human loop). The Bing/
+  Foursquare submitters were DELETED 2026-08-23 (their write endpoints 404) — those
+  keys enable nothing; `FOURSQUARE_API_KEY` remains live for DISCOVERY reads only.
+  Full: `backend/docs/CITATIONS-WEB2-CREDENTIALS.md`.
 - Skills: `offpage`, `backlink-audit`, `citation-builder`, `citation-submit`, `web2-build`.
 
 ## Module 04 — Policy Radar (mandatory core)
