@@ -14,6 +14,8 @@ import {
   useQueueHeartbeat,
   useReleaseQueueItem,
 } from "@/lib/hooks/offpage";
+import { useClients } from "@/lib/hooks/clients";
+import ExtensionCallout from "./ExtensionCallout";
 import w from "./Wave4.module.css";
 
 // The operator's working surface. Two numbers govern the cost of a live citation: what
@@ -34,6 +36,14 @@ function mmss(total: number): string {
 }
 
 export default function CitationQueue() {
+  const clientsQ = useClients();
+  // Seeded from ?client= so the workspace's "Work the queue" links land pre-filtered.
+  // Read lazily from window (never useSearchParams: that demands a Suspense boundary
+  // at build time, and a missed one is a next-build failure nothing local catches).
+  const [clientFilter, setClientFilter] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("client") ?? "";
+  });
   const boardQ = useCitationQueue();
   const claim = useClaimQueueItem();
   const complete = useCompleteQueueItem();
@@ -116,7 +126,7 @@ export default function CitationQueue() {
   }, []);
 
   function takeNext() {
-    claim.mutate(undefined, {
+    claim.mutate(clientFilter || undefined, {
       onSuccess: (next) => {
         reset();
         setItem(next);
@@ -207,6 +217,7 @@ export default function CitationQueue() {
 
   return (
     <div>
+      <ExtensionCallout />
       {flash && <div className={`op-note ${flash.tone === "err" ? "crit" : flash.tone}`}>{flash.msg}</div>}
 
       {boardQ.isError && (
@@ -237,11 +248,26 @@ export default function CitationQueue() {
       </div>
 
       {!item && (
-        <div className="op-toolset" style={{ marginTop: 14 }}>
+        <div className="op-toolset" style={{ marginTop: 14, flexWrap: "wrap" }}>
           <button className="primary-btn" onClick={takeNext} disabled={claim.isPending}>
             <span className="material-symbols-rounded">play_arrow</span>
-            {claim.isPending ? "Finding one…" : "Take the next item"}
+            {claim.isPending
+              ? "Finding one…"
+              : clientFilter
+                ? "Take this client's next item"
+                : "Take the next item"}
           </button>
+          <select
+            className="op-input"
+            value={clientFilter}
+            onChange={(e) => setClientFilter(e.target.value)}
+            title="Scope the next claim to one client, or work the whole queue"
+          >
+            <option value="">Any client</option>
+            {(clientsQ.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.cn}</option>
+            ))}
+          </select>
         </div>
       )}
 

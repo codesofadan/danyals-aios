@@ -95,6 +95,42 @@ export default function ExtensionTab() {
       <section className="card" style={{ marginBottom: 16 }}>
         <div className="card-h">
           <div>
+            <div className="ct">Install &amp; connect</div>
+            <div className="cs">
+              The Citation Assistant lives in Chrome and works{" "}
+              <a className="op-url" href="/admin/citations/queue">the citation queue</a> from a
+              side panel beside each directory&apos;s form.
+            </div>
+          </div>
+        </div>
+        <ol style={{ margin: "6px 0 0 18px", fontSize: 13.5, lineHeight: 1.7 }}>
+          <li>
+            Build it once: run <code>Build-Extension.bat</code> (Windows) or{" "}
+            <code>cd extension &amp;&amp; npm install &amp;&amp; npm run build</code>, then{" "}
+            <code>chrome://extensions</code> → Developer mode → Load unpacked →{" "}
+            <b>the <code>extension/dist</code> folder</b> (not <code>extension/</code>).
+          </li>
+          <li>
+            Copy the API address below and create a token in the next card — paste both
+            into the extension&apos;s side panel.
+          </li>
+          <li>
+            If pairing fails, the panel runs a connection check and tells you which of
+            the four things broke (server unreachable / blocked by the browser / bad
+            token / expired) and what to do. For the &quot;blocked by the browser&quot; case, the
+            panel shows this device&apos;s id — an admin adds{" "}
+            <code>EXTENSION_ORIGINS=chrome-extension://&lt;that id&gt;</code> to{" "}
+            <code>backend/.env</code> and restarts the API.
+            {(pairingQ.data?.allowedExtensionOrigins.length ?? 0) > 0 && (
+              <> Currently allow-listed: <code>{pairingQ.data!.allowedExtensionOrigins.join(", ")}</code>.</>
+            )}
+          </li>
+        </ol>
+      </section>
+
+      <section className="card" style={{ marginBottom: 16 }}>
+        <div className="card-h">
+          <div>
             <div className="ct">Pair a device</div>
             <div className="cs">
               The Citation Assistant fills a directory&apos;s form from the client&apos;s
