@@ -242,8 +242,9 @@ def is_live_directory_response(status_code: int | None) -> bool:
 
 def estimate_campaign_cost(rows: list[dict[str, Any]], settings: Settings) -> float:
     """The R5 pre-check total for a batch of directory rows, BEFORE any submit runs -
-    a lead reviews this (the ``citations`` dial defaults to ``byhand``) rather than
-    discovering the spend after the fact.
+    a lead sees this total up front rather than discovering the spend after the fact.
+    (The ``citations`` dial actually defaults to ``api`` — a recorded client decision;
+    the per-row cost gate inside the worker is what bounds the spend.)
 
     An ``api``/``aggregator`` row prices at the Data Axle Add estimate, which is **0.0
     until a real rate card is on file**. That is not a claim those submissions are free -

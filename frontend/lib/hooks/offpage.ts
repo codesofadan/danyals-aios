@@ -199,6 +199,10 @@ export type CitationAuditQueued = {
    *  audit is still queued, there is simply nothing to poll. */
   jobRunId: string | null;
   jobName: string;
+  /** The dial's verdict, stated at click time (2026-09-02). willRun false means the
+   *  sweep will record a blocked run, not listings — say so, don't let the operator
+   *  poll nothing. */
+  discovery?: { dial: string; willRun: boolean; detail?: string };
 };
 
 export function useRunCitationAudit() {

@@ -65,6 +65,10 @@ logger = get_logger("workers.offpage")
 # Off-page monitoring pulls ride the 'backlinks' (off-page) money-dial; the provider
 # labels are for the cost log only (not the frontend dial's Provider union).
 _MONITOR_FEATURE = "backlinks"
+# Citation discovery rides its OWN dial (2026-09-02). It used to share
+# _MONITOR_FEATURE, so the byhand backlinks default silently blocked every citation
+# audit — zero rows written behind a 202 (measured, 2026-09-01 23:30).
+_CITATION_DISCOVERY_FEATURE = "citation_discovery"
 _MONITOR_JOB_TYPE = "backlinks"
 
 # The notify callback shape: (client_id, client_name, new_links, lost_rows).
@@ -279,7 +283,7 @@ def run_citation_monitor(
     rows (NAP state drives the Submit/Update action). Cost-gated + never-raises like the
     backlink monitor."""
     ctx = GateContext(
-        feature_key=_MONITOR_FEATURE, client_id=client_id, provider="BrightLocal",
+        feature_key=_CITATION_DISCOVERY_FEATURE, client_id=client_id, provider="BrightLocal",
         estimated_cost=float(settings.offpage_monitor_cost_estimate), job_id=business,
         job_type=_MONITOR_JOB_TYPE, client_name=client_name,
     )

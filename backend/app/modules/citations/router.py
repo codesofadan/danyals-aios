@@ -113,6 +113,29 @@ _PROFILE_NOT_FOUND = HTTPException(
 _CLIENT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
 
+def get_discovery_dial_reader() -> Callable[[], str]:
+    """Dependency: read the citation_discovery dial (overridable in tests).
+
+    Read SYNCHRONOUSLY at the route so a refusal is stated at click time. The audit
+    used to 202 "queued" into a dial that silently blocked the sweep — zero rows
+    written, and the operator discovered it by polling nothing."""
+
+    def _read() -> str:
+        from app.services.cost_store import PostgresCostStore
+
+        try:
+            return str(PostgresCostStore().dial_mode("citation_discovery"))
+        except Exception:
+            # An unreadable dial must not take the audit down; the worker's own gate
+            # still decides. "unknown" renders as willRun-unknown, never as a promise.
+            return "unknown"
+
+    return _read
+
+
+DiscoveryDialDep = Annotated[Callable[[], str], Depends(get_discovery_dial_reader)]
+
+
 def get_citation_enqueuer() -> Callable[..., None]:
     """Dependency: enqueue the citation-submit worker (overridable in tests).
 
@@ -326,7 +349,11 @@ async def ensure_business_profile(
 
 @router.post("/clients/{client_id}/audit", status_code=status.HTTP_202_ACCEPTED)
 async def run_citation_audit(
-    client_id: str, repo: CitationsRepoDep, actor: Lead, enqueue: AuditEnqueuerDep
+    client_id: str,
+    repo: CitationsRepoDep,
+    actor: Lead,
+    enqueue: AuditEnqueuerDep,
+    dial: DiscoveryDialDep,
 ) -> dict[str, Any]:
     """AUDIT a client's citations (lead-only): discover which directories ALREADY list
     this business (and whether the NAP is consistent) vs which are MISSING - the
@@ -351,6 +378,37 @@ async def run_citation_audit(
             detail="Add this client's NAP (business profile) before running a citation audit.",
         )
     business = str(profile.get("business_name") or name)
+
+    # THE DIAL, STATED AT CLICK TIME. `off` refuses outright — enqueueing work the
+    # gate will certainly skip manufactures a dead run. `byhand` still enqueues (the
+    # worker records the honest blocked outcome, and that trail is valuable) but the
+    # response SAYS the sweep will not run and names the fix.
+    mode = await asyncio.to_thread(dial)
+    if mode == "off":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The Citation Discovery dial is OFF, so this audit would be skipped. "
+                "Turn it on under Cost → dials, or approve the spend, then re-run."
+            ),
+        )
+    will_run = mode == "api"
+    discovery = {
+        "dial": mode,
+        "willRun": will_run,
+        **(
+            {}
+            if will_run
+            else {
+                "detail": (
+                    "The citation_discovery dial requires manual review - the sweep "
+                    "will record a blocked run, not listings. Flip it to api on the "
+                    "Cost page or approve the spend."
+                )
+            }
+        ),
+    }
+
     # domain is only used by the sibling backlink monitor; a citation audit keys off
     # the business name, so "" is fine here.
     key = await asyncio.to_thread(enqueue, client_id, "", business)
@@ -370,7 +428,12 @@ async def run_citation_audit(
         "business": business,
         "jobRunId": str(run["id"]) if run else None,
         "jobName": "offpage.monitor",
-        "detail": "Citation audit queued - discovering existing vs missing listings.",
+        "discovery": discovery,
+        "detail": (
+            "Citation audit queued - discovering existing vs missing listings."
+            if will_run
+            else "Citation audit queued, but the Citation Discovery dial will hold it - see discovery.detail."
+        ),
     }
 
 

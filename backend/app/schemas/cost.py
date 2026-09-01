@@ -68,7 +68,15 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # listing URL (see directory_specs). With the whitelist empty, `api` mode submits
     # nothing through the bot, so the client's decision and the safety requirement stop
     # being in tension. Flip this to `byhand` only as a deliberate operator choice.
-    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="Auto-submits queued directories (CAPTCHA + proxy spend)", default_mode="api"),
+    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="Submits via earned specs only — 0 machine-submittable until directory specs are activated; unmatched rows route to the operator queue (CAPTCHA + proxy spend when the bot runs)", default_mode="api"),
+    # 2026-09-02. Citation DISCOVERY (the audit that finds which directories already
+    # list a business) used to gate on `backlinks` — whose byhand default meant every
+    # citation audit silently produced ZERO rows while the route 202'd "queued". The
+    # two are different intents: backlinks is a paid DataForSEO pull a lead reviews;
+    # discovery is the cheap prerequisite the whole audit-first citations UX depends
+    # on. Splitting the key makes the citation audit switchable without also opening
+    # the backlink spend.
+    DialFeatureMeta(key="citation_discovery", label="Citation Discovery", icon="travel_explore", provider="Serper", note="Listing discovery for the citation audit (near-free per business)", default_mode="api"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
     DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),
     # Part 6B — the Client-Context / AI-memory module's two AI spends. Both flow

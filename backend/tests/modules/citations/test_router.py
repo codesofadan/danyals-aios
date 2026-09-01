@@ -772,3 +772,75 @@ async def test_a_nap_edit_on_a_client_with_no_listings_is_a_clean_noop(
     assert resp.status_code == 200, resp.text
     assert len(repo.nap_changes) == 1
     assert repo.nap_changes[0]["citation_ids"] == []
+
+
+# --------------------------------------------------------------------------- #
+# The audit route states the dial's verdict at click time (2026-09-02).
+# It used to 202 "queued" into a dial that silently blocked the sweep — zero
+# rows written, discovered only by polling nothing.
+# --------------------------------------------------------------------------- #
+from app.modules.citations.router import get_discovery_dial_reader  # noqa: E402
+
+
+def _seed_auditable_client(repo: FakeCitationsRepo) -> None:
+    repo.client_names["cl-1"] = "Acme Dental"
+    repo.create_business_profile(
+        client_id="cl-1", client_name="Acme Dental",
+        fields={"business_name": "Acme Dental Studio"},
+    )
+
+
+async def test_audit_says_it_will_run_when_the_dial_is_api(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    app: FastAPI, audits: list[tuple[str, str, str]],
+) -> None:
+    _seed_auditable_client(repo)
+    wire("owner")
+    app.dependency_overrides[get_discovery_dial_reader] = lambda: (lambda: "api")
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 202
+    assert resp.json()["discovery"] == {"dial": "api", "willRun": True}
+    assert len(audits) == 1
+
+
+async def test_audit_on_a_byhand_dial_still_queues_but_says_it_will_be_held(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    app: FastAPI, audits: list[tuple[str, str, str]],
+) -> None:
+    _seed_auditable_client(repo)
+    wire("owner")
+    app.dependency_overrides[get_discovery_dial_reader] = lambda: (lambda: "byhand")
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["discovery"]["willRun"] is False
+    assert "citation_discovery" in body["discovery"]["detail"]
+    assert "hold" in body["detail"]  # the top-level sentence says so too
+    assert len(audits) == 1  # the blocked run is still recorded — that trail matters
+
+
+async def test_audit_refuses_loudly_when_the_dial_is_off(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+    app: FastAPI, audits: list[tuple[str, str, str]],
+) -> None:
+    """Enqueueing work the gate will certainly skip manufactures a dead run."""
+    _seed_auditable_client(repo)
+    wire("owner")
+    app.dependency_overrides[get_discovery_dial_reader] = lambda: (lambda: "off")
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 409
+    assert "Citation Discovery dial is OFF" in _message(resp)
+    assert audits == []  # nothing enqueued
+
+
+async def test_an_unreadable_dial_degrades_to_unknown_never_to_a_promise(
+    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None],
+) -> None:
+    """The default reader in unit tests has no DB — the route must still 202, with
+    willRun false and the dial reported as unknown rather than asserted."""
+    _seed_auditable_client(repo)
+    wire("owner")
+    resp = await client.post("/api/v1/citation-builder/clients/cl-1/audit")
+    assert resp.status_code == 202
+    assert resp.json()["discovery"]["dial"] == "unknown"
+    assert resp.json()["discovery"]["willRun"] is False

@@ -232,8 +232,10 @@ class CitationCampaignRequest(BaseModel):
 
 class CitationCampaignResponse(BaseModel):
     """The outcome of queuing a campaign: how many rows were queued/skipped, and the
-    R5 cost estimate for the WHOLE batch (a lead reviews this before it runs - the
-    ``citations`` dial defaults to ``byhand`` for exactly this reason)."""
+    R5 cost estimate for the WHOLE batch. A lead sees this total regardless of dial
+    mode; the ``citations`` dial actually defaults to ``api`` (a recorded client
+    decision — see app/schemas/cost.py:71's note), and each row still cost-gates
+    individually inside the worker."""
 
     # The campaign's durable id (0120) — what the board polls. Empty only when the
     # identity row could not be written (the batch still queued; degrade, don't refuse).

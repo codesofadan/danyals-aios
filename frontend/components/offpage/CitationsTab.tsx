@@ -90,7 +90,11 @@ export default function CitationsTab() {
         // for it only when the ledger could not be read back - the sweep is still
         // queued, but nothing can report on it, and a panel that stays empty for
         // that reason must not read as "nothing is happening".
-        if (r?.jobRunId) {
+        if (r?.discovery && r.discovery.willRun === false) {
+          // Queued, but the dial will hold it — an "ok" flash here would be the old
+          // lie ("queued!") with extra steps. Say which dial and where to flip it.
+          setFlash("warn", r.discovery.detail ?? r.detail ?? "Queued, but the Citation Discovery dial will hold it.");
+        } else if (r?.jobRunId) {
           setFlash("ok", r?.detail ?? "Citation audit queued — discovering existing vs missing.");
         } else {
           setFlash("warn", "Audit queued, but its run could not be recorded — there is nothing to follow here. Check Operations, or re-run it.");
