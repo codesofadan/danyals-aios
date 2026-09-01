@@ -111,27 +111,7 @@ export default function Web2PlatformPicker({
           <summary>
             {needsAccount.length} more platform(s) this client may use — connect an account
           </summary>
-          <ul style={{ margin: "8px 0 0 16px" }}>
-            {needsAccount.map((row) => (
-              <li key={row.name} style={{ marginBottom: 8 }}>
-                <b>{row.name}</b>
-                {row.setupCost && !/^free/i.test(row.setupCost) && (
-                  <span style={{ color: "#92400e" }}> — {row.setupCost}</span>
-                )}
-                {row.setupBlocker && (
-                  <div style={{ color: "#92400e", marginTop: 2 }}>⚠ {row.setupBlocker}</div>
-                )}
-                {row.setupSteps && <div style={{ marginTop: 2 }}>{row.setupSteps}</div>}
-                {row.setupUrl && (
-                  <div style={{ marginTop: 2 }}>
-                    <a href={row.setupUrl} target="_blank" rel="noopener noreferrer">
-                      {row.setupUrl}
-                    </a>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <Web2SetupGuideList rows={needsAccount} />
         </details>
       )}
 
@@ -183,5 +163,34 @@ export default function Web2PlatformPicker({
         </div>
       )}
     </>
+  );
+}
+
+/** The per-platform setup guide list (where to sign up, what it costs, what blocks it,
+ *  which token to fetch). Shared with the Accounts tab, where connecting is the JOB —
+ *  the guides used to render only inside the two planning modals. */
+export function Web2SetupGuideList({ rows }: { rows: Web2PlatformStatusRow[] }) {
+  return (
+    <ul style={{ margin: "8px 0 0 16px" }}>
+      {rows.map((row) => (
+        <li key={row.name} style={{ marginBottom: 8 }}>
+          <b>{row.name}</b>
+          {row.setupCost && !/^free/i.test(row.setupCost) && (
+            <span style={{ color: "#92400e" }}> — {row.setupCost}</span>
+          )}
+          {row.setupBlocker && (
+            <div style={{ color: "#92400e", marginTop: 2 }}>⚠ {row.setupBlocker}</div>
+          )}
+          {row.setupSteps && <div style={{ marginTop: 2 }}>{row.setupSteps}</div>}
+          {row.setupUrl && (
+            <div style={{ marginTop: 2 }}>
+              <a href={row.setupUrl} target="_blank" rel="noopener noreferrer">
+                {row.setupUrl}
+              </a>
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

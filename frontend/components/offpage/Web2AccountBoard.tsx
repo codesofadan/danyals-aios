@@ -7,8 +7,10 @@ import {
   useRegisterWeb2Account,
   useWeb2Accounts,
   useWeb2Catalog,
+  useWeb2PlatformBoard,
 } from "@/lib/hooks/offpage";
 import type { Web2Account } from "@/lib/offpage";
+import { Web2SetupGuideList } from "./Web2PlatformPicker";
 
 /**
  * The connection board — which publishing accounts exist and whether they still work.
@@ -57,6 +59,7 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
           API licence).
         </p>
         <button className="op-act" onClick={() => setAdding(true)}>Register an account</button>
+        <ConnectGuides clientId={clientId} />
       </div>
     );
   }
@@ -71,6 +74,7 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
       {adding && (
         <RegisterAccountForm clientId={clientId} onDone={() => setAdding(false)} />
       )}
+      <ConnectGuides clientId={clientId} />
       <table className="tbl op-tbl w2-ledger">
         <thead>
           <tr>
@@ -133,6 +137,31 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
         checked yet, which is deliberately different from a platform rejecting the credential.
       </div>
     </div>
+  );
+}
+
+/** The platforms this client could use but holds no account for, with the setup guide
+ *  for each — ON the screen where connecting is the job. The guides used to render only
+ *  inside the two planning modals, so the person sent here to "add an account" arrived
+ *  with no instructions. */
+function ConnectGuides({ clientId }: { clientId?: string }) {
+  const boardQ = useWeb2PlatformBoard(clientId || undefined);
+  const rows = (boardQ.data ?? []).filter((r) => r.status === "not_connected");
+  if (!clientId) {
+    return (
+      <div className="fld-hint" style={{ margin: "8px 0" }}>
+        Pick a client above to see which platforms they may use and the setup guide for each.
+      </div>
+    );
+  }
+  if (rows.length === 0) return null;
+  return (
+    <details className="fld-hint" style={{ margin: "8px 0" }}>
+      <summary>
+        {rows.length} platform(s) this client may use have no account yet — setup guides
+      </summary>
+      <Web2SetupGuideList rows={rows} />
+    </details>
   );
 }
 
