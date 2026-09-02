@@ -507,6 +507,17 @@ export function useAdvanceWeb2Provisioning() {
   });
 }
 
+/** Start OAuth for one queue item. Returns a consent URL, or `held` with the reason
+ *  when no app is registered for that platform yet. */
+export function useConnectWeb2Provisioning() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.get<{ held: boolean; reason: string; authorizeUrl: string | null }>(
+        `/offpage/web2/provisioning/${id}/connect`,
+      ),
+  });
+}
+
 /** Run the automatic steps: mint the API-signup accounts, and read each client's own
  *  mailbox once for confirmation mail that has arrived. */
 export function useRunWeb2Provisioning() {

@@ -524,6 +524,17 @@ class Settings(BaseSettings):
     # unset and `sync_gbp_profile` HOLDS cleanly; map-pack rank + citations work
     # without them. The per-client refresh TOKEN is never here: it is AES-GCM sealed
     # in the vault and `gbp_profiles.oauth_vault_ref` points at it.
+    # --- Web 2.0 OAuth apps (one registration per platform, reused by every client) ---
+    # Blogger deliberately has no entry: it reuses `google_oauth_client_id` below, since
+    # registering a second Google app for the same provider buys nothing.
+    web2_wordpress_client_id: str | None = None
+    web2_wordpress_client_secret: SecretStr | None = None
+    web2_tumblr_client_id: str | None = None
+    web2_tumblr_client_secret: SecretStr | None = None
+    #: Where each platform sends the operator back after consent. Must match what is
+    #: registered with the platform EXACTLY, or the exchange is refused.
+    web2_oauth_redirect_uri: str | None = None
+
     gbp_oauth_client_id: str | None = None
     gbp_oauth_client_secret: SecretStr | None = None
 

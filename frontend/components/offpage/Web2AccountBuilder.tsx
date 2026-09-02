@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   useAdvanceWeb2Provisioning,
   useStartWeb2Provisioning,
+  useConnectWeb2Provisioning,
   useRunWeb2Provisioning,
   useWeb2Provisioning,
   useWeb2ClientIdentity,
@@ -46,6 +47,7 @@ export default function Web2AccountBuilder({ clientId }: { clientId?: string }) 
   const start = useStartWeb2Provisioning();
   const advance = useAdvanceWeb2Provisioning();
   const runTick = useRunWeb2Provisioning();
+  const connect = useConnectWeb2Provisioning();
   const [tickResult, setTickResult] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [ack, setAck] = useState(false);
@@ -233,7 +235,31 @@ export default function Web2AccountBuilder({ clientId }: { clientId?: string }) 
                         </button>
                       )}
                       {item.status === "awaiting_credential" && (
-                        <FinishForm item={item} onError={setError} />
+                        <>
+                          <button
+                            className="op-act"
+                            style={{ marginRight: 6 }}
+                            disabled={connect.isPending}
+                            onClick={async () => {
+                              setError("");
+                              try {
+                                const r = await connect.mutateAsync(item.id);
+                                if (r.held || !r.authorizeUrl) {
+                                  // Not a failure: the platform simply has no app
+                                  // registered yet, and the token can still be pasted.
+                                  setError(r.reason || "Connect is not set up for this platform yet.");
+                                  return;
+                                }
+                                window.location.href = r.authorizeUrl;
+                              } catch (e) {
+                                setError((e as Error)?.message ?? "Could not start the connection.");
+                              }
+                            }}
+                          >
+                            {connect.isPending ? "Connecting…" : "Connect"}
+                          </button>
+                          <FinishForm item={item} onError={setError} />
+                        </>
                       )}
                     </td>
                   </tr>

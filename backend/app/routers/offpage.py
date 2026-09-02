@@ -24,17 +24,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.deps import RedisDep, SettingsDep
 from app.core.pagination import PageDep
 from app.db.offpage_repo import OffpageRepoDep
+from app.logging_setup import get_logger
 from app.schemas.offpage import (
     BacklinkResponse,
     BacklinkStatus,
@@ -73,6 +77,8 @@ from app.schemas.offpage import (
     action_for,
 )
 from app.services.activity import record_activity
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["offpage"])
 
@@ -1424,6 +1430,147 @@ async def start_web2_provisioning(
         )
     rows = await asyncio.to_thread(repo.list_provision_items, body.client_id)
     return [Web2ProvisionItemResponse.from_row(r) for r in rows]
+
+
+_WEB2_OAUTH_STATE_TTL = 600  # 10 minutes - plenty for a consent screen
+
+
+def _web2_oauth_state_key(state: str) -> str:
+    return f"web2:oauth:{state}"
+
+
+@router.get("/offpage/web2/provisioning/{item_id}/connect")
+async def connect_web2_provisioning(
+    item_id: str,
+    repo: OffpageRepoDep,
+    redis: RedisDep,
+    settings: SettingsDep,
+    actor: Lead,
+) -> dict[str, Any]:
+    """Start OAuth for one queue item, or say why it cannot run (lead-only).
+
+    OAuth replaces the token hunt, not the signup: the ACCOUNT must already exist,
+    because these platforms' own terms require a human to create it. What consent
+    removes is the operator copying a token out of a developer console.
+
+    HOLDS rather than fails when no app is registered for the platform, so an
+    unconfigured platform reads as "not set up yet" instead of a broken button.
+    """
+    from app.services.web2_oauth import authorize_url, availability
+
+    row = await asyncio.to_thread(repo.get_provision_item, item_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Provisioning item not found"
+        )
+    platform = str(row.get("platform") or "")
+    ready, reason = availability(platform, settings)
+    redirect_uri = settings.web2_oauth_redirect_uri or ""
+    if not ready or not redirect_uri:
+        return {
+            "held": True,
+            "reason": reason or "No OAuth redirect URI is configured for Web 2.0.",
+            "authorizeUrl": None,
+        }
+
+    state = secrets.token_urlsafe(32)
+    payload = json.dumps({"item_id": item_id, "platform": platform, "actor_id": actor.id})
+    await redis.set(
+        _web2_oauth_state_key(state), payload.encode(), ex=_WEB2_OAUTH_STATE_TTL
+    )
+    return {
+        "held": False,
+        "reason": "",
+        "authorizeUrl": authorize_url(
+            platform, settings, state=state, redirect_uri=redirect_uri
+        ),
+    }
+
+
+@router.get("/offpage/web2/oauth/callback", include_in_schema=False)
+async def web2_oauth_callback(
+    redis: RedisDep,
+    settings: SettingsDep,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """The platform's redirect back to us - UNAUTHENTICATED by necessity.
+
+    The ``state`` token is the capability: single-use, ten-minute TTL, and mintable only
+    by an already-authenticated lead's ``/connect`` call. It is deleted before the
+    exchange, so a replayed callback cannot re-run one.
+    """
+    return_to = "/admin/web2"
+    if error or not (code and state):
+        return RedirectResponse(f"{return_to}?web2Connect=error")
+
+    raw = await redis.get(_web2_oauth_state_key(state))
+    if raw is None:
+        return RedirectResponse(f"{return_to}?web2Connect=expired")
+    await redis.delete(_web2_oauth_state_key(state))  # single-use, even if the rest fails
+
+    try:
+        payload = json.loads(raw)
+        item_id = str(payload["item_id"])
+        platform = str(payload["platform"])
+        credential = await _exchange_web2_oauth(platform, settings, code=code)
+        if not credential:
+            logger.error("web2_oauth_no_token", platform=platform)
+            return RedirectResponse(f"{return_to}?web2Connect=error")
+        await asyncio.to_thread(_finish_web2_oauth_item, item_id, credential)
+    except Exception:
+        logger.exception("web2_oauth_callback_failed")
+        return RedirectResponse(f"{return_to}?web2Connect=error")
+
+    return RedirectResponse(f"{return_to}?web2Connect=success")
+
+
+async def _exchange_web2_oauth(
+    platform: str, settings: Any, *, code: str
+) -> dict[str, str]:
+    """Trade the consent code for a token and shape it as the publisher's credential."""
+    import httpx
+
+    from app.services.web2_oauth import credential_from_tokens, exchange_payload
+
+    url, form = exchange_payload(
+        platform, settings, code=code, redirect_uri=settings.web2_oauth_redirect_uri or ""
+    )
+    if not url:
+        return {}
+
+    def _post() -> dict[str, Any]:
+        with httpx.Client(timeout=25.0, follow_redirects=False) as http:
+            resp = http.post(url, data=form)
+            resp.raise_for_status()
+            parsed = resp.json()
+        return parsed if isinstance(parsed, dict) else {}
+
+    tokens = await asyncio.to_thread(_post)
+    return credential_from_tokens(platform, tokens)
+
+
+def _finish_web2_oauth_item(item_id: str, credential: dict[str, str]) -> None:
+    """Seal the consented token against the queue item.
+
+    The item lands at ``awaiting_credential`` with the token already held rather than at
+    ``live``, because most of these platforms still need one operator-supplied field the
+    consent screen cannot provide - a blog id or site host. Marking it live here would
+    register an account the publisher cannot actually address.
+    """
+    from app.db.database import privileged_connection
+
+    with privileged_connection() as cur:
+        cur.execute(
+            "update public.web2_provision_items "
+            "set status = 'awaiting_credential', note = %s "
+            "where id = %s and status <> 'cancelled'",
+            (
+                "Connected. Add the remaining field (blog id / site) to finish.",
+                item_id,
+            ),
+        )
 
 
 @router.post("/offpage/web2/provisioning/run")
