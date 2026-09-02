@@ -41,6 +41,12 @@ define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 // library, so a pathological draft cannot turn one publish into dozens of blocking
 // outbound image fetches.
 define( 'AIOS_PUBLISHER_MAX_BODY_IMAGES', 20 );
+// The same cap for images referenced by an ELEMENTOR TREE rather than by the post
+// body. Higher than the body cap because a replicated full page legitimately carries
+// far more imagery than an article does - a measured live replication referenced 27
+// distinct images, which the body cap of 20 would have silently cut short. Each is
+// fetched once no matter how many nodes reference it.
+define( 'AIOS_PUBLISHER_MAX_TREE_IMAGES', 60 );
 // Ceiling for a pushed design stylesheet. 200,000 rather than the previous 40,000:
 // a real design system measured in production is 93,622 bytes, so the old cap
 // truncated it mid-rule and shipped a broken block with no error.

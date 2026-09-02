@@ -46,17 +46,25 @@ def tree() -> list[dict[str, Any]]:
     page = infer_layout(raw, viewport_width=1440)
     from app.services.elementor_replica import (
         mobile_text_positions,
+        responsive_band_padding,
         responsive_heading_sizes,
     )
 
-    captures = {}
+    captures = _captures()
+    return build_tree(page, extract(nodes),
+                      responsive_heading_sizes(captures),
+                      mobile_text_positions(captures),
+                      responsive_band_padding(captures))
+
+
+def _captures() -> dict[str, Any]:
+    """The tablet + mobile captures of the same reference page."""
+    captures: dict[str, Any] = {}
     for dev in ("tablet", "mobile"):
         f = _FIXTURE.parent / f"spotino_{dev}.json"
         if f.exists():
             captures[dev] = json.loads(f.read_text())
-    return build_tree(page, extract(nodes),
-                      responsive_heading_sizes(captures),
-                      mobile_text_positions(captures))
+    return captures
 
 
 def _walk(nodes: list[dict[str, Any]]):
@@ -413,9 +421,29 @@ class TestItBuildsToWhatTheTargetCanRender:
             links=(NavLink("Services", "/services/"), NavLink("About", "/about/")),
         )
 
-    def test_a_pro_site_gets_a_real_navigation_menu(self) -> None:
+    def test_a_pro_site_publishes_rather_than_aborting_on_an_unemittable_widget(
+        self,
+    ) -> None:
+        """This test used to assert a Pro site gets a real `nav-menu`. That is the
+        right AMBITION and it was, as written, a total outage.
+
+        `nav-menu` is in every Elementor Pro registry and is NOT in
+        `oracle_4_7.json`. `build_navbar` promoted to it on capability alone,
+        `validate_tree` then refused the finished tree, and `replicate()` returned
+        "refused by the oracle" having published NOTHING - not a degraded page, no
+        page. The better the client's site, the more total the failure.
+
+        A widget must satisfy BOTH authorities: the site must be able to render it
+        and the oracle must be able to validate it. Until the oracle carries
+        nav-menu's real control ids - which have to be read off a live Pro editor
+        bootstrap, never invented, because inventing them is the exact bug the
+        oracle exists to catch - the honest output is the approximation plus a note.
+
+        The guard is data-driven, so this reverses itself: add nav-menu to the
+        oracle and Pro sites get real menus again with no code change.
+        """
         from app.services.design_system import DesignSystem
-        from app.services.elementor_replica import build_navbar
+        from app.services.elementor_replica import build_navbar, load_oracle
         from app.services.replica_capability import TargetCapability
 
         pro = TargetCapability.from_ping({
@@ -424,10 +452,20 @@ class TestItBuildsToWhatTheTargetCanRender:
             "elementor_widgets": ["heading", "icon-list", "image", "button", "nav-menu"],
         })
         section, notes = build_navbar(self._nav(), DesignSystem(), 1200, pro)
-        blob = json.dumps(section)
-        assert '"widgetType": "nav-menu"' in blob
-        assert "icon-list" not in blob, "the free-tier approximation must not also ship"
-        assert notes == [], "using the right widget is not a degradation"
+        emittable = set(load_oracle().get("widget_keys", {}))
+        if "nav-menu" in emittable:
+            # The oracle has since gained the widget: the ambition is met for real.
+            assert '"widgetType": "nav-menu"' in json.dumps(section)
+            return
+        validate_tree([{  # the whole point: the tree must SURVIVE the oracle
+            "id": "s1", "elType": "section", "settings": {},
+            "elements": [section] if section.get("elType") == "column" else section.get(
+                "elements", [])
+        }] if section.get("elType") != "section" else [section])
+        assert any("nav-menu" in n for n in notes), (
+            "a Pro site that cannot get its real menu must be TOLD, not silently "
+            f"downgraded: {notes}"
+        )
 
     def test_a_free_site_gets_the_link_list_and_is_told_why(self) -> None:
         from app.services.design_system import DesignSystem
@@ -470,8 +508,24 @@ class TestItBuildsToWhatTheTargetCanRender:
             "elementor": True, "elementor_pro": False,
             "elementor_widgets": ["heading", "accordion", "tabs"],
         })
+        assert addons.can("tabs"), "the registry, not a Pro boolean, is the answer"
+
+        # ...but rendering is only half of it. This assertion used to be
+        # `widget == "tabs" and note is None`, which asserted a promotion to a
+        # widget type `oracle_4_7.json` does not carry and this codebase has no
+        # emitter for (there is no `_w_tabs`) - so it would have been refused at
+        # validation, taking the whole publish with it. Six of the seven UPGRADES
+        # entries name such a widget.
+        from app.services.elementor_replica import load_oracle
+
         widget, note = addons.resolve("tabs")
-        assert widget == "tabs" and note is None
+        if "tabs" in load_oracle().get("widget_keys", {}):
+            assert widget == "tabs" and note is None
+        else:
+            assert widget == "accordion" and note, (
+                "a construct AIOS cannot emit must degrade with a note, not be "
+                "promoted into a tree the oracle will refuse"
+            )
 
     def test_a_missing_widget_degrades_to_something_renderable(self) -> None:
         from app.services.replica_capability import FREE_WIDGETS, UPGRADES, TargetCapability
@@ -481,3 +535,204 @@ class TestItBuildsToWhatTheTargetCanRender:
             widget, note = bare.resolve(construct)
             assert widget in FREE_WIDGETS, f"{construct} degraded to unrenderable {widget}"
             assert note, f"{construct} degraded silently"
+
+
+class TestTheRebuildIsResponsive:
+    """Three viewports are captured; before these tests, two of them contributed
+    only heading font sizes and every section shipped its DESKTOP spacing to phones.
+
+    Measured on this exact fixture: all 153 text anchors present at every viewport
+    had a mobile band padding different from desktop (88px desktop vs 10-25px
+    mobile), so inheriting desktop was wrong on every section, not a rare edge.
+    """
+
+    def test_the_band_padding_map_is_not_empty(self) -> None:
+        """THE NON-VACUITY GUARD, and it is not hypothetical: the first version of
+        `responsive_band_padding` took the page width as `max(width of any node)`.
+        The tablet capture contains a 2,468px carousel track inside an 834px
+        viewport, so the band threshold became 2,221px, nothing matched, the
+        function returned an empty map and the entire responsive pass was a silent
+        no-op that emitted a perfectly valid tree. Only a test that asserts real
+        CONTENT catches that; asserting "it returns a dict" would have passed.
+        """
+        from app.services.elementor_replica import responsive_band_padding
+
+        band = responsive_band_padding(_captures())
+        assert set(band) == {"tablet", "mobile"}
+        for device, measured in band.items():
+            assert len(measured) > 50, f"{device}: only {len(measured)} anchors resolved"
+            assert all(isinstance(v, tuple) and len(v) == 2 for v in measured.values())
+
+    def test_an_overflowing_child_does_not_break_band_detection(self) -> None:
+        """The regression above, reduced to its shape: a node far wider than the
+        viewport must not move the page width."""
+        from app.services.elementor_replica import responsive_band_padding
+
+        root = {
+            "t": "div", "box": [0, 0, 390, 2000], "s": {},
+            "kids": [
+                {"t": "section", "box": [0, 0, 390, 900],
+                 "s": {"paddingTop": "44px", "paddingBottom": "44px"},
+                 "txt": "", "kids": [
+                     {"t": "h2", "box": [20, 44, 350, 40], "s": {}, "txt": "A heading"},
+                     # the carousel track: 6x the viewport width
+                     {"t": "div", "box": [0, 100, 2340, 300], "s": {}, "kids": []},
+                 ]},
+            ],
+        }
+        band = responsive_band_padding({"mobile": root})
+        assert band["mobile"].get("A heading") == (44, 44)
+
+    def test_every_padded_section_carries_its_measured_breakpoints(
+        self, tree: list[dict[str, Any]]
+    ) -> None:
+        sections = [n for n in tree if n.get("elType") == "section" and not n.get("isInner")]
+        padded = [s for s in sections if "padding" in (s.get("settings") or {})]
+        assert padded, "the fixture's sections do measure a vertical rhythm"
+        with_variants = [
+            s for s in padded
+            if "padding_mobile" in s["settings"] or "padding_tablet" in s["settings"]
+        ]
+        assert len(with_variants) == len(padded), (
+            f"only {len(with_variants)} of {len(padded)} padded sections carry a "
+            "breakpoint variant; the rest silently inherit desktop spacing on a phone"
+        )
+
+    def test_the_mobile_rhythm_is_actually_tighter_than_the_desktop_one(
+        self, tree: list[dict[str, Any]]
+    ) -> None:
+        """The point of the exercise. A replica whose phone padding equals its
+        desktop padding has not transferred the source's responsiveness."""
+        tighter = 0
+        for node in _walk(tree):
+            settings = node.get("settings") or {}
+            base, mobile = settings.get("padding"), settings.get("padding_mobile")
+            if not base or not mobile:
+                continue
+            if int(mobile["top"]) < int(base["top"]):
+                tighter += 1
+        assert tighter >= 5, f"only {tighter} sections tightened their spacing on mobile"
+
+    def test_a_section_matching_desktop_exactly_emits_no_variant(self) -> None:
+        """Noise control: an explicit variant identical to the base is dead weight in
+        every page's stored JSON."""
+        from app.services.elementor_replica import _section_anchor, build_tree
+        from app.services.layout_infer import infer_layout
+
+        raw = json.loads(_FIXTURE.read_text())
+        page = infer_layout(raw, viewport_width=1440)
+        target = next(s for s in page.sections if s.pad_top or s.pad_bottom)
+        anchor = _section_anchor(target)
+        assert anchor, "the section must be identifiable by its copy"
+        same = {"tablet": {anchor: (target.pad_top, target.pad_bottom)}}
+        built = build_tree(page, extract([raw]), None, None, same)
+        section = next(
+            n for n in built
+            if _section_anchor(target) and n.get("elType") == "section"
+            and (n.get("settings") or {}).get("padding", {}).get("top") == str(target.pad_top)
+        )
+        assert "padding_tablet" not in section["settings"]
+
+    def test_every_heading_can_be_looked_up_in_the_responsive_map(self) -> None:
+        """The map's KEY must be the expression `_w_heading` looks up with.
+
+        It was not. This walk required `n["txt"]` and keyed on it, while
+        `_w_heading` titles from `node.get("txt") or _inline_text(node)`. A heading
+        whose words live on nested spans - "Comfort that feels like <em>home</em>",
+        the hero-headline pattern - has no own text, so it was never entered in the
+        map and its lookup could never hit. 12 of this fixture's 37 headings, and
+        they are exactly the big display headings whose desktop size most needs
+        reducing on a phone.
+
+        Asserts the MATCH RATE, not the number of emitted variants: whether a
+        matched heading actually resizes is a property of the page, and on this
+        fixture most of the newly-matched ones happen not to.
+        """
+        from app.services.elementor_replica import (
+            _inline_text,
+            _px,
+            responsive_heading_sizes,
+        )
+
+        band = responsive_heading_sizes(_captures())
+        desktop = json.loads(_FIXTURE.read_text())
+
+        headings: list[str] = []
+
+        def walk(n: dict[str, Any]) -> None:
+            if n.get("t") in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                text = n.get("txt") or _inline_text(n)
+                if text and _px((n.get("s") or {}).get("fontSize", "")):
+                    headings.append(text)
+            for k in n.get("kids") or []:
+                walk(k)
+
+        walk(desktop)
+        assert headings, "the fixture must contain headings"
+        for device in ("tablet", "mobile"):
+            missed = [h for h in headings if h not in band[device]]
+            assert not missed, (
+                f"{len(missed)} of {len(headings)} headings cannot be looked up in "
+                f"the {device} map, so they can never get a responsive size: "
+                f"{missed[:3]}"
+            )
+
+    def test_repeated_card_labels_cannot_force_columns_inline_on_a_phone(self) -> None:
+        """A row of cards whose buttons all read the same thing must NOT be judged
+        "stays inline".
+
+        `mobile_text_positions` kept the FIRST position per text and ignored every
+        later one, so three cards each ending in "View more" all resolved to the
+        same coordinates: identical y, zero spread, "they share a band" - and the
+        row was pinned to 33% width on a 390px phone. On the reference capture 21 of
+        160 distinct strings repeat, and they are exactly the across-a-row labels:
+        "View more" 4x spread over 1,287px, "Get a quote" 3x over 10,343px.
+
+        Elementor stacks columns on mobile by default. Forcing them inline is only
+        correct when the source PROVABLY keeps them inline, so an ambiguous anchor
+        must fail closed.
+        """
+        from app.services.elementor_replica import mobile_text_positions
+
+        mobile = {
+            "t": "div", "box": [0, 0, 390, 3000], "s": {}, "kids": [
+                # three cards stacked vertically on the phone, each ending in the
+                # same call to action
+                {"t": "div", "box": [20, 100, 350, 300], "s": {}, "kids": [
+                    {"t": "h3", "box": [20, 110, 350, 30], "s": {}, "txt": "Card one"},
+                    {"t": "a", "box": [20, 360, 120, 40], "s": {}, "txt": "View more"}]},
+                {"t": "div", "box": [20, 500, 350, 300], "s": {}, "kids": [
+                    {"t": "h3", "box": [20, 510, 350, 30], "s": {}, "txt": "Card two"},
+                    {"t": "a", "box": [20, 760, 120, 40], "s": {}, "txt": "View more"}]},
+                {"t": "div", "box": [20, 900, 350, 300], "s": {}, "kids": [
+                    {"t": "h3", "box": [20, 910, 350, 30], "s": {}, "txt": "Card three"},
+                    {"t": "a", "box": [20, 1160, 120, 40], "s": {}, "txt": "View more"}]},
+            ],
+        }
+        pos = mobile_text_positions({"mobile": mobile})
+
+        assert "View more" not in pos, (
+            "a text occurring three times at three different y positions cannot "
+            "identify one position; keeping the first is how three stacked cards "
+            "were judged to sit side by side"
+        )
+        # The unambiguous headings still resolve, and to their real positions.
+        assert pos["Card one"] == (20, 110)
+        assert pos["Card two"] == (20, 510)
+        assert pos["Card three"] == (20, 910)
+
+    def test_unambiguous_inline_rows_are_still_detected(self) -> None:
+        """The conservative fix must not destroy the feature it guards: a genuine
+        side-by-side row with distinct labels still reports its positions."""
+        from app.services.elementor_replica import mobile_text_positions
+
+        mobile = {
+            "t": "div", "box": [0, 0, 390, 400], "s": {}, "kids": [
+                {"t": "div", "box": [10, 100, 120, 60], "s": {}, "txt": "2,400+"},
+                {"t": "div", "box": [140, 100, 120, 60], "s": {}, "txt": "10 yr"},
+                {"t": "div", "box": [270, 100, 110, 60], "s": {}, "txt": "4.9/5"},
+            ],
+        }
+        pos = mobile_text_positions({"mobile": mobile})
+        ys = [pos[t][1] for t in ("2,400+", "10 yr", "4.9/5")]
+        assert max(ys) - min(ys) <= 30, "a real inline trio must still read as one band"

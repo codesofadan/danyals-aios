@@ -218,3 +218,85 @@ class TestTheWorkerCore:
         payload = result_payload(R(), url="https://alligatorpools.com/")
         assert payload["owner_confirmed_source"] is True
         assert payload["post_id"] == 157
+
+
+class TestARunCanBeRepeated:
+    """The starter itself, not the stubbed one the route tests inject.
+
+    THE BUG THIS PINS. `get_replica_starter` returned the stored handle for ANY
+    prior run carrying a celery id, without ever looking at how that run ENDED. So
+    the first replication of a (client, url, slug) was the only one that could ever
+    happen: a run that degraded on a truncated capture, or was `blocked` because
+    WordPress was not connected yet, answered every later POST with its own dead
+    handle. The operator connected the site, clicked "Replicate design" again, got a
+    202, and watched the same terminal row it already had. Nothing was enqueued and
+    nothing said so.
+    """
+
+    @staticmethod
+    def _starter(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[dict[str, Any]]]:
+        calls: list[dict[str, Any]] = []
+
+        def _enqueue(task: str, *args: Any, **kw: Any) -> str:
+            calls.append({"task": task, "args": args, **kw})
+            return f"new-handle-{len(calls)}"
+
+        monkeypatch.setattr("app.jobs.celery_task.enqueue", _enqueue)
+        return get_replica_starter(), calls
+
+    def _run(self, repo: _FakeRuns, starter: Any) -> str:
+        return str(starter(repo, client_id=_CLIENT_ID, url="https://x.example/",
+                           title=None, slug=None, client_name="X"))
+
+    def test_a_run_still_in_flight_collapses_to_the_existing_handle(
+        self, runs: _FakeRuns, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What idempotency is actually FOR: a double-click is one capture."""
+        starter, calls = self._starter(monkeypatch)
+        key = replica_idempotency_key(_CLIENT_ID, "https://x.example/", None)
+        runs.by_key[key] = {"celery_task_id": "in-flight", "status": "running"}
+        assert self._run(runs, starter) == "in-flight"
+        assert calls == [], "an in-flight rebuild must not be enqueued twice"
+
+    @pytest.mark.parametrize("status", ["degraded", "blocked", "failed", "completed",
+                                        "cancelled"])
+    def test_a_terminal_run_does_not_block_a_fresh_one(
+        self, runs: _FakeRuns, monkeypatch: pytest.MonkeyPatch, status: str
+    ) -> None:
+        starter, calls = self._starter(monkeypatch)
+        key = replica_idempotency_key(_CLIENT_ID, "https://x.example/", None)
+        runs.by_key[key] = {"celery_task_id": "old-dead-handle", "status": status}
+        handle = self._run(runs, starter)
+        assert handle != "old-dead-handle", (
+            f"a {status} run answered the new request with its own dead handle"
+        )
+        assert len(calls) == 1, "the rebuild must actually be enqueued"
+
+    def test_the_fresh_run_gets_a_key_the_claim_will_accept(
+        self, runs: _FakeRuns, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A new HANDLE alone is not enough and this is the half that is easy to miss.
+
+        `job_runs` holds a unique index on `idempotency_key` across the whole table,
+        terminal rows included. Re-enqueueing under the spent key would be claimed
+        with created=False, the runner would decline the work, and the new handle
+        would map to no row - "queued" forever, which is worse than the bug it
+        replaced. So the generation must advance past every terminal row.
+        """
+        starter, calls = self._starter(monkeypatch)
+        url = "https://x.example/"
+        for generation in (1, 2, 3):
+            runs.by_key[replica_idempotency_key(_CLIENT_ID, url, None, generation)] = {
+                "celery_task_id": f"dead-{generation}", "status": "degraded",
+            }
+        self._run(runs, starter)
+        assert calls[0]["generation"] == 4
+        fresh = replica_idempotency_key(_CLIENT_ID, url, None, 4)
+        assert fresh not in runs.by_key, "generation 4 must be an unspent key"
+
+    def test_generation_one_is_byte_identical_to_the_original_key(self) -> None:
+        """Every run already in the ledger has to keep matching its own key."""
+        base = replica_idempotency_key(_CLIENT_ID, "https://x.example/", "home")
+        assert base == replica_idempotency_key(_CLIENT_ID, "https://x.example/", "home", 1)
+        assert base == f"replica.publish:{_CLIENT_ID}:https://x.example/:home"
+        assert replica_idempotency_key(_CLIENT_ID, "https://x.example/", "home", 2) != base

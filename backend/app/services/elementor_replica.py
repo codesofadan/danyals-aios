@@ -493,8 +493,10 @@ def _row_as_inner_section(row: InferredRow, ds: DesignSystem, ids: _IdGen,
 def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
              container_px: int,
              responsive: dict[str, dict[str, int]] | None = None,
-             mobile_pos: dict[str, tuple[int, int]] | None = None) -> dict[str, Any]:
+             mobile_pos: dict[str, tuple[int, int]] | None = None,
+             band_pad: dict[str, dict[str, tuple[int, int]]] | None = None) -> dict[str, Any]:
     settings: dict[str, Any] = {}
+    anchor = _section_anchor(section)
     first_multi = next((r for r in section.rows if len(r.columns) > 1), None)
     if first_multi and first_multi.structure:
         settings["structure"] = first_multi.structure
@@ -528,6 +530,21 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
             "unit": "px", "top": str(section.pad_top), "right": "0",
             "bottom": str(section.pad_bottom), "left": "0", "isLinked": False,
         }
+        # ...and the rhythm the SOURCE uses at each smaller breakpoint, rather than
+        # letting Elementor inherit the desktop figure down to a 390px phone. See
+        # responsive_band_padding: on the reference page every measured band shrank
+        # from 88px to 10-25px, so inheriting desktop is wrong on every section.
+        for device, suffix in (("tablet", "_tablet"), ("mobile", "_mobile")):
+            measured = (band_pad or {}).get(device, {}).get(anchor)
+            if not measured:
+                continue
+            top, bottom = measured
+            if (top, bottom) == (section.pad_top, section.pad_bottom):
+                continue  # identical to desktop; an explicit variant would be noise
+            settings[f"padding{suffix}"] = {
+                "unit": "px", "top": str(top), "right": "0",
+                "bottom": str(bottom), "left": "0", "isLinked": False,
+            }
     if section.classes:
         settings["_css_classes"] = " ".join(section.classes[:4])
     if section.element_id:
@@ -580,9 +597,11 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
 
 def build_tree(page: InferredPage, ds: DesignSystem,
                responsive: dict[str, dict[str, int]] | None = None,
-               mobile_pos: dict[str, tuple[int, int]] | None = None) -> list[dict[str, Any]]:
+               mobile_pos: dict[str, tuple[int, int]] | None = None,
+               band_pad: dict[str, dict[str, tuple[int, int]]] | None = None
+               ) -> list[dict[str, Any]]:
     ids = _IdGen()
-    return [_section(s, ds, ids, page.container_px, responsive, mobile_pos)
+    return [_section(s, ds, ids, page.container_px, responsive, mobile_pos, band_pad)
             for s in page.sections]
 
 
@@ -600,14 +619,33 @@ def mobile_text_positions(captures: dict[str, dict[str, Any]]) -> dict[str, tupl
     if not mobile:
         return out
 
+    # AMBIGUOUS TEXT IDENTIFIES NOTHING. This kept the FIRST position per text and
+    # ignored every later one, so a row of cards whose buttons all read "View more"
+    # had every column resolve to the SAME coordinates - identical y, zero spread,
+    # "they share a band", forced side by side at 33% width on a 390px phone.
+    # Measured on the reference capture: 21 of 160 distinct strings repeat, and the
+    # repeats are exactly the ones that would appear across a row of cards -
+    # "View more" 4x spread over 1,287px, "Get a quote" 3x over 10,343px, "Read the
+    # guide" 3x over 802px, and an icon-font glyph 45x over 4,789px.
+    #
+    # So count first and keep only the texts that occur ONCE. A column whose anchor
+    # is ambiguous now finds nothing, and `_row_stays_inline_on_mobile` already
+    # returns False on a missing anchor - which is the right default, because
+    # Elementor stacks columns on mobile unless we can PROVE the source does not.
+    counts: dict[str, int] = {}
+    first: dict[str, tuple[int, int]] = {}
+
     def walk(n: dict[str, Any]) -> None:
         t = (n.get("txt") or "").strip()
-        if t and t not in out:
-            out[t] = (int(n["box"][0]), int(n["box"][1]))
+        if t:
+            counts[t] = counts.get(t, 0) + 1
+            if t not in first:
+                first[t] = (int(n["box"][0]), int(n["box"][1]))
         for k in n.get("kids") or []:
             walk(k)
 
     walk(mobile)
+    out = {t: xy for t, xy in first.items() if counts[t] == 1}
     return out
 
 
@@ -628,22 +666,108 @@ def _row_stays_inline_on_mobile(row: InferredRow,
     return max(ys) - min(ys) <= 30
 
 
+def responsive_band_padding(
+    captures: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, tuple[int, int]]]:
+    """{device: {anchor text: (padTop, padBottom)}} - a band's OWN vertical rhythm
+    at each non-desktop viewport.
+
+    THE DEFECT THIS CLOSES. Three viewports were captured and the tablet/mobile ones
+    were mined for exactly two facts: heading font sizes and mobile text positions.
+    Every other measurement was discarded, so a rebuilt page carried its DESKTOP
+    spacing to every breakpoint. Measured on the reference capture, that is not a
+    small error and it is not occasional: of 153 text anchors present at all three
+    viewports, **153** had mobile band padding differing from desktop - the source
+    uses 88px of vertical padding on a desktop band and 10-25px on a phone. Shipping
+    88px to a 390px screen puts most of a phone viewport's height into dead space at
+    every single section boundary, which is precisely what "not properly responsive"
+    looks like to the person holding the phone.
+
+    Anchored by TEXT for the same reason `responsive_heading_sizes` is: node identity
+    does not survive across viewports (the prune keeps different wrappers at different
+    widths) but a band's copy is the same page-fact everywhere it renders.
+
+    A "band" is a node spanning nearly the full page width, and the OUTERMOST one that
+    declares padding wins - an inner card's padding is not the section's rhythm. Text
+    with no measured band contributes nothing, so a section that cannot be matched
+    simply keeps its desktop padding: the behaviour before this existed, never worse.
+    """
+    out: dict[str, dict[str, tuple[int, int]]] = {}
+    for device, root in captures.items():
+        # THE PAGE WIDTH IS THE ROOT'S WIDTH, never the widest node in the tree.
+        # A horizontally-overflowing element - a carousel track, a marquee - is
+        # legitimately far wider than the viewport: the reference tablet capture
+        # (834px) contains a 2,468px track, so a max-of-all-widths page width put
+        # the band threshold at 2,221px and matched NOTHING. This function silently
+        # returned an empty map and the whole responsive pass was a no-op.
+        page_w = int((root.get("box") or [0, 0, 0, 0])[2])
+        if not page_w:
+            out[device] = {}
+            continue
+
+        found: dict[str, tuple[int, int]] = {}
+
+        def walk(n: dict[str, Any], band: tuple[int, int] | None,
+                 _found: dict[str, tuple[int, int]] = found, _pw: int = page_w) -> None:
+            style = n.get("s") or {}
+            width = int((n.get("box") or [0, 0, 0, 0])[2])
+            # OUTERMOST band wins: only adopt a new one where none is in force.
+            if band is None and width >= _pw * 0.9:
+                top = _px(style.get("paddingTop", "")) or 0
+                bottom = _px(style.get("paddingBottom", "")) or 0
+                if top or bottom:
+                    band = (top, bottom)
+            text = (n.get("txt") or "").strip()
+            if text and band is not None and text not in _found:
+                _found[text] = band
+            for k in n.get("kids") or []:
+                walk(k, band)
+
+        walk(root, None)
+        out[device] = found
+    return out
+
+
+def _section_anchor(section: InferredSection) -> str:
+    """The first piece of copy inside a section - its identity across viewports."""
+    for row in section.rows:
+        for col in row.columns:
+            # `all_columns()` walks a column and the columns nested inside its rows,
+            # so a section whose copy sits in an inner section still finds an anchor.
+            for nested in col.all_columns():
+                for widget in nested.widgets:
+                    text = (widget.node.get("txt") or "").strip()
+                    if text:
+                        return text
+    return ""
+
+
 def responsive_heading_sizes(captures: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:
     """{device: {heading text: font px}} from the tablet/mobile captures.
 
     Matched by TEXT because node identity does not survive across viewports - the
     prune keeps different wrappers at different widths - while a heading's text is
     the same page-fact everywhere it renders.
+
+    THE KEY MUST BE THE ONE `_w_heading` LOOKS UP WITH, and it was not. This walk
+    required `n["txt"]` and keyed on it; `_w_heading` titles from
+    ``node.get("txt") or _inline_text(node)``. A heading whose words live on nested
+    spans - "Comfort that feels like <em>home</em>", the hero headline pattern - has
+    no own text, so it was never entered in this map at all and its lookup could
+    never hit. Measured on the reference capture: 12 of 37 headings, 32%, and they
+    are exactly the large display headings whose desktop size most needs reducing on
+    a phone. Both sides now derive the key identically.
     """
     out: dict[str, dict[str, int]] = {}
     for device, root in captures.items():
         sizes: dict[str, int] = {}
 
         def walk(n: dict[str, Any], _sizes: dict[str, int] = sizes) -> None:
-            if n.get("t") in ("h1", "h2", "h3", "h4", "h5", "h6") and n.get("txt"):
+            if n.get("t") in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                text = n.get("txt") or _inline_text(n)
                 px = _px((n.get("s") or {}).get("fontSize", ""))
-                if px:
-                    _sizes[n["txt"]] = px
+                if text and px:
+                    _sizes[text] = px
             for k in n.get("kids") or []:
                 walk(k)
 

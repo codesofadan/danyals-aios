@@ -65,6 +65,80 @@ function aios_publisher_sideload_body_images( $post_id, $content ) {
 	return $content;
 }
 /**
+ * Import every image an ELEMENTOR TREE references into this site's own media library,
+ * rewriting the tree in place to point at the local copies.
+ *
+ * WHY THIS EXISTS. `aios_publisher_sideload_body_images()` above only ever sees the post
+ * BODY. A design replication puts its entire page in `_elementor_data` and sends a
+ * one-line placeholder as the body ("<p>Replicated by AIOS. Open in Elementor to
+ * edit.</p>"), so the body sideloader matched nothing and every replicated image stayed
+ * hotlinked to the SOURCE domain. Measured on a live replication (2026-09-01): 27 of 27
+ * image URLs in the emitted tree still pointed at the source host. That is not a copy of
+ * the page - it is a page that borrows its pictures, breaks when the source moves them or
+ * blocks hotlinking, and bills the source's bandwidth for the client's traffic.
+ *
+ * Elementor carries images as `{"url": "...", "id": ...}` under keys like `image` and
+ * `background_image`. The `id` matters as much as the url: with a real attachment id
+ * Elementor can emit srcset/sizes and its own responsive image handling, which a bare
+ * external url cannot do. So this sets BOTH.
+ *
+ * Best-effort per image, exactly like the body sideloader: one failed import leaves that
+ * one image external rather than failing the push. Each distinct URL is fetched once no
+ * matter how many nodes reference it, and the whole pass is capped.
+ *
+ * @param int   $post_id The post the sideloaded images attach to.
+ * @param array $tree    The decoded Elementor tree (by reference; rewritten in place).
+ * @return int The number of distinct images successfully localized.
+ */
+function aios_publisher_localize_elementor_images( $post_id, &$tree ) {
+	require_once ABSPATH . 'wp-admin/includes/media.php';
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	require_once ABSPATH . 'wp-admin/includes/image.php';
+
+	$seen      = array(); // original url => array('url' => local, 'id' => attachment id)
+	$localized = 0;
+	$budget    = AIOS_PUBLISHER_MAX_TREE_IMAGES;
+
+	$visit = function ( &$node ) use ( &$visit, &$seen, &$localized, &$budget, $post_id ) {
+		if ( ! is_array( $node ) ) {
+			return;
+		}
+		// An Elementor image value: an array carrying a 'url' that points off-site.
+		if ( isset( $node['url'] ) && is_string( $node['url'] ) && array_key_exists( 'id', $node ) ) {
+			$url = $node['url'];
+			if ( ! isset( $seen[ $url ] ) && $budget > 0 && preg_match( '#^https?://#i', $url ) ) {
+				--$budget;
+				$seen[ $url ] = false;
+				$attachment_id = media_sideload_image( esc_url_raw( $url ), $post_id, null, 'id' );
+				if ( ! is_wp_error( $attachment_id ) && $attachment_id ) {
+					$local = wp_get_attachment_url( (int) $attachment_id );
+					if ( is_string( $local ) && '' !== $local ) {
+						$seen[ $url ] = array(
+							'url' => $local,
+							'id'  => (int) $attachment_id,
+						);
+						++$localized;
+					}
+				}
+			}
+			if ( ! empty( $seen[ $url ] ) ) {
+				$node['url'] = $seen[ $url ]['url'];
+				$node['id']  = $seen[ $url ]['id'];
+			}
+		}
+		foreach ( $node as &$child ) {
+			if ( is_array( $child ) ) {
+				$visit( $child );
+			}
+		}
+		unset( $child );
+	};
+
+	$visit( $tree );
+	return $localized;
+}
+
+/**
  * Sanitize a caller-supplied CSS string for safe emission inside a <style> block.
  *
  * The CSS is DATA, never markup: strip every angle bracket so a hostile payload cannot
@@ -147,9 +221,22 @@ function aios_publisher_store_elementor_data( $post_id, $request ) {
 		$edit_mode = 'builder';
 	}
 
+	// TAKE OWNERSHIP OF THE IMAGERY before the tree is stored. Without this the
+	// replicated page renders entirely from the source site's servers - see
+	// aios_publisher_localize_elementor_images(). Re-encode from the rewritten tree
+	// rather than storing the original $data string.
+	$localized = aios_publisher_localize_elementor_images( $post_id, $decoded );
+	if ( $localized > 0 ) {
+		$reencoded = wp_json_encode( $decoded );
+		if ( is_string( $reencoded ) && '' !== $reencoded ) {
+			$data = $reencoded;
+		}
+	}
+
 	update_post_meta( $post_id, '_elementor_edit_mode', $edit_mode );
 	// wp_slash so the JSON survives the DB write exactly as Elementor stores it.
 	update_post_meta( $post_id, '_elementor_data', wp_slash( $data ) );
+	update_post_meta( $post_id, '_aios_images_localized', (int) $localized );
 	$version = defined( 'ELEMENTOR_VERSION' ) ? ELEMENTOR_VERSION : '3.0.0';
 	update_post_meta( $post_id, '_elementor_version', $version );
 	// Elementor renders its own layout, so tell the theme to use a full-width/blank

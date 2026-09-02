@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_process_init
+from celery.signals import worker_init, worker_process_init
 
 from app.config import get_settings, validate_settings
 from app.jobs.celery_task import route_task
@@ -28,7 +28,19 @@ def _init_worker_db_pools(**_kwargs: object) -> None:
     lifespan, so without this every DB-touching task (audit, content, rank
     tracker, ...) fails with ``DatabaseNotConfiguredError`` - the pool globals stay
     ``None``. Built per worker process (post-fork under the prefork pool) so a
-    psycopg connection is never shared across a fork. Fires for the solo pool too.
+    psycopg connection is never shared across a fork.
+
+    THIS SIGNAL DOES NOT FIRE FOR EVERY POOL, and the docstring here used to claim
+    it covered solo as well and stop there - which read as "all pools are handled".
+    In celery 5.6.3 exactly two concurrency backends send ``worker_process_init``:
+    ``concurrency/solo.py:20`` and ``concurrency/prefork.py:82``. The THREAD pool
+    sends nothing. ``Start-Worker.bat`` - the documented way to run a worker on
+    Windows, which is where this platform is developed - launches with
+    ``--pool=threads``, so on that machine this function never ran, both pools
+    stayed ``None``, and every DB-touching job died at its first ledger write. A
+    queued replication then sat on the card reading "Waiting for the worker..."
+    forever, which is indistinguishable from "slow". ``_init_worker_db_pools_any_pool``
+    below is the fallback that closes it.
     """
     from app.db.database import build_admin_pool, build_rls_pool, set_pools
 
@@ -47,6 +59,48 @@ def _init_worker_db_pools(**_kwargs: object) -> None:
     if admin is not None:
         admin.open()
     set_pools(rls, admin)
+
+
+@worker_init.connect  # type: ignore[untyped-decorator]  # celery's signal decorator is untyped
+def _init_worker_db_pools_any_pool(**_kwargs: object) -> None:
+    """Build the pools for the pools ``worker_process_init`` never reaches.
+
+    ``worker_init`` fires once per worker, for EVERY concurrency backend, before the
+    pool starts. That is the right hook for the thread and gevent/eventlet pools,
+    which run tasks in the main process and never emit ``worker_process_init``.
+
+    It is the WRONG hook for prefork, where it runs in the parent BEFORE the fork:
+    pools built here would be inherited by every child, and a psycopg connection
+    shared across a fork is a corruption bug, not a performance one. So prefork is
+    explicitly skipped and left to ``worker_process_init``, which runs post-fork.
+
+    Idempotent by construction - it does nothing when pools already exist - so the
+    two handlers can never fight, whichever order they fire in.
+    """
+    import sys
+
+    from app.db import database
+
+    pool = ""
+    try:
+        pool = str(celery_app.conf.get("worker_pool") or "")
+    except Exception:  # conf may not be fully resolved this early
+        pool = ""
+    if not pool:  # fall back to the command line that started this worker
+        for i, arg in enumerate(sys.argv):
+            if arg in ("-P", "--pool") and i + 1 < len(sys.argv):
+                pool = sys.argv[i + 1]
+            elif arg.startswith("--pool="):
+                pool = arg.split("=", 1)[1]
+    if "prefork" in pool or "processes" in pool:
+        return  # post-fork initialisation is worker_process_init's job
+
+    # Read the module globals rather than get_rls_pool()/get_admin_pool(), which
+    # RAISE when unset - "is it configured" must not be asked with an exception.
+    if database._rls_pool is not None or database._admin_pool is not None:
+        return  # already built; nothing to do
+    _init_worker_db_pools()
+
 
 celery_app = Celery(
     "aios",

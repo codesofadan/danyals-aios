@@ -51,6 +51,12 @@ _JOB_NAME = "replica.publish"
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Replica job not found")
 
+#: How many times the same (client, url, slug) may be replicated before the route
+#: stops looking for a free idempotency key. Each probe is one indexed lookup, and
+#: replicating one page fifty times is already pathological; the ceiling exists so a
+#: bug upstream cannot turn a POST into an unbounded scan.
+_MAX_GENERATIONS = 50
+
 
 def get_replica_starter() -> Callable[..., str]:
     """Dependency: start (or find) the replica job; returns the job id (overridable
@@ -80,13 +86,44 @@ def get_replica_starter() -> Callable[..., str]:
         client_name: str,
     ) -> str:
         from app.jobs.celery_task import enqueue
+        from app.jobs.status import is_terminal
         from workers.tasks.replica import TASK_NAME, replica_idempotency_key
 
-        existing = repo.get_run_by_idempotency_key(replica_idempotency_key(client_id, url, slug))
-        if existing is not None and existing.get("celery_task_id"):
-            return str(existing["celery_task_id"])
+        # COLLAPSE A DUPLICATE, NEVER A RETRY. This used to return the stored handle
+        # for ANY prior run with a celery id, with no look at how that run ended - so
+        # the FIRST replication of a URL was the only one possible, forever. A run
+        # that degraded on a truncated capture, was blocked because WordPress was not
+        # connected yet, or failed outright, answered every later POST with its own
+        # dead handle: the operator connected the site, clicked "Replicate design"
+        # again, got a 202, and watched the same terminal row it already had. Nothing
+        # was enqueued and nothing said so. Fixing the connection could not fix the
+        # replication, which is as close to "it is not working properly" as a bug gets.
+        #
+        # A fresh handle alone would NOT have fixed it: job_runs holds a unique index
+        # on idempotency_key across the whole table, so the claim would answer the new
+        # message with created=False and decline the work, leaving a celery id that
+        # maps to no row and reads "queued" forever. The KEY has to differ, which is
+        # what the generation is for.
+        #
+        # In flight (queued/running) is the case idempotency is FOR: collapse it, so a
+        # double-click is one capture. Terminal is finished work, and asking for it
+        # again is a legitimate new request that needs a key of its own.
+        generation = 1
+        while generation <= _MAX_GENERATIONS:
+            key = replica_idempotency_key(client_id, url, slug, generation)
+            existing = repo.get_run_by_idempotency_key(key)
+            if existing is None:
+                break  # a free key: enqueue against it
+            if not is_terminal(str(existing.get("status") or "")):
+                # Someone is already doing exactly this work.
+                handle = existing.get("celery_task_id")
+                if handle:
+                    return str(handle)
+                break
+            generation += 1
         return enqueue(
-            TASK_NAME, client_id, url, title=title, slug=slug, client_name=client_name
+            TASK_NAME, client_id, url, title=title, slug=slug,
+            client_name=client_name, generation=generation,
         )
 
     return _start

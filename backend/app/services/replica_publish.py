@@ -18,6 +18,7 @@ failure reads "capture degraded: <why>" rather than a stack trace from a worker.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -28,6 +29,7 @@ from app.services.elementor_replica import (
     build_navbar,
     build_tree,
     mobile_text_positions,
+    responsive_band_padding,
     responsive_heading_sizes,
     to_json,
     validate_tree,
@@ -73,6 +75,10 @@ def _serialize(node: Any) -> dict[str, Any]:
     }
 
 
+def _no_stage(_: str) -> None:
+    """Default progress sink: replication must run identically with nobody watching."""
+
+
 def replicate(
     url: str,
     *,
@@ -81,6 +87,7 @@ def replicate(
     slug: str | None = None,
     owner_confirmed_source: bool = False,
     capture: Any | None = None,
+    on_stage: Callable[[str], None] = _no_stage,
 ) -> ReplicaResult:
     """Rebuild ``url`` as a draft Elementor page on the connected site.
 
@@ -102,6 +109,10 @@ def replicate(
     if capture is None:
         from integrations.replica_capture import capture_replica
 
+        # The single longest stage by far - a cold browser, a live page load and
+        # three viewport measurements. Say so, or an operator reads 20s of silence
+        # as a hang and re-runs, which doubles the real cost.
+        on_stage("Opening the page in a browser and measuring it at three viewports")
         capture = capture_replica(url)
     for n in capture.notes:
         result.note(f"capture: {n}")
@@ -126,6 +137,7 @@ def replicate(
 
     flatten(raw)
 
+    on_stage("Working out the page's sections, rows and columns")
     page: InferredPage = infer_layout(raw, viewport_width=desktop.width)
     for n in page.notes:
         result.note(f"layout: {n}")
@@ -133,6 +145,7 @@ def replicate(
         result.note("layout degraded: no sections were inferred; nothing to publish")
         return result
 
+    on_stage("Reading the design system - colours, type scale and spacing")
     ds: DesignSystem = extract(nodes, css_vars=capture.css_vars)
     if not ds.is_grounded:
         result.note("design system is ungrounded (few measured values); styling will be thin")
@@ -144,10 +157,12 @@ def replicate(
         ds, container_px=page.container_px, notes=f"Replicated from {url}"
     ).as_dict()
 
+    on_stage(f"Building {len(page.sections)} section(s) as Elementor widgets")
     tree = build_tree(
         page, ds,
         responsive_heading_sizes(captures),
         mobile_text_positions(captures),
+        responsive_band_padding(captures),
     )
 
     # THE SITE'S CHROME. A replica without the source's navbar and footer is a
@@ -161,6 +176,7 @@ def replicate(
     # Never guess upward: an unknown widget is stored and silently ignored by the
     # editor, so an over-ambitious tree renders a page with holes and no error.
     caps_raw: dict[str, Any] = {}
+    on_stage("Asking the target site which Elementor widgets it can render")
     getter = getattr(publisher, "capabilities", None)
     if callable(getter):
         try:
@@ -173,6 +189,7 @@ def replicate(
     for n in capability.notes:
         result.note(f"capability: {n}")
 
+    on_stage("Rebuilding the site's navbar and footer")
     chrome_used = False
     nav_used = False
     hdr = getattr(desktop, "header", None)
@@ -212,6 +229,7 @@ def replicate(
     # same-host URLs become path-relative, so sibling pages replicated at the
     # same slugs connect to each other.
     _localize_links(tree, url)
+    on_stage("Checking every setting against Elementor's own registry")
     try:
         validate_tree(tree)
     except UnknownSettingError as exc:
@@ -247,6 +265,7 @@ def replicate(
         # header/footer must not double up around them.
         payload["template"] = "elementor_canvas"
 
+    on_stage("Publishing the draft page to WordPress and importing its images")
     try:
         pushed = publisher.publish(payload)
     except Exception as exc:

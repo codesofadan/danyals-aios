@@ -39,13 +39,28 @@ JOB_NAME = "replica.publish"
 # --------------------------------------------------------------------------- #
 # Pure core (no Celery, no DB) - unit-tested directly.
 # --------------------------------------------------------------------------- #
-def replica_idempotency_key(client_id: str, url: str, slug: str | None) -> str:
-    """Deterministic key of the WORK: (client, source URL, destination slug).
+def replica_idempotency_key(
+    client_id: str, url: str, slug: str | None, generation: int = 1
+) -> str:
+    """Deterministic key of the WORK: (client, source URL, destination slug, generation).
 
     Two enqueues of the same rebuild collapse to one run; replicating the same URL
     to a different slug is genuinely different work and gets its own run.
+
+    ``generation`` is what makes a RE-RUN possible. ``job_runs`` carries a unique
+    index on ``idempotency_key`` covering the whole table, terminal rows included, so
+    a key is spent the moment its first run finishes: the claim answers every later
+    enqueue with ``created=False`` and the runner correctly declines to repeat work it
+    believes is done. Without a generation that made the first replication of a URL
+    the only one that could ever happen - a run that degraded, or was blocked because
+    WordPress was not connected yet, could not be retried even after the operator
+    fixed the cause.
+
+    Generation 1 is byte-identical to the key this function has always produced, so
+    every run already in the ledger keeps matching.
     """
-    return f"{JOB_NAME}:{client_id}:{url}:{slug or ''}"
+    base = f"{JOB_NAME}:{client_id}:{url}:{slug or ''}"
+    return base if generation <= 1 else f"{base}:g{generation}"
 
 
 def degrade_code(notes: list[str]) -> str:
@@ -106,9 +121,10 @@ def _target(
     title: str | None = None,
     slug: str | None = None,
     client_name: str = "",
+    generation: int = 1,
 ) -> JobTarget:
     return JobTarget(
-        idempotency_key=replica_idempotency_key(client_id, url, slug),
+        idempotency_key=replica_idempotency_key(client_id, url, slug, generation),
         client_id=client_id,
         client_name=client_name,
         scope_id=client_id,
@@ -169,11 +185,17 @@ def run_replica(
     title: str | None = None,
     slug: str | None = None,
     client_name: str = "",
+    generation: int = 1,
 ) -> JobOutcome:
     """Replicate ``url`` as a draft Elementor page on the client's connected site.
 
     ``client_name`` rides along purely for the ledger row (the operator board shows
     it); it is not part of the work's identity, so it is not in the idempotency key.
+
+    ``generation`` IS part of the work's identity - it is what distinguishes "the
+    same rebuild, enqueued twice" (collapse) from "rebuild this page again, now that
+    I have fixed what stopped it last time" (run it). The route picks the number; the
+    task only has to pass it to the same key function the claim uses.
     """
     # The route already refused private addresses; re-check at run time (defence in
     # depth, same as the audit worker re-running the enqueue-time gate) so a stale
@@ -188,6 +210,11 @@ def run_replica(
     # Cancellation gate BEFORE the ~30-60s browser capture; the capture itself is
     # one long call, so this is the last stop where a cancel takes effect cheaply.
     ctx.checkpoint()
+    # SAY WHAT IS HAPPENING. The run takes 12-60s and used to report only "queued"
+    # then a terminal state, so the operator watched an unlabelled spinner for the
+    # whole of it and had no way to tell work from a hang. The stages are few and
+    # named, so each one is forced past the 30s progress throttle: eight writes per
+    # run, against a run that spends most of a minute inside a browser.
     res = replicate(
         url,
         publisher=publisher,
@@ -195,6 +222,7 @@ def run_replica(
         slug=slug or None,
         # The route enforced the assertion; see the module docstring.
         owner_confirmed_source=True,
+        on_stage=lambda line: ctx.progress(line, force=True),
     )
     ctx.checkpoint()
 

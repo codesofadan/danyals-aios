@@ -124,12 +124,36 @@ class TestTheExtractorItself:
 
     def test_lazy_images_are_given_a_chance_to_load(self) -> None:
         """An Elementor page ships a placeholder in `src` until the image nears the
-        viewport. Capturing without scrolling rebuilds the page with grey rectangles."""
+        viewport. Capturing without scrolling rebuilds the page with grey rectangles.
+
+        Asserts the scroll pass EXISTS and that `capture_replica` runs it, rather than
+        grepping the function's own source for "scrollTo" - which is what this test used
+        to do, and which broke the moment the script was lifted into a named constant
+        even though the behaviour was unchanged and improved.
+        """
         import inspect
 
         from integrations import replica_capture
 
-        assert "scrollTo" in inspect.getsource(replica_capture.capture_replica)
+        assert "scrollTo" in replica_capture._SCROLL_JS
+        source = inspect.getsource(replica_capture.capture_replica)
+        assert "_SCROLL_JS" in source, "the capture must actually run the scroll pass"
+
+    def test_the_scroll_pass_cannot_spin_forever(self) -> None:
+        """A page that GROWS as it is scrolled (an infinite feed, a carousel that
+        appends) would never satisfy a `y > scrollHeight` loop. The pass is bounded."""
+        from integrations import replica_capture
+
+        assert "steps > 60" in replica_capture._SCROLL_JS
+
+    def test_the_scroll_pass_measures_against_the_document_not_the_body(self) -> None:
+        """`document.body.scrollHeight` is the value a scroll lock corrupts; the
+        document element's is not. Reading the body's is how a locked page reported
+        itself one screen tall."""
+        from integrations import replica_capture
+
+        assert "documentElement.scrollHeight" in replica_capture._SCROLL_JS
+        assert "body.scrollHeight" not in replica_capture._SCROLL_JS
 
 
 class TestItNeverBreaksTheCaller:

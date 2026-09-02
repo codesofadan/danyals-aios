@@ -60,10 +60,15 @@ export function useReplicaRuns(clientId: string | null, limit = 10) {
   return useQuery({
     queryKey: [...REPLICA_RUNS_KEY, qs] as const,
     queryFn: () => api.get<JobRun[]>(`/jobs/runs?${qs}`),
+    // 2s while something is MOVING, not 4s. The worker now reports about eight
+    // named stages across a 12-60s rebuild; at a 4s cadence roughly half of them
+    // were never rendered, which defeats the point of reporting them. Polling
+    // stops dead the moment every run is terminal, so this costs nothing on an
+    // idle screen.
     refetchInterval: (query) => {
       const rows = query.state.data as JobRun[] | undefined;
-      if (!rows) return 4000;
-      return rows.some((r) => !isTerminalStatus(r.status)) ? 4000 : false;
+      if (!rows) return 2000;
+      return rows.some((r) => !isTerminalStatus(r.status)) ? 2000 : false;
     },
     placeholderData: (prev) => prev,
   });

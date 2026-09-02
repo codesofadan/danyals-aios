@@ -430,7 +430,7 @@ class JobContext:
         self._last_heartbeat = now
         self._store.heartbeat(self.run_id)
 
-    def progress(self, detail: str) -> None:
+    def progress(self, detail: str, *, force: bool = False) -> None:
         """Say what this job is doing NOW, in one line a human can read.
 
         A long job could only ever report two things - that it had been claimed, and
@@ -442,11 +442,19 @@ class JobContext:
         Throttled on the heartbeat's own clock: a per-directory call would otherwise
         be one UPDATE per directory. The FINAL detail is written by ``finish``, so a
         throttled-away line is never the last word.
+
+        ``force`` writes the line regardless of the throttle, mirroring
+        ``heartbeat(force=True)``. The throttle exists to stop a loop over HUNDREDS of
+        items issuing an UPDATE each; it is wrong for a job with a handful of long,
+        genuinely different STAGES. A design replication has about eight stages and
+        takes 12-60s, so at the default 30s throttle an operator saw one line for the
+        whole run - which is barely different from the "running" it replaced. Use
+        ``force`` only where the call sites are few and named.
         """
         if self._store is None or not detail:
             return
         now = self._clock()
-        if (now - self._last_heartbeat) < self._heartbeat_every:
+        if not force and (now - self._last_heartbeat) < self._heartbeat_every:
             return
         self._last_heartbeat = now
         self._store.progress(self.run_id, detail)

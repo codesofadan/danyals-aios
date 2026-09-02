@@ -58,7 +58,21 @@ CAPTURED_PROPS: tuple[str, ...] = (
 )
 
 MAX_NODES = 1400
-MAX_DEPTH = 14
+#: How deep the walk goes from the CONTENT ROOT before it gives up on a subtree.
+#:
+#: This was 14, and 14 is far too shallow for a real page. Measured on a live
+#: Elementor site (elementor.com, 2026-09-01): the DOM runs 23 levels deep, and a
+#: depth-14 walk captured 229 nodes carrying 3,762 characters of copy while a
+#: depth-18 walk of the same page captured 319 nodes carrying 13,571. The cap was
+#: silently discarding 72% of the page's text - whole FAQ and feature blocks - and
+#: the page published anyway. The saving it bought was SIX MILLISECONDS (108ms of
+#: in-page extraction versus 114ms) and 47KB of payload against an 1.8MB budget.
+#:
+#: 20 clears every real page measured (both test sites bottom out and report
+#: `truncated: false` by 18) with room for a deeply-nested theme. Depth is no longer
+#: the binding constraint; MAX_NODES and MAX_PAYLOAD_BYTES are, and both of those
+#: degrade honestly. Never lower this to buy time - the time is not here.
+MAX_DEPTH = 20
 MAX_TEXT = 400
 # Above this the capture drops its deepest level and retries, flagging `truncated`.
 MAX_PAYLOAD_BYTES = 1_800_000
@@ -175,11 +189,21 @@ _JS_TEMPLATE = """
     return false;
   };
 
-  let count = 0, truncated = false;
+  let count = 0, truncated = false, chromeTruncated = false;
+  // THE BUDGET IS A VARIABLE, NOT THE CONSTANT. `count` is shared by all three
+  // walks and the CONTENT is walked first, so on any page that reaches the cap the
+  // header and footer walks began already over budget and returned null - and the
+  // pipeline then told the operator "no header element was found on the source",
+  // which is a different and wrong statement: the header was found, it was
+  // measured, and its nodes were thrown away. The site chrome is a handful of
+  // nodes and it is the first thing anyone notices missing, so it gets its own
+  // reserve on top of whatever the content used.
+  let budget = MAX_NODES;
+  const CHROME_RESERVE = 220;
   const sx = window.scrollX, sy = window.scrollY;
 
   function walk(el, depth, pcs) {
-    if (count >= MAX_NODES) { truncated = true; return null; }
+    if (count >= budget) { truncated = true; return null; }
     // toUpperCase because SVG-namespace elements preserve lowercase tagName - so
     // 'svg' never matched the uppercase SKIP set, inline SVG innards were walked
     // as content, and <text> inside an icon leaked into the page's copy.
@@ -354,8 +378,17 @@ _JS_TEMPLATE = """
     '[data-elementor-type="footer"]', '.elementor-location-footer',
     'footer.site-footer', 'body footer', '#colophon', 'body > div footer',
   ]);
+  // Content is finished; give the chrome a budget of its own so a long page
+  // cannot silently cost the site its navbar and footer. `truncated` is reset
+  // around these walks and reported separately: a truncated BODY and a truncated
+  // HEADER are different facts and the operator needs to be told which happened.
+  const contentTruncated = truncated;
+  budget = count + CHROME_RESERVE;
+  truncated = false;
   const headerTree = headerEl ? walk(headerEl, 0, getComputedStyle(document.body)) : null;
   const footerTree = footerEl ? walk(footerEl, 0, getComputedStyle(document.body)) : null;
+  chromeTruncated = truncated;
+  truncated = contentTruncated;
 
   // The <head> fundamentals - title, description, canonical, og, robots,
   // favicon - the SEO identity a faithful rebuild must carry.
@@ -432,9 +465,106 @@ _JS_TEMPLATE = """
     fonts: fonts,
     nodeCount: count,
     truncated: truncated,
+    chromeTruncated: chromeTruncated,
+    headerFound: !!headerEl,
+    footerFound: !!footerEl,
   };
 })()
 """
+
+
+#: Wait for the page to hold still, and unlock it if it is holding itself shut.
+#:
+#: THE BUG THIS EXISTS TO KILL. The capture used to change the viewport and then
+#: immediately scroll and measure, with one blind `wait_for_timeout(500)` for the
+#: whole reflow. Responsive sites do not reflow that predictably: a mobile nav or a
+#: cookie wall commonly puts `position: fixed; overflow: hidden` on <body> for a few
+#: hundred milliseconds while it initialises. Measured on elementor.com, two runs of
+#: the SHIPPED code minutes apart:
+#:
+#:     run 1:  desktop docH=15776  tablet docH=16576  mobile docH=12227   (correct)
+#:     run 2:  desktop docH=15794  tablet docH= 1194  mobile docH=  844   (collapsed)
+#:
+#: 1194 and 844 are exactly the tablet and mobile VIEWPORT heights. A scroll-locked
+#: body reports its own height as the viewport, so the capture recorded a 12,000px
+#: page as one screen tall - and, because `window.scrollTo` is a no-op on a fixed
+#: body, the scroll pass loaded no lazy imagery either. Same URL, same code, two
+#: different answers: the tablet and mobile measurements were a coin flip. Those two
+#: viewports exist ONLY to produce `responsive_heading_sizes` and
+#: `mobile_text_positions`, so the responsive half of every rebuild was being
+#: derived, intermittently, from a page the browser had measured as one screen tall.
+#:
+#: So: unlock the scroll lock for the duration of the measurement (the site's own
+#: intent is irrelevant - nothing here is rendered to a user), then wait for
+#: `scrollHeight` to actually stop moving rather than for a fixed 500ms. Returns as
+#: soon as the height repeats three frames running, so a page that settles fast is
+#: measured fast; the budget is a ceiling, not a sleep.
+_STABILIZE_JS = """
+(maxMs) => new Promise(resolve => {
+  const t0 = performance.now();
+  const unlock = () => {
+    for (const el of [document.documentElement, document.body]) {
+      const cs = getComputedStyle(el);
+      if (cs.position === 'fixed') el.style.setProperty('position', 'static', 'important');
+      if (cs.overflow === 'hidden' || cs.overflowY === 'hidden')
+        el.style.setProperty('overflow', 'visible', 'important');
+      if (cs.height === '0px') el.style.setProperty('height', 'auto', 'important');
+    }
+  };
+  let last = -1, stable = 0;
+  const tick = () => {
+    unlock();
+    const h = document.documentElement.scrollHeight;
+    // A height that merely EQUALS the viewport is the collapsed reading, not a
+    // settled one - keep waiting for a real document height until the budget runs out.
+    if (h === last && h > window.innerHeight) stable++; else stable = 0;
+    last = h;
+    if (stable >= 3 || performance.now() - t0 > maxMs)
+      return resolve({height: h, ms: Math.round(performance.now() - t0), settled: stable >= 3});
+    requestAnimationFrame(tick);
+  };
+  tick();
+})
+"""
+
+#: Walk the page so lazy imagery resolves. Steps by viewport height against
+#: `documentElement.scrollHeight` (the body's own height is the value a scroll lock
+#: corrupts) and is bounded, so a page that grows as it loads - an infinite feed,
+#: a carousel that appends - cannot spin here forever.
+_SCROLL_JS = """
+() => new Promise(resolve => {
+  let y = 0, steps = 0;
+  const t = setInterval(() => {
+    window.scrollTo({top: y, behavior: 'instant'});
+    y += window.innerHeight;
+    if (y > document.documentElement.scrollHeight || ++steps > 60) {
+      clearInterval(t);
+      window.scrollTo({top: 0, behavior: 'instant'});
+      requestAnimationFrame(() => resolve(steps));
+    }
+  }, 40);
+})
+"""
+
+#: Third-party hosts that paint nothing and only cost time. Blocking these is what
+#: lets the network go quiet on a site whose analytics and chat widgets otherwise
+#: poll forever - the reason `wait_until="networkidle"` used to burn its whole 45s
+#: budget and then throw away the entire capture.
+#:
+#: DELIBERATELY NARROW: analytics, tag managers, session recorders, chat widgets and
+#: ad exchanges only. Fonts, images, media and CSS are NEVER blocked - they decide
+#: how the page LOOKS, which is the one thing this capture exists to measure.
+#: Blocking fonts was measured to change layout and was dropped.
+BLOCKED_HOSTS: tuple[str, ...] = (
+    "google-analytics.com", "googletagmanager.com", "/gtag/", "/gtm.js",
+    "doubleclick.net", "googlesyndication.com", "adservice.google",
+    "connect.facebook.net", "facebook.com/tr",
+    "hotjar.com", "clarity.ms", "fullstory.com", "mouseflow.com", "logrocket",
+    "intercom.io", "intercomcdn", "crisp.chat", "tawk.to", "drift.com",
+    "zdassets.com", "livechatinc", "hs-scripts.com", "hs-analytics",
+    "segment.io", "segment.com", "cdn.amplitude", "mixpanel", "matomo",
+    "sentry.io", "bugsnag", "newrelic", "optimizely", "cookiebot", "onetrust",
+)
 
 
 @dataclass
@@ -486,6 +616,14 @@ class ReplicaViewport:
     doc_height: int = 0
     node_count: int = 0
     truncated: bool = False
+    #: The chrome walk hit its own budget (distinct from a truncated body).
+    chrome_truncated: bool = False
+    #: A header/footer ELEMENT was located in the DOM - whether or not it was
+    #: successfully measured. Without these two, "we found no header" and "we found
+    #: one and lost it" are indistinguishable to the caller, and the pipeline
+    #: reported the first for both.
+    header_found: bool = False
+    footer_found: bool = False
 
 
 @dataclass
@@ -547,8 +685,17 @@ def capture_replica(
     viewports: tuple[tuple[str, int, int], ...] = DEFAULT_VIEWPORTS,
     timeout_ms: int = 45_000,
     settle_ms: int = 500,
+    load_ms: int = 8_000,
+    quiet_ms: int = 6_000,
 ) -> ReplicaCapture:
     """Measure ``url`` at each viewport into a node tree.
+
+    ``timeout_ms`` bounds the NAVIGATION (reaching a parsed document). ``load_ms``
+    and ``quiet_ms`` then bound two best-effort waits for sub-resources and for a
+    quiet network: neither can fail the capture, they only stop it waiting forever
+    on a site that is never going to go quiet. ``settle_ms`` is the unit of the
+    per-viewport layout-stability budget, not a sleep - a page that settles in one
+    frame costs one frame.
 
     Total: never raises. A page that will not load, a missing browser, or a hostile
     document all degrade into a capture carrying `notes` and no viewports - the caller
@@ -566,11 +713,71 @@ def capture_replica(
         with sync_playwright() as pw:
             browser = pw.chromium.launch(args=["--disable-dev-shm-usage"])
             try:
-                page = browser.new_page(viewport={"width": viewports[0][1],
-                                                  "height": viewports[0][2]})
-                page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                context = browser.new_context(viewport={"width": viewports[0][1],
+                                                        "height": viewports[0][2]})
+                # Analytics and chat widgets are why a page never goes quiet. Refuse
+                # them at the network layer so the quiet wait below can actually
+                # succeed; everything that PAINTS is still fetched normally.
+                #
+                # ONE ROUTE PER PATTERN, never a `**/*` catch-all with a predicate.
+                # A catch-all sends EVERY request - hundreds of images, styles and
+                # scripts - across the process boundary into Python and back for a
+                # `continue_()`, and measured on a real page that cost more than the
+                # trackers it was blocking: 21.8s versus 20.7s for the pattern form
+                # with stabilisation off, and 32.1s versus 17.2s with it on. Matching
+                # in the browser means a request that is not a tracker never enters
+                # Python at all.
+                for host in BLOCKED_HOSTS:
+                    context.route(f"**{host}**", lambda route: route.abort())
+                page = context.new_page()
+
+                # NAVIGATION, IN TWO BOUNDED STEPS. This used to be a single
+                # `goto(wait_until="networkidle", timeout=45_000)`, which is a trap:
+                # a site with a chat widget, a poller or an ad exchange NEVER goes
+                # network-quiet, so the call burned the full 45 seconds and then
+                # RAISED - and the `except` around this whole block discarded the
+                # capture entirely. The operator waited 45s for "capture degraded:
+                # no desktop viewport was measured". Commit the navigation first,
+                # then treat quiet as a bonus with its own small budget.
+                response = page.goto(url, wait_until="domcontentloaded",
+                                     timeout=timeout_ms)
+                # LOOK AT WHAT CAME BACK. The Response was discarded, so a 404 page,
+                # a 500, a Cloudflare interstitial or a consent wall was measured and
+                # rebuilt as though it were the client's page - and the run reported
+                # `completed`. An operator would only find out by opening the preview
+                # and seeing "Page not found" faithfully reproduced in Elementor.
+                if response is not None:
+                    code = response.status
+                    if code >= 400:
+                        notes.append(
+                            f"the page returned HTTP {code}; what follows is a rebuild "
+                            f"of whatever {code} page the server served, not of the "
+                            "page that was asked for"
+                        )
+                    final = page.url
+                    if final and final.rstrip("/") != url.rstrip("/"):
+                        notes.append(f"the request was redirected to {final}")
+                for state, budget in (("load", load_ms), ("networkidle", quiet_ms)):
+                    try:
+                        # The literal is spelled out per branch rather than passed
+                        # through a variable: Playwright types this parameter as a
+                        # Literal, and a str would not type-check.
+                        if state == "load":
+                            page.wait_for_load_state("load", timeout=budget)
+                        else:
+                            page.wait_for_load_state("networkidle", timeout=budget)
+                    except Exception:
+                        notes.append(
+                            f"the page did not reach '{state}' within {budget}ms; "
+                            "measured it as it stood rather than waiting longer"
+                        )
+
                 for name, width, height in viewports:
                     page.set_viewport_size({"width": width, "height": height})
+                    # WAIT FOR THE REFLOW TO FINISH before touching the page. A
+                    # blind sleep here is what made the tablet and mobile
+                    # measurements a coin flip (see _STABILIZE_JS).
+                    page.evaluate(_STABILIZE_JS, settle_ms * 6)
                     # Lazy-loaded imagery only resolves once it has been near the
                     # viewport, and a page rebuilt without its images is not a rebuild.
                     # `behavior: 'instant'` throughout: a site with CSS
@@ -578,26 +785,36 @@ def capture_replica(
                     # never came near the viewport before extraction - and the
                     # final return to top was never verified, leaving document
                     # coordinates offset by wherever the smooth scroll had reached.
-                    page.evaluate(
-                        "() => new Promise(r => { let y = 0; const t = setInterval(() => {"
-                        " window.scrollTo({top: y, behavior: 'instant'});"
-                        " y += window.innerHeight;"
-                        " if (y > document.body.scrollHeight) { clearInterval(t);"
-                        " window.scrollTo({top: 0, behavior: 'instant'});"
-                        " requestAnimationFrame(() => r()); } }, 40); })"
-                    )
-                    page.wait_for_timeout(settle_ms)
+                    page.evaluate(_SCROLL_JS)
+                    # And again after scrolling: the scroll is what triggers the
+                    # lazy loads, so the page is still growing when it returns.
+                    settled = page.evaluate(_STABILIZE_JS, settle_ms * 4)
+                    if isinstance(settled, dict) and not settled.get("settled"):
+                        notes.append(
+                            f"{name}: the layout was still moving when it was "
+                            "measured; spacing on this viewport may be approximate"
+                        )
                     raw = page.evaluate(js)
                     # The size guard, for real. MAX_PAYLOAD_BYTES sat unused while
                     # the docstring claimed a drop-deepest-and-retry existed; on an
                     # oversized page the capture simply hit MAX_NODES and silently
                     # lost the BOTTOM of the page. One retry at reduced depth trades
                     # depth for completeness and says so.
+                    #
+                    # This is now the ONLY thing that lowers the depth, and it fires
+                    # on measured bytes rather than on a guess about how deep pages
+                    # are. Depth costs ~6ms and ~47KB against a 1.8MB budget, so on
+                    # every page measured it never fires at all.
                     import json as _json
 
                     if len(_json.dumps(raw)) > MAX_PAYLOAD_BYTES:
-                        raw = page.evaluate(_extractor_js(max_depth=MAX_DEPTH - 4))
+                        raw = page.evaluate(_extractor_js(max_depth=MAX_DEPTH - 6))
                         raw["truncated"] = True
+                        notes.append(
+                            f"{name}: the page exceeded the capture size budget, so it "
+                            f"was re-measured {6} levels shallower; deeply-nested "
+                            "content is simplified"
+                        )
                     root, meta = parse_extraction(raw)
                     styles_ = raw.get("styles") or []
                     props_ = raw.get("props") or list(CAPTURED_PROPS)
@@ -610,6 +827,9 @@ def capture_replica(
                         doc_height=int(meta.get("docHeight") or 0),
                         node_count=int(meta.get("nodeCount") or 0),
                         truncated=bool(meta.get("truncated")),
+                        chrome_truncated=bool(meta.get("chromeTruncated")),
+                        header_found=bool(meta.get("headerFound")),
+                        footer_found=bool(meta.get("footerFound")),
                     ))
                     if name == viewports[0][0]:
                         out.title = str(meta.get("title") or "")
@@ -632,6 +852,26 @@ def capture_replica(
                 f"{vp.viewport}: the capture budget was reached - content walked "
                 "LAST (the page's later and deeper regions) is missing, and the "
                 "rebuild will be incomplete there"
+            )
+        # Tell apart "this site has no header" from "we ran out of room to measure
+        # its header". The pipeline used to report the first when the truth was the
+        # second, sending an operator to look for a navbar that was there all along.
+        if vp.chrome_truncated:
+            notes.append(
+                f"{vp.viewport}: the site's header/footer were found but too large to "
+                "measure fully; the replicated chrome is incomplete"
+            )
+        if vp.header_found and vp.header is None:
+            notes.append(
+                f"{vp.viewport}: a header element WAS found on the source but could "
+                "not be measured - the replica has no navbar for a reason that is "
+                "ours, not the site's"
+            )
+        if vp.footer_found and vp.footer is None:
+            notes.append(
+                f"{vp.viewport}: a footer element WAS found on the source but could "
+                "not be measured - the replica has no footer for a reason that is "
+                "ours, not the site's"
             )
     if not out.css_vars:
         notes.append("no :root custom properties were readable (cross-origin stylesheets?)")

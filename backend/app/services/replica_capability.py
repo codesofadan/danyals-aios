@@ -102,6 +102,29 @@ UPGRADES: Mapping[str, Substitution] = {
 }
 
 
+_EMITTABLE: frozenset[str] | None = None
+
+
+def _emittable_widgets() -> frozenset[str]:
+    """Widget types the ORACLE knows - i.e. that this codebase can emit and validate.
+
+    Imported lazily: `elementor_replica` imports this module, so a module-level
+    import of the oracle loader would be a cycle. Cached because the oracle is a
+    file read and `resolve()` is called per construct.
+    """
+    global _EMITTABLE
+    if _EMITTABLE is None:
+        try:
+            from app.services.elementor_replica import load_oracle
+
+            _EMITTABLE = frozenset(load_oracle().get("widget_keys", {}))
+        except Exception:
+            # An unreadable oracle must not silently disable every upgrade; the
+            # emitter's own validate_tree is still the backstop.
+            _EMITTABLE = frozenset()
+    return _EMITTABLE
+
+
 @dataclass(frozen=True)
 class TargetCapability:
     """What one client's site can render, as answered by its own plugin."""
@@ -161,12 +184,34 @@ class TargetCapability:
 
         Returns ``(widget_type, note)``. ``note`` is None when the preferred widget
         was available, and operator-facing prose when a substitution was made.
+
+        TWO AUTHORITIES, AND BOTH MUST AGREE. The site's registry says what the
+        target can RENDER; the oracle says what this codebase can correctly EMIT.
+        Only the first was ever consulted, and the two disagree: `nav-menu` is in
+        every Elementor Pro registry and is NOT in `oracle_4_7.json`. So a client on
+        Elementor Pro - the best sites, the ones most worth replicating - had a
+        `nav-menu` promoted into its navbar, `validate_tree` refused the finished
+        tree, and `replicate()` returned "refused by the oracle" having published
+        NOTHING AT ALL. Not a degraded page: no page. Six of the seven UPGRADES
+        entries name a widget the oracle does not carry, so the same total failure
+        was waiting behind any source page with a form, slider, gallery, tab strip,
+        pricing table or post feed on a capable target.
+
+        Preferring the fallback is strictly better than aborting: the operator gets
+        the page, with a note saying which construct was approximated.
         """
         upgrade = UPGRADES.get(construct)
         if upgrade is None:
             return construct, None
-        if self.can(upgrade.preferred):
+        if self.can(upgrade.preferred) and upgrade.preferred in _emittable_widgets():
             return upgrade.preferred, None
+        if self.can(upgrade.preferred):
+            return upgrade.fallback, (
+                f"{upgrade.why.split(' because ')[0]} - this site COULD render a "
+                f"{upgrade.preferred!r}, but AIOS cannot yet emit one it is sure "
+                "Elementor will read, and publishing a widget the editor silently "
+                "ignores would leave a hole in the page"
+            )
         return upgrade.fallback, upgrade.why
 
     def summary(self) -> str:

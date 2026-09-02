@@ -155,9 +155,16 @@ function RunRow({ run }: { run: JobRun }) {
             >
               progress_activity
             </span>
-            {status === "queued"
-              ? "Waiting for the worker…"
-              : "Capturing the page and rebuilding it as Elementor…"}
+            {/* The LIVE stage, not a fixed sentence. The worker writes one human line
+                per stage into the ledger's `detail` column (JobRun.detail), which this
+                card was already receiving and throwing away — so a 12-60s rebuild
+                showed the same eight words from start to finish and an operator could
+                not tell progress from a hang. Falls back to the old wording only
+                before the first stage lands. */}
+            {run.detail ||
+              (status === "queued"
+                ? "Waiting for the worker…"
+                : "Capturing the page and rebuilding it as Elementor…")}
           </span>
         )}
         {previewUrl && (status === "completed" || status === "degraded") && (

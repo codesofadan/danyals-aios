@@ -241,3 +241,54 @@ describe("DesignReplicator - a blocked run reads as an instruction", () => {
     expect(screen.getByText(/7 sections · 31 widgets/)).toBeInTheDocument();
   });
 });
+
+describe("DesignReplicator - a running job says what it is doing", () => {
+  /**
+   * A replication takes 12-60s. The card used to show one fixed sentence for all of
+   * it ("Capturing the page and rebuilding it as Elementor..."), which is
+   * indistinguishable from a hang - and an operator who thinks it has hung re-runs
+   * it, doubling the real cost.
+   *
+   * The worker reports about eight named stages into the job ledger's `detail`
+   * column. `JobRun.detail` was already on the wire and already in this component's
+   * props; the card simply threw it away.
+   */
+  it("renders the worker's live stage rather than a fixed sentence", async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path.startsWith("/clients")) return [CLIENT];
+      if (path.startsWith("/jobs/runs"))
+        return [
+          run({
+            status: "running",
+            startedAt: "2026-08-31T10:00:05Z",
+            detail: "Building 9 section(s) as Elementor widgets",
+          }),
+        ];
+      return [];
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByText(/Building 9 section\(s\) as Elementor widgets/),
+    ).toBeInTheDocument();
+    // The generic fallback must not ALSO be on screen - it is what the stage replaces.
+    expect(
+      screen.queryByText(/Capturing the page and rebuilding it as Elementor/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls back to the generic line only before the first stage lands", async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path.startsWith("/clients")) return [CLIENT];
+      if (path.startsWith("/jobs/runs")) return [run({ status: "running", detail: "" })];
+      return [];
+    });
+
+    renderCard();
+
+    expect(
+      await screen.findByText(/Capturing the page and rebuilding it as Elementor/),
+    ).toBeInTheDocument();
+  });
+});
