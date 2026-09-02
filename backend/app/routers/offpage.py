@@ -1426,6 +1426,23 @@ async def start_web2_provisioning(
     return [Web2ProvisionItemResponse.from_row(r) for r in rows]
 
 
+@router.post("/offpage/web2/provisioning/run")
+async def run_web2_provisioning_tick(_actor: Lead) -> dict[str, Any]:
+    """Advance every queue item that can move without a human (lead-only).
+
+    Two jobs: mint the accounts whose platforms have a real signup API, and read each
+    client's own mailbox ONCE for confirmation mail that has arrived. It never drives a
+    browser through a signup form - that is a terms breach on the platforms that matter,
+    not a missing feature.
+
+    Runs on demand rather than on a schedule because beat is parked by standing owner
+    instruction; scheduling it later changes only WHO calls this.
+    """
+    from workers.tasks.offpage import execute_web2_provision_tick
+
+    return await asyncio.to_thread(execute_web2_provision_tick)
+
+
 @router.get("/offpage/web2/provisioning", response_model=list[Web2ProvisionItemResponse])
 async def list_web2_provisioning(
     repo: OffpageRepoDep,
@@ -1498,59 +1515,32 @@ async def advance_web2_provisioning(
 async def _register_provisioned_account(
     row: dict[str, Any], body: Web2ProvisionAdvanceRequest
 ) -> str:
-    """Create the real account row + seal its credential, reusing the register path.
+    """Create the real account row + seal its credential.
 
-    Not a second implementation: ``build_spec`` is the same function the CLI and the
-    register endpoint call, so the handle/email hygiene rules hold identically however
-    an account arrives. Two copies would drift, and the drift is a footprint months
-    later rather than a test failure today.
+    Delegates to the ONE registration path the CLI and the auto-lane worker also use, so
+    R2-08's identity rules cannot drift by being enforced in three places - a drift that
+    fails no test and shows up months later as one suspension enumerating a client base.
     """
-    from app.cli.web2_accounts import (
-        HandleRejectedError,
-        _shared_domains,
-        build_spec,
-        insert_account,
+    from app.services.web2_account_registration import (
+        AccountRegistrationError,
+        register_account,
     )
-    from app.services.vault import add_key
-    from integrations.web2_credentials import VAULT_KIND_CLIENT_ACCESS, vault_provider_for
 
-    credential = {k: v for k, v in body.credential.items() if str(v).strip()}
-    if not credential:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(
-                "Going live needs the platform credential. An account that reports live "
-                "with nothing sealed shows green on the board and cannot publish."
-            ),
-        )
     try:
-        spec = await asyncio.to_thread(
-            lambda: build_spec(
+        return await asyncio.to_thread(
+            lambda: register_account(
                 platform=str(row.get("platform") or ""),
-                ownership="per_client",
-                handle=body.handle.strip() or str(row.get("handle") or ""),
                 client_id=str(row.get("client_id") or ""),
+                handle=body.handle.strip() or str(row.get("handle") or ""),
                 registration_email=str(row.get("registration_email") or ""),
+                credential=dict(body.credential),
                 property_url=body.property_url.strip(),
-                max_properties=1,
-                credential=credential,
-                shared_domains=_shared_domains(),
             )
         )
-    except (HandleRejectedError, ValueError) as refused:
+    except AccountRegistrationError as refused:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
         ) from refused
-
-    account_id = await asyncio.to_thread(insert_account, spec)
-    await asyncio.to_thread(
-        add_key,
-        provider=vault_provider_for(spec.platform),
-        label=account_id,
-        secret=json.dumps(spec.credential),
-        kind=VAULT_KIND_CLIENT_ACCESS,
-    )
-    return account_id
 
 
 @router.get("/offpage/web2/accounts", response_model=list[Web2AccountResponse])

@@ -192,6 +192,28 @@ class ImapMailbox:
                 return None
             time.sleep(max(poll_s, 1))
 
+    def check_once(
+        self,
+        *,
+        to_alias: str,
+        since: datetime,
+        subject_contains: Sequence[str] = (),
+    ) -> EmailMessage | None:
+        """ONE pass over the INBOX - no sleeping, no deadline.
+
+        WHY THIS IS PUBLIC AND WHY IT MATTERS. ``wait_for_message`` blocks a whole
+        worker slot for up to its timeout while a platform takes its time sending mail.
+        That is fine inside one signup flow; it is wrong for a queue sweeping every
+        client's pending signups, where twenty pending items would hold twenty workers
+        asleep. Callers that sweep should check once per tick and be rescheduled, which
+        is the same total waiting spread across no held resources.
+
+        Degrade-safe on exactly the same terms as ``wait_for_message``: an IMAP failure
+        yields ``None`` (the item simply stays pending), never an exception into a
+        worker.
+        """
+        return self._poll_once(to_alias.strip().lower(), since, subject_contains)
+
     def _poll_once(
         self, alias_l: str, since: datetime, subject_contains: Sequence[str]
     ) -> EmailMessage | None:

@@ -507,6 +507,23 @@ export function useAdvanceWeb2Provisioning() {
   });
 }
 
+/** Run the automatic steps: mint the API-signup accounts, and read each client's own
+ *  mailbox once for confirmation mail that has arrived. */
+export function useRunWeb2Provisioning() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ checked: number; advanced: number; failed: number }>(
+        "/offpage/web2/provisioning/run",
+        {},
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["web2-provisioning"] });
+      void qc.invalidateQueries({ queryKey: ["web2-accounts"] });
+    },
+  });
+}
+
 /** The platform catalogue, including the credential shape each platform needs. */
 export function useWeb2Catalog() {
   return useQuery({

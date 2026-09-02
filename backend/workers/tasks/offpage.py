@@ -620,6 +620,190 @@ from app.jobs.contract import JobContext  # noqa: E402
 from workers.celery_app import celery_app  # noqa: E402 - after the pure core, per the worker template
 
 
+def _mailbox_for_client(row: dict[str, Any]) -> Any:
+    """The CLIENT's own mailbox, built from their stored identity (0122).
+
+    Never the agency catch-all: reading a client's confirmation mail out of a shared
+    inbox is the same shared-registrant-domain footprint the per-client identity exists
+    to remove. No stored mailbox simply means no automatic verification - the operator
+    clicks the link themselves and nothing breaks.
+    """
+    host = str(row.get("web2_imap_host") or "")
+    user = str(row.get("web2_imap_user") or "")
+    label = str(row.get("web2_imap_vault_label") or "")
+    provider = str(row.get("web2_imap_vault_provider") or "")
+    if not (host and user and label and provider):
+        return None
+    from app.services.vault import find_secret
+    from integrations.imap_mailbox import ImapMailbox
+
+    password = find_secret(provider=provider, label=label)
+    if not password:
+        return None
+    return ImapMailbox(
+        host=host, port=int(row.get("web2_imap_port") or 993), user=user, password=password
+    )
+
+
+def execute_web2_provision_tick(limit: int = 25) -> dict[str, Any]:
+    """Advance every provisioning item that can move without a human.
+
+    Reads and writes on the privileged pool: this sweeps ACROSS clients, which no
+    tenant-scoped connection may do, and it writes only the queue's own columns.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.web2_account_registration import (
+        AccountRegistrationError,
+        register_account,
+    )
+    from app.services.web2_provision_tick import TickReport, decide_auto_signup, decide_verification
+
+    checked = advanced = failed = 0
+    with privileged_connection() as cur:
+        cur.execute(
+            "select i.id, i.client_id, i.platform, i.status, i.lane, i.handle, "
+            "       i.registration_email, i.created_at, "
+            "       c.web2_imap_host, c.web2_imap_port, c.web2_imap_user, "
+            "       c.web2_imap_vault_provider, c.web2_imap_vault_label "
+            "from public.web2_provision_items i "
+            "join public.clients c on c.id = i.client_id "
+            "where i.status in ('identity_ready', 'awaiting_verification') "
+            "order by i.created_at limit %s",
+            (limit,),
+        )
+        items = list(cur.fetchall())
+
+    for item in items:
+        checked += 1
+        status_now = str(item.get("status") or "")
+        action = None
+        try:
+            if status_now == "identity_ready":
+                action = decide_auto_signup(item, signup=_run_api_signup)
+            elif status_now == "awaiting_verification":
+                mailbox = _mailbox_for_client(item)
+                if mailbox is None:
+                    continue  # no mailbox: the operator confirms by hand, which is fine
+                created = item.get("created_at")
+                since = created if isinstance(created, datetime) else datetime.now(UTC)
+                def _check(alias: str, when: datetime, _mb: Any = mailbox) -> tuple[bool, str]:
+                    return _check_mail(_mb, alias, when)
+
+                action = decide_verification(
+                    item, since=since - timedelta(hours=1), check=_check
+                )
+        except Exception as exc:  # a bad item must never stop the sweep
+            failed += 1
+            logger.warning(
+                "web2_provision_tick_item_failed",
+                platform=str(item.get("platform") or ""), error=type(exc).__name__,
+            )
+            continue
+        if action is None:
+            continue
+
+        note = action.note
+        account_id: str | None = None
+        if action.to_status == "live":
+            try:
+                account_id = register_account(
+                    platform=action.platform,
+                    client_id=str(item.get("client_id") or ""),
+                    handle=action.handle or str(item.get("handle") or ""),
+                    registration_email=str(item.get("registration_email") or ""),
+                    credential=action.credential,
+                )
+            except AccountRegistrationError as refused:
+                failed += 1
+                _write_tick_result(
+                    action.item_id, status="blocked", note=str(refused)[:400],
+                    verify_link="", account_id=None,
+                )
+                continue
+        _write_tick_result(
+            action.item_id, status=action.to_status, note=note[:400],
+            verify_link=action.verify_link, account_id=account_id,
+        )
+        advanced += 1
+
+    return TickReport(checked=checked, advanced=advanced, failed=failed).as_dict()
+
+
+def _run_api_signup(platform: str, handle: str) -> tuple[str, dict[str, str], str]:
+    """Drive the platform's own signup API. Returns (status, credentials, error)."""
+    from integrations.web2_signup import SignupContext, api_signup_provider_for
+
+    provider = api_signup_provider_for(platform)
+    if provider is None:
+        return ("blocked", {}, f"{platform} has no automatic signup.")
+    ctx = SignupContext(
+        platform=platform, alias_email="", username=handle or "aios", password="",
+        http=_signup_http(),
+    )
+    result = provider.signup(ctx)
+    return (result.status, dict(result.credentials), result.error or "")
+
+
+def _signup_http() -> Any:
+    """The JSON HTTP seam the API signup providers call."""
+    import httpx
+
+    def call(url: str, *, method: str = "GET", data: dict[str, Any] | None = None) -> Any:
+        with httpx.Client(timeout=25.0, follow_redirects=False) as client:
+            resp = client.request(method, url, json=data)
+            return resp.json()
+
+    return call
+
+
+def _check_mail(mailbox: Any, alias: str, since: datetime) -> tuple[bool, str]:
+    """One non-blocking look for a confirmation mail. Never sleeps, never raises."""
+    from integrations.imap_mailbox import extract_verification
+
+    msg = mailbox.check_once(
+        to_alias=alias, since=since, subject_contains=("confirm", "verify", "activate")
+    )
+    if msg is None:
+        return (False, "")
+    return (True, extract_verification(msg).link or "")
+
+
+def _write_tick_result(
+    item_id: str, *, status: str, note: str, verify_link: str, account_id: str | None
+) -> None:
+    """Persist one decided move. Only the columns this tick owns are written."""
+    sets = ["status = %s", "note = %s"]
+    params: list[Any] = [status, note]
+    if verify_link:
+        sets.append("verify_link = %s")
+        sets.append("verify_found_at = now()")
+        params.append(verify_link)
+    if account_id:
+        sets.append("account_id = %s")
+        params.append(account_id)
+    params.append(item_id)
+    with privileged_connection() as cur:
+        cur.execute(
+            "update public.web2_provision_items set "
+            + ", ".join(sets)
+            + " where id = %s",
+            params,
+        )
+
+
+@celery_app.task(name="web2_provision_tick")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
+def web2_provision_tick_job(limit: int = 25) -> dict[str, Any]:
+    """Entry point: advance the provisioning queue's automatic steps.
+
+    Deliberately NOT on a beat schedule - beat is parked by standing owner instruction,
+    and turning it on is an owner decision, not a side effect of adding a feature. The
+    operator runs this from the account builder, and a future beat entry would change
+    only WHO calls it.
+    """
+    return execute_web2_provision_tick(limit)
+
+
 @celery_app.task(name="web2_write")  # type: ignore[untyped-decorator]  # celery's decorator is untyped
 def web2_write_job(web2_id: str) -> dict[str, Any]:
     """Entry point: draft one planned Web 2.0 property and PARK it at ``needs_review``.

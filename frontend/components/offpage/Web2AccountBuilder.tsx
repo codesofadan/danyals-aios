@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   useAdvanceWeb2Provisioning,
   useStartWeb2Provisioning,
+  useRunWeb2Provisioning,
   useWeb2Provisioning,
   useWeb2ClientIdentity,
   type Web2ProvisionItem,
@@ -44,6 +45,8 @@ export default function Web2AccountBuilder({ clientId }: { clientId?: string }) 
   const identityQ = useWeb2ClientIdentity(clientId);
   const start = useStartWeb2Provisioning();
   const advance = useAdvanceWeb2Provisioning();
+  const runTick = useRunWeb2Provisioning();
+  const [tickResult, setTickResult] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [ack, setAck] = useState(false);
   const [error, setError] = useState("");
@@ -135,6 +138,35 @@ export default function Web2AccountBuilder({ clientId }: { clientId?: string }) 
         <div className="login-error" role="alert">
           <span className="material-symbols-rounded">error</span>
           {error}
+        </div>
+      )}
+
+      {openItems.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 8px" }}>
+          <button
+            className="op-act"
+            disabled={runTick.isPending}
+            onClick={async () => {
+              setTickResult("");
+              try {
+                const r = await runTick.mutateAsync();
+                setTickResult(
+                  r.advanced > 0
+                    ? `Moved ${r.advanced} of ${r.checked} forward.`
+                    : `Checked ${r.checked} — nothing ready to move yet.`,
+                );
+              } catch (e) {
+                setError((e as Error)?.message ?? "Could not run the automatic steps.");
+              }
+            }}
+          >
+            {runTick.isPending ? "Running…" : "Run the automatic steps"}
+          </button>
+          <span className="fld-hint" style={{ margin: 0 }}>
+            Creates the accounts that have a signup API, and checks the client&rsquo;s
+            mailbox for confirmation emails.
+          </span>
+          {tickResult && <span className="fld-hint" style={{ margin: 0 }}>{tickResult}</span>}
         </div>
       )}
 
