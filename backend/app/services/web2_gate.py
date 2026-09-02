@@ -26,6 +26,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.logging_setup import get_logger
+from app.services import web2_links
 from app.services import web2_similarity as sim
 from app.services.web2_pipeline import SimilarityOutcome
 
@@ -48,6 +49,10 @@ class SimilarityStore(Protocol):
         min_shared: int = 2,
         limit: int = 200,
     ) -> list[dict[str, Any]]: ...
+
+    def known_web2_urls(self) -> set[str]:
+        """Every property URL we have published, across ALL clients (R2-15)."""
+        ...
 
     def record_web2_fingerprint(
         self,
@@ -98,6 +103,26 @@ def evaluate_draft(
     platform = str(row.get("platform") or "")
     client_id = str(row.get("client_id") or "") or None
     account_id = str(row.get("account_id") or "") or None
+
+    # R2-15 runs FIRST, and it is unconditional. Every other check here weighs a
+    # statistical tell against a threshold; this one is a hard edge in a graph anyone can
+    # walk from the open web, so there is no band in which it is acceptable. Running it
+    # before the fingerprint work also means the cheap certain refusal happens before the
+    # expensive uncertain one.
+    #
+    # A store that cannot answer must NOT be read as "no properties exist" - an empty
+    # corpus passes everything, which is exactly how this ban sat unenforced. A failure
+    # propagates to the caller, which converts it to `unavailable`, and the approval
+    # endpoint refuses on that rather than waving the draft through.
+    links = web2_links.check_links(
+        body_md,
+        target_url=str(row.get("target_url") or ""),
+        known_property_urls=store.known_web2_urls(),
+    )
+    if links.blocked:
+        logger.info("web2_link_gate_blocked", web2_id=web2_id, code=links.code)
+        return SimilarityOutcome(verdict="block", code=links.code, detail=links.detail)
+
     fp = sim.fingerprint(
         body_md=body_md,
         client_name=client_name,

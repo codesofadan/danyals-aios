@@ -37,7 +37,7 @@ _BODY = (
 
 
 class FakeSimStore:
-    """An in-memory stand-in for the two ``ServiceOffpageStore`` methods the gate uses.
+    """An in-memory stand-in for the ``ServiceOffpageStore`` methods the gate uses.
 
     It models the real query's shape closely enough to be honest: candidates are only
     returned from the recorded corpus, and scoping is applied - so a test cannot pass by
@@ -46,6 +46,12 @@ class FakeSimStore:
 
     def __init__(self) -> None:
         self.corpus: list[dict[str, Any]] = []
+        #: R2-15's corpus. Empty by default so these similarity tests exercise only the
+        #: similarity rule; the link rule has its own suite.
+        self.property_urls: set[str] = set()
+
+    def known_web2_urls(self) -> set[str]:
+        return set(self.property_urls)
 
     def web2_similarity_candidates(
         self, *, sampled_hashes: Any, body_sha256: str, client_id: str | None,
@@ -198,3 +204,45 @@ def test_the_scope_label_reports_the_most_actionable_relationship() -> None:
     assert web2_gate.scope_of(
         {"client_id": "cl-9", "account_id": "acct-9"}, client_id="cl-1", account_id="acct-1"
     ) == "platform"
+
+
+# --------------------------------------------------------------------------- #
+# R2-15 is WIRED, not just written.
+# --------------------------------------------------------------------------- #
+def test_the_gate_refuses_a_draft_that_links_to_another_property() -> None:
+    """The regression that matters: `known_web2_urls()` existed with a docstring citing
+    R2-15 and had ZERO callers, so the ban was documentation. This asserts the gate
+    itself refuses - if the wiring is removed, the corpus goes unread and this passes a
+    self-link straight through."""
+    store = FakeSimStore()
+    store.property_urls = {"https://otherclient.wordpress.com/2026/08/a-post"}
+
+    row = {**_row("w2-link"), "target_url": "https://leedsdrainage.co.uk/services"}
+    outcome = web2_gate.evaluate_draft(
+        store, _settings(), web2_id="w2-link", row=row,
+        body_md=(
+            "Background: https://otherclient.wordpress.com/2026/08/a-post\n\n"
+            "We handle this at https://leedsdrainage.co.uk/services"
+        ),
+        client_name="Leeds Drainage", geo="Leeds",
+    )
+
+    assert outcome.blocked
+    assert outcome.code.startswith("link_block:self_reference:")
+
+
+def test_the_gate_still_passes_a_draft_citing_genuine_third_parties() -> None:
+    store = FakeSimStore()
+    store.property_urls = {"https://otherclient.wordpress.com/2026/08/a-post"}
+
+    row = {**_row("w2-ok"), "target_url": "https://leedsdrainage.co.uk/services"}
+    outcome = web2_gate.evaluate_draft(
+        store, _settings(), web2_id="w2-ok", row=row,
+        body_md=(
+            "Per https://gov.uk/drainage-standards the survey matters.\n\n"
+            "We handle this at https://leedsdrainage.co.uk/services"
+        ),
+        client_name="Leeds Drainage", geo="Leeds",
+    )
+
+    assert not outcome.blocked
