@@ -16,6 +16,7 @@ Falls back gracefully:
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,15 @@ from audit_engine.logging_setup import get_logger
 log = get_logger(__name__)
 
 
-NARRATIVE_MODEL = "claude-opus-4-7"
+# Overridable, for the same reason the dispatcher's DEFAULT_MODEL is: when the caller
+# points ANTHROPIC_BASE_URL at a gateway (Agent Router, LiteLLM, ...), that gateway
+# publishes its OWN model catalog and an id from Anthropic's catalog is rejected
+# outright. A hard-coded id made the narrative the one call that could not follow the
+# rest of the platform onto a gateway. AUDIT_NARRATIVE_MODEL overrides it alone;
+# AUDIT_AGENT_MODEL is the shared fallback so one env var can move every engine call.
+NARRATIVE_MODEL = (
+    os.getenv("AUDIT_NARRATIVE_MODEL") or os.getenv("AUDIT_AGENT_MODEL") or "claude-opus-4-7"
+)
 MAX_TOKENS_OUT = 16000
 
 SYSTEM_PROMPT = """You are the senior SEO consultant at __BRAND__ writing the final unified audit report.

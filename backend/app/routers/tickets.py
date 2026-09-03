@@ -22,7 +22,7 @@ from app.core.auth import CurrentUser, require_perm
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepoDep
 from app.db.tasks_repo import TasksRepoDep
-from app.db.threads_repo import ThreadsRepoDep
+from app.db.threads_repo import ThreadsRepo, ThreadsRepoDep
 from app.db.tickets_repo import TicketsRepoDep
 from app.schemas.tasks import TaskResponse
 from app.schemas.tickets import (
@@ -33,9 +33,12 @@ from app.schemas.tickets import (
     TicketStatusUpdate,
     TicketToTaskRequest,
 )
+from app.logging_setup import get_logger
 from app.services.activity import record_activity
 from app.services.notifications import email_client, notify_client_in_app
 from app.services.task_assignment import assign_task
+
+logger = get_logger("routers.tickets")
 
 router = APIRouter(tags=["tickets"])
 
@@ -148,7 +151,11 @@ async def update_ticket_status(
 
 @router.post("/tickets/{code}/reply", response_model=TicketResponse)
 async def reply_to_ticket(
-    code: str, body: TicketReplyRequest, repo: TicketsRepoDep, actor: ManageClients
+    code: str,
+    body: TicketReplyRequest,
+    repo: TicketsRepoDep,
+    threads: ThreadsRepoDep,
+    actor: ManageClients,
 ) -> TicketResponse:
     """Send a real, free-text reply on a ticket/request (lead-only).
 
@@ -157,6 +164,18 @@ async def reply_to_ticket(
     When the ticket is client-linked (``client_id`` set - mirrors the same check
     ``update_ticket_status`` uses for its canned status email) the actual reply text
     is emailed to the client, not a canned status label.
+
+    IT ALSO MIRRORS THE REPLY INTO THE THREAD, and that is the point of the mirror.
+    Two staff reply paths existed and they did not meet: this one wrote a single
+    ``support_tickets.reply`` column and sent an email, while the client portal reads
+    ``portal_thread_messages`` (0098). So an operator who used "Reply" on a ticket
+    emailed the client and left NOTHING in the conversation the client actually opens
+    - the portal thread showed the client's own message and no answer, which reads as
+    being ignored. The reply is written ``client_visible`` because that is what this
+    endpoint means by definition: it has always emailed the text to the client.
+
+    The email is sent ONCE, by the block below, not by the mirror - writing through
+    the repo rather than the /threads route is what keeps it to one message.
     """
     ticket = await asyncio.to_thread(repo.get_ticket_by_code, code)
     if ticket is None:
@@ -182,12 +201,62 @@ async def reply_to_ticket(
         entity_id=str(client_id) if client_id is not None else None,
     )
     # ADMIN/LEAD -> CLIENT: the real reply text (not a canned status label), only on
+    # Mirror into the thread the CLIENT reads, so "Reply" leaves a trace there and
+    # not only in an inbox. Best-effort for the same reason the email is: a thread
+    # write that fails must not lose a reply that is already saved on the ticket.
+    await _mirror_reply_to_thread(
+        threads,
+        ticket_id=str(ticket["id"]),
+        client_id=str(client_id) if client_id is not None else None,
+        actor_id=actor.id,
+        actor_name=actor.name or actor.email,
+        message=body.message,
+    )
+
     # a client-linked ticket. Best-effort; never blocks the reply from being saved.
     if client_id is not None:
         await _email_client_ticket_reply(
             str(client_id), str(ticket.get("subject", "")), body.message
         )
     return TicketResponse.from_row(updated)
+
+
+async def _mirror_reply_to_thread(
+    threads: ThreadsRepo,
+    *,
+    ticket_id: str,
+    client_id: str | None,
+    actor_id: str,
+    actor_name: str,
+    message: str,
+) -> None:
+    """Write a ticket reply into the ticket's thread as a client-visible message.
+
+    ``create_thread`` is upsert-shaped (``on conflict do nothing``, returning the
+    existing row), so this is safe whether or not the client has already opened the
+    conversation. Swallows everything: the reply is already persisted on the ticket
+    and already on its way by email; a thread hiccup must not turn that into a 500.
+    """
+    try:
+        thread = await asyncio.to_thread(
+            threads.create_thread,
+            entity_type="ticket",
+            entity_id=ticket_id,
+            client_id=client_id,
+        )
+        if thread is None:
+            logger.warning("ticket_reply_thread_unavailable", ticket_id=ticket_id)
+            return
+        await asyncio.to_thread(
+            threads.add_message,
+            thread_id=str(thread["id"]),
+            author_id=actor_id,
+            author_name=actor_name,
+            body=message,
+            visibility="client_visible",
+        )
+    except Exception:
+        logger.warning("ticket_reply_thread_mirror_failed", ticket_id=ticket_id)
 
 
 async def _email_client_ticket_reply(client_id: str, subject: str, message: str) -> None:

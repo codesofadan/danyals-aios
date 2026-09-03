@@ -29,6 +29,10 @@ _SHEETS_SUBDIR = "sheets"
 # report.pdf under ``<root>/<audit_id>/`` and is resolved by convention from the
 # audit id (no DB column) - see ``resolve_report_html``.
 REPORT_HTML_NAME = "report.html"
+#: The CONSULTING report this platform builds, under <root>/<audit_id>/sheets/.
+#: Kept as a literal rather than imported from audit_report: that module imports
+#: REPORT_PDF_NAME from HERE, so importing it back would close a cycle.
+_BUILT_REPORT_NAME = "audit-report.html"
 #: The platform's own client report, written into `<audit_id>/sheets/` by the
 #: ingest step. Defined here rather than in `audit_report` because this module is
 #: the lower layer: the store must be able to find the file without importing the
@@ -113,13 +117,31 @@ class LocalArtifactStore:
         return target if target.is_file() else None
 
     def resolve_report_html(self, audit_id: str) -> Path | None:
-        """Resolve the self-contained report.html for a run, or ``None``.
+        """Resolve the report HTML for a run, richest document first, or ``None``.
 
-        report.html is written as a sibling of report.pdf under
-        ``<root>/<audit_id>/``, so it is resolved from the audit id alone - no DB
-        column, and independent of whether a PDF was produced (an engine with no
-        PDF backend still emits the HTML). Traversal-safe via ``resolve``.
+        TWO documents can exist for one run and they are not equivalent:
+
+        * ``sheets/audit-report.html`` - the CONSULTING report this platform builds
+          (``audit_report.render``): scored dimensions, the ranked findings body,
+          the phased plan, the page table.
+        * ``report.html`` - what the ENGINE emitted, a sibling of report.pdf.
+
+        The consulting document is preferred wherever it exists, and this ordering
+        is load-bearing rather than cosmetic. Serving the engine file is what made
+        the free public page look empty: on a ``--mode free`` run the engine's own
+        HTML is heavily condensed (1 table / 7 rows against a paid run's 7 / 54),
+        so a visitor saw headings with nothing under them and concluded the audit
+        had found nothing - while that run's ``findings.json`` held the same ~176
+        findings a paid run produces. Preferring the built report also makes the
+        free and paid pages ONE document instead of two that drift.
+
+        Falls back to the engine file so a run from before the consulting report
+        existed - or one whose render failed - still serves something. Resolved
+        from the audit id alone (no DB column) and traversal-safe via ``resolve``.
         """
+        built = self.resolve(f"{audit_id}/{_SHEETS_SUBDIR}/{_BUILT_REPORT_NAME}")
+        if built is not None:
+            return built
         return self.resolve(f"{audit_id}/{REPORT_HTML_NAME}")
 
     def sheets_dir(self, audit_id: str) -> Path:

@@ -22,8 +22,9 @@ client actually reads.
 from __future__ import annotations
 
 import html
+import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,8 @@ from app.db.database import privileged_connection
 from app.services import report_pdf
 from app.services.audit_artifacts import REPORT_PDF_NAME
 from app.services.branding import Brand, brand
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Palette - the platform's own tokens, inlined because the document is standalone
@@ -371,7 +374,8 @@ REPORT_NAME = "audit-report.html"
 #: store reads without importing this builder. Rendered from the HTML by a headless
 #: browser so the page a reviewer approved and the file a client receives cannot
 #: diverge; absent when no browser is installed, and the HTML is written either way.
-__all__ = ["REPORT_NAME", "REPORT_PDF_NAME", "ReportInput", "build", "render"]
+__all__ = ["REPORT_NAME", "REPORT_PDF_NAME", "ReportInput", "build",
+           "build_from_artifacts", "render"]
 
 #: URLs listed in the appendix. Beyond this the table stops being read and starts
 #: being weight; the workbook carries the complete list either way.
@@ -1050,5 +1054,115 @@ def build(
     if pdf:
         # Best effort by design: a missing browser must cost this run its PDF, not
         # its workbook, its CSVs, or the HTML that was just written.
+        report_pdf.render(path, out / REPORT_PDF_NAME)
+    return path
+
+
+def build_from_artifacts(
+    *,
+    artifact_dir: str | Path,
+    out_dir: str | Path,
+    meta: dict[str, Any] | None = None,
+    site_url: str = "",
+    top_findings: int = 40,
+    pdf: bool = True,
+) -> Path:
+    """Render the SAME document as :func:`build`, straight from the run's artifacts.
+
+    WHY A SECOND ENTRY POINT. :func:`build` reads 100% of its content from five
+    tables - ``audit_rollups`` / ``audit_findings`` / ``audit_finding_instances`` /
+    ``audit_pages`` / ``audit_roadmaps`` - which are populated by
+    ``audit_ingest.ingest``. Every one of those tables carries
+    ``audit_id references public.audits(id)``, so ONLY a tenant audit can be
+    ingested. A public free audit lives in ``public_audits``, a different table with
+    no row in ``audits``, so the free path never ingested and therefore never had a
+    report: sections 03/04/05/08 are each guarded by ``if dims:`` / ``if scored:`` /
+    ``if items:`` / ``if data.pages:``, and with empty tables they all fell away. The
+    free report came out as bare headings and one empty coverage table (1 table / 7
+    rows against the paid document's 7 tables / 54 rows) - not because the free run
+    produced less, but because nothing had loaded what it produced. A free
+    ``findings.json`` is ~125 KB with 176 findings, the same order as a paid one.
+
+    So this renders from the artifacts IN MEMORY. No DB read, no DB write, no
+    ``audits`` row required, and nothing an unauthenticated funnel touches. It reuses
+    the pure halves that ``ingest`` already factored out - ``audit_ingest.prepare``
+    for causes/pages/rollups and the pure ``audit_roadmap.build`` planner - so the
+    free and paid documents cannot drift apart: they run the same ``render``.
+    """
+    # Imported here, not at module scope: audit_ingest imports this module's
+    # neighbours and a top-level import would close a cycle.
+    from app.services import audit_ingest, audit_roadmap
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    raw_findings, raw_pages, coverage = audit_ingest.load_artifacts(artifact_dir)
+    causes, pages, rollup_objs, _scope = audit_ingest.prepare(
+        raw_findings, raw_pages, coverage, site_url=site_url
+    )
+
+    # Cause -> the finding dict `render` expects (the audit_findings row shape).
+    # Only OPEN problems are printed, matching build()'s query, which selects the
+    # findings this audit actually instantiated rather than every check that ran.
+    findings: list[dict[str, Any]] = []
+    for c in causes:
+        if (c.status or "").lower() in {"pass", "n_a", "na", "not_applicable"}:
+            continue
+        findings.append({
+            "id": c.fingerprint,
+            "check_id": c.check_id,
+            "check_name": c.check_name,
+            "pillar": c.pillar,
+            "subcategory": c.subcategory,
+            "dimension": c.dimension,
+            "owner_agent": c.owner_agent,
+            "automation": c.automation,
+            "severity": c.severity,
+            "status": c.status,
+            "confidence": c.confidence,
+            "locus_kind": c.locus_kind,
+            "locus_value": c.locus_value,
+            "discriminator": c.discriminator,
+            "fingerprint": c.fingerprint,
+            "remediation": c.remediation,
+            "instance_count": c.instance_count,
+            "pages_affected": c.pages_affected,
+            # build() fetches up to three example URLs per PRINTED finding; the same
+            # cap here keeps the two documents identical rather than merely similar.
+            "sample_urls": [i.url for i in c.instances if i.url][:3],
+        })
+    # Same ordering as build()'s ORDER BY: severity rank, then reach, then check_id.
+    _sev_rank = {"critical": 0, "major": 1, "minor": 2}
+    findings.sort(key=lambda f: (
+        _sev_rank.get((f["severity"] or "").lower(), 3),
+        -int(f["instance_count"] or 0),
+        f["check_id"] or "",
+    ))
+
+    rollups = [asdict(r) for r in rollup_objs]
+
+    # The plan. audit_roadmap.build is pure - it scores and packs the findings it is
+    # handed - so the free report gets section 05 without any persistence.
+    roadmap: dict[str, Any] | None = None
+    roadmap_items: list[dict[str, Any]] = []
+    try:
+        plan = audit_roadmap.build(findings, pages_crawled=len(pages))
+        roadmap = {
+            "capacity_points_per_month": plan.capacity_points_per_month,
+            "scoring_model_version": plan.scoring_model_version,
+        }
+        roadmap_items = [
+            {**asdict(it), "sequence": n} for n, it in enumerate(plan.planned, start=1)
+        ]
+    except Exception:  # never fatal: a plan we could not score must not cost the report
+        log.warning("free_report_roadmap_failed", exc_info=True)
+
+    doc = render(ReportInput(
+        meta=meta or {}, rollups=rollups, findings=findings, pages=pages,
+        roadmap=roadmap, roadmap_items=roadmap_items, top_findings=top_findings,
+    ))
+    path = out / REPORT_NAME
+    path.write_text(doc, encoding="utf-8")
+    if pdf:
         report_pdf.render(path, out / REPORT_PDF_NAME)
     return path

@@ -18,9 +18,9 @@
 // Playwright captures of the same URL. It carries the same copyright assertion the
 // standalone Replicator enforces — never hardcoded, because the server checks it too.
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useSiteDesign } from "@/lib/hooks/content";
-import { useReplicaJob, useReplicate } from "@/lib/hooks/replica";
+import { useReplicaJob, useReplicaRuns, useReplicate } from "@/lib/hooks/replica";
 import { FRAMEWORKS, TEMPLATE_THEME_DEFAULTS, type Framework, type PageTemplate } from "@/lib/content";
 import TemplateGallery from "@/components/content/TemplateGallery";
 import { useToast, describeError } from "@/components/ui/Toast";
@@ -37,6 +37,28 @@ export default function StepBrief({
   const replicate = useReplicate();
   const replicaJob = useReplicaJob(state.replicaJobId);
   const toast = useToast();
+
+  // Replications this client ALREADY has, from the job ledger.
+  //
+  // The effect below adopts a design only from `state.replicaJobId` - a run this
+  // screen started itself. So a replication launched from /admin/wordpress (the
+  // Design Replicator card, which is where an operator naturally does it) left its
+  // measured profile sitting in `job_runs.result` unread: the content job was then
+  // generated with NO profile and silently fell back to the template default. The
+  // work was paid for and invisible. The ledger has always held it - nothing here
+  // was reading it.
+  const pastRuns = useReplicaRuns(state.clientId || null);
+  const reusable = useMemo(() => {
+    const rows = pastRuns.data ?? [];
+    return rows
+      .map((r) => {
+        const result = (r.result ?? {}) as { url?: string; design_profile?: unknown };
+        return { run: r, url: result.url || "", profile: result.design_profile };
+      })
+      // A degraded run can finish having measured nothing; only offer runs that
+      // actually carry a profile, so picking one can never be a no-op.
+      .filter((x) => x.profile != null);
+  }, [pastRuns.data]);
 
   // The replica job carries the measured design once it finishes. A degraded run that
   // produced no profile is NOT a silent failure — it falls back to measuring the
@@ -174,6 +196,37 @@ export default function StepBrief({
               <div className="cs" style={{ marginTop: 8 }}>
                 No site chosen on screen 1, so there is nothing to measure. Pick a
                 template below, or replicate a design from a URL.
+              </div>
+            )}
+
+            {/* Reuse a design this client already paid to have measured. */}
+            {reusable.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div className="cs" style={{ marginBottom: 8 }}>
+                  Or reuse a design already replicated for this client — no second
+                  capture, no second charge.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {reusable.map(({ run, url, profile }) => (
+                    <button
+                      key={run.id}
+                      type="button"
+                      className="chip"
+                      title={url || "replicated design"}
+                      onClick={() => {
+                        patch({ design: profile as FlowState["design"], designFrom: url });
+                        toast.success(
+                          "Design reused",
+                          "Colours, fonts and width taken from the earlier replication of " +
+                            (url || "this client's site") + ".",
+                        );
+                      }}
+                    >
+                      <span className="material-symbols-rounded">history</span>
+                      {url || "replicated design"}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 

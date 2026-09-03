@@ -55,3 +55,10 @@ whatsapp chats, media and calls/
 # build artifacts
 0_build.txt
 logs.zip
+
+# Local native-Windows dev runtime (see RUN-LOCALLY.md) — never committed.
+# .local-state/ = the artifact + backup roots the API/worker read and write
+#                 (the native stand-in for the aios_state docker volume).
+# tools/redis/  = portable Redis for Windows; a ~12 MB vendored binary + its AOF.
+.local-state/
+tools/redis/

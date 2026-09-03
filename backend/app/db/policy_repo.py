@@ -21,6 +21,7 @@ column list (the materialize insert) comes from a server-built dict quoted via
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any, cast
 
 from fastapi import Depends
@@ -32,6 +33,21 @@ from app.db.database import rls_connection
 from app.services.policy_baseline import baseline_by_id, merge_baseline
 
 _Rows = list[dict[str, Any]]
+
+
+def _is_uuid(value: str) -> bool:
+    """True when `value` can bind to a uuid column.
+
+    `recommendations.id` is a uuid, and psycopg raises InvalidTextRepresentation -
+    not a miss - when a non-uuid string is bound to it. Baseline recommendations
+    carry synthetic string ids, so every caller that may hold one has to check the
+    shape before it reaches SQL.
+    """
+    try:
+        uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 class PolicyRepo:
@@ -142,14 +158,24 @@ class PolicyRepo:
         decision persists and future lists dedup the constant away. Only a lead
         (owner/admin/manager) reaches here; RLS enforces that on both the UPDATE and
         the INSERT."""
-        with rls_connection(self._user_id) as cur:
-            cur.execute(
-                "update public.recommendations set status = %s where id = %s returning *",
-                (new_status, rec_id),
-            )
-            updated = cur.fetchone()
-            if updated is not None:
-                return updated
+        # ONLY a real uuid may reach the UPDATE. `recommendations.id` is a uuid
+        # column, so binding a synthetic baseline id ("rec-base-eeat") made Postgres
+        # raise InvalidTextRepresentation *before* the materialize path below could
+        # run - and since every recommendation the Policy Radar shows on a fresh
+        # install is a baseline one, Acknowledge and Dismiss returned 500 for all of
+        # them. The docstring above always described the right behaviour; the UPDATE
+        # simply ran first and blew up. Checking the shape first makes the documented
+        # path reachable, and an unparseable id now falls through to `baseline_by_id`
+        # and ends as an honest 404 rather than a stack trace.
+        if _is_uuid(rec_id):
+            with rls_connection(self._user_id) as cur:
+                cur.execute(
+                    "update public.recommendations set status = %s where id = %s returning *",
+                    (new_status, rec_id),
+                )
+                updated = cur.fetchone()
+                if updated is not None:
+                    return updated
 
         base = baseline_by_id(rec_id)
         if base is None:

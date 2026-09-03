@@ -626,6 +626,9 @@ async def research_content(
                 site=body.site,
                 content_type=body.content_type,
                 count=body.count,
+                # Carrying the client is what lets the paid result be SAVED to that
+                # client's keyword bank instead of dying with the wizard screen.
+                client_id=body.client_id,
             )
         except Exception:
             logger.exception("content_research_endpoint_error")

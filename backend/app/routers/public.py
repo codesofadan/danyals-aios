@@ -38,6 +38,7 @@ Fiverr upsell link. Security posture (read before touching this file):
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any, Protocol
@@ -528,3 +529,154 @@ async def serve_content_image(
     if path is None:
         raise _ARTIFACT_NOT_FOUND
     return FileResponse(path, media_type="image/png", headers=_IMAGE_CACHE_HEADERS)
+
+
+# --------------------------------------------------------------------------- #
+# Readable public pages: /leads/<slug>
+# --------------------------------------------------------------------------- #
+# The token routes above stay exactly as they are - every existing link keeps
+# working. These add a SECOND, readable address for the same curated report, and
+# they are the only public surface a paid audit ever gets.
+#
+# The resolve is deliberately narrow. It reads ONE row from public_audit_pages by
+# slug, and only when `published` is true; an unpublished page is a 404 and not a
+# 403, so the URL space leaks nothing about which slugs exist. Free pages are
+# published on completion (the lead magnet is meant to be shared, and the report
+# is derived wholly from a public crawl); PAID pages default to unpublished and
+# additionally carry a random suffix, so a client's deliverable is neither public
+# by accident nor reachable by guessing their brand name. See 0126's header.
+_PAGE_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
+)
+
+_PAGE_SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$")
+
+
+class PublicPage(BaseModel):
+    """The curated public page payload. Same withholding rules as PublicReport:
+    no internal id, no email, no stored error, no artifact path."""
+
+    slug: str
+    kind: str
+    brand: str
+    url: str
+    status: str
+    score: int | None
+    scores: dict[str, Any]
+    has_pdf: bool
+    has_report: bool
+    when: str | None
+    fiverr_url: str
+
+
+def _resolve_page(slug: str) -> dict[str, Any] | None:
+    """slug -> the published report row it names, or None.
+
+    Privileged path (the route is unauthenticated) but filtered to a single row by
+    primary key, exactly like the token reads above - no tenant table is reachable
+    from here. Returns the underlying public_audits/audits row plus the page's own
+    `kind`, so the caller can serve one shape for both.
+    """
+    with privileged_connection() as cur:
+        cur.execute(
+            "select kind, public_audit_id, audit_id from public.public_audit_pages"
+            " where slug = %s and published",
+            (slug,),
+        )
+        page = cur.fetchone()
+        if page is None:
+            return None
+        if page["kind"] == "free":
+            cur.execute(
+                "select id, url, status, score, scores, pdf_path, json_path, created_at"
+                " from public.public_audits where id = %s",
+                (page["public_audit_id"],),
+            )
+        else:
+            cur.execute(
+                "select id, url, status::text as status, score, scores, pdf_path,"
+                " json_path, created_at from public.audits where id = %s",
+                (page["audit_id"],),
+            )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        out["kind"] = page["kind"]
+        return out
+
+
+def _validated_slug(slug: str) -> str:
+    """Reject anything the slug column could not hold before it reaches the DB."""
+    s = (slug or "").strip().lower()
+    if not _PAGE_SLUG_RE.match(s):
+        raise _PAGE_NOT_FOUND
+    return s
+
+
+@router.get("/pages/{slug}", response_model=PublicPage)
+async def get_public_page(
+    slug: str, settings: SettingsDep, store: PublicArtifactStoreDep
+) -> PublicPage:
+    """The curated report behind a readable slug (free or paid, published only)."""
+    s = _validated_slug(slug)
+    row = await asyncio.to_thread(_resolve_page, s)
+    if row is None or str(row.get("status")) != "done":
+        raise _PAGE_NOT_FOUND
+    has_pdf, has_report = await asyncio.to_thread(
+        _public_report_flags, store or local_store_from_settings(settings), row
+    )
+    when = row.get("created_at")
+    return PublicPage(
+        slug=s,
+        kind=str(row["kind"]),
+        brand=s.rsplit("-", 1)[0] if row["kind"] == "paid" else s,
+        url=str(row["url"]),
+        status=str(row["status"]),
+        score=row.get("score"),
+        scores=row.get("scores") or {},
+        has_pdf=has_pdf,
+        has_report=has_report,
+        when=when.isoformat() if isinstance(when, datetime) else (str(when) if when else None),
+        fiverr_url=settings.fiverr_upsell_url,
+    )
+
+
+@router.get("/pages/{slug}/report.html")
+async def view_public_page_report(
+    slug: str, store: PublicArtifactStoreDep
+) -> FileResponse:
+    """The full consulting report behind a readable slug.
+
+    Resolves to the SAME document the staff and portal viewers serve
+    (``resolve_report_html`` prefers the built consulting report over the engine's
+    condensed one), so a free page and a paid page show the same thing.
+    """
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    s = _validated_slug(slug)
+    row = await asyncio.to_thread(_resolve_page, s)
+    if row is None:
+        raise _PAGE_NOT_FOUND
+    path = store.resolve_report_html(str(row["id"]))
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="text/html", headers=REPORT_HTML_VIEW_HEADERS)
+
+
+@router.get("/pages/{slug}/report.pdf")
+async def download_public_page_pdf(
+    slug: str, store: PublicArtifactStoreDep
+) -> FileResponse:
+    """The report PDF behind a readable slug."""
+    if store is None:
+        raise _ARTIFACT_NOT_FOUND
+    s = _validated_slug(slug)
+    row = await asyncio.to_thread(_resolve_page, s)
+    if row is None:
+        raise _PAGE_NOT_FOUND
+    key = row.get("pdf_path")
+    path = store.resolve(str(key)) if key else None
+    if path is None:
+        raise _ARTIFACT_NOT_FOUND
+    return FileResponse(path, media_type="application/pdf", filename=f"{s}-audit-report.pdf")

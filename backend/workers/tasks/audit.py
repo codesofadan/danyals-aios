@@ -27,7 +27,13 @@ from psycopg.types.json import Jsonb
 from app.config import Settings, get_settings
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
-from app.services import audit_ingest, audit_report, audit_workbook, pricing
+from app.services import (
+    audit_ingest,
+    audit_public_pages,
+    audit_report,
+    audit_workbook,
+    pricing,
+)
 from app.services.audit_artifacts import ArtifactStore, LocalArtifactStore, local_store_from_settings
 from app.services.audit_sheets import SheetMeta, store_audit_sheets
 from app.services.cost_gate import CostGate, GateContext, GateDecision
@@ -249,6 +255,52 @@ def _store_sheets(
         store_audit_sheets(artifacts, audit_id, result.findings_path, meta)
     except Exception:
         logger.warning("audit_sheet_build_failed", audit_id=audit_id)
+
+
+def _build_free_report(
+    artifacts: ArtifactStore | None,
+    public_audit_id: str,
+    result: AuditRunResult,
+    row: dict[str, Any],
+) -> None:
+    """Render the consulting report for a PUBLIC (free) audit; never fatal.
+
+    The paid path gets this document from ``_ingest_altitudes``, which loads the
+    artifacts into ``audit_pages`` / ``audit_findings`` / ``audit_rollups`` /
+    ``audit_roadmaps`` and then calls ``audit_report.build`` off those tables. A
+    public audit CANNOT take that route: every one of those tables is
+    ``audit_id references public.audits(id)`` and a public audit has no ``audits``
+    row. So the free report was simply never built, and the public page showed
+    headings with nothing under them while the paid one showed full tables - which
+    read as "the free audit found nothing" when the free ``findings.json`` in fact
+    carries the same ~176 findings a paid run does.
+
+    ``audit_report.build_from_artifacts`` renders the SAME document from those
+    artifacts in memory: no DB read, no DB write, no tenant table touched from a
+    path an anonymous visitor can reach.
+
+    Swallowed and logged for the same reason ``_store_sheets`` is: a report that
+    failed to render must not turn a completed audit into a failed one.
+    """
+    if not isinstance(artifacts, LocalArtifactStore):
+        return
+    if not result.artifact_dir:
+        return
+    try:
+        audit_report.build_from_artifacts(
+            artifact_dir=result.artifact_dir,
+            out_dir=artifacts.sheets_dir(public_audit_id),
+            site_url=str(row.get("url") or ""),
+            meta={
+                "site": str(row.get("url") or ""),
+                "tier": "Free",
+                "score": result.score,
+                "generated_at": _utcnow().isoformat(),
+            },
+        )
+        logger.info("free_report_built", public_audit_id=public_audit_id)
+    except Exception:
+        logger.warning("free_report_build_failed", public_audit_id=public_audit_id)
 
 
 def _ingest_altitudes(
@@ -505,6 +557,13 @@ def execute_audit(
     )
     # Role-based remediation sheets (xlsx + csvs) from the SAME findings.json.
     _store_sheets(artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free")
+    # Readable public URL (/leads/<brand>-<suffix>). A PAID page is minted but NOT
+    # published: it is client deliverable work, so it becomes reachable only when a
+    # staff member publishes it, and it carries a random suffix so that even then it
+    # is not guessable from the client's name. See db/migrations/0126's header.
+    audit_public_pages.ensure_page(
+        kind="paid", audit_id=audit_id, url=str(row.get("url") or "")
+    )
     ingest_note = _ingest_altitudes(
         artifacts, audit_id, result, row, tier_label="Paid" if tier == "paid" else "Free"
     )
@@ -791,6 +850,12 @@ def execute_public_audit(
     )
     # Role-based remediation sheets from the SAME findings.json (public = Free).
     _store_sheets(artifacts, str(public_audit_id), result, row, tier_label="Free")
+    _build_free_report(artifacts, str(public_audit_id), result, row)
+    # Readable public URL (/leads/<brand>). Free pages publish on completion - the
+    # lead magnet is meant to be shared. Never fatal; see audit_public_pages.
+    audit_public_pages.ensure_page(
+        kind="free", public_audit_id=str(public_audit_id), url=str(row.get("url") or "")
+    )
     return {"public_audit_id": public_audit_id, "status": "done", "score": result.score}
 
 

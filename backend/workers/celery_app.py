@@ -13,11 +13,16 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_init, worker_process_init
 
-from app.config import get_settings, validate_settings
+from app.config import apply_provider_env, get_settings, validate_settings
 from app.jobs.celery_task import route_task
 from app.jobs.status import BROKER_VISIBILITY_TIMEOUT
 
 settings = get_settings()
+# Same reason as app/main.py: the Anthropic SDK resolves its host from os.environ, and
+# the audit-engine subprocess inherits this process's environment. Worker tasks are the
+# heaviest LLM callers (content pipeline, SME questions, audit narrative), so the export
+# has to happen here too - the API's copy does not reach this process.
+apply_provider_env(settings)
 
 
 @worker_process_init.connect  # type: ignore[untyped-decorator]  # celery's signal decorator is untyped
@@ -81,17 +86,25 @@ def _init_worker_db_pools_any_pool(**_kwargs: object) -> None:
 
     from app.db import database
 
+    # The COMMAND LINE is authoritative and is read FIRST. At worker_init time celery
+    # has NOT yet applied `-P/--pool` to conf, so conf.get("worker_pool") still reports
+    # its default ("prefork") even for `--pool=threads`. Trusting conf here made this
+    # handler return early on Windows -- where prefork does not work and threads is the
+    # only option -- so neither hook ever built the pools and EVERY task failed with
+    # DatabaseNotConfiguredError. Prod is unaffected either way: it passes no --pool, so
+    # argv yields nothing, conf's "prefork" wins, and worker_process_init builds the
+    # pools post-fork as before.
     pool = ""
-    try:
-        pool = str(celery_app.conf.get("worker_pool") or "")
-    except Exception:  # conf may not be fully resolved this early
-        pool = ""
-    if not pool:  # fall back to the command line that started this worker
-        for i, arg in enumerate(sys.argv):
-            if arg in ("-P", "--pool") and i + 1 < len(sys.argv):
-                pool = sys.argv[i + 1]
-            elif arg.startswith("--pool="):
-                pool = arg.split("=", 1)[1]
+    for i, arg in enumerate(sys.argv):
+        if arg in ("-P", "--pool") and i + 1 < len(sys.argv):
+            pool = sys.argv[i + 1]
+        elif arg.startswith("--pool="):
+            pool = arg.split("=", 1)[1]
+    if not pool:  # no CLI override -- fall back to whatever conf reports
+        try:
+            pool = str(celery_app.conf.get("worker_pool") or "")
+        except Exception:  # conf may not be fully resolved this early
+            pool = ""
     if "prefork" in pool or "processes" in pool:
         return  # post-fork initialisation is worker_process_init's job
 

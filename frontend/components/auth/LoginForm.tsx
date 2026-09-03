@@ -15,7 +15,11 @@ export default function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [expired, setExpired] = useState(false);
   // Show the actual password by default (visible), with a toggle to mask it.
-  const [showPw, setShowPw] = useState(true);
+  // Masked by DEFAULT. This was `true`, which rendered the field as type="text" on
+  // first paint: the password was shown in plaintext, browsers did not treat it as a
+  // password field, and the eye button started in "hide" state. The toggle itself was
+  // always correct — only the initial value was inverted.
+  const [showPw, setShowPw] = useState(false);
 
   // Bounced here by a 401 (expired/absent token)? Read the flag client-side
   // (avoids useSearchParams' Suspense requirement on this route).

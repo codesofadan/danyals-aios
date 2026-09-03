@@ -65,6 +65,10 @@ export default function StepPages({
         site: state.siteDomain,
         contentType: pageKind(state.kind).research,
         count: Number.isFinite(n) && n > 0 ? n : undefined,
+        // Attribute the paid run to this client so the server can save it into
+        // their keyword bank. Omit it and the result is a one-shot answer that
+        // dies with this screen - which is what used to happen.
+        clientId: state.clientId || undefined,
       },
       {
         onSuccess: (r) => {

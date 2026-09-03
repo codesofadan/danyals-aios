@@ -151,6 +151,9 @@ export type ContentResearchInput = {
   site: string;
   contentType: ResearchContentType;
   count?: number;
+  /** Which client the research is FOR. Without it the server cannot attribute the
+   *  paid result to anyone, so it is not saved to that client's keyword bank. */
+  clientId?: string;
 };
 export type ContentResearchResult = {
   status: "ok" | "degraded";
@@ -159,9 +162,18 @@ export type ContentResearchResult = {
 };
 
 export function useContentResearch() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: ContentResearchInput) =>
       api.post<ContentResearchResult>("/content/research", input),
+    // The server now SAVES a researched page set into the client's keyword bank, so
+    // the bank the very next tab reads is stale the moment this resolves. Without
+    // this the operator runs research, switches to "Keyword bank", and is told
+    // "Nothing researched for this client yet" about the run that just finished.
+    onSuccess: (_res, input) => {
+      qc.invalidateQueries({ queryKey: ["keyword-bank", input.clientId ?? "all"] });
+      qc.invalidateQueries({ queryKey: ["keyword-clusters", input.clientId ?? "all"] });
+    },
   });
 }
 

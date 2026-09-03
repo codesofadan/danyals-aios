@@ -374,6 +374,15 @@ def run_audit(
             cwd=cfg.engine_dir,
             capture_output=True,
             text=True,
+            # DECODE AS UTF-8 EXPLICITLY. The child is already told to WRITE utf-8
+            # (PYTHONIOENCODING above), but `text=True` alone decodes with the parent's
+            # locale codec -- cp1252 on Windows. `rich` prints box-drawing glyphs, whose
+            # bytes are undefined in cp1252, so the read raised UnicodeDecodeError, the
+            # "Run UUID:" line was never parsed, and EVERY audit (free and paid) failed
+            # with "could not parse run UUID from engine output". errors="replace" means
+            # an odd byte can never again turn a finished audit into a failed one.
+            encoding="utf-8",
+            errors="replace",
             timeout=cfg.timeout_seconds,
             env=child_env,
             check=False,

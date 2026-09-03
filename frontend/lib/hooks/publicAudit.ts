@@ -98,3 +98,56 @@ export function usePublicReport(token: string | null) {
     refetchInterval: (query) => (isPending(query.state.data as PublicReport | undefined) ? 2500 : false),
   });
 }
+
+// --------------------------------------------------------------------------
+// Readable public pages: /leads/<slug>
+// --------------------------------------------------------------------------
+// The token helpers above are unchanged and every existing link still works.
+// These address the SAME curated report by its readable slug, and they are the
+// only public surface a paid audit has. FILE_BASE for the same reason as above:
+// the report streams straight from the API origin rather than through the Next
+// rewrite proxy.
+
+/** The curated payload behind a readable slug (free or paid, published only). */
+export type PublicPage = {
+  slug: string;
+  kind: "free" | "paid";
+  brand: string;
+  url: string;
+  status: string;
+  score: number | null;
+  scores: Record<string, unknown>;
+  has_pdf: boolean;
+  has_report: boolean;
+  when: string | null;
+  fiverr_url: string;
+};
+
+export const publicPageKey = (slug: string) => ["public-page", slug] as const;
+
+/** Direct URL for the report HTML behind a slug. */
+export function publicPageReportHtmlUrl(slug: string): string {
+  return `${FILE_BASE}/public/pages/${encodeURIComponent(slug)}/report.html`;
+}
+
+/** Direct-download URL for the report PDF behind a slug (only when `has_pdf`). */
+export function publicPageReportPdfUrl(slug: string): string {
+  return `${FILE_BASE}/public/pages/${encodeURIComponent(slug)}/report.pdf`;
+}
+
+/** Fetch the full consulting report HTML for a slug. Throws on 404 so the page
+ *  can show a real "not found" rather than an empty viewer. */
+export async function fetchPublicPageReportHtml(slug: string): Promise<string> {
+  const res = await fetch(publicPageReportHtmlUrl(slug));
+  if (!res.ok) throw new Error(`report unavailable (${res.status})`);
+  return res.text();
+}
+
+/** Read the curated page payload. Not polled: a published page is already done. */
+export function usePublicPage(slug: string) {
+  return useQuery({
+    queryKey: publicPageKey(slug),
+    queryFn: () => api.get<PublicPage>(`/public/pages/${encodeURIComponent(slug)}`),
+    retry: false,
+  });
+}

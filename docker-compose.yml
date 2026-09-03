@@ -74,8 +74,19 @@ x-app-env: &app-env
   SEED_OWNER_NAME: ${SEED_OWNER_NAME:-Agency Owner}
   # ---- provider keys (each module is key-gated: absent → degrades to a fake) ----
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  # Anthropic-compatible GATEWAY host (Agent Router, LiteLLM, a self-hosted proxy).
+  # Blank = talk to api.anthropic.com directly. app.config.apply_provider_env exports
+  # this to os.environ at API + worker startup, which is what re-points the vendor SDK
+  # in all five places it is constructed -- including the audit-engine subprocess,
+  # which inherits this process's environment.
+  # NOTE the host carries NO /v1: the SDK appends its own path.
+  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+  # Model ids are GATEWAY-SPECIFIC. A router publishes its own catalog and rejects an
+  # id it does not carry, so these move together with ANTHROPIC_BASE_URL.
   ANTHROPIC_MODEL_SUMMARY: ${ANTHROPIC_MODEL_SUMMARY:-claude-haiku-4-5}
   ANTHROPIC_MODEL_HEAVY: ${ANTHROPIC_MODEL_HEAVY:-claude-sonnet-5}
+  # Engine narrative model; falls back to AUDIT_AGENT_MODEL, then the engine default.
+  AUDIT_NARRATIVE_MODEL: ${AUDIT_NARRATIVE_MODEL:-}
   SERPER_API_KEY: ${SERPER_API_KEY:-}
   RESEND_API_KEY: ${RESEND_API_KEY:-}
   RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-AIOS <noreply@mail.qanry.com>}

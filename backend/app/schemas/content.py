@@ -473,6 +473,11 @@ class ContentResearchRequest(BaseModel):
     content_type: ContentType = Field(alias="contentType")
     # Optional cap; ``None`` -> the ``content_research_count`` setting default.
     count: int | None = Field(default=None, ge=1, le=50)
+    # Which client the research is FOR. Optional so the existing callers keep
+    # working, but without it the paid result cannot be attributed to anyone and
+    # is therefore not saved to that client's keyword bank - it stays a one-shot,
+    # in-memory answer that dies with the wizard screen.
+    client_id: str | None = Field(default=None, alias="clientId")
 
 
 class ContentResearchResponse(BaseModel):

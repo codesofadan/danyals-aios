@@ -7,6 +7,7 @@ is used app-wide. Secrets are ``SecretStr`` so they can never appear in a log or
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -193,6 +194,13 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_model_summary: str = "claude-haiku-4-5"  # cheap default fold
     anthropic_model_heavy: str = "claude-sonnet-5"  # heavier model for large folds
+    # Anthropic-compatible GATEWAY host (Agent Router, LiteLLM, a self-hosted proxy).
+    # Blank = talk to Anthropic directly, which is the historical behaviour. Set it and
+    # every Anthropic call in the platform is re-pointed, including the audit engine
+    # subprocess (see apply_provider_env + integrations/audit_engine.py child_env).
+    # Model IDs are gateway-specific: a router exposes its OWN catalog, so switching
+    # host usually means switching anthropic_model_summary/heavy + AUDIT_AGENT_MODEL too.
+    anthropic_base_url: str = ""
     # Embedder (Anthropic has no embeddings API, so it is a SEPARATE provider).
     # embeddings_provider selects the impl: "voyage" (default, voyage-3 -> 1024) or
     # "openai" (text-embedding-3-small -> 1536; for a client with an OpenAI key but
@@ -1090,3 +1098,31 @@ def validate_settings(settings: Settings) -> None:
         "Missing config (dev, non-fatal): %s. Dependent features will report 'not configured'.",
         ", ".join(missing),
     )
+
+
+def apply_provider_env(settings: Settings) -> None:
+    """Export gateway/provider settings the vendor SDKs read from ``os.environ``.
+
+    WHY THIS EXISTS. ``pydantic-settings`` reads ``backend/.env`` into this Settings
+    object; it does NOT put those values into the process environment. The Anthropic
+    SDK resolves its host from ``ANTHROPIC_BASE_URL`` in ``os.environ`` when no
+    ``base_url`` is passed, and the SDK client is constructed in five places across
+    two repos (three in backend/, two inside the audit engine) - none of which takes a
+    host argument. Exporting once at startup re-points ALL of them, including any
+    future construction site, instead of threading a kwarg through nine builder call
+    sites and hoping none is missed.
+
+    It also fixes the audit-engine subprocess: ``integrations/audit_engine.py`` builds
+    its child env from ``os.environ``, and the engine's ``load_dotenv`` is called
+    WITHOUT ``override=True`` - so a value present here wins over the engine's own
+    committed ``.env``. Without this export the engine would keep using whatever key
+    is sitting in ``danyals-audit-system/.env``.
+
+    Idempotent, and a blank setting is a no-op: absent configuration must never
+    silently rewrite a host the operator did not ask to change.
+    """
+    if settings.anthropic_base_url:
+        os.environ["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
+    if settings.anthropic_api_key:
+        # The gateway key must reach the engine subprocess too; see the docstring.
+        os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key.get_secret_value()

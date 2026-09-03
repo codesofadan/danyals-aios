@@ -18,7 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
-from app.config import get_settings, validate_settings
+from app.config import apply_provider_env, get_settings, validate_settings
 from app.core.errors import install_error_handlers
 from app.core.metrics import MetricsMiddleware, metrics_response
 from app.core.middleware import RequestIDMiddleware
@@ -72,6 +72,9 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
     validate_settings(settings)
+    # Export the Anthropic host/key so the vendor SDK picks them up wherever it is
+    # constructed (it reads os.environ; pydantic-settings does not populate it).
+    apply_provider_env(settings)
     init_sentry(settings)
 
     get_logger("app.main").info(

@@ -36,6 +36,15 @@ the backend.
 
 **A) Full local (UI + backend on your machine, Claude Code drives it)**
 1. Make sure local **PostgreSQL** (`:5432`) and **Redis** (`:6379`) are running (see `backend/.env`).
+   Redis is **not** a Windows service here - it is a portable build vendored at
+   `tools/redis/` (gitignored). Start it with:
+   ```
+   tools/redis/redis-server.exe tools/redis/redis-local.conf
+   ```
+   That conf binds **`127.0.0.1` AND `::1`** on purpose. Bind IPv4 only and the app's
+   *async* Redis client resolves `localhost` -> `::1` first and times out under the
+   Windows Proactor loop, so `/health/ready` reports `redis: connection failed` while
+   `redis-cli ping` happily answers PONG. Celery uses the same `localhost` URLs.
 2. Double-click **Start-Backend.bat** (leave it running).
 3. Double-click **Start-Worker.bat** (leave it running too — see above).
 4. Double-click **Start-Dashboard.bat** — it opens `http://localhost:3000`, sending its API requests to your local backend.
@@ -47,4 +56,23 @@ the backend.
 ## Finishing citations locally
 Double-click **Finish-Citations.bat**, type a directory name (or `ALL`). A real browser opens, logged in and pre-filled — do the one human step (category / captcha), click **Publish**, then close the window to move to the next.
 
-Prereqs are already installed: `frontend/node_modules` and the `backend/.venv` Python environment.
+## Rebuilding the local database
+
+The local DB drifts behind `db/migrations` (there is no ledger until you build one).
+`scripts/local-db-rebuild.sh` is the native-Windows equivalent of the Docker stack's
+`migrate` service: safety dump -> drop/recreate -> apply every migration in order
+through `deploy.schema_migrations` -> set the authenticated/service_role passwords
+from the DSNs -> RLS coverage gate -> seed the owner.
+
+```
+PGPASSWORD="$LOCAL_PG_SUPERUSER_PASSWORD" scripts/local-db-rebuild.sh
+```
+
+It needs the **`postgres` superuser** (kept as `LOCAL_PG_SUPERUSER_PASSWORD` in
+`backend/.env`), not `service_role`: migration 0000 has an ownership invariant
+requiring a BYPASSRLS superuser owner, or the SECURITY DEFINER helpers recurse
+through `users_select`. Stop the API/worker/beat first so nothing holds a connection.
+
+Prereqs are already installed: `frontend/node_modules`, the `backend/.venv` Python
+environment, and `danyals-audit-system/.venv` (the audit engine's own isolated venv,
+mirroring `/opt/audit-venv` in the prod image).

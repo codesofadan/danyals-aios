@@ -1354,6 +1354,93 @@ def _recommend_degraded(site: str, content_type: str, reason: str) -> ContentRes
     )
 
 
+
+# --------------------------------------------------------------------------- #
+# Persisting the paid result
+# --------------------------------------------------------------------------- #
+#: Numeric difficulty per recommender bucket. These are midpoints of the bands the
+#: bank READER uses (StepPages.itemFromKeyword: <=30 easy, <=60 medium, else hard),
+#: so a saved row read back out of the bank lands in the bucket it was saved as.
+_DIFFICULTY_NUM: dict[str, float] = {"easy": 25.0, "medium": 50.0, "hard": 75.0}
+
+
+def _save_to_keyword_bank(
+    items: list[ContentRecommendation], *, client_id: str | None, client_name: str
+) -> None:
+    """Write a research run into the client's keyword bank. Never fatal.
+
+    WHY. This call is the most expensive thing the content wizard does - an Anthropic
+    web-search run the operator paid for - and its output used to exist ONLY in the
+    wizard's React state. Screen 2's "Keyword bank" tab, which reads
+    ``public.keywords`` for this client, therefore kept saying "Nothing researched for
+    this client yet" immediately after a successful run, and navigating away discarded
+    the result permanently. The reader was built; nothing ever wrote.
+
+    The write is deliberately on the PRIVILEGED store rather than the RLS-scoped repo.
+    ``POST /content/research`` is gated by ``publish_content``, which a specialist
+    holds, while every keyword-bank mutation requires ``run_research``
+    (owner/admin/manager) and the matching RLS policy. Going through the RLS path
+    would mean a specialist could spend the money but not keep the result - the exact
+    asymmetry that loses it. ``upsert_keyword`` is the sanctioned service writer and
+    is idempotent on ``(client_id, keyword, geo)`` (0035's NULLS NOT DISTINCT unique
+    index), so re-running research refreshes rows instead of duplicating them.
+
+    ``source='content'`` distinguishes these from the keyword module's own runs. The
+    enum value has existed since 0035 and this is its first writer.
+
+    Best-effort by construction: the page set is the product, and a bank write that
+    fails must not turn a paid, successful research into an error.
+    """
+    if not client_id or not items:
+        return
+    try:
+        from app.modules.keyword_research.repo import ServiceKeywordStore
+        from app.modules.keyword_research.service import opportunity_score
+
+        store = ServiceKeywordStore()
+        saved = 0
+        for it in items:
+            term = (it.primary_keyword or it.title or "").strip()
+            if not term:
+                continue
+            difficulty = _DIFFICULTY_NUM.get(str(it.difficulty).lower(), 50.0)
+            volume = max(0, int(it.est_volume or 0))
+            # Relevance is 1.0: the recommender was asked for pages for THIS site, so
+            # every term it returned is on-topic by construction. Scoring it honestly
+            # also keeps these rows out of the bottom of the bank - the list orders by
+            # `opportunity desc`, and a default 0 would bury them under every row the
+            # keyword worker ever wrote.
+            saved += bool(
+                store.upsert_keyword(
+                    client_id=client_id,
+                    client_name=client_name,
+                    keyword=term,
+                    geo=(it.city or None),
+                    volume=volume,
+                    difficulty=difficulty,
+                    cpc=0.0,
+                    competition=0.0,
+                    intent=None,
+                    intent_source=None,
+                    intent_confidence=0.0,
+                    cluster_id=None,
+                    opportunity=opportunity_score(volume, difficulty, 1.0),
+                    winnable=None,
+                    source="content",
+                    # `metrics_confidence` is an ENUM of exactly (high, low). These
+                    # volumes are the recommender's ESTIMATES, not provider metrics,
+                    # so `low` is the honest value - and the only valid one that says
+                    # so. Anything else is rejected by the column outright.
+                    metrics_confidence="low",
+                    provider="content_research",
+                    fetched_at=datetime.now(UTC),
+                )
+            )
+        logger.info("content_research_banked", saved=saved, total=len(items))
+    except Exception:
+        logger.warning("content_research_bank_failed", exc_info=True)
+
+
 def run_content_research(
     *,
     researcher: Researcher | None,
@@ -1362,6 +1449,8 @@ def run_content_research(
     site: str,
     content_type: str,
     count: int | None = None,
+    client_id: str | None = None,
+    client_name: str = "",
 ) -> ContentResearchResult:
     """Research ONE site + content type and RECOMMEND a page set. Pure; degrades.
 
@@ -1436,6 +1525,7 @@ def run_content_research(
         logger.warning("content_research_commit_failed")
 
     items = parse_recommendations(research.text, content_type=ctype, count=n)
+    _save_to_keyword_bank(items, client_id=client_id, client_name=client_name)
     return ContentResearchResult(
         site=clean_site, content_type=ctype, status="ok", items=items, reason=""
     )
