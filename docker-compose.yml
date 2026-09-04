@@ -140,7 +140,7 @@ x-backend-build: &backend-build
   build:
     context: .
     dockerfile: backend/Dockerfile
-  image: aios-backend:20260829-fix-build-v2
+  image: aios-backend:20260904-experience-images
 
 services:
   # ------------------------------------------------------------------ Postgres
