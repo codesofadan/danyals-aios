@@ -132,7 +132,8 @@ def _published_slug_for(public_audit_id: str) -> str:
     would take the whole lead detail down with it.
     """
     try:
-        with privileged_connection() as conn, conn.cursor() as cur:
+        # privileged_connection yields a CURSOR, not a connection.
+        with privileged_connection() as cur:
             cur.execute(
                 # ::uuid is REQUIRED. psycopg sends a Python str as text and
                 # Postgres has no `uuid = text` operator, so without the cast every

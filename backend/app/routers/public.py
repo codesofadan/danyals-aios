@@ -453,7 +453,8 @@ def _published_slug_for(public_audit_id: str) -> str:
     funnel that 500s, so a missing table or a failed lookup degrades to no link.
     """
     try:
-        with privileged_connection() as conn, conn.cursor() as cur:
+        # privileged_connection yields a CURSOR, not a connection.
+        with privileged_connection() as cur:
             cur.execute(
                 # ::uuid is REQUIRED. psycopg sends a Python str as text and
                 # Postgres has no `uuid = text` operator, so without the cast every
