@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import ReportViewer from "@/components/report/ReportViewer";
 import { cleanDomain, scoreBand, VERDICT } from "@/lib/freeAudit";
 import {
@@ -61,9 +63,12 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
           <span className="material-symbols-rounded" aria-hidden>link_off</span>
           <h1>This report isn’t available</h1>
           <p>The link may have expired, or the report may not have been shared yet.</p>
-          <a className="primary-btn fa-cta" href="/" style={{ marginTop: 18, display: "inline-block" }}>
+          {/* `next/link`, not a bare <a>: @next/next/no-html-link-for-pages is an
+              ERROR in `next build`, so an anchor to an in-app route fails the
+              production build outright - it does not merely warn. */}
+          <Link className="primary-btn fa-cta" href="/" style={{ marginTop: 18, display: "inline-block" }}>
             Run a free audit
-          </a>
+          </Link>
         </div>
       </Shell>
     );
