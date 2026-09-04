@@ -134,13 +134,21 @@ def _published_slug_for(public_audit_id: str) -> str:
     try:
         with privileged_connection() as conn, conn.cursor() as cur:
             cur.execute(
+                # ::uuid is REQUIRED. psycopg sends a Python str as text and
+                # Postgres has no `uuid = text` operator, so without the cast every
+                # call raised and the handler below returned "" -- the share link
+                # silently never appeared, which is exactly how this shipped once.
                 "select slug from public.public_audit_pages"
-                " where public_audit_id = %s and published"
+                " where public_audit_id = %s::uuid and published"
                 " order by created_at desc limit 1",
                 (public_audit_id,),
             )
             got = cur.fetchone()
-    except Exception:
+    except Exception as exc:
+        # LOGGED, not swallowed. A silent "" is indistinguishable from "this audit
+        # has no page", which is what let a uuid/text operator error hide as a
+        # missing feature rather than surfacing as the bug it was.
+        logger.warning("public_slug_lookup_failed", extra={"error": str(exc)[:200]})
         return ""
     if not got:
         return ""
