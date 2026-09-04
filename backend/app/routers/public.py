@@ -160,6 +160,14 @@ class PublicReport(BaseModel):
     url: str
     when: str | None
     fiverr_url: str
+    # The readable /leads/<brand> page for THIS audit, when one is published.
+    #
+    # The page has always been created on completion (`audit_public_pages.ensure_page`,
+    # free pages publish by default) and was reachable only if you already knew the
+    # slug -- which the person who ran the audit never saw. So the shareable artifact
+    # existed and its owner could not find it. Empty string when no published page
+    # exists yet (the audit is still running, or publishing was skipped).
+    public_slug: str = Field(default="", serialization_alias="publicSlug")
 
 
 # --------------------------------------------------------------------------- #
@@ -422,6 +430,7 @@ async def get_public_report(report_token: str, gateway: PublicGatewayDep, settin
     when_iso = when.isoformat() if isinstance(when, datetime) else (str(when) if when else None)
     store = local_store_from_settings(settings)
     has_pdf, has_report = await asyncio.to_thread(_public_report_flags, store, row)
+    slug = await asyncio.to_thread(_published_slug_for, str(row["id"]))
     return PublicReport(
         status=str(row["status"]),
         score=row.get("score"),
@@ -431,7 +440,32 @@ async def get_public_report(report_token: str, gateway: PublicGatewayDep, settin
         url=str(row["url"]),
         when=when_iso,
         fiverr_url=settings.fiverr_upsell_url,
+        public_slug=slug,
     )
+
+
+def _published_slug_for(public_audit_id: str) -> str:
+    """The published slug naming this audit, or "" when there is not one.
+
+    Scoped to a single audit id and to `published` rows, like every other read on
+    this router: the public surface must never be able to enumerate slugs. Never
+    raises -- a funnel that cannot show a share link is a smaller failure than a
+    funnel that 500s, so a missing table or a failed lookup degrades to no link.
+    """
+    try:
+        with privileged_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select slug from public.public_audit_pages"
+                " where public_audit_id = %s and published"
+                " order by created_at desc limit 1",
+                (public_audit_id,),
+            )
+            got = cur.fetchone()
+    except Exception:
+        return ""
+    if not got:
+        return ""
+    return str(got[0] if not isinstance(got, dict) else got.get("slug", ""))
 
 
 def _public_report_flags(
@@ -614,6 +648,26 @@ def _validated_slug(slug: str) -> str:
     return s
 
 
+def _brand_from_url(url: str) -> str:
+    """The readable brand for a page, derived from the AUDITED URL.
+
+    Mirrors the SQL `audit_brand_slug` that produced the slug base: drop the scheme,
+    drop `www.`, keep the host, drop the public suffix, scrub to [a-z0-9-].
+
+    Derived from the URL and NOT from the slug, because the slug carries whatever
+    machinery was needed to make it unique: a paid slug has a random hex suffix, and
+    a free slug gains a counter on collision, so the third audit of one brand becomes
+    `acme-3`. Rendering the slug announced that page as "amsofastudio-3". Stripping a
+    trailing number instead would be a guess that mangles a brand genuinely ending in
+    one ("studio-54" -> "studio"); the URL has the answer and needs no guess.
+    """
+    host = re.sub(r"^[a-zA-Z]+://", "", url or "")
+    host = re.sub(r"^www\.", "", host).split("/")[0].lower()
+    host = re.sub(r"\.[a-z.]+$", "", host)          # public suffix
+    host = re.sub(r"[^a-z0-9-]+", "-", host)
+    return re.sub(r"-{2,}", "-", host).strip("-")
+
+
 @router.get("/pages/{slug}", response_model=PublicPage)
 async def get_public_page(
     slug: str, settings: SettingsDep, store: PublicArtifactStoreDep
@@ -630,7 +684,7 @@ async def get_public_page(
     return PublicPage(
         slug=s,
         kind=str(row["kind"]),
-        brand=s.rsplit("-", 1)[0] if row["kind"] == "paid" else s,
+        brand=_brand_from_url(str(row["url"])) or s,
         url=str(row["url"]),
         status=str(row["status"]),
         score=row.get("score"),

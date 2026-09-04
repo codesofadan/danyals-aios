@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import anime from "animejs";
 import { cleanDomain, scoreBand, toCategoryBars, VERDICT } from "@/lib/freeAudit";
 import { publicReportPdfUrl, type PublicReport } from "@/lib/hooks/publicAudit";
@@ -105,6 +105,27 @@ export default function FreeAuditReport({ report, token }: { report: PublicRepor
     };
   }, [report]);
 
+  // The absolute link, built in the browser so it carries whatever host the visitor
+  // actually reached us on. Rendered empty on the server pass and filled on mount,
+  // which is why it is state and not a derived constant.
+  const [origin, setOrigin] = useState("");
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setOrigin(window.location.origin), []);
+  const shareUrl = report.publicSlug ? `${origin}/leads/${report.publicSlug}` : "";
+
+  const copyShare = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard is permission-gated and blocked outright in some embeds. The
+      // link beside the button is a real anchor, so failing silently here still
+      // leaves the visitor a working way to take the URL.
+    }
+  };
+
   return (
     <div className="fa-report" ref={bodyRef}>
       {/* Score header */}
@@ -142,6 +163,40 @@ export default function FreeAuditReport({ report, token }: { report: PublicRepor
           )}
         </div>
       </section>
+
+      {/* THE SHAREABLE LINK.
+          A free audit is a lead magnet, which only works if the person holding it
+          can pass it on. The /leads/<brand> page has been published on completion
+          all along and was reachable only by knowing the slug -- so the artifact
+          existed and its own owner could not find it. This is that link, with a
+          one-press copy, because "select the URL bar and copy" is where sharing
+          quietly stops. */}
+      {report.publicSlug && (
+        <section className="fa-share fa-layer fa-reveal">
+          <div className="fa-share-head">
+            <span className="material-symbols-rounded">link</span>
+            <div>
+              <b>Your report has its own page</b>
+              <div className="fa-share-sub">
+                Anyone with this link can read it — no account, no sign-in.
+              </div>
+            </div>
+          </div>
+          <div className="fa-share-row">
+            <a className="fa-share-url" href={`/leads/${report.publicSlug}`} target="_blank" rel="noopener noreferrer">
+              {shareUrl}
+            </a>
+            <button type="button" className="fa-share-copy" onClick={copyShare}>
+              <span className="material-symbols-rounded">{copied ? "check" : "content_copy"}</span>
+              {copied ? "Copied" : "Copy link"}
+            </button>
+            <a className="fa-share-open" href={`/leads/${report.publicSlug}`} target="_blank" rel="noopener noreferrer">
+              Open
+              <span className="material-symbols-rounded">open_in_new</span>
+            </a>
+          </div>
+        </section>
+      )}
 
       {bars.length > 0 && (
         <>

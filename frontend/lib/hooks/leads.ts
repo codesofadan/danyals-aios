@@ -27,6 +27,10 @@ export type PublicAuditLead = {
   error: string | null;
   created_at: string;
   updated_at: string | null;
+  /** The readable /leads/<brand> page this audit published, or "" when none exists.
+   *  Every completed free audit gets one; nothing used to show it, so an operator
+   *  could download the PDF but had no way to reach or send the client-facing page. */
+  publicSlug: string;
 };
 
 export const LEADS_KEY = ["leads"] as const;

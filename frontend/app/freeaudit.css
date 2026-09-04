@@ -429,3 +429,63 @@
   .fa-viz { aspect-ratio: 4 / 5; max-height: 66vh; }
   .fa-viz-caption { max-width: none; }
 }
+
+/* ---- The shareable public-page link -----------------------------------------
+   A lead magnet only works if the person holding it can pass it on. The page
+   behind /leads/<brand> has always been published on completion; this is the
+   first thing that shows it to the person who ran the audit. */
+.fa-share {
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px;
+  border: 1px solid var(--fa-line, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  background: var(--fa-card, rgba(255, 255, 255, 0.04));
+}
+.fa-share-head { display: flex; gap: 12px; align-items: flex-start; }
+.fa-share-head .material-symbols-rounded { font-size: 22px; opacity: 0.85; flex: none; }
+.fa-share-head b { font-size: 15.5px; }
+.fa-share-sub { font-size: 13.5px; opacity: 0.72; margin-top: 2px; line-height: 1.5; }
+.fa-share-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.fa-share-url {
+  flex: 1 1 260px;
+  min-width: 0;
+  /* The URL is the long element here, and a slug can be long. Ellipsis rather
+     than wrap keeps the row one line high on a phone. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--fa-line, rgba(255, 255, 255, 0.12));
+  background: rgba(0, 0, 0, 0.16);
+  color: inherit;
+  text-decoration: none;
+}
+.fa-share-url:hover { text-decoration: underline; }
+.fa-share-copy,
+.fa-share-open {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--fa-line, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+}
+.fa-share-copy:hover,
+.fa-share-open:hover { background: rgba(255, 255, 255, 0.06); }
+.fa-share-copy .material-symbols-rounded,
+.fa-share-open .material-symbols-rounded { font-size: 17px; }

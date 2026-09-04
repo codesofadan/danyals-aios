@@ -204,9 +204,16 @@ async def test_report_by_token_is_curated(
     assert resp.status_code == 200
     body = resp.json()
     # Exactly the curated fields - no id, no email, no error, no artifact paths.
+    # `publicSlug` belongs here: it names a page that is PUBLIC by design (free pages
+    # publish on completion), so it discloses nothing the slug does not already
+    # advertise -- and without it the person who ran the audit is never shown the one
+    # artifact meant for them to share.
     assert set(body) == {
-        "status", "score", "scores", "has_pdf", "has_report", "url", "when", "fiverr_url"
+        "status", "score", "scores", "has_pdf", "has_report", "url", "when",
+        "fiverr_url", "publicSlug",
     }
+    # It must be a SLUG, never the capability token that addresses this endpoint.
+    assert body["publicSlug"] != "secret-token"
     assert body["score"] == 77
     assert body["has_pdf"] is True and body["has_report"] is True
     assert body["fiverr_url"].startswith("https://www.fiverr.com/")

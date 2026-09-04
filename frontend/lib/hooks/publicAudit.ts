@@ -37,6 +37,11 @@ export type PublicReport = {
   url: string;
   when: string | null;
   fiverr_url: string;
+  /** The readable /leads/<brand> page for this audit, or "" when none is published.
+   *  The page was always created on completion; nothing ever showed it to the
+   *  person who ran the audit, so the one shareable artifact had no route to its
+   *  own owner. */
+  publicSlug: string;
 };
 
 export type CreatePublicAuditInput = {

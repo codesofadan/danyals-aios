@@ -24,11 +24,15 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUser, require_perm
 from app.core.pagination import PageDep
-from app.db.database import DatabaseNotConfiguredError, rls_connection
+from app.db.database import (
+    DatabaseNotConfiguredError,
+    privileged_connection,
+    rls_connection,
+)
 from app.logging_setup import get_logger
 from app.routers.public import PublicArtifactStoreDep
 from app.services.audit_artifacts import LocalArtifactStore, honest_artifact_flags
@@ -66,6 +70,12 @@ class PublicAuditLead(BaseModel):
     error: str | None
     created_at: str
     updated_at: str | None
+    # The readable /leads/<brand> page this audit published, or "" when none exists.
+    #
+    # Every completed free audit gets one, and until now nothing showed it: an
+    # operator looking at a lead could download the PDF but had no way to reach --
+    # or send -- the page the client is meant to read.
+    public_slug: str = Field(default="", serialization_alias="publicSlug")
 
     @classmethod
     def from_row(
@@ -95,6 +105,7 @@ class PublicAuditLead(BaseModel):
             error=(str(row["error"]) if row.get("error") else None),
             created_at=created,
             updated_at=_iso(row.get("updated_at")),
+            public_slug=_published_slug_for(str(row["id"])),
         )
 
 
@@ -111,6 +122,29 @@ def _fetch_leads(user_id: str, *, limit: int, offset: int) -> list[dict[str, Any
             (limit, offset),
         )
         return cur.fetchall()
+
+
+def _published_slug_for(public_audit_id: str) -> str:
+    """The published slug naming this audit, or "" when there is not one.
+
+    Scoped to one audit id and to published rows. Never raises: a lead row that
+    cannot resolve its share link is worth rendering without one, where a 500
+    would take the whole lead detail down with it.
+    """
+    try:
+        with privileged_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select slug from public.public_audit_pages"
+                " where public_audit_id = %s and published"
+                " order by created_at desc limit 1",
+                (public_audit_id,),
+            )
+            got = cur.fetchone()
+    except Exception:
+        return ""
+    if not got:
+        return ""
+    return str(got[0] if not isinstance(got, dict) else got.get("slug", ""))
 
 
 def _fetch_lead_by_token(user_id: str, report_token: str) -> dict[str, Any] | None:

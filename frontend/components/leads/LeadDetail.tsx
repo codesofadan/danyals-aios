@@ -76,6 +76,21 @@ export default function LeadDetail({ token }: { token: string }) {
                 <span className="material-symbols-rounded">visibility</span>View report
               </button>
             )}
+            {/* The client-facing page. The audit has published one all along and the
+                operator had no route to it -- so the artifact meant for the lead was
+                the one thing this screen could not hand them. */}
+            {lead.publicSlug && (
+              <a
+                className="ghostbtn"
+                href={`/leads/${lead.publicSlug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open the shareable report page (/leads/${lead.publicSlug})`}
+              >
+                <span className="material-symbols-rounded">public</span>Public page
+                <span className="material-symbols-rounded">open_in_new</span>
+              </a>
+            )}
             {lead.has_pdf && (
               <button
                 type="button" className="ghostbtn"

@@ -88,6 +88,14 @@ x-app-env: &app-env
   # Engine narrative model; falls back to AUDIT_AGENT_MODEL, then the engine default.
   AUDIT_NARRATIVE_MODEL: ${AUDIT_NARRATIVE_MODEL:-}
   SERPER_API_KEY: ${SERPER_API_KEY:-}
+  # DataForSEO (Basic auth pair) -- the contracted keyword-metrics and rank
+  # provider. Absent, keyword data degrades to ESTIMATES that are honestly
+  # labelled but far less reliable; the worker says so as
+  # `keyword_data_degraded reason=missing_dataforseo_credentials`. Forwarded
+  # explicitly because a value set only in the stack environment never
+  # reaches the container.
+  DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
+  DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
   RESEND_API_KEY: ${RESEND_API_KEY:-}
   RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-AIOS <noreply@mail.qanry.com>}
   # Email transport selector: "resend" (HTTP), "smtp" (Gmail/any SMTP), or "none".
@@ -144,7 +152,7 @@ x-backend-build: &backend-build
   build:
     context: .
     dockerfile: backend/Dockerfile
-  image: aios-backend:20260904-experience-images
+  image: aios-backend:20260904-share-links
 
 services:
   # ------------------------------------------------------------------ Postgres
