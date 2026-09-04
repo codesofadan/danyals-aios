@@ -276,6 +276,16 @@ T6_ABSOLUTE = re.compile(
 _CONTACT_TOKEN = re.compile(
     r"""(?ix)
     (?: [\w\.\-\+]+@[\w\-]+\.[\w\.\-]+
+      # The 7-DIGIT LOCAL FORM, its own alternative because the general run below
+      # cannot reach it: that run needs a digit, then 7+ separator-or-digit
+      # characters, then a digit - nine at minimum. "555-0142" is eight, so it
+      # never matched, and an invented local number walked straight through the
+      # one check whose entire job is stopping invented contact details. Not
+      # hypothetical: a generated service page shipped `Call [555-0142]` - the
+      # 555-01xx block RESERVED FOR FICTION, which is precisely what a model
+      # reaches for when it has no real number. Anchored 3-then-4 around a single
+      # separator, so a licence ("CPC1459915") still does not match.
+      | \b\d{3}[-.\s]\d{4}\b
       | \+?\d[\d\s\-\(\)]{7,}\d
       | \b(?:https?://)?(?:www\.)?[\w\-]+\.(?:com|net|org|io|ai|co)\b )"""
 )
