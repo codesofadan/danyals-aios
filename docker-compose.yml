@@ -104,6 +104,10 @@ x-app-env: &app-env
   # Content article images (OpenAI-compatible). Model preset; key awaited → placeholder.
   IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
   IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
+  # How many pictures a page gets. The code default is ONE (a hero only);
+  # a full page wants one per section. Passed through explicitly because a
+  # value set only in the stack environment never reaches the container.
+  CONTENT_PIPELINE_MAX_IMAGES: ${CONTENT_PIPELINE_MAX_IMAGES:-1}
   # Off-page citation-builder direct-API submitters (each absent → that submitter is
   # skipped, the directory HOLDS as 'blocked'; never a crash). Apify is the fallback
   # engine and needs BOTH the token AND an actor id to switch on.
