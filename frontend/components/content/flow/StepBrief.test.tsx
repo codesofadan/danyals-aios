@@ -24,13 +24,19 @@ import { EMPTY_FLOW, type FlowState } from "./types";
 
 const replicateMutate = vi.fn();
 let job: Record<string, unknown> | undefined;
+let questions: { slotKey: string; question: string }[] = [];
 
+// Every hook the screen calls has to be here: a vi.mock factory REPLACES the module,
+// so a hook added to the component and not added here throws "no export is defined"
+// and takes the whole file down with it, whatever it was actually testing.
 vi.mock("@/lib/hooks/content", () => ({
   useSiteDesign: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }),
+  useExperienceQuestions: () => ({ data: questions, isPending: false, isError: false }),
 }));
 vi.mock("@/lib/hooks/replica", () => ({
   useReplicate: () => ({ mutate: replicateMutate, isPending: false, isError: false, error: null }),
   useReplicaJob: () => ({ data: job }),
+  useReplicaRuns: () => ({ data: [] }),
 }));
 vi.mock("@/components/content/TemplateGallery", () => ({ default: () => <div /> }));
 
@@ -43,6 +49,7 @@ function renderStep(over: Partial<FlowState> = {}, patch = vi.fn()) {
 beforeEach(() => {
   replicateMutate.mockClear();
   job = undefined;
+  questions = [];
 });
 
 describe("replicating a design in the content flow", () => {
@@ -97,5 +104,50 @@ describe("replicating a design in the content flow", () => {
     job = { status: "completed", design_profile: { palette: { primary: "#0f172a" } } };
     renderStep({ replicaJobId: "job-1", replicaUrl: "https://example.com/page" });
     expect(await screen.findByText(/Design replicated/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The Experience interview, asked BEFORE the build.
+ *
+ * It used to be asked by the pipeline, after the operator pressed Build on screen 4 -
+ * so a run they believed was under way parked itself on five questions they had never
+ * been shown. The questions are a pure function of the page kind, so there was never
+ * a reason to wait for a job to exist before asking them.
+ *
+ * What is pinned here is that the questions are RENDERED and that an answer reaches
+ * `patch` under the backend's own slot key - the key is the whole contract, because a
+ * mismatched one seeds nothing and the page halts exactly as before, silently.
+ */
+describe("the Experience interview on screen 3", () => {
+  it("asks the proof questions this page kind requires", () => {
+    questions = [
+      { slotKey: "founding_date", question: "What year did the business start trading?" },
+      { slotKey: "license_permit", question: "What is the licence number?" },
+    ];
+    renderStep();
+    expect(screen.getByText(/What year did the business start trading\?/)).toBeInTheDocument();
+    expect(screen.getByText(/What is the licence number\?/)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 2 answered/)).toBeInTheDocument();
+  });
+
+  it("records an answer under the slot key the pipeline seeds from", async () => {
+    questions = [{ slotKey: "license_permit", question: "What is the licence number?" }];
+    const patch = renderStep();
+    await userEvent.type(screen.getByLabelText(/What is the licence number\?/), "M-41982");
+    expect(patch).toHaveBeenCalledWith(
+      expect.objectContaining({ experience: expect.objectContaining({ license_permit: "M" }) }),
+    );
+  });
+
+  it("counts only answers that are actually filled in", () => {
+    questions = [
+      { slotKey: "founding_date", question: "Trading since?" },
+      { slotKey: "license_permit", question: "Licence?" },
+    ];
+    // Whitespace is not an answer: the pipeline's gate counts a blank slot as
+    // unanswered and halts, so the screen must not report it as done.
+    renderStep({ experience: { founding_date: "2011", license_permit: "   " } });
+    expect(screen.getByText(/1 of 2 answered/)).toBeInTheDocument();
   });
 });

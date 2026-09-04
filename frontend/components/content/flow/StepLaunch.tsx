@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { useSpendHalted } from "@/lib/hooks/cost";
-import { useGenerateFromResearch } from "@/lib/hooks/content";
+import { useExperienceQuestions, useGenerateFromResearch } from "@/lib/hooks/content";
 import { profileFromTemplate } from "@/lib/content";
 import { pageKind } from "@/lib/pageKinds";
 import { useToast, describeError } from "@/components/ui/Toast";
@@ -30,6 +30,12 @@ export default function StepLaunch({
   const generate = useGenerateFromResearch();
   const toast = useToast();
   const kind = pageKind(state.kind);
+  // Shared query key with screen 3, so this is the cached list rather than a refetch.
+  // Screen 3's Next button already enforces this; repeating it here closes the one
+  // way round it, which is deep-linking straight to ?step=4.
+  const asked = useExperienceQuestions(kind.pageType).data ?? [];
+  const answered = asked.filter((q) => (state.experience[q.slotKey] ?? "").trim()).length;
+  const proofMissing = asked.length > 0 && answered < asked.length;
   const designToSend =
     state.design ??
     (state.template !== "Auto" ? profileFromTemplate(state.template, state.theme) : null);
@@ -57,6 +63,16 @@ export default function StepLaunch({
         testimonials: lines(state.testimonials).slice(0, 12),
         uniqueData: lines(state.uniqueData).slice(0, 12),
         services: lines(state.services).slice(0, 20),
+        // The Experience interview, answered on screen 3. It rides on the job so the
+        // pipeline's SME stage SEEDS the dossier rather than halting to ask - the
+        // whole reason the interview moved to the front. Only non-empty answers are
+        // sent: an empty string is not an answer, and the gate would (rightly) still
+        // stop the page rather than treat a blank as satisfied.
+        experience: Object.fromEntries(
+          Object.entries(state.experience)
+            .map(([k, v]) => [k, String(v).trim()])
+            .filter(([, v]) => v),
+        ),
         // A MEASURED profile beats a template every time - it is the client's
         // real site rather than a guess at it. A picked template synthesises one
         // so the colours and fonts the operator chose actually travel.
@@ -84,10 +100,10 @@ export default function StepLaunch({
           <div>
             <div className="ct">{codes.length} page{codes.length === 1 ? "" : "s"} queued</div>
             <div className="cs" style={{ marginTop: 6, lineHeight: 1.6 }}>
-              Each page now runs research, drafting and QA on its own. <b>Most will stop and
-              ask you for first-party facts</b> before they will write — that is the gate that
-              stops the writer inventing credentials, and it is answered on each page&apos;s
-              Experience tab.
+              Each page now runs research, drafting and QA on its own. Your proof answers
+              travel with them, so they go straight to writing rather than stopping to ask.
+              <b> Nothing reaches the site without your review.</b> If a page does need
+              something you have not supplied, it says so on its Experience tab.
             </div>
           </div>
         </div>
@@ -98,8 +114,8 @@ export default function StepLaunch({
                 <tr key={c}>
                   <td><Link href={`/admin/content/${c}`}><strong>{c}</strong></Link></td>
                   <td style={{ textAlign: "right" }}>
-                    <Link className="mini-btn" href={`/admin/content/${c}?tab=experience`}>
-                      Answer its questions
+                    <Link className="mini-btn" href={`/admin/content/${c}`}>
+                      Follow it
                     </Link>
                   </td>
                 </tr>
@@ -140,6 +156,17 @@ export default function StepLaunch({
           </dd>
           <dt className="cs">Grounded in</dt>
           <dd style={{ margin: 0 }}>{facts} proof point{facts === 1 ? "" : "s"}</dd>
+          {/* Say that the interview is DONE. Its absence is what used to surface as a
+              parked page ten minutes later, so its presence is worth stating here. */}
+          {asked.length > 0 && (
+            <>
+              <dt className="cs">Experience</dt>
+              <dd style={{ margin: 0, color: proofMissing ? "var(--warn)" : "var(--ok)" }}>
+                {answered} of {asked.length} answered
+                {proofMissing ? " — the rest will be asked per page" : " — no page will stop to ask"}
+              </dd>
+            </>
+          )}
           <dt className="cs">Look</dt>
           <dd style={{ margin: 0 }}>
             {state.design
@@ -172,7 +199,9 @@ export default function StepLaunch({
         <button
           type="button" className="primary-btn"
           onClick={launch}
-          disabled={generate.isPending || halted || state.picks.length === 0 || facts === 0}
+          disabled={
+            generate.isPending || halted || state.picks.length === 0 || facts === 0 || proofMissing
+          }
         >
           <span className="material-symbols-rounded">rocket_launch</span>
           {generate.isPending ? "Queueing…" : `Build ${state.picks.length} page${state.picks.length === 1 ? "" : "s"}`}
@@ -180,7 +209,9 @@ export default function StepLaunch({
         <div className="cs" style={{ marginTop: 8 }}>
           {facts === 0
             ? "Add at least one proof point first — a page with nothing to stand on will not be written."
-            : "Nothing publishes without your approval."}
+            : proofMissing
+              ? `Go back to Facts & look and answer the remaining ${asked.length - answered} proof question${asked.length - answered === 1 ? "" : "s"} — the writer will not start without them.`
+              : "Nothing publishes without your approval."}
         </div>
       </div>
     </div>

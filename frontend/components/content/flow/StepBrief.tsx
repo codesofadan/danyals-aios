@@ -7,6 +7,18 @@
 // "great service" costs a page its credibility while "412 callouts in 2025, from
 // our dispatch log" earns it. The placeholder now teaches that.
 //
+// The Experience interview is asked HERE, before the build, and not by the pipeline
+// afterwards. It used to be the other way round: the operator filled in this whole
+// screen, pressed Build on screen 4, and every queued page then parked itself at
+// "waiting on your experience answers" — five questions they had never been shown,
+// arriving after the one action they reasonably read as the last one. The questions
+// are a pure function of the page kind chosen on screen 2, so there is nothing to
+// wait for and nothing to pay for: they can simply be asked at the point the
+// operator is already answering questions about the same pages.
+//
+// They are REQUIRED, because the pipeline's gate is a halt and not a warning. Making
+// them optional here would only move the same dead end back to where it was.
+//
 // Design is a real choice between THREE real things: measure the client's actual
 // site, replicate a design from any URL, or pick a template. Extraction wins when it
 // succeeds, and says so.
@@ -19,13 +31,27 @@
 // standalone Replicator enforces — never hardcoded, because the server checks it too.
 
 import { useEffect, useMemo } from "react";
-import { useSiteDesign } from "@/lib/hooks/content";
+import { useExperienceQuestions, useSiteDesign } from "@/lib/hooks/content";
 import { useReplicaJob, useReplicaRuns, useReplicate } from "@/lib/hooks/replica";
 import { FRAMEWORKS, TEMPLATE_THEME_DEFAULTS, type Framework, type PageTemplate } from "@/lib/content";
 import TemplateGallery from "@/components/content/TemplateGallery";
 import { useToast, describeError } from "@/components/ui/Toast";
+import { pageKind } from "@/lib/pageKinds";
 import type { FlowState } from "./types";
 import { lines } from "./types";
+
+// A worked example per proof slot. Not decoration: the whole difference between an
+// answer that clears the gate and one that gets cut is whether it names a checkable
+// artifact, and showing one is far more effective than saying so.
+const EXAMPLE: Record<string, string> = {
+  founding_date: "Trading since March 2011 — Companies House registration 07612345",
+  license_permit: "Texas Master Plumber licence M-41982, issued by the TSBPE",
+  count_source: "412 emergency callouts in 2025, counted from our dispatch log",
+  photo: "https://… — our own crew on the Rowlett slab job, 12 Feb 2025 (not stock)",
+  review_source: "Google Business Profile — 187 reviews, 4.8 average, read at g.page/…",
+  named_team: "Dave Whitmore, lead engineer, Gas Safe registration 512883",
+  credential_source: "NICEIC Approved Contractor, certificate 2024/8812",
+};
 
 export default function StepBrief({
   state, patch,
@@ -33,6 +59,13 @@ export default function StepBrief({
   state: FlowState;
   patch: (p: Partial<FlowState>) => void;
 }) {
+  const kind = pageKind(state.kind);
+  // Same query key as the orchestrator's own call, so the two share one fetch and
+  // the Next button is gated on exactly the questions rendered below.
+  const questions = useExperienceQuestions(kind.pageType);
+  const asked = questions.data ?? [];
+  const answered = asked.filter((q) => (state.experience[q.slotKey] ?? "").trim()).length;
+
   const extract = useSiteDesign();
   const replicate = useReplicate();
   const replicaJob = useReplicaJob(state.replicaJobId);
@@ -160,6 +193,51 @@ export default function StepBrief({
               placeholder="Original data, internal stats, things competitors cannot say"
             />
           </div>
+        </div>
+      </section>
+
+      <section className="card" style={{ padding: "var(--s-7)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <div className="ct">What can you prove first-hand?</div>
+          {asked.length > 0 && (
+            <span className="cs" style={{ color: answered === asked.length ? "var(--ok)" : undefined }}>
+              {answered} of {asked.length} answered
+            </span>
+          )}
+        </div>
+        <div className="cs" style={{ margin: "4px 0 14px", lineHeight: 1.6 }}>
+          Every {kind.label.toLowerCase()} has to be able to back these {asked.length || "few"}{" "}
+          claims, and the writer will not start without them. Answer once here and the whole
+          batch is covered — <b>these are asked now precisely so the pages do not stop and
+          ask later</b>. Name a number, a date, a document or a person; anything vague gets
+          cut rather than softened.
+        </div>
+
+        {questions.isPending && <div className="cs">Working out what this page kind needs…</div>}
+        {questions.isError && (
+          <div className="fld-hint" style={{ color: "var(--warn)" }} role="alert">
+            Couldn&apos;t load the proof questions. You can still continue — each page will
+            ask them on its own Experience tab instead.
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 12 }}>
+          {asked.map((q, i) => (
+            <div className="fld" key={q.slotKey}>
+              <label htmlFor={`flow-exp-${q.slotKey}`}>
+                {i + 1}. {q.question} <span style={{ color: "var(--crit)" }}>*</span>
+              </label>
+              <textarea
+                id={`flow-exp-${q.slotKey}`}
+                rows={2}
+                value={state.experience[q.slotKey] ?? ""}
+                onChange={(e) =>
+                  patch({ experience: { ...state.experience, [q.slotKey]: e.target.value } })
+                }
+                placeholder={EXAMPLE[q.slotKey] ?? ""}
+              />
+            </div>
+          ))}
         </div>
       </section>
 

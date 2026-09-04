@@ -25,6 +25,13 @@ export type FlowState = {
   /** The pages to build, from the keyword bank, a research run, or added by hand. */
   picks: ResearchItem[];
   proof: string;
+  /** The Experience interview, answered on screen 3 and keyed by slot key.
+   *
+   *  It rides on the job so the pipeline's SME stage SEEDS the dossier instead of
+   *  halting to ask. The questions themselves are a pure function of the page type
+   *  (GET /content/experience-questions), so this screen can ask them while the
+   *  operator is still filling the form rather than after they have committed. */
+  experience: Record<string, string>;
   services: string;
   testimonials: string;
   uniqueData: string;
@@ -46,7 +53,7 @@ export type FlowState = {
 
 export const EMPTY_FLOW: FlowState = {
   clientId: "", clientName: "", siteDomain: "", siteRegistered: false, kind: "service",
-  picks: [], proof: "", services: "", testimonials: "", uniqueData: "",
+  picks: [], proof: "", experience: {}, services: "", testimonials: "", uniqueData: "",
   framework: "Auto", target: "WordPress", design: null, designFrom: "", replicaUrl: "", replicaOwnerConfirmed: false, replicaJobId: null,
   template: "Auto", theme: TEMPLATE_THEME_DEFAULTS.service,
 };

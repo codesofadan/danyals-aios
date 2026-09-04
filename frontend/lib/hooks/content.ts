@@ -104,6 +104,9 @@ export type CreateContentJobInput = {
   testimonials?: string[];
   uniqueData?: string[];
   services?: string[];
+  /** Answers to the Experience interview, collected up front. Seeds the dossier so
+   *  the pipeline does not stop the page to ask what the operator was never shown. */
+  experience?: Record<string, string>;
 };
 
 export function useCreateContentJob() {
@@ -197,6 +200,10 @@ export type BulkGenerateInput = {
   uniqueData?: string[];
   services?: string[];
   designProfile?: SiteDesignProfile;
+  /** The Experience interview, answered in the wizard BEFORE the build. Keyed by
+   *  slot key (`founding_date`, `license_permit`, …). Shared across the fan-out,
+   *  because the dossier the pipeline seeds from it is per cluster, not per page. */
+  experience?: Record<string, string>;
 };
 
 export function useGenerateFromResearch() {
@@ -367,6 +374,34 @@ export function useRepublishJob() {
 // The doctrine pipeline halts a page whose first-party facts nobody has supplied
 // and writes the interview questions it needs answered. These two calls are the
 // only way to clear that halt: everything else about the job is downstream of it.
+
+// The interview asked UP FRONT, on the wizard's own screen.
+//
+// GET /content/experience-questions is deliberately cheap: the slot set is a pure
+// function of the page type and the questions are the pipeline's own wording, so
+// asking costs no model call and needs no job to exist yet. That is what lets the
+// wizard ask BEFORE the operator commits, instead of the pipeline asking after -
+// which is how an operator ended up filling a whole form, pressing Build, and then
+// being stopped by five questions they had never been shown.
+//
+// `staleTime: Infinity` because the answer is a constant per page type for the life
+// of the tab; there is nothing here that can go stale.
+export type ExperienceQuestion = { slotKey: string; question: string };
+
+export const experienceQuestionsKey = (pageType: string) =>
+  ["content", "experience-questions", pageType] as const;
+
+export function useExperienceQuestions(pageType: string | null) {
+  return useQuery({
+    queryKey: experienceQuestionsKey(String(pageType)),
+    queryFn: () =>
+      api.get<ExperienceQuestion[]>(
+        `/content/experience-questions?pageType=${encodeURIComponent(String(pageType))}`,
+      ),
+    enabled: Boolean(pageType),
+    staleTime: Infinity,
+  });
+}
 
 export type ExperienceSlot = {
   slotKey: string;
