@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import PublicAuditPage from "@/components/public-audit/PublicAuditPage";
-import "../../freeaudit.css";
+import "../../freeaudit.css";   // .fa-cta (the shared button)
+import "../../publicaudit.css"; // the full-width report layout
 
 // The readable public audit page: /leads/<brand>.
 //

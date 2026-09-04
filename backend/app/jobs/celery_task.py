@@ -155,6 +155,28 @@ def aios_job(
             queue=queue.value,
             time_limit=TIME_LIMITS[queue],
             soft_time_limit=SOFT_TIME_LIMITS[queue],
+            # UNBOUNDED at the CELERY layer, on purpose - the bounds live in the DB.
+            #
+            # This has to be set HERE, not only at the `self.retry(max_retries=None)`
+            # call below, and the difference is not cosmetic. Celery resolves
+            #     max_retries = self.max_retries if max_retries is None else max_retries
+            # (celery/app/task.py), so passing None to `retry()` does NOT mean
+            # "unlimited" - it means "do not override the task's own setting", which
+            # without this line is Celery's default of 3.
+            #
+            # That silently capped the CONCURRENCY WAIT. A job deferred because its
+            # client is at the queue's in-flight limit comes back through the same
+            # `retry()` path as a failure, so waiting for a slot burned the retry
+            # budget meant for errors: submit five replications at once and the last
+            # two exhausted three deferrals in ~90s and died with
+            # MaxRetriesExceededError, while `max_queue_seconds` - the bound that is
+            # supposed to decide this - was never reached. The work was simply lost.
+            #
+            # With None, redelivery is unlimited and the REAL bounds apply, exactly as
+            # the retry site below already claims: `max_attempts` for errors and
+            # `max_queue_seconds` for concurrency waits, both counted in Postgres by
+            # the runner, which ends a hopeless wait as BLOCKED with a reason.
+            max_retries=None,
         )
         @functools.wraps(fn)
         def _task(self: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:

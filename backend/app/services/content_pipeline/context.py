@@ -77,6 +77,10 @@ class PipelineContext:
     target_words: int = 1200
 
     # --- accumulated by stages ---------------------------------------------- #
+    # Experience answers the OPERATOR supplied up front, keyed by sme slot_key.
+    # The SME stage seeds the dossier from these, which is what lets a job that was
+    # answered in the wizard run straight through instead of halting after submit.
+    experience: dict[str, str] = field(default_factory=dict)
     proof_signals: frozenset[str] = field(default_factory=frozenset)
     facts: tuple[str, ...] = ()
     brief: dict[str, Any] = field(default_factory=dict)

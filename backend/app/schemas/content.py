@@ -228,6 +228,13 @@ class ContentJobCreate(BaseModel):
     # (ordered ``<section class="aios-<name>">`` blocks from ``layout.section_order``).
     # Absent -> the publish path behaves exactly as before (no structural wrap).
     design_profile: SiteDesignProfile | None = Field(default=None, alias="designProfile")
+    # The Experience interview, ANSWERED IN THE WIZARD, keyed by sme slot_key
+    # (founding_date / license_permit / count_source / photo / review_source / ...).
+    # The SME stage seeds the dossier from this, so a job whose proof was collected up
+    # front runs straight through instead of halting after the operator pressed Build.
+    # Absent -> the stage behaves exactly as before and asks for what is missing.
+    experience: dict[str, str] = Field(default_factory=dict, max_length=12)
+
 
 
 ReviewAction = Literal["approve", "edit", "reject"]
@@ -517,6 +524,10 @@ class ContentBulkGenerateRequest(BaseModel):
     # Shared across every fanned-out job (like the grounding lists above): the target
     # site's design profile is seeded into each job's ``source_pack["design_profile"]``.
     design_profile: SiteDesignProfile | None = Field(default=None, alias="designProfile")
+    # The Experience interview answered in the wizard, shared across the fan-out. The
+    # dossier is per CLUSTER, so one set of answers legitimately covers a whole batch -
+    # which is exactly why asking once, up front, is the right shape.
+    experience: dict[str, str] = Field(default_factory=dict, max_length=12)
 
 
 class ContentBulkGenerateResponse(BaseModel):

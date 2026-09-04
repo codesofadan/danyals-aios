@@ -186,13 +186,54 @@ def run_sme(
                 notes.append(f"question generation unavailable ({type(exc).__name__}); "
                              "using the default interview questions")
         for slot_key in missing_slots:
+            # SEED THE OPERATOR'S OWN ANSWER if the wizard already collected it.
+            #
+            # The interview now happens at the FRONT of the content flow: the operator
+            # picks the pages, the wizard asks the proof questions that page type
+            # requires, and the answers ride on the job. Creating the slot empty here
+            # and then halting would ask the same questions a second time, after a
+            # submit the operator reasonably believed was the last step - which is the
+            # frustration this stage was accused of, and fairly.
+            #
+            # `answer` is what `refresh_dossier_status` counts, so a seeded slot lands
+            # complete and the run continues. Nothing is invented: an answer exists
+            # only because a human typed it, and a slot the wizard did not cover stays
+            # empty and still halts, exactly as before.
+            supplied = str((ctx.experience or {}).get(slot_key, "")).strip()
             store.upsert_slot(
                 dossier_id=dossier.id,
                 slot_key=slot_key,
                 question=questions.get(slot_key) or FALLBACK_QUESTIONS.get(slot_key, ""),
+                answer=supplied,
             )
         store.refresh_dossier_status(dossier.id)
         dossier = store.get_or_create_dossier(engagement_id=ctx.engagement_id, cluster_key=key)
+
+    # A dossier that already EXISTED is not covered by the seeding above, because
+    # `missing_slots` is empty for it. That is the common case, not an edge one: the
+    # dossier is per CLUSTER, so the second page in a cluster finds every slot already
+    # created - and, before this, unanswered. Fill whatever the operator supplied for
+    # this job before deciding to halt, so answering once in the wizard covers the
+    # cluster exactly as the per-cluster design intends.
+    if not dossier.complete and ctx.experience:
+        seeded = 0
+        for slot in dossier.unanswered:
+            supplied = str((ctx.experience or {}).get(slot.slot_key, "")).strip()
+            if not supplied:
+                continue
+            store.upsert_slot(
+                dossier_id=dossier.id,
+                slot_key=slot.slot_key,
+                question=slot.question,
+                answer=supplied,
+            )
+            seeded += 1
+        if seeded:
+            store.refresh_dossier_status(dossier.id)
+            dossier = store.get_or_create_dossier(
+                engagement_id=ctx.engagement_id, cluster_key=key
+            )
+            notes.append(f"seeded {seeded} Experience answer(s) collected in the wizard")
 
     if not dossier.complete:
         outstanding = [s.slot_key for s in dossier.unanswered]

@@ -16,6 +16,11 @@ import {
 // the paid page rendered the built consulting report (thirteen). They now resolve
 // to the same file server-side, so this page does not branch on `kind` for
 // anything except the label it prints.
+//
+// LAYOUT: its own `pa-*` classes (app/publicaudit.css), NOT the free-audit
+// funnel's `fa-card`. That card is 460px wide because it holds an email + URL
+// form; reusing it here clamped a 13-table consulting report into a narrow strip
+// pinned to the left of the screen. This is a full-width, fluid reading layout.
 
 function formatWhen(when: string | null): string {
   if (!when) return "";
@@ -24,17 +29,25 @@ function formatWhen(when: string | null): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="pa-page">
+      <div className="pa-wrap">{children}</div>
+    </main>
+  );
+}
+
 export default function PublicAuditPage({ slug }: { slug: string }) {
   const q = usePublicPage(slug);
 
   if (q.isLoading) {
     return (
-      <main className="fa-wrap">
-        <div className="fa-card" style={{ textAlign: "center", padding: "64px 28px" }}>
+      <Shell>
+        <div className="pa-block pa-state">
           <span className="material-symbols-rounded" aria-hidden>hourglass_top</span>
           <p>Loading the report…</p>
         </div>
-      </main>
+      </Shell>
     );
   }
 
@@ -43,18 +56,16 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
   // nothing about which reports exist.
   if (q.isError || !q.data) {
     return (
-      <main className="fa-wrap">
-        <div className="fa-card" style={{ textAlign: "center", padding: "64px 28px" }}>
+      <Shell>
+        <div className="pa-block pa-state">
           <span className="material-symbols-rounded" aria-hidden>link_off</span>
-          <h1 style={{ fontSize: 22, margin: "12px 0 6px" }}>This report isn’t available</h1>
-          <p style={{ opacity: 0.75 }}>
-            The link may have expired, or the report may not have been shared yet.
-          </p>
-          <a className="fa-cta" href="/" style={{ marginTop: 18, display: "inline-block" }}>
+          <h1>This report isn’t available</h1>
+          <p>The link may have expired, or the report may not have been shared yet.</p>
+          <a className="primary-btn fa-cta" href="/" style={{ marginTop: 18, display: "inline-block" }}>
             Run a free audit
           </a>
         </div>
-      </main>
+      </Shell>
     );
   }
 
@@ -64,33 +75,28 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
   const when = formatWhen(page.when);
 
   return (
-    <main className="fa-wrap">
-      <header className="fa-card" style={{ display: "grid", gap: 14, padding: "26px 28px" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "baseline" }}>
-          <h1 style={{ fontSize: 26, margin: 0, letterSpacing: "-0.02em" }}>
-            SEO audit — {domain}
-          </h1>
-          <span style={{ fontSize: 13, opacity: 0.7 }}>
+    <Shell>
+      <header className="pa-block">
+        <div className="pa-head">
+          <h1 className="pa-title">SEO audit — {domain}</h1>
+          <span className="pa-meta">
             {page.kind === "paid" ? "Full audit" : "Free audit"}
             {when ? ` · ${when}` : ""}
           </span>
         </div>
 
         {page.score != null && (
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <strong style={{ fontSize: 46, lineHeight: 1, letterSpacing: "-0.03em" }}>
-              {page.score}
-            </strong>
-            <span style={{ fontSize: 15, opacity: 0.7 }}>/ 100</span>
-            
+          <div className="pa-score">
+            <b>{page.score}</b>
+            <span>/ 100</span>
           </div>
         )}
 
-        {verdict && <p style={{ margin: 0, opacity: 0.8, maxWidth: "62ch" }}>{verdict}</p>}
+        {verdict && <p className="pa-verdict">{verdict}</p>}
 
         {page.has_pdf && (
-          <div>
-            <a className="fa-cta" href={publicPageReportPdfUrl(page.slug)} download>
+          <div className="pa-actions">
+            <a className="primary-btn fa-cta" href={publicPageReportPdfUrl(page.slug)} download>
               Download the PDF report
             </a>
           </div>
@@ -98,7 +104,7 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
       </header>
 
       {page.has_report ? (
-        <div className="fa-card" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="pa-block pa-block--flush pa-viewer">
           <ReportViewer
             label={domain}
             load={() => fetchPublicPageReportHtml(page.slug)}
@@ -107,7 +113,7 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
           />
         </div>
       ) : (
-        <div className="fa-card" style={{ padding: "28px" }}>
+        <div className="pa-block">
           <p style={{ margin: 0, opacity: 0.8 }}>
             The full report for this audit isn’t on file. The score above is still accurate.
           </p>
@@ -115,13 +121,13 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
       )}
 
       {page.fiverr_url && (
-        <footer className="fa-card" style={{ padding: "22px 28px" }}>
+        <footer className="pa-block">
           <p style={{ margin: "0 0 10px" }}>Want a hand fixing what this audit surfaced?</p>
-          <a className="fa-cta" href={page.fiverr_url} target="_blank" rel="noopener noreferrer">
+          <a className="primary-btn fa-cta" href={page.fiverr_url} target="_blank" rel="noopener noreferrer">
             Explore our SEO services
           </a>
         </footer>
       )}
-    </main>
+    </Shell>
   );
 }

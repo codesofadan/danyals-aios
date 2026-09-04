@@ -293,6 +293,15 @@ def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
         # The context's own default (1200) stands unless the operator's brief asked
         # for a length; there is no platform-wide word-count setting to read.
         target_words=int(pack.get("target_words") or 1200),
+        # Collected by the wizard BEFORE the job was queued. Carrying it here is what
+        # moves the Experience interview to the front of the flow: the SME stage finds
+        # the dossier already answerable instead of halting a job the operator thought
+        # was finished.
+        experience={
+            str(k): str(v)
+            for k, v in (pack.get("experience") or {}).items()
+            if isinstance(pack.get("experience"), dict) and str(v).strip()
+        },
     )
 
 

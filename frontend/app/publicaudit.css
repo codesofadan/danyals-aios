@@ -1,0 +1,113 @@
+/* ============================================================
+   Public audit report page (/leads/<slug>)
+
+   Its own stylesheet, deliberately. The page first reused the free-audit
+   funnel's `.fa-card`, which is a 460px lead-capture card - correct for an
+   email+URL form, wrong for a 13-table consulting report. Every block was
+   clamped to 460px and pinned to the left of a wide screen.
+
+   This is a full-width reading layout: a centred column that grows with the
+   viewport, and a report viewer that gets the whole width it needs.
+   ============================================================ */
+
+.pa-page {
+  min-height: 100vh;
+  width: 100%;
+  /* The viewer's own theme paints behind this; set the ground explicitly so the
+     page never borrows whatever is underneath. */
+  /* The app's real tokens. An earlier version used `--fg`, which does not exist
+     in this theme, so it fell back to a near-white and rendered pale text on the
+     cream `--bg` - the header was effectively invisible. */
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* The centred column. clamp() rather than a media-query ladder: padding grows
+   smoothly from a phone to a desktop instead of jumping at breakpoints. */
+.pa-wrap {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 40px) clamp(14px, 4vw, 40px) clamp(48px, 8vw, 96px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(14px, 2vw, 22px);
+  box-sizing: border-box;
+}
+
+/* Full-width blocks. `width:100%` + `min-width:0` so a wide child (the report
+   iframe, a long URL) can never push the column sideways. */
+.pa-block {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: clamp(18px, 2.5vw, 30px) clamp(16px, 3vw, 34px);
+}
+
+.pa-block--flush { padding: 0; overflow: hidden; }
+
+/* --- header ------------------------------------------------------------- */
+.pa-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+}
+.pa-title {
+  color: var(--fg-strong);
+  font-size: clamp(21px, 3.2vw, 31px);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  margin: 0;
+  line-height: 1.15;
+  /* A long domain must wrap rather than widen the page. */
+  overflow-wrap: anywhere;
+}
+.pa-meta { font-size: 13.5px; color: var(--muted); }
+
+.pa-score { display: flex; align-items: baseline; gap: 10px; margin-top: 14px; }
+.pa-score b {
+  font-size: clamp(38px, 6vw, 54px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+}
+.pa-score span { font-size: 15px; color: var(--muted); }
+
+.pa-verdict {
+  margin: 12px 0 0;
+  font-size: clamp(14.5px, 1.6vw, 16.5px);
+  line-height: 1.6;
+  color: var(--body);
+  max-width: 68ch;
+}
+
+.pa-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* --- the report viewer -------------------------------------------------- */
+/* The report is the reason the page exists, so it gets real height: most of the
+   viewport on a laptop, and a sane floor on a phone. */
+.pa-viewer { width: 100%; min-width: 0; }
+.pa-viewer iframe,
+.pa-viewer > div { width: 100% !important; }
+@media (min-width: 900px) {
+  .pa-viewer { min-height: 78vh; }
+}
+
+/* --- states ------------------------------------------------------------- */
+.pa-state {
+  text-align: center;
+  padding: clamp(48px, 10vw, 96px) clamp(16px, 4vw, 32px);
+}
+.pa-state h1 { font-size: clamp(19px, 2.6vw, 24px); margin: 12px 0 6px; }
+.pa-state p { color: var(--muted); margin: 0 auto; max-width: 46ch; }
+
+/* --- small screens ------------------------------------------------------ */
+@media (max-width: 560px) {
+  .pa-block { border-radius: 12px; }
+  .pa-head { gap: 4px 10px; }
+}

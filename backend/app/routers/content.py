@@ -33,6 +33,7 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg.types.json import Jsonb
+from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
@@ -210,6 +211,7 @@ def _seed_source_pack(
     design_profile: dict[str, Any] | None = None,
     template: str | None = None,
     primary_keyword: str = "",
+    experience: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Assemble the worker's ``source_pack`` grounding from the client + its site.
 
@@ -237,6 +239,14 @@ def _seed_source_pack(
         facts["contact_role"] = str(client["contact_role"])
 
     pack: dict[str, Any] = {"client_name": client.get("name", ""), "facts": facts}
+    # The Experience interview, answered in the wizard BEFORE the job was queued.
+    # The SME stage seeds the per-cluster dossier from this, which is what lets the
+    # job run through instead of stopping to ask the operator questions they were
+    # never shown until after they pressed Build.
+    if experience:
+        pack["experience"] = {
+            str(k): str(v).strip() for k, v in experience.items() if str(v).strip()
+        }
     # The chosen search term travels with the job. The worker researches THIS when
     # it is present, falling back to the topic/title only when it is not.
     if primary_keyword.strip():
@@ -328,6 +338,7 @@ async def _seed_and_insert_job(
     design_profile: dict[str, Any] | None = None,
     template: str | None = None,
     primary_keyword: str = "",
+    experience: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Seed a job's ``source_pack``, insert the queued row (RLS path), enqueue the
     pipeline worker, and return the row. The shared create path behind BOTH
@@ -358,6 +369,7 @@ async def _seed_and_insert_job(
         design_profile=design_profile,
         template=template,
         primary_keyword=primary_keyword,
+        experience=experience,
     )
     row = await asyncio.to_thread(
         repo.insert_job,
@@ -569,6 +581,7 @@ async def create_content_job(
         services=body.services,
         design_profile=_design_dict(body.design_profile),
         template=None if body.template == "Auto" else body.template,
+        experience=body.experience,
     )
     await record_activity(
         actor, kind="content", action="queued a content job", target=client.get("name", ""),
@@ -689,6 +702,7 @@ async def generate_from_research(
             services=body.services,
             design_profile=design_profile,
             template=template,
+            experience=body.experience,
         )
         codes.append(str(row["code"]))
 
@@ -1115,3 +1129,44 @@ async def patch_content_job(
         entity_id=str(client_id) if client_id is not None else None,
     )
     return ContentJobResponse.from_row(updated)
+
+
+# --------------------------------------------------------------------------- #
+# The Experience interview, asked UP FRONT
+# --------------------------------------------------------------------------- #
+class ExperienceQuestion(BaseModel):
+    """One proof question a page type requires, for the wizard to ask before Build."""
+
+    slot_key: str = Field(serialization_alias="slotKey")
+    question: str
+
+
+@router.get("/content/experience-questions", response_model=list[ExperienceQuestion])
+async def experience_questions(
+    _user: PublishContent,
+    page_type: Annotated[str, Query(alias="pageType")] = "service",
+) -> list[ExperienceQuestion]:
+    """The proof questions this page type must be able to answer.
+
+    WHY THIS EXISTS. The Experience interview used to happen INSIDE the pipeline,
+    after the operator pressed Build: they filled in the whole wizard, submitted,
+    and the job then parked at "waiting on your experience answers" - questions
+    they had never been shown. This endpoint moves the same interview to the front,
+    so the wizard can ask while the operator is still filling the form.
+
+    Deliberately CHEAP and deterministic: the slot set is a pure function of the
+    page type (``required_slots``) and the questions are the module's own fallback
+    prompts. No model call, no dossier, no job - a wizard screen must not have to
+    create a job to find out what it should ask, and must not pay for an LLM call
+    to render a form. The pipeline still generates sharper, page-specific wording
+    when it runs; these are the same categories, phrased generically.
+
+    A page type with no extra requirements (blog, faq, gbp_post) returns only the
+    three base slots, so the wizard shows three questions rather than five.
+    """
+    from app.services.content_pipeline.sme import FALLBACK_QUESTIONS, required_slots
+
+    return [
+        ExperienceQuestion(slot_key=key, question=FALLBACK_QUESTIONS.get(key, ""))
+        for key in required_slots(page_type)
+    ]
