@@ -441,3 +441,100 @@ function aios_publisher_head_faq_schema() {
 		wp_json_encode( $schema ) .
 		"</script>\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- wp_json_encode produces safe JSON for a ld+json block.
 }
+
+
+/* -------------------------------------------------------------------------- *
+ * The FALLBACK page menu: cap it, and keep generated pages out of it.
+ *
+ * THE BUG THIS FIXES, measured on a live client site. spotino.org's header listed
+ * eight links - every page the platform had ever published, including two untitled
+ * Elementor drafts and a test page called "hy" - in alphabetical order. It looked
+ * like AIOS was adding pages to a navbar. It was not: this plugin only ever writes
+ * a menu from `site-assembler.php`, on the `/site` route, which that site has never
+ * called. The markup gave it away - `<li class="page_item page-item-152">`, with no
+ * `menu-item-object-page` anywhere. Those classes come from `wp_page_menu()`, which
+ * is what a theme calls when NO menu is assigned to its nav location, and which
+ * lists every published page with no limit.
+ *
+ * So the pages were not being added to a menu; there was no menu, and WordPress was
+ * enumerating the whole site in its place. Publishing a page as `post_type=page`
+ * (which a landing page must be, to escape the theme's narrow blog column) is enough
+ * to join that list.
+ *
+ * Two changes, both to the FALLBACK only. A site with a real menu assigned never
+ * calls this filter, so a client who has arranged their own navigation is untouched:
+ *
+ *   1. AIOS-MANAGED PAGES ARE EXCLUDED. A generated service or article page is not
+ *      site navigation, and it is already reachable from search, sitemaps and
+ *      internal links. This is exact, not a heuristic: every page this plugin writes
+ *      carries `_aios_managed`.
+ *   2. WHAT REMAINS IS CAPPED (default 4). A theme fallback that lists every page a
+ *      site will ever have is not navigation at any size.
+ *
+ * Deliberately NOT done here: creating a menu and assigning it. That silently
+ * replaces the client's navigation from a content push, which is a bigger decision
+ * than this hook is allowed to make - `site-assembler.php` does it, and only when a
+ * plan explicitly asks.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * The most links the fallback page menu may show. Filterable, floor of 1.
+ *
+ * @return int
+ */
+function aios_publisher_nav_max_pages() {
+	$max = (int) apply_filters( 'aios_publisher_nav_max_pages', 4 );
+	return $max > 0 ? $max : 4;
+}
+
+/**
+ * Every page this plugin published, by id. Empty when there are none.
+ *
+ * @return int[]
+ */
+function aios_publisher_managed_page_ids() {
+	$ids = get_posts(
+		array(
+			'post_type'        => 'page',
+			'post_status'      => array( 'publish', 'draft', 'pending', 'private' ),
+			'numberposts'      => 200,
+			'fields'           => 'ids',
+			'meta_key'         => AIOS_PUBLISHER_META_MANAGED, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- indexed by WP's postmeta key index; bounded to 200.
+			'suppress_filters' => false,
+			'no_found_rows'    => true,
+		)
+	);
+	return is_array( $ids ) ? array_map( 'intval', $ids ) : array();
+}
+
+/**
+ * Trim the theme's no-menu-assigned page list.
+ *
+ * @param array $args wp_page_menu()/wp_list_pages() arguments.
+ * @return array
+ */
+function aios_publisher_cap_fallback_page_menu( $args ) {
+	if ( ! is_array( $args ) ) {
+		return $args;
+	}
+
+	// Keep whatever the theme already excluded; never drop its own choices.
+	$exclude = array();
+	if ( ! empty( $args['exclude'] ) ) {
+		$exclude = is_array( $args['exclude'] )
+			? $args['exclude']
+			: array_filter( array_map( 'trim', explode( ',', (string) $args['exclude'] ) ) );
+	}
+	$exclude = array_merge( array_map( 'intval', $exclude ), aios_publisher_managed_page_ids() );
+	$exclude = array_values( array_unique( array_filter( $exclude ) ) );
+	if ( ! empty( $exclude ) ) {
+		$args['exclude'] = implode( ',', $exclude );
+	}
+
+	// `number` is honoured by wp_list_pages, which wp_page_menu delegates to.
+	$args['number'] = aios_publisher_nav_max_pages();
+
+	return $args;
+}
+add_filter( 'wp_page_menu_args', 'aios_publisher_cap_fallback_page_menu' );
+add_filter( 'widget_pages_args', 'aios_publisher_cap_fallback_page_menu' );

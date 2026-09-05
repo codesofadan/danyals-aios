@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       AIOS Publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
- * Version:           1.12.0
+ * Version:           1.13.0
  * Requires at least: 5.6
  * Requires PHP:      7.2
  * Author:            AIOS
@@ -34,7 +34,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 // be plugin-root-relative: register_activation_hook() and plugins_url() lookups.
 define( 'AIOS_PUBLISHER_FILE', __FILE__ );
 
-define( 'AIOS_PUBLISHER_VERSION', '1.12.0' );
+define( 'AIOS_PUBLISHER_VERSION', '1.13.0' );
 define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 
 // A hard cap on how many <img> tags a single push will sideload into the media
