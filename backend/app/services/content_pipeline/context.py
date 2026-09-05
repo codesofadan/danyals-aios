@@ -81,6 +81,17 @@ class PipelineContext:
     # The SME stage seeds the dossier from these, which is what lets a job that was
     # answered in the wizard run straight through instead of halting after submit.
     experience: dict[str, str] = field(default_factory=dict)
+    # The page BLUEPRINT's content-bearing sections, as (kind, suggested heading), in
+    # order. Empty when no blueprint resolves (a plain article).
+    #
+    # WHY THE OUTLINE NEEDS THIS. The template used to reach only the PUBLISH path:
+    # `_shape_body_html` wrapped the finished HTML in `aios-<kind>` section divs and
+    # built the Elementor tree from it. The outline never saw it, so a "homepage"
+    # template produced an ARTICLE - long editorial H2s like "The audit PDF nobody
+    # implemented: why SEO work keeps getting billed twice" - which was then wrapped
+    # in landing-page section divs. The page read as a blog post wearing a landing
+    # page's CSS, because that is exactly what it was.
+    blueprint_sections: tuple[tuple[str, str], ...] = ()
     proof_signals: frozenset[str] = field(default_factory=frozenset)
     facts: tuple[str, ...] = ()
     brief: dict[str, Any] = field(default_factory=dict)

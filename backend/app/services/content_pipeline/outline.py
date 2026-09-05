@@ -119,6 +119,38 @@ def _prompt(ctx: PipelineContext, forbidden: list[str]) -> str:
     if ctx.facts:
         lines += ["", "First-party facts you may use (and NOTHING else as fact):",
                   *(f"  - {f}" for f in ctx.facts)]
+    # THE BLUEPRINT, when one resolved. Without this the writer plans an article and
+    # the publish path then wraps that article in landing-page section divs - which is
+    # how a "homepage" template produced long editorial H2s and read as a blog post in
+    # a landing page's CSS. Asking for ONE section per slot, in order, is what makes
+    # the copy the shape the layout is built for.
+    if ctx.blueprint_sections:
+        subs = {"{client}": ctx.client_name or "the business",
+                "{primary}": ctx.primary_keyword or "the service"}
+        slots = []
+        for i, (kind, heading) in enumerate(ctx.blueprint_sections, 1):
+            hint = heading
+            for k, v in subs.items():
+                hint = hint.replace(k, v)
+            slots.append(f"  {i}. {kind}" + (f"  - suggested: {hint}" if hint else ""))
+        lines += [
+            "",
+            "THIS IS A LANDING PAGE, NOT AN ARTICLE. It is built to a fixed layout, and",
+            f"you must return EXACTLY {len(ctx.blueprint_sections)} sections, one per slot,",
+            "IN THIS ORDER:",
+            *slots,
+            "",
+            "Heading rules for this layout - they override the usual article guidance:",
+            "  - SHORT. Two to six words. A landing-page section heading is a signpost,",
+            "    not a sentence, and it sits in large type above a block of copy.",
+            "  - No colons, no clauses, no rhetorical questions, no 'why X matters'.",
+            "  - Say what the block IS ('What you get', 'How it works', 'Pricing'),",
+            "    or the benefit it delivers. The suggested heading above is a fallback;",
+            "    a better, more specific one for this business always wins.",
+            "  - The hero heading is the page's single biggest promise, in plain words.",
+            "",
+            "Keep each section tight - a landing page is scanned, not read.",
+        ]
     lines += [
         "",
         "For each section give:",
@@ -132,7 +164,13 @@ def _prompt(ctx: PipelineContext, forbidden: list[str]) -> str:
         "",
         "Write headings that could ONLY belong to this business and this place. A "
         "heading that would fit any competitor in any city is the scaled-content "
-        "pattern search engines demote.",
+        "pattern search engines demote."
+        + (
+            " Within the short-heading rule above: specific beats generic, but never"
+            " at the cost of length."
+            if ctx.blueprint_sections
+            else ""
+        ),
     ]
     if forbidden:
         lines += [

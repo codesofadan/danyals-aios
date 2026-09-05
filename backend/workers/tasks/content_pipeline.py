@@ -267,6 +267,33 @@ def _sme_with_client_facts(
     return run
 
 
+def _blueprint_sections(
+    row: dict[str, Any], pack: dict[str, Any]
+) -> tuple[tuple[str, str], ...]:
+    """The blueprint's CONTENT-bearing sections as (kind, heading), in order.
+
+    Chrome sections (trust_bar, map, gallery) are excluded: the theme and the AIOS
+    Publisher plugin supply those from live data, and asking the writer for copy it
+    has nowhere to go would spend tokens producing text the page never renders.
+
+    Never raises - an unresolvable blueprint yields () and the outline falls back to
+    planning a plain article, which is the behaviour every page had before this.
+    """
+    try:
+        from app.services.page_blueprints import resolve_blueprint
+
+        specs = resolve_blueprint(
+            design_profile=(pack.get("design_profile") or None),
+            template=(str(pack.get("template") or "").strip() or None),
+            page_type=str(row.get("page_type") or "blog"),
+        )
+        return tuple(
+            (s.kind, str(getattr(s, "heading", "") or "")) for s in specs if s.content
+        )
+    except Exception:
+        return ()
+
+
 def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
     """Build the pipeline's context from the job row.
 
@@ -287,6 +314,11 @@ def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
         node_id=str(row["node_id"]) if row.get("node_id") else None,
         primary_keyword=str(pack.get("primary_keyword") or row.get("topic") or ""),
         page_type=str(row.get("page_type") or "service"),
+        # The SAME resolver the publish path uses (analyzed profile > chosen template >
+        # page-type default), so the sections the outline plans for are exactly the
+        # sections the published page is wrapped into. Resolving it twice from one
+        # function is what stops the two drifting.
+        blueprint_sections=_blueprint_sections(row, pack),
         vertical=str(pack.get("vertical") or ""),
         framework=str(row.get("framework") or "PAS"),
         geo=str(pack.get("geo") or pack.get("city") or ""),
