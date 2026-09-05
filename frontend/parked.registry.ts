@@ -228,14 +228,21 @@ export const PARKED: ParkedEntry[] = [
     reEnableWhen: `An owner asks for the ${surface} surface back, or the reason above stops being true.`,
   })),
 
-  // --- Milestones: the whole admin module (QA 15) -----------------------------
+  // --- Milestones: the admin module (QA 15), then the client tab too ----------
   // "Milestones module is not required. Remove the Milestones option/module from
-  // the admin portal." Removed from ADMIN only: `/client/milestones` is a separate
-  // surface built on components/client/ClientMilestones.tsx and still shipping, and
-  // the /milestones endpoints still feed it. The module was read-only by design
-  // (only the onboarding stage auto-advances), so nothing that wrote is lost.
+  // the admin portal." That first pass removed it from ADMIN only, and recorded that
+  // `/client/milestones` was a separate surface and still shipping. It no longer is:
+  // the owner removed the client tab as well, and `components/client/ClientQueue.tsx`
+  // replaced it — My Queue renders the same five stages plus what has been delivered
+  // and what the client is waiting on, so the timeline was absorbed rather than lost.
+  //
+  // The /milestones ENDPOINT is untouched and still read: ClientQueue and
+  // ClientHeader both call it. What was parked is the presentation, not the data.
+  // The module was read-only by design (only onboarding auto-advances), so nothing
+  // that wrote is lost.
   ...(
     [
+      "client/ClientMilestones.tsx",
       "milestones/MilestonesWorkspace.tsx",
       "milestones/MilestoneStats.tsx",
       "milestones/MilestoneDetail.tsx",

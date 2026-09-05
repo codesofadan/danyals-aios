@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePortal } from "./PortalContext";
 import { useAuth } from "@/lib/auth";
-import { toolForKey } from "@/lib/tools";
+import { isTeamTool, toolForKey } from "@/lib/tools";
 import { TEAM_NAV } from "@/lib/nav";
 
 
@@ -20,9 +20,13 @@ export default function TeamSidebar() {
   };
   const items = TEAM_NAV.map((it) => ({ ...it, count: counts[it.href] }));
 
-  // The tools this member can actually open — exactly what the admin
-  // granted them, in feature order.
+  // The tools this member can actually open: what the admin granted them, MINUS the
+  // analysis surfaces the team portal does not carry (see TEAM_HIDDEN_TOOL_KEYS).
+  // Filtering on the key BEFORE resolving the tool means a hidden key never even
+  // becomes a link, and the route refuses the slug as well - hiding a nav item is
+  // not access control on its own.
   const myTools = myGrants
+    .filter(isTeamTool)
     .map((key) => toolForKey(key))
     .filter((t): t is NonNullable<typeof t> => Boolean(t));
 

@@ -172,3 +172,52 @@ export function useTaskDeadlineRequests(code: string, enabled = true) {
     enabled: enabled && !!code,
   });
 }
+
+// --- Team requests (0127) -----------------------------------------------------
+// A member asking the leads for something. The team portal had no such route, so an
+// ask for an access grant, a tool or a deadline went to chat and left no record, no
+// owner and no status. Reads hit `team_requests`, a view filtered to auth.uid() in
+// SQL - a member can only ever see their own.
+
+export type TeamRequestKind = "Report" | "Access" | "Support" | "Feature" | "Billing";
+
+export type TeamRequest = {
+  code: string;
+  subject: string;
+  detail: string;
+  kind: string;
+  status: string;
+  priority: string;
+  opened_at: string | null;
+  reply: string;
+  replied_at: string | null;
+};
+
+export const TEAM_REQUESTS_KEY = ["team", "requests"] as const;
+
+export function useTeamRequests() {
+  return useQuery({
+    queryKey: TEAM_REQUESTS_KEY,
+    queryFn: () => api.get<TeamRequest[]>("/team/requests"),
+  });
+}
+
+export type CreateTeamRequestInput = {
+  kind: TeamRequestKind;
+  subject: string;
+  detail: string;
+};
+
+/** Raise a request to the leads. `retry: 0` so a transient failure never silently
+ *  files the same ask twice; on success the list refetches. */
+export function useCreateTeamRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTeamRequestInput) =>
+      api.post<TeamRequest>("/team/requests", input),
+    retry: 0,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: TEAM_REQUESTS_KEY });
+    },
+  });
+}

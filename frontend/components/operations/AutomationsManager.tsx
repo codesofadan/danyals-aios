@@ -16,12 +16,9 @@
 // anyone switches it on.
 // ============================================================
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  useAutomationCapabilities,
   useAutomations,
-  useCreateAutomation,
-  useDeleteAutomation,
   useRunAutomationNow,
   useUpdateAutomation,
   type Automation,
@@ -58,8 +55,6 @@ function LastRun({ a }: { a: Automation }) {
 function Row({ a, onError }: { a: Automation; onError: (m: string) => void }) {
   const update = useUpdateAutomation();
   const runNow = useRunAutomationNow();
-  const remove = useDeleteAutomation();
-  const [confirming, setConfirming] = useState(false);
 
   const fail = (err: unknown) =>
     onError(err instanceof Error ? err.message : "That could not be changed.");
@@ -108,170 +103,14 @@ function Row({ a, onError }: { a: Automation; onError: (m: string) => void }) {
           >
             Run now
           </button>
-          {confirming ? (
-            <>
-              <button
-                type="button"
-                className="ghostbtn co-reject"
-                disabled={remove.isPending}
-                onClick={() =>
-                  remove.mutate(a.id, { onError: fail, onSettled: () => setConfirming(false) })
-                }
-              >
-                Delete for good
-              </button>
-              <button type="button" className="ghostbtn" onClick={() => setConfirming(false)}>
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button type="button" className="ghostbtn" onClick={() => setConfirming(true)}>
-              Delete
-            </button>
-          )}
         </div>
       </td>
     </tr>
   );
 }
 
-function CreateForm({ onClose, onError }: { onClose: () => void; onError: (m: string) => void }) {
-  const capsQ = useAutomationCapabilities();
-  const create = useCreateAutomation();
-  const caps = useMemo(() => capsQ.data ?? [], [capsQ.data]);
-
-  const [kind, setKind] = useState("");
-  const [name, setName] = useState("");
-  const [mode, setMode] = useState<"interval" | "cron">("interval");
-  const [minutes, setMinutes] = useState("60");
-  const [cron, setCron] = useState("0 2 * * *");
-
-  const chosen = caps.find((c) => c.kind === kind);
-  // A client-scoped capability needs clients chosen, and this form does not collect
-  // them yet - so it says so rather than letting someone save an automation the
-  // server will refuse.
-  const clientScoped = chosen?.scope === "client";
-  const canSave = Boolean(kind && name.trim() && !clientScoped);
-
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 14, display: "grid", gap: 12 }}>
-      <div className="fld">
-        <label htmlFor="auto-kind">What should it do?</label>
-        <select
-          id="auto-kind"
-          value={kind}
-          onChange={(e) => {
-            const next = caps.find((c) => c.kind === e.target.value);
-            setKind(e.target.value);
-            if (next) {
-              setName((n) => n || next.label);
-              setMinutes(String(Math.max(1, Math.round(next.defaultIntervalSeconds / 60))));
-            }
-          }}
-        >
-          <option value="">Choose…</option>
-          {caps.map((c) => (
-            <option key={c.kind} value={c.kind}>
-              {c.label}
-              {c.paid ? " (spends budget)" : ""}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {chosen && (
-        <div className="op-muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
-          {chosen.description}
-          {chosen.needs.length > 0 && (
-            <>
-              {" "}
-              Needs {chosen.needs.join(", ")}; without it a run reports that it could not
-              do its work rather than failing silently.
-            </>
-          )}
-          {clientScoped && (
-            <div style={{ color: "var(--warn)", fontWeight: 600, marginTop: 6 }}>
-              This one runs per client, and choosing clients isn&rsquo;t available on this
-              form yet. Pick a platform-wide automation for now.
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="fld">
-        <label htmlFor="auto-name">Name</label>
-        <input id="auto-name" value={name} onChange={(e) => setName(e.target.value)} />
-      </div>
-
-      <div className="seg">
-        <button className={mode === "interval" ? "on" : undefined} onClick={() => setMode("interval")}>
-          Every…
-        </button>
-        <button className={mode === "cron" ? "on" : undefined} onClick={() => setMode("cron")}>
-          At a set time
-        </button>
-      </div>
-
-      {mode === "interval" ? (
-        <div className="fld">
-          <label htmlFor="auto-mins">Run every (minutes)</label>
-          <input
-            id="auto-mins"
-            inputMode="numeric"
-            value={minutes}
-            onChange={(e) => setMinutes(e.target.value.replace(/[^0-9]/g, ""))}
-          />
-          <div className="fld-hint">Minimum 1 minute — the dispatcher runs once a minute.</div>
-        </div>
-      ) : (
-        <div className="fld">
-          <label htmlFor="auto-cron">Schedule</label>
-          <input id="auto-cron" value={cron} onChange={(e) => setCron(e.target.value)} />
-          <div className="fld-hint">
-            minute hour day-of-month month day-of-week — e.g. <code>0 2 * * *</code> for 02:00
-            daily. Times are UTC.
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <button
-          type="button"
-          className="primary-btn"
-          disabled={!canSave || create.isPending}
-          onClick={() =>
-            create.mutate(
-              {
-                name: name.trim(),
-                kind,
-                scheduleKind: mode,
-                intervalSeconds: mode === "interval" ? Math.max(60, Number(minutes || 0) * 60) : null,
-                cronExpr: mode === "cron" ? cron.trim() : null,
-                // Created PAUSED. A schedule that starts running the moment it is
-                // saved is a schedule nobody reviewed.
-                enabled: false,
-              },
-              {
-                onSuccess: onClose,
-                onError: (err) =>
-                  onError(err instanceof Error ? err.message : "That could not be created."),
-              },
-            )
-          }
-        >
-          {create.isPending ? "Creating…" : "Create (paused)"}
-        </button>
-        <button type="button" className="ghostbtn" onClick={onClose}>
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function AutomationsManager() {
   const autosQ = useAutomations();
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
   const rows = autosQ.data ?? [];
@@ -281,6 +120,9 @@ export default function AutomationsManager() {
     <section className="card">
       <div className="card-h">
         <div>
+          {/* No "New automation" button, and the POST route 405s to match. The
+              platform seeds ONE automation per module it actually has (0128); an
+              admin decides whether each runs and how often, not what exists. */}
           <div className="ct">Automations</div>
           <div className="cs">
             {autosQ.isError
@@ -288,20 +130,11 @@ export default function AutomationsManager() {
               : `${live} of ${rows.length} running. Everything else is paused and does nothing until you enable it.`}
           </div>
         </div>
-        <button type="button" className="primary-btn" onClick={() => setCreating((c) => !c)}>
-          <span className="material-symbols-rounded">add</span>New automation
-        </button>
       </div>
 
       {error && (
         <div style={{ padding: "0 16px 10px", color: "var(--crit)", fontWeight: 600, fontSize: 13 }}>
           {error}
-        </div>
-      )}
-
-      {creating && (
-        <div style={{ padding: "0 16px" }}>
-          <CreateForm onClose={() => setCreating(false)} onError={setError} />
         </div>
       )}
 
@@ -319,7 +152,8 @@ export default function AutomationsManager() {
         </div>
       ) : rows.length === 0 ? (
         <div className="op-muted" style={{ padding: 18 }}>
-          No automations yet. Create one to have the platform do something on a schedule.
+          No automations are set up. The platform seeds one per module on deploy — if
+          this is empty, the seed migration has not run on this environment.
         </div>
       ) : (
         <div className="tbl-wrap">

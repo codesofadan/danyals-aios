@@ -87,36 +87,36 @@ async def list_automations(repo: AutomationsRepoDep, _user: ViewReports) -> list
     return [AutomationResponse.from_row(r) for r in rows]
 
 
+#: The standing automations are SEEDED (0128), not composed by an operator.
+#:
+#: Owner decision: an admin should not be building scheduled work. The platform ships
+#: one automation per module it actually has - content/WordPress publishing, citation
+#: liveness, audit refresh, the off-page sweep and monthly reports - and the admin's
+#: job is to decide whether each runs, and how often, not to invent new ones.
+#:
+#: REFUSED HERE, not merely hidden in the UI. The builder form is gone from
+#: Operations, but a removed form is not a removed capability: the route stayed
+#: callable, and "the admin cannot add custom automations" has to be true of the API
+#: or it is not true at all.
+_CREATION_CLOSED = HTTPException(
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    detail=(
+        "Automations are not created by hand. The platform ships one per module; "
+        "enable, re-time or pause them on the Operations screen."
+    ),
+)
+
+
 @router.post("/automations", response_model=AutomationResponse, status_code=status.HTTP_201_CREATED)
 async def create_automation(
     body: AutomationCreate, repo: AutomationsRepoDep, actor: Lead
 ) -> AutomationResponse:
-    _validate(body.kind, body.params, body.schedule_kind, body.cron_expr)
-    try:
-        row = await asyncio.to_thread(
-            automations_store().create,
-            name=body.name.strip(),
-            kind=body.kind,
-            params=body.params,
-            schedule_kind=body.schedule_kind,
-            interval_seconds=body.interval_seconds,
-            cron_expr=body.cron_expr,
-            enabled=body.enabled,
-            notify_on_failure=body.notify_on_failure,
-            notify_channels=body.notify_channels,
-            created_by=actor.id,
-        )
-    except InvalidScheduleError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
-    await record_activity(
-        actor, kind="task", action="created an automation", target=body.name,
-        entity_type="automation", entity_id=str(row["id"]),
-    )
-    # Re-read so the response carries the joined last-run columns the list gives.
-    fresh = await asyncio.to_thread(repo.get, str(row["id"]))
-    return AutomationResponse.from_row(fresh or row)
+    """Closed. The standing automations are seeded; see `_CREATION_CLOSED`.
+
+    The route is KEPT rather than deleted so a caller gets a 405 that explains itself,
+    instead of a 404 that reads as "the automations API moved".
+    """
+    raise _CREATION_CLOSED
 
 
 @router.patch("/automations/{automation_id}", response_model=AutomationResponse)

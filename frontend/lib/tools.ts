@@ -310,3 +310,25 @@ export function getToolBySlug(slug: string): Tool | undefined {
 export function toolForKey(key: string): Tool | undefined {
   return tools.find((t) => t.key === key);
 }
+
+/** Tools that never appear in the TEAM portal, whatever the admin has granted.
+ *
+ *  These are ANALYSIS surfaces: they inform a decision about strategy rather than
+ *  carry out a piece of work. Rank tracking, keyword research, the backlink profile
+ *  and competitor share-of-voice are read and acted on by leads from the admin
+ *  dashboard; a delivery member opening them sees the whole book of business rather
+ *  than the job in front of them.
+ *
+ *  Enforced in TWO places on purpose: the sidebar hides them, and the tool route
+ *  refuses them. Hiding a link is not access control - the slug is guessable, and
+ *  `/team/tools/backlink-manager` would still have rendered.
+ */
+export const TEAM_HIDDEN_TOOL_KEYS: ReadonlySet<string> = new Set([
+  "rank_tracker",
+  "keyword_research",
+  "backlink_manager",
+  "competitor_intel",
+]);
+
+/** Whether a tool key may be opened from the team portal. */
+export const isTeamTool = (key: string): boolean => !TEAM_HIDDEN_TOOL_KEYS.has(key);

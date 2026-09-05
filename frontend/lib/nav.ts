@@ -84,12 +84,21 @@ export const TEAM_NAV: NavItem[] = [
   { icon: "space_dashboard", label: "Team Dashboard", href: "/team", keywords: "home overview" },
   { icon: "view_kanban", label: "My Queue", href: "/team/queue", keywords: "tasks work inbox" },
   { icon: "play_circle", label: "Deliver", href: "/team/deliver", keywords: "handoff shipping" },
+  // A member asking the leads for something - an access grant, a tool, a deadline
+  // moved, a decision. Without it the ask went to chat, where it had no record, no
+  // owner and no status.
+  { icon: "forum", label: "Requests", href: "/team/requests", keywords: "ask admin help access request support" },
 ];
 
 export const CLIENT_NAV: NavItem[] = [
   { icon: "insights", label: "Client Dashboard", href: "/client", keywords: "home overview dashboard" },
+  // MY QUEUE replaces the Milestones tab. Milestones showed the five-stage timeline
+  // and nothing else, so it answered "where are we in the plan?" and never "what is
+  // being worked on right now, and what landed this week?". This screen answers both
+  // and absorbs the timeline, so nothing was lost by removing that tab.
+  { icon: "view_kanban", label: "My Queue", href: "/client/queue", keywords: "queue work in progress projects tasks updates status roadmap progress milestones" },
   { icon: "fact_check", label: "Audits", href: "/client/audits", keywords: "seo scan report pdf findings" },
-  { icon: "flag", label: "Milestones", href: "/client/milestones", keywords: "roadmap progress" },
+
   { icon: "summarize", label: "Reports", href: "/client/reports", keywords: "deliverables pdf downloads" },
   { icon: "forum", label: "Requests", href: "/client/requests", keywords: "tickets edits support" },
 ];

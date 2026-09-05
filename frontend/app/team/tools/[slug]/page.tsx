@@ -5,13 +5,19 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import ToolWorkspace from "@/components/portal/ToolWorkspace";
 import { usePortal } from "@/components/portal/PortalContext";
-import { getToolBySlug } from "@/lib/tools";
+import { getToolBySlug, isTeamTool } from "@/lib/tools";
 import { useToolWorkspace } from "@/lib/hooks/tools";
 
 export default function ToolPage() {
   const { slug } = useParams<{ slug: string }>();
   const { myGrants } = usePortal();
-  const tool = getToolBySlug(String(slug));
+  const resolved = getToolBySlug(String(slug));
+  // A tool the team portal does not carry is treated as NOT FOUND, not as "no
+  // access". The slug is guessable, so hiding the sidebar link alone would still
+  // have rendered /team/tools/backlink-manager for anyone who typed it; and framing
+  // it as a permission problem would invite a member to go and ask for a grant that
+  // is not the reason they cannot open it.
+  const tool = resolved && isTeamTool(resolved.key) ? resolved : undefined;
   const granted = Boolean(tool && myGrants.includes(tool.key));
   // Only fetched once granted — an ungranted tool's /workspace route 403s.
   const workspaceQ = useToolWorkspace(String(slug), granted);
