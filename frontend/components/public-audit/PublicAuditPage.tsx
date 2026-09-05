@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import FiverrUpsells from "@/components/free-audit/FiverrUpsells";
 import ReportViewer from "@/components/report/ReportViewer";
 import { cleanDomain, scoreBand, VERDICT } from "@/lib/freeAudit";
 import {
@@ -125,14 +126,22 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
         </div>
       )}
 
-      {page.fiverr_url && (
-        <footer className="pa-block">
-          <p style={{ margin: "0 0 10px" }}>Want a hand fixing what this audit surfaced?</p>
-          <a className="primary-btn fa-cta" href={page.fiverr_url} target="_blank" rel="noopener noreferrer">
-            Explore our SEO services
-          </a>
-        </footer>
-      )}
+      {/* THE THREE GIGS, the same component the free-audit funnel ends on.
+          This page carried a single "Explore our SEO services" link to the Fiverr
+          PROFILE, so a reader who had just been shown their own problems was handed
+          a directory and left to work out which service addressed them. The funnel
+          already ends on three named gigs; the shared page did not, and the shared
+          page is the one that gets forwarded.
+
+          Rendered UNCONDITIONALLY, unlike the link it replaces. The gigs are a
+          frontend constant (lib/freeAuditGigs), so they do not depend on the
+          backend's `fiverr_url` - which gated the old block and hid the whole
+          section whenever it was unset. `fiverr_url` now only powers the
+          section's own "Explore all services" link, which FiverrUpsells already
+          renders conditionally. */}
+      <footer className="pa-block pa-upsell">
+        <FiverrUpsells fiverrUrl={page.fiverr_url} />
+      </footer>
     </Shell>
   );
 }

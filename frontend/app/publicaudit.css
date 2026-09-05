@@ -111,3 +111,24 @@
   .pa-block { border-radius: 12px; }
   .pa-head { gap: 4px 10px; }
 }
+
+/* --- the three gig cards, borrowed from the free-audit funnel -------------
+   `.fa-upsell` carries `margin-top: 34px` because on the funnel it follows the
+   report directly with nothing between them. Here it sits INSIDE a `.pa-block`,
+   which already supplies the padding, so that margin would push the heading off
+   its own card. Neutralised rather than changed at source: the funnel's spacing
+   is correct for the funnel. */
+.pa-upsell .fa-upsell { margin-top: 0; }
+
+/* The funnel is a narrow single column; this page is full-width, so let the grid
+   use the room instead of stretching three cards across 1100px. */
+.pa-upsell .fa-gig-grid {
+  grid-template-columns: repeat(auto-fill, minmax(clamp(240px, 30%, 320px), 1fr));
+}
+
+/* The section header wraps on a phone; keep "Explore all services" from being
+   squeezed onto the badge's line. */
+@media (max-width: 620px) {
+  .pa-upsell .fa-upsell-h { flex-wrap: wrap; }
+  .pa-upsell .fa-upsell-all { margin-left: 52px; }
+}
