@@ -8,9 +8,9 @@ the replacement engine silently dropped the capability rather than deciding agai
 
 WHY THE PLAN IS DETERMINISTIC. v1 spends a writer call per page whose ONLY product is
 a decision about what to photograph (`_photo_briefs`, workers/tasks/content.py's
-generator). Nothing else reads it. Here the plan comes from the finished draft's own
-structure - the H1 for the hero, the H2s for the section slots, in document order - so
-illustrating a page adds no tokens to its bill, only the image spend itself.
+generator). Nothing else reads it. Here the plan's STRUCTURE comes from the finished
+draft itself - the H1 for the hero, the H2s for the section slots, in document order -
+and only the scene WORDING costs a call: one per page, never one per image.
 
 WHY THE PROMPT NEVER NAMES THE TOPIC. Proven at the provider and recorded at
 content_generator's `Image planning (§9)` comment block: gpt-image ignores negative
@@ -33,6 +33,7 @@ no `images` count, and a note that names the missing key.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Sequence
 from typing import Any
@@ -108,7 +109,64 @@ def _scene_offset(seed: str) -> int:
     return int(digest, 16) % len(_FALLBACK_SCENES)
 
 
-def plan_images(ctx: PipelineContext, *, max_images: int) -> tuple[ImagePlanItem, ...]:
+#: How many scene briefs one writer call may author. Bounded so a runaway max_images
+#: cannot turn a cheap planning call into a long generation.
+_MAX_AUTHORED_SCENES = 8
+
+
+def _scene_prompt(ctx: PipelineContext, slots: Sequence[tuple[str, str]]) -> str:
+    """Ask for ONE concrete, literal scene per slot, grounded in this page's subject."""
+    sections = "\n".join(f"{i + 1}. {alt}" for i, (_slot, alt) in enumerate(slots))
+    subject = ctx.title or ctx.primary_keyword
+    where = f" in {ctx.geo}" if ctx.geo else ""
+    who = f" for {ctx.client_name}" if ctx.client_name else ""
+    return "\n".join([
+        f'A page titled "{subject}" needs {len(slots)} photographs{who}{where}.',
+        "",
+        "Write ONE photographic scene description per section below. Each must be a",
+        "CONCRETE, LITERAL, PHYSICAL scene a photographer could walk into and shoot:",
+        "real objects, real people doing a real thing, a real place, real light.",
+        "",
+        "HARD RULES, each of which the image model will otherwise break:",
+        "- Never name the topic, the industry or any abstract noun as the SUBJECT.",
+        "  Handed an abstract subject the model renders it as TITLE TEXT and returns a",
+        "  flat vector infographic. Describe only what is physically in frame.",
+        "- No text, letters, words, numbers, signage, labels, logos, packaging copy,",
+        "  screens showing text, charts, diagrams, icons or infographics.",
+        "- No brand names and no recognisable real person.",
+        "- One scene per entry, 20-40 words, no preamble and no numbering in the value.",
+        "",
+        "Sections:",
+        sections,
+        "",
+        f"Reply with ONLY a JSON array of exactly {len(slots)} strings.",
+    ])
+
+
+def _parse_scenes(raw: str, wanted: int) -> list[str]:
+    """Pull a list of scene strings out of the reply; [] when it is unusable."""
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if not match:
+        return []
+    try:
+        parsed = json.loads(match.group(0))
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    scenes = [str(x).strip() for x in parsed if isinstance(x, str) and str(x).strip()]
+    # A reply that lost slots is still useful - the caller pads from the bank - but a
+    # reply of the wrong SHAPE (objects, nested lists) is not.
+    return scenes[:wanted]
+
+
+def plan_images(
+    ctx: PipelineContext,
+    *,
+    max_images: int,
+    writer: Any | None = None,
+    accounting: Any | None = None,
+) -> tuple[ImagePlanItem, ...]:
     """A hero plus one image per H2, in document order, capped at ``max_images``.
 
     Read off the FINISHED draft rather than the outline: the draft is what the reader
@@ -141,11 +199,43 @@ def plan_images(ctx: PipelineContext, *, max_images: int) -> tuple[ImagePlanItem
             continue
         slots.append((f"section:{_slug(heading)}", heading))
 
+    # TOPICAL SCENES, authored once per page.
+    #
+    # This stage used to draw every prompt from a topic-free bank, and said why: an
+    # abstract topic handed to gpt-image comes back as title text, and "without a
+    # writer call there is no way to author a concrete scene that is also topical".
+    # The pipeline HAS a writer, so that is now one cheap call - and the reason it
+    # matters is that a skincare page illustrated from the bank shipped a photograph
+    # of a man in an office corridor. A generic picture is not a neutral default; it
+    # actively contradicts the page.
+    #
+    # The bank remains the FALLBACK, per slot, so a missing writer, a spend block or
+    # a malformed reply still yields a fully illustrated page.
+    authored: list[str] = []
+    if writer is not None:
+        try:
+            raw = writer.write(
+                STAGE,
+                _scene_prompt(ctx, slots[:_MAX_AUTHORED_SCENES]),
+                page_type=ctx.page_type,
+                vertical=ctx.vertical or None,
+                max_tokens=2_000,
+                expected_calls=1,
+                accounting=accounting,
+            )
+            authored = _parse_scenes(raw, len(slots))
+        except Exception:
+            authored = []
+
     start = _scene_offset(ctx.primary_keyword or hero_alt)
     return tuple(
         ImagePlanItem(
             slot=slot,
-            prompt=f"{_FALLBACK_SCENES[(start + i) % len(_FALLBACK_SCENES)]} {_CAMERA_SUFFIX}",
+            prompt=(
+                f"{authored[i]} {_CAMERA_SUFFIX}"
+                if i < len(authored)
+                else f"{_FALLBACK_SCENES[(start + i) % len(_FALLBACK_SCENES)]} {_CAMERA_SUFFIX}"
+            ),
             alt=alt,
         )
         for i, (slot, alt) in enumerate(slots)
@@ -218,6 +308,7 @@ def run_images(
     gate: CostGate,
     settings: Settings,
     max_images: int | None = None,
+    writer: Any | None = None,
 ) -> StageResult:
     """Generate the planned images, one gate decision per image, and weave them in."""
     if not ctx.draft_md.strip():
@@ -243,7 +334,7 @@ def run_images(
             "generated and nothing was billed",
         )
 
-    plan = plan_images(ctx, max_images=limit)
+    plan = plan_images(ctx, max_images=limit, writer=writer)
     if not plan:
         return _skipped(ctx, "the draft carries no heading to hang an image on")
 

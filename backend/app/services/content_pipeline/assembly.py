@@ -132,8 +132,10 @@ def build_page_stages(
         stages["title_meta"] = lambda ctx: run_title_meta(ctx, writer=writer, model=model)
 
     if images is not None and cost_gate is not None and settings is not None:
+        # `writer` so the stage can author scenes that are actually ABOUT this page;
+        # it is None on a keyless deploy and the stage falls back to the scene bank.
         stages["images"] = lambda ctx: run_images(
-            ctx, generator=images, gate=cost_gate, settings=settings
+            ctx, generator=images, gate=cost_gate, settings=settings, writer=writer
         )
 
     # DELIBERATELY OUTSIDE the writer block. Every other stage above is bound only

@@ -152,7 +152,7 @@ x-backend-build: &backend-build
   build:
     context: .
     dockerfile: backend/Dockerfile
-  image: aios-backend:20260905-prose-rhythm
+  image: aios-backend:20260905-topical-images
 
 services:
   # ------------------------------------------------------------------ Postgres
