@@ -113,7 +113,21 @@
 }
 
 /* --- the three gig cards, borrowed from the free-audit funnel -------------
-   `.fa-upsell` carries `margin-top: 34px` because on the funnel it follows the
+   THE FIVERR BRAND TOKEN IS REDECLARED HERE, and it is not cosmetic.
+   `--fa-fiverr` is defined on `.fa-wrap`, the FUNNEL's wrapper, which does not
+   exist on this page. Borrowing `FiverrUpsells` therefore left every rule that
+   reads it resolving to nothing - and `.fa-fiverr-cta` is `color: #fff` on
+   `background: var(--fa-fiverr)`, so the "View on Fiverr" button rendered as
+   white text on a white card: present in the DOM, clickable, and invisible.
+   Caught by screenshotting the deployed page rather than trusting the markup.
+   Declared on `.pa-page` rather than `.pa-upsell` so the next fa-* component
+   borrowed onto this page does not rediscover the same hole. */
+.pa-page {
+  --fa-fiverr: #1dbf73;
+  --fa-fiverr-ink: #0f2e20;
+}
+
+/* `.fa-upsell` carries `margin-top: 34px` because on the funnel it follows the
    report directly with nothing between them. Here it sits INSIDE a `.pa-block`,
    which already supplies the padding, so that margin would push the heading off
    its own card. Neutralised rather than changed at source: the funnel's spacing
