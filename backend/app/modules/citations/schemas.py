@@ -19,9 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field
 BusinessMarket = Literal["US", "UK", "CA", "AU", "GLOBAL"]
 DirectoryTier = Literal["aggregator", "api", "bot_fillable", "captcha_assisted", "manual_only"]
 LinkRel = Literal["dofollow", "nofollow", "mixed", "unknown"]
-CitationSubmitStatus = Literal[
-    "not_started", "queued", "submitting", "submitted", "verified", "failed", "blocked"
-]
+# NOTE: the submit-status vocabulary lives in app/schemas/offpage.py
+# (CitationSubmitStatus, all 11 values). A 7-value duplicate that once lived here
+# predated 0064/0106 and silently missed ready_for_human/live/drifted/delisted —
+# deleted (off-page redesign Phase 0) so the enum has exactly one Python mirror.
 
 AuthorityTier = Literal["core", "tier1", "tier2"]
 DirectoryAccess = Literal["open", "apply_gated", "aggregator"]

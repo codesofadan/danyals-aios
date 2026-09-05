@@ -74,7 +74,6 @@ from app.schemas.offpage import (
     Web2ProvisionItemResponse,
     Web2ProvisionStartRequest,
     Web2ReviewRequest,
-    action_for,
 )
 from app.services.activity import record_activity
 
@@ -270,6 +269,16 @@ async def list_citations(
     return [CitationResponse.from_row(r) for r in rows]
 
 
+_CITATION_EVIDENCE_GATED = HTTPException(
+    status_code=status.HTTP_409_CONFLICT,
+    detail=(
+        "Evidence-gated: a listing is marked live/consistent only by the probe-verified "
+        "operator-queue path (POST /api/v1/citation-builder/queue/{id}/complete with the "
+        "public listing URL). Asserting it here records nothing anyone verified."
+    ),
+)
+
+
 @router.post("/offpage/citations/{citation_id}/action", response_model=CitationResponse)
 async def act_on_citation(
     citation_id: str,
@@ -277,32 +286,30 @@ async def act_on_citation(
     repo: OffpageRepoDep,
     actor: Lead,
 ) -> CitationResponse:
-    """Mark ONE listing handled: a Submit (created a missing listing) or an Update
-    (fixed drift) both resolve the NAP to ``consistent``. Lead-only; 404 if unknown."""
+    """Annotate ONE listing (action ``Note``). Lead-only; 404 if unknown.
+
+    ``Submit``/``Update`` are refused with 409: they used to resolve the NAP to
+    ``consistent`` and advance ``submit_status`` on a bare assertion — the one write
+    path that bypassed the probe-verified evidence rule the operator queue enforces.
+    """
+    if body.action != "Note":
+        raise _CITATION_EVIDENCE_GATED
     row = await asyncio.to_thread(repo.get_citation, citation_id)
     if row is None:
         raise _CITATION_NOT_FOUND
-
-    changes: dict[str, Any] = {"nap_status": "consistent", "action": action_for("consistent")}
-    # A human acting on a listing (Submit a missing one, finish a bot-built handoff, or
-    # re-sync a drift) is ASSERTING it is now live. Advance ANY not-yet-live submission
-    # state to `submitted` so the row SETTLES to a done state. Without this a manually
-    # handled row lingers at `queued`/`not_started` (there is no local worker to move
-    # it), which renders as a permanent, no-op "Update" action. An already-`verified`
-    # row keeps the stronger state.
-    if row.get("submit_status") not in ("submitted", "verified"):
-        changes["submit_status"] = "submitted"
-    if body.note is not None:
-        changes["note"] = body.note
-    updated = await asyncio.to_thread(repo.update_citation, citation_id, changes)
+    if body.note is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="action 'Note' requires a note",
+        )
+    updated = await asyncio.to_thread(repo.update_citation, citation_id, {"note": body.note})
     if updated is None:
         raise _CITATION_NOT_FOUND
 
     ent_type, ent_id = _client_entity(row)
-    verb = "submitted a citation" if body.action == "Submit" else "updated a citation"
     await record_activity(
-        actor, kind="content", action=verb, target=row.get("client_name", ""),
-        entity_type=ent_type, entity_id=ent_id,
+        actor, kind="content", action="annotated a citation",
+        target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
     )
     return CitationResponse.from_row(updated)
 
@@ -311,13 +318,10 @@ async def act_on_citation(
 async def bulk_update_citations(
     body: CitationBulkRequest, repo: OffpageRepoDep, actor: Lead
 ) -> list[CitationResponse]:
-    """Mark many listings ``consistent`` in one shot (a batch Submit/Update). Only
-    the rows RLS lets the caller see are affected. Lead-only. Records one activity per
-    distinct client touched."""
-    changes: dict[str, Any] = {"nap_status": "consistent", "action": action_for("consistent")}
-    rows = await asyncio.to_thread(repo.bulk_update_citations, body.ids, changes)
-    await _record_per_client(actor, rows, action="reconciled citations")
-    return [CitationResponse.from_row(r) for r in rows]
+    """RETIRED bulk assertion — always 409. Batch "mark consistent" had no URL and
+    no probe behind it; the route survives only to explain where the evidence path
+    lives (the request body is still validated so an empty batch stays a 422)."""
+    raise _CITATION_EVIDENCE_GATED
 
 
 # --- web 2.0 ------------------------------------------------------------------

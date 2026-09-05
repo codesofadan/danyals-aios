@@ -690,7 +690,25 @@ async def test_citation_action_is_lead_only(
     assert resp.status_code == 403
 
 
-async def test_citation_action_resolves_to_consistent(
+async def test_citation_action_submit_is_evidence_gated(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None]
+) -> None:
+    """Submit/Update are bare assertions with no probe behind them - both refuse with
+    409 (Phase 0 of the off-page redesign) and the row is untouched."""
+    repo.citations = {
+        "ct-1": _citation_row(id="ct-1", nap_status="missing", action="Submit")
+    }
+    wire("manager", "u-lead")
+    for verb in ("Submit", "Update"):
+        resp = await client.post(
+            "/api/v1/offpage/citations/ct-1/action", json={"action": verb}
+        )
+        assert resp.status_code == 409
+        assert "citation-builder/queue" in resp.json()["error"]["message"]
+    assert repo.citations["ct-1"]["nap_status"] == "missing"  # nothing asserted
+
+
+async def test_citation_action_note_annotates_without_state_change(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None]
 ) -> None:
     repo.citations = {
@@ -698,12 +716,19 @@ async def test_citation_action_resolves_to_consistent(
     }
     wire("manager", "u-lead")
     resp = await client.post(
-        "/api/v1/offpage/citations/ct-1/action", json={"action": "Submit"}
+        "/api/v1/offpage/citations/ct-1/action",
+        json={"action": "Note", "note": "left voicemail with the directory"},
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["nap"] == "consistent"
-    assert body["action"] == "Update"  # a resolved listing is an Update going forward
+    assert body["nap"] == "missing"  # unchanged - a note is not evidence
+    assert repo.citations["ct-1"]["note"] == "left voicemail with the directory"
+
+    # a Note without a note body is refused
+    resp = await client.post(
+        "/api/v1/offpage/citations/ct-1/action", json={"action": "Note"}
+    )
+    assert resp.status_code == 422
 
 
 async def test_citation_action_missing_is_404(
@@ -716,9 +741,11 @@ async def test_citation_action_missing_is_404(
     assert resp.status_code == 404
 
 
-async def test_bulk_update_marks_all_consistent(
+async def test_bulk_update_is_evidence_gated(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None]
 ) -> None:
+    """Bulk 'mark consistent' was a pure evidence assertion - the route now always
+    refuses with 409 and touches nothing."""
     repo.citations = {
         "ct-1": _citation_row(id="ct-1", nap_status="missing"),
         "ct-2": _citation_row(id="ct-2", nap_status="inconsistent"),
@@ -727,10 +754,10 @@ async def test_bulk_update_marks_all_consistent(
     resp = await client.post(
         "/api/v1/offpage/citations/bulk", json={"ids": ["ct-1", "ct-2"]}
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert repo.bulk_ids == ["ct-1", "ct-2"]
-    assert all(c["nap"] == "consistent" for c in body)
+    assert resp.status_code == 409
+    assert repo.bulk_ids is None  # the repo write was never reached
+    assert repo.citations["ct-1"]["nap_status"] == "missing"
+    assert repo.citations["ct-2"]["nap_status"] == "inconsistent"
 
 
 async def test_bulk_update_requires_non_empty_ids(

@@ -10,12 +10,12 @@
 // spread across three screens, one of which showed only a third of the picture.
 //
 // So this screen composes the THREE reads rather than adding a fourth endpoint:
-//   /portal/milestones   -> the stage the engagement is on, and what advances it
+//   /portal/milestones   -> the stage the engagement is on, and how far through it is
 //   /portal/deliverables -> what has actually been handed over
 //   /portal/requests     -> what the client has asked for and not yet had answered
 //
-// IT USES THE PORTAL'S OWN CLASSES - `cl-stat-card`, `cl-ms-bar`, `cl-steps`,
-// `cl-rp-row` - and defines no new ones. The first cut of this screen invented a
+// IT USES THE PORTAL'S OWN CLASSES - `cl-stat-card`, `cl-ms-bar`, `cl-rp-row` -
+// and defines no new ones. The first cut of this screen invented a
 // `cq-*` vocabulary and never wrote the stylesheet for it, so every rule resolved to
 // nothing: the progress bar was an empty div, the stepper was a default-numbered
 // <ol>, and the lists were browser bullets. Reusing the vocabulary the rest of the
@@ -38,7 +38,6 @@ import {
   currentStage,
   LIFECYCLE,
   projectProgress,
-  STAGE_STATUS_META,
 } from "@/lib/milestones";
 
 //: The accent each deliverable kind carries in its row icon (`--c`, read by
@@ -58,18 +57,6 @@ const STATUS_PILL: Record<string, string> = {
 };
 
 const stageMeta = (key: string) => LIFECYCLE.find((l) => l.key === key);
-
-/** Whether a string field carries a real value.
- *
- *  The portal serialiser renders an absent timestamp as an EM DASH, not as "" -
- *  `updated_at` comes back as "—" on every unstarted stage. A plain truthiness
- *  check passes that, so the timeline printed "Updated —" five times down the
- *  page: pure noise, and worse than saying nothing, because it looks like a field
- *  that failed to load rather than one that has no value yet. */
-const present = (v: string | null | undefined): boolean => {
-  const t = (v ?? "").trim();
-  return t !== "" && t !== "—" && t !== "–" && t !== "-";
-};
 
 export default function ClientQueue() {
   const projectQ = useClientMilestones();
@@ -186,79 +173,27 @@ export default function ClientQueue() {
             </div>
           </div>
 
-          {/* --- progress + the timeline --------------------------------------- */}
+          {/* --- how far through the plan --------------------------------------- */}
           {project ? (
-            <>
-              <section className="card cl-ms-head">
-                <div className="cl-ms-progress">
-                  <div className="cl-ms-progress-top">
-                    <div>
-                      <div className="cl-ms-progress-l">Overall progress</div>
-                      <div className="cl-ms-progress-v">{projectProgress(project)}%</div>
-                    </div>
-                    <div className="cl-ms-current">
-                      <span className="cl-ms-current-l">Current stage</span>
-                      <span className="cl-ms-current-v">
-                        {stageMeta(currentStage(project).key)?.label}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="cl-ms-bar">
-                    <span style={{ width: `${projectProgress(project)}%` }} />
-                  </div>
-                </div>
-              </section>
-
-              <section className="card">
-                <div className="card-h">
+            <section className="card cl-ms-head">
+              <div className="cl-ms-progress">
+                <div className="cl-ms-progress-top">
                   <div>
-                    <div className="ct">What we&apos;re working on</div>
-                    <div className="cs">
-                      Every stage of your engagement. Each one moves when the work behind
-                      it actually completes — not on a schedule.
-                    </div>
+                    <div className="cl-ms-progress-l">Overall progress</div>
+                    <div className="cl-ms-progress-v">{projectProgress(project)}%</div>
+                  </div>
+                  <div className="cl-ms-current">
+                    <span className="cl-ms-current-l">Current stage</span>
+                    <span className="cl-ms-current-v">
+                      {stageMeta(currentStage(project).key)?.label}
+                    </span>
                   </div>
                 </div>
-
-                <div className="cl-steps">
-                  {stages.map((stage, i) => {
-                    const meta = stageMeta(stage.key);
-                    const sm = STAGE_STATUS_META[stage.status];
-                    const last = i === stages.length - 1;
-                    return (
-                      <div className={`cl-step ${stage.status}`} key={stage.key}>
-                        <div className="cl-step-rail">
-                          <span className="cl-step-node" style={{ color: sm.color }}>
-                            <span className="material-symbols-rounded">{sm.icon}</span>
-                          </span>
-                          {!last && <span className="cl-step-line" />}
-                        </div>
-                        <div className="cl-step-body">
-                          <div className="cl-step-top">
-                            <span className="cl-step-ic material-symbols-rounded">
-                              {meta?.icon ?? "radio_button_unchecked"}
-                            </span>
-                            <span className="cl-step-t">{meta?.label ?? stage.key}</span>
-                            <span className={`status-pill ${sm.cls}`}>{sm.label}</span>
-                          </div>
-                          {/* `auto_source` names the job or audit that advances this
-                              stage - the honest answer to "who is doing what". */}
-                          {present(stage.auto_source) && (
-                            <div className="cl-step-src">{stage.auto_source}</div>
-                          )}
-                          {present(stage.updated_at) && (
-                            <div className="cl-step-time">
-                              <span className="material-symbols-rounded">schedule</span>
-                              Updated {stage.updated_at}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="cl-ms-bar">
+                  <span style={{ width: `${projectProgress(project)}%` }} />
                 </div>
-              </section>
-            </>
+              </div>
+            </section>
           ) : (
             <section className="card">
               <div className="pt-empty">

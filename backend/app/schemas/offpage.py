@@ -41,6 +41,9 @@ Web2ReviewAction = Literal["approve", "reject"]
 BacklinkStatus = Literal["new", "lost", "toxic"]
 NapStatus = Literal["consistent", "inconsistent", "missing"]
 CitationAction = Literal["Submit", "Update"]
+# Request-side verbs for the legacy /offpage/citations/{id}/action endpoint. Submit/
+# Update are refused (evidence-gated, Phase 0); Note is the surviving annotation verb.
+CitationActionVerb = Literal["Submit", "Update", "Note"]
 # 7B-4: the citation SUBMISSION pipeline's state - verbatim from
 # public.citation_submit_status (0045) / frontend CitationSubmitStatus (offpage.ts).
 CitationSubmitStatus = Literal[
@@ -328,22 +331,26 @@ class Web2CatalogResponse(BaseModel):
 
 
 class CitationActionRequest(BaseModel):
-    """POST /offpage/citations/{id}/action body: mark a single listing handled.
+    """POST /offpage/citations/{id}/action body: annotate a single listing.
 
-    ``Submit`` (a missing listing was created) or ``Update`` (a drifted listing was
-    fixed / re-verified) both resolve the NAP to ``consistent``. ``note`` optionally
-    records the detail; omitted leaves the existing note.
+    Evidence-gated (off-page redesign Phase 0): ``Submit``/``Update`` used to resolve
+    the NAP to ``consistent`` and advance ``submit_status`` on a lead's bare
+    assertion — the one write path that could claim a listing state nobody verified.
+    Both now refuse with 409; a listing becomes ``live``/``consistent`` only through
+    the probe-verified operator-queue complete endpoint. ``Note`` records ``note``
+    and changes no state.
     """
 
-    action: CitationAction
+    action: CitationActionVerb
     note: str | None = None
 
 
 class CitationBulkRequest(BaseModel):
-    """POST /offpage/citations/bulk body: mark many listings consistent at once.
+    """POST /offpage/citations/bulk body — RETIRED assertion (kept for the 409).
 
-    ``ids`` is the set of citation row ids the operator submitted/updated in a batch;
-    each resolves to ``consistent`` (action -> ``Update``).
+    Bulk "mark consistent" was a pure evidence assertion (no URL, no probe); the
+    endpoint now always refuses with 409 pointing at the probe path. The body shape
+    is kept so existing callers get the explanatory refusal, not a 422.
     """
 
     ids: list[str] = Field(min_length=1)
