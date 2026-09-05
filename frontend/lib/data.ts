@@ -324,6 +324,20 @@ export const ACTIVITY_META: Record<ActivityKind, { icon: string; c: string }> = 
   client: { icon: "diversity_3", c: SERIES.c2 },
 };
 
+/** ACTIVITY_META for any kind, including one this build has never heard of.
+ *
+ *  `activity_log.kind` is plain TEXT in the database - no enum, no CHECK - so the
+ *  Literal union is a claim about our own writers, not a guarantee about the rows.
+ *  A single bad row (a backend writing `kind:"team"`, which is not a member of the
+ *  union) made `ACTIVITY_META[kind]` undefined, and the feed read `.c` off it and
+ *  threw - one malformed row taking down the whole timeline for everyone.
+ *
+ *  A neutral fallback is the honest render: we do not know this kind, so show it
+ *  plainly rather than crash or silently drop it. Dropping would be worse - an
+ *  activity log that hides entries it cannot classify is no longer a log. */
+export const activityMeta = (kind: string): { icon: string; c: string } =>
+  ACTIVITY_META[kind as ActivityKind] ?? { icon: "bolt", c: "var(--muted)" };
+
 export type Activity = {
   id: string;
   kind: ActivityKind;

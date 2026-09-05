@@ -74,8 +74,11 @@ async def create_team_request(
             "created_by": user.id,
         },
     )
+    # kind="member": ActivityKind is a CLOSED 7-value union mirrored in
+    # frontend/lib/data.ts (ACTIVITY_META is keyed by it) - "team" is not a member
+    # of it, and a team request is a team-MEMBER action.
     await record_activity(
-        user, kind="team", action="raised a team request", target=subject,
+        user, kind="member", action="raised a team request", target=subject,
     )
     mail_subject, html, text = _alert(member_name, subject, detail, kind)
     await email_admin(mail_subject, html, text)

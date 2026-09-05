@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ACTIVITY_META, type Activity, type ActivityKind } from "@/lib/data";
+import { activityMeta, type Activity, type ActivityKind } from "@/lib/data";
 
 const FILTERS: { key: ActivityKind | "all"; label: string }[] = [
   { key: "all", label: "All" },
@@ -34,7 +34,7 @@ export default function ActivityLog({ log }: { log: Activity[] }) {
 
       <div className="timeline">
         {rows.map((a) => {
-          const meta = ACTIVITY_META[a.kind];
+          const meta = activityMeta(a.kind);
           return (
             <div className="tl-row" key={a.id}>
               <div className="tl-rail">
