@@ -1,7 +1,7 @@
 """Inferred layout -> a real, oracle-validated Elementor document (stage 4).
 
 EVERY KEY IS CHECKED AGAINST ELEMENTOR'S OWN REGISTRY BEFORE ANYTHING LEAVES THIS
-MODULE. The oracle (`tests/fixtures/elementor/oracle_4_7.json`) is the controls
+MODULE. The oracle (`app/services/data/elementor_oracle_4_7.json`) is the controls
 registry parsed out of Elementor 4.7's editor bootstrap on the target site, unioned
 with the keys the reference page's real `_elementor_data` uses. A settings key the
 registry does not know is stored and silently IGNORED by the editor, which is how two
@@ -44,10 +44,24 @@ from app.services.replica_capability import TargetCapability
 #: header and the menu the publisher registers cannot drift apart.
 _NAV_MENU_NAME = "AIOS Replica"
 
-_ORACLE_PATH = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "tests" / "fixtures" / "elementor" / "oracle_4_7.json"
-)
+#: PACKAGE DATA, not a test fixture.
+#:
+#: This lived at `backend/tests/fixtures/elementor/oracle_4_7.json` and was loaded via
+#: `parents[2] / "tests" / ...`. That resolves in a source checkout and CANNOT resolve
+#: in production: the app runs from the venv (backend/Dockerfile copies only
+#: db/migrations and the audit engine into the runtime stage), so `parents[2]` is
+#: site-packages and `tests/` was never shipped. Every replication died on
+#:   FileNotFoundError: /opt/venv/.../site-packages/tests/fixtures/elementor/oracle_4_7.json
+#: while the whole test suite passed, because a test run always has the checkout.
+#:
+#: pyproject's force-include comment predicted this exact failure for the doctrine
+#: corpus ("present in every test run and absent in production"). Same trap, second
+#: file. Inside `app/` it is carried by `packages = ["app"]`, so it needs no
+#: force-include entry and cannot be forgotten again.
+#:
+#: The TESTS read it through `load_oracle()` too, so there is ONE copy: a test can
+#: never pass against a file production does not have.
+_ORACLE_PATH = pathlib.Path(__file__).resolve().parent / "data" / "elementor_oracle_4_7.json"
 
 
 class UnknownSettingError(ValueError):
