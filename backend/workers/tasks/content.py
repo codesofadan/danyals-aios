@@ -1337,6 +1337,75 @@ def _spacing_px(scale: str) -> int:
     return 48  # comfortable / default
 
 
+# VERTICAL RHYTHM for a page built from a MEASURED design profile.
+#
+# `_classic_style_block` (the TEMPLATE-only path) has always set line-height, a body
+# size and per-heading margins. `_design_style_block` set none of them - it emitted a
+# container width, fonts and colours and stopped. So a page built from a measured
+# design inherited whatever vertical rhythm the client's THEME happened to have, and
+# a theme that resets `p{margin:0}` - most modern block themes do - rendered the body
+# as paragraph, paragraph, paragraph with no gap at all. Measuring the client's site
+# therefore produced WORSE typography than not measuring it, which is the opposite of
+# the intent.
+#
+# These are palette-agnostic and set only properties the profile does not: the profile
+# still owns font-family, colour, container width and the component styling. Emitted
+# FIRST so any profile-derived declaration on the same property still wins.
+_PROSE_RHYTHM_CSS = (
+    ".aios-page{line-height:1.72}"
+    ".aios-page p{margin:0 0 1.15em}"
+    ".aios-page h1{line-height:1.15;margin:0 0 .45em}"
+    ".aios-page h2{line-height:1.2;margin:1.9em 0 .6em}"
+    ".aios-page h3{line-height:1.3;margin:1.5em 0 .4em}"
+    ".aios-page h4{line-height:1.35;margin:1.3em 0 .35em}"
+    # A heading already carries the space above it; a paragraph directly after one
+    # must not add its own on top, or the gap reads as a broken column.
+    ".aios-page h1+p,.aios-page h2+p,.aios-page h3+p,.aios-page h4+p{margin-top:0}"
+    ".aios-page ul,.aios-page ol{margin:0 0 1.3em;padding-left:1.45em}"
+    ".aios-page li{margin:.45em 0}"
+    ".aios-page li>p{margin:0}"
+    ".aios-page blockquote{margin:1.9em 0;padding:.4em 0 .4em 1.2em}"
+    ".aios-page table{margin:1.9em 0;border-collapse:collapse;width:100%}"
+    ".aios-page th,.aios-page td{padding:.7em .9em;text-align:left}"
+    ".aios-page figure{margin:2em 0}"
+    ".aios-page figcaption{margin-top:.6em;font-size:.9em;opacity:.72}"
+    # The last child of a section must not add a margin on top of the section's own
+    # padding, which is what makes consecutive sections drift apart unevenly.
+    ".aios-page section>*:last-child{margin-bottom:0}"
+)
+
+# A READING MEASURE for prose inside a wide container.
+#
+# `container_width` is measured from the client's site and is routinely 1200px+, which
+# is right for a hero or a card grid and wrong for body copy: a 1200px line of 14px
+# text runs past 180 characters, roughly two and a half times the readable maximum.
+# Prose is capped and centred inside the full-width container, so the layout stays the
+# client's while the text stays readable. Grids and banners are untouched - they are
+# addressed by their own `.aios-layout-*` hooks and are meant to span.
+_PROSE_MEASURE_CSS = (
+    ".aios-page section>p,.aios-page section>h2,.aios-page section>h3,"
+    ".aios-page section>h4,.aios-page section>blockquote,"
+    ".aios-page section>ul:not([class]),.aios-page section>ol:not([class])"
+    "{max-width:72ch;margin-left:auto;margin-right:auto}"
+)
+
+
+def _readable_base_size(measured: str, *, floor_px: float = 16.0) -> str:
+    """The measured body size, raised to a readable floor. Non-px values pass through.
+
+    Only a `px` value is comparable without a rendering context, so `rem`/`em`/`%` are
+    returned untouched rather than guessed at.
+    """
+    text = (measured or "").strip()
+    if not text.endswith("px"):
+        return text
+    try:
+        value = float(text[:-2])
+    except ValueError:
+        return text
+    return f"{floor_px:g}px" if value < floor_px else text
+
+
 def _design_style_block(profile: dict[str, Any]) -> str:
     """Build a self-contained ``<style>`` block from the design profile's palette /
     typography / layout / component tokens, scoped to ``.aios-page`` so it only styles
@@ -1356,13 +1425,20 @@ def _design_style_block(profile: dict[str, Any]) -> str:
     accent = str(palette.get("accent") or "").strip()
     primary = str(palette.get("primary") or "").strip()
 
+    rules.append(_PROSE_RHYTHM_CSS)
+    rules.append(_PROSE_MEASURE_CSS)
+
     page_decls = ["margin:0 auto"]
     if container:
         page_decls.append(f"max-width:{container}")
     if body_font:
         page_decls.append(f"font-family:{body_font}")
     if base_size:
-        page_decls.append(f"font-size:{base_size}")
+        # FLOORED at 16px. A measured base size is whatever the client's template uses
+        # for its own chrome, and a 14px body on a 1200px page is unreadable as an
+        # article; 16px is also the point below which mobile Safari zooms the viewport.
+        # The measured value is honoured whenever it clears the floor.
+        page_decls.append(f"font-size:{_readable_base_size(base_size)}")
     if text_color:
         page_decls.append(f"color:{text_color}")
     rules.append(f"{page}{{{';'.join(page_decls)}}}")
