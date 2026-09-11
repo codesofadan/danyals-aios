@@ -7,7 +7,7 @@ the capacity input is the ONLY thing that moves.
 
 from __future__ import annotations
 
-from app.services import audit_roadmap as RM
+from app.services import audit_roadmap as RM  # noqa: N812 - module-as-namespace alias
 
 
 def _f(fid="f1", **over):

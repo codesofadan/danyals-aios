@@ -133,19 +133,25 @@ def seed() -> Iterator[dict[str, Any]]:
             )
 
             # --- 3 audits for A (created_at t0<t1<t2) + 1 for B (isolation proof).
+            # visible_to_client=true on BOTH tenants (the 0096 operator opt-in): the
+            # portal-repo reads assert A's rows through the view, and B's row must be
+            # hidden from A by TENANCY, not by happening to be unpublished.
             for i in range(3):
                 cur.execute(
                     "insert into public.audits "
-                    "(client_id, client_name, url, types, tier, status, created_at) "
-                    "values (%s, %s, %s, %s, 'free', 'done', %s) returning id",
+                    "(client_id, client_name, url, types, tier, status, created_at, "
+                    " visible_to_client) "
+                    "values (%s, %s, %s, %s, 'free', 'done', %s, true) returning id",
                     (tenant_a, f"ZParity A {tag}", f"http://a{i}.example",
                      ["technical"], t0 + timedelta(minutes=i)),
                 )
                 audit_ids.append(str(cur.fetchone()["id"]))
             cur.execute(
                 "insert into public.audits "
-                "(client_id, client_name, url, types, tier, status, created_at) "
-                "values (%s, %s, 'http://b.example', %s, 'free', 'queued', %s) returning id",
+                "(client_id, client_name, url, types, tier, status, created_at, "
+                " visible_to_client) "
+                "values (%s, %s, 'http://b.example', %s, 'free', 'queued', %s, true) "
+                "returning id",
                 (tenant_b, f"AParity B {tag}", ["technical"], t0 + timedelta(minutes=5)),
             )
             audit_b_id = str(cur.fetchone()["id"])
@@ -320,7 +326,10 @@ def test_audits_repo_order_and_insert(seed: dict[str, Any]) -> None:
 # --- activity_repo ------------------------------------------------------------
 def test_activity_repo_order_and_pagination(seed: dict[str, Any]) -> None:
     repo = ActivityRepo(seed["staff_uid"])
-    ids = [str(r["id"]) for r in repo.list_activity()]
+    # limit=None: the seeded rows are FAR-PAST (t0=2020) on purpose, so on a shared
+    # dev DB with real activity they fall beyond the default 50-row first page - the
+    # order proof needs the full listing, not the first page.
+    ids = [str(r["id"]) for r in repo.list_activity(limit=None)]
     assert _relative_order(ids, list(reversed(seed["activity_ids"])))  # created_at desc
     assert len(repo.list_activity(limit=1)) <= 1  # limit cap honored
 
@@ -355,7 +364,9 @@ def test_cost_repo_dial_roundtrip(seed: dict[str, Any]) -> None:
 
 def test_cost_repo_log_and_today_spent(seed: dict[str, Any]) -> None:
     repo = CostRepo(seed["staff_uid"])
-    log_ids = [str(r["id"]) for r in repo.list_cost_log()]
+    # limit=None for the same reason as the activity test: the far-past seeded row
+    # sits beyond the default first page on a shared dev DB with real cost rows.
+    log_ids = [str(r["id"]) for r in repo.list_cost_log(limit=None)]
     # Newest first: the TODAY row precedes the far-past row.
     assert _relative_order(log_ids, [seed["cost_log_ids"][0], seed["cost_log_ids"][1]])
     # today_spent sums only rows created today (>= my seeded today cost).

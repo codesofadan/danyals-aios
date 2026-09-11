@@ -232,7 +232,12 @@ function aios_publisher_apply_menu( $plan, $ids ) {
 
 	$added = 0;
 	$pages = isset( $plan['pages'] ) && is_array( $plan['pages'] ) ? $plan['pages'] : array();
-	foreach ( $pages as $page ) {
+	$pending = $pages;
+	$passes  = 0;
+	while ( ! empty( $pending ) && $passes <= count( $pages ) ) {
+		$next = array();
+		$progress = false;
+		foreach ( $pending as $page ) {
 		if ( ! is_array( $page ) ) {
 			continue;
 		}
@@ -247,7 +252,16 @@ function aios_publisher_apply_menu( $plan, $ids ) {
 
 		$parent_item = 0;
 		$parent_slug = sanitize_title( (string) ( isset( $page['parent_slug'] ) ? $page['parent_slug'] : '' ) );
-		if ( '' !== $parent_slug && isset( $ids[ $parent_slug ], $seen[ (int) $ids[ $parent_slug ] ] ) ) {
+		if ( '' !== $parent_slug && isset( $ids[ $parent_slug ] ) ) {
+			// The parent page exists in this plan. Defer ONE pass if its menu item is
+			// not created yet, so we can attach under it. A parent NOT in $ids (absent
+			// or failed to create) is NOT deferred here — the child falls through to top
+			// level rather than being dropped, and the post-loop safety net catches any
+			// child whose parent is excluded from the menu entirely.
+			if ( ! isset( $seen[ (int) $ids[ $parent_slug ] ] ) ) {
+				$next[] = $page;
+				continue;
+			}
 			$parent_item = (int) $seen[ (int) $ids[ $parent_slug ] ];
 		}
 
@@ -260,6 +274,50 @@ function aios_publisher_apply_menu( $plan, $ids ) {
 				'menu-item-type'      => 'post_type',
 				'menu-item-status'    => 'publish',
 				'menu-item-parent-id' => $parent_item,
+				'menu-item-position'  => (int) ( isset( $page['menu_order'] ) ? $page['menu_order'] : 0 ),
+			)
+		);
+		if ( ! is_wp_error( $item_id ) ) {
+			$seen[ $page_id ] = (int) $item_id;
+			++$added;
+			$progress = true;
+		}
+	}
+		if ( ! $progress ) {
+			break;
+		}
+		$pending = $next;
+		++$passes;
+	}
+
+	// SAFETY NET: any in-menu page that never received a menu item (its parent was
+	// excluded from the menu, failed to create, or formed a cycle) is added at TOP
+	// LEVEL rather than silently dropped from the nav. Idempotent — a page already in
+	// $seen is skipped.
+	foreach ( $pages as $page ) {
+		if ( ! is_array( $page ) ) {
+			continue;
+		}
+		if ( isset( $page['in_menu'] ) && ! $page['in_menu'] ) {
+			continue;
+		}
+		$slug = sanitize_title( (string) ( isset( $page['slug'] ) ? $page['slug'] : '' ) );
+		if ( '' === $slug || ! isset( $ids[ $slug ] ) ) {
+			continue;
+		}
+		$page_id = (int) $ids[ $slug ];
+		if ( isset( $seen[ $page_id ] ) ) {
+			continue;
+		}
+		$item_id = wp_update_nav_menu_item(
+			$menu_id,
+			0,
+			array(
+				'menu-item-object-id' => $page_id,
+				'menu-item-object'    => 'page',
+				'menu-item-type'      => 'post_type',
+				'menu-item-status'    => 'publish',
+				'menu-item-parent-id' => 0,
 				'menu-item-position'  => (int) ( isset( $page['menu_order'] ) ? $page['menu_order'] : 0 ),
 			)
 		);

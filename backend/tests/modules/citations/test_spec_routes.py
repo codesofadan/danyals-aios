@@ -280,13 +280,14 @@ async def test_writing_a_spec_requires_a_lead(
     assert resp.status_code == 403
 
 
-async def test_activation_promotes_the_directory_to_route_b() -> None:
-    """The route move is the point, not bookkeeping: gating the loader on route='B' while
-    nothing could ever SET it produced a whitelist that could never have a member."""
+async def test_activation_no_longer_promotes_the_directory_to_route_b() -> None:
+    """Route B is RETIRED with the bot (0132): "the bot submits here" cannot be earned
+    when there is no bot. Activation now grants exactly one thing - extension autofill
+    in the operator queue - so re-adding the route promotion would recreate a route
+    the migration just emptied."""
     import inspect
 
     from app.modules.citations.repo import DirectorySpecsRepo
 
     src = inspect.getsource(DirectorySpecsRepo.activate)
-    assert "update public.directories set route = 'B'" in src
-    assert "route <> 'F'" in src, "a prohibited directory must never be promoted"
+    assert "route = 'B'" not in src, "route B is retired - activation must not write it"

@@ -39,12 +39,18 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
 from app.logging_setup import get_logger
-from integrations.citations import CitationRecord, classify_citation
+from integrations.citations import (
+    BusinessListing,
+    CitationRecord,
+    classify_citation,
+    dataforseo_listings_from_settings,
+    evidence_level_for,
+)
 from integrations.errors import ProviderNotConfiguredError
 from integrations.http_client import HttpProviderClient
 
@@ -149,7 +155,13 @@ class FoursquareListing:
 class _Candidate:
     """One discovery candidate before Claude's keep/classify pass. ``name``/``phone``/
     ``address`` are whatever the source surfaced (a Foursquare field, a Firecrawl scrape,
-    or empty for a bare Serper hit); ``snippet`` carries the SERP text Claude reads."""
+    or empty for a bare Serper hit); ``snippet`` carries the SERP text Claude reads.
+
+    Evidence bookkeeping (0129): ``sources`` is every INDEPENDENT source that surfaced
+    this same listing (two sources agreeing is what upgrades an unfetched hit to
+    ``confirmed``); ``queries`` records which searches produced it; ``fetched`` is True
+    only when the listing's own data/page was actually read (a Foursquare API read, a
+    Firecrawl render) - never for a bare SERP snippet."""
 
     source: str
     domain: str
@@ -160,6 +172,13 @@ class _Candidate:
     name: str = ""
     phone: str = ""
     address: str = ""
+    fetched: bool = False
+    sources: list[str] = field(default_factory=list)
+    queries: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.sources and self.source:
+            self.sources = [self.source]
 
 
 # --------------------------------------------------------------------------- #
@@ -362,6 +381,31 @@ class FakeFoursquarePlaces:
 
 
 # --------------------------------------------------------------------------- #
+# Business-listings corroboration seam (0129): a POI database READ (DataForSEO
+# Business Listings). Evidence only - it never contributes candidates.
+# --------------------------------------------------------------------------- #
+@runtime_checkable
+class BusinessListings(Protocol):
+    """Search a POI/listings database for a business. Impls MUST NOT raise for a
+    provider-side failure - they return ``[]`` so discovery degrades (the source is
+    skipped and nothing else changes)."""
+
+    def search(self, *, name: str, phone: str = "", limit: int = 5) -> list[BusinessListing]: ...
+
+
+class FakeBusinessListings:
+    """Deterministic, offline ``BusinessListings`` - a fixed record set (default [])."""
+
+    def __init__(self, listings: list[BusinessListing] | None = None) -> None:
+        self._listings = list(listings or [])
+        self.calls = 0
+
+    def search(self, *, name: str, phone: str = "", limit: int = 5) -> list[BusinessListing]:
+        self.calls += 1
+        return list(self._listings[:limit])
+
+
+# --------------------------------------------------------------------------- #
 # Helpers (pure) - domain mapping, NAP normalisation, prompt + parse.
 # --------------------------------------------------------------------------- #
 def _domain_of(url: str) -> str:
@@ -448,6 +492,7 @@ class SearchCitationProvider:
         foursquare: FoursquarePlaces | None = None,
         classifier: SystemSummarizer | None = None,
         firecrawl: Firecrawl | None = None,
+        listings: BusinessListings | None = None,
         geo: str | None = None,
         model: str = "claude-haiku-4-5",
         max_tokens: int = 2000,
@@ -458,6 +503,10 @@ class SearchCitationProvider:
         self._foursquare = foursquare
         self._classifier = classifier
         self._firecrawl = firecrawl
+        # OPTIONAL corroboration (DataForSEO Business Listings). Strictly additive:
+        # absent -> no call, identical candidates, identical-or-weaker tiers. It can
+        # never ADD a candidate - a POI database is not a directory scanner (plan C5).
+        self._listings = listings
         self._geo = geo
         self._model = model
         self._max_tokens = max_tokens
@@ -488,6 +537,12 @@ class SearchCitationProvider:
         city = anchor.city or _city_hint(business)
         candidates = self._collect_candidates(business, reference, city)
         self._enrich_with_firecrawl(candidates)
+        # DataForSEO corroboration (0129): a second, independent NAP anchor - most
+        # valuable exactly when Places is keyless/ambiguous. DELIBERATELY consulted
+        # AFTER the candidates are fixed and NEVER fed into the classifier's reference:
+        # its only power is to strengthen evidence (uncertain -> confirmed), so its
+        # absence yields identical candidates with identical-or-weaker tiers.
+        corroboration = self._corroborating_listing(reference, business)
 
         records: list[CitationRecord] = []
         # The Google Business Profile anchor is itself the #1 citation (the canonical
@@ -498,12 +553,67 @@ class SearchCitationProvider:
                     directory=_GOOGLE_BUSINESS,
                     nap_status="consistent",
                     note="Google Business Profile (canonical NAP)",
+                    url=anchor.listing_url,
+                    # A Places read IS a fetch of the listing's own data; with no
+                    # listing URL the anchor is honest evidence but not a confirmable
+                    # URL, so the tier degrades to uncertain rather than overclaiming.
+                    evidence_level=evidence_level_for(
+                        url_found=bool(anchor.listing_url),
+                        nap_matched=True,
+                        page_fetched=True,
+                        hit_found=True,
+                    ),
+                    evidence={
+                        "sources": ["places"],
+                        "queries": [business],
+                        "snippet": "",
+                        "nap": {
+                            "name": anchor.name,
+                            "phone": anchor.phone,
+                            "address": anchor.address,
+                        },
+                        "classifier": "places_anchor",
+                    },
                 )
             )
 
-        classified = self._classify(reference, candidates)
-        records.extend(classified)
+        classified, classifier_name = self._classify(reference, candidates)
+        records.extend(_evidence_records(classified, candidates, classifier_name, corroboration))
         return _dedupe(records, limit=limit)
+
+    def _corroborating_listing(
+        self, reference: CanonicalNAP, business: str
+    ) -> BusinessListing | None:
+        """The POI-database record for THIS business, or ``None``. Never raises.
+
+        ``None`` is the normal state (source unconfigured, no match, provider down) and
+        changes nothing - corroboration only ever ADDS evidence. A record matches when
+        its name token-overlaps the reference and its phone (when both are known) does
+        not contradict it - a same-name different-phone record is a different branch,
+        which corroborates nothing.
+
+        COST: this is one more paid call inside the already cost-gated citation
+        discovery pull (the ``citation_discovery`` dial gates the whole
+        ``run_citation_monitor`` sweep and commits one per-pull estimate; there is no
+        per-source metering, so this call is folded into that single estimate)."""
+        if self._listings is None:
+            return None
+        name = reference.name or business
+        try:
+            results = self._listings.search(name=name, phone=reference.phone)
+        except Exception:
+            logger.info("citation_discovery_listings_failed")
+            return None
+        ref_tokens = _name_tokens(name)
+        ref_phone = _digits(reference.phone)
+        for item in results:
+            if not (ref_tokens & _name_tokens(item.name)):
+                continue  # a different business entirely
+            item_phone = _digits(item.phone)
+            if ref_phone and item_phone and ref_phone != item_phone:
+                continue  # same name, different branch - not corroboration
+            return item
+        return None
 
     def _anchor(self, business: str) -> CanonicalNAP:
         """Resolve the canonical NAP + GBP listing, or an empty NAP (never raises)."""
@@ -530,11 +640,14 @@ class SearchCitationProvider:
             is_own_site = bool(own_domain) and _registrable(cand.domain) == own_domain
             if cand.domain in _SKIP_DOMAINS or is_own_site:
                 continue
-            by_directory.setdefault(cand.directory.lower(), cand)
+            _merge_candidate(by_directory, cand)
 
         fsq = self._foursquare_candidate(name, city)
         if fsq is not None:
-            by_directory.setdefault(fsq.directory.lower(), fsq)
+            # MERGE, don't drop: a listing that Serper found AND the Foursquare API
+            # read is TWO independent sources agreeing about the same listing - the
+            # exact fact the >=2-sources corroboration rule (0129) counts.
+            _merge_candidate(by_directory, fsq)
 
         return list(by_directory.values())
 
@@ -573,6 +686,7 @@ class SearchCitationProvider:
                         url=url,
                         title=organic.title,
                         snippet=organic.snippet or "",
+                        queries=[query],
                     )
                 )
         return out
@@ -600,6 +714,9 @@ class SearchCitationProvider:
             name=listing.name,
             phone=listing.phone,
             address=listing.address,
+            # A direct API read of the listing's own record IS a fetch: the NAP fields
+            # above are the listing's exact data, not a search snippet.
+            fetched=True,
         )
 
     def _enrich_with_firecrawl(self, candidates: list[_Candidate]) -> None:
@@ -621,19 +738,25 @@ class SearchCitationProvider:
             text = scraped.get(cand.url)
             if text:
                 cand.snippet = f"{cand.snippet} {text}".strip()
+                # The listing's own page was actually rendered - the NAP judgement made
+                # from this candidate now rests on a fetch, not a snippet.
+                cand.fetched = True
+                if "firecrawl" not in cand.sources:
+                    cand.sources.append("firecrawl")
 
     def _classify(
         self, canonical: CanonicalNAP, candidates: list[_Candidate]
-    ) -> list[CitationRecord]:
+    ) -> tuple[list[CitationRecord], str]:
         """Claude keeps genuine listings + judges NAP; falls back to a deterministic
-        heuristic when Claude is absent or fails. Never raises."""
+        heuristic when Claude is absent or fails. Never raises. Returns the records
+        plus WHICH classifier judged them (recorded in the evidence receipt)."""
         if not candidates:
-            return []
+            return [], "none"
         if self._classifier is not None:
             claude = self._classify_with_claude(canonical, candidates)
             if claude is not None:
-                return claude
-        return _heuristic_records(canonical, candidates)
+                return claude, "claude"
+        return _heuristic_records(canonical, candidates), "heuristic"
 
     def _classify_with_claude(
         self, canonical: CanonicalNAP, candidates: list[_Candidate]
@@ -666,6 +789,106 @@ class SearchCitationProvider:
 _TOP_DIRECTORY_SITES = (
     "yelp.com", "facebook.com", "yellowpages.com", "bbb.org", "mapquest.com", "foursquare.com",
 )
+
+
+def _merge_candidate(by_directory: dict[str, _Candidate], cand: _Candidate) -> None:
+    """Fold ``cand`` into the per-directory map: first sighting wins the slot, later
+    sightings of the SAME directory merge their sources/queries/NAP into it. Two
+    independent sources agreeing is evidence (the >=2 corroboration rule), so dropping
+    the second sighting - the old ``setdefault`` - silently discarded it."""
+    key = cand.directory.lower()
+    existing = by_directory.get(key)
+    if existing is None:
+        by_directory[key] = cand
+        return
+    for src in cand.sources:
+        if src not in existing.sources:
+            existing.sources.append(src)
+    for query in cand.queries:
+        if query not in existing.queries:
+            existing.queries.append(query)
+    existing.fetched = existing.fetched or cand.fetched
+    existing.name = existing.name or cand.name
+    existing.phone = existing.phone or cand.phone
+    existing.address = existing.address or cand.address
+    existing.url = existing.url or cand.url
+    if cand.snippet and cand.snippet not in existing.snippet:
+        existing.snippet = f"{existing.snippet} {cand.snippet}".strip()
+
+
+def _evidence_records(
+    classified: list[CitationRecord],
+    candidates: list[_Candidate],
+    classifier: str,
+    corroboration: BusinessListing | None,
+) -> list[CitationRecord]:
+    """Attach each classified verdict back to its candidate's URL + evidence (0129).
+
+    PURE. The tier comes from ``evidence_level_for`` and nothing else:
+
+    * a candidate whose own page/data was FETCHED and judged consistent -> confirmed;
+    * judged inconsistent -> inconsistent_nap (the URL exists, the NAP drifted);
+    * consistent but unfetched -> confirmed only when >= 2 independent sources agree
+      (Serper + Foursquare, Serper + DataForSEO corroboration, ...), else uncertain;
+    * a verdict Claude renamed away from any candidate keeps no URL -> uncertain.
+
+    ``corroboration`` (the DataForSEO POI record for this business) counts as one more
+    independent source for candidates judged CONSISTENT with the canonical NAP - it can
+    only ever strengthen a tier, never change the candidate set or a drift verdict."""
+    by_key = {c.directory.lower(): c for c in candidates}
+    out: list[CitationRecord] = []
+    for rec in classified:
+        cand = by_key.get(rec.directory.lower())
+        if cand is None:
+            out.append(
+                CitationRecord(
+                    directory=rec.directory,
+                    nap_status=rec.nap_status,
+                    note=rec.note,
+                    evidence_level=evidence_level_for(url_found=False, hit_found=True),
+                    evidence={
+                        "sources": [],
+                        "queries": [],
+                        "snippet": "",
+                        "nap": {},
+                        "classifier": classifier,
+                    },
+                )
+            )
+            continue
+        sources = list(dict.fromkeys(cand.sources))
+        nap_matched: bool | None
+        if rec.nap_status == "consistent":
+            nap_matched = True
+        elif rec.nap_status == "inconsistent":
+            nap_matched = False
+        else:
+            nap_matched = None
+        if corroboration is not None and nap_matched is True and "dataforseo" not in sources:
+            sources.append("dataforseo")
+        out.append(
+            CitationRecord(
+                directory=rec.directory,
+                nap_status=rec.nap_status,
+                note=rec.note,
+                url=cand.url,
+                evidence_level=evidence_level_for(
+                    url_found=bool(cand.url),
+                    nap_matched=nap_matched,
+                    page_fetched=cand.fetched,
+                    independent_sources=len(sources),
+                    hit_found=True,
+                ),
+                evidence={
+                    "sources": sources,
+                    "queries": list(cand.queries),
+                    "snippet": cand.snippet[:600],
+                    "nap": {"name": cand.name, "phone": cand.phone, "address": cand.address},
+                    "classifier": classifier,
+                },
+            )
+        )
+    return out
 
 
 def _city_hint(business: str) -> str:
@@ -870,6 +1093,10 @@ def build_search_citation_provider(settings: Settings) -> SearchCitationProvider
     places = _build_places_anchor(settings, serper_key.get_secret_value())
     foursquare = _build_foursquare(settings)
     firecrawl = firecrawl_from_settings(settings)
+    # DataForSEO Business Listings corroboration - gated on the DataForSEO creds the
+    # same way Firecrawl is gated on its key: present -> wired, absent -> None and the
+    # pipeline is byte-identical minus the extra evidence.
+    listings = dataforseo_listings_from_settings(settings)
 
     return SearchCitationProvider(
         serp=serp,
@@ -877,6 +1104,7 @@ def build_search_citation_provider(settings: Settings) -> SearchCitationProvider
         foursquare=foursquare,
         classifier=classifier,
         firecrawl=firecrawl,
+        listings=listings,
         model=settings.anthropic_model_summary,
     )
 

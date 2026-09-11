@@ -90,12 +90,15 @@ pytestmark = pytest.mark.unit
 _CATALOG_ITEM_KEYS = {
     "id", "name", "homepageUrl", "signupUrl", "publishMethod", "authType",
     "authorityTier", "market", "automationReady", "notes",
+    # 0135's capability matrix: the routing lane, its free-text status, when a real
+    # check last passed, and two TRI-state capability facts (null = not assessed).
+    "mechanism", "lastTestedAt", "adapterStatus", "linkVerifiable", "mediaSupport",
 }
 # `credentialFields` is served rather than duplicated in the frontend so the
 # registration form cannot drift from what the publisher actually validates
 # (app/schemas/offpage.py). It is part of the contract, so it belongs here -
 # this set is the guard that a response key is never added or removed silently.
-_CATALOG_KEYS = {"total", "automationReady", "byAuthType", "platforms",
+_CATALOG_KEYS = {"total", "automationReady", "byAuthType", "byMechanism", "platforms",
                  "credentialFields"}
 
 _VALID_AUTH_TYPES = {"api", "oauth", "automation", "anonymous"}
@@ -159,6 +162,42 @@ def test_from_row_unknown_enum_values_fall_back() -> None:
     assert item.market == "global"
 
 
+def test_from_row_maps_the_capability_matrix_columns() -> None:
+    import datetime
+
+    dumped = Web2PlatformCatalogResponse.from_row(
+        _platform_row(
+            mechanism="extension",
+            adapter_status="No public write API.",
+            last_tested_at=datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC),
+            link_verifiable=False,
+            media_support=True,
+        )
+    ).model_dump(by_alias=True)
+    assert dumped["mechanism"] == "extension"
+    assert dumped["adapterStatus"] == "No public write API."
+    assert dumped["lastTestedAt"] != ""  # formatted, not the raw datetime
+    assert dumped["linkVerifiable"] is False
+    assert dumped["mediaSupport"] is True
+
+
+def test_from_row_matrix_defaults_stay_honest() -> None:
+    """A pre-0135 row (no matrix keys at all) degrades to UNCLASSIFIED and
+    UNMEASURED: mechanism '', lastTestedAt '', and the tri-state booleans null -
+    never a fabricated False, which would read as a measured verdict."""
+    dumped = Web2PlatformCatalogResponse.from_row(_platform_row()).model_dump(by_alias=True)
+    assert dumped["mechanism"] == ""
+    assert dumped["lastTestedAt"] == ""
+    assert dumped["adapterStatus"] == ""
+    assert dumped["linkVerifiable"] is None
+    assert dumped["mediaSupport"] is None
+
+
+def test_from_row_unknown_mechanism_degrades_to_unclassified() -> None:
+    item = Web2PlatformCatalogResponse.from_row(_platform_row(mechanism="telepathy"))
+    assert item.mechanism == ""
+
+
 # --- endpoint (faked repo) ----------------------------------------------------
 
 
@@ -176,18 +215,20 @@ class FakeCatalogRepo:
         authority_tier: str | None = None,
         automation_ready: bool | None = None,
         market: str | None = None,
+        mechanism: str | None = None,
     ) -> list[dict[str, Any]]:
         self.kwargs = {
             "auth_type": auth_type,
             "authority_tier": authority_tier,
             "automation_ready": automation_ready,
             "market": market,
+            "mechanism": mechanism,
         }
         return self._rows
 
 
 def _fifty_rows() -> list[dict[str, Any]]:
-    """17 automation_ready + 33 not = 50, with a known auth_type spread."""
+    """17 automation_ready + 33 not = 50, with known auth_type/mechanism spreads."""
     rows: list[dict[str, Any]] = []
     for i in range(17):
         rows.append(
@@ -196,6 +237,7 @@ def _fifty_rows() -> list[dict[str, Any]]:
                 name=f"Ready{i}",
                 auth_type="oauth" if i < 5 else "api",
                 automation_ready=True,
+                mechanism="api",
             )
         )
     for i in range(33):
@@ -206,6 +248,7 @@ def _fifty_rows() -> list[dict[str, Any]]:
                 auth_type="automation",
                 authority_tier="medium",
                 automation_ready=False,
+                mechanism="extension" if i < 10 else "human",
             )
         )
     return rows
@@ -245,6 +288,8 @@ async def test_catalog_returns_fifty_with_seventeen_automation_ready(
     assert body["automationReady"] == 17
     # Rollup is exact over the returned rows: 5 oauth + 12 api (ready) + 33 automation.
     assert body["byAuthType"] == {"oauth": 5, "api": 12, "automation": 33}
+    # 0135: the capability-matrix rollup counts every returned row's lane.
+    assert body["byMechanism"] == {"api": 17, "extension": 10, "human": 23}
     assert len(body["platforms"]) == 50
     assert set(body["platforms"][0]) == _CATALOG_ITEM_KEYS
     # Every row carries a valid, honest classification.
@@ -273,7 +318,19 @@ async def test_catalog_filters_pass_through_to_repo(
         "authority_tier": "high",
         "automation_ready": True,
         "market": None,
+        "mechanism": None,
     }
+
+
+async def test_catalog_mechanism_filter_passes_through_to_repo(
+    client: httpx.AsyncClient, repo: FakeCatalogRepo, wire: Callable[..., None]
+) -> None:
+    wire("analyst")
+    resp = await client.get(
+        "/api/v1/offpage/web2/catalog", params={"mechanism": "extension"}
+    )
+    assert resp.status_code == 200
+    assert repo.kwargs is not None and repo.kwargs["mechanism"] == "extension"
 
 
 async def test_catalog_rejects_bad_auth_type(
@@ -282,6 +339,16 @@ async def test_catalog_rejects_bad_auth_type(
     wire("viewer")
     resp = await client.get("/api/v1/offpage/web2/catalog", params={"authType": "bogus"})
     assert resp.status_code == 422  # not a Web2AuthType
+
+
+async def test_catalog_rejects_bad_mechanism(
+    client: httpx.AsyncClient, wire: Callable[..., None]
+) -> None:
+    wire("viewer")
+    resp = await client.get(
+        "/api/v1/offpage/web2/catalog", params={"mechanism": "telepathy"}
+    )
+    assert resp.status_code == 422  # not a Web2Mechanism
 
 
 # --- the SEED (0063) + table (0062) -------------------------------------------

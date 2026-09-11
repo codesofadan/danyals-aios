@@ -5,6 +5,10 @@
 refusal was indistinguishable from a directory problem on every surface that maps the
 code to a sentence. And `requeue_citation` reset status+error but not blocked_reason,
 so a requeued row carried last campaign's verdict into its fresh life.
+
+(Rewritten for the bot's retirement, Phase 3: the row that reaches the cost gate is
+now an API-route one — `api:apple_business` — because a `bot:*` row is routed to the
+operator queue before the gate is ever consulted.)
 """
 
 from __future__ import annotations
@@ -15,7 +19,6 @@ import pytest
 
 from app.config import Settings
 from app.modules.citations.tasks import execute_citation_submit
-from integrations.citation_bot import FormSpec, PlaywrightCitationSubmitter
 
 pytestmark = pytest.mark.unit
 
@@ -35,9 +38,9 @@ class _FakeStore:
 def _row(**over: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": "c1", "client_id": "cl", "client_name": "Acme",
-        "submit_status": "queued", "submit_method": "bot:playwright",
-        "directory_name": "Brownbook", "directory_url": "brownbook.net",
-        "directory_tier": "bot_fillable", "directory_route": "C",
+        "submit_status": "queued", "submit_method": "api:apple_business",
+        "directory_name": "Apple Maps", "directory_url": "maps.apple.com",
+        "directory_tier": "api", "directory_route": "A",
         "bp_business_name": "Acme Dental", "bp_address_line1": "123 Main St",
         "bp_address_line2": "", "bp_city": "Bellevue", "bp_region": "WA",
         "bp_postal_code": "98004", "bp_phone": "555-0100",
@@ -48,10 +51,12 @@ def _row(**over: Any) -> dict[str, Any]:
     return row
 
 
-def _spec(directory: str) -> FormSpec:
-    return FormSpec(
-        directory_name=directory, url=f"https://{directory.lower()}.net/add",
-        fields=(), submit_selector="#go", success_indicator="text=thanks",
+def _settings() -> Settings:
+    # A configured Apple engine, so the row passes engine resolution and reaches the
+    # gate — the branch under test.
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None, app_env="dev",
+        apple_business_api_key="k", apple_business_org_id="org-1",
     )
 
 
@@ -72,15 +77,8 @@ def test_a_spend_refusal_writes_its_machine_reason(monkeypatch: pytest.MonkeyPat
             raise AssertionError("a refused row must never commit spend")
 
     monkeypatch.setattr(tasks, "_gate", lambda: _Gate())
-    # A spec EXISTS, so the row passes engine resolution and reaches the gate.
-    monkeypatch.setattr(
-        tasks, "citation_bot_from_settings",
-        lambda settings, **kw: PlaywrightCitationSubmitter(
-            spec_loader=lambda job: _spec(job.directory_name)
-        ),
-    )
     store = _FakeStore(_row())
-    out = execute_citation_submit(store, Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[arg-type]
+    out = execute_citation_submit(store, _settings(), "c1")  # type: ignore[arg-type]
 
     assert out["state"] == "blocked"
     assert store.updates["submit_status"] == "blocked"

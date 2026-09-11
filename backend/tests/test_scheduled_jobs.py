@@ -105,7 +105,10 @@ def test_scheduled_jobs_surfaces_last_run_and_status() -> None:
 
 def test_scheduled_jobs_flags_waiting_on_absent_provider_key() -> None:
     # A keyless dev Settings: no audit engine + no off-page provider configured.
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    # anthropic_api_key is pinned None because app.main's import-time
+    # apply_provider_env exports the real key into os.environ on a keyed dev box,
+    # and pydantic-settings reads os.environ even with _env_file=None.
+    settings = Settings(_env_file=None, anthropic_api_key=None)  # type: ignore[call-arg]
     jobs = scheduled_jobs(schedule=PARKED, settings=settings)
     audit = next(j for j in jobs if j.name == "refresh-client-audits")
     sweep = next(j for j in jobs if j.name == "sweep-offpage-monitors")

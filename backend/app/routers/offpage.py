@@ -37,8 +37,10 @@ from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
 from app.core.deps import RedisDep, SettingsDep
 from app.core.pagination import PageDep
-from app.db.offpage_repo import OffpageRepoDep
+from app.core.security import is_public_url
+from app.db.offpage_repo import OffpageRepo, OffpageRepoDep
 from app.logging_setup import get_logger
+from app.modules.citations.operator_auth import require_operator_scope
 from app.schemas.offpage import (
     BacklinkResponse,
     BacklinkStatus,
@@ -64,6 +66,9 @@ from app.schemas.offpage import (
     Web2CatalogResponse,
     Web2ClientIdentityRequest,
     Web2ClientIdentityResponse,
+    Web2Mechanism,
+    Web2PlacementCompleteRequest,
+    Web2PlacementCompleteResponse,
     Web2PlacementResponse,
     Web2PlannedPropertyResponse,
     Web2PlanRequest,
@@ -350,6 +355,7 @@ async def web2_catalog(
     auth_type: Annotated[Web2AuthType | None, Query(alias="authType")] = None,
     authority_tier: Annotated[Web2AuthorityTier | None, Query(alias="authorityTier")] = None,
     automation_ready: Annotated[bool | None, Query(alias="automationReady")] = None,
+    mechanism: Annotated[Web2Mechanism | None, Query()] = None,
 ) -> Web2CatalogResponse:
     """The Web 2.0 platform CATALOG (``public.web2_platforms``, 0062/0063): the curated
     target list of real web2 backlink properties the off-page automation works through -
@@ -357,13 +363,16 @@ async def web2_catalog(
     staff-readable (``view_reports``); a portal client is 403'd out of the namespace.
 
     Returns the rows plus a rollup header (total, how many ``automationReady`` - i.e.
-    hold a real publisher class - and a per-``authType`` breakdown). ``authType`` /
-    ``authorityTier`` / ``automationReady`` narrow the board."""
+    hold a real publisher class - a per-``authType`` breakdown, and 0135's
+    per-``mechanism`` breakdown). ``authType`` / ``authorityTier`` /
+    ``automationReady`` / ``mechanism`` narrow the board - ``mechanism`` is the 0135
+    capability-matrix lane (api / extension / human / unsupported)."""
     rows = await asyncio.to_thread(
         repo.list_web2_platforms,
         auth_type=auth_type,
         authority_tier=authority_tier,
         automation_ready=automation_ready,
+        mechanism=mechanism,
     )
     from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
 
@@ -372,12 +381,15 @@ async def web2_catalog(
         name: list(fields) for name, fields in PLATFORM_CREDENTIAL_FIELDS.items() if fields
     }
     by_auth_type: dict[str, int] = {}
+    by_mechanism: dict[str, int] = {}
     for p in platforms:
         by_auth_type[p.auth_type] = by_auth_type.get(p.auth_type, 0) + 1
+        by_mechanism[p.mechanism] = by_mechanism.get(p.mechanism, 0) + 1
     return Web2CatalogResponse(
         total=len(platforms),
         automation_ready=sum(1 for p in platforms if p.automation_ready),
         by_auth_type=by_auth_type,
+        by_mechanism=by_mechanism,
         platforms=platforms,
         credential_fields=credential_fields,
     )
@@ -444,9 +456,12 @@ async def plan_web2(
     # account, no anchor check. Two doors into one table with different rules is how a
     # placement lands on a platform the client may not use, or one holding no credential,
     # after the article has been written and paid for.
+    # `allow_extension` (0136): the single-property door may plan an extension-lane
+    # platform - drafting is our own writer, and approval then routes to a placement
+    # session instead of the publish worker. Campaigns deliberately keep the default.
     selection = await asyncio.to_thread(
         _eligible_for, repo, body.client_id, [body.platform],
-        acknowledged=body.acknowledge_platform_advisory,
+        acknowledged=body.acknowledge_platform_advisory, allow_extension=True,
     )
     if selection.advisories:
         # Not a refusal - a question, asked with the platform's own rule attached so the
@@ -653,6 +668,32 @@ async def approve_web2(
         )
         return Web2PropertyResponse.from_row(updated or row)
 
+    # PLACEMENT ROUTING (0135 matrix + 0136, Phase 7). An extension-lane platform has
+    # no API the publish worker can drive: approval PARKS the row at `publishing` with
+    # publish_method='extension' and enqueues NOTHING. The parked row itself is the
+    # placement queue - operator_session_tasks (0130) structurally require a session,
+    # so tasks are created when an operator STARTS a web2_placement session for this
+    # client (mirroring how `ready_for_human` citations wait for a session), never
+    # pre-created unattached. Completion is the evidence door below
+    # (/offpage/web2/placements/{id}/complete). API-lane platforms (and uncatalogued
+    # legacy platform values) keep the existing enqueue path byte-for-byte.
+    matrix = await asyncio.to_thread(
+        repo.platform_matrix_for, str(row.get("platform") or "")
+    )
+    if matrix is not None and str(matrix.get("mechanism") or "") == "extension":
+        updated = await asyncio.to_thread(
+            repo.update_web2_status, web2_id,
+            {"status": "publishing", "publish_method": "extension"},
+        )
+        if updated is None:
+            raise _WEB2_NOT_FOUND
+        await record_activity(
+            actor, kind="content",
+            action="approved a Web 2.0 property (awaiting operator placement)",
+            target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
+        )
+        return Web2PropertyResponse.from_row(updated)
+
     updated = await asyncio.to_thread(
         repo.update_web2_status, web2_id, {"status": "publishing"}
     )
@@ -670,6 +711,179 @@ async def approve_web2(
         target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
     )
     return Web2PropertyResponse.from_row(updated)
+
+
+# --- extension-assisted placement completion (0136, Phase 7) --------------------
+#
+# The evidence door for the extension lane. An operator published the approved draft
+# in their OWN logged-in browser session; the server now checks the pasted public URL
+# the same way the citation queue checks a listing URL: fetch it ourselves, pin the
+# host to the platform's own, find the client's target link on the page. A refusal is
+# a normal 200 `accepted:false` and advances NOTHING.
+
+# The hybrid credential rule, reused from the citation queue's factories rather than
+# re-implemented: a dashboard BEARER is governed by role, an extension token must hold
+# `web2_queue:write` - and either way the resolved user must be a LEAD, because a
+# completion mutates a client's ledger. Module-level resolver OBJECT so tests can
+# override it by identity, exactly as the citation queue's tests do.
+resolve_web2_operator_write = require_operator_scope("web2_queue:write")
+
+_PLACEMENT_LEAD_ROLES = frozenset({"owner", "admin", "manager"})
+
+
+async def require_web2_placement_lead(
+    user: Annotated[CurrentUser, Depends(resolve_web2_operator_write)],
+) -> CurrentUser:
+    """A lead, however they authenticated (bearer role / extension `web2_queue:write`).
+    The token inherits its holder's role and never widens it - a non-lead pairing an
+    extension is refused here for the same reason their dashboard session would be."""
+    if user.role not in _PLACEMENT_LEAD_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires an owner, admin or manager.",
+        )
+    return user
+
+
+Web2PlacementLead = Annotated[CurrentUser, Depends(require_web2_placement_lead)]
+
+
+def get_offpage_repo_placement(
+    user: Annotated[CurrentUser, Depends(resolve_web2_operator_write)],
+) -> OffpageRepo:
+    """OffpageRepo for the placement evidence door. The plain ``OffpageRepoDep``
+    resolves bearer-only ``get_current_user``, which 401s an extension presenting
+    only ``X-Operator-Token`` BEFORE the route's own hybrid lead guard is ever
+    consulted - the exact regression class ``test_operator_route_reach.py``
+    documents for the queue routes. Bound to the SAME write-floor object as
+    ``Web2PlacementLead`` (the ``get_offpage_repo_session`` pattern), so the
+    credential resolves once per request and the lead gate stays the deciding
+    guard."""
+    return OffpageRepo(user.id)
+
+
+OffpageRepoPlacementDep = Annotated[OffpageRepo, Depends(get_offpage_repo_placement)]
+
+
+@router.post(
+    "/offpage/web2/placements/{web2_id}/complete",
+    response_model=Web2PlacementCompleteResponse,
+)
+async def complete_web2_placement(
+    web2_id: str,
+    body: Web2PlacementCompleteRequest,
+    actor: Web2PlacementLead,
+    repo: OffpageRepoPlacementDep,
+) -> Web2PlacementCompleteResponse:
+    """Close an extension-lane placement with the PUBLIC URL of the published post.
+
+    THE COMPLETION IS CHECKED, NOT ASSERTED (the citation-complete contract): SSRF
+    guard -> our own fetch with the honest UA (redirects re-validated) -> the page
+    must live on the platform's OWN host -> `inspect_html` must find the client's
+    target link. Only then: post_url written, status -> `published`, verified per the
+    existing semantics (our fetch of the public page IS the live confirmation), and
+    the tri-state link evidence stamped so the recheck sweep owns it from here.
+
+    A refusal is a NORMAL response (accepted:false + reason) - commonest cause is a
+    post still propagating or pasted from the wrong tab - and it advances nothing:
+    not the property, not the session task, not the spec counters."""
+    from app.services import web2_placement
+
+    row = await asyncio.to_thread(repo.get_web2, web2_id)
+    if row is None:
+        raise _WEB2_NOT_FOUND
+    current = str(row.get("status") or "")
+    method = str(row.get("publish_method") or "api")
+    if current != "publishing" or method != "extension":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This property is not awaiting an extension placement "
+                f"(status={current}, publishMethod={method})."
+            ),
+        )
+
+    url = body.url.strip()
+
+    def _refusal(reason: str, link_rel: str = "") -> Web2PlacementCompleteResponse:
+        return Web2PlacementCompleteResponse(
+            accepted=False, status=current, post_url=url, reason=reason,
+            link_found=None, link_rel=link_rel,
+        )
+
+    # SSRF: the URL is operator-supplied and this fetch runs server-side (off-loop).
+    if not await asyncio.to_thread(is_public_url, url):
+        return _refusal("That is not a reachable public URL.")
+
+    matrix = await asyncio.to_thread(
+        repo.platform_matrix_for, str(row.get("platform") or "")
+    )
+    platform_host = web2_placement.host_of(str((matrix or {}).get("homepage_url") or ""))
+
+    html, final_url = await asyncio.to_thread(web2_placement.fetch_placement_page, url)
+    # Redirects re-validated: the URL that actually ANSWERED must itself be public -
+    # a public URL that 302s into a private range must not smuggle its body through.
+    if html is not None and final_url and not await asyncio.to_thread(is_public_url, final_url):
+        return _refusal("That URL redirected off the public web.")
+
+    verdict = web2_placement.judge_placement(
+        html, final_url or url,
+        platform_host=platform_host,
+        target_url=str(row.get("target_url") or ""),
+    )
+    if not verdict.accepted:
+        return _refusal(verdict.reason, link_rel=verdict.link.rel)
+
+    now = datetime.now(UTC)
+    updated = await asyncio.to_thread(
+        repo.update_web2_status, web2_id,
+        {
+            "post_url": url,
+            "status": "published",
+            "verified": "verified",
+            "published_at": now.date(),
+            "link_found": True,
+            "link_rel": verdict.link.rel,
+            "link_checked_at": now,
+            "error": "",
+        },
+    )
+    if updated is None:
+        raise _WEB2_NOT_FOUND
+
+    # Spec bookkeeping - ONLY on an accepted completion (a refusal writes nothing).
+    if matrix is not None:
+        spec = await asyncio.to_thread(
+            repo.active_placement_spec, str(matrix.get("id") or "")
+        )
+        if spec is not None:
+            await asyncio.to_thread(
+                repo.record_placement_spec_success, str(spec["id"])
+            )
+
+    # POST-TERMINAL SESSION HOOK (0130/Phase 4, same contract as the citation
+    # complete's): if this property is a task in the caller's ACTIVE web2_placement
+    # session, mark it `submitted` and run the batch-release check. A broken hook is
+    # logged loudly and never fails a completion the fetch accepted.
+    try:
+        from app.modules.citations.sessions import OperatorSessionsRepo
+
+        await asyncio.to_thread(
+            OperatorSessionsRepo(actor.id).mark_web2_terminal, web2_id, "submitted",
+            meta={"post_url": url},
+        )
+    except Exception:
+        logger.exception("web2_session_task_mark_failed", web2_id=web2_id)
+
+    ent_type, ent_id = _client_entity(row)
+    await record_activity(
+        actor, kind="content", action="published a Web 2.0 property (extension placement)",
+        target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
+    )
+    return Web2PlacementCompleteResponse(
+        accepted=True, status="published", post_url=url,
+        link_found=True, link_rel=verdict.link.rel,
+    )
 
 
 # --- Web 2.0 CAMPAIGNS ---------------------------------------------------------
@@ -717,7 +931,12 @@ def _history(repo: Any, client_id: str) -> list[Any]:
 
 
 def _eligible_for(
-    repo: Any, client_id: str, selected: list[str], *, acknowledged: bool = False
+    repo: Any,
+    client_id: str,
+    selected: list[str],
+    *,
+    acknowledged: bool = False,
+    allow_extension: bool = False,
 ) -> Any:
     """Narrow the operator's selection into plan / refuse / ask.
 
@@ -744,7 +963,9 @@ def _eligible_for(
         client_scope=scope,
         connected_platforms=repo.connected_platforms_for(client_id),
     )
-    return resolve_selection(board, selected, acknowledged=acknowledged)
+    return resolve_selection(
+        board, selected, acknowledged=acknowledged, allow_extension=allow_extension
+    )
 
 
 def _build_plan(repo: Any, body: Web2CampaignRequest, client_name: str) -> Any:
@@ -826,7 +1047,7 @@ async def web2_platform_board(
     actor: ViewReports,
     client_id: Annotated[str, Query(alias="clientId", min_length=1)],
 ) -> list[Web2PlatformStatusResponse]:
-    """The five-state platform board for one client (WEB2-012).
+    """The platform board for one client (WEB2-012; 0135 adds a sixth state).
 
     Every catalogue row is returned, with a reason on the ones this client may not use.
     Hiding them would make the product look smaller than it is AND leave the operator
@@ -834,6 +1055,8 @@ async def web2_platform_board(
     50+ platform catalogue be offered honestly. Honesty cuts both ways: a row nobody
     has adjudicated reports ``not_reviewed`` (a safe default), never a fabricated
     policy verdict, and a row without publisher code reports ``not_supported``.
+    ``eligible_extension`` (0135) marks the extension-assisted lane - real, but
+    operator-published via Phase 7 placement sessions, never an API campaign target.
     """
     from app.services.web2_eligibility import evaluate_catalog
 
@@ -1021,6 +1244,11 @@ async def approve_web2_campaign(
     approved: list[str] = []
     held: list[Web2CampaignHold] = []
     rejected: list[str] = []
+    # 0135 mechanism routing, per platform, resolved at APPROVAL time (not campaign
+    # creation): a platform reclassified `extension` since the plan was made must not
+    # be dispatched down the API lane, where the publish worker can only fail it.
+    # Cached per platform - one lookup however many siblings share it.
+    matrix_by_platform: dict[str, dict[str, Any] | None] = {}
 
     for prop in pending:
         web2_id = str(prop["id"])
@@ -1049,6 +1277,26 @@ async def approve_web2_campaign(
                     reason=str(blocked.detail),
                 )
             )
+            continue
+
+        # PLACEMENT ROUTING (0135 matrix + 0136) - the same fork the single-property
+        # approve takes: an extension-lane platform has no API the publish worker can
+        # drive, so approval PARKS the row at publishing/publish_method='extension'
+        # and enqueues NOTHING (the parked row is the placement queue; completion is
+        # the /offpage/web2/placements/{id}/complete evidence door).
+        platform = str(prop.get("platform") or "")
+        if platform not in matrix_by_platform:
+            matrix_by_platform[platform] = await asyncio.to_thread(
+                repo.platform_matrix_for, platform
+            )
+        matrix = matrix_by_platform[platform]
+        if matrix is not None and str(matrix.get("mechanism") or "") == "extension":
+            updated = await asyncio.to_thread(
+                repo.update_web2_status, web2_id,
+                {"status": "publishing", "publish_method": "extension"},
+            )
+            if updated is not None:
+                approved.append(web2_id)
             continue
 
         updated = await asyncio.to_thread(

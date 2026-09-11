@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from app.services import audit_altitude as A
+from app.services import audit_altitude as A  # noqa: N812 - module-as-namespace alias
 
 
 def _f(check_id="ON-041", *, page_id=None, status="fail", severity="major",
@@ -93,7 +93,7 @@ def test_two_broken_templates_do_not_merge():
 def test_fingerprint_ignores_everything_that_moves_with_the_site():
     """A fingerprint that changes when CONTENT changes cannot answer 'is this the
     same problem as last month'. Adding a page must not re-identify a finding."""
-    base = dict(check_id="ON-041", locus_kind="template", locus_value="/s/{slug}")
+    base = {"check_id": "ON-041", "locus_kind": "template", "locus_value": "/s/{slug}"}
     fp = A.fingerprint(**base)
     # none of these are inputs at all - the signature has no place to put them
     assert fp == A.fingerprint(**base, discriminator="")

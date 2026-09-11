@@ -7,7 +7,7 @@ tests/integration/test_audit_altitudes.py.
 
 from __future__ import annotations
 
-from app.services import audit_workbook as W
+from app.services import audit_workbook as W  # noqa: N812 - module-as-namespace alias
 
 
 def _rollup(level, key, label, score, ran, applicable, **over):
@@ -148,7 +148,7 @@ def test_an_instance_severity_override_wins_over_the_causes():
 
 # ------------------------------------------------------------------ coverage
 
-def test_the_coverage_sheet_lists_checks_that_did_NOT_run():
+def test_the_coverage_sheet_lists_checks_that_did_NOT_run():  # noqa: N802 - the NOT is the point of the name
     """This is the sheet that stops a skipped check reading like a passing one."""
     coverage = {
         "ran": ["A"],

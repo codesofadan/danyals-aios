@@ -16,7 +16,7 @@ column lists come from server-built dicts quoted via ``psycopg.sql.Identifier``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -257,11 +257,13 @@ class OffpageRepo:
         authority_tier: str | None = None,
         automation_ready: bool | None = None,
         market: str | None = None,
+        mechanism: str | None = None,
     ) -> _Rows:
         """Browse the Web 2.0 platform catalog (0062/0063). Reference data shared by
         every tenant - RLS gates it to staff (``is_staff()``); a portal client sees
         nothing (and is 403'd out of the router before reaching here). Ordered
-        automation-ready-first so the actionable rows lead, then by name."""
+        automation-ready-first so the actionable rows lead, then by name.
+        ``mechanism`` narrows to one 0135 capability-matrix lane."""
         query = "select * from public.web2_platforms"
         clauses: list[str] = []
         params: list[Any] = []
@@ -277,6 +279,9 @@ class OffpageRepo:
         if market is not None:
             clauses.append("market = %s")
             params.append(market)
+        if mechanism is not None:
+            clauses.append("mechanism = %s")
+            params.append(mechanism)
         if clauses:
             query += " where " + " and ".join(clauses)
         query += " order by automation_ready desc, name"
@@ -343,6 +348,76 @@ class OffpageRepo:
             )
             return cur.fetchone()
 
+    # --- extension-assisted placement (0135 matrix + 0136 specs) ------------------ #
+
+    def platform_matrix_for(self, platform: str) -> dict[str, Any] | None:
+        """The catalogue/matrix row behind one property's ``platform`` value.
+
+        Resolved by ``platform_enum`` first (the publishing identity), catalogue
+        ``name`` second - instance-qualified rows ("Mastodon (mastodon.social)") only
+        match through the enum, while most extension-lane rows (no enum value) match
+        by name. Returns only what placement routing needs; ``None`` when the value
+        is not catalogued (an honest pre-0062 legacy row) - callers then keep the
+        API-lane behaviour unchanged."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select id, name, platform_enum, mechanism, homepage_url "
+                "from public.web2_platforms "
+                "where platform_enum = %s or name = %s "
+                "order by (platform_enum = %s) desc, name limit 1",
+                (platform, platform, platform),
+            )
+            return cur.fetchone()
+
+    def active_placement_spec(self, platform_id: str) -> dict[str, Any] | None:
+        """The one ACTIVE earned placement spec for a platform, or ``None``.
+
+        ``None`` is the normal, fail-closed answer (the whitelist starts empty): the
+        extension then offers copy-blocks and the platform homepage, never a guessed
+        selector or a guessed editor URL."""
+        if not platform_id:
+            return None
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select * from public.web2_placement_specs "
+                "where platform_id = %s and active limit 1",
+                (platform_id,),
+            )
+            return cur.fetchone()
+
+    def record_placement_spec_success(self, spec_id: str) -> None:
+        """Bank a verified placement against the spec that assisted it. Called only
+        on an ACCEPTED completion - a refusal writes nothing anywhere (a refusal
+        never advances state, spec bookkeeping included)."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.web2_placement_specs set "
+                "  success_count = success_count + 1, "
+                "  last_success_at = now(), last_attempt_at = now() "
+                "where id = %s",
+                (spec_id,),
+            )
+
+    def record_placement_spec_drift(
+        self, platform_id: str, *, selector: str, evidence: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Deactivate a platform's ACTIVE spec on a human drift report (fail-closed,
+        0108's rule carried over): an operator just said the editor no longer matches
+        the spec, so the extension must stop offering its selectors until a new
+        revision is earned. Returns the deactivated row, or ``None`` when no active
+        spec existed (nothing to deactivate is a fine answer)."""
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.web2_placement_specs set "
+                "  active = false, deactivated_reason = 'drift_detected', "
+                "  drift_detected_at = now(), drift_selector = %s, "
+                "  drift_evidence = drift_evidence || %s, "
+                "  failure_count = failure_count + 1, last_attempt_at = now() "
+                "where platform_id = %s and active returning *",
+                (selector[:200], Jsonb(evidence), platform_id),
+            )
+            return cur.fetchone()
+
     # --- campaigns (the operator's unit of work) ---------------------------------- #
 
     def list_web2_accounts(self, client_id: str | None = None) -> _Rows:
@@ -376,12 +451,14 @@ class OffpageRepo:
             return cur.fetchone()
 
     def eligible_catalog(self) -> _Rows:
-        """The automation-ready catalogue rows the eligibility service classifies."""
+        """The catalogue rows the eligibility service classifies. ``mechanism`` /
+        ``adapter_status`` (0135) ride along so the verdicts can gate on the
+        capability-matrix lane and quote its recorded reason."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "select name, platform_enum, ownership_tier, topical_scope, "
                 "       automation_ready, authority_tier, terms_position, "
-                "       terms_checked_on, terms_source_url "
+                "       terms_checked_on, terms_source_url, mechanism, adapter_status "
                 "from public.web2_platforms order by authority_tier, name"
             )
             return list(cur.fetchall())
@@ -842,15 +919,23 @@ class ServiceOffpageStore:
         spam: int,
         first_seen: date | None,
         status: str,
+        source_url: str = "",
+        target_url: str = "",
     ) -> None:
+        """Insert one discovered backlink. ``source_url``/``target_url`` (0133) are the
+        verification coordinates - the referring PAGE and the linked-to URL - defaulted
+        to the columns' own '' so every pre-0133 caller keeps working unchanged. A row
+        lands ``liveness='unchecked'`` (the column default): discovery never grants
+        ``live``; only the verify sweep's own fetch does."""
         with privileged_connection() as cur:
             cur.execute(
                 "insert into public.backlinks "
                 "(client_id, client_name, ref_domain, anchor, authority, spam, "
-                "first_seen, status) values (%s, %s, %s, %s, %s, %s, %s, %s)",
+                "first_seen, status, source_url, target_url) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     client_id, client_name, ref_domain, anchor, authority, spam,
-                    first_seen, status,
+                    first_seen, status, source_url, target_url,
                 ),
             )
 
@@ -869,6 +954,99 @@ class ServiceOffpageStore:
                 "where id = %s and competitor_id is null",
                 (status, backlink_id),
             )
+
+    # --- backlink verification (0133: the verify_backlinks sweep) -------------
+    def claim_due_backlink_checks(self, *, limit: int = 25) -> _Rows:
+        """Claim the backlinks due a liveness check, at most ``limit``.
+
+        Due = never checked (``liveness='unchecked'`` with no schedule yet) OR the
+        scheduled ``next_check_at`` has arrived - and only rows that actually carry a
+        ``source_url``, because a row with no referring page has nothing to fetch
+        (every pre-0133 row; it stays honestly ``unchecked`` until a fresh ingest
+        records its page).
+
+        CLAIM SEMANTICS: ``for update skip locked`` keeps two concurrent sweeps off
+        the same rows, and the same statement writes a 30-minute LEASE into
+        ``next_check_at`` - so a crashed sweep's rows come back on their own, and a
+        sweep that overlaps the lease window cannot re-claim them (an unchecked row
+        is only due while its ``next_check_at`` is still null). The verdict write
+        then replaces the lease with the real schedule.
+
+        OWN-PROFILE INVARIANT (0037): pins ``competitor_id is null`` - this runs on
+        the privileged (BYPASSRLS) seam and both fetches URLs and later flips status,
+        so without the pin a competitor-side row could be fetched and rewritten.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "with due as ("
+                " select id from public.backlinks"
+                " where competitor_id is null and source_url <> ''"
+                "   and ((liveness = 'unchecked' and next_check_at is null)"
+                "        or next_check_at <= now())"
+                " order by next_check_at asc nulls first, created_at asc"
+                " limit %s for update skip locked) "
+                "update public.backlinks b "
+                "set next_check_at = now() + make_interval(mins => 30) "
+                "from due where b.id = due.id returning b.*",
+                (limit,),
+            )
+            return list(cur.fetchall())
+
+    def record_backlink_check(
+        self,
+        backlink_id: str,
+        *,
+        liveness: str,
+        link_rel: str,
+        check_evidence: dict[str, Any],
+        checked_at: datetime,
+        next_check_at: datetime,
+        mark_lost: bool = False,
+    ) -> None:
+        """Write one verification verdict: liveness + rel + the evidence receipt +
+        when to look again. ``mark_lost`` flips the MONITORING status to ``lost`` in
+        the same statement - passed only by the worker, and only for a loss that a
+        second look has CONFIRMED (missing twice, 7 days apart), so one fetch blip
+        can never delete a live link from the client's board.
+
+        OWN-PROFILE INVARIANT (0037): pins ``competitor_id is null`` even though the
+        id targets a single row - privileged seam, same reasoning as
+        ``set_backlink_status`` above.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.backlinks "
+                "set liveness = %s, link_rel = %s, check_evidence = %s, "
+                "    last_checked_at = %s, next_check_at = %s, "
+                "    status = case when %s then 'lost' else status end "
+                "where id = %s and competitor_id is null",
+                (
+                    liveness, link_rel, Jsonb(check_evidence), checked_at,
+                    next_check_at, mark_lost, backlink_id,
+                ),
+            )
+
+    # --- web 2.0 link recheck (0133 phase: published != still-linked) ---------
+    def list_published_web2_for_recheck(self, *, limit: int = 50) -> _Rows:
+        """PUBLISHED properties whose placed link is worth re-measuring, least-
+        recently-checked first (never-checked rows lead), at most ``limit``.
+
+        Only rows with BOTH URLs qualify: no ``post_url`` means nothing to fetch, no
+        ``target_url`` means nothing to look for - either way a check could only ever
+        return ``unknown``, and sweeping those daily would be busywork that reports
+        nothing. No claim/lease here: the verdict write is idempotent and the sweep
+        is daily, so an overlapping run at worst re-measures a page."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "select id, client_id, client_name, platform, post_url, target_url, "
+                "       link_found, link_rel, link_checked_at "
+                "from public.web2_properties "
+                "where status = 'published' and post_url <> '' and target_url <> '' "
+                "order by link_checked_at asc nulls first, published_at asc "
+                "limit %s",
+                (limit,),
+            )
+            return list(cur.fetchall())
 
     # --- citations (monitoring diff/apply) ------------------------------------
     def list_citations_for_client(self, client_id: str) -> _Rows:
@@ -915,23 +1093,64 @@ class ServiceOffpageStore:
         action: str,
         note: str,
         directory_id: str | None = None,
+        discovered_url: str = "",
+        discovery_evidence: dict[str, Any] | None = None,
+        evidence_level: str = "",
+        evidence_checked_at: datetime | None = None,
     ) -> None:
+        """Insert one discovered/monitored citation row.
+
+        The evidence params (0129) default to the columns' own defaults, so every
+        pre-tier caller keeps working unchanged. ``discovered_url`` never grants
+        ``live`` - only the liveness probe promotes it."""
         with privileged_connection() as cur:
             cur.execute(
                 "insert into public.citations "
-                "(client_id, client_name, directory, nap_status, action, note, directory_id) "
-                "values (%s, %s, %s, %s, %s, %s, %s)",
-                (client_id, client_name, directory, nap_status, action, note, directory_id),
+                "(client_id, client_name, directory, nap_status, action, note, directory_id, "
+                " discovered_url, discovery_evidence, evidence_level, evidence_checked_at) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    client_id, client_name, directory, nap_status, action, note, directory_id,
+                    discovered_url, Jsonb(discovery_evidence or {}), evidence_level,
+                    evidence_checked_at,
+                ),
             )
 
     def update_citation_status(
-        self, citation_id: str, *, nap_status: str, action: str, note: str
+        self,
+        citation_id: str,
+        *,
+        nap_status: str,
+        action: str,
+        note: str,
+        discovered_url: str | None = None,
+        discovery_evidence: dict[str, Any] | None = None,
+        evidence_level: str | None = None,
+        evidence_checked_at: datetime | None = None,
     ) -> None:
+        """Move one row's monitoring verdict; the OPTIONAL evidence fields (0129) are
+        written only when supplied, so a legacy caller's status move never blanks what
+        a fresh discovery recorded - and a fresh discovery updates its evidence in the
+        same statement as the NAP change."""
+        sets = ["nap_status = %s", "action = %s", "note = %s"]
+        params: list[Any] = [nap_status, action, note]
+        if discovered_url is not None:
+            sets.append("discovered_url = %s")
+            params.append(discovered_url)
+        if discovery_evidence is not None:
+            sets.append("discovery_evidence = %s")
+            params.append(Jsonb(discovery_evidence))
+        if evidence_level is not None:
+            sets.append("evidence_level = %s")
+            params.append(evidence_level)
+        if evidence_checked_at is not None:
+            sets.append("evidence_checked_at = %s")
+            params.append(evidence_checked_at)
+        params.append(citation_id)
         with privileged_connection() as cur:
             cur.execute(
-                "update public.citations set nap_status = %s, action = %s, note = %s "
-                "where id = %s",
-                (nap_status, action, note, citation_id),
+                "update public.citations set " + ", ".join(sets) + " where id = %s",
+                params,
             )
 
 

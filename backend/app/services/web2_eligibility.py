@@ -36,12 +36,28 @@ TIER_DO_NOT_USE = "do_not_use"
 # unclassified client still has a usable set rather than an empty board.
 SCOPE_AGNOSTIC = "agnostic"
 
-Status = Literal["eligible", "not_connected", "not_eligible", "not_reviewed", "not_supported"]
+# 0135's capability-matrix lanes (web2_platforms.mechanism). '' = a row the matrix
+# has not classified - it falls through to the pre-0135 rules unchanged.
+MECHANISM_API = "api"
+MECHANISM_EXTENSION = "extension"
+MECHANISM_HUMAN = "human"
+MECHANISM_UNSUPPORTED = "unsupported"
+
+# ``eligible_extension`` (0135) is the extension-assisted lane's own state, kept
+# SEPARATE from ``eligible`` on purpose: an extension-lane platform is real and
+# usable, but an OPERATOR publishes there in their own logged-in browser session
+# (Phase 7 placement sessions) - the API pipeline cannot drive it, so folding it
+# into ``eligible`` would let a campaign plan publishes no worker can run. Later
+# placement routing keys off exactly this state.
+Status = Literal[
+    "eligible", "eligible_extension", "not_connected", "not_eligible",
+    "not_reviewed", "not_supported",
+]
 
 
 @dataclass(frozen=True)
 class PlatformVerdict:
-    """One row of the five-state board (WEB2-012).
+    """One row of the platform board (WEB2-012; six states since 0135).
 
     ``not_connected`` is deliberately distinct from ``not_eligible``: the first is a
     missing credential an operator can go and fix in ten minutes, the second is a
@@ -65,6 +81,9 @@ class PlatformVerdict:
     terms_position: str = ""
     terms_checked_on: str = ""
     terms_source_url: str = ""
+    #: 0135: the capability-matrix lane this verdict was judged under ('' = the row
+    #: predates the matrix / was not classified - pre-0135 rules applied unchanged).
+    mechanism: str = ""
 
     @property
     def eligible(self) -> bool:
@@ -72,16 +91,18 @@ class PlatformVerdict:
 
     @property
     def advisable(self) -> bool:
-        """Whether an operator may CHOOSE this platform for this client.
+        """Whether an operator may CHOOSE this platform for the API publish path.
 
         The distinction that makes "any platform for any client" honest without making
-        it reckless. Two states are hard facts about the machine and can never be
-        overridden - there is no publisher (``not_supported``) or there is no credential
-        (``not_connected``), and no amount of operator conviction publishes through
-        either. The other two are JUDGEMENTS about fit: a topical mismatch
-        (``not_eligible``) or an unread terms page (``not_reviewed``). Those are the
-        operator's call to make with the platform's own rule in front of them, so they
-        are advisory - selectable against a recorded acknowledgement, not refused.
+        it reckless. Three states are hard facts about the machine and can never be
+        overridden - there is no publisher (``not_supported``), there is no credential
+        (``not_connected``), or the lane is operator-run (``eligible_extension``:
+        the API pipeline cannot drive it; Phase 7's placement sessions are its path) -
+        and no amount of operator conviction publishes through any of them. The other
+        two are JUDGEMENTS about fit: a topical mismatch (``not_eligible``) or an
+        unread terms page (``not_reviewed``). Those are the operator's call to make
+        with the platform's own rule in front of them, so they are advisory -
+        selectable against a recorded acknowledgement, not refused.
         """
         return self.status in ("eligible", "not_eligible", "not_reviewed")
 
@@ -106,6 +127,8 @@ def evaluate_platform(
     tier = str(row.get("ownership_tier") or TIER_DO_NOT_USE)
     scope = str(row.get("topical_scope") or "")
     terms = str(row.get("terms_position") or "")
+    mechanism = str(row.get("mechanism") or "")
+    adapter_status = str(row.get("adapter_status") or "")
     checked_on = row.get("terms_checked_on")
     checked_on_iso = checked_on.isoformat() if isinstance(checked_on, date) else str(checked_on or "")
     # Migration 0103 stamped terms_checked_on on every row a human actually adjudicated,
@@ -125,6 +148,38 @@ def evaluate_platform(
             terms_position=terms,
             terms_checked_on=checked_on_iso,
             terms_source_url=str(row.get("terms_source_url") or ""),
+            mechanism=mechanism,
+        )
+
+    # --- 0135 capability-matrix gates, judged FIRST -------------------------------
+    # The matrix is a fact about the machine and the platform, so it outranks every
+    # per-client judgement: no tier, scope, or acknowledgement changes what lane a
+    # placement can physically travel.
+    if mechanism == MECHANISM_UNSUPPORTED:
+        # Hard, regardless of tier: the recorded exclusion reason (0135 seed / a later
+        # manual reclassification) is the answer, never a generic refusal.
+        return verdict(
+            "not_supported",
+            adapter_status
+            or "Excluded by the capability matrix: this platform is not used for "
+            "placements (do-not-use lane).",
+        )
+    if mechanism == MECHANISM_EXTENSION:
+        reason = (
+            "Extension-assisted: an operator publishes here in their own logged-in "
+            "session via a placement task - it is not an API campaign target."
+        )
+        if adapter_status:
+            reason = f"{reason} {adapter_status}"
+        return verdict("eligible_extension", reason)
+    if mechanism == MECHANISM_HUMAN:
+        # Honest about WHY nothing can be queued: not a missing adapter someone should
+        # go build tomorrow, but a lane where a person places by hand and records the
+        # evidence URL - until/unless a placement spec is earned.
+        return verdict(
+            "not_supported",
+            "Human lane: no API and no placement tooling - place it by hand and "
+            "record the evidence URL.",
         )
 
     if not row.get("automation_ready"):
@@ -217,6 +272,7 @@ def resolve_selection(
     selected: Iterable[str],
     *,
     acknowledged: bool = False,
+    allow_extension: bool = False,
 ) -> SelectionVerdict:
     """Narrow an operator's chosen platforms into plan / refuse / ask.
 
@@ -227,6 +283,20 @@ def resolve_selection(
     hard blocks stay hard (no publisher, no credential: those are facts, not opinions);
     the two judgement states become the operator's decision, taken with the platform's
     own rule quoted to them and their acknowledgement recorded.
+
+    ``eligible_extension`` (0135) lands in ``blocked`` here BY DEFAULT, carrying its
+    lane explanation: this resolver feeds the API publish/campaign path, which cannot
+    drive an operator's browser session - an acknowledgement cannot change that any
+    more than it can conjure a credential.
+
+    ``allow_extension`` (0136, Phase 7) is the SINGLE-property plan door's opt-in:
+    drafting is our own writer (no platform credential involved), and approval then
+    parks the row at ``publishing``/``publish_method='extension'`` for a placement
+    session instead of enqueueing the publish worker. It moves an extension-lane
+    platform into ``allowed`` ONLY when the ledger can actually hold a property for
+    it (a ``platform_enum`` mapping exists - the enum types the column); otherwise
+    the row stays blocked with the honest structural reason. CAMPAIGNS keep the
+    default ``False``: their pacing/scheduling assumes the API pipeline publishes.
     """
     by_name: dict[str, PlatformVerdict] = {}
     for verdict in verdicts:
@@ -245,6 +315,15 @@ def resolve_selection(
         target = chosen.platform_enum or chosen.name
         if chosen.eligible:
             allowed.append(target)
+        elif allow_extension and chosen.status == "eligible_extension":
+            if chosen.platform_enum:
+                allowed.append(chosen.platform_enum)
+            else:
+                blocked.append(
+                    f"{name}: extension-lane platform with no publishing-enum mapping "
+                    "yet - the property ledger cannot hold a row for it (the enum "
+                    "types the column). Growing the enum is its own migration."
+                )
         elif not chosen.advisable:
             blocked.append(f"{name}: {chosen.reason}")
         elif acknowledged:

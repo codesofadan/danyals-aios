@@ -39,8 +39,18 @@ def test_only_citation_scopes_can_ever_be_stored() -> None:
     assert cap_scopes(["*", "admin", "owner"]) == []
 
 
-def test_the_vocabulary_is_two_values_and_neither_touches_a_secret_store() -> None:
-    assert {"citation_queue", "citation_credential"} == EXTENSION_SCOPES
+def test_the_vocabulary_is_seven_values_and_none_touches_a_secret_store() -> None:
+    """0131 widened two values to seven - the granular queue/profile/web2 splits plus
+    the legacy umbrella - and NONE of them names the vault, clients, or the dials."""
+    assert {
+        "citation_queue",
+        "citation_credential",
+        "citation_queue:read",
+        "citation_queue:write",
+        "client_profile:read",
+        "web2_queue:read",
+        "web2_queue:write",
+    } == EXTENSION_SCOPES
 
 
 def test_scopes_are_deduped_and_order_stable() -> None:
@@ -141,7 +151,12 @@ def test_the_queue_is_the_only_surface_that_accepts_an_operator_token() -> None:
     ]
     assert accepting, "expected the queue routes to use the either-credential dependency"
     # They must all be queue handlers, which the router declares under /queue.
-    assert src.count("OperatorOrUser") <= 12, (
+    # Budget accounting (Phase 3's read/write split): 2 import lines + 3 comment
+    # mentions + 5 in the three alias definitions + exactly 7 queue-route parameters
+    # (board, claim, item GET, heartbeat, release, complete, blocked) = 17. A higher
+    # count means a NEW route took the either-credential dependency - ask whether
+    # that was deliberate before touching this number.
+    assert src.count("OperatorOrUser") <= 17, (
         "the either-credential dependency has spread beyond the queue routes"
     )
 
@@ -274,7 +289,9 @@ class _FakePrincipal:
     issued_at = datetime.now(UTC)
 
     def has(self, scope: str) -> bool:
-        return scope == "citation_queue"
+        # The queue dependency now asks for the granular read scope (the legacy
+        # umbrella maps onto it); this fake grants exactly that family.
+        return scope in {"citation_queue", "citation_queue:read"}
 
 
 async def test_denylist_outage_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,6 +316,34 @@ async def test_denylist_outage_fails_closed(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(HTTPException) as excinfo:
         await oa.resolve_operator(
             request=None, settings=None, redis=None, credentials=None,  # type: ignore[arg-type]
+            x_operator_token="aop_pref_secret",
+        )
+    assert excinfo.value.status_code == 503
+    assert "revocation" in str(excinfo.value.detail)
+
+
+async def test_the_real_denylist_chain_refuses_on_a_redis_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The test above stubs `is_revoked` to raise — something the REAL function could
+    never do until it grew `fail_closed=True` (it swallowed every exception and
+    returned False by contract), which made the 503 branch unreachable in production
+    and the guard vacuous. This one drives the real `is_revoked` with a broken redis
+    client, proving the production dependency chain itself fails closed."""
+    from fastapi import HTTPException
+
+    from app.modules.citations import operator_auth as oa
+
+    monkeypatch.setattr(oa, "verify_operator_token", lambda raw: _FakePrincipal())
+    monkeypatch.setattr(oa, "_load_user_row", lambda uid: _user_row())
+
+    class _DeadRedis:
+        async def get(self, key: str) -> None:
+            raise ConnectionError("redis unreachable")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await oa.resolve_operator(
+            request=None, settings=None, redis=_DeadRedis(), credentials=None,  # type: ignore[arg-type]
             x_operator_token="aop_pref_secret",
         )
     assert excinfo.value.status_code == 503

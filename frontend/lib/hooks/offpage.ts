@@ -25,6 +25,8 @@ import type {
   CitationGap,
   Directory,
   DirectoryTier,
+  OperatorSession,
+  OperatorSessionDetail,
   QueueBlockReason,
   SpecBoard,
   SpecCreateInput,
@@ -894,6 +896,49 @@ export function useReleaseQueueItem() {
     mutationFn: ({ citationId, workedSeconds }: { citationId: string; workedSeconds: number }) =>
       api.post<void>(`/citation-builder/queue/${citationId}/release`, { workedSeconds }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["citation-queue"] });
+    },
+  });
+}
+
+// --- operator sessions (0130) -------------------------------------------------
+
+export const OPERATOR_SESSIONS_KEY = ["citation-builder", "sessions"] as const;
+
+/** The caller's own ACTIVE session, or null. The extension owns creating and working
+ *  sessions; this board only OBSERVES (and can close one that was left behind). */
+export function useMyActiveSession() {
+  return useQuery({
+    queryKey: [...OPERATOR_SESSIONS_KEY, "mine-active"] as const,
+    queryFn: async () => {
+      const rows = await api.get<OperatorSession[]>(
+        "/citation-builder/sessions?mine=true&active=true",
+      );
+      return rows[0] ?? null;
+    },
+    refetchInterval: 30_000,
+  });
+}
+
+/** The full session board: every task card with its batch and telemetry state. */
+export function useOperatorSessionDetail(sessionId: string | null) {
+  return useQuery({
+    queryKey: [...OPERATOR_SESSIONS_KEY, sessionId] as const,
+    queryFn: () => api.get<OperatorSessionDetail>(`/citation-builder/sessions/${sessionId}`),
+    enabled: Boolean(sessionId),
+    refetchInterval: 15_000,
+  });
+}
+
+/** Close a session (claims released; recorded `completed` or `abandoned` honestly). */
+export function useCloseOperatorSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      api.post<OperatorSession>(`/citation-builder/sessions/${sessionId}/close`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: OPERATOR_SESSIONS_KEY });
+      // Closing releases claims, so the queue's in-progress numbers move too.
       qc.invalidateQueries({ queryKey: ["citation-queue"] });
     },
   });

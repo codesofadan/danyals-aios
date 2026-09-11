@@ -330,7 +330,7 @@ def _runner_reporting(mode: str) -> Any:
 
 
 def _cost_mode_for(monkeypatch: Any, *, depth: str, engine_mode: str) -> str:
-    from workers.tasks import audit as A
+    from workers.tasks import audit as A  # noqa: N812 - module-as-namespace alias
 
     captured: dict[str, str] = {}
     real = A.pricing.audit_cost

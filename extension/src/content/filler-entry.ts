@@ -11,7 +11,7 @@
  * a renderer shared with the directory's own JavaScript.
  */
 
-import { fillForm, type FieldPlanItem, type FillOutcome } from "./filler";
+import { fillForm, fillFormHeuristic, type FieldPlanItem, type FillOutcome, type HeuristicValue } from "./filler";
 
 declare global {
   interface Window {
@@ -26,14 +26,21 @@ if (!window.__aiosFillerLoaded) {
   window.__aiosFillerLoaded = true;
   chrome.runtime.onMessage.addListener(
     (
-      msg: { type?: string; plan?: FieldPlanItem[] },
+      msg: { type?: string; plan?: FieldPlanItem[]; values?: HeuristicValue[] },
       _sender: unknown,
       respond: (value: FillOutcome) => void,
     ) => {
-      if (msg?.type !== "aios-fill") return;
-      void fillForm(msg.plan ?? []).then(respond);
-      // Keeps the channel open for the async reply; without it the panel hangs.
-      return true;
+      // Spec-driven fill (exact selectors from an earned spec).
+      if (msg?.type === "aios-fill") {
+        void fillForm(msg.plan ?? []).then(respond);
+        return true; // keep the channel open for the async reply
+      }
+      // Best-effort autofill (no spec): match business values to this page's fields.
+      if (msg?.type === "aios-autofill") {
+        void fillFormHeuristic(msg.values ?? []).then(respond);
+        return true;
+      }
+      return;
     },
   );
 }

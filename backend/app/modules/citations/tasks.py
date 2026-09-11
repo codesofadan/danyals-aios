@@ -1,7 +1,8 @@
 """Citation-submission worker (7B-4): the never-stuck / never-re-raise / idempotent
 driver that claims a QUEUED citation row, dispatches it to the right engine (a
-direct API or the self-hosted Playwright bot), and tracks the
-outcome. Mirrors ``workers/tasks/offpage.py``'s Web 2.0 tasks exactly - with
+legitimate direct API - the Playwright form bot is RETIRED, Phase 3/C1) or routes
+it to the operator queue, and tracks the outcome. Mirrors
+``workers/tasks/offpage.py``'s Web 2.0 tasks exactly - with
 ``task_acks_late`` a raised exception would redeliver the job and re-run a PAID
 stage (double spend), so this always acks and returns a small result dict.
 
@@ -26,11 +27,14 @@ from app.logging_setup import get_logger
 from app.modules.citations.repo import ServiceCitationsStore, service_citations_store
 from app.modules.citations.service import (
     disposition_for_block,
+    is_human_queue_method,
     is_prohibited,
     job_from_row,
     submitter_for,
 )
 from app.services.citation_liveness import (
+    DRIFTED,
+    LIVE,
     LivenessProbe,
     http_liveness_probe,
     judge_liveness,
@@ -38,13 +42,9 @@ from app.services.citation_liveness import (
 )
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
-from integrations.captcha_solver import captcha_solver_from_settings
 from integrations.citation_aggregators import AppleBusinessSubmitter, DataAxleSubmitter
-from integrations.citation_bot import citation_bot_from_settings, db_spec_loader
-from integrations.citation_signup import citation_signup_bot_from_settings
 from integrations.citation_submitters import CitationSubmitter
 from integrations.errors import ProviderNotConfiguredError
-from integrations.imap_mailbox import imap_mailbox_from_settings
 
 logger = get_logger("app.modules.citations.tasks")
 
@@ -144,17 +144,12 @@ def _cost_estimate_for(tier: str, settings: Settings, submit_method: str = "") -
         # refuses these rows while `data_axle_submits_enabled` is False, so the 0.0 is
         # never actually spent - it is a blocked route, not a free one.
         return settings.data_axle_add_cost_estimate
-    if tier in ("api", "aggregator"):
-        # Apple and GBP: a real API call, no per-submission charge. Priced at zero because
-        # it IS zero, not because the price is unknown.
-        return 0.0
-    if tier == "bot_fillable":
-        return settings.citation_bot_cost_estimate
-    if tier == "captcha_assisted":
-        return settings.citation_captcha_cost_estimate
-    # Any other/unknown tier falls to the self-hosted Playwright bot's estimate -
-    # the default engine for a directory not on the api/aggregator/captcha tiers.
-    return settings.citation_bot_cost_estimate
+    # Everything else is zero because it IS zero: Apple/GBP are real API calls with no
+    # per-submission charge, and every form tier (bot_fillable / captcha_assisted) is
+    # operator-queue work since the Playwright bot's retirement - a person's minutes,
+    # never metered provider spend. The old per-submit bot/solve estimates were deleted
+    # with the bot (Phase 3, plan C1).
+    return 0.0
 
 
 def execute_citation_submit(
@@ -274,45 +269,35 @@ def execute_citation_submit(
         #
         # It used to run after: the gate charged, the row went to `submitting`, and only
         # then did the worker discover there was no engine - so a client was billed for a
-        # submission that could not physically happen. That was survivable while the bot
-        # fell back to a 50-entry in-code catalogue and almost always had *something* to
-        # run. It stops being survivable now that the bot only drives EARNED specs
-        # (0108): the whitelist starts empty, so "no engine" is the common case, and
+        # submission that could not physically happen. Since the Playwright bot's
+        # retirement (Phase 3, plan C1) the machine-dispatchable set is SMALL - the two
+        # legitimate API submitters - so "route to a person" is the common case, and
         # charging for it would turn an honest coverage number into a bill.
         #
-        # Nothing above this line spends. `submitter_for` is pure dispatch, and building
-        # the bot only imports Playwright and reads the active-spec whitelist.
-        job = job_from_row(row)
-        solver = captcha_solver_from_settings(settings)
-        # The EARNED whitelist is the bot's ONLY source of a runnable spec (0108).
-        # `route` suppresses the residential proxy on Route B: a Route B directory is by
-        # definition undefended, so one that starts answering 403 has BECOME Route C -
-        # a route change to record, not proxy bandwidth to buy.
-        bot = citation_bot_from_settings(
-            settings,
-            captcha_solver=solver,
-            spec_loader=db_spec_loader,
-            route=str(row.get("directory_route") or ""),
-        )
-        # Account-creation engine: only wired when a catch-all IMAP mailbox + mail
-        # domain are configured (else None -> a bot:signup directory HOLDS as blocked).
-        # IMAP polling is free; the paid submit is still gated by the `citations` dial.
-        mailbox = imap_mailbox_from_settings(settings)
-        signup_bot = citation_signup_bot_from_settings(settings, captcha_solver=solver, mailbox=mailbox)
+        # Nothing above this line spends. `submitter_for` is pure dispatch.
         submitter, reason = submitter_for(
             submit_method,
             api_submitters=_api_submitters(settings),
-            bot=bot,
-            signup_bot=signup_bot,
         )
         if submitter is None:
-            # A missing engine is HUMAN WORK, not a dead end - `disposition_for_block`
-            # sends it to the operator queue rather than parking it. The one exception the
-            # classifier makes is `aggregator:fed_by_*`, whose "no action needed" reason
-            # means the listing arrives through the core feed and there is nothing for
-            # anyone to submit; that stays `blocked` so it is not offered as work.
-            fed_by_aggregator = submit_method.startswith("aggregator:fed_by_")
-            code = "fed_by_aggregator" if fed_by_aggregator else "no_engine"
+            # `disposition_for_block` decides where an undispatched row goes:
+            #
+            #  * fed_by_aggregator -> `blocked` (nothing to submit; the listing arrives
+            #    through the core feed and offering it as work would be an invented task).
+            #  * every retired bot route (`bot:*`, non-fed `aggregator:*`, `manual`) ->
+            #    `ready_for_human` with the honest code `human_queue`: form work is a
+            #    PERSON's by design, not an engine gap. This is the campaign skip
+            #    ledger's truth - "43 waiting on human_queue" means 43 items of real
+            #    queue work, not 43 misconfigurations.
+            #  * anything else (an unconfigured API engine, `closed`, an unknown
+            #    method) -> `no_engine`, which still routes to the queue where a person
+            #    can act and stays honest where they cannot.
+            if submit_method.startswith("aggregator:fed_by_"):
+                code = "fed_by_aggregator"
+            elif is_human_queue_method(submit_method):
+                code = "human_queue"
+            else:
+                code = "no_engine"
             state = disposition_for_block(code)
             store.update_citation(
                 citation_id,
@@ -323,33 +308,10 @@ def execute_citation_submit(
                 },
             )
             logger.info(
-                "citation_submit_no_engine",
-                citation_id=citation_id, reason=reason, disposition=state,
+                "citation_submit_not_dispatched",
+                citation_id=citation_id, reason=reason, code=code, disposition=state,
             )
             return {"state": state, "reason": reason}
-
-        # A bot with no EARNED spec for this directory cannot submit. Asking before the
-        # gate is what keeps an empty whitelist free rather than expensive.
-        can_submit = getattr(submitter, "can_submit", None)
-        if callable(can_submit) and not can_submit(job):
-            # The most common row in the catalogue today: 176 bot-tier directories with
-            # zero earned specs. A person does not need a spec - they have eyes - so this
-            # is the single biggest source of legitimate queue work.
-            state = disposition_for_block("no_verified_spec")
-            store.update_citation(
-                citation_id,
-                {
-                    "submit_status": state,
-                    "blocked_reason": "no_verified_spec",
-                    "error": (
-                        "no verified form spec for this directory - a spec is activated "
-                        "only after a dated human DOM check and one submission that "
-                        "produced a public listing URL (nothing was sent, nothing charged)"
-                    ),
-                },
-            )
-            logger.info("citation_submit_no_spec", citation_id=citation_id, disposition=state)
-            return {"state": state, "reason": "no_verified_spec"}
 
         decision = _gate().evaluate(ctx)
         if not decision.allowed:
@@ -374,7 +336,7 @@ def execute_citation_submit(
         store.update_citation(citation_id, {"submit_status": "submitting"})
 
         try:
-            result = submitter.submit(job)
+            result = submitter.submit(job_from_row(row))
         except Exception as exc:  # a provider crash still marks failed - never stuck, never re-raised
             _gate().commit(ctx, ctx.estimated_cost)  # the attempt still incurred the metered cost
             logger.exception("citation_submit_provider_error", citation_id=citation_id)
@@ -390,8 +352,7 @@ def execute_citation_submit(
             )
             return {"state": "failed", "reason": f"{exc!r}"[:_ERROR_MAX]}
 
-        # The self-hosted bot only drives directories it has a FormSpec for, and a
-        # native API can turn out not to expose the write endpoint at all (e.g.
+        # A native API can turn out not to expose the write endpoint at all (e.g.
         # Foursquare's public API has no anonymous place-create - POST /v3/places
         # 404s). With no fallback engine, that engine's own honest failed/blocked
         # result stands as-is - a queued directory it cannot reach is reported
@@ -467,13 +428,19 @@ def execute_liveness_recheck(
     for row in rows:
         citation_id = str(row.get("id"))
         live_url = str(row.get("live_url") or "")
+        discovered_url = str(row.get("discovered_url") or "")
+        # PROMOTION CANDIDATE (0129): discovery found a URL and nothing has verified it
+        # yet. The probe below is the ONLY thing that can grant `live` - discovery
+        # never does; it merely nominates the URL the probe now fetches.
+        promoting = not live_url and bool(discovered_url)
+        target_url = live_url or discovered_url
         try:
-            # SSRF guard: `live_url` is operator/provider-supplied and this runs
+            # SSRF guard: the target URL is operator/provider-supplied and this runs
             # server-side, so a private/loopback host must never be fetched.
-            if not is_public_url(live_url):
+            if not is_public_url(target_url):
                 probe = LivenessProbe(status_code=None, checked_from="refused:non-public-url")
             else:
-                probe = fetch(live_url)
+                probe = fetch(target_url)
         except Exception:
             # A failure to LOOK is not evidence the listing is gone. Hold the row.
             logger.warning("citation_recheck_fetch_failed", citation_id=citation_id)
@@ -500,13 +467,52 @@ def execute_liveness_recheck(
         # redo. So the row's status is left exactly as it was, the failed attempt is
         # recorded in the evidence, and it is retried SOON rather than consuming a rung of
         # the settling ladder - a network failure must not push the next real check out by
-        # three months.
+        # three months. (This holds for a PROMOTION candidate too: an unreachable host
+        # neither promotes nor demotes it.)
         could_not_look = probe.status_code is None
         if could_not_look:
             fields: dict[str, Any] = {
                 "verification_evidence": Json(verdict.evidence),
                 "next_recheck_at": datetime.now(UTC) + timedelta(days=_UNREACHABLE_RETRY_DAYS),
             }
+        elif promoting:
+            days = next_recheck_days(
+                recheck_count=count,
+                authority_tier=str(row.get("directory_authority_tier") or ""),
+                route=str(row.get("directory_route") or ""),
+            )
+            if verdict.status in (LIVE, DRIFTED):
+                # THE PROBE GRANTS LIVE - discovery never does. The page answered and
+                # the business is really on it, so the discovered URL is promoted:
+                # live_url is earned, the method is 'discovery' (the value 0106
+                # reserved for exactly this path), and the status is whatever the
+                # existing judge decided (live, or drifted when the NAP no longer
+                # matches - the listing exists either way).
+                fields = {
+                    "live_url": discovered_url,
+                    "submit_status": verdict.status,
+                    "verification_method": "discovery",
+                    "verification_evidence": Json(verdict.evidence),
+                    "recheck_count": count + 1,
+                    "next_recheck_at": datetime.now(UTC) + timedelta(days=days),
+                    "evidence_checked_at": datetime.now(UTC),
+                }
+                if verdict.is_live:
+                    fields["live_url_verified_at"] = datetime.now(UTC)
+                if current != verdict.status:
+                    changed += 1
+            else:
+                # The probe LOOKED and the business was not there. That is NOT a
+                # delisting - nothing was ever live at this URL - it is the discovery
+                # claim failing verification, so the `confirmed` tier no longer
+                # stands: demote to `uncertain` (the verify-first bucket owns it now)
+                # and leave live_url/submit_status untouched.
+                fields = {
+                    "evidence_level": "uncertain",
+                    "verification_evidence": Json(verdict.evidence),
+                    "next_recheck_at": datetime.now(UTC) + timedelta(days=days),
+                    "evidence_checked_at": datetime.now(UTC),
+                }
         else:
             days = next_recheck_days(
                 recheck_count=count,
@@ -561,7 +567,7 @@ def _submit_outcome(result: dict[str, Any]) -> JobOutcome:
 
     Doctrine: ``is_success()`` may be true only when a submission actually went out.
     ``ready_for_human`` is a routing verdict, not a delivery — it renders as blocked
-    with its reason so Operations can aggregate "43 waiting on no_verified_spec"."""
+    with its reason so Operations can aggregate "43 waiting on human_queue"."""
     state = str(result.get("state") or "error")
     reason = str(result.get("reason") or "")
     if state in ("submitted", "verified"):
@@ -591,9 +597,10 @@ def _submit_outcome(result: dict[str, Any]) -> JobOutcome:
     # (the same move citation_liveness_recheck made below).
     name="citation_submit",
     job_name="citations.submit",
-    # BROWSER: a real submit is minutes of headless Chromium, which is exactly the
-    # envelope this queue owns; today's spec-less classification runs are milliseconds,
-    # which it also serves fine.
+    # BROWSER: kept for message-compatibility (in-flight jobs and worker -Q lists name
+    # it). The Playwright bot is retired, so nothing here launches a browser any more -
+    # dispatch/classification runs are milliseconds and an API submit is one HTTP call,
+    # both of which this queue serves fine.
     queue=JobQueue.BROWSER,
     # ONE attempt: execute_citation_submit already owns never-re-raise / never-
     # double-spend. The contract adds the ledger row, dead-letter and reaper coverage

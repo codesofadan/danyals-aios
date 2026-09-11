@@ -110,8 +110,8 @@ def integration_statuses(
             _present(settings.foursquare_api_key), "FOURSQUARE_API_KEY"),
         cfg("bing_places", "Bing Places", "Off-page",
             _present(settings.bing_places_api_key), "BING_PLACES_API_KEY"),
-        cfg("captcha", "CAPTCHA Solver", "Off-page",
-            _present(settings.captcha_solver_api_key), "CAPTCHA_SOLVER_API_KEY"),
+        # (The CAPTCHA-solver row was deleted 2026-09-05 with the citation bot's
+        # retirement - solving CAPTCHAs is ruled out, not unconfigured.)
         cfg("brightlocal", "BrightLocal", "Off-page",
             _present(settings.brightlocal_api_key), "BRIGHTLOCAL_API_KEY"),
         # --- Backups (offsite) ---

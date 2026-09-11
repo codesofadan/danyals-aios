@@ -56,9 +56,15 @@ _CITATION_KEYS = {
     # machine-readable hold reason the UI maps to a sentence. handoffUrl left with its
     # column (0121): no writer ever existed and the queue serves add_url instead.
     "liveUrl", "blockedReason",
+    # 0129 on the wire: what discovery FOUND (never a liveness claim - only the probe
+    # promotes it into liveUrl) and how much that evidence is worth.
+    "discoveredUrl", "evidenceLevel",
 }
 _WEB2_KEYS = {
     "id", "client", "platform", "postUrl", "anchor", "verified", "published", "status",
+    # 0135/0136 on the wire: WHICH lane publishes this placement. A `publishing` row
+    # with publishMethod='extension' is waiting for an operator session, not a worker.
+    "publishMethod",
 }
 _KPI_KEYS = {"referringDomains", "newLinks30d", "lostLinks30d", "toxicFlagged"}
 
@@ -440,6 +446,35 @@ class FakeOffpageRepo:
     def get_web2_account(self, account_id: str) -> dict[str, Any] | None:
         return self.accounts.get(account_id)
 
+    # --- extension placement (0135 matrix + 0136 specs) ---
+    # Empty by default: an uncatalogued platform keeps the API-lane behaviour
+    # byte-for-byte (approve's routing branch requires mechanism='extension').
+    def platform_matrix_for(self, platform: str) -> dict[str, Any] | None:
+        return getattr(self, "_matrix", {}).get(platform)
+
+    def set_matrix(self, platform: str, row: dict[str, Any]) -> None:
+        if not hasattr(self, "_matrix"):
+            self._matrix = {}
+        self._matrix[platform] = row
+
+    def active_placement_spec(self, platform_id: str) -> dict[str, Any] | None:
+        return getattr(self, "_placement_specs", {}).get(platform_id)
+
+    def set_active_placement_spec(self, platform_id: str, row: dict[str, Any]) -> None:
+        if not hasattr(self, "_placement_specs"):
+            self._placement_specs = {}
+        self._placement_specs[platform_id] = row
+
+    def record_placement_spec_success(self, spec_id: str) -> None:
+        if not hasattr(self, "_spec_successes"):
+            self._spec_successes = []
+        self._spec_successes.append(spec_id)
+
+    def record_placement_spec_drift(
+        self, platform_id: str, *, selector: str, evidence: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        return None
+
     def pacing_caps_row(self) -> dict[str, Any] | None:
         # Jitter off and the campaign cap lifted so these tests assert the ROUTER's
         # contract rather than re-testing the pacing service.
@@ -734,9 +769,11 @@ async def test_citation_action_note_annotates_without_state_change(
 async def test_citation_action_missing_is_404(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None]
 ) -> None:
+    # `Note` is the only verb that reaches the lookup - Submit/Update 409 first
+    # (evidence-gated, Phase 0), so the 404 path is exercised with an annotation.
     wire("manager", "u-lead")
     resp = await client.post(
-        "/api/v1/offpage/citations/nope/action", json={"action": "Update"}
+        "/api/v1/offpage/citations/nope/action", json={"action": "Note", "note": "x"}
     )
     assert resp.status_code == 404
 
@@ -1324,6 +1361,31 @@ async def test_the_platform_board_never_calls_a_platform_connected_without_an_ac
     assert "no account is connected" in reason.lower()
 
 
+async def test_the_platform_board_surfaces_the_extension_lane_as_its_own_state(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+) -> None:
+    """0135: an extension-mechanism row reaches the wire as ``eligible_extension`` -
+    never ``eligible`` (the API pipeline cannot drive an operator's browser session)
+    and never a hidden/refused row (the platform is real and usable). Phase 7's
+    placement routing keys off exactly this wire value."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    wire("specialist", "u-staff")
+    repo.catalog_rows.append(
+        {
+            "name": "Substack", "platform_enum": None, "ownership_tier": "do_not_use",
+            "topical_scope": "niche", "automation_ready": False,
+            "authority_tier": "high", "terms_position": "",
+            "mechanism": "extension",
+            "adapter_status": "No public post-write API.",
+        }
+    )
+    board = (await client.get("/api/v1/offpage/web2/platform-board?clientId=cl-1")).json()
+    row = next(r for r in board if r["name"] == "Substack")
+    assert row["status"] == "eligible_extension"
+    assert "operator" in row["reason"].lower()
+    assert "No public post-write API." in row["reason"]
+
+
 async def test_web2_approve_refuses_when_the_similarity_gate_could_not_run(
     client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
     web2_enqueues: tuple[list[str], list[str]], web2_sim_code: Callable[[str], None],
@@ -1540,6 +1602,49 @@ async def test_one_approval_publishes_every_property_in_the_campaign(
     assert body["status"] == "scheduled"
     # Every property transitioned individually - none left behind at review.
     assert all(r["status"] == "publishing" for r in repo.campaign_properties(campaign_id))
+
+
+async def test_campaign_approval_routes_an_extension_lane_platform_to_the_parked_state(
+    client: httpx.AsyncClient, repo: FakeOffpageRepo, wire: Callable[..., None],
+    web2_enqueues: tuple[list[str], list[str]],
+) -> None:
+    """0135 mechanism routing at APPROVAL time - the same fork the single-property
+    approve takes. A platform reclassified `extension` between campaign creation and
+    approval must PARK (publishing + publish_method='extension', nothing enqueued),
+    not be dispatched to a publish worker that has no publisher for it; its api-lane
+    siblings keep the enqueue path untouched."""
+    repo.client_names["cl-1"] = "Leeds Drainage"
+    _writes, publishes = web2_enqueues
+    wire("manager", "u-lead")
+    created = await client.post("/api/v1/offpage/web2/campaigns", json=_campaign_body())
+    campaign_id = created.json()["id"]
+    props = repo.campaign_properties(campaign_id)
+    for row in props:
+        row["status"] = "needs_review"
+    repo.campaigns[campaign_id]["status"] = "needs_approval"
+    # An operator reclassifies Blogger to the extension lane before the lead approves.
+    repo.set_matrix("Blogger", {
+        "id": "pl-blogger", "name": "Blogger", "platform_enum": "Blogger",
+        "mechanism": "extension", "homepage_url": "https://blogger.com",
+    })
+    publishes.clear()
+
+    resp = await client.post(
+        f"/api/v1/offpage/web2/campaigns/{campaign_id}/approve", json={"action": "approve"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == len(props)
+
+    after = repo.campaign_properties(campaign_id)
+    blogger = [r for r in after if r["platform"] == "Blogger"]
+    others = [r for r in after if r["platform"] != "Blogger"]
+    assert blogger and all(
+        r["status"] == "publishing" and r.get("publish_method") == "extension"
+        for r in blogger
+    )
+    assert others and all(r["status"] == "publishing" for r in others)
+    # NOTHING was enqueued for the parked rows - they wait for an operator session.
+    assert all(str(r["id"]) not in publishes for r in blogger)
 
 
 async def test_a_property_the_gate_blocks_is_held_not_waved_through_with_the_batch(

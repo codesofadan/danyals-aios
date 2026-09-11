@@ -56,6 +56,8 @@ from app.schemas.content import (
     SiteDesignProfile,
     SiteDesignRequest,
     SiteDesignResponse,
+    SiteNavigationRequest,
+    SiteNavigationResponse,
     auto_framework,
     compute_content_stats,
     job_page_type_for,
@@ -81,6 +83,8 @@ from app.services.site_design import (
     build_design_summarizer,
     extract_site_design,
 )
+from app.services.site_navigation import navigation_pages_from_jobs
+from app.services.site_plan import build_site_plan
 from integrations.firecrawl import Firecrawl, firecrawl_from_settings
 from integrations.llm import Researcher
 
@@ -715,6 +719,80 @@ async def generate_from_research(
         entity_id=body.client_id,
     )
     return ContentBulkGenerateResponse(jobs=codes)
+
+
+@router.post("/content/site-navigation", response_model=SiteNavigationResponse)
+async def rebuild_site_navigation(
+    body: SiteNavigationRequest,
+    repo: ContentRepoDep,
+    clients: ClientsRepoDep,
+    settings: SettingsDep,
+    actor: PublishContent,
+) -> SiteNavigationResponse:
+    """Assemble the client's WordPress navbar from its PUBLISHED content pages.
+
+    The bulk flow publishes each page independently; this is the missing last mile that
+    nests them — the service / location / blog pages group under a Services / Locations /
+    Blog parent so each shows a DROPDOWN of its children (a missing family hub is
+    auto-created). Idempotent: the AIOS Publisher plugin upserts the pages and re-syncs
+    the menu — nothing new is published here. An honest no-op (``delivered=false`` with a
+    ``reason``) when there are no published pages, the plan has blocking issues, or the
+    client's site has no plugin configured."""
+    client = await asyncio.to_thread(clients.get_client, body.client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    jobs = await asyncio.to_thread(repo.list_jobs, client_id=body.client_id, status="done")
+    pages = navigation_pages_from_jobs(jobs)
+    if not pages:
+        return SiteNavigationResponse(
+            delivered=False, pages=0, reason="no published pages to put in the navigation"
+        )
+
+    plan = build_site_plan(
+        pages,
+        menu_name=(f"{client.get('name', '')} Menu").strip() or "Main Menu",
+        menu_location="primary",
+    )
+    if not plan.valid:
+        return SiteNavigationResponse(
+            delivered=False, pages=len(pages), issues=list(plan.issues), notes=list(plan.notes),
+            reason="the plan has blocking issues; not delivered",
+        )
+
+    # Resolve the client's AIOS Publisher target. A site_url override rides a synthetic
+    # source_pack; otherwise a published job's source_pack carries the seeded site.
+    from workers.tasks.content import _resolve_wp_plugin  # lazy: avoids a heavy import cycle
+
+    row: dict[str, Any] = (
+        {"source_pack": {"wp_site_url": body.site_url}, "code": ""}
+        if body.site_url
+        else next((j for j in jobs if j.get("source_pack")), {})
+    )
+    publisher = _resolve_wp_plugin(row, settings)
+    if publisher is None:
+        return SiteNavigationResponse(
+            delivered=False, pages=len(pages), notes=list(plan.notes),
+            reason="no AIOS Publisher plugin is configured for this client's site",
+        )
+
+    try:
+        result = await asyncio.to_thread(publisher.deliver_site, plan.payload())
+    except Exception as exc:
+        logger.exception("site_navigation_delivery_failed", client_id=body.client_id)
+        return SiteNavigationResponse(
+            delivered=False, pages=len(pages), notes=list(plan.notes),
+            reason=f"delivery failed: {exc}",
+        )
+
+    await record_activity(
+        actor, kind="content", action="rebuilt the site navigation",
+        target=client.get("name", ""), entity_type="client", entity_id=body.client_id,
+    )
+    return SiteNavigationResponse(
+        delivered=True, pages=len(pages), menu_items=int(result.get("items") or 0),
+        notes=list(plan.notes),
+    )
 
 
 # --------------------------------------------------------------------------- #

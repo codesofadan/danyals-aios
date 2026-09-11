@@ -213,7 +213,7 @@ class TestTheWorkerCore:
             preview_url = "https://spotino.org/?page_id=157"
             sections = 8
             widgets = 97
-            notes = ["ok"]
+            notes = ["ok"]  # noqa: RUF012 - frozen test stub, never mutated
 
         payload = result_payload(R(), url="https://alligatorpools.com/")
         assert payload["owner_confirmed_source"] is True

@@ -33,10 +33,10 @@ at client construction.
 |---|---|---|
 | `BING_PLACES_API_KEY` | Bing Places | direct-API citation submit (verify bulk endpoint at setup) |
 | `FOURSQUARE_API_KEY` | Foursquare | direct-API citation submit (verify write path) |
-| `CAPTCHA_SOLVER_API_KEY` (+ `CAPTCHA_SOLVER_PROVIDER` capsolver/capmonster) | CAPTCHA solver | for `captcha_assisted` directories (self-hosted Playwright bot) |
-| `CITATION_PROXY_URL` | residential proxy | optional; recommended at scale |
+| ~~`CAPTCHA_SOLVER_API_KEY` / `CAPTCHA_SOLVER_PROVIDER`~~ | *retired 2026-09-05* | the Playwright form bot and its CAPTCHA solver were retired outright (off-page redesign Phase 3) — cancel the solver subscription; these vars are no longer read |
+| ~~`CITATION_PROXY_URL`~~ | *retired 2026-09-05* | the residential proxy existed only for the retired bot — cancel it; the var is no longer read |
 | `CITATION_ARTIFACT_DIR` | local path | where submission proof screenshots land (`proofUrl`) |
-| `APIFY_API_TOKEN` + `APIFY_CITATION_ACTOR_ID` | Apify | fallback engine, only for directories the self-hosted bot can't reach |
+| `APIFY_API_TOKEN` + `APIFY_CITATION_ACTOR_ID` | Apify | fallback engine for directories no other engine reaches |
 | ~~`WEB2_HOUSE_CREDENTIALS_JSON`~~ | *removed 2026-08-25 (R2-06)* | the seeder copied one shared house login into every client's vault row; register accounts with `app.cli.web2_accounts` instead, which seals each credential once under its `web2_accounts.id` |
 
 Data Axle, Neustar/Localeze, OpenStreetMap are deliberately **`manual_only`** (no

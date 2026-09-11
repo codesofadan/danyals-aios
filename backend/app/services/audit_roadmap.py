@@ -155,10 +155,8 @@ def compute_impact(
     rather than 0 - otherwise a broken robots.txt would rank below a typo.
     """
     weight = _SEVERITY_WEIGHT.get((severity or "").lower(), 1.0)
-    if pages_crawled > 0 and pages_affected > 0:
-        reach = min(1.0, pages_affected / pages_crawled)
-    else:
-        reach = 1.0
+    measured = pages_crawled > 0 and pages_affected > 0
+    reach = min(1.0, pages_affected / pages_crawled) if measured else 1.0
     conf = 1.0 if confidence is None else max(0.0, min(1.0, float(confidence)))
     return round(weight * reach * conf, 4)
 
@@ -294,5 +292,5 @@ def effort_table() -> dict[str, Any]:
         "surface": dict(_SURFACE_EFFORT),
         "volume_url_locus": {">=5": 1.0, ">=25": 2.0, ">=100": 4.0},
         "priority": "impact / effort",
-        "phases": {p: m for p, m in PHASE_MONTHS},
+        "phases": dict(PHASE_MONTHS),
     }

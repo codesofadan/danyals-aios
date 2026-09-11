@@ -101,22 +101,61 @@ def test_the_exchange_body_carries_the_secret_and_the_same_redirect() -> None:
     assert form["redirect_uri"] == "https://x/cb", "must match the authorize call exactly"
 
 
-def test_a_refresh_token_is_preferred_over_a_short_lived_access_token() -> None:
-    """Sealing the access token produces an account that works today and stops
-    publishing within the hour - a failure that surfaces long after the connect."""
+def test_the_full_bundle_is_sealed_never_a_single_chosen_token() -> None:
+    """Choosing ONE token was the original defect and both choices lose: the access
+    token dies within the hour, the refresh token 401s when sent as a Bearer (the
+    live Blogger failure). The bundle keeps both halves so the refresh service can
+    serve a current bearer forever."""
+    import json
+
     cred = credential_from_tokens(
-        "Blogger", {"access_token": "short", "refresh_token": "durable"}
+        "Blogger",
+        {"access_token": "short", "refresh_token": "durable", "expires_in": 3600},
     )
-    assert cred == {"oauth_token": "durable"}
+    assert set(cred) == {"oauth_token"}
+    bundle = json.loads(cred["oauth_token"])
+    assert bundle["access_token"] == "short"
+    assert bundle["refresh_token"] == "durable"
+    assert bundle["token_type"] == "Bearer"
+    # expires_in is relative and meaningless once sealed - the bundle carries the
+    # ABSOLUTE expiry, stamped at exchange time.
+    assert bundle["expires_at"], "an expiring token must seal its absolute expiry"
 
 
 def test_an_access_only_response_is_still_used_where_that_is_all_a_platform_issues() -> None:
-    assert credential_from_tokens("Tumblr", {"access_token": "only"}) == {"oauth_token": "only"}
+    import json
+
+    cred = credential_from_tokens("Tumblr", {"access_token": "only"})
+    bundle = json.loads(cred["oauth_token"])
+    assert bundle["access_token"] == "only"
+    assert bundle["refresh_token"] == ""
+    # No expires_in in the response -> no expiry claimed. The refresh service reads
+    # an empty expiry as "never stale" rather than inventing a deadline.
+    assert bundle["expires_at"] == ""
 
 
 def test_a_token_response_with_nothing_usable_yields_no_credential() -> None:
     """Better an empty credential the caller refuses than a row sealed with junk."""
     assert credential_from_tokens("Tumblr", {"error": "invalid_grant"}) == {}
+
+
+def test_the_refresh_grant_carries_the_app_and_the_durable_token() -> None:
+    from app.services.web2_oauth import refresh_payload
+
+    url, form = refresh_payload(
+        "Tumblr", _Settings(tumblr_id="i", tumblr_secret="s"), refresh_token="durable"
+    )
+    assert url == "https://api.tumblr.com/v2/oauth2/token"
+    assert form["grant_type"] == "refresh_token"
+    assert form["refresh_token"] == "durable"
+    assert form["client_id"] == "i" and form["client_secret"] == "s"
+
+
+def test_the_refresh_grant_holds_when_no_app_is_registered() -> None:
+    from app.services.web2_oauth import refresh_payload
+
+    assert refresh_payload("Tumblr", _Settings(), refresh_token="t") == ("", {})
+    assert refresh_payload("dev.to", _Settings(), refresh_token="t") == ("", {})
 
 
 # --------------------------------------------------------------------------- #

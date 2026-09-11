@@ -3,8 +3,10 @@
 // & Web 2.0). Paid tier; every Web 2.0 placement is human-
 // approved, never link spam. Backlink signals originate from
 // DataForSEO (new/lost alerts); Web 2.0 posts publish through
-// official platform APIs; citations SUBMIT via a direct API, an
-// aggregator push, or the self-hosted Playwright bot (7B-4).
+// official platform APIs; citations SUBMIT via the legitimate
+// direct APIs (Data Axle / Apple) or the operator queue — the
+// Playwright form bot is retired (Phase 3); earned directory
+// specs power extension AUTOFILL, a person always submits.
 // Shapes mirror the live FastAPI response models 1:1 (contract-
 // locked server-side by tests/test_contract_lock.py) — there is
 // no mock data left in this file; every screen reads the backend.
@@ -89,6 +91,22 @@ export const SUBMIT_STATUS_META: Record<CitationSubmitStatus, { label: string; c
   delisted: { label: "Delisted", cls: "op-crit" },
 };
 
+// 0129: how much a DISCOVERY verdict is actually worth. "" = a pre-tier row;
+// confirmed = fetched w/ NAP match OR >=2 independent sources corroborated it;
+// inconsistent_nap = the listing exists but its NAP drifted; uncertain = a hit exists
+// but nothing fetched/corroborated it (verify first); no_evidence = zero hits across
+// ALL sources — a *candidate* gap, because absence of evidence is never proof.
+export type CitationEvidenceLevel =
+  | "" | "confirmed" | "inconsistent_nap" | "uncertain" | "no_evidence";
+
+export const EVIDENCE_LEVEL_META: Record<CitationEvidenceLevel, { label: string; cls: string }> = {
+  "": { label: "Not judged", cls: "mut" },
+  confirmed: { label: "Confirmed", cls: "ok" },
+  inconsistent_nap: { label: "NAP drifted", cls: "warn" },
+  uncertain: { label: "Verify first", cls: "info" },
+  no_evidence: { label: "No evidence found", cls: "mut" },
+};
+
 export type Citation = {
   id: string;
   client: string;
@@ -102,6 +120,11 @@ export type Citation = {
   proofUrl: string;
   // The public listing URL — set only after a fetch-verified completion. THE deliverable.
   liveUrl: string;
+  // 0129: the URL discovery FOUND. Never a claim of liveness — only the liveness probe
+  // promotes it into liveUrl (verification_method = "discovery").
+  discoveredUrl: string;
+  // 0129: the evidence tier behind the discovery verdict.
+  evidenceLevel: CitationEvidenceLevel;
   // Machine-readable hold reason ("" unless on hold) → sentence via lib/citationStatus.ts.
   blockedReason: string;
 };
@@ -207,6 +230,12 @@ export const PLATFORM_ISSUES: Partial<Record<Web2Platform, string>> = {
   Storyblok: "Management token exists, but no target space configured yet",
 };
 
+/** Which lane publishes a placement (0135/0136): `api` = the publish worker,
+ *  `extension` = an operator places it in their own logged-in session (a row parked
+ *  at `publishing` with this value is waiting for a placement session, not a
+ *  worker), `manual` = placed by hand with the evidence URL recorded. */
+export type Web2PublishMethod = "api" | "extension" | "manual";
+
 export type Web2Property = {
   id: string;
   client: string;
@@ -216,6 +245,7 @@ export type Web2Property = {
   verified: Web2Verified;
   published: string;
   status: Web2PipelineStatus;
+  publishMethod: Web2PublishMethod;
 };
 
 // --- Web 2.0 campaigns + the per-client platform board -------------------------
@@ -250,7 +280,17 @@ export type Web2AnchorCheck = {
 export type Web2PlatformStatusRow = {
   name: string;
   platform: string | null;
-  status: "eligible" | "not_connected" | "not_eligible" | "not_reviewed" | "not_supported";
+  // eligible_extension (0135): the extension-assisted lane's own state — the platform
+  // is real and usable, but an OPERATOR publishes there in their own logged-in session
+  // (Phase 7 placement sessions). Kept separate from `eligible` so it is never offered
+  // as an API campaign target, and so placement routing can key off it.
+  status:
+    | "eligible"
+    | "eligible_extension"
+    | "not_connected"
+    | "not_eligible"
+    | "not_reviewed"
+    | "not_supported";
   reason: string;
   authorityTier: string;
   /** ISO date the platform's terms were last read ("" = never) and the source read. */
@@ -297,6 +337,42 @@ export type Web2Account = {
   complete: boolean;
 };
 
+// --- 0135: the capability matrix -------------------------------------------
+// BY WHAT MECHANISM a placement happens on a platform. "" = a catalogue row the
+// matrix has not classified yet (the DB default for future inserts).
+export type Web2Mechanism = "" | "api" | "extension" | "human" | "unsupported";
+
+export const MECHANISM_META: Record<Web2Mechanism, { label: string; cls: string }> = {
+  "": { label: "Unclassified", cls: "mut" },
+  api: { label: "API", cls: "ok" },
+  extension: { label: "Extension-assisted", cls: "info" },
+  human: { label: "Human", cls: "mut" },
+  unsupported: { label: "Do not use", cls: "warn" },
+};
+
+/** One catalogue row (mirrors `Web2PlatformCatalogResponse` 1:1).
+ *
+ *  `linkVerifiable` / `mediaSupport` are TRI-state: `null` means "not assessed",
+ *  which must render as unmeasured — never as a false. `lastTestedAt` is "" until a
+ *  real credential/publish check has passed (0135 seeds nothing, honestly). */
+export type Web2CatalogPlatform = {
+  id: string;
+  name: string;
+  homepageUrl: string;
+  signupUrl: string;
+  publishMethod: string;
+  authType: string;
+  authorityTier: string;
+  market: string;
+  automationReady: boolean;
+  notes: string;
+  mechanism: Web2Mechanism;
+  lastTestedAt: string;
+  adapterStatus: string;
+  linkVerifiable: boolean | null;
+  mediaSupport: boolean | null;
+};
+
 /** The catalogue rollup, including each platform's credential shape.
  *
  *  `credentialFields` is served rather than duplicated here on purpose: a hand-copied
@@ -306,6 +382,10 @@ export type Web2Catalog = {
   total: number;
   automationReady: number;
   byAuthType: Record<string, number>;
+  /** 0135: rows per capability-matrix lane — the honest headline next to
+   *  `automationReady` (adapters that exist vs what each lane can be used for). */
+  byMechanism: Record<string, number>;
+  platforms: Web2CatalogPlatform[];
   credentialFields: Record<string, string[]>;
 };
 
@@ -579,6 +659,15 @@ export type NapSource = "submission_profile" | "client_profile" | "none";
 
 export type CitationLiveUrl = { directory: string; url: string; status: string };
 
+// 0129: one DISCOVERED listing whose evidence is `uncertain` — a hit exists but
+// nothing fetched or corroborated it. Deduped from `missing` (never rebuilt while
+// unverified) yet NOT counted covered: the operator verifies it first.
+export type CitationVerifyFirst = {
+  directory: string;
+  url: string;
+  evidenceLevel: CitationEvidenceLevel;
+};
+
 export type CitationGap = {
   client: string;
   hasNap: boolean;
@@ -594,9 +683,13 @@ export type CitationGap = {
   missingCount: number;
   missing: Directory[];
   liveUrls: CitationLiveUrl[];
+  // 0129: `uncertain` discoveries to verify before building — neither covered nor a gap.
+  verifyFirst: CitationVerifyFirst[];
   skipped: CitationSkip[];
   bySubmitStatus: Record<string, number>;
   byNapStatus: Record<string, number>;
+  // 0129: tier tallies over rows that HAVE a tier (pre-tier "" rows are not counted).
+  byEvidenceLevel: Record<string, number>;
 };
 
 // One catalog directory NOT built for this client, and why. A required output: without
@@ -635,8 +728,9 @@ export const SKIP_REASON_LABEL: Record<CitationSkipReason, string> = {
 // audit, PRIORITIZED Generic → Country → Niche. Each directory is tagged built|missing
 // (the same covering rule gap-analysis uses). Read-only, degrade-safe server-side.
 // in_flight = an attempt is pending (deduped, not built); stuck = it sat unmoved
-// past the staleness threshold. Neither may ever render as "built" (2026-09-01).
-export type AuditPlanStatus = "built" | "missing" | "in_flight" | "stuck";
+// past the staleness threshold; verify_first = an `uncertain` discovery hit awaiting
+// verification (0129). None of these may ever render as "built" (2026-09-01).
+export type AuditPlanStatus = "built" | "missing" | "in_flight" | "stuck" | "verify_first";
 
 export type AuditPlanItem = {
   directoryName: string;
@@ -655,12 +749,9 @@ export type AuditPlan = {
   niche: AuditPlanItem[];
 };
 
-// The three prioritized buckets, in build order, for rendering.
-export const AUDIT_PLAN_BUCKETS: { key: "generic" | "country" | "niche"; label: string; hint: string }[] = [
-  { key: "generic", label: "Generic", hint: "Global core, aggregators & APIs every market builds first." },
-  { key: "country", label: "Country", hint: "The client's own-market general directories." },
-  { key: "niche", label: "Niche", hint: "Vertical-specific directories for the client's industry." },
-];
+// (AUDIT_PLAN_BUCKETS lived here until its last importer left in 8a24228 — the
+// workspace now shows three build-order counts instead of the bucket dump. The
+// backend truth-guard sweep flags unreferenced seed arrays, so it was removed.)
 
 // --- Wave 4: client business profile (NAP captured at creation) --------------
 export type ClientBusinessProfile = {
@@ -849,4 +940,114 @@ export const QUEUE_BLOCK_LABEL: Record<QueueBlockReason, string> = {
   phone_verification: "Wants to phone the business",
   postcard_verification: "Wants to post a card to the business",
   other: "Something else (see note)",
+};
+
+// --- operator sessions (0130) -------------------------------------------------
+// Batch-based citation building through the extension: one operator, one client,
+// batches of up to 25; the next batch releases server-side when the last task of the
+// current one goes terminal. `uiState` is TELEMETRY with zero authority — evidence
+// stays on the citation row (`live`/`drifted`/... via the probe path).
+// These shapes mirror app/modules/citations/schemas.py's session models 1:1 and are
+// server-authoritative until the contract lock covers them (the module's existing
+// convention for a new surface) — move them together with any backend key change.
+
+export type OperatorSessionStatus = "active" | "paused" | "completed" | "abandoned";
+
+export type SessionTaskState =
+  | "pending"
+  | "released"
+  | "opened"
+  | "form_detected"
+  | "filled"
+  | "awaiting_submit"
+  | "submitted"
+  | "skipped"
+  | "deferred"
+  | "blocked";
+
+export const SESSION_TASK_STATE_META: Record<SessionTaskState, { label: string; cls: string }> = {
+  pending: { label: "Waiting", cls: "mut" },
+  released: { label: "Ready", cls: "info" },
+  opened: { label: "Tab open", cls: "info" },
+  form_detected: { label: "Form found", cls: "info" },
+  filled: { label: "Filled", cls: "info" },
+  awaiting_submit: { label: "Review & submit", cls: "warn" },
+  submitted: { label: "Submitted", cls: "ok" },
+  skipped: { label: "Skipped", cls: "mut" },
+  deferred: { label: "Deferred", cls: "mut" },
+  blocked: { label: "Blocked", cls: "warn" },
+};
+
+export type SessionTaskCard = {
+  taskId: string;
+  citationId: string;
+  batchNo: number;
+  position: number;
+  uiState: SessionTaskState;
+  directory: string;
+  directoryId: string;
+  directoryUrl: string;
+  addUrl: string;
+  /** Fail-closed: false whenever no ACTIVE earned spec exists — the extension then
+   *  offers click-to-copy, never a fabricated Fill. */
+  hasSpec: boolean;
+  fields: QueueFieldValue[];
+  queuedBecause: string;
+  prohibitedWarning: string;
+  /** The catalogue's cost note (e.g. "Free", "Free; paid upsells") so an operator
+   *  sees whether submission costs money before working the directory. */
+  priceNote: string;
+};
+
+export type OperatorSession = {
+  id: string;
+  client: string;
+  clientId: string;
+  status: OperatorSessionStatus;
+  kind: "citation" | "web2_placement";
+  batchSize: number;
+  currentBatch: number;
+  totalBatches: number;
+  taskCount: number;
+  byUiState: Record<string, number>;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+};
+
+/** One paste-ready value from an approved web2 draft (0136). Copy-blocks are the
+ *  placement lane's default and its fail-closed fallback. */
+export type Web2CopyBlock = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+/** One web2_placement task (0136): the approved draft as copy-blocks, where the
+ *  editor lives, and - only under an ACTIVE earned placement spec - selector fill
+ *  fields. `hasSpec` is fail-closed exactly like the citation card's. */
+export type Web2PlacementTaskCard = {
+  taskId: string;
+  web2Id: string;
+  batchNo: number;
+  position: number;
+  uiState: SessionTaskState;
+  platform: string;
+  title: string;
+  /** Spec editor_url when an active spec exists (host-pinned server-side), else the
+   *  platform homepage, else "" - shown honestly as "no URL on file". */
+  editorUrl: string;
+  anchor: string;
+  targetUrl: string;
+  hasSpec: boolean;
+  copyBlocks: Web2CopyBlock[];
+  fields: QueueFieldValue[];
+};
+
+/** Kind-split task lists: a citation session fills `tasks`, a web2_placement
+ *  session fills `web2Tasks` - the shapes differ and a union would make every
+ *  consumer guess. */
+export type OperatorSessionDetail = OperatorSession & {
+  tasks: SessionTaskCard[];
+  web2Tasks: Web2PlacementTaskCard[];
 };

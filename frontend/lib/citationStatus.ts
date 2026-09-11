@@ -132,9 +132,11 @@ export function citationStatusMeta(status: string): StatusMeta {
  * add a code here that the backend cannot write.
  */
 export const BLOCKED_REASON_LABEL: Record<string, string> = {
+  human_queue:
+    "Human work by design — the form bot is retired. Routed to your team's queue; the extension autofills where a spec is earned, and a person submits.",
   no_verified_spec:
-    "No earned form spec yet — routed to your team's queue. Finishing it by hand once is how it becomes automatic.",
-  no_engine: "No machine can submit here — routed to your team's queue.",
+    "No earned form spec yet — routed to your team's queue. (Bot-era code kept for older rows.)",
+  no_engine: "No API engine is configured for this directory — routed to your team's queue.",
   captcha: "A CAPTCHA needs a person — routed to your team's queue.",
   waf_403: "The site refuses robots — a person with a real browser does this one.",
   account_gated: "Needs a login only a person holds — routed to your team's queue.",

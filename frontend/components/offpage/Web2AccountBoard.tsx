@@ -9,7 +9,7 @@ import {
   useWeb2Catalog,
   useWeb2PlatformBoard,
 } from "@/lib/hooks/offpage";
-import type { Web2Account } from "@/lib/offpage";
+import { MECHANISM_META, type Web2Account, type Web2Mechanism } from "@/lib/offpage";
 import { Web2SetupGuideList } from "./Web2PlatformPicker";
 import Web2ClientIdentityPanel from "./Web2ClientIdentityPanel";
 import Web2AccountBuilder from "./Web2AccountBuilder";
@@ -61,6 +61,7 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
           API licence).
         </p>
         <button className="op-act" onClick={() => setAdding(true)}>Register an account</button>
+        <MechanismRollup />
         <Web2ClientIdentityPanel clientId={clientId} />
         <Web2AccountBuilder clientId={clientId} />
         <ConnectGuides clientId={clientId} />
@@ -78,6 +79,7 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
       {adding && (
         <RegisterAccountForm clientId={clientId} onDone={() => setAdding(false)} />
       )}
+      <MechanismRollup />
       <Web2ClientIdentityPanel clientId={clientId} />
       <Web2AccountBuilder clientId={clientId} />
       <ConnectGuides clientId={clientId} />
@@ -142,6 +144,29 @@ export default function Web2AccountBoard({ clientId }: { clientId?: string }) {
         platform was actually asked. <i>Unverified</i> is not a failure — it means nobody has
         checked yet, which is deliberately different from a platform rejecting the credential.
       </div>
+    </div>
+  );
+}
+
+/** The 0135 capability-matrix rollup: how many catalogue platforms sit in each lane
+ *  (API / extension-assisted / human / do-not-use). One line, on the screen where
+ *  operators already reason about what can publish — `automationReady` alone counts
+ *  adapters that exist, which is not the same claim as "usable, and by which lane". */
+function MechanismRollup() {
+  const catalog = useWeb2Catalog();
+  const by = catalog.data?.byMechanism;
+  if (!by) return null;
+  const lanes = (Object.keys(MECHANISM_META) as Web2Mechanism[]).filter((m) => (by[m] ?? 0) > 0);
+  if (lanes.length === 0) return null;
+  return (
+    <div className="fld-hint" style={{ margin: "8px 0", display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <span>Capability matrix:</span>
+      {lanes.map((m) => (
+        <span key={m || "unclassified"}>
+          <span className={`status-pill ${MECHANISM_META[m].cls}`}>{MECHANISM_META[m].label}</span>{" "}
+          {by[m]}
+        </span>
+      ))}
     </div>
   );
 }

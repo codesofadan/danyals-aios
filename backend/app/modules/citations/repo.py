@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import DatabaseNotConfiguredError, privileged_connection, rls_connection
-from app.modules.citations.operator_auth import OperatorOrUserDep
+from app.modules.citations.operator_auth import OperatorOrUserDep, OperatorOrUserWriteDep
 from app.modules.citations.service import derive_business_profile_fields
 
 
@@ -532,9 +532,11 @@ class CitationQueueRepo:
         "       d.route as directory_route, d.tos_position as directory_tos_position, "
         "       d.tos_clause as directory_tos_clause, "
         "       d.tos_source_url as directory_tos_source_url, "
+        "       d.price_note as directory_price_note, "
         "       bp.business_name as bp_business_name, bp.address_line1 as bp_address_line1, "
         "       bp.address_line2 as bp_address_line2, bp.city as bp_city, "
         "       bp.region as bp_region, bp.postal_code as bp_postal_code, "
+        "       bp.market as bp_market, "
         "       bp.phone as bp_phone, bp.website_url as bp_website_url, "
         "       bp.categories as bp_categories, bp.description as bp_description, "
         "       bp.email as bp_email, bp.hours as bp_hours "
@@ -616,34 +618,47 @@ class CitationQueueRepo:
         evidence: dict[str, Any],
         worked_seconds: int,
         note: str = "",
+        verification_method: str = "human",
+        mark_verified: bool = True,
+        recheck_days: int | None = 3,
     ) -> dict[str, Any] | None:
-        """Close an item WITH a verified listing URL.
+        """Close an item, recording HOW its liveness was established.
 
-        The caller must have already run the liveness check and be passing its verdict -
-        this method does not decide liveness, it records a decision that was made. That
-        split is deliberate: completion is the one place an operator could assert
-        something the system never saw, so the assertion has to be checked before it
-        reaches the database, and the check has to be the same one the re-check uses."""
+        This method does not decide liveness - it records a decision the caller made:
+
+        * probe-verified live: ``mark_verified=True`` stamps ``live_url_verified_at`` and
+          a long re-check window - the URL was fetched and the business was found on it;
+        * operator-confirmed (a probe false negative - a JS-rendered or blocked page):
+          ``mark_verified=False`` leaves ``live_url_verified_at`` null and schedules a
+          SHORTER re-check, so the row honestly says "submitted, not probe-verified" and
+          the automated check keeps trying. ``recheck_days=None`` schedules none (nothing
+          to re-check - e.g. a directory that exposes no public URL).
+
+        The split matters: completion is the one place an operator could assert something
+        the system never saw, so a probe that DID see it and one that did not are stored
+        as different facts, never collapsed into "live"."""
+        verified_clause = "live_url_verified_at = now(), " if mark_verified else "live_url_verified_at = null, "
+        recheck_clause = (
+            "next_recheck_at = now() + make_interval(days => %s) "
+            if recheck_days is not None
+            else "next_recheck_at = null "
+        )
+        params: list[Any] = [submit_status, live_url, verification_method, Jsonb(evidence),
+                             max(0, worked_seconds), note[:2000]]
+        if recheck_days is not None:
+            params.append(int(recheck_days))
+        params += [citation_id, self._user_id]
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.citations set "
-                "  submit_status = %s, live_url = %s, live_url_verified_at = now(), "
-                "  verification_method = 'human', verification_evidence = %s, "
+                "  submit_status = %s, live_url = %s, " + verified_clause +
+                "  verification_method = %s, verification_evidence = %s, "
                 "  submitted_at = coalesce(submitted_at, now()), "
                 "  worked_seconds = worked_seconds + %s, operator_note = %s, "
-                "  claimed_by = null, claimed_at = null, claim_expires_at = null, "
-                "  next_recheck_at = now() + interval '3 days' "
+                "  claimed_by = null, claimed_at = null, claim_expires_at = null, " + recheck_clause +
                 "where id = %s and claimed_by = %s::uuid "
                 "returning *",
-                (
-                    submit_status,
-                    live_url,
-                    Jsonb(evidence),
-                    max(0, worked_seconds),
-                    note[:2000],
-                    citation_id,
-                    self._user_id,
-                ),
+                tuple(params),
             )
             return cur.fetchone()
 
@@ -712,7 +727,21 @@ def get_citation_queue_repo(user: OperatorOrUserDep) -> CitationQueueRepo:
     return CitationQueueRepo(user.id)
 
 
+def get_citation_queue_repo_write(user: OperatorOrUserWriteDep) -> CitationQueueRepo:
+    """The queue repo for the MUTATION routes, floored on ``citation_queue:write``.
+
+    A separate dependency from the read one because the repo floor must carry the
+    ROUTE'S verb: the split (Phase 3) makes `:read` open the board and the item GET
+    and NOTHING else, while `:write` alone works the mutations (one-way granularity -
+    neither implies the other). Bound to the SAME `resolve_operator_write` object the
+    routes' own `OperatorOrUserWrite`/lead guards depend on, so FastAPI's per-request
+    cache resolves the credential exactly once and a wrong-verb token is refused
+    401 deterministically - before any epoch/DB work."""
+    return CitationQueueRepo(user.id)
+
+
 CitationQueueRepoDep = Annotated[CitationQueueRepo, Depends(get_citation_queue_repo)]
+CitationQueueRepoWriteDep = Annotated[CitationQueueRepo, Depends(get_citation_queue_repo_write)]
 
 
 CitationsRepoDep = Annotated[CitationsRepo, Depends(get_citations_repo)]
@@ -767,22 +796,35 @@ class ServiceCitationsStore:
         of that sends us a notification - so `live` decays into a claim unless something
         goes and looks again. `next_recheck_at` is what schedules that.
 
-        Only rows with a `live_url` are selectable: there is nothing to fetch otherwise,
-        and a row that has never had one is the submission pipeline's problem, not this
-        one's. Ordered oldest-due-first and LIMITed so one sweep is bounded work."""
+        TWO row families are selectable, because there are two things worth fetching:
+
+        * a row with a `live_url` whose re-check has come due (the original sweep);
+        * a DISCOVERED-but-unverified row (0129): `discovered_url` set, `live_url`
+          still empty, evidence `confirmed`/`inconsistent_nap` - the promotion
+          candidates. A fresh discovery has no `next_recheck_at` yet, so NULL counts
+          as due for these. `uncertain`/`no_evidence` rows are deliberately NOT
+          selected: the operator's verify-first bucket owns those, and probing a
+          low-confidence URL on a schedule would spend fetches proving nothing.
+
+        Ordered oldest-due-first (fresh promotions lead) and LIMITed so one sweep is
+        bounded work."""
         with privileged_connection() as cur:
             cur.execute(
-                "select c.id, c.live_url, c.submit_status, c.recheck_count, c.directory, "
+                "select c.id, c.live_url, c.discovered_url, c.evidence_level, "
+                "  c.submit_status, c.recheck_count, c.directory, "
                 "  d.authority_tier as directory_authority_tier, d.route as directory_route, "
                 "  bp.business_name as bp_business_name, bp.phone as bp_phone, "
                 "  bp.address_line1 as bp_address_line1 "
                 "from public.citations c "
                 "left join public.directories d on d.id = c.directory_id "
                 "left join public.business_profiles bp on bp.id = c.business_profile_id "
-                "where c.live_url <> '' "
-                "  and c.next_recheck_at is not null "
-                "  and c.next_recheck_at <= now() "
-                "order by c.next_recheck_at asc "
+                "where (c.live_url <> '' "
+                "       and c.next_recheck_at is not null "
+                "       and c.next_recheck_at <= now()) "
+                "   or (c.discovered_url <> '' and c.live_url = '' "
+                "       and c.evidence_level in ('confirmed', 'inconsistent_nap') "
+                "       and (c.next_recheck_at is null or c.next_recheck_at <= now())) "
+                "order by c.next_recheck_at asc nulls first "
                 "limit %s",
                 (limit,),
             )
@@ -927,13 +969,11 @@ class DirectorySpecsRepo:
             return cur.fetchone()
 
     def activate(self, spec_id: str) -> dict[str, Any] | None:
-        """Turn the spec on AND promote its directory to route B, in ONE transaction.
-
-        The route move is not bookkeeping - it is the point. Gating the loader on
-        `directories.route = 'B'` while nothing could ever SET route B was a design that
-        looked correct and could never have a member: measured on this catalogue, route B
-        held zero rows and no code path wrote it. Activation IS the evidence a directory
-        earned route B, so the two facts are established together or not at all.
+        """Turn the spec on. What activation MEANS changed with the bot's retirement
+        (0132): an active spec no longer promotes its directory to route B - route B
+        ("the bot submits here") is retired outright, because there is no bot. An
+        active spec now powers exactly one thing: the extension's AUTOFILL for this
+        directory in the operator queue, where a person reviews and submits.
 
         The `active_is_earned` CHECK does the refusing: an unverified spec, or one with
         no first live URL, cannot reach `active = true` however it is asked."""
@@ -943,22 +983,11 @@ class DirectorySpecsRepo:
                 "where id = %s returning *",
                 (spec_id,),
             )
-            row = cur.fetchone()
-            if row is None:
-                return None
-            cur.execute(
-                "update public.directories set route = 'B' where id = %s and route <> 'F'",
-                (row["directory_id"],),
-            )
-            return row
+            return cur.fetchone()
 
     def deactivate(self, spec_id: str, *, reason: str) -> dict[str, Any] | None:
-        """Turn a spec off, with a reason that reaches the client report.
-
-        The directory is NOT moved back off route B here. Route B says "this directory
-        has an open form we have successfully submitted to", which stays true even while
-        the current spec is broken - and a row that flip-flops between routes on every
-        drift event tells an operator nothing."""
+        """Turn a spec off, with a reason that reaches the client report. The queue
+        falls back to copy-buttons for this directory until a spec is re-earned."""
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.directory_specs set active = false, deactivated_reason = %s "

@@ -90,7 +90,9 @@ def test_the_sweep_actually_covers_the_shipped_tree() -> None:
     files = _candidate_files()
     assert len(files) > 200, f"expected the shipped tree, found only {len(files)} files"
     # The two surfaces that reached end clients must be in scope by construction.
-    covered = {str(p.relative_to(_REPO_ROOT)) for p in files}
+    # as_posix(): on Windows `str(Path)` yields backslashes and the literals below
+    # would never match, failing the guard on every dev box.
+    covered = {p.relative_to(_REPO_ROOT).as_posix() for p in files}
     assert "wordpress-plugin/aios-publisher/aios-publisher.php" in covered
     assert "backend/app/services/email_templates.py" in covered
 

@@ -8,7 +8,7 @@ Two real defects anchor these tests:
 
 from __future__ import annotations
 
-from app.services import audit_rollups as R
+from app.services import audit_rollups as R  # noqa: N812 - module-as-namespace alias
 from app.services.audit_altitude import Cause, Instance
 
 
@@ -211,8 +211,8 @@ def test_all_four_levels_are_emitted():
 
 def test_rollups_are_deterministic():
     reg = _registry(_facts("T1"), _facts("O1", pillar="off-page", sub="authority", dim="offpage"))
-    args = dict(causes=[_cause("T1", urls=["https://x.test/p1"])],
-                coverage=_coverage(ran=["T1", "O1"]), registry=reg, pages=_pages(2))
+    args = {"causes": [_cause("T1", urls=["https://x.test/p1"])],
+            "coverage": _coverage(ran=["T1", "O1"]), "registry": reg, "pages": _pages(2)}
     a = R.build_rollups(**args)
     b = R.build_rollups(**args)
     assert [(r.level, r.key, r.score) for r in a] == [(r.level, r.key, r.score) for r in b]

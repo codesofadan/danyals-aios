@@ -137,9 +137,7 @@ def _is_doctrine(rel: str) -> bool:
         return False
     # `clients/` holds the declared `_template/` alongside sample workspaces that
     # ship with the corpus; only the template is doctrine.
-    if rel.startswith("clients/") and not rel.startswith("clients/_template/"):
-        return False
-    return True
+    return not rel.startswith("clients/") or rel.startswith("clients/_template/")
 
 
 def test_no_undeclared_file_has_appeared(manifest: dict) -> None:

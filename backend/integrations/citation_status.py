@@ -6,7 +6,7 @@ THE HEADLINE COMES FIRST AND IT IS THE WHITELIST. On 2026-09-01 this board repor
 machine-submittable — the binding constraint is the count of ACTIVE directory_specs
 (a spec activates only after a dated human DOM check plus one submission that produced
 a public listing URL), and a board that omits it flatters every other row. Engines are
-transport; a directory is machine-submittable only when its spec is earned.
+transport; the constraint is what a machine may honestly do.
 
 RETIREMENT RECORD (rows deleted from the board, story kept here — a status board is
 for things that can change state, and "no key can enable an endpoint that does not
@@ -20,53 +20,38 @@ exist" is not a state):
     an auth failure); additions route to community-moderated Placemaker review.
     FOURSQUARE_API_KEY remains LIVE for citation DISCOVERY (a read path) — do not
     delete the key on the strength of this retirement.
+  * Playwright form bot — retired 2026-09-05 (off-page redesign Phase 3, plan C1). The
+    engine shipped with stealth launch args, fingerprint masking, human-cadence typing,
+    a residential proxy and live CapMonster CAPTCHA solving — anti-abuse evasion this
+    platform has ruled out. Route B is retired with it (0132); bot_fillable and
+    captcha_assisted directories are HUMAN work in the operator queue, and an earned
+    directory spec now powers the extension's autofill there instead of a bot. The
+    board's `human_queue` lane states this rather than pretending a bot lane is merely
+    unconfigured.
+  * CAPTCHA solver (CapSolver/CapMonster) + submission proxy — retired with the bot.
+    A CAPTCHA is a workflow boundary the operator clears themselves; a directory that
+    needs a proxy to look human is defended, and a defended directory is queue work.
+  * Account-signup bot (bot:signup) — retired with the bot; it inherited the same
+    anti-detection wholesale and no catalogue row ever routed to it. Directory
+    accounts are created by the operator during queue work and sealed into
+    `citation_accounts`.
 
-Every status carries the EXTERNAL caveat: a CONNECTED engine can still be refused by
-the provider (a revoked key, a 4xx from a moved endpoint, an actor that no longer
-covers a directory). Configuration presence is necessary, not sufficient - the board
-never claims a live submit will succeed, only that the credential exists.
+Every remaining status carries the EXTERNAL caveat: a CONNECTED engine can still be
+refused by the provider (a revoked key, a 4xx from a moved endpoint). Configuration
+presence is necessary, not sufficient - the board never claims a live submit will
+succeed, only that the credential exists.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from app.config import Settings
 
 
-def playwright_bot_available() -> bool:
-    """True when the Playwright package is importable AND a Chromium browser build is
-    present on the host. Both are baked into the worker image (``backend/Dockerfile``
-    installs the ``.[automation]`` extra + ``playwright install chromium``); this probe
-    stays honest if that ever fails, degrading the bot to a 'blocked' status rather than
-    crashing a submit at runtime. Pure + side-effect-free (never launches a browser)."""
-    if importlib.util.find_spec("playwright") is None:
-        return False
-    candidates: list[Path] = []
-    root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
-    if root:
-        candidates.append(Path(root))
-    home = Path.home()
-    candidates += [
-        home / ".cache" / "ms-playwright",  # Linux default
-        home / "AppData" / "Local" / "ms-playwright",  # Windows default
-        home / "Library" / "Caches" / "ms-playwright",  # macOS default
-    ]
-    for base in candidates:
-        try:
-            if base.is_dir() and any(base.glob("chromium-*")):
-                return True
-        except OSError:
-            continue
-    return False
-
-
 @dataclass(frozen=True)
 class EngineStatus:
-    """One submission engine's configuration state for the status board."""
+    """One submission lane's state for the status board."""
 
     key: str
     label: str
@@ -99,46 +84,36 @@ def citation_engine_status(
     settings: Settings,
     *,
     active_spec_count: int = 0,
-    signup_spec_count: int = 0,
 ) -> list[EngineStatus]:
-    """The per-engine board, honestly — REAL engines only (see the retirement record
-    in the module docstring for the two deleted ghosts)."""
-    captcha = (
-        _has_secret(settings.captcha_solver_api_key)
-        and settings.captcha_solver_provider not in ("", "none")
-    )
-    proxy = _has_secret(settings.citation_proxy_url)
-    bot_installed = playwright_bot_available()
+    """The per-lane board, honestly — the human queue stated as what it is (the retired
+    bot's honest successor, not an unconfigured engine), then the REAL API engines."""
     data_axle_keyed = _has_secret(settings.data_axle_api_key)
     data_axle_priced = bool(getattr(settings, "data_axle_submits_enabled", False))
     apple = _has_secret(settings.apple_business_api_key) and bool(
         settings.apple_business_org_id
     )
-    signup_mailbox = bool(settings.citation_imap_host) and bool(settings.citation_mail_domain)
 
     statuses: list[EngineStatus] = [
         EngineStatus(
-            key="playwright_bot",
-            label="Self-hosted Playwright bot (bot_fillable / captcha_assisted)",
-            # Installed is necessary; an EARNED spec is what actually lets it act. A
-            # board that called an install "connected" while the whitelist was empty is
-            # how "3/5 connected" coexisted with zero submittable directories.
-            connected=bot_installed and active_spec_count > 0,
+            key="human_queue",
+            label="Operator queue + Chrome extension (form directories)",
+            # Always available: this lane IS the product for bot_fillable /
+            # captcha_assisted directories now that the Playwright bot is retired.
+            # No configuration can switch it off, so `connected` is a statement of
+            # design, not of a credential.
+            connected=True,
             reason=(
-                f"Installed, {active_spec_count} earned spec(s) active - those "
-                "directories submit automatically; the rest route to the operator queue."
-                if bot_installed and active_spec_count > 0
-                else (
-                    "Installed, but 0 earned specs - every bot-tier row routes to the "
-                    "operator queue. Finishing a directory by hand once (and activating "
-                    "its spec) is what turns this on, per directory."
-                    if bot_installed
-                    else "Playwright browser not found on the worker host - bot-tier "
-                    "directories HOLD until it is installed."
-                )
+                "The Playwright form bot is retired (2026-09-05) - every form-tier "
+                f"directory routes to the operator queue. {active_spec_count} earned "
+                "spec(s) power extension autofill there; the operator always reviews "
+                "and submits in their own browser."
             ),
-            required_config=("playwright browser (worker host)", "an ACTIVE directory spec"),
-            external_note=_EXTERNAL,
+            required_config=(),
+            external_note=(
+                "A directory can still refuse a human submission (paid listings, "
+                "phone/postcard verification) - the queue records those as blocked "
+                "with the reason."
+            ),
         ),
         EngineStatus(
             key="data_axle",
@@ -187,47 +162,6 @@ def citation_engine_status(
             required_config=(),
             external_note=_EXTERNAL,
         ),
-        EngineStatus(
-            key="signup_bot",
-            label="Account-signup bot (bot:signup)",
-            connected=False,
-            reason=(
-                "OFF pending the human loop being proven (a deliberate constraint - "
-                "auto account creation + IMAP verification comes after Phases 0-3). "
-                + (
-                    f"Config present ({signup_spec_count} signup spec(s))."
-                    if signup_mailbox
-                    else "Also unconfigured: CITATION_IMAP_* / CITATION_MAIL_DOMAIN."
-                )
-            ),
-            required_config=("CITATION_IMAP_HOST", "CITATION_MAIL_DOMAIN"),
-            external_note=_EXTERNAL,
-        ),
-        EngineStatus(
-            key="captcha_solver",
-            label=f"CAPTCHA solver ({settings.captcha_solver_provider or 'none'})",
-            connected=captcha,
-            reason=(
-                "Solver key configured - captcha_assisted directories can be driven."
-                if captcha
-                else "No CAPTCHA_SOLVER_API_KEY set - captcha_assisted directories cannot "
-                "be auto-solved; they hold for manual handling."
-            ),
-            required_config=("CAPTCHA_SOLVER_PROVIDER", "CAPTCHA_SOLVER_API_KEY"),
-            external_note=_EXTERNAL,
-        ),
-        EngineStatus(
-            key="proxy",
-            label="Submission proxy (optional)",
-            connected=proxy,
-            reason=(
-                "Proxy configured - bot submissions egress through it."
-                if proxy
-                else "No CITATION_PROXY_URL set - bot submissions use the worker's own IP "
-                "(fine for low volume; a proxy reduces block rates at scale)."
-            ),
-            required_config=("CITATION_PROXY_URL",),
-        ),
     ]
     return statuses
 
@@ -239,24 +173,23 @@ class EngineBoard:
     engines: list[EngineStatus] = field(default_factory=list)
     connected_count: int = 0
     total_count: int = 0
-    # THE binding constraint, first: how many directories a machine may submit to
-    # today. Everything else on the board is transport.
+    # The count of ACTIVE earned specs. Since the bot's retirement this no longer means
+    # "a machine submits here" - it means the extension can AUTOFILL here while the
+    # operator submits. The response key is contract-stable; the note below carries the
+    # honest semantics.
     machine_submittable_directories: int = 0
     whitelist_note: str = (
-        "A directory becomes machine-submittable only after a dated human DOM check "
-        "and one submission that produced a public listing URL (an ACTIVE directory "
-        "spec). Engines are transport; the whitelist is the constraint."
+        "The Playwright form bot is retired: NO machine submits a directory form. An "
+        "ACTIVE directory spec (earned by a dated human DOM check plus one submission "
+        "that produced a public listing URL) now powers extension AUTOFILL in the "
+        "operator queue - the operator reviews and submits in their own browser."
     )
 
 
 def citation_engine_board(
-    settings: Settings, *, active_spec_count: int = 0, signup_spec_count: int = 0
+    settings: Settings, *, active_spec_count: int = 0
 ) -> EngineBoard:
-    engines = citation_engine_status(
-        settings,
-        active_spec_count=active_spec_count,
-        signup_spec_count=signup_spec_count,
-    )
+    engines = citation_engine_status(settings, active_spec_count=active_spec_count)
     return EngineBoard(
         engines=engines,
         connected_count=sum(1 for e in engines if e.connected),

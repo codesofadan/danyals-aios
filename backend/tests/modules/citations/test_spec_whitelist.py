@@ -1,12 +1,14 @@
-"""The earned whitelist: coverage as a fact rather than a claim.
+"""The retired bot's replacement behavior, pinned.
 
-`FORM_SPECS` is 50 hand-written guesses whose own docstring says none was verified
-against a live DOM. Probed 2026-08-23: 29 answer 403, 8 answer 404, 6 hosts are dead.
-None has ever produced a proven live listing. Defaulting the bot to that dict meant the
-system claimed 50 directories of coverage and had evidence for none.
+Until Phase 3 (plan C1) a `bot:*` row was dispatched to a Playwright engine gated on
+the earned-spec whitelist. The engine is DELETED — stealth args, fingerprint masking,
+CAPTCHA solving, proxy and all — so the pins here are about what replaced it:
 
-The two tests that matter most here are the economic ones: an empty whitelist must be
-FREE, not expensive.
+* a form-route row goes STRAIGHT to the operator queue (`ready_for_human`) with the
+  honest code `human_queue` — before the cost gate, so it is free;
+* it never passes through `submitting` (no browser ever drives it);
+* the earned specs survive as EXTENSION AUTOFILL data (`integrations.directory_specs`),
+  fail-closed exactly as before: no active row, no selectors.
 """
 
 from __future__ import annotations
@@ -17,12 +19,10 @@ import pytest
 
 from app.config import Settings
 from app.modules.citations.tasks import execute_citation_submit
-from integrations.citation_bot import FormSpec, PlaywrightCitationSubmitter
 from integrations.citation_submitters import CitationJob
+from integrations.directory_specs import FormField, FormSpec, db_spec_loader
 
 pytestmark = pytest.mark.unit
-
-playwright = pytest.importorskip("playwright", reason="the bot needs Playwright installed")
 
 
 def _job(directory: str = "Brownbook") -> CitationJob:
@@ -32,13 +32,6 @@ def _job(directory: str = "Brownbook") -> CitationJob:
         address_line1="123 Main St", address_line2="", city="Bellevue", region="WA",
         postal_code="98004", phone="555-0100", website_url="https://acme.example",
         categories=("dentist",), client_id="cl",
-    )
-
-
-def _spec(directory: str = "Brownbook") -> FormSpec:
-    return FormSpec(
-        directory_name=directory, url=f"https://{directory.lower()}.net/add",
-        fields=(), submit_selector="#go", success_indicator="text=thanks",
     )
 
 
@@ -71,52 +64,13 @@ def _row(**over: Any) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# The bot refuses anything it has not earned.
+# THE ECONOMICS, unchanged in spirit: routing a form row to a person must be FREE.
 # --------------------------------------------------------------------------- #
-def test_an_unconfigured_bot_has_no_specs_and_can_submit_nothing() -> None:
-    """The default USED to be the 50-entry FORM_SPECS dict, so a caller that forgot to
-    wire the whitelist got maximal unverified coverage. It now gets none."""
-    bot = PlaywrightCitationSubmitter()
-    assert bot.can_submit(_job()) is False
-
-
-def test_the_in_code_catalogue_is_never_a_fallback() -> None:
-    """`Brownbook` IS in FORM_SPECS. If the fallback ever returns, this fails."""
-    from integrations.citation_bot import FORM_SPECS
-
-    assert "Brownbook" in FORM_SPECS, "fixture assumption: Brownbook is in the seed dict"
-    assert PlaywrightCitationSubmitter().can_submit(_job("Brownbook")) is False
-
-
-def test_an_injected_spec_is_submittable() -> None:
-    bot = PlaywrightCitationSubmitter(specs={"Brownbook": _spec()})
-    assert bot.can_submit(_job("Brownbook")) is True
-    assert bot.can_submit(_job("Somewhere Else")) is False
-
-
-def test_a_loader_that_returns_none_means_no_submission() -> None:
-    bot = PlaywrightCitationSubmitter(spec_loader=lambda job: None)
-    assert bot.can_submit(_job()) is False
-
-
-def test_a_loader_supplying_a_spec_makes_it_submittable() -> None:
-    bot = PlaywrightCitationSubmitter(spec_loader=lambda job: _spec(job.directory_name))
-    assert bot.can_submit(_job("Ourbis")) is True
-
-
-# --------------------------------------------------------------------------- #
-# THE ECONOMICS. An empty whitelist must be free.
-# --------------------------------------------------------------------------- #
-def test_no_verified_spec_blocks_before_the_cost_gate_so_nothing_is_charged(
+def test_a_form_route_row_goes_to_the_queue_before_the_cost_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The defect this ordering exists to prevent.
-
-    Engine resolution used to run AFTER the gate: the gate charged, the row went to
-    `submitting`, and only then did the worker find there was no engine - billing a
-    client for a submission that could not physically happen. Survivable while the bot
-    fell back to 50 in-code specs and almost always had something to run. Not survivable
-    now that the whitelist starts EMPTY, which makes "no spec" the common case."""
+    """The defect this ordering exists to prevent survives the retirement: nothing may
+    be charged for a submission no machine will make."""
     import app.modules.citations.tasks as tasks
 
     gate_calls: list[str] = []
@@ -124,40 +78,27 @@ def test_no_verified_spec_blocks_before_the_cost_gate_so_nothing_is_charged(
     class _Gate:
         def evaluate(self, ctx: Any) -> Any:
             gate_calls.append("evaluate")
-            raise AssertionError("the cost gate must not be reached without a spec")
+            raise AssertionError("the cost gate must not be reached for a form-route row")
 
         def commit(self, ctx: Any, cost: float) -> None:
             gate_calls.append("commit")
 
     monkeypatch.setattr(tasks, "_gate", lambda: _Gate())
-    monkeypatch.setattr(
-        tasks, "citation_bot_from_settings",
-        lambda settings, **kw: PlaywrightCitationSubmitter(spec_loader=lambda job: None),
-    )
     store = _FakeStore(_row())
     out = execute_citation_submit(store, Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[call-arg]
 
-    # The guarantee this test exists for - NOTHING IS CHARGED - is unchanged.
-    assert gate_calls == [], "nothing may be charged when there is no spec to run"
-    assert out["reason"] == "no_verified_spec"
-    assert store.updates["blocked_reason"] == "no_verified_spec"
-    assert "nothing was sent, nothing charged" in store.updates["error"]
-    # The DESTINATION changed 2026-08-30 and is the point of the change: a bot with no
-    # earned spec cannot submit, but a PERSON can - so the row becomes queue work rather
-    # than parking in `blocked` where nothing ever picked it up. `ready_for_human` had no
-    # writer anywhere in the repo before this, which left the operator queue, its routes
-    # and the extension all reading a status nothing produced.
+    assert gate_calls == [], "nothing may be charged for human-queue work"
     assert out["state"] == "ready_for_human"
     assert store.updates["submit_status"] == "ready_for_human"
+    # The HONEST code: this is a person's work by design, not an engine gap.
+    assert store.updates["blocked_reason"] == "human_queue"
+    assert "retired" in store.updates["error"]
 
 
-def test_the_row_never_reaches_submitting_when_there_is_no_spec(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`submitting` means a browser is driving a form. A row that never had a spec must
-    not pass through it - an operator watching the board would read it as work starting."""
-    import app.modules.citations.tasks as tasks
-
+def test_the_row_never_reaches_submitting_on_a_form_route() -> None:
+    """`submitting` means an engine is driving a submission. There is no engine for a
+    form row any more, so the status must go straight to the queue — an operator
+    watching the board must never read 'work starting' for work no machine does."""
     seen: list[str] = []
 
     class _Store(_FakeStore):
@@ -166,22 +107,70 @@ def test_the_row_never_reaches_submitting_when_there_is_no_spec(
                 seen.append(str(fields["submit_status"]))
             super().update_citation(citation_id, fields)
 
-    monkeypatch.setattr(
-        tasks, "citation_bot_from_settings",
-        lambda settings, **kw: PlaywrightCitationSubmitter(spec_loader=lambda job: None),
-    )
     execute_citation_submit(_Store(_row()), Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[call-arg]
     assert "submitting" not in seen
-    # Straight to the operator queue, without ever implying a browser was driving.
     assert seen == ["ready_for_human"]
 
 
-def test_the_worker_passes_the_whitelist_loader_and_the_route() -> None:
-    """Wiring, asserted. The bot fails CLOSED when no loader is passed, so a worker that
-    forgets to wire one submits nothing at all - a silent zero rather than a crash, which
-    is exactly the kind of thing that survives unnoticed."""
-    import inspect
+def test_every_bot_era_method_lands_in_the_queue() -> None:
+    """`bot:signup` too: the signup engine was deleted with the bot (it inherited the
+    anti-detection wholesale and no catalogue row ever routed to it)."""
+    for method in ("bot:playwright", "bot:signup", "aggregator:data_axle", "manual"):
+        store = _FakeStore(_row(submit_method=method))
+        out = execute_citation_submit(store, Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[call-arg]
+        assert out["state"] == "ready_for_human", method
+        assert store.updates["blocked_reason"] == "human_queue", method
 
-    src = inspect.getsource(execute_citation_submit)
-    assert "spec_loader=db_spec_loader" in src
-    assert "route=" in src
+
+def test_fed_by_aggregator_is_still_never_offered_as_work() -> None:
+    store = _FakeStore(_row(submit_method="aggregator:fed_by_data_axle"))
+    out = execute_citation_submit(store, Settings(_env_file=None, app_env="dev"), "c1")  # type: ignore[call-arg]
+    assert out["state"] == "blocked"
+    assert store.updates["blocked_reason"] == "fed_by_aggregator"
+
+
+# --------------------------------------------------------------------------- #
+# The earned specs survive as autofill data, fail-closed.
+# --------------------------------------------------------------------------- #
+def test_the_spec_loader_fails_closed_to_no_autofill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No active row (or no reachable database) means NO selectors — the queue then
+    shows copy-buttons, never a fabricated selector."""
+    import integrations.directory_specs as ds
+
+    monkeypatch.setattr(ds, "active_form_specs", lambda **kw: {})
+    assert db_spec_loader(_job()) is None
+
+
+def test_the_spec_loader_serves_an_active_spec_by_directory_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import integrations.directory_specs as ds
+
+    spec = FormSpec(
+        directory_name="Brownbook", url="https://brownbook.net/add",
+        fields=(FormField("input[name='business_name']", "business_name"),),
+        submit_selector="#go", success_indicator="text=thanks",
+    )
+    monkeypatch.setattr(ds, "active_form_specs", lambda **kw: {"Brownbook": spec})
+    loaded = db_spec_loader(_job("Brownbook"))
+    assert loaded is spec
+
+
+def test_a_legacy_captcha_key_in_the_stored_spec_is_ignored() -> None:
+    """0108 rows written in the bot era may carry a `captcha` block. Nothing solves
+    CAPTCHAs any more, so rehydration reads the fields and drops the key rather than
+    resurrecting a solver dependency."""
+    from integrations.directory_specs import spec_from_json
+
+    spec = spec_from_json(
+        {
+            "url": "https://brownbook.net/add",
+            "fields": [{"selector": "#name", "value_key": "business_name"}],
+            "submit_selector": "#go",
+            "success_indicator": "text=thanks",
+            "captcha": {"kind": "recaptcha_v2", "site_key_selector": ".g-recaptcha"},
+        },
+        "Brownbook",
+    )
+    assert spec.fields == (FormField("#name", "business_name"),)
+    assert not hasattr(spec, "captcha")

@@ -17,21 +17,37 @@ here - dispatching a campaign only QUEUES rows; nothing is spent synchronously.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.core.auth import CurrentUser, require_perm, require_role
+from app.core.deps import RedisDep
+from app.core.ratelimit import _enforce
 from app.core.security import is_public_url
+from app.db.offpage_repo import OffpageRepo
+from app.logging_setup import get_logger
 from app.modules.citations.evidence import citation_evidence_store
-from app.modules.citations.operator_auth import OperatorOrUserDep, require_operator_lead
+from app.modules.citations.operator_auth import (
+    OperatorOrUserDep,
+    OperatorOrUserWriteDep,
+    operator_principal_of,
+    require_operator_lead,
+    require_operator_lead_over,
+    require_operator_scope_or_perm,
+    require_operator_scope_sets,
+)
 from app.modules.citations.repo import (
     CitationQueueRepoDep,
+    CitationQueueRepoWriteDep,
+    CitationsRepo,
     CitationsRepoDep,
+    DirectorySpecsRepo,
     DirectorySpecsRepoDep,
     ServiceCitationsStore,
     service_citations_store,
@@ -52,11 +68,13 @@ from app.modules.citations.schemas import (
     CitationCampaignResponse,
     CitationLiveUrl,
     CitationSkip,
+    CitationVerifyFirst,
     DirectoryResponse,
     DirectorySpecResponse,
     EngineStatusBoardResponse,
     EngineStatusResponse,
     GapAnalysisResponse,
+    OperatorSessionResponse,
     QueueBlockedRequest,
     QueueBoardResponse,
     QueueClaimRequest,
@@ -65,11 +83,22 @@ from app.modules.citations.schemas import (
     QueueFieldValue,
     QueueHeartbeatRequest,
     QueueItemResponse,
+    SessionActionResponse,
+    SessionClientCount,
+    SessionCreateRequest,
+    SessionDetailResponse,
+    SessionHeartbeatResponse,
+    SessionSkipRequest,
+    SessionTaskCard,
+    SessionTelemetryRequest,
+    SessionWeb2BlockRequest,
     SpecBoardResponse,
     SpecCreateRequest,
     SpecDeactivateRequest,
     SpecFirstLiveRequest,
     SpecVerifyRequest,
+    Web2CopyBlock,
+    Web2PlacementTaskCard,
     Web2PlatformStatusResponse,
     Web2StatusResponse,
 )
@@ -85,12 +114,23 @@ from app.modules.citations.service import (
     submit_method_label,
     summarize_campaign_rows,
 )
+from app.modules.citations.sessions import (
+    SESSION_LEASE_SECONDS,
+    ActiveSessionExistsError,
+    NoSessionWorkError,
+    OperatorSessionsRepoDep,
+    OperatorSessionsRepoWriteDep,
+)
 from app.modules.citations.verticals import normalize_vertical
+from app.rbac import role_has_perm
 from app.services.activity import record_activity
 from app.services.citation_liveness import http_liveness_probe, judge_liveness
-from integrations.citation_bot import db_spec_loader
+from app.services.web2_placement import copy_blocks_for, editor_url_for, spec_selectors
 from integrations.citation_status import citation_engine_board
+from integrations.directory_specs import db_spec_loader
 from integrations.web2_status import web2_status_board
+
+logger = get_logger("app.modules.citations.router")
 
 router = APIRouter(prefix="/citation-builder", tags=["citation-builder"])
 
@@ -99,12 +139,45 @@ ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
 # `X-Operator-Token`, resolving both to the same CurrentUser - so there is ONE
 # implementation of "a completion is checked by fetching the URL", not two.
 #
+# The Phase-2 scope split is APPLIED here (Phase 3): reads resolve through
+# `citation_queue:read` (`OperatorOrUser`), every mutation through
+# `citation_queue:write` (`OperatorOrUserWrite`, and `require_operator_lead` which
+# wraps it). The legacy umbrella `citation_queue` satisfies both until those tokens
+# age out; bearer callers are governed by their role exactly as before.
+#
 # `OperatorOrUserLead` additionally requires a lead role, exactly as the bearer-only
 # version did: an operator token inherits its holder's role and grants nothing extra.
 # A non-lead paired extension is refused the write endpoints for the same reason a
 # non-lead session is.
 OperatorOrUser = OperatorOrUserDep
+OperatorOrUserWrite = OperatorOrUserWriteDep
 OperatorOrUserLead = Annotated[CurrentUser, Depends(require_operator_lead)]
+# Reads that serve CANONICAL BUSINESS-PROFILE values: the extension path needs the
+# `client_profile:read` scope; a bearer caller still needs `view_reports`, exactly as
+# before the extension could reach these. A module-level OBJECT so the repo
+# dependency below binds to the SAME resolver (one credential resolution per request,
+# and tests can override it by identity).
+resolve_profile_reader = require_operator_scope_or_perm("client_profile:read", "view_reports")
+ProfileReader = Annotated[CurrentUser, Depends(resolve_profile_reader)]
+
+
+def get_citations_repo_profile(
+    user: Annotated[CurrentUser, Depends(resolve_profile_reader)],
+) -> CitationsRepo:
+    """CitationsRepo for the extension-reachable business-profile READ. The plain
+    `CitationsRepoDep` resolves bearer-only `get_current_user`, which would 401 an
+    operator token before `resolve_profile_reader` was ever consulted - the exact
+    failure mode `get_citation_queue_repo`'s docstring documents. Bound to the same
+    hybrid guard the route declares, so the scope/permission bar is unchanged."""
+    return CitationsRepo(user.id)
+
+
+CitationsRepoProfileDep = Annotated[CitationsRepo, Depends(get_citations_repo_profile)]
+# Gap/coverage reads reachable by the extension: `citation_queue:read` on the operator
+# path, the unchanged `view_reports` on the bearer path.
+QueueReader = Annotated[
+    CurrentUser, Depends(require_operator_scope_or_perm("citation_queue:read", "view_reports"))
+]
 Lead = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))]
 
 _PROFILE_NOT_FOUND = HTTPException(
@@ -228,10 +301,13 @@ ServiceCitationsStoreDep = Annotated[ServiceCitationsStore, Depends(get_service_
 
 @router.get("/business-profiles", response_model=list[BusinessProfileResponse])
 async def list_business_profiles(
-    repo: CitationsRepoDep,
-    _user: ViewReports,
+    repo: CitationsRepoProfileDep,
+    _user: ProfileReader,
     client_id: Annotated[str | None, Query(alias="clientId")] = None,
 ) -> list[BusinessProfileResponse]:
+    """Canonical NAP values. Reachable by the extension under `client_profile:read`
+    (what its autofill types is exactly this data); bearer callers still need
+    `view_reports`, unchanged."""
     rows = await asyncio.to_thread(repo.list_business_profiles, client_id=client_id)
     return [BusinessProfileResponse.from_row(r) for r in rows]
 
@@ -688,7 +764,7 @@ async def campaign_rollup(
 @router.get("/gap-analysis", response_model=GapAnalysisResponse)
 async def gap_analysis(
     repo: CitationsRepoDep,
-    _user: ViewReports,
+    _user: QueueReader,
     client_id: Annotated[str, Query(alias="clientId", min_length=1)],
 ) -> GapAnalysisResponse:
     """Reconcile a client's citations against the automatable catalog: (a) analyse what
@@ -741,9 +817,17 @@ async def gap_analysis(
         missing_count=len(gap.missing),
         missing=[DirectoryResponse.from_row(d) for d in gap.missing],
         live_urls=[CitationLiveUrl(**u) for u in gap.live_urls],
+        # 0129: `uncertain` discoveries to verify before building - neither covered
+        # nor missing - plus the per-tier tallies. The bucket is uncertain-only by
+        # construction, so the model's default tier stands.
+        verify_first=[
+            CitationVerifyFirst(directory=v.get("directory", ""), url=v.get("url", ""))
+            for v in gap.verify_first
+        ],
         skipped=[CitationSkip(**s) for s in gap.skipped],
         by_submit_status=gap.by_submit_status,
         by_nap_status=gap.by_nap_status,
+        by_evidence_level=gap.by_evidence_level,
     )
 
 
@@ -835,25 +919,22 @@ async def web2_status(_user: ViewReports) -> Web2StatusResponse:
 
 @router.get("/engine-status", response_model=EngineStatusBoardResponse)
 async def engine_status(_user: ViewReports) -> EngineStatusBoardResponse:
-    """The citation-ENGINE status board — the WHITELIST COUNT first (the binding
-    constraint: how many directories a machine may submit to today), then each real
-    engine CONNECTED vs MISSING with the reason and the external-API caveat. Derived
-    from settings + the earned-spec count - never a live probe, never a spend."""
+    """The citation-ENGINE status board, post-bot-retirement (Phase 3, plan C1): the
+    earned-spec count first (it now measures extension AUTOFILL coverage in the
+    operator queue - no machine submits a form), then the human-queue lane stated as
+    what it is, then each real API engine CONNECTED vs MISSING with the reason and the
+    external-API caveat. Derived from settings + the earned-spec count - never a live
+    probe, never a spend. The retired bot/solver/proxy rows are gone; their story
+    lives in `integrations/citation_status.py`'s retirement record."""
 
     def _active_spec_count() -> int:
-        from integrations.citation_bot import active_form_specs
+        from integrations.directory_specs import active_form_specs
 
         return len(active_form_specs())
-
-    def _signup_spec_count() -> int:
-        from integrations.citation_signup import SIGNUP_SPECS
-
-        return len(SIGNUP_SPECS)
 
     board = citation_engine_board(
         get_settings(),
         active_spec_count=await asyncio.to_thread(_active_spec_count),
-        signup_spec_count=_signup_spec_count(),
     )
     return EngineStatusBoardResponse(
         connected_count=board.connected_count,
@@ -939,6 +1020,58 @@ _QUEUE_BLOCK_LABELS: dict[str, str] = {
     "other": "see the operator's note",
 }
 
+# Claim throttle: fail-OPEN like every authenticated-mutation limit (the caller is
+# already bounded by auth + the lease model; the limiter is a brake on a runaway
+# extension loop, never the reason a legitimate claim 500s during a cache blip).
+# Wired by hand because `rate_limit()`'s dependency resolves `get_current_user`
+# (bearer), and a claim may arrive on the operator token with no bearer identity.
+_CLAIM_LIMIT_PER_MINUTE = 30
+
+
+async def _claim_rate_limit(redis: RedisDep, user_id: str) -> None:
+    window = int(time.time()) // 60
+    await _enforce(
+        redis,
+        f"rl:citation_queue_claim:{user_id}:{window}",
+        "citation_queue_claim",
+        _CLAIM_LIMIT_PER_MINUTE,
+        60,
+        fail_closed=False,
+    )
+
+
+def get_form_drift_recorder() -> Callable[[str, str, dict[str, Any]], dict[str, Any] | None]:
+    """Dependency: deactivate a directory's ACTIVE spec on operator-reported drift
+    (overridable in tests).
+
+    THE WIRING 0108 SHIPPED WITHOUT. `DirectorySpecsRepo.record_drift` existed with no
+    caller, so an operator reporting `form_changed` - the strongest drift signal the
+    platform receives - left the spec active, and the extension kept autofilling
+    selectors a human just said are wrong. Fail-CLOSED now: the report deactivates the
+    spec (`deactivated_reason = 'drift_detected'`), and re-earning it takes the full
+    verify + first-live contract. No active spec is a clean no-op (returns None)."""
+
+    def _record(
+        user_id: str, directory_id: str, evidence: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        repo = DirectorySpecsRepo(user_id)
+        active = [r for r in repo.list_specs(directory_id=directory_id) if r.get("active")]
+        if not active:
+            return None
+        return repo.record_drift(
+            str(active[0]["id"]),
+            selector="",  # the operator reports the FORM changed, not which selector
+            evidence=evidence,
+        )
+
+    return _record
+
+
+FormDriftRecorderDep = Annotated[
+    Callable[[str, str, dict[str, Any]], dict[str, Any] | None],
+    Depends(get_form_drift_recorder),
+]
+
 
 def _spec_selectors(row: dict[str, Any]) -> dict[str, str]:
     """`{value_key: selector}` from this directory's ACTIVE spec, or empty.
@@ -958,13 +1091,34 @@ def _spec_selectors(row: dict[str, Any]) -> dict[str, str]:
     return {f.value_key: f.selector for f in spec.fields}
 
 
-def _queue_fields(row: dict[str, Any]) -> list[QueueFieldValue]:
+# Market code -> the country name a directory form's country field expects. The profile
+# stores a market code (US/UK/CA/AU), not a spelled-out country, so a country dropdown
+# has nothing to match against without this.
+_MARKET_COUNTRY: dict[str, str] = {
+    "US": "United States",
+    "UK": "United Kingdom",
+    "GB": "United Kingdom",
+    "CA": "Canada",
+    "AU": "Australia",
+}
+
+
+def _queue_fields(
+    row: dict[str, Any], selectors: dict[str, str] | None = None
+) -> list[QueueFieldValue]:
     """Every value the operator needs, pre-computed and labelled.
 
     Empty values are DROPPED rather than shown blank. A form asks for what it asks for;
     presenting an operator with eight empty boxes to puzzle over is exactly the friction
     the queue exists to remove, and a blank field is better discovered on the directory's
-    own form than in our panel."""
+    own form than in our panel.
+
+    ``selectors`` may be passed pre-computed (the session card serializer reads them
+    twice - once for ``hasSpec``, once here - and the spec lookup is a DB read per
+    directory); omitted, they are resolved exactly as before."""
+    # Country from the business MARKET code (US/UK/CA/AU) — a form's country dropdown
+    # has no value to fill otherwise, and the profile carries no free-text country.
+    country = _MARKET_COUNTRY.get(str(row.get("bp_market") or "").upper(), "")
     pairs: list[tuple[str, str, Any]] = [
         ("business_name", "Business name", row.get("bp_business_name")),
         ("address_line1", "Address", row.get("bp_address_line1")),
@@ -972,23 +1126,36 @@ def _queue_fields(row: dict[str, Any]) -> list[QueueFieldValue]:
         ("city", "City", row.get("bp_city")),
         ("region", "State / region", row.get("bp_region")),
         ("postal_code", "Postcode", row.get("bp_postal_code")),
+        ("country", "Country", country),
         ("phone", "Phone", row.get("bp_phone")),
         ("website_url", "Website", row.get("bp_website_url")),
         ("email", "Email", row.get("bp_email")),
         ("description", "Description", row.get("bp_description")),
     ]
-    selectors = _spec_selectors(row)
+    if selectors is None:
+        selectors = _spec_selectors(row)
     out = [
         QueueFieldValue(key=k, label=label, value=str(v).strip(), selector=selectors.get(k, ""))
         for k, label, v in pairs
         if str(v or "").strip()
     ]
-    categories = row.get("bp_categories") or []
-    if categories:
+    # Split the category list into a primary CATEGORY and a SUB-CATEGORY so a form's
+    # two-level category dropdowns each get their own value. Many directories ask for
+    # both; a single comma-joined "categories" value never matched either dropdown.
+    cats = [str(x).strip() for x in (row.get("bp_categories") or []) if str(x).strip()]
+    if cats:
         out.append(
             QueueFieldValue(
-                key="categories", label="Categories", value=", ".join(categories),
-                selector=selectors.get("categories", ""),
+                key="category", label="Category", value=cats[0],
+                # Fall back to the legacy "categories" spec key so an earned spec keeps working.
+                selector=selectors.get("category", selectors.get("categories", "")),
+            )
+        )
+    if len(cats) > 1:
+        out.append(
+            QueueFieldValue(
+                key="sub_category", label="Sub-category", value=cats[1],
+                selector=selectors.get("sub_category", ""),
             )
         )
     return out
@@ -1046,9 +1213,37 @@ async def citation_queue_board(queue: CitationQueueRepoDep, _user: OperatorOrUse
 
 @router.post("/queue/claim", response_model=QueueItemResponse | None)
 async def claim_queue_item(
-    body: QueueClaimRequest, queue: CitationQueueRepoDep, actor: OperatorOrUserLead
+    body: QueueClaimRequest,
+    queue: CitationQueueRepoWriteDep,
+    sessions: OperatorSessionsRepoWriteDep,
+    actor: OperatorOrUserLead,
+    redis: RedisDep,
 ) -> QueueItemResponse | None:
-    """Take the next available item. Returns ``null`` when the queue is empty."""
+    """Take the next available item. Returns ``null`` when the queue is empty.
+
+    REFUSED (409) while the caller holds an ACTIVE session (0130): a session already
+    owns a batch of claims on this operator's behalf, and an ad-hoc claim beside it
+    would split the lease accounting two ways. The check reads the same partial unique
+    index that enforces one-active-session, and it lazily reaps a session whose
+    heartbeat went silent - a crashed browser never fences an operator out of the
+    queue."""
+    try:
+        active = await asyncio.to_thread(sessions.active_session)
+    except Exception:
+        # The refusal is a coordination guard, not a security boundary: if the session
+        # table cannot be read the claim must still work (the lease model bounds it),
+        # exactly like the fail-open rate limiter below.
+        logger.warning("session_check_unavailable_failing_open")
+        active = None
+    if active is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "You have an active work session - take items through the session "
+                "(the extension's batch view) or close it before claiming ad hoc."
+            ),
+        )
+    await _claim_rate_limit(redis, actor.id)
     claimed = await asyncio.to_thread(
         queue.claim_next, lease_seconds=_QUEUE_LEASE_SECONDS, client_id=body.client_id
     )
@@ -1085,7 +1280,10 @@ async def get_queue_item(
 
 @router.post("/queue/{citation_id}/heartbeat")
 async def heartbeat_queue_item(
-    citation_id: str, body: QueueHeartbeatRequest, queue: CitationQueueRepoDep, _user: OperatorOrUser
+    citation_id: str,
+    body: QueueHeartbeatRequest,
+    queue: CitationQueueRepoWriteDep,
+    _user: OperatorOrUserWrite,
 ) -> dict[str, Any]:
     """Extend the lease and bank the time worked. Time ACCUMULATES, so a crash costs at
     most one heartbeat of measurement rather than the whole session."""
@@ -1105,7 +1303,10 @@ async def heartbeat_queue_item(
 
 @router.post("/queue/{citation_id}/release", status_code=status.HTTP_204_NO_CONTENT)
 async def release_queue_item(
-    citation_id: str, body: QueueHeartbeatRequest, queue: CitationQueueRepoDep, _user: OperatorOrUser
+    citation_id: str,
+    body: QueueHeartbeatRequest,
+    queue: CitationQueueRepoWriteDep,
+    _user: OperatorOrUserWrite,
 ) -> None:
     """Hand the item back without finishing it. The attempt still counts."""
     await asyncio.to_thread(queue.release_claim, citation_id, worked_seconds=body.worked_seconds)
@@ -1113,7 +1314,11 @@ async def release_queue_item(
 
 @router.post("/queue/{citation_id}/complete", response_model=QueueCompleteResponse)
 async def complete_queue_item(
-    citation_id: str, body: QueueCompleteRequest, queue: CitationQueueRepoDep, actor: OperatorOrUserLead
+    citation_id: str,
+    body: QueueCompleteRequest,
+    queue: CitationQueueRepoWriteDep,
+    sessions: OperatorSessionsRepoWriteDep,
+    actor: OperatorOrUserLead,
 ) -> QueueCompleteResponse:
     """Close an item with the public URL of the listing that was created.
 
@@ -1135,13 +1340,65 @@ async def complete_queue_item(
         )
 
     live_url = body.live_url.strip()
+    confirmed = body.operator_confirmed
+    directory = str(row.get("directory_name") or row.get("directory") or "")
+    client_id = str(row.get("client_id")) if row.get("client_id") else None
+
+    async def _record(
+        *, submit_status: str, evidence: dict[str, Any], url: str,
+        verification_method: str, mark_verified: bool, recheck_days: int | None, activity_meta: str,
+    ) -> None:
+        """Write the completion, run the post-terminal session hook, log the activity.
+        Shared by all three accepted paths so the batch-release + audit trail are identical."""
+        updated = await asyncio.to_thread(
+            queue.complete_item, citation_id, live_url=url, submit_status=submit_status,
+            evidence=evidence, worked_seconds=body.worked_seconds, note=body.note,
+            verification_method=verification_method, mark_verified=mark_verified, recheck_days=recheck_days,
+        )
+        if updated is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Your claim on this item expired."
+            )
+        # POST-TERMINAL SESSION HOOK (0130): mark the session task submitted + run the
+        # batch-release check. A broken hook is logged, never fails an accepted completion.
+        try:
+            await asyncio.to_thread(
+                sessions.mark_citation_terminal, citation_id, "submitted", meta={"live_url": url}
+            )
+        except Exception:
+            logger.exception("session_task_mark_failed", citation_id=citation_id)
+        await record_activity(
+            actor, kind="task", action="completed a citation listing", target=directory,
+            entity_type="client", entity_id=client_id, meta=activity_meta,
+        )
+
+    # PATH 1 — no URL. Some directories expose no public listing URL; only completable
+    # with an explicit operator confirmation, recorded as submitted (never `live`).
+    if not live_url:
+        if not confirmed:
+            return QueueCompleteResponse(
+                accepted=False, submit_status=str(row.get("submit_status") or ""), live_url="",
+                reason="Paste the public listing URL. If this directory shows no public URL at all, "
+                "use “No public URL — I submitted it”.",
+                can_confirm=True,
+            )
+        await _record(
+            submit_status="submitted",
+            evidence={"verification": "human", "operator_confirmed": True, "matched_fields": [],
+                      "reason": "operator confirmed; directory exposes no public listing URL"},
+            url="", verification_method="human", mark_verified=False, recheck_days=None,
+            activity_meta="operator-confirmed (no public URL)",
+        )
+        return QueueCompleteResponse(
+            accepted=True, submit_status="submitted", live_url="", operator_confirmed=True,
+            reason="Recorded as submitted (operator-confirmed). No public URL to auto-verify.",
+        )
+
     # SSRF: the URL is operator-supplied and this fetch runs server-side.
     if not await asyncio.to_thread(is_public_url, live_url):
         return QueueCompleteResponse(
-            accepted=False,
-            submit_status=str(row.get("submit_status") or ""),
-            live_url=live_url,
-            reason="That is not a reachable public URL.",
+            accepted=False, submit_status=str(row.get("submit_status") or ""),
+            live_url=live_url, reason="That is not a reachable public URL.",
         )
 
     probe = await asyncio.to_thread(http_liveness_probe, live_url)
@@ -1151,53 +1408,63 @@ async def complete_queue_item(
         phone=str(row.get("bp_phone") or ""),
         address_line1=str(row.get("bp_address_line1") or ""),
     )
-    if not verdict.is_live:
+
+    # PATH 2 — probe-verified LIVE (the default, unchanged): the page loaded and carried
+    # the business. `verification_method='human'` default + verified timestamp + standard
+    # re-check, exactly as before.
+    if verdict.is_live:
+        await _record(
+            submit_status=verdict.status, evidence=verdict.evidence, url=live_url,
+            verification_method="human", mark_verified=True, recheck_days=3,
+            activity_meta=f"live at {live_url}",
+        )
         return QueueCompleteResponse(
-            accepted=False,
-            submit_status=str(row.get("submit_status") or ""),
-            live_url=live_url,
-            reason=str(verdict.evidence.get("reason") or "the business was not found on that page"),
+            accepted=True, submit_status=verdict.status, live_url=live_url,
             matched_fields=list(verdict.evidence.get("matched_fields") or []),
         )
 
-    updated = await asyncio.to_thread(
-        queue.complete_item,
-        citation_id,
-        live_url=live_url,
-        submit_status=verdict.status,
-        evidence=verdict.evidence,
-        worked_seconds=body.worked_seconds,
-        note=body.note,
-    )
-    if updated is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Your claim on this item expired."
+    # PATH 3 — probe could NOT confirm. Default: refuse, but tell the panel it may be a
+    # false negative the operator can override (can_confirm). If the operator DID confirm,
+    # record as submitted / operator-confirmed (NOT live) with a short re-check window, so
+    # they are never blocked by a page we cannot read and we never claim what we did not see.
+    if not confirmed:
+        return QueueCompleteResponse(
+            accepted=False, submit_status=str(row.get("submit_status") or ""), live_url=live_url,
+            reason=str(verdict.evidence.get("reason") or "the business was not found on that page"),
+            matched_fields=list(verdict.evidence.get("matched_fields") or []), can_confirm=True,
         )
-    await record_activity(
-        actor, kind="task", action="completed a citation listing",
-        target=str(row.get("directory_name") or row.get("directory") or ""),
-        entity_type="client",
-        entity_id=str(row.get("client_id")) if row.get("client_id") else None,
-        meta=f"live at {live_url}",
+    await _record(
+        submit_status="submitted",
+        evidence={**verdict.evidence, "verification": "human", "operator_confirmed": True},
+        url=live_url, verification_method="human", mark_verified=False, recheck_days=2,
+        activity_meta=f"operator-confirmed at {live_url}",
     )
     return QueueCompleteResponse(
-        accepted=True,
-        submit_status=verdict.status,
-        live_url=live_url,
-        matched_fields=list(verdict.evidence.get("matched_fields") or []),
+        accepted=True, submit_status="submitted", live_url=live_url, operator_confirmed=True,
+        reason="Recorded as submitted (operator-confirmed). We could not read the page "
+        "automatically; a re-check will retry it.",
     )
 
 
 @router.post("/queue/{citation_id}/blocked", status_code=status.HTTP_204_NO_CONTENT)
 async def block_queue_item(
-    citation_id: str, body: QueueBlockedRequest, queue: CitationQueueRepoDep, actor: OperatorOrUserLead
+    citation_id: str,
+    body: QueueBlockedRequest,
+    queue: CitationQueueRepoWriteDep,
+    sessions: OperatorSessionsRepoWriteDep,
+    actor: OperatorOrUserLead,
+    record_drift: FormDriftRecorderDep,
 ) -> None:
     """Close an item as NOT done, with a machine-readable reason.
 
     This is the outcome operators will reach for most often and it must cost them
     nothing to report. The reasons are a closed vocabulary so the board can answer
     'which directories are wasting our time?' - which is what eventually removes a row
-    from the offer list."""
+    from the offer list.
+
+    `form_changed` additionally DEACTIVATES the directory's active spec (0108 drift,
+    fail-closed): a human just said the form no longer matches what the spec describes,
+    so the extension must stop autofilling those selectors until the spec is re-earned."""
     row = await asyncio.to_thread(queue.held_item, citation_id)
     if row is None:
         raise HTTPException(
@@ -1212,12 +1479,49 @@ async def block_queue_item(
         detail=detail,
         worked_seconds=body.worked_seconds,
     )
+    # POST-TERMINAL SESSION HOOK (0130): same contract as complete's - mark the
+    # matching session task `blocked` and run the batch-release check; a broken hook
+    # never turns an honest block report into a 500.
+    try:
+        await asyncio.to_thread(
+            sessions.mark_citation_terminal, citation_id, "blocked",
+            meta={"blocked_reason": body.reason},
+        )
+    except Exception:
+        logger.exception("session_task_mark_failed", citation_id=citation_id)
+    drifted: dict[str, Any] | None = None
+    if body.reason == "form_changed" and row.get("directory_id"):
+        try:
+            drifted = await asyncio.to_thread(
+                record_drift,
+                actor.id,
+                str(row["directory_id"]),
+                {
+                    "source": "operator_blocked",
+                    "reason": "form_changed",
+                    "detail": detail[:500],
+                    "citation_id": citation_id,
+                    "reported_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        except Exception:
+            # The operator's report is the primary record and it is already written;
+            # a failed deactivation must not turn the block into a 500. It is logged
+            # loudly because an active spec surviving a drift report is exactly the
+            # fail-open state this wiring exists to close.
+            logger.exception(
+                "citation_drift_deactivation_failed",
+                citation_id=citation_id, directory_id=str(row.get("directory_id")),
+            )
     await record_activity(
         actor, kind="task", action="reported a citation as blocked",
         target=str(row.get("directory_name") or row.get("directory") or ""),
         entity_type="client",
         entity_id=str(row.get("client_id")) if row.get("client_id") else None,
-        meta=f"{body.reason}: {detail}",
+        meta=(
+            f"{body.reason}: {detail}"
+            + (" - the directory's form spec was deactivated (drift)" if drifted else "")
+        ),
     )
 
 
@@ -1405,11 +1709,9 @@ async def record_spec_first_live(
 async def activate_directory_spec(
     spec_id: str, specs: DirectorySpecsRepoDep, actor: Lead
 ) -> DirectorySpecResponse:
-    """Turn the spec on, and promote its directory to route B in the same transaction.
-
-    The route move is the point, not bookkeeping: gating the loader on `route = 'B'` while
-    nothing could ever SET route B produced a whitelist that could never have a member.
-    Activation IS the evidence the directory earned route B.
+    """Turn the spec on. Since the bot's retirement (0132 retired route B with it), an
+    active spec means exactly one thing: the extension AUTOFILLS this directory's form
+    in the operator queue - a person still reviews and submits.
 
     The refusal comes from the `active_is_earned` CHECK, so an unverified spec cannot be
     activated however the request is shaped."""
@@ -1441,3 +1743,586 @@ async def deactivate_directory_spec(
     )
     full = await asyncio.to_thread(specs.get_spec, spec_id)
     return DirectorySpecResponse.from_row(full or row)
+
+
+# --- operator sessions (0130) -------------------------------------------------------
+#
+# The batch layer over the SAME queue: a session hands an operator 10 items at once,
+# the extension opens every tab, and the next batch releases transactionally when the
+# last item of the current one goes terminal. Nothing here writes evidence - the only
+# evidence writers remain /queue/{id}/complete (probe) and /queue/{id}/blocked, which
+# gained the post-terminal session hook above.
+#
+# Auth mirrors the queue exactly, plus the NAP rule: responses that carry canonical
+# business-profile values (the task cards) additionally require `client_profile:read`
+# on the extension path - the same hybrid GET /business-profiles applies.
+
+# Module-level resolver OBJECTS (not inline factory calls) so tests can override them
+# by identity, exactly as they override `resolve_operator`/`resolve_operator_write`.
+#
+# KIND-GENERALIZED GUARDS (0136). Sessions now come in two kinds, and a token may
+# legitimately hold only ONE queue's scopes - so the shared machinery routes take an
+# ANY-OF floor across the two kinds' FULL scope sets for the route's verb (bearer
+# callers stay governed by their role, as everywhere else): the refusal is a
+# deterministic 401 before any epoch/DB work. The handlers where the session KIND is
+# known (create's body, the detail read's loaded row, the web2 block door) then
+# enforce that kind's EXACT granular scope via `_refuse_kind_scope`: citation
+# sessions need `citation_queue:<verb>` (+ `client_profile:read` when the payload
+# carries the canonical NAP), web2_placement sessions need `web2_queue:<verb>`. The
+# floor is honest because every session/task query is pinned to the caller's own
+# operator_id - the widest cross-kind act is orchestrating the caller's OWN
+# other-kind session, with zero evidence authority; the evidence doors (queue
+# complete/blocked, the placement complete) each keep their exact single scope.
+#
+# Every session route declares its floor BEFORE the repo dependencies, so the floor
+# is what refuses a wrong-scope extension token - the repos' own any-queue-scope
+# guard is containment behind it, never the front door.
+
+# Session SUMMARY reads (the list + session-clients counts: no NAP, no drafts).
+resolve_session_reader = require_operator_scope_sets(
+    ("citation_queue:read",), ("web2_queue:read",)
+)
+# Task-CARD reads: citation cards carry the canonical NAP, so that lane's set is
+# queue read + profile read; web2 cards carry the client's own approved draft.
+resolve_session_card_reader = require_operator_scope_sets(
+    ("citation_queue:read", "client_profile:read"), ("web2_queue:read",)
+)
+resolve_session_write_floor = require_operator_scope_sets(
+    ("citation_queue:write",), ("web2_queue:write",)
+)
+# Session creation returns batch-1 CARDS, so its floor is write + the card scopes.
+resolve_session_create_floor = require_operator_scope_sets(
+    ("citation_queue:write", "client_profile:read"), ("web2_queue:write",)
+)
+resolve_session_lead = require_operator_lead_over(resolve_session_write_floor)
+resolve_session_creator = require_operator_lead_over(resolve_session_create_floor)
+
+# Session summary reads (list + per-client counts).
+SessionReader = Annotated[CurrentUser, Depends(resolve_session_reader)]
+# Task-card reads (the detail board; the in-handler kind check refines further).
+SessionCardReader = Annotated[CurrentUser, Depends(resolve_session_card_reader)]
+# Non-lead session mutations (heartbeat, telemetry).
+SessionWrite = Annotated[CurrentUser, Depends(resolve_session_write_floor)]
+# Lead session mutations (close, skip/defer, the web2 block door).
+SessionLead = Annotated[CurrentUser, Depends(resolve_session_lead)]
+# Lead session CREATION (a claim-class mutation whose response carries cards).
+SessionCreator = Annotated[CurrentUser, Depends(resolve_session_creator)]
+
+
+def get_citations_repo_session(
+    user: Annotated[CurrentUser, Depends(resolve_session_create_floor)],
+) -> CitationsRepo:
+    """CitationsRepo for session CREATION (client_name_for): bound to the same floor
+    object as `SessionCreator`, so either credential reaches it, the credential
+    resolves once per request, and the bar is exactly the creation route's own."""
+    return CitationsRepo(user.id)
+
+
+CitationsRepoSessionDep = Annotated[CitationsRepo, Depends(get_citations_repo_session)]
+
+
+def get_offpage_repo_session(
+    user: Annotated[CurrentUser, Depends(resolve_session_write_floor)],
+) -> OffpageRepo:
+    """OffpageRepo for the web2 BLOCK door: the plain `OffpageRepoDep` resolves
+    bearer-only `get_current_user`, which would 401 the extension before the door's
+    own SessionLead guard was consulted. Bound to the same write-floor object, so
+    the credential resolves once and the lead gate stays the deciding guard."""
+    return OffpageRepo(user.id)
+
+
+OffpageRepoSessionDep = Annotated[OffpageRepo, Depends(get_offpage_repo_session)]
+
+#: The kind-specific scope each verb needs on the EXTENSION path.
+_KIND_SCOPES: dict[str, dict[str, str]] = {
+    "citation": {"read": "citation_queue:read", "write": "citation_queue:write"},
+    "web2_placement": {"read": "web2_queue:read", "write": "web2_queue:write"},
+}
+
+
+async def _refuse_kind_scope(
+    x_operator_token: str | None, kind: str, *, write: bool, cards: bool = False
+) -> None:
+    """401 unless the presented extension token holds the SESSION KIND's exact scope
+    (+ `client_profile:read` for citation card payloads, which carry the canonical
+    NAP). Bearer callers pass untouched - their role already governed the floor."""
+    if not x_operator_token:
+        return
+    principal = await asyncio.to_thread(operator_principal_of, x_operator_token)
+    verb = "write" if write else "read"
+    needed = [_KIND_SCOPES.get(kind, _KIND_SCOPES["citation"])[verb]]
+    if kind == "citation" and cards:
+        needed.append("client_profile:read")
+    if principal is None or not all(principal.has(s) for s in needed):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+# Session creation throttle: fail-OPEN like the claim limiter (same reasoning - the
+# caller is authenticated, lead-gated and lease-bounded; the limiter is a brake on a
+# runaway extension loop, never the reason a legitimate session 500s).
+_SESSION_CREATE_LIMIT_PER_MINUTE = 6
+
+
+async def _session_rate_limit(redis: RedisDep, user_id: str) -> None:
+    window = int(time.time()) // 60
+    await _enforce(
+        redis,
+        f"rl:citation_session_create:{user_id}:{window}",
+        "citation_session_create",
+        _SESSION_CREATE_LIMIT_PER_MINUTE,
+        60,
+        fail_closed=False,
+    )
+
+
+def _task_card(row: dict[str, Any]) -> SessionTaskCard:
+    """One session task card from the joined task+citation+directory+NAP row.
+
+    FAIL-CLOSED on specs, by construction: `_spec_selectors` returns {} whenever no
+    ACTIVE spec exists (or the whitelist read fails), so `hasSpec` is false and every
+    field ships an empty selector - the panel then offers copy-buttons, never a
+    fabricated Fill."""
+    selectors = _spec_selectors(row)
+    prohibited = ""
+    if str(row.get("directory_route") or "").upper() == "F":
+        prohibited = (
+            "This directory's terms forbid automated submission and it should not be in "
+            f"the queue. Do not submit. {row.get('directory_tos_source_url') or ''}"
+        ).strip()
+    return SessionTaskCard(
+        task_id=str(row.get("task_id")),
+        citation_id=str(row.get("id")),
+        batch_no=int(row.get("batch_no") or 1),
+        position=int(row.get("position") or 0),
+        ui_state=str(row.get("ui_state") or "pending"),  # type: ignore[arg-type]
+        directory=str(row.get("directory_name") or row.get("directory") or ""),
+        directory_id=str(row.get("directory_id") or ""),
+        directory_url=str(row.get("directory_url") or ""),
+        add_url=str(row.get("directory_add_url") or ""),
+        has_spec=bool(selectors),
+        fields=_queue_fields(row, selectors=selectors),
+        queued_because=str(row.get("blocked_reason") or "") or "prepared for a human to finish",
+        prohibited_warning=prohibited,
+        price_note=str(row.get("directory_price_note") or ""),
+    )
+
+
+def _web2_task_card(row: dict[str, Any]) -> Web2PlacementTaskCard:
+    """One web2_placement task card from the joined task+property+platform+spec row.
+
+    FAIL-CLOSED by construction, twice over: with no ACTIVE placement spec,
+    `placement_spec` is NULL, so `hasSpec` is false, `fields` is empty (copy-blocks
+    only - the extension never fills on a guess) and the Open button falls back to
+    the platform's homepage rather than a fabricated editor URL."""
+    spec = row.get("placement_spec") if isinstance(row.get("placement_spec"), dict) else None
+    platform_row = {
+        "homepage_url": str(row.get("platform_homepage_url") or ""),
+    }
+    selectors = spec_selectors(spec)
+    blocks = copy_blocks_for(row, spec)
+    values = {b["key"]: b["value"] for b in blocks}
+    return Web2PlacementTaskCard(
+        task_id=str(row.get("task_id")),
+        web2_id=str(row.get("id")),
+        batch_no=int(row.get("batch_no") or 1),
+        position=int(row.get("position") or 0),
+        ui_state=str(row.get("ui_state") or "pending"),  # type: ignore[arg-type]
+        platform=str(row.get("platform") or ""),
+        title=str(row.get("topic") or ""),
+        editor_url=editor_url_for(spec, platform_row),
+        anchor=str(row.get("anchor") or ""),
+        target_url=str(row.get("target_url") or ""),
+        has_spec=bool(selectors),
+        copy_blocks=[Web2CopyBlock(**b) for b in blocks],
+        fields=[
+            QueueFieldValue(
+                key=key, label=key.replace("_", " ").title(), value=values.get(key, ""),
+                selector=selector,
+            )
+            for key, selector in selectors.items()
+            if values.get(key, "")
+        ],
+    )
+
+
+def _session_summary(
+    row: dict[str, Any],
+    tasks: list[SessionTaskCard] | list[Web2PlacementTaskCard] | None = None,
+) -> dict[str, Any]:
+    """The shared kwargs for OperatorSessionResponse/SessionDetailResponse."""
+
+    def _iso(v: Any) -> str:
+        return v.isoformat() if isinstance(v, datetime) else (str(v) if v else "")
+
+    by_state: dict[str, int] = {}
+    for t in tasks or []:
+        by_state[t.ui_state] = by_state.get(t.ui_state, 0) + 1
+    return {
+        "id": str(row["id"]),
+        "client": str(row.get("client_name") or ""),
+        "client_id": str(row.get("client_id") or ""),
+        "status": str(row.get("status") or "active"),
+        "kind": str(row.get("kind") or "citation"),
+        "batch_size": int(row.get("batch_size") or 10),
+        "current_batch": int(row.get("current_batch") or 1),
+        "total_batches": int(row.get("total_batches") or 1),
+        "task_count": int(row.get("task_count") or (len(tasks) if tasks else 0)),
+        "by_ui_state": by_state,
+        "created_at": _iso(row.get("created_at")),
+        "updated_at": _iso(row.get("updated_at")),
+        "closed_at": _iso(row.get("closed_at")) or None,
+    }
+
+
+@router.get("/session-clients", response_model=list[SessionClientCount])
+async def session_client_counts(
+    user: SessionReader,
+    sessions: OperatorSessionsRepoDep,
+    x_operator_token: Annotated[str | None, Header(alias="X-Operator-Token")] = None,
+) -> list[SessionClientCount]:
+    """Per-client session-able workload for the extension's client selector: queue rows
+    waiting for a human, verify-first discoveries, candidate gaps - and (0136) parked
+    extension-lane placements. Counts only - the full gap analysis stays a per-client
+    read. The guard is the session floor (either queue's read scope) so a web2-only
+    token can pick a client; bearer callers keep the pre-0136 `view_reports` bar."""
+    if not x_operator_token and not role_has_perm(user.role, "view_reports"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Missing permission: view_reports"
+        )
+    rows = await asyncio.to_thread(sessions.client_work_counts)
+    return [
+        SessionClientCount(
+            client_id=str(r.get("client_id") or ""),
+            client=str(r.get("client_name") or ""),
+            ready_for_human=int(r.get("ready") or 0),
+            verify_first=int(r.get("verify_first") or 0),
+            candidate_gaps=int(r.get("candidate_gaps") or 0),
+            web2_placements=int(r.get("web2_placements") or 0),
+        )
+        for r in rows
+    ]
+
+
+@router.post("/sessions", response_model=SessionDetailResponse, status_code=status.HTTP_201_CREATED)
+async def create_operator_session(
+    body: SessionCreateRequest,
+    actor: SessionCreator,
+    sessions: OperatorSessionsRepoDep,
+    repo: CitationsRepoSessionDep,
+    redis: RedisDep,
+    x_operator_token: Annotated[str | None, Header(alias="X-Operator-Token")] = None,
+) -> SessionDetailResponse:
+    """Start a work session, batched, all one transaction.
+
+    ``kind='citation'``: select this client's workable citations (from gaps, or an
+    explicit list) and CLAIM batch 1; the cards carry the canonical NAP (hence
+    `client_profile:read` on the extension path). ``kind='web2_placement'`` (0136):
+    select the client's parked extension-lane properties; the cards carry the
+    approved draft as copy-blocks (`web2_queue:write` on the extension path).
+
+    One active session per operator (409 otherwise - the partial unique index is the
+    enforcement, this route merely words the refusal). Already-claimed / in-session
+    rows are excluded at selection, never fought over."""
+    await _refuse_kind_scope(x_operator_token, body.kind, write=True, cards=True)
+    await _session_rate_limit(redis, actor.id)
+    name = await asyncio.to_thread(repo.client_name_for, body.client_id)
+    if name is None:
+        raise _CLIENT_NOT_FOUND
+    gaps = body.from_gaps
+    params: dict[str, Any] = {
+        "kind": body.kind,
+        "batchSize": body.batch_size,
+        **({"fromGaps": gaps.model_dump()} if gaps else {}),
+        **({"citationIds": body.citation_ids} if body.citation_ids else {}),
+    }
+    try:
+        session = await asyncio.to_thread(
+            sessions.create_session,
+            client_id=body.client_id,
+            client_name=name,
+            batch_size=body.batch_size,
+            params=params,
+            tiers=list(gaps.tiers) if gaps and gaps.tiers else None,
+            limit=gaps.limit if gaps else 25,
+            citation_ids=body.citation_ids,
+            kind=body.kind,
+        )
+    except ActiveSessionExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an active session - close it before starting another.",
+        ) from exc
+    except NoSessionWorkError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Nothing to work for this client right now - no unclaimed queue items, "
+                "candidate gaps, or parked placements matched the selection."
+            ),
+        ) from exc
+    session_id = str(session["id"])
+    if body.kind == "web2_placement":
+        web2_rows = await asyncio.to_thread(sessions.web2_task_rows, session_id)
+        web2_cards = [_web2_task_card(r) for r in web2_rows]
+        await record_activity(
+            actor, kind="task",
+            action=f"started a Web 2.0 placement session ({len(web2_cards)} tasks)",
+            target=name, entity_type="client", entity_id=body.client_id,
+        )
+        full = await asyncio.to_thread(sessions.get_session, session_id)
+        return SessionDetailResponse(
+            **_session_summary(full or session, web2_cards), web2_tasks=web2_cards
+        )
+    task_rows = await asyncio.to_thread(sessions.session_task_rows, session_id)
+    cards = [_task_card(r) for r in task_rows]
+    await record_activity(
+        actor, kind="task", action=f"started a citation session ({len(cards)} tasks)",
+        target=name, entity_type="client", entity_id=body.client_id,
+    )
+    full = await asyncio.to_thread(sessions.get_session, session_id)
+    return SessionDetailResponse(**_session_summary(full or session, cards), tasks=cards)
+
+
+@router.get("/sessions", response_model=list[OperatorSessionResponse])
+async def list_operator_sessions(
+    _user: SessionReader,
+    sessions: OperatorSessionsRepoDep,
+    mine: bool = True,
+    active: bool = False,
+) -> list[OperatorSessionResponse]:
+    """Session summaries (no task cards, so no NAP - the session read floor, either
+    queue's read scope, suffices). `?mine=true&active=true` is how the extension and
+    the dashboard find the caller's live session after a reload."""
+    rows = await asyncio.to_thread(sessions.list_sessions, mine=mine, active=active)
+    return [OperatorSessionResponse(**_session_summary(r)) for r in rows]
+
+
+@router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
+async def get_operator_session(
+    session_id: str,
+    _user: SessionCardReader,
+    sessions: OperatorSessionsRepoDep,
+    x_operator_token: Annotated[str | None, Header(alias="X-Operator-Token")] = None,
+) -> SessionDetailResponse:
+    """The full session board: every task card with its ui_state and batch number.
+
+    Citation sessions carry spec fill fields + the canonical NAP (hence
+    `client_profile:read` on the extension path); web2_placement sessions carry the
+    approved drafts as copy-blocks (`web2_queue:read` on the extension path). The
+    kind's exact scope is enforced AFTER the row is loaded - the floor guard already
+    authenticated the caller, so a wrong-scope read refuses without leaking more
+    than the session's existence to its own operator."""
+    row = await asyncio.to_thread(sessions.get_session, session_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    kind = str(row.get("kind") or "citation")
+    await _refuse_kind_scope(x_operator_token, kind, write=False, cards=True)
+    if kind == "web2_placement":
+        web2_rows = await asyncio.to_thread(sessions.web2_task_rows, session_id)
+        web2_cards = [_web2_task_card(r) for r in web2_rows]
+        return SessionDetailResponse(
+            **_session_summary(row, web2_cards), web2_tasks=web2_cards
+        )
+    task_rows = await asyncio.to_thread(sessions.session_task_rows, session_id)
+    cards = [_task_card(r) for r in task_rows]
+    return SessionDetailResponse(**_session_summary(row, cards), tasks=cards)
+
+
+@router.post("/sessions/{session_id}/heartbeat", response_model=SessionHeartbeatResponse)
+async def heartbeat_operator_session(
+    session_id: str,
+    body: QueueHeartbeatRequest,
+    _user: SessionWrite,
+    sessions: OperatorSessionsRepoDep,
+) -> SessionHeartbeatResponse:
+    """Extend the lease on every released, non-terminal task and bank the time worked -
+    the per-item heartbeat's semantics, batched (the delta is SPREAD across the open
+    items so total minutes stay honest; see the repo). 409 once the session is no
+    longer this operator's active work."""
+    result = await asyncio.to_thread(
+        sessions.heartbeat, session_id, worked_seconds=body.worked_seconds
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This session is not active (or not yours) - start a new one.",
+        )
+    return SessionHeartbeatResponse(
+        ok=True, lease_seconds=SESSION_LEASE_SECONDS, extended=int(result.get("extended") or 0)
+    )
+
+
+@router.post("/sessions/{session_id}/close", response_model=OperatorSessionResponse)
+async def close_operator_session(
+    session_id: str, actor: SessionLead, sessions: OperatorSessionsRepoDep
+) -> OperatorSessionResponse:
+    """Explicit close: every held claim is released and the outcome recorded honestly -
+    `completed` when all tasks went terminal, else `abandoned`. 404 when the session
+    is not this operator's open work."""
+    row = await asyncio.to_thread(sessions.close_session, session_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No open session of yours by that id.",
+        )
+    await record_activity(
+        actor, kind="task", action=f"closed a citation session ({row.get('status')})",
+        target=str(row.get("client_name") or ""),
+    )
+    full = await asyncio.to_thread(sessions.get_session, session_id)
+    return OperatorSessionResponse(**_session_summary(full or row))
+
+
+@router.post("/sessions/{session_id}/tasks/{task_id}/telemetry")
+async def record_session_telemetry(
+    session_id: str,
+    task_id: str,
+    body: SessionTelemetryRequest,
+    _user: SessionWrite,
+    sessions: OperatorSessionsRepoDep,
+) -> dict[str, Any]:
+    """The extension's ui_state report: FORWARD-ONLY within the non-terminal ladder.
+
+    Terminal values are unrepresentable in the request schema (422 by construction);
+    a backwards or repeated move is a 409. Telemetry carries ZERO authority - the
+    citation's own status never moves here."""
+    try:
+        task = await asyncio.to_thread(
+            sessions.record_telemetry, session_id, task_id,
+            new_state=body.ui_state, detail=body.detail,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such task in an active session of yours.",
+        )
+    return {"ok": True, "taskId": task_id, "uiState": str(task.get("ui_state"))}
+
+
+@router.post("/sessions/{session_id}/tasks/{task_id}/skip", response_model=SessionActionResponse)
+async def skip_session_task(
+    session_id: str,
+    task_id: str,
+    body: SessionSkipRequest,
+    _user: SessionLead,
+    sessions: OperatorSessionsRepoDep,
+) -> SessionActionResponse:
+    """Skip a task (terminal, server-written): claim released, reason recorded on the
+    task, batch-release check run in the same transaction. The citation row itself is
+    untouched - nothing was attempted, so nothing is asserted."""
+    result = await asyncio.to_thread(sessions.skip_task, session_id, task_id, reason=body.reason)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such open task in an active session of yours.",
+        )
+    return SessionActionResponse(
+        ok=True, session_id=session_id, task_id=task_id, state="skipped",
+        batch_no=int(result.get("batchNo") or 0), released=int(result.get("released") or 0),
+    )
+
+
+@router.post("/sessions/{session_id}/tasks/{task_id}/defer", response_model=SessionActionResponse)
+async def defer_session_task(
+    session_id: str,
+    task_id: str,
+    _user: SessionLead,
+    sessions: OperatorSessionsRepoDep,
+) -> SessionActionResponse:
+    """Defer a task to the TAIL: it leaves the current batch (terminal `deferred` for
+    batch accounting), its claim is released, and it comes back `released` when its
+    new tail batch is reached."""
+    result = await asyncio.to_thread(sessions.defer_task, session_id, task_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such open task in an active session of yours.",
+        )
+    return SessionActionResponse(
+        ok=True, session_id=session_id, task_id=task_id, state="deferred",
+        batch_no=int(result.get("batchNo") or 0), released=int(result.get("released") or 0),
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/tasks/{task_id}/blocked", response_model=SessionActionResponse
+)
+async def block_web2_session_task(
+    session_id: str,
+    task_id: str,
+    body: SessionWeb2BlockRequest,
+    actor: SessionLead,
+    sessions: OperatorSessionsRepoDep,
+    offpage: OffpageRepoSessionDep,
+    x_operator_token: Annotated[str | None, Header(alias="X-Operator-Token")] = None,
+) -> SessionActionResponse:
+    """Block a WEB2 placement task (terminal, server-written, closed vocabulary - the
+    citation queue's, reused so the "what wastes our time" rollup spans both lanes).
+
+    WEB2-ONLY by construction: a citation task's block must travel through
+    /queue/{id}/blocked, which also writes the citation row and the drift hook - a
+    citation task here is a 404, never a thinner second door. The PROPERTY stays
+    parked at `publishing`: an operator's obstacle is a fact about the attempt, not
+    evidence about the placement, and un-approving reviewed work is a lead's
+    decision on the dashboard.
+
+    `form_changed` additionally DEACTIVATES the platform's ACTIVE placement spec
+    (0136 drift, fail-closed - the same rule the citation door applies to 0108
+    specs): a human just said the editor no longer matches what the spec describes,
+    so the extension must stop offering its selectors until a revision is earned."""
+    await _refuse_kind_scope(x_operator_token, "web2_placement", write=True)
+    try:
+        result = await asyncio.to_thread(
+            sessions.block_web2_task, session_id, task_id,
+            reason=body.reason, detail=body.detail,
+        )
+    except ValueError as exc:  # unreachable via the schema; belt for direct callers
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such open web2 placement task in an active session of yours.",
+        )
+    if body.reason == "form_changed" and result.get("web2Id"):
+        # Best-effort, logged loudly on failure: the operator's block is the primary
+        # record and is already written - an active spec surviving a drift report is
+        # the fail-open state this hook closes, but it must never 500 the report.
+        try:
+            row = await asyncio.to_thread(offpage.get_web2, str(result["web2Id"]))
+            matrix = (
+                await asyncio.to_thread(
+                    offpage.platform_matrix_for, str(row.get("platform") or "")
+                )
+                if row is not None
+                else None
+            )
+            if matrix is not None:
+                await asyncio.to_thread(
+                    offpage.record_placement_spec_drift,
+                    str(matrix.get("id") or ""),
+                    selector="",
+                    evidence={
+                        "source": "operator_blocked",
+                        "reason": "form_changed",
+                        "detail": body.detail[:500],
+                        "web2_id": str(result["web2Id"]),
+                        "reported_by": actor.id,
+                        "reported_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+        except Exception:
+            logger.exception(
+                "web2_placement_drift_deactivation_failed",
+                task_id=task_id, web2_id=str(result.get("web2Id") or ""),
+            )
+    return SessionActionResponse(
+        ok=True, session_id=session_id, task_id=task_id, state="blocked",
+        batch_no=int(result.get("batchNo") or 0), released=int(result.get("released") or 0),
+    )

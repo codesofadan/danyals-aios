@@ -306,6 +306,88 @@ def test_citation_monitor_blocked_by_dial() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Evidence tiers (0129): the worker PERSISTS what discovery found.
+# --------------------------------------------------------------------------- #
+def test_fake_citation_provider_emits_one_row_per_evidence_tier() -> None:
+    records = FakeCitationProvider().fetch_citations("Acme Roofing")
+    tiers = {r.evidence_level for r in records}
+    assert {"confirmed", "inconsistent_nap", "uncertain", "no_evidence"} <= tiers
+    # A tiered hit carries its URL; a no_evidence row honestly carries none.
+    for r in records:
+        assert (r.evidence_level == "no_evidence") == (r.url == "")
+
+
+def test_citation_monitor_persists_url_and_tier_through_to_the_store() -> None:
+    store = FakeOffpageStore()
+    result = wk.run_citation_monitor(
+        store, FakeCitationProvider(), _gate(FakeCostStore()), _settings(),
+        client_id="cl-1", client_name="Acme", business="Acme Roofing",
+    )
+    assert result["state"] == "ok"
+    by_dir = {c["directory"]: c for c in store.inserted_citations}
+    fetched = {r.directory: r for r in FakeCitationProvider().fetch_citations("Acme Roofing")}
+    for directory, rec in fetched.items():
+        written = by_dir[directory]
+        assert written["discovered_url"] == rec.url
+        assert written["evidence_level"] == rec.evidence_level
+        # The receipt is persisted with a SERVER-SIDE checked_at stamped at write time.
+        assert written["discovery_evidence"]["sources"] == ["fake"]
+        assert written["discovery_evidence"]["checked_at"]
+        assert written["evidence_checked_at"] is not None
+
+
+def test_diff_citations_updates_evidence_on_changed_rows_too() -> None:
+    """A stored row whose NAP verdict is unchanged but whose EVIDENCE moved (the URL
+    was finally found, or the tier strengthened) must be updated - or the evidence
+    columns freeze at their first write."""
+    fetched = [
+        CitationRecord(
+            directory="Yelp", nap_status="consistent", note="",
+            url="https://yelp.example/biz/1", evidence_level="confirmed",
+            evidence={"sources": ["serper", "dataforseo"]},
+        )
+    ]
+    stored = [{
+        "id": "c-yelp", "directory": "Yelp", "nap_status": "consistent",
+        "evidence_level": "uncertain", "discovered_url": "https://yelp.example/biz/1",
+    }]
+    diff = wk.diff_citations(fetched, stored)
+    assert [existing["id"] for existing, _rec in diff.changed] == ["c-yelp"]
+
+    # And an identical pull (same nap, same tier, same url) stays a no-op.
+    stored[0]["evidence_level"] = "confirmed"
+    assert wk.diff_citations(fetched, stored).changed == []
+
+
+def test_citation_monitor_passes_evidence_through_on_changed_rows() -> None:
+    class _RecordingStore(FakeOffpageStore):
+        def __init__(self, **kw: Any) -> None:
+            super().__init__(**kw)
+            self.update_kwargs: list[dict[str, Any]] = []
+
+        def update_citation_status(self, citation_id: str, **kw: Any) -> None:
+            super().update_citation_status(citation_id, **kw)
+            self.update_kwargs.append(kw)
+
+    provider = FakeCitationProvider()
+    first = provider.fetch_citations("Acme Roofing")[0]  # pinned: consistent/confirmed
+    store = _RecordingStore(citations=[{
+        "id": "c-1", "directory": first.directory, "nap_status": "inconsistent",
+        "evidence_level": "", "discovered_url": "",
+    }])
+    result = wk.run_citation_monitor(
+        store, provider, _gate(FakeCostStore()), _settings(),
+        client_id="cl-1", client_name="Acme", business="Acme Roofing",
+    )
+    assert result["state"] == "ok"
+    assert store.updated_citations == ["c-1"]
+    kw = store.update_kwargs[0]
+    assert kw["discovered_url"] == first.url
+    assert kw["evidence_level"] == first.evidence_level
+    assert kw["discovery_evidence"]["checked_at"]
+
+
+# --------------------------------------------------------------------------- #
 # notify_new_lost seam is 7F-1-decoupled (guarded no-op, never raises)
 # --------------------------------------------------------------------------- #
 def test_notify_new_lost_noops_without_service() -> None:
@@ -475,7 +557,7 @@ def test_web2_publish_worker_never_raises_on_store_failure(monkeypatch: pytest.M
             raise RuntimeError("db down")
 
     monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
-    # web2_publisher_from_settings returns None (per-account OAuth is in the vault).
+    # _publisher_for degrades to None on the store failure (per-account creds live in the vault).
     outcome = wk.execute_web2_publish(BoomStore(), _settings(), "w2-1")  # type: ignore[arg-type]
     assert outcome.state == "error"  # never stuck, never re-raised
 

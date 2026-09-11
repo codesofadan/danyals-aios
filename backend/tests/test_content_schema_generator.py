@@ -110,6 +110,53 @@ def test_service_emits_service_breadcrumb_and_organization() -> None:
     assert result.primary_type == "Service"
 
 
+def test_additional_seo_schema_nodes_fail_closed() -> None:
+    """Injected SEO nodes ship ONLY as a recognized type carrying every required
+    property. Empty / ghost / unknown / typeless nodes are DROPPED — emitting invalid
+    structured data is the manual-action risk this module exists to prevent."""
+    biz = _storefront()
+    page = Page(
+        url="https://verdeplumbing.example/video",
+        title="Drain Cleaning",
+        service_type="Drain Cleaning",
+        schema_nodes=(
+            {  # complete VideoObject -> emitted
+                "@type": "VideoObject", "name": "Drain Cleaning",
+                "description": "How we clear a drain", "thumbnailUrl": "https://verdeplumbing.example/t.jpg",
+                "uploadDate": "2026-09-01",
+            },
+            {"@type": "Product", "name": "Drain Cleaning Kit"},  # has required name -> emitted
+            {"@type": "VideoObject", "name": "Ghost"},           # missing required props -> DROPPED
+            {"@type": "Product"},                                # empty -> DROPPED
+            {"@type": "Frobnicate", "name": "x"},                # unknown/unvetted type -> DROPPED
+            {"name": "no type"},                                 # no @type -> DROPPED
+        ),
+    )
+    graph = build_json_ld("service", biz, page)
+    types = _types(graph)
+    assert [t for t in types if t in ("VideoObject", "Product")] == ["VideoObject", "Product"]
+    assert types.count("VideoObject") == 1 and types.count("Product") == 1
+    assert "Frobnicate" not in types
+
+
+def test_injected_node_with_invisible_claim_is_flagged() -> None:
+    """A well-formed injected node whose human claim is NOT on the page fails validation
+    (and is therefore never reported rich-result eligible)."""
+    biz = _storefront()
+    page = Page(
+        url="https://verdeplumbing.example/p",
+        title="Drain Cleaning",
+        service_type="Drain Cleaning",
+        schema_nodes=({"@type": "Product", "name": "Nonexistent Widget 9000"},),
+    )
+    graph = build_json_ld("service", biz, page)
+    assert "Product" in _types(graph)  # structurally valid, so emitted
+    result = validate_json_ld(graph, VisibleContent(text="Drain Cleaning — we clear blocked drains fast."))
+    assert not result.valid
+    assert any("Nonexistent Widget 9000" in e and "not present in the visible content" in e
+               for e in result.errors)
+
+
 def test_service_missing_service_type_is_flagged() -> None:
     biz = _storefront()
     page = Page(url="https://verdeplumbing.example/x", title="Verde Plumbing")  # no service_type

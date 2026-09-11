@@ -749,14 +749,16 @@ class Settings(BaseSettings):
             return ("", 0, "", "")
         return (host, port, user, password)
 
-    # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: direct
-    # APIs (Bing Places / Foursquare), aggregator pushes, and a self-hosted Playwright
-    # bot for bot_fillable/captcha_assisted directories. ALL
+    # --- Citation-builder module (7B-4). ACTUAL submission, not monitoring: the
+    # legitimate direct/aggregator APIs (Data Axle, Apple Business Connect). The
+    # Playwright form bot - and with it the CAPTCHA solver, the residential proxy and
+    # the per-submit bot cost estimates - was RETIRED 2026-09-05 (off-page redesign
+    # Phase 3, plan C1): form directories are operator-queue work, with earned
+    # directory specs powering extension autofill. ALL keys here are
     # optional and NOT in _REQUIRED_IN_PROD: every provider degrades to a fake/hold
-    # exactly like every other off-page seam. Per-directory login credentials (a
-    # directory account username/password the bot fills in) are NOT here — they
-    # are per-client `client_access` vault rows, like a client's own WordPress
-    # login. Costs are logged through the `citations` money-dial (R5 pre-check). ---
+    # exactly like every other off-page seam. Per-directory login credentials are NOT
+    # here — they are per-client `client_access` vault rows, like a client's own
+    # WordPress login. Costs are logged through the `citations` money-dial. ---
     bing_places_api_key: SecretStr | None = None  # Bing Places for Business API
     foursquare_api_key: SecretStr | None = None  # Foursquare Places API
     # --- Citation AUDIT discovery (the READ side; the BrightLocal replacement).
@@ -773,29 +775,20 @@ class Settings(BaseSettings):
     # the anchor. Keys are SecretStr (never logged / never in a repr). ---
     google_places_api_key: SecretStr | None = None  # Google Places API (New) anchor lookup
     google_maps_api_key: SecretStr | None = None  # legacy alias, fallback for the Places anchor
-    # DEFAULTS TO OFF, deliberately changed from "capsolver" 2026-08-29. Paying a solver
-    # to clear a CAPTCHA IS the anti-abuse evasion this project has ruled out, and a live
-    # solver as the DEFAULT meant the policy and the code disagreed - the policy said
-    # "CAPTCHA is a workflow boundary", the shipped default said "pay to cross it".
-    # A CAPTCHA is now what routes a directory to the human queue, where a person clears
-    # it. Set this explicitly if that is ever reversed as a deliberate owner decision.
-    captcha_solver_provider: str = "none"  # capsolver | capmonster | none
-    captcha_solver_api_key: SecretStr | None = None
-    # Residential proxy. Same reasoning: a directory that needs a proxy to look human is
-    # DEFENDED, and a defended directory is a human-queue item, not a bandwidth purchase.
-    citation_proxy_url: SecretStr | None = None  # http(s)://user:pass@host:port
-    # Per-submit cost estimates for the `citations` money-dial.
+    # RETIRED SETTINGS, deleted 2026-09-05 with the Playwright bot (Phase 3, plan C1) -
+    # kept as a record so nobody re-adds them from an old .env:
+    #   CAPTCHA_SOLVER_PROVIDER / CAPTCHA_SOLVER_API_KEY - paying a solver to clear a
+    #     CAPTCHA IS the anti-abuse evasion this project ruled out; a CAPTCHA routes
+    #     the directory to the human queue, where a person clears it.
+    #   CITATION_PROXY_URL - a directory that needs a residential proxy to look human
+    #     is DEFENDED, and a defended directory is a human-queue item.
+    #   CITATION_BOT_COST_ESTIMATE / CITATION_CAPTCHA_COST_ESTIMATE /
+    #   CITATION_ROUTE_B_COST_ESTIMATE - per-submit prices for an engine that no longer
+    #     exists; queue work is measured in operator minutes (`worked_seconds`), not
+    #     provider spend.
+    # (`citation_api_cost_estimate` was deleted earlier with the Bing/Foursquare
+    # submitters - it priced calls to endpoints that return 404.)
     #
-    # `citation_api_cost_estimate` was DELETED with the Bing/Foursquare submitters - it
-    # priced a call to endpoints that return 404. Do not reintroduce it as a generic
-    # "api" figure: the three write paths that verified (Data Axle, Apple, GBP) have
-    # wildly different costs, and one blended number would hide that.
-    citation_bot_cost_estimate: float = 0.005  # one Playwright bot_fillable submit (no CAPTCHA)
-    citation_captcha_cost_estimate: float = 0.006  # one Playwright captcha_assisted submit
-    # Route B is compute only - no proxy, no solve - because a directory needing either
-    # is by definition Route C. This is the ONLY route the "under 10c marginal"
-    # commitment has ever been true for.
-    citation_route_b_cost_estimate: float = 0.002
     # Data Axle Local Listings Premium, per Add/Renewal. UNKNOWN: the price is published
     # nowhere reachable and www.data-axle.com 403s every client tried (R1 O-2). It stays
     # 0.0, and 0.0 BLOCKS the route rather than enabling a free one - see
@@ -806,18 +799,20 @@ class Settings(BaseSettings):
     data_axle_api_key: SecretStr | None = None
     apple_business_api_key: SecretStr | None = None
     apple_business_org_id: str = ""
-    # Controlled root a bot_fillable/captcha_assisted submission's proof screenshot is
-    # written under. Unset -> no screenshot is captured (an honest empty proof_url,
-    # never a crash) - mirrors audit_artifact_dir's key-gating.
+    # Controlled root citation proof screenshots live under. The retired bot wrote
+    # them; the guarded download route still SERVES the historical ones, so the root
+    # stays configurable. Unset -> no proofs resolvable (an honest 404, never a crash)
+    # - mirrors audit_artifact_dir's key-gating.
     citation_artifact_dir: str | None = None
-    # --- Citation ACCOUNT-CREATION (signup + email verify, 7B-5). A single
-    # CATCH-ALL mailbox (every address at `citation_mail_domain` lands in one INBOX)
-    # lets the signup bot confirm each freshly-created directory account via its OWN
-    # unique alias (see integrations/imap_mailbox.alias_for) - what avoids the "one
-    # email -> many accounts" ban. ALL optional and NOT in _REQUIRED_IN_PROD: with no
-    # mailbox/domain, `imap_mailbox_from_settings` returns None and a `bot:signup`
-    # directory HOLDS as 'blocked' (never crashes). IMAP polling is FREE (no dial).
-    # The password is a SecretStr - never logged / never in a repr. ---
+    # --- Citation/web2 account EMAIL VERIFICATION (7B-5). A single CATCH-ALL mailbox
+    # (every address at `citation_mail_domain` lands in one INBOX) lets the guided
+    # web2 provisioning lane read each freshly-created account's confirmation email
+    # via its OWN unique alias (see integrations/imap_mailbox.alias_for) - what avoids
+    # the "one email -> many accounts" ban. (The automated citation SIGNUP bot that
+    # also read this mailbox was retired 2026-09-05 with the form bot.) ALL optional
+    # and NOT in _REQUIRED_IN_PROD: with no mailbox/domain,
+    # `imap_mailbox_from_settings` returns None and the flow HOLDS (never crashes).
+    # IMAP polling is FREE (no dial). The password is a SecretStr - never logged. ---
     citation_imap_host: str = ""  # IMAP-SSL host for the catch-all mailbox
     citation_imap_port: int = 993
     citation_imap_user: str = ""

@@ -247,7 +247,13 @@ export default function Web2Tab() {
                   const pm = PLATFORM_META[w.platform as Web2Platform];
                   // Fallback for any status the backend emits that isn't in the map
                   // (e.g. blocked/unchanged/error/skipped) — never crash the page.
-                  const pipeline = PIPELINE_META[w.status] ?? { label: w.status, cls: "mut" };
+                  // An extension-lane row parked at `publishing` is waiting for an
+                  // OPERATOR's placement session (0136), not for the publish worker —
+                  // labelling it "Publishing" would promise a worker that never comes.
+                  const pipeline =
+                    w.status === "publishing" && w.publishMethod === "extension"
+                      ? { label: "Operator placement", cls: "warn" }
+                      : PIPELINE_META[w.status] ?? { label: w.status, cls: "mut" };
                   return (
                     <tr>
                       <td className="op-strong">{w.client}</td>

@@ -290,7 +290,7 @@ class ImapMailbox:
 def imap_mailbox_from_settings(settings: Settings) -> ImapMailbox | None:
     """The catch-all mailbox client, or ``None`` when unconfigured (host/user/password
     missing) -- the signup flow then DEGRADES (a signup HOLDS as blocked), it never
-    crashes. Mirrors ``captcha_solver_from_settings`` / ``citation_bot_from_settings``."""
+    crashes. The same key-gated factory pattern every optional off-page seam uses."""
     # Resolved across BOTH settings families: the mailbox was declared twice (see
     # config.resolved_imap) and only one name was ever read, so configuring the other
     # produced a None mailbox and a silently-held signup.

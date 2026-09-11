@@ -103,8 +103,11 @@ async def test_public_funnel_end_to_end() -> None:
                 body = report.json()
                 assert set(body) == {
                     "status", "score", "scores", "has_pdf", "has_report",
-                    "url", "when", "fiverr_url",
+                    "url", "when", "fiverr_url", "publicSlug",
                 }
+                # The /leads/<brand> page publishes on COMPLETION; this audit is
+                # still queued, so the slug is the documented empty-string default.
+                assert body["publicSlug"] == ""
                 assert body["url"] == _PUBLIC_URL
                 assert body["fiverr_url"] == get_settings().fiverr_upsell_url
                 raw = report.text

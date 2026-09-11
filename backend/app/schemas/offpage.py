@@ -70,6 +70,12 @@ Web2Platform = Literal[
     "Livedoor Blog", "FC2 Blog", "Seesaa Blog", "Warpcast", "Sourcehut Pages",
     "Sanity", "Storyblok", "Hygraph", "WriteFreely",
 ]
+# Evidence tiers (0129), verbatim from the citations CHECK / frontend
+# CitationEvidenceLevel (offpage.ts). '' = a pre-tier row; `no_evidence` is a
+# *candidate* gap - absence of evidence is never proof of absence.
+CitationEvidenceLevel = Literal[
+    "", "confirmed", "inconsistent_nap", "uncertain", "no_evidence"
+]
 Web2Verified = Literal["verified", "pending"]
 # The publish PIPELINE's internal state machine (0028) - distinct from `verified`,
 # which is the live/indexable check on an ALREADY-published row.
@@ -88,6 +94,9 @@ _CITATION_SUBMIT_STATUSES: frozenset[str] = frozenset(
      # the only status this module actually earns — to "not_started" on the wire. The
      # one screen that listed citations could therefore never show a success.
      "live", "drifted", "delisted"}
+)
+_EVIDENCE_LEVELS: frozenset[str] = frozenset(
+    {"", "confirmed", "inconsistent_nap", "uncertain", "no_evidence"}
 )
 # Verbatim from integrations.web2_publishers.WEB2_PLATFORMS (7B-4's platform expansion).
 _WEB2_PLATFORMS: frozenset[str] = frozenset(
@@ -110,6 +119,9 @@ _WEB2_VERIFIED: frozenset[str] = frozenset({"verified", "pending"})
 _WEB2_PIPELINE_STATUSES: frozenset[str] = frozenset(
     {"draft", "needs_review", "publishing", "published", "failed", "rejected"}
 )
+# 0135: which lane actually publishes a placement (web2_properties.publish_method).
+Web2PublishMethod = Literal["api", "extension", "manual"]
+_WEB2_PUBLISH_METHODS: frozenset[str] = frozenset({"api", "extension", "manual"})
 
 # --- Web 2.0 platform CATALOG (public.web2_platforms, 0062/0063) ---------------
 # The web2 analogue of the citation-directory catalog: reference data, not tenant
@@ -121,6 +133,11 @@ Web2AuthType = Literal["api", "oauth", "automation", "anonymous"]
 Web2AuthorityTier = Literal["high", "medium", "low"]
 _WEB2_AUTH_TYPES: frozenset[str] = frozenset({"api", "oauth", "automation", "anonymous"})
 _WEB2_AUTHORITY_TIERS: frozenset[str] = frozenset({"high", "medium", "low"})
+# 0135's capability matrix: BY WHAT MECHANISM a placement happens on this platform.
+# '' = a row not yet classified (the column default - honest for future inserts, and
+# the degrade target for an unknown DB value, mirroring every closed vocabulary here).
+Web2Mechanism = Literal["", "api", "extension", "human", "unsupported"]
+_WEB2_MECHANISMS: frozenset[str] = frozenset({"", "api", "extension", "human", "unsupported"})
 
 
 def action_for(nap_status: str) -> CitationAction:
@@ -180,6 +197,12 @@ class CitationResponse(BaseModel):
     # 0106's public listing URL — the thing a client can open and track. Empty until a
     # completion was fetch-verified. This is NOT proof_url (a screenshot).
     live_url: str = Field(default="", serialization_alias="liveUrl")
+    # 0129: the URL discovery FOUND. Never a claim of liveness — only the probe
+    # promotes it into live_url (verification_method='discovery').
+    discovered_url: str = Field(default="", serialization_alias="discoveredUrl")
+    # 0129: how much the discovery verdict is worth ('' = a pre-tier row;
+    # no_evidence = a *candidate* gap — absence of evidence is never proof).
+    evidence_level: CitationEvidenceLevel = Field(default="", serialization_alias="evidenceLevel")
     # Why a row is on hold, as the machine-readable code the frontend maps to a
     # sentence (lib/citationStatus.ts). Empty for rows that are not blocked.
     blocked_reason: str = Field(default="", serialization_alias="blockedReason")
@@ -205,6 +228,10 @@ class CitationResponse(BaseModel):
         proof_link = (
             f"/api/v1/citation-builder/citations/{row['id']}/proof" if proof_key else ""
         )
+        # 0129: the tier is guarded like every other closed vocabulary here - an
+        # unknown value degrades to '' (pre-tier), never to an invented tier.
+        level = row.get("evidence_level")
+        level_v: CitationEvidenceLevel = level if level in _EVIDENCE_LEVELS else ""
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
@@ -214,6 +241,8 @@ class CitationResponse(BaseModel):
             submit_status=submit_status_v,
             proof_url=proof_link,
             live_url=str(row.get("live_url") or ""),
+            discovered_url=str(row.get("discovered_url") or ""),
+            evidence_level=level_v,
             blocked_reason=str(row.get("blocked_reason") or ""),
             note=row.get("note", ""),
         )
@@ -238,12 +267,19 @@ class Web2PropertyResponse(BaseModel):
     verified: Web2Verified
     published: str
     status: Web2PipelineStatus
+    # 0135/0136 on the wire: WHICH lane publishes this placement. 'extension' is the
+    # operator-published lane - a row parked at `publishing` with this value is
+    # waiting for a placement session, not for a worker, and the UI must say so.
+    publish_method: Web2PublishMethod = Field(
+        default="api", serialization_alias="publishMethod"
+    )
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> Web2PropertyResponse:
         platform = row.get("platform")
         verified = row.get("verified")
         status = row.get("status")
+        method = row.get("publish_method")
         return cls(
             id=str(row["id"]),
             client=row.get("client_name", ""),
@@ -253,6 +289,7 @@ class Web2PropertyResponse(BaseModel):
             verified=verified if verified in _WEB2_VERIFIED else "pending",
             published=format_date(row.get("published_at"), empty="—"),
             status=status if status in _WEB2_PIPELINE_STATUSES else "published",
+            publish_method=method if method in _WEB2_PUBLISH_METHODS else "api",
         )
 
 
@@ -277,7 +314,13 @@ class Web2PlatformCatalogResponse(BaseModel):
     shipped 17 of these, since grown by 0068 + 0070's catalog upserts to match
     ``integrations.web2_publishers.WEB2_PLATFORMS``); every other row is a catalogued
     build target. ``authType`` is verbatim from the ``web2_auth_type`` enum;
-    ``authorityTier`` is a directional high/medium/low (not a DA number)."""
+    ``authorityTier`` is a directional high/medium/low (not a DA number).
+
+    0135's capability matrix rides the same row: ``mechanism`` is the routing lane
+    (api / extension / human / unsupported), ``adapterStatus`` its free-text caveat or
+    exclusion reason, ``lastTestedAt`` when a real check last passed ("" = never),
+    and ``linkVerifiable`` / ``mediaSupport`` are TRI-state (null = not assessed) -
+    an unmeasured capability must read as unmeasured, never as false."""
 
     id: str
     name: str
@@ -289,11 +332,22 @@ class Web2PlatformCatalogResponse(BaseModel):
     market: str
     automation_ready: bool = Field(serialization_alias="automationReady")
     notes: str
+    # --- 0135 capability matrix -------------------------------------------------
+    mechanism: Web2Mechanism = ""
+    last_tested_at: str = Field(default="", serialization_alias="lastTestedAt")
+    adapter_status: str = Field(default="", serialization_alias="adapterStatus")
+    link_verifiable: bool | None = Field(default=None, serialization_alias="linkVerifiable")
+    media_support: bool | None = Field(default=None, serialization_alias="mediaSupport")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> Web2PlatformCatalogResponse:
         auth = row.get("auth_type")
         tier = row.get("authority_tier")
+        mechanism = row.get("mechanism")
+        # Booleans stay tri-state: a row 0135 never assessed serializes null, which the
+        # UI renders as "not assessed" - coercing to False would fabricate a verdict.
+        link_verifiable = row.get("link_verifiable")
+        media_support = row.get("media_support")
         return cls(
             id=str(row["id"]),
             name=row.get("name", ""),
@@ -305,17 +359,29 @@ class Web2PlatformCatalogResponse(BaseModel):
             market=row.get("market", "global") or "global",
             automation_ready=bool(row.get("automation_ready", False)),
             notes=row.get("notes", ""),
+            mechanism=mechanism if mechanism in _WEB2_MECHANISMS else "",
+            last_tested_at=format_date(row.get("last_tested_at"), empty=""),
+            adapter_status=str(row.get("adapter_status") or ""),
+            link_verifiable=link_verifiable if isinstance(link_verifiable, bool) else None,
+            media_support=media_support if isinstance(media_support, bool) else None,
         )
 
 
 class Web2CatalogResponse(BaseModel):
     """The Web 2.0 platform catalog plus a one-line rollup header: how many platforms
-    total, how many are ``automationReady`` (the pipeline can publish to now), and the
-    per-``authType`` breakdown - the web2 analogue of the citation engine board."""
+    total, how many are ``automationReady`` (the pipeline can publish to now), the
+    per-``authType`` breakdown, and (0135) the per-``mechanism`` breakdown - the web2
+    analogue of the citation engine board."""
 
     total: int
     automation_ready: int = Field(serialization_alias="automationReady")
     by_auth_type: dict[str, int] = Field(serialization_alias="byAuthType")
+    #: 0135: how many rows sit in each capability-matrix lane. The honest headline -
+    #: `automationReady` counts adapters that exist, this counts what each lane can
+    #: actually be used for.
+    by_mechanism: dict[str, int] = Field(
+        default_factory=dict, serialization_alias="byMechanism"
+    )
     platforms: list[Web2PlatformCatalogResponse]
     #: platform -> the credential fields it needs, straight from the publishers' own map.
     #: Served rather than duplicated in the frontend so the registration form cannot
@@ -434,18 +500,26 @@ Web2CampaignStatus = Literal[
 
 
 class Web2PlatformStatusResponse(BaseModel):
-    """One row of the three-state platform board for a client.
+    """One row of the platform board for a client.
 
     ``notEligible`` carries the platform's OWN stated reason rather than a generic
     refusal, because an operator told "dev.to bans promotional content for non-developer
     clients" learns the rule, while one told "not allowed" learns only that the software
     said no. Nothing is hidden from the board - the full catalogue stays visible, which
     is what makes offering "50+ platforms" honest rather than a silently shorter list.
+
+    ``eligible_extension`` (0135) is the extension-assisted lane's own state: the
+    platform is real and usable, but an OPERATOR publishes there in their own logged-in
+    session (Phase 7 placement sessions) - it is not an API campaign target, and
+    collapsing it into ``eligible`` would plan publishes no pipeline can run.
     """
 
     name: str
     platform: str | None = None
-    status: Literal["eligible", "not_connected", "not_eligible", "not_reviewed", "not_supported"]
+    status: Literal[
+        "eligible", "eligible_extension", "not_connected", "not_eligible",
+        "not_reviewed", "not_supported",
+    ]
     reason: str = ""
     authority: str = Field(default="", serialization_alias="authorityTier")
     #: When the platform's terms were last read by a human (ISO date, "" = never) and
@@ -917,3 +991,31 @@ class Web2ReviewRequest(BaseModel):
 
     action: Web2ReviewAction = "approve"
     acknowledge_similarity: bool = Field(default=False, alias="acknowledgeSimilarity")
+
+
+# --- extension-assisted placement completion (0136, Phase 7) --------------------
+
+
+class Web2PlacementCompleteRequest(BaseModel):
+    """POST /offpage/web2/placements/{id}/complete body: the PUBLIC URL of the post
+    the operator just published in their own logged-in session. Required and checked
+    before anything is stored - the server fetches it, pins the host to the
+    platform's own, and looks for the client's target link (the citation-complete
+    contract, applied to Web 2.0)."""
+
+    url: str = Field(min_length=1)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class Web2PlacementCompleteResponse(BaseModel):
+    """The outcome of a placement completion - including a REFUSAL, which is a normal
+    HTTP 200 response and never advances state (exactly the citation queue's
+    ``accepted:false`` shape). ``linkFound``/``linkRel`` carry what the server's own
+    fetch measured on an accepted URL."""
+
+    accepted: bool
+    status: str
+    post_url: str = Field(serialization_alias="postUrl")
+    reason: str = ""
+    link_found: bool | None = Field(default=None, serialization_alias="linkFound")
+    link_rel: str = Field(default="", serialization_alias="linkRel")

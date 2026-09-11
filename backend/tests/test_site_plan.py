@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from app.services.site_plan import MAX_MENU_DEPTH, build_site_plan, slugify
+from app.services.site_plan import build_site_plan, slugify
 
 pytestmark = pytest.mark.unit
 
@@ -127,6 +127,36 @@ class TestTheLiveSiteSafeties:
 
 
 class TestHierarchyAndMenu:
+    def test_bulk_pages_group_under_an_existing_family_hub(self) -> None:
+        plan = build_site_plan([
+            _page("services", page_type="service"),
+            _page("drain-cleaning", page_type="service"),
+            _page("locations", page_type="local"),
+            _page("austin", page_type="local"),
+            _page("blog", page_type="blog"),
+            _page("winter-plumbing", page_type="blog"),
+        ])
+        parents = {page.slug: page.parent_slug for page in plan.pages}
+        assert parents["drain-cleaning"] == "services"
+        assert parents["austin"] == "locations"
+        assert parents["winter-plumbing"] == "blog"
+
+    def test_missing_family_hub_is_auto_created_so_the_dropdown_forms(self) -> None:
+        """When bulk pages imply a family (service/local/blog) but no hub page is in the
+        delivery, the hub is SYNTHESIZED (and flagged) so the pages nest under one nav
+        dropdown instead of falling flat as top-level links with no signal."""
+        plan = build_site_plan([
+            _page("drain-cleaning", page_type="service"),
+            _page("slab-leak", page_type="service"),
+        ])
+        slugs = {page.slug for page in plan.pages}
+        assert "services" in slugs  # the hub was auto-created
+        parents = {page.slug: page.parent_slug for page in plan.pages}
+        assert parents["drain-cleaning"] == "services"
+        assert parents["slab-leak"] == "services"
+        assert parents["services"] == ""  # the hub itself stays top-level
+        assert any("auto-created" in n and "Services" in n for n in plan.notes)
+
     def test_a_valid_parent_child_plan_is_accepted(self) -> None:
         plan = build_site_plan([
             _page("services"), _page("slab-leak", parent_slug="services")])

@@ -13,17 +13,18 @@ import { blockedReasonLabel, citationStatusMeta } from "@/lib/citationStatus";
 import {
   useAuditPlan,
   useCitations,
+  useCitationAuditRuns,
   useCitationCampaigns,
   useCitationGap,
   useClearCitations,
   useRecheckCitations,
   useRunCitationAudit,
 } from "@/lib/hooks/offpage";
+import { isTerminalStatus } from "@/lib/jobs";
 import CitationAuditProgress from "./CitationAuditProgress";
 import { useClients } from "@/lib/hooks/clients";
 import CitationCampaignModal from "./CitationCampaignModal";
 import CampaignBoard from "./CampaignBoard";
-import AutomationPanel from "./AutomationPanel";
 import w from "./Wave4.module.css";
 
 const NAP_SOURCE_LABEL: Record<string, string> = {
@@ -90,6 +91,36 @@ export default function CitationsTab() {
   // run, so Step 2 (build) becomes the focus. Picking a different client — or hitting
   // "Change client / re-audit" — re-opens the full picker.
   const [auditCollapsed, setAuditCollapsed] = useState(false);
+
+  // The audit is a JOB — read its real ledger status, don't infer completion from the
+  // click. `auditCollapsed` folds Step 1 the moment a run is QUEUED, but a queued run
+  // has written nothing yet; gating the build step on it showed "0 existing · 45
+  // missing" while the sweep was still working.
+  const auditRunsQ = useCitationAuditRuns(gapClient || null, 1);
+  const latestRun = auditRunsQ.data?.[0];
+  const auditActive = !!latestRun && !isTerminalStatus(latestRun.status);
+  const auditTerminal = !!latestRun && isTerminalStatus(latestRun.status);
+
+  // A discovery run is happening RIGHT NOW: the POST is in flight, OR a run row exists
+  // and is still queued/running, OR we just launched one this session and the ledger
+  // has not yet caught up to a terminal row. While this is true the page shows ONLY the
+  // progress panel — never the build step or a "missing" count.
+  const auditInProgress = runAudit.isPending || auditActive || (auditCollapsed && !auditTerminal);
+
+  // The client already carries citation rows (e.g. a prior session's audit) — a
+  // complete picture even without a run row in the last-1 window.
+  const hasRows = gap
+    ? gap.existingCount > 0 ||
+      gap.inFlightCount > 0 ||
+      gap.verifyFirst.length > 0 ||
+      Object.keys(gap.bySubmitStatus).length > 0
+    : false;
+
+  // Show the build step only once we have a COMPLETE picture: the latest run FINISHED,
+  // or the client already carries rows and nothing is re-running now. Before a discovery
+  // run has actually looked, "45 missing" is just the whole catalogue mistaken for
+  // confirmed gaps — the absence-as-proof this module forbids.
+  const audited = !auditInProgress && (auditTerminal || hasRows);
 
   // Audit-first: discover which directories already list this business vs which are
   // missing. Populates the board + gap analysis; build then targets the missing.
@@ -178,14 +209,15 @@ export default function CitationsTab() {
         <div className={w.rollup} style={{ marginBottom: 10, flexWrap: "wrap" }}>
           {(() => {
             const hasNap = !!gap?.hasNap;
-            const audited = (gap?.existingCount ?? 0) > 0 || auditCollapsed;
-            const planned = (gap?.missingCount ?? 0) > 0 || audited;
+            // `audited` is derived once at the top of the component (the same honest
+            // signal that gates the build step) — a missingCount alone never counts as
+            // "planned", because before an audit it is just the whole catalogue.
             const approved = (campaignsQ.data?.length ?? 0) > 0;
             const liveCount = gap?.liveUrls.length ?? 0;
             const steps: { label: string; done: boolean; hint: string }[] = [
               { label: "1 Profile", done: hasNap, hint: hasNap ? "NAP on file" : "add NAP (Clients → Edit)" },
-              { label: "2 Audit", done: audited, hint: audited ? `${gap?.existingCount ?? 0} existing found` : "run the audit below" },
-              { label: "3 Plan", done: planned && audited, hint: `${gap?.missingCount ?? 0} missing` },
+              { label: "2 Audit", done: audited, hint: audited ? `${gap?.existingCount ?? 0} existing found` : auditInProgress ? "auditing…" : "run the audit below" },
+              { label: "3 Plan", done: audited, hint: audited ? `${gap?.missingCount ?? 0} missing` : "audit first" },
               { label: "4 Approve", done: approved, hint: approved ? "campaign queued" : "review & queue a build" },
               { label: "5 Track", done: liveCount > 0, hint: `${liveCount} live` },
             ];
@@ -310,7 +342,20 @@ export default function CitationsTab() {
       {gapClient && gapQ.isError && (
         <div className="op-muted">Couldn&apos;t run gap analysis - {(gapQ.error as Error)?.message ?? "try again"}.</div>
       )}
-      {gap && (
+      {/* Not yet audited AND nothing running: say so plainly instead of rendering a
+          build step whose "45 missing" would just be the whole catalogue mistaken for
+          confirmed gaps. While a run IS in progress this stays hidden — the progress
+          panel above is the only thing shown. */}
+      {gapClient && gap && !audited && !auditInProgress && !gapQ.isLoading && (
+        <div className={w.step}>
+          <div className="op-muted" style={{ whiteSpace: "normal" }}>
+            <b>Run the citation audit above</b> to discover which directories already list
+            this business and which are genuine gaps. Nothing is planned or counted as
+            &ldquo;missing&rdquo; until a discovery run has actually looked.
+          </div>
+        </div>
+      )}
+      {gap && audited && (
         <div className={w.step}>
           <div className={w.stepH}><span className={w.stepN}>2</span> Build the missing listings</div>
           <div className={w.rollup}>
@@ -465,7 +510,7 @@ export default function CitationsTab() {
           action, which is most of what "a lot of directories were shown" meant. The
           counts reuse the same audit-plan endpoint; the full list lives inside the
           campaign approval, where choosing among directories is actually the task. */}
-      {gapClient && planQ.data && (
+      {gapClient && audited && planQ.data && (
         <div className="op-muted" style={{ marginBottom: 10 }}>
           Build order:{" "}
           {(["generic", "country", "niche"] as const).map((k, i) => {
@@ -485,8 +530,14 @@ export default function CitationsTab() {
       {/* ───────── Track — what happened to the latest build ───────── */}
       <CampaignBoard clientId={gapClient || undefined} />
 
-      {/* ───────── Automation — the earned whitelist, and the payoff counter ───────── */}
-      <AutomationPanel />
+      {/* REMOVED 2026-09-07: the AutomationPanel ("directories automated / engines /
+          earned whitelist"). It counted how many directories a MACHINE may submit to —
+          a bot-era framing retired with the Playwright submitter (Phase 3). Submission
+          is now human-in-the-loop via the extension queue, so that counter (always 0)
+          only misled. The directory_specs it managed still power EXTENSION AUTOFILL and
+          are taught from the queue after a verified completion — a re-framed
+          "extension autofill specs" surface can return when specs actually exist. The
+          AutomationPanel.tsx component is kept for that. */}
 
       {/* ───────── Monitor — this client's listings (read-only truth) ───────── */}
       <div className={w.stepH} style={{ marginTop: 8, flexWrap: "wrap" }}>

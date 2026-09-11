@@ -56,13 +56,14 @@ embeddings = [
     "voyageai>=0.2",     # Embedder (Voyage AI - Anthropic has NO embeddings API)
     "pinecone>=5",       # VectorStore (Pinecone; namespaced per entity)
 ]
-# 7B-4: the self-hosted citation-submission bot. Kept OUT of the core runtime deps
-# (a headless-Chromium download is heavy and this only ever runs inside the
-# citation_submit_job worker, never the FastAPI request path) - integrations/
-# citation_bot.py lazy-imports it and degrades to None without it. Install with
-# `pip install -e .[automation]` THEN `playwright install chromium` (the Python
-# package alone does not ship the browser binary) to activate bot_fillable/
-# captcha_assisted citation submits.
+# Headless-browser automation (site analysis / replica capture / site builder).
+# The Playwright CITATION bot was retired 2026-09-05 (off-page redesign Phase 3) -
+# this extra no longer enables any citation submission. Kept OUT of the core
+# runtime deps (a headless-Chromium download is heavy and it only ever runs in
+# workers, never the FastAPI request path) - the seams lazy-import it and degrade
+# without it. Install with `pip install -e .[automation]` THEN
+# `playwright install chromium` (the Python package alone does not ship the
+# browser binary).
 automation = [
     "playwright>=1.44",
 ]

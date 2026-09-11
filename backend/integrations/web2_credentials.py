@@ -164,20 +164,47 @@ class SecretLookup(Protocol):
     def __call__(self, *, provider: str, label: str) -> str | None: ...
 
 
+def _oauth_bearer(value: str) -> str:
+    """The plain bearer inside an OAuth ``oauth_token`` field.
+
+    Phase 5 seals that field as a BUNDLE - a JSON object ``{access_token,
+    refresh_token, expires_at, token_type}`` written by
+    ``web2_oauth.credential_from_tokens`` - while every pre-bundle row still holds a
+    bare token string. The publish worker's refreshing lookup normally hands this
+    factory a credential whose field is already a current plain token; this unwrap is
+    the DEFENSIVE floor for any other caller (the credcheck path, a test, a bundle
+    sealed but not yet routed through refresh), because sending a JSON blob verbatim
+    as a Bearer header is a guaranteed 401 - the exact shape of the live Blogger
+    defect. A bundle with no access token yields '' so the client's own
+    required-field guard refuses it honestly instead of publishing with garbage."""
+    text = (value or "").strip()
+    if not text.startswith("{"):
+        return text
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(parsed, dict):
+        return text
+    return str(parsed.get("access_token") or "")
+
+
 # Each builder takes the parsed credential dict and returns the real client. A
 # missing/blank required field surfaces as THAT client's own
 # ``ProviderNotConfiguredError`` (naming the exact fix), not a bare ``KeyError`` --
 # every constructor already validates its own required fields (see
 # web2_publishers.py), so these lambdas just map field names, they never guard.
+# The three OAuth platforms route their token field through ``_oauth_bearer``: the
+# stored value may be a Phase-5 bundle, and the constructor must see a plain bearer.
 _BUILDERS: dict[str, Any] = {
     PLATFORM_WORDPRESS: lambda c: WordPressComClient(
-        oauth_token=c.get("oauth_token", ""), target=c.get("site", "")
+        oauth_token=_oauth_bearer(c.get("oauth_token", "")), target=c.get("site", "")
     ),
     PLATFORM_BLOGGER: lambda c: BloggerClient(
-        oauth_token=c.get("oauth_token", ""), target=c.get("blog_id", "")
+        oauth_token=_oauth_bearer(c.get("oauth_token", "")), target=c.get("blog_id", "")
     ),
     PLATFORM_TUMBLR: lambda c: TumblrClient(
-        oauth_token=c.get("oauth_token", ""), target=c.get("blog", "")
+        oauth_token=_oauth_bearer(c.get("oauth_token", "")), target=c.get("blog", "")
     ),
     PLATFORM_DEVTO: lambda c: DevToClient(api_key=c.get("api_key", "")),
     PLATFORM_WRITEAS: lambda c: WriteAsClient(token=c.get("token", ""), target=c.get("alias", "")),

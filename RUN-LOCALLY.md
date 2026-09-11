@@ -18,7 +18,7 @@ kill commands are printed, never executed (concurrent sessions share this checko
 | **Start-Dashboard.bat** | Runs the dashboard UI on `http://localhost:3000` and opens your browser. |
 | **Start-Backend.bat** | Runs the local backend (the engine) on `http://localhost:8000`. |
 | **Start-Worker.bat** | Runs the job worker that actually executes background work. |
-| **Finish-Citations.bat** | ⚠️ Superseded — use the **Citation queue** page (`/admin/citations/queue`) + the Citation Assistant extension instead. The queue tracks who did what and verifies live URLs; this script predates it. |
+| ~~Finish-Citations.bat~~ | **Deleted** (off-page redesign Phase 0) — use the **Citation queue** page (`/admin/citations/queue`) + the Citation Assistant extension instead. The queue tracks who did what and verifies live URLs; this script predated it. |
 | **Build-Extension.bat** | Builds the Citation Assistant browser extension and prints the folder to load into Chrome. |
 
 ## The worker is not optional
@@ -54,7 +54,11 @@ the backend.
 2. Double-click it — the local dashboard talks to the live cloud backend. (Skip Start-Backend.bat.)
 
 ## Finishing citations locally
-Double-click **Finish-Citations.bat**, type a directory name (or `ALL`). A real browser opens, logged in and pre-filled — do the one human step (category / captcha), click **Publish**, then close the window to move to the next.
+`Finish-Citations.bat` was deleted (off-page redesign Phase 0) — it called a retired
+script and depended on a plaintext credential export. Use the **Citation queue** page
+(`/admin/citations/queue`) with the Citation Assistant extension instead: claim an item,
+submit on the directory yourself, and complete with the public listing URL (the server
+probe-verifies it before anything is marked live).
 
 ## Rebuilding the local database
 

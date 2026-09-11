@@ -8,7 +8,7 @@ the document that leaves the building.
 
 from __future__ import annotations
 
-from app.services import audit_report as R
+from app.services import audit_report as R  # noqa: N812 - module-as-namespace alias
 
 
 def _rollup(level, key, label, score, ran, applicable, **over):
@@ -36,17 +36,17 @@ def _finding(**over):
 
 
 def _doc(**over):
-    kw = dict(
-        meta={"client_name": "SmileOn", "url": "https://smileon.pk",
-              "tier": "Advanced", "generated_at": "25 August 2026"},
-        rollups=[
+    kw = {
+        "meta": {"client_name": "SmileOn", "url": "https://smileon.pk",
+                 "tier": "Advanced", "generated_at": "25 August 2026"},
+        "rollups": [
             _rollup("site", "", "Site", 56.4, 160, 363),
             _rollup("dimension", "technical", "Technical", 88.7, 25, 100),
             _rollup("dimension", "strategy", "Strategy", None, 0, 21,
                     skip_reasons={"analyzer_path_unresolved": 21}),
         ],
-        findings=[_finding()], pages=[], roadmap=None, roadmap_items=None,
-    )
+        "findings": [_finding()], "pages": [], "roadmap": None, "roadmap_items": None,
+    }
     kw.update(over)
     return R.render(R.ReportInput(**kw))
 
@@ -372,10 +372,10 @@ def test_a_dimension_that_genuinely_found_nothing_still_says_so() -> None:
 def test_no_em_or_en_dash_survives_in_the_rendered_document():
     doc = _doc(findings=[_finding(
         check_name="Title tags — missing",
-        remediation="Rewrite the title – keep it under 60 characters.",
+        remediation="Rewrite the title – keep it under 60 characters.",  # noqa: RUF001 - the en dash IS the test input
     )])
     assert "—" not in doc
-    assert "–" not in doc
+    assert "–" not in doc  # noqa: RUF001 - asserting the en dash is gone
     assert "&mdash;" not in doc and "&ndash;" not in doc
     # And the sentence still reads: replaced, not deleted.
     assert "Title tags - missing" in doc

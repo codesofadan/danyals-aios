@@ -15,9 +15,11 @@ a per-client platform needs a per-client account, not this.
 It NEVER writes a secret to disk or to the repo -- it prints the block to stdout for the
 operator to place in the secret store. The catch-all mailbox
 (``imap_mailbox_from_settings`` + ``CITATION_MAIL_DOMAIN``) is used for the optional
-email-verify step; degrade-safe when unset. The browser-signup platforms
-(LiveJournal/Dreamwidth/...) are NOT handled here -- they run through the Playwright
-``BrowserSignupProvider`` in a worker, not a one-shot CLI.
+email-verify step; degrade-safe when unset. Platforms without a signup API
+(LiveJournal/Dreamwidth/...) are NOT handled here -- their accounts are created in the
+guided lane (a person signs up in their own browser; the provisioning queue watches
+the mailbox and seals the credential). The Playwright ``BrowserSignupProvider`` was
+deleted with the citation bot's retirement (off-page redesign Phase 3, C2).
 
     python -m app.cli.web2_signup                       # Telegra.ph + Write.as -> JSON block
     python -m app.cli.web2_signup --platforms "Telegra.ph"

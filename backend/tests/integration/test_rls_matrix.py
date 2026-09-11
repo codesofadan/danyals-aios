@@ -146,20 +146,25 @@ def rls() -> Iterator[dict[str, Any]]:
         # --- one row per table (service_role bypasses RLS) ---
         with privileged_connection(pool=admin_pool) as cur:
             cur.execute("insert into public.sites (client_id, domain) values (%s, 'rls-a.example')", (tenant["A"],))
+            # visible_to_client=true is the 0096 operator opt-in, granted for BOTH
+            # tenants so the view-scoping test proves denial by TENANCY - an
+            # unpublished tenant-B audit would hide the leak vacuously.
             cur.execute(
                 "insert into public.audits "
                 "(client_id, client_name, url, types, tier, status, score, cost, error, "
-                " run_uuid, artifact_dir, pdf_path, json_path) "
+                " run_uuid, artifact_dir, pdf_path, json_path, visible_to_client) "
                 "values (%s, 'RLS Tenant A', 'http://a.example', %s, 'free', 'done', 77, 4.25, "
-                "'seed-error-string', 'seed-run-a', '/seed/a', 'x/report.pdf', 'x/findings.json') "
-                "returning id",
+                "'seed-error-string', 'seed-run-a', '/seed/a', 'x/report.pdf', 'x/findings.json', "
+                "true) returning id",
                 (tenant["A"], ["technical"]),
             )
             audit_a = str(cur.fetchone()["id"])
             cleanup_audits.append(audit_a)
             cur.execute(
-                "insert into public.audits (client_id, client_name, url, types, tier, status) "
-                "values (%s, 'RLS Tenant B', 'http://b.example', %s, 'free', 'queued') returning id",
+                "insert into public.audits "
+                "(client_id, client_name, url, types, tier, status, visible_to_client) "
+                "values (%s, 'RLS Tenant B', 'http://b.example', %s, 'free', 'queued', true) "
+                "returning id",
                 (tenant["B"], ["technical"]),
             )
             audit_b = str(cur.fetchone()["id"])

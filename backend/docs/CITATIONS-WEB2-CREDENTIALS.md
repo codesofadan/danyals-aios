@@ -220,44 +220,33 @@ on purpose — community norms explicitly forbid bulk/automated POI inserts.
 
 ---
 
-## 4. Citations — the self-hosted Playwright bot (bot_fillable / captcha_assisted)
+## 4. Citations — form directories (bot_fillable / captcha_assisted): the OPERATOR QUEUE
 
-This is the highest-coverage engine (~120 of the 155 catalogued directories) and
-needs the most setup. Three pieces:
+**The Playwright bot is RETIRED (off-page redesign Phase 3, 2026-09-05).** Do NOT
+set up Playwright, a CAPTCHA-solver account or a residential proxy — the bot, its
+solver and its anti-detection were removed outright (`integrations/citation_bot.py`,
+`integrations/captcha_solver.py` and `services/browser_fingerprint.py` are deleted).
+If you funded a CapSolver/CapMonster balance or a proxy plan for this, **cancel
+them**; `CAPTCHA_SOLVER_API_KEY`, `CAPTCHA_SOLVER_PROVIDER` and
+`CITATION_PROXY_URL` are no longer read by anything (pydantic silently ignores them
+if set).
 
-1. **Install Playwright on the VPS** (not in the base install — see
-   `pyproject.toml`'s `automation` extra):
-   ```bash
-   pip install -e .[automation]
-   playwright install chromium
-   ```
-2. **A CAPTCHA-solver account** (for `captcha_assisted` directories only —
-   `bot_fillable` directories need none of this):
-   - Sign up at [capsolver.com](https://capsolver.com) (or capmonster.cloud — set
-     `CAPTCHA_SOLVER_PROVIDER=capmonster`), fund the balance (a few dollars covers
-     thousands of solves at the reference plan's own ~$0.0006–0.003/solve figures).
-   - Set `CAPTCHA_SOLVER_API_KEY` in `.env` (agency-wide, not per-client).
-3. **A budget residential proxy** (optional at low volume; recommended once
-   submitting at scale to avoid one VPS IP hammering every directory):
-   - Any budget residential provider from the reference plan's cost table
-     (DataImpulse, IPRoyal, Webshare — all ~$1–2/GB).
-   - Set `CITATION_PROXY_URL=http://user:pass@host:port` in `.env`.
-4. **Set `CITATION_ARTIFACT_DIR`** to a writable path — every submission's proof
-   screenshot lands here (surfaced in the dashboard as the citation's `proofUrl`).
+What replaces it — no credentials to buy:
 
-**Per-directory login credentials** (a handful of `bot_fillable` directories ask
-you to create an account before listing, distinct from the CAPTCHA-solver key
-above) go in the vault as `kind=client_access`, `provider="citation:<Directory
-Name>"`, `label=<client_id>` — not yet wired into `citation_bot.py`'s dispatch
-(today's `FORM_SPECS` catalog only covers directories with a no-login public form).
+1. **Every form directory routes to the operator queue** (`ready_for_human`): a
+   person submits in their own logged-in browser session, and the server verifies
+   the live listing URL itself before anything counts.
+2. **The Chrome extension autofills where a directory spec is EARNED** — specs are
+   learned from real operator submissions (`backend/integrations/directory_specs.py`
+   + the spec board), never hand-scripted. The extension pre-fills; the human is
+   the submit button.
+3. **`CITATION_ARTIFACT_DIR`** stays: proof screenshots land here (surfaced as the
+   citation's `proofUrl`).
 
-**Extending coverage.** `integrations/citation_bot.py`'s `FORM_SPECS` dict currently
-covers 12 representative US directories. Adding the rest of the catalog's
-`bot_fillable`/`captcha_assisted` rows is DATA, not code — one `FormSpec` entry per
-directory (URL + field selectors + submit button + success indicator), verified
-against that directory's current live form before trusting it at scale (the
-selectors shipped here are best-effort starting points, not hand-verified against
-every site's current DOM — see the module's own docstring).
+**Per-directory login credentials** (directories that require an account before
+listing) go in the vault as `kind=client_access`, `provider="citation:<Directory
+Name>"`, `label=<client_id>` — the queue's credential door reveals them to an
+operator holding the `citation_credential` scope.
 
 ---
 

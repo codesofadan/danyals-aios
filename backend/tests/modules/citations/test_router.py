@@ -19,6 +19,7 @@ from app.modules.citations.repo import get_citations_repo
 from app.modules.citations.router import (
     get_audit_enqueuer,
     get_citation_enqueuer,
+    get_citations_repo_profile,
     get_service_citations_store,
 )
 
@@ -275,8 +276,12 @@ def wire(
     enqueued: list[str],
     audits: list[tuple[str, str, str]],
     svc_store: _FakeServiceCitationsStore,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Callable[[str], None]:
     app.dependency_overrides[get_citations_repo] = lambda: repo
+    # The extension-reachable business-profiles READ binds its repo through the
+    # profile-scoped dependency (either credential); same fake behind both doors.
+    app.dependency_overrides[get_citations_repo_profile] = lambda: repo
     # The real enqueuer now takes (citation_id, *, client_id, correlation_id) so the
     # job ledger can attribute the row; the recorder keeps only the id the tests
     # assert on but must ACCEPT the kwargs or every dispatch 500s.
@@ -292,6 +297,19 @@ def wire(
 
     def _as(role: str) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
+
+        # The reads the extension can now reach (business-profiles, gap-analysis)
+        # resolve bearer auth through `operator_auth.get_current_user` AS A PLAIN
+        # FUNCTION, so a dependency override never reaches them. Patch the function in
+        # that namespace instead - the hybrid guard's own perm check (view_reports on
+        # the bearer path) still runs for real, which is exactly what the 403 tests
+        # exercise.
+        import app.modules.citations.operator_auth as operator_auth
+
+        async def _bearer(*a: Any, **kw: Any) -> CurrentUser:
+            return _user(role)
+
+        monkeypatch.setattr(operator_auth, "get_current_user", _bearer)
 
     return _as
 
@@ -462,18 +480,44 @@ async def test_campaign_404s_on_unknown_business_profile(
 
 
 async def test_campaign_reports_an_estimated_cost_for_the_fresh_batch(
-    client: httpx.AsyncClient, repo: FakeCitationsRepo, wire: Callable[[str], None]
+    client: httpx.AsyncClient,
+    repo: FakeCitationsRepo,
+    wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Retirement repricing (0132): a `bot_fillable` row costs nothing METERED - the
+    Playwright bot and its per-submit compute/solve/proxy estimates are gone, so that
+    work is a person's minutes tracked on the row, never provider spend. What still
+    prices is an `api`/`aggregator` row at the Data Axle Add estimate, the moment a
+    real rate card is configured."""
+    import sys
+
+    import app.modules.citations.router  # noqa: F401  (populates sys.modules)
+
+    # `app.modules.citations.router` is ambiguous - the package __init__ re-exports
+    # an APIRouter under that name - so bind the MODULE via sys.modules.
+    citations_router = sys.modules["app.modules.citations.router"]
+
     repo.client_names["cl-secret"] = "Acme Dental"
     repo.profiles["bp-1"] = _profile_row()
-    repo.directories = [_directory_row(id="d-1", tier="bot_fillable")]
+    repo.directories = [
+        _directory_row(id="d-api", name="Data Axle", tier="api", submit_method="api:data_axle"),
+        _directory_row(id="d-bot", name="Brownbook", tier="bot_fillable"),
+    ]
+    priced = citations_router.get_settings().model_copy(
+        update={"data_axle_add_cost_estimate": 0.35}
+    )
+    monkeypatch.setattr(citations_router, "get_settings", lambda: priced)
     wire("owner")
     resp = await client.post(
         "/api/v1/citation-builder/campaigns",
         json={"clientId": "cl-secret", "businessProfileId": "bp-1"},
     )
     assert resp.status_code == 201, resp.text
-    assert resp.json()["estimatedCost"] > 0
+    body = resp.json()
+    assert body["queued"] == 2
+    # ONLY the api row contributes - the operator-queue row adds zero.
+    assert body["estimatedCost"] == pytest.approx(0.35)
 
 
 async def test_campaign_matches_vertical_and_excludes_marketplaces(

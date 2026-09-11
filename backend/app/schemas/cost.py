@@ -63,12 +63,12 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # behaviour they asked for while the code had taken it away.
     #
     # The real defect was never the dial: it was that an unverified spec could run at all.
-    # That is now gated where it belongs - a directory reaches the automated route only
-    # after a dated human DOM verification AND one submission that produced a public
-    # listing URL (see directory_specs). With the whitelist empty, `api` mode submits
-    # nothing through the bot, so the client's decision and the safety requirement stop
-    # being in tension. Flip this to `byhand` only as a deliberate operator choice.
-    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="Submits via earned specs only — 0 machine-submittable until directory specs are activated; unmatched rows route to the operator queue (CAPTCHA + proxy spend when the bot runs)", default_mode="api"),
+    # Since 2026-09-05 the Playwright bot is RETIRED outright (off-page redesign Phase 3):
+    # `api` mode now covers ONLY the legitimate API submitters (Data Axle, Apple), every
+    # form directory routes to the operator queue, and earned directory specs power
+    # extension AUTOFILL there - no machine submits a form. Flip this to `byhand` only
+    # as a deliberate operator choice.
+    DialFeatureMeta(key="citations", label="Citation Builder", icon="add_location_alt", provider="Serper", note="API submitters only (Data Axle / Apple, when keyed) — the form bot is retired; form directories route to the operator queue, where earned specs power extension autofill", default_mode="api"),
     # 2026-09-02. Citation DISCOVERY (the audit that finds which directories already
     # list a business) used to gate on `backlinks` — whose byhand default meant every
     # citation audit silently produced ZERO rows while the route 202'd "queued". The

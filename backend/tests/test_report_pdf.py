@@ -13,7 +13,7 @@ import subprocess
 
 import pytest
 
-from app.services import report_pdf as P
+from app.services import report_pdf as P  # noqa: N812 - module-as-namespace alias
 
 
 @pytest.fixture

@@ -317,11 +317,14 @@ def test_audit_store_update_noop_on_empty_fields(seed: dict[str, Any]) -> None:
 # --- portal artifact-path loader (owner-only via the RLS view) ----------------
 def test_portal_loader_resolves_paths_for_owner_only(seed: dict[str, Any]) -> None:
     # Tenant A's audit (the client's OWN) + tenant B's audit (a foreign one).
+    # Both carry the 0096 operator opt-in (visible_to_client) so the foreign
+    # audit is unreachable because of TENANCY, not because it is unpublished.
     own = insert_audit_row(
         {
             "client_id": seed["tenant_a"], "client_name": f"SvcWrites A {seed['tag']}",
             "url": "http://svc-own.example", "types": ["technical"], "tier": "free",
             "status": "done", "pdf_path": "stored/own.pdf", "json_path": "stored/own.json",
+            "visible_to_client": True,
         }
     )
     foreign = insert_audit_row(
@@ -329,6 +332,7 @@ def test_portal_loader_resolves_paths_for_owner_only(seed: dict[str, Any]) -> No
             "client_id": seed["tenant_b"], "client_name": f"SvcWrites B {seed['tag']}",
             "url": "http://svc-foreign.example", "types": ["technical"], "tier": "free",
             "status": "done", "pdf_path": "stored/foreign.pdf",
+            "visible_to_client": True,
         }
     )
     own_id, foreign_id = str(own["id"]), str(foreign["id"])

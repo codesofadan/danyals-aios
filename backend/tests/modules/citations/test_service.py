@@ -44,6 +44,11 @@ def test_manual_only_is_excluded() -> None:
     assert [r["id"] for r in result] == ["d-2"]
 
 
+def test_inactive_directory_is_excluded_even_if_its_tier_is_automatable() -> None:
+    rows = [_dir(id="retired", active=False), _dir(id="live", active=True)]
+    assert [r["id"] for r in automatable_directories(rows)] == ["live"]
+
+
 def test_fed_by_another_aggregator_is_excluded_even_though_tier_is_aggregator() -> None:
     rows = [
         _dir(id="d-1", tier="aggregator", submit_method="aggregator:fed_by_data_axle_foursquare"),
@@ -69,12 +74,21 @@ def test_cost_estimate_sums_per_tier() -> None:
         # `citation_api_cost_estimate` was deleted with the Bing/Foursquare submitters -
         # it priced calls to endpoints that return 404. An api/aggregator row now prices
         # at the Data Axle Add rate, which is 0.0 until a real rate card is on file.
-        settings.data_axle_add_cost_estimate
-        + settings.citation_bot_cost_estimate
-        + settings.citation_captcha_cost_estimate,
+        # The bot/captcha per-submit estimates were deleted with the Playwright bot's
+        # retirement (Phase 3): form tiers are operator-queue work and price at zero
+        # metered spend.
+        settings.data_axle_add_cost_estimate,
         4,
     )
     assert total == expected
+
+
+def test_form_tiers_price_at_zero_metered_spend() -> None:
+    """The bot's per-submit estimates are gone WITH the bot: a form-tier row costs
+    operator minutes (worked_seconds), never provider spend."""
+    settings = _settings()
+    rows = [_dir(tier="bot_fillable"), _dir(tier="captcha_assisted")]
+    assert estimate_campaign_cost(rows, settings) == 0.0
 
 
 def test_an_unpriced_aggregator_row_contributes_nothing_because_it_cannot_run() -> None:
@@ -125,52 +139,50 @@ class _StubSubmitter:
 
 
 def test_fed_by_routes_to_no_engine_with_an_honest_reason() -> None:
-    sub, reason = submitter_for(
-        "aggregator:fed_by_data_axle", api_submitters={}, bot=_StubSubmitter()
-    )
+    sub, reason = submitter_for("aggregator:fed_by_data_axle", api_submitters={})
     assert sub is None
     assert "no action needed" in reason
 
 
 def test_api_prefix_routes_to_the_matching_key() -> None:
-    bing = _StubSubmitter()
-    sub, reason = submitter_for("api:bing_places", api_submitters={"bing_places": bing}, bot=None)
-    assert sub is bing and reason == ""
+    axle = _StubSubmitter()
+    sub, reason = submitter_for("api:data_axle", api_submitters={"data_axle": axle})
+    assert sub is axle and reason == ""
 
 
 def test_api_prefix_with_no_matching_key_is_a_clean_none() -> None:
-    sub, reason = submitter_for("api:foursquare_places", api_submitters={}, bot=None)
+    sub, reason = submitter_for("api:foursquare_places", api_submitters={})
     assert sub is None and "foursquare_places" in reason
 
 
-def test_bot_prefix_routes_to_the_bot() -> None:
-    bot = _StubSubmitter()
-    sub, reason = submitter_for("bot:playwright", api_submitters={}, bot=bot)
-    assert sub is bot and reason == ""
-
-
-def test_aggregator_non_fed_prefix_also_routes_to_the_bot() -> None:
-    bot = _StubSubmitter()
-    sub, _reason = submitter_for("aggregator:data_axle", api_submitters={}, bot=bot)
-    assert sub is bot
-
-
-def test_bot_prefix_with_no_bot_configured_is_a_clean_none() -> None:
-    sub, reason = submitter_for("bot:playwright", api_submitters={}, bot=None)
-    assert sub is None and "Playwright" in reason
-
-
-def test_removed_engine_method_degrades_honestly() -> None:
-    # The old fallback engine is gone: a directory whose method is literally that
-    # engine's name now has no engine and falls to the honest "no automatable
-    # engine" reason rather than being silently re-routed.
-    sub, reason = submitter_for("apify", api_submitters={}, bot=_StubSubmitter())
-    assert sub is None and "no automatable engine" in reason
+def test_bot_prefix_never_dispatches_a_machine_again() -> None:
+    """THE RETIREMENT (Phase 3, plan C1). `bot:*` used to reach the Playwright engine
+    - stealth args, fingerprint masking, CAPTCHA solving. It is deleted, so the
+    dispatcher must state the honest disposition: this is a person's work."""
+    for method in ("bot:playwright", "bot:signup", "aggregator:data_axle"):
+        sub, reason = submitter_for(method, api_submitters={})
+        assert sub is None, method
+        assert "human work" in reason, method
+        assert "retired" in reason, method
 
 
 def test_unrecognised_method_never_raises() -> None:
-    sub, reason = submitter_for("mystery:xyz", api_submitters={}, bot=None)
+    sub, reason = submitter_for("mystery:xyz", api_submitters={})
     assert sub is None and "mystery:xyz" in reason
+
+
+def test_is_human_queue_method_covers_every_retired_bot_route() -> None:
+    from app.modules.citations.service import is_human_queue_method
+
+    assert is_human_queue_method("bot:playwright")
+    assert is_human_queue_method("bot:signup")
+    assert is_human_queue_method("aggregator:data_axle")
+    assert is_human_queue_method("manual")
+    # NOT human work: nothing to submit, or a real API engine's territory.
+    assert not is_human_queue_method("aggregator:fed_by_data_axle")
+    assert not is_human_queue_method("api:data_axle")
+    assert not is_human_queue_method("closed")
+    assert not is_human_queue_method("mystery:xyz")
 
 
 # --------------------------------------------------------------------------- #
@@ -370,7 +382,7 @@ def test_is_live_directory_response(code: int | None, alive: bool) -> None:
 def test_manual_reads_as_a_decision_not_a_dispatcher_bug() -> None:
     from app.modules.citations.service import submitter_for
 
-    sub, reason = submitter_for("manual", api_submitters={}, bot=object())  # type: ignore[arg-type]
+    sub, reason = submitter_for("manual", api_submitters={})
     assert sub is None
     assert "operator" in reason
     assert "no automatable engine" not in reason, (
@@ -382,17 +394,17 @@ def test_manual_reads_as_a_decision_not_a_dispatcher_bug() -> None:
 def test_closed_says_the_directory_takes_no_submissions() -> None:
     from app.modules.citations.service import submitter_for
 
-    sub, reason = submitter_for("closed", api_submitters={}, bot=object())  # type: ignore[arg-type]
+    sub, reason = submitter_for("closed", api_submitters={})
     assert sub is None
     assert "closed" in reason
 
 
 def test_an_actually_unknown_method_still_reads_as_unknown() -> None:
-    """The negative control. Naming two known values must not turn the catch-all into a
+    """The negative control. Naming known values must not turn the catch-all into a
     reassuring message for a value nobody has ever handled."""
     from app.modules.citations.service import submitter_for
 
-    sub, reason = submitter_for("selenium", api_submitters={}, bot=object())  # type: ignore[arg-type]
+    sub, reason = submitter_for("selenium", api_submitters={})
     assert sub is None
     assert "no automatable engine" in reason
 
@@ -442,9 +454,12 @@ def test_a_free_api_row_is_estimated_at_zero_not_at_the_unknown_rate() -> None:
 def test_a_missing_engine_becomes_human_work_not_a_dead_end() -> None:
     from app.modules.citations.service import disposition_for_block
 
+    # `human_queue` is the honest post-retirement code: form work is a person's by
+    # DESIGN, not because an engine happens to be unconfigured.
+    assert disposition_for_block("human_queue") == "ready_for_human"
     assert disposition_for_block("no_engine") == "ready_for_human"
     assert disposition_for_block("no_verified_spec") == "ready_for_human", (
-        "176 bot-tier directories have no earned spec; a person does not need one"
+        "historical bot-era rows carry this code; they are still a person's work"
     )
     assert disposition_for_block("captcha") == "ready_for_human"
     assert disposition_for_block("waf_403") == "ready_for_human"

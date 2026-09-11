@@ -59,6 +59,12 @@ class BacklinkRecord:
     (``None`` if the source omits it); ``lost`` marks a link the source reports as
     dropped since the last crawl. ``status`` is DERIVED via ``classify_backlink`` -
     never trusted from the raw source - so every ingest path agrees.
+
+    ``source_url`` / ``target_url`` (0133) are the two facts VERIFICATION needs: the
+    referring PAGE the link lives on and the URL it points at. Without them a backlink
+    row can never be checked against the live web, so "new" stays a provider's claim
+    forever. Empty when the source omits them - the verify sweep simply skips a row it
+    has no page for, it never guesses one.
     """
 
     ref_domain: str
@@ -67,6 +73,8 @@ class BacklinkRecord:
     spam: int
     first_seen: date | None = None
     lost: bool = False
+    source_url: str = ""
+    target_url: str = ""
 
     @property
     def status(self) -> str:
@@ -160,7 +168,12 @@ def _dfs_items(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _record_from_dfs(item: dict[str, Any]) -> BacklinkRecord:
-    """Map one DataForSEO backlink item to a ``BacklinkRecord``."""
+    """Map one DataForSEO backlink item to a ``BacklinkRecord``.
+
+    ``url_from`` / ``url_to`` are what the Backlinks API actually calls the referring
+    page and the linked-to page (same envelope as ``domain_from``); they feed the 0133
+    verification columns so the verify sweep can fetch the page and look for the link
+    itself rather than trusting this pull forever."""
     return BacklinkRecord(
         ref_domain=str(item.get("domain_from") or ""),
         anchor=str(item.get("anchor") or ""),
@@ -168,6 +181,8 @@ def _record_from_dfs(item: dict[str, Any]) -> BacklinkRecord:
         spam=_to_int(item.get("backlink_spam_score")),
         first_seen=_to_date(item.get("first_seen")),
         lost=bool(item.get("is_lost")),
+        source_url=str(item.get("url_from") or ""),
+        target_url=str(item.get("url_to") or ""),
     )
 
 
@@ -180,6 +195,16 @@ _AUTHORITY_KEYS = ("authority", "domain authority", "domain rating", "dr", "da",
 _SPAM_KEYS = ("spam", "spam score", "spam_score", "toxicity score")
 _FIRST_SEEN_KEYS = ("first_seen", "first seen", "firstseen", "first indexed", "date")
 _LOST_KEYS = ("lost", "is_lost", "is lost", "status")
+# Verification URLs (0133). Only a value with a scheme is usable - the verify sweep
+# has to FETCH it - so a bare-domain cell (which several exports put under these same
+# headers) is dropped rather than guessed into a URL that was never in the export.
+_SOURCE_URL_KEYS = ("referring page url", "source url", "url_from", "source page url", "url")
+_TARGET_URL_KEYS = ("target url", "url_to", "destination url", "link url", "target page url")
+
+
+def _as_url(value: str) -> str:
+    """``value`` when it is a fetchable URL (has a scheme), else ``''``."""
+    return value if "://" in value else ""
 
 
 class CsvBacklinkImporter:
@@ -208,6 +233,8 @@ class CsvBacklinkImporter:
                     spam=_to_int(_first(row, _SPAM_KEYS) or 0),
                     first_seen=_to_date(_first(row, _FIRST_SEEN_KEYS)),
                     lost=_is_lost(_first(row, _LOST_KEYS)),
+                    source_url=_as_url(_first(row, _SOURCE_URL_KEYS)),
+                    target_url=_as_url(_first(row, _TARGET_URL_KEYS)),
                 )
             )
         return records

@@ -1,11 +1,12 @@
-"""Directory accounts: the passwords the bot used to throw away.
+"""Directory accounts: the passwords the retired signup bot used to throw away.
 
-`integrations/citation_signup.py` generates a strong per-account password, types it into
-the signup form, and never stores it. Every directory account the bot has created has an
-irrecoverable login - so those listings cannot be corrected, cannot be removed, and
-cannot be handed to an operator to finish. The only remaining move is to abandon the
-account and create a duplicate, which is the exact problem a citation campaign exists to
-prevent.
+The (now deleted) `integrations/citation_signup.py` generated a strong per-account
+password, typed it into the signup form, and never stored it. Every directory account
+that bot created has an irrecoverable login - so those listings cannot be corrected,
+cannot be removed, and cannot be handed to an operator to finish. The only remaining
+move is to abandon the account and create a duplicate, which is the exact problem a
+citation campaign exists to prevent. Since the bot's retirement (off-page redesign
+Phase 3) accounts are created BY THE OPERATOR during queue work and sealed here.
 
 This module is the missing half: create the account row FIRST, then seal the password
 into the vault under coordinates the database itself assigned. The ordering is forced by

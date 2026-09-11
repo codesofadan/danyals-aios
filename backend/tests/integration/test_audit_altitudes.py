@@ -167,8 +167,8 @@ def test_re_ingest_is_idempotent_and_upserts_rather_than_duplicates(pools, tmp_p
     """Retrying a crashed ingest must not corrupt a client's history."""
     audit_id = _seed_audit()
     d = _artifacts(tmp_path, [_finding("ON-001", p) for p in (1, 2, 3)], PAGES, _coverage(["ON-001"]))
-    kw = dict(audit_id=audit_id, client_id=None, artifact_dir=d,
-              site_url="https://alt.test", tier="paid", types=[])
+    kw = {"audit_id": audit_id, "client_id": None, "artifact_dir": d,
+          "site_url": "https://alt.test", "tier": "paid", "types": []}
     first = audit_ingest.ingest(**kw)
     second = audit_ingest.ingest(**kw)
     assert (first.pages, first.findings, first.instances) == \

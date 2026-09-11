@@ -107,12 +107,15 @@ async def test_client_isolation_end_to_end() -> None:
 
             # seed one audit per tenant WITH sensitive columns populated
             def _seed(cur: Any, cid: str, name: str) -> str:
+                # visible_to_client mirrors the operator's 0096 disclosure opt-in for BOTH
+                # tenants, so the cross-tenant denials below are proven by TENANCY, not by
+                # the audit happening to be unpublished (which would pass vacuously).
                 cur.execute(
                     "insert into public.audits "
                     "(client_id, client_name, url, types, tier, status, score, cost, error, "
-                    " pdf_path, json_path, run_uuid, artifact_dir) "
+                    " pdf_path, json_path, run_uuid, artifact_dir, visible_to_client) "
                     "values (%s, %s, %s, %s, 'free', 'done', 80, 12.5, 'internal detail', "
-                    "%s, %s, %s, %s) returning id",
+                    "%s, %s, %s, %s, true) returning id",
                     (cid, name, f"{name}.com", ["technical"],
                      f"/srv/{name}.pdf", f"/srv/{name}.json", f"uuid-{name}", f"/srv/{name}"),
                 )

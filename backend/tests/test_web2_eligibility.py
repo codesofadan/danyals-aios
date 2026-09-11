@@ -281,3 +281,134 @@ def test_a_mixed_selection_splits_three_ways() -> None:
     assert verdict.allowed == ["WordPress.com"]
     assert len(verdict.advisories) == 1 and "dev.to" in verdict.advisories[0]
     assert len(verdict.blocked) == 1 and "Wix" in verdict.blocked[0]
+
+
+# --------------------------------------------------------------------------- #
+# 0135: the capability matrix outranks every per-client judgement.
+# --------------------------------------------------------------------------- #
+def test_an_unsupported_mechanism_is_a_hard_refusal_regardless_of_tier() -> None:
+    """The matrix is a fact about the machine and the platform. A do-not-use lane
+    stays refused even on a per-client tier with a connected account - and the reason
+    is the RECORDED one (adapter_status), never a generic restatement."""
+    verdict = evaluate_platform(
+        _row(
+            name="Pastebin.com", platform_enum="Pastebin.com",
+            ownership_tier="per_client", mechanism="unsupported",
+            adapter_status="Paste site: link placements read as spam signals.",
+        ),
+        client_scope="agnostic",
+        connected=True,
+    )
+    assert verdict.status == "not_supported"
+    assert verdict.reason == "Paste site: link placements read as spam signals."
+    assert verdict.mechanism == "unsupported"
+
+
+def test_an_unsupported_row_without_a_recorded_reason_still_refuses_honestly() -> None:
+    verdict = evaluate_platform(
+        _row(mechanism="unsupported", adapter_status=""),
+        client_scope="agnostic",
+        connected=True,
+    )
+    assert verdict.status == "not_supported"
+    assert "do-not-use" in verdict.reason
+
+
+def test_no_acknowledgement_moves_an_unsupported_platform() -> None:
+    """`not_eligible`/`not_reviewed` are judgements an operator may override; the
+    matrix's do-not-use lane is not - an acknowledgement cannot make a paste site a
+    defensible placement."""
+    board = evaluate_catalog(
+        [_row(name="Pastebin.com", platform_enum="Pastebin.com",
+              mechanism="unsupported", adapter_status="Paste site.")],
+        client_scope="agnostic",
+        connected_platforms={"Pastebin.com"},
+    )
+    verdict = resolve_selection(board, ["Pastebin.com"], acknowledged=True)
+    assert verdict.allowed == []
+    assert len(verdict.blocked) == 1 and "Paste site." in verdict.blocked[0]
+
+
+def test_the_extension_lane_is_its_own_state_not_eligible_and_not_refused() -> None:
+    """`eligible_extension` exists so placement routing (Phase 7) can key off it.
+    It is deliberately NOT `eligible`: the API pipeline cannot drive an operator's
+    browser session, so folding the two together would plan publishes no worker can
+    run."""
+    verdict = evaluate_platform(
+        _row(name="Substack", platform_enum=None, automation_ready=False,
+             mechanism="extension"),
+        client_scope="agnostic",
+        connected=False,  # no credential needed - the operator's own session publishes
+    )
+    assert verdict.status == "eligible_extension"
+    assert not verdict.eligible
+    assert verdict.mechanism == "extension"
+    assert "operator" in verdict.reason.lower()
+
+
+def test_extension_reason_carries_the_recorded_adapter_status() -> None:
+    verdict = evaluate_platform(
+        _row(name="Medium", platform_enum="Medium", mechanism="extension",
+             adapter_status="Publish API retired."),
+        client_scope="agnostic",
+        connected=True,
+    )
+    assert verdict.status == "eligible_extension"
+    assert "Publish API retired." in verdict.reason
+
+
+def test_extension_rows_are_never_api_campaign_targets() -> None:
+    """Neither the eligible list nor an acknowledged selection may leak an
+    extension-lane platform into the API publish path - the block reason explains the
+    lane instead of pretending a credential or adapter is missing."""
+    board = evaluate_catalog(
+        [_row(name="Medium", platform_enum="Medium", mechanism="extension")],
+        client_scope="agnostic",
+        connected_platforms={"Medium"},
+    )
+    assert eligible_platform_names(board) == []
+    verdict = resolve_selection(board, ["Medium"], acknowledged=True)
+    assert verdict.allowed == []
+    assert verdict.advisories == []
+    assert len(verdict.blocked) == 1 and "placement task" in verdict.blocked[0]
+
+
+def test_the_human_lane_reports_itself_not_a_missing_adapter() -> None:
+    """'Someone should build this adapter' and 'a person places this by hand' are
+    different answers, and the board must give the second for a human-lane row."""
+    verdict = evaluate_platform(
+        _row(name="Wattpad", platform_enum=None, automation_ready=False,
+             mechanism="human"),
+        client_scope="agnostic",
+        connected=True,
+    )
+    assert verdict.status == "not_supported"
+    assert "by hand" in verdict.reason
+    assert "build target" not in verdict.reason
+
+
+def test_an_unclassified_mechanism_falls_through_to_the_pre_matrix_rules() -> None:
+    """mechanism='' (a pre-0135 row, or a fake row in an older test) must behave
+    exactly as before the matrix existed - back-compat is what keeps every existing
+    eligibility pin green without edits."""
+    verdict = evaluate_platform(
+        _row(mechanism=""), client_scope="agnostic", connected=True
+    )
+    assert verdict.eligible
+
+
+def test_the_matrix_is_judged_before_tier_scope_and_review() -> None:
+    """An extension row keeps its lane even when its tier/scope would otherwise say
+    not_reviewed or not_eligible: what lane a placement can physically travel is not
+    a per-client judgement (Medium: do_not_use-with-review was about the dead API
+    path; the extension lane is its replacement, not its contradiction)."""
+    verdict = evaluate_platform(
+        _row(
+            name="Medium", platform_enum="Medium", ownership_tier="do_not_use",
+            topical_scope="developer", mechanism="extension",
+            terms_position="Publish API retired.",
+        ),
+        client_scope="agnostic",
+        connected=False,
+    )
+    assert verdict.status == "eligible_extension"

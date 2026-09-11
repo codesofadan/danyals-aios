@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   QUEUE_BLOCK_LABEL,
+  SESSION_TASK_STATE_META,
   type QueueBlockReason,
   type QueueItem,
 } from "@/lib/offpage";
@@ -10,7 +11,10 @@ import {
   useBlockQueueItem,
   useCitationQueue,
   useClaimQueueItem,
+  useCloseOperatorSession,
   useCompleteQueueItem,
+  useMyActiveSession,
+  useOperatorSessionDetail,
   useQueueHeartbeat,
   useReleaseQueueItem,
 } from "@/lib/hooks/offpage";
@@ -34,6 +38,67 @@ function mmss(total: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// The session board (0130): OBSERVES the caller's active extension session — batch
+// progress and per-task telemetry states. Working a session happens in the extension
+// (tabs, autofill, submit); the dashboard's honest powers here are watching and
+// closing one that was left behind. Server-authoritative shapes (see lib/offpage.ts).
+function SessionBoard() {
+  const sessionQ = useMyActiveSession();
+  const detailQ = useOperatorSessionDetail(sessionQ.data?.id ?? null);
+  const close = useCloseOperatorSession();
+
+  const session = sessionQ.data;
+  if (!session) return null;
+  const detail = detailQ.data;
+  const tasks = detail?.tasks ?? [];
+  const current = tasks.filter((t) => t.batchNo === session.currentBatch);
+  const doneCount = tasks.filter((t) =>
+    ["submitted", "skipped", "deferred", "blocked"].includes(t.uiState),
+  ).length;
+
+  return (
+    <div className={w.step} style={{ marginBottom: 14 }}>
+      <div className={w.stepH} style={{ flexWrap: "wrap" }}>
+        <span className="material-symbols-rounded">tab_group</span>
+        Active session · {session.client}
+        <span className="op-muted" style={{ marginLeft: "auto" }}>
+          batch {session.currentBatch} of {session.totalBatches} · {doneCount}/
+          {session.taskCount || tasks.length} finished
+        </span>
+      </div>
+      <div className="op-muted" style={{ marginTop: 4 }}>
+        Worked through the extension — the next batch releases itself when this one is
+        finished. Closing here releases every held claim.
+      </div>
+      {current.length > 0 && (
+        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+          {current.map((t) => (
+            <div key={t.taskId} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <span className={`status-pill ${SESSION_TASK_STATE_META[t.uiState]?.cls ?? "mut"}`}>
+                {SESSION_TASK_STATE_META[t.uiState]?.label ?? t.uiState}
+              </span>
+              <span>{t.directory}</span>
+              {!t.hasSpec && (
+                <span className="op-muted" style={{ fontSize: 12 }}>copy-paste (no spec)</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="op-toolset" style={{ marginTop: 10 }}>
+        <button
+          className="ghostbtn"
+          onClick={() => close.mutate(session.id)}
+          disabled={close.isPending}
+        >
+          <span className="material-symbols-rounded">close</span>
+          {close.isPending ? "Closing…" : "Close session"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function CitationQueue() {
@@ -234,6 +299,7 @@ export default function CitationQueue() {
   return (
     <div>
       <ExtensionCallout />
+      <SessionBoard />
       {flash && <div className={`op-note ${flash.tone === "err" ? "crit" : flash.tone}`}>{flash.msg}</div>}
 
       {teach && !showDrawer && (

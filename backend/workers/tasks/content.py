@@ -655,6 +655,12 @@ def _schema_inputs(
             date_published=today,
             article_type="BlogPosting",
         )
+    raw_schema_nodes = row.get("schema_nodes")
+    if isinstance(raw_schema_nodes, list):
+        page = replace(
+            page,
+            schema_nodes=tuple(node for node in raw_schema_nodes if isinstance(node, dict)),
+        )
     visible = VisibleContent(text=content.draft_md, has_reviews=False)
     return page_type, business, page, visible
 

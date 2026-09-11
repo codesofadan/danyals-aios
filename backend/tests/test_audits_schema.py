@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.schemas.audits import (
-    PAID_AUDIT_TYPES,
     AuditCreate,
     AuditResponse,
     tier_from_db,

@@ -127,13 +127,27 @@ async def revoke_all_for_user(redis: object, *, user_id: str, max_token_ttl: int
         return False
 
 
-async def is_revoked(redis: object, *, jti: str | None, user_id: str, issued_at: int | None) -> bool:
+async def is_revoked(
+    redis: object,
+    *,
+    jti: str | None,
+    user_id: str,
+    issued_at: int | None,
+    fail_closed: bool = False,
+) -> bool:
     """Whether this token has been revoked, by either mechanism.
 
-    FAILS OPEN by contract (see the module docstring): an unreachable Redis
-    returns False and logs. The Postgres-backed suspension check in
-    ``get_current_user`` is what actually holds the line.
-    """
+    FAILS OPEN by default (see the module docstring): an unreachable Redis returns
+    False and logs. The Postgres-backed suspension check in ``get_current_user`` is
+    what actually holds the line for JWT sessions.
+
+    ``fail_closed=True`` RE-RAISES on an unanswerable check instead. The operator
+    extension path requires it: a paired extension token is a long-lived
+    plaintext-on-disk credential whose only FAST kill switch is this Redis epoch, so
+    "Redis down" must surface to that caller (a 503 refusal) rather than silently
+    skipping the check - the swallow below would otherwise make the caller's own
+    except-branch unreachable, downgrading revocation to "whenever the token
+    expires" with no signal."""
     try:
         if jti and await redis.get(_jti_key(jti)) is not None:  # type: ignore[attr-defined]
             return True
@@ -146,6 +160,8 @@ async def is_revoked(redis: object, *, jti: str | None, user_id: str, issued_at:
         # `revoke_all_for_user` for why the boundary errs this way.
         return int(issued_at) <= cutoff
     except Exception as exc:
+        if fail_closed:
+            raise
         # Never let a cache problem 500 a request or lock a legitimate user out.
         logger.warning("token_revocation_check_unavailable", error=type(exc).__name__)
         return False

@@ -14,15 +14,23 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import pytest
 
 import app.modules.citations.router  # noqa: F401  (populates sys.modules)
 from app.core.auth import get_current_user
-from app.modules.citations.operator_auth import require_operator_lead, resolve_operator
-from app.modules.citations.repo import CitationQueueRepo, get_citation_queue_repo
+from app.modules.citations.operator_auth import (
+    require_operator_lead,
+    resolve_operator,
+    resolve_operator_write,
+)
+from app.modules.citations.repo import (
+    CitationQueueRepo,
+    get_citation_queue_repo,
+    get_citation_queue_repo_write,
+)
 from app.services.citation_liveness import LivenessProbe
 
 from .test_router import _user  # the shared CurrentUser factory
@@ -125,6 +133,9 @@ class FakeQueueRepo:
 def queue(app: Any) -> FakeQueueRepo:  # type: ignore[misc]
     fake = FakeQueueRepo()
     app.dependency_overrides[get_citation_queue_repo] = lambda: fake
+    # The mutation routes bind the repo through the WRITE-floored dependency (the
+    # repo floor carries the route's verb) - same fake behind both doors.
+    app.dependency_overrides[get_citation_queue_repo_write] = lambda: fake
     return fake
 
 
@@ -142,6 +153,9 @@ def wire(app: Any, queue: FakeQueueRepo) -> Callable[[str], None]:  # type: igno
     def _as(role: str) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
         app.dependency_overrides[resolve_operator] = lambda: _user(role)
+        # Phase 3 split the scope guards: heartbeat/release resolve through the WRITE
+        # member of the family, so it needs its own override.
+        app.dependency_overrides[resolve_operator_write] = lambda: _user(role)
         app.dependency_overrides[require_operator_lead] = lambda: _user(role)
 
     return _as
@@ -322,7 +336,10 @@ async def test_the_item_carries_every_prefilled_field_and_drops_the_empty_ones(
     fields = {f["key"]: f["value"] for f in resp.json()["fields"]}
     assert fields["business_name"] == _NAME
     assert fields["phone"] == _PHONE
-    assert fields["categories"] == "dentist"
+    # The category list is split into a primary `category` and a `sub_category` so a
+    # form's two-level dropdowns each get a value; a single category yields no sub.
+    assert fields["category"] == "dentist"
+    assert "sub_category" not in fields
     # address_line2, email and description were empty on the profile.
     assert "address_line2" not in fields
     assert "email" not in fields
@@ -413,7 +430,7 @@ async def test_a_non_lead_is_refused_the_queue_write_endpoints(
     An operator token INHERITS its holder's role and grants nothing extra: a specialist
     who pairs an extension is refused the write endpoints for exactly the same reason
     their dashboard session would be."""
-    app.dependency_overrides[resolve_operator] = lambda: _user("specialist")
+    app.dependency_overrides[resolve_operator_write] = lambda: _user("specialist")
     queue.held["cit-1"] = _held_row()
 
     for path, body in (
@@ -430,7 +447,7 @@ async def test_a_lead_may_use_the_same_write_endpoints(
     app: Any, client: httpx.AsyncClient, queue: FakeQueueRepo
 ) -> None:
     """The other half: the gate must not be refusing everyone."""
-    app.dependency_overrides[resolve_operator] = lambda: _user("manager")
+    app.dependency_overrides[resolve_operator_write] = lambda: _user("manager")
     queue.held["cit-1"] = _held_row()
     resp = await client.post(
         "/api/v1/citation-builder/queue/cit-1/blocked", json={"reason": "captcha_wall"}
@@ -486,3 +503,210 @@ class TestBoardReportsWhatTheOperatorHolds:
         board = (await client.get("/api/v1/citation-builder/queue")).json()
 
         assert board["mine"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Drift wiring (Phase 3): a `form_changed` report DEACTIVATES the active spec.
+#
+# `DirectorySpecsRepo.record_drift` shipped in 0108 with no caller, so the strongest
+# drift signal the platform receives - a human saying "this form is not what the spec
+# describes" - left the spec active and the extension kept autofilling wrong selectors.
+# --------------------------------------------------------------------------- #
+class TestFormChangedDeactivatesTheSpec:
+    @pytest.fixture
+    def drift_calls(self, app: Any) -> list[tuple[str, str, dict[str, Any]]]:
+        calls: list[tuple[str, str, dict[str, Any]]] = []
+        app.dependency_overrides[citations_router.get_form_drift_recorder] = lambda: (
+            lambda user_id, directory_id, evidence: (
+                calls.append((user_id, directory_id, evidence)) or {"id": "spec-1"}
+            )
+        )
+        return calls
+
+    async def test_form_changed_reaches_the_drift_recorder(
+        self,
+        client: httpx.AsyncClient,
+        queue: FakeQueueRepo,
+        wire: Callable[[str], None],
+        drift_calls: list[tuple[str, str, dict[str, Any]]],
+    ) -> None:
+        queue.held["cit-1"] = _held_row(directory_id="dir-9")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/citation-builder/queue/cit-1/blocked",
+            json={"reason": "form_changed", "detail": "the add form is a wizard now"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert len(drift_calls) == 1
+        _uid, directory_id, evidence = drift_calls[0]
+        assert directory_id == "dir-9"
+        assert evidence["reason"] == "form_changed"
+        assert evidence["source"] == "operator_blocked"
+        assert evidence["citation_id"] == "cit-1"
+        # The block itself was still recorded - drift is additive, never a replacement.
+        assert queue.blocked and queue.blocked[0]["reason"] == "form_changed"
+
+    async def test_other_reasons_never_touch_the_drift_recorder(
+        self,
+        client: httpx.AsyncClient,
+        queue: FakeQueueRepo,
+        wire: Callable[[str], None],
+        drift_calls: list[tuple[str, str, dict[str, Any]]],
+    ) -> None:
+        queue.held["cit-1"] = _held_row(directory_id="dir-9")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/citation-builder/queue/cit-1/blocked", json={"reason": "captcha_wall"}
+        )
+        assert resp.status_code == 204, resp.text
+        assert drift_calls == []
+
+    async def test_a_row_with_no_directory_id_is_a_clean_no_op(
+        self,
+        client: httpx.AsyncClient,
+        queue: FakeQueueRepo,
+        wire: Callable[[str], None],
+        drift_calls: list[tuple[str, str, dict[str, Any]]],
+    ) -> None:
+        queue.held["cit-1"] = _held_row()  # legacy row: no directory_id
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/citation-builder/queue/cit-1/blocked", json={"reason": "form_changed"}
+        )
+        assert resp.status_code == 204, resp.text
+        assert drift_calls == []
+
+    async def test_a_failing_deactivation_does_not_fail_the_block(
+        self,
+        app: Any,
+        client: httpx.AsyncClient,
+        queue: FakeQueueRepo,
+        wire: Callable[[str], None],
+    ) -> None:
+        """The operator's report is the primary record; a broken drift write is logged
+        loudly, never surfaced as a 500 that would teach operators not to report."""
+
+        def _boom(user_id: str, directory_id: str, evidence: dict[str, Any]) -> None:
+            raise RuntimeError("db down")
+
+        app.dependency_overrides[citations_router.get_form_drift_recorder] = lambda: _boom
+        queue.held["cit-1"] = _held_row(directory_id="dir-9")
+        wire("manager")
+        resp = await client.post(
+            "/api/v1/citation-builder/queue/cit-1/blocked", json={"reason": "form_changed"}
+        )
+        assert resp.status_code == 204, resp.text
+        assert queue.blocked and queue.blocked[0]["reason"] == "form_changed"
+
+
+def test_the_default_recorder_deactivates_only_an_active_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real recorder over a fake repo: an ACTIVE spec is deactivated through
+    `record_drift` (which writes `deactivated_reason = 'drift_detected'` - asserted at
+    the SQL below); no active spec is a clean None, never an invented deactivation."""
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    class _FakeSpecsRepo:
+        rows_for_test: ClassVar[list[dict[str, Any]]] = []
+
+        def __init__(self, user_id: str) -> None:
+            self.user_id = user_id
+
+        def list_specs(self, *, directory_id: str | None = None) -> list[dict[str, Any]]:
+            return list(_FakeSpecsRepo.rows_for_test)
+
+        def record_drift(
+            self, spec_id: str, *, selector: str, evidence: dict[str, Any]
+        ) -> dict[str, Any]:
+            calls.append((spec_id, selector, evidence))
+            return {"id": spec_id, "active": False, "deactivated_reason": "drift_detected"}
+
+    monkeypatch.setattr(citations_router, "DirectorySpecsRepo", _FakeSpecsRepo)
+    recorder = citations_router.get_form_drift_recorder()
+
+    # No active spec -> no-op.
+    _FakeSpecsRepo.rows_for_test = [{"id": "s-old", "active": False}]
+    assert recorder("u1", "dir-9", {"reason": "form_changed"}) is None
+    assert calls == []
+
+    # An active spec -> deactivated with the operator's evidence attached.
+    _FakeSpecsRepo.rows_for_test = [
+        {"id": "s-old", "active": False},
+        {"id": "s-live", "active": True},
+    ]
+    out = recorder("u1", "dir-9", {"reason": "form_changed"})
+    assert out is not None and out["deactivated_reason"] == "drift_detected"
+    assert calls == [("s-live", "", {"reason": "form_changed"})]
+
+
+def test_record_drift_sql_writes_the_drift_reason() -> None:
+    """The fail-closed contract lives in the repo's UPDATE: deactivation + the
+    `drift_detected` reason + the drift columns, in one statement."""
+    import inspect
+
+    from app.modules.citations.repo import DirectorySpecsRepo as RealRepo
+
+    src = inspect.getsource(RealRepo.record_drift)
+    assert "active = false" in src
+    assert "deactivated_reason = 'drift_detected'" in src
+    assert "drift_detected_at = now()" in src
+
+
+# --------------------------------------------------------------------------- #
+# The claim throttle (Phase 3): fail-open, per principal, hand-wired because the
+# caller may hold no bearer identity.
+# --------------------------------------------------------------------------- #
+async def test_claim_is_rate_limited_per_principal(
+    app: Any,
+    client: httpx.AsyncClient,
+    queue: FakeQueueRepo,
+    wire: Callable[[str], None],
+) -> None:
+    class _CountingRedis:
+        def __init__(self) -> None:
+            self.count = 0
+
+        async def incr(self, key: str) -> int:
+            self.count += 1
+            return self.count
+
+        async def expire(self, key: str, seconds: int) -> None:
+            return None
+
+        async def aclose(self) -> None:  # the lifespan closes whatever it finds here
+            return None
+
+    app.state.redis = _CountingRedis()
+    queue.available = [_held_row(id=f"cit-{i}") for i in range(40)]
+    wire("owner")
+
+    codes = []
+    for _ in range(citations_router._CLAIM_LIMIT_PER_MINUTE + 1):
+        resp = await client.post("/api/v1/citation-builder/queue/claim", json={})
+        codes.append(resp.status_code)
+    assert codes[-1] == 429, codes[-5:]
+    assert all(c == 200 for c in codes[:-1])
+
+
+async def test_claim_limiter_fails_open_when_redis_is_down(
+    app: Any,
+    client: httpx.AsyncClient,
+    queue: FakeQueueRepo,
+    wire: Callable[[str], None],
+) -> None:
+    """The caller is already authenticated and lease-bounded; the limiter is a brake,
+    never the reason a legitimate claim 500s during a cache blip."""
+
+    class _DownRedis:
+        async def incr(self, key: str) -> int:
+            raise ConnectionError("redis down")
+
+        async def aclose(self) -> None:  # the lifespan closes whatever it finds here
+            return None
+
+    app.state.redis = _DownRedis()
+    queue.available = [_held_row()]
+    wire("owner")
+    resp = await client.post("/api/v1/citation-builder/queue/claim", json={})
+    assert resp.status_code == 200, resp.text

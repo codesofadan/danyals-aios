@@ -26,6 +26,10 @@ _STATUS_FIELDS = {"id", "name", "category", "connected", "source", "detail"}
 
 
 def _settings(**over: Any) -> Settings:
+    # Keyless means KEYLESS: app.main's import-time apply_provider_env exports the
+    # real ANTHROPIC_API_KEY into os.environ on a keyed dev box, and
+    # pydantic-settings reads os.environ even with _env_file=None.
+    over.setdefault("anthropic_api_key", None)
     return Settings(_env_file=None, app_env="dev", **over)
 
 

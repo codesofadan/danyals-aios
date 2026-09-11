@@ -12,9 +12,8 @@ browser itself used to paint the page - so the extracted typography/colours/layo
 are exact, not inferred, and responsive behaviour (section reflow, font scaling) is
 observed directly instead of guessed.
 
-Playwright is an OPTIONAL dependency (``pip install -e .[automation]``), exactly
-like ``integrations/citation_bot.py`` - lazy-imported so importing this module costs
-nothing until a capture actually runs. Uses the SYNC API deliberately: this only
+Playwright is an OPTIONAL dependency (``pip install -e .[automation]``) -
+lazy-imported so importing this module costs nothing until a capture actually runs. Uses the SYNC API deliberately: this only
 ever runs inside a Celery worker (``app/modules/site_builder/tasks.py``), never the
 async FastAPI request path.
 

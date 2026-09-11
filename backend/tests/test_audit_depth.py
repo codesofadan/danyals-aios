@@ -181,7 +181,7 @@ def test_free_depth_asks_the_engine_itself_to_refuse_paid_work(monkeypatch, tmp_
     in `run_audit`, because `build_argv` is a pure function of the mode it is
     handed.
     """
-    import integrations.audit_engine as AE
+    import integrations.audit_engine as AE  # noqa: N812 - module-as-namespace alias
 
     seen: dict = {}
 

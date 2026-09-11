@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services import audit_ingest as I
+from app.services import audit_ingest as I  # noqa: N812 - module-as-namespace alias
 
 
 class FakeCursor:

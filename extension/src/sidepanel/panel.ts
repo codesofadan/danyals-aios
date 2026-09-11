@@ -8,7 +8,21 @@
  * worker what is going on.
  */
 
-import type { CompleteResult, ConnectionReport, FillOutcome, PanelRequest, PanelResponse, QueueBoard, QueueItem } from "../lib/messages";
+import type {
+  CompleteResult,
+  ConnectionReport,
+  FillOutcome,
+  PanelRequest,
+  PanelResponse,
+  PlacementCompleteResult,
+  QueueBoard,
+  QueueItem,
+  SessionClientCount,
+  SessionKind,
+  SessionTaskCard,
+  Web2PlacementTaskCard,
+} from "../lib/messages";
+import { type ActiveSession, sessionKind } from "../lib/sessionBoard";
 import { needsGrant, originPattern } from "../lib/origins";
 
 const root = document.getElementById("root") as HTMLElement;
@@ -65,6 +79,35 @@ async function ensureOriginPermission(apiBase: string): Promise<boolean> {
     pattern = originPattern(apiBase);
   } catch {
     return false;
+  }
+  if (!needsGrant(pattern)) return true;
+  try {
+    if (await chrome.permissions.contains({ origins: [pattern] })) return true;
+    return await chrome.permissions.request({ origins: [pattern] });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure this extension may INJECT into a directory's page before a Fill / Autofill.
+ *
+ * A directory host (2findlocal.com, brownbook.net…) is in `optional_host_permissions`,
+ * NOT granted by default, so `chrome.scripting.executeScript` throws until the operator
+ * grants it — which is exactly the "I clicked Autofill and nothing happened" symptom:
+ * the inject failed and the service worker had no permission to report about. The grant
+ * MUST be requested from THIS user gesture (a service worker cannot prompt), so callers
+ * make this the first await in the click handler. Returns true when injection may
+ * proceed (already granted, just granted, or no host to reason about → let activeTab
+ * try). An empty URL is treated as "proceed" so a task with no add URL still attempts.
+ */
+async function ensureInjectPermission(pageUrl: string): Promise<boolean> {
+  if (!pageUrl) return true;
+  let pattern: string;
+  try {
+    pattern = originPattern(pageUrl);
+  } catch {
+    return true; // an unparseable URL is not a reason to block — let the inject try
   }
   if (!needsGrant(pattern)) return true;
   try {
@@ -189,7 +232,85 @@ function renderBoard(board: QueueBoard): void {
         (board.medianSeconds != null ? mmss(board.medianSeconds) : "not yet measured"),
     }),
   );
-  const take = el("button", { className: "primary", textContent: "Take the next item" });
+
+  // --- session mode (0130; web2 placement since 0136): pick a client + lane. --- //
+  root.append(el("h1", { textContent: "Work session" }));
+  root.append(
+    el("p", {
+      className: "muted",
+      textContent:
+        "Start a session to work a client in batches of 10: every page opens in its " +
+        "own tab, autofill runs where a spec is earned, and the next batch releases " +
+        "when this one is finished. Web 2.0 placement sessions hand you each approved " +
+        "draft as copy-blocks — you publish in your own logged-in account; nothing is " +
+        "ever submitted for you.",
+    }),
+  );
+  const kindSelect = el("select");
+  kindSelect.append(
+    el("option", { value: "citation", textContent: "Citations (directory listings)" }),
+    el("option", { value: "web2_placement", textContent: "Web 2.0 placement (approved drafts)" }),
+  );
+  const clientSelect = el("select");
+  // The client list is fetched on demand AND re-fetchable: this call used to fire once
+  // at render, so a fetch that raced with pairing — or ran a moment before an audit
+  // finished queuing work — left "No session-able work" frozen with no way back but
+  // reopening the panel. loadClients() is idempotent and the ↻ button re-runs it.
+  const refreshClients = el("button", {
+    textContent: "↻",
+    title: "Reload the client list (after running an audit or queuing a build)",
+  });
+  async function loadClients(): Promise<void> {
+    clientSelect.replaceChildren(el("option", { value: "", textContent: "Loading clients…" }));
+    refreshClients.disabled = true;
+    const res = await send({ type: "sessionClients" });
+    refreshClients.disabled = false;
+    clientSelect.replaceChildren();
+    if (!res.ok) {
+      clientSelect.append(el("option", { value: "", textContent: "Couldn't load clients — press ↻ to retry" }));
+      return;
+    }
+    const clients = res.data as SessionClientCount[];
+    if (clients.length === 0) {
+      clientSelect.append(
+        el("option", { value: "", textContent: "No work yet — run an audit / queue a build, then press ↻" }),
+      );
+      return;
+    }
+    for (const c of clients) {
+      clientSelect.append(
+        el("option", {
+          value: c.clientId,
+          textContent:
+            `${c.client} — ${c.readyForHuman} ready · ${c.verifyFirst} verify · ` +
+            `${c.candidateGaps} gaps · ${c.web2Placements ?? 0} web2`,
+        }),
+      );
+    }
+  }
+  refreshClients.onclick = () => void loadClients();
+  void loadClients();
+  const start = el("button", { className: "primary", textContent: "Start session" });
+  start.onclick = async () => {
+    if (!clientSelect.value) return;
+    start.disabled = true;
+    const res = await send({
+      type: "startSession",
+      clientId: clientSelect.value,
+      kind: (kindSelect.value || "citation") as SessionKind,
+    });
+    start.disabled = false;
+    if (!res.ok) { renderError(res); return; }
+    renderSession(res.data as ActiveSession);
+  };
+  root.append(
+    el("div", { className: "row" }, kindSelect),
+    el("div", { className: "row" }, clientSelect, refreshClients),
+    el("div", { className: "row" }, start),
+  );
+
+  root.append(el("hr"));
+  const take = el("button", { textContent: "Take one item (no session)" });
   take.onclick = async () => {
     take.disabled = true;
     const res = await send({ type: "claim" });
@@ -203,6 +324,405 @@ function renderBoard(board: QueueBoard): void {
   const unpair = el("button", { textContent: "Unpair this device" });
   unpair.onclick = async () => { await send({ type: "unpair" }); renderPairing(); };
   root.append(el("hr"), el("div", { className: "row" }, unpair));
+}
+
+// --------------------------------------------------------------------------- //
+// The session board (0130).
+// --------------------------------------------------------------------------- //
+
+const STATE_LABEL: Record<string, string> = {
+  pending: "waiting", released: "ready", opened: "tab open", form_detected: "form found",
+  filled: "filled", awaiting_submit: "review & submit", submitted: "submitted ✓",
+  skipped: "skipped", deferred: "deferred", blocked: "blocked",
+};
+
+const TERMINAL_STATES = new Set(["submitted", "skipped", "deferred", "blocked"]);
+
+async function refreshSessionView(): Promise<void> {
+  const res = await send({ type: "refreshSession" });
+  if (!res.ok) { renderError(res); return; }
+  if (!res.data) { flash = flash || "Session finished."; void refresh(); return; }
+  renderSession(res.data as ActiveSession);
+}
+
+function renderSessionTask(task: SessionTaskCard): HTMLElement {
+  const wrapper = el("div", { className: "note" });
+  const pn = task.priceNote.trim();
+  const low = pn.toLowerCase();
+  // A directory that charges to SUBMIT (not just paid upsells on a free listing).
+  const paidToSubmit = !!pn && !low.includes("free") && /\$|\bpaid\b|\bfee\b|\bpay\b/.test(low);
+
+  // Collapsed HEADER: a chevron, the directory, its state, and a compact "paid" flag so
+  // cost is visible without expanding. The whole header toggles the body.
+  const chevron = el("span", { className: "muted", textContent: "▸" });
+  const head = el("div", { className: "row" },
+    chevron,
+    el("b", { textContent: task.directory }),
+    el("span", { className: "muted", textContent: ` · ${STATE_LABEL[task.uiState] ?? task.uiState}` }),
+  );
+  head.style.cursor = "pointer";
+  head.style.alignItems = "center";
+  if (paidToSubmit) head.append(el("span", { className: "note bad", textContent: "⚠ paid" }));
+  wrapper.append(head);
+
+  if (task.prohibitedWarning) {
+    wrapper.append(el("div", { className: "note bad", textContent: `Do not submit. ${task.prohibitedWarning}` }));
+    return wrapper;
+  }
+  // A finished task is header-only — which IS the collapsed look, so a card naturally
+  // collapses once its work is done (refreshSessionView re-renders after a submit).
+  if (TERMINAL_STATES.has(task.uiState)) return wrapper;
+
+  // Collapsible BODY: hidden by default, revealed by the header/chevron. Every control
+  // lives here, so each card starts collapsed showing only a dropdown affordance.
+  const card = el("div");
+  card.style.display = "none";
+  let expanded = false;
+  head.onclick = () => {
+    expanded = !expanded;
+    card.style.display = expanded ? "" : "none";
+    chevron.textContent = expanded ? "▾" : "▸";
+  };
+  if (pn) {
+    card.append(
+      el("div", {
+        className: paidToSubmit ? "note bad" : "muted",
+        textContent: paidToSubmit
+          ? `⚠ Costs money to submit — ${pn}. Skip unless the client agreed.`
+          : `Cost: ${pn}`,
+      }),
+    );
+  }
+
+  const actions = el("div", { className: "row" });
+  // ONE-CLICK primary path: open the add-form tab and autofill it in a single click.
+  // Open / Autofill below stay for re-filling or when the page needs manual steps first.
+  if (task.addUrl) {
+    const oneClick = el("button", { className: "primary", textContent: "Open & Autofill" });
+    const oneOut = el("div", { className: "muted" });
+    oneClick.onclick = async () => {
+      oneClick.disabled = true;
+      const permitted = await ensureInjectPermission(task.addUrl);
+      if (!permitted) {
+        oneClick.disabled = false;
+        oneOut.textContent = "Chrome needs permission to fill this site. Choose Allow, then click again.";
+        return;
+      }
+      oneOut.textContent = "Opening the form and filling…";
+      const res = await send({ type: "openAndAutofill", taskId: task.taskId });
+      oneClick.disabled = false;
+      if (!res.ok) { oneOut.textContent = `Couldn't autofill: ${res.error ?? "unknown error"}.`; return; }
+      const outcome = res.data as FillOutcome;
+      const noMatch = outcome.failed.filter((f) => f.reason === "no_field_matched").map((f) => f.key);
+      oneOut.textContent =
+        outcome.filled.length === 0 && noMatch.length === 0
+          ? "Opened — no form fields detected yet. When the form is visible, press Autofill."
+          : `Filled ${outcome.filled.length}${outcome.filled.length ? ` (${outcome.filled.join(", ")})` : ""}` +
+            `${noMatch.length ? ` · no field for: ${noMatch.join(", ")} — copy those below` : ""}. Review, then submit.`;
+    };
+    actions.append(oneClick);
+    card.append(oneOut);
+  }
+  const open = el("button", { textContent: task.addUrl ? "Open" : "No add URL" , disabled: !task.addUrl });
+  open.onclick = async () => { await send({ type: "openTask", taskId: task.taskId }); };
+  actions.append(open);
+
+  if (task.hasSpec) {
+    const fill = el("button", { textContent: "Fill" });
+    const fillOut = el("div", { className: "muted" });
+    fill.onclick = async () => {
+      fill.disabled = true;
+      const permitted = await ensureInjectPermission(task.addUrl);
+      if (!permitted) {
+        fill.disabled = false;
+        fillOut.textContent = "Chrome needs permission to fill this site. Choose Allow, then click Fill again.";
+        return;
+      }
+      const res = await send({ type: "fillTask", taskId: task.taskId });
+      fill.disabled = false;
+      if (!res.ok) { fillOut.textContent = `Fill couldn't run: ${res.error ?? "unknown error"}.`; return; }
+      const outcome = res.data as FillOutcome;
+      fillOut.textContent = `${outcome.filled.length} filled, ${outcome.failed.length} not`;
+    };
+    actions.append(fill);
+    card.append(fillOut);
+  } else {
+    // No earned spec means no exact selectors — but the operator should not have to
+    // copy ten fields by hand. "Autofill" scans THIS page and matches each value to a
+    // field by its attributes; it is honest (reports what stuck), never submits, and
+    // never touches a CAPTCHA. The copy-buttons stay as the fallback for whatever it
+    // could not confidently identify. Finishing one by hand is how a spec gets earned.
+    const auto = el("button", { textContent: "Autofill (best-effort)" });
+    const autoOut = el("div", { className: "muted" });
+    auto.onclick = async () => {
+      auto.disabled = true;
+      // FIRST await, inside the gesture: grant access to the directory's host so the
+      // filler can be injected. Without this the inject throws and nothing happens.
+      const permitted = await ensureInjectPermission(task.addUrl);
+      if (!permitted) {
+        auto.disabled = false;
+        autoOut.textContent =
+          "Chrome needs permission to fill this site. When it asks, choose Allow, then click Autofill again.";
+        return;
+      }
+      autoOut.textContent = "Scanning the form…";
+      const res = await send({ type: "fillTaskAuto", taskId: task.taskId });
+      auto.disabled = false;
+      // Errors render INLINE here (not a full re-render) so a failure is visible on the
+      // card instead of looking like the panel just refreshed.
+      if (!res.ok) {
+        autoOut.textContent = `Autofill couldn't run: ${res.error ?? "unknown error"}. Open the form tab and try again.`;
+        return;
+      }
+      const outcome = res.data as FillOutcome;
+      const noMatch = outcome.failed.filter((f) => f.reason === "no_field_matched").map((f) => f.key);
+      if (outcome.filled.length === 0 && noMatch.length === 0) {
+        autoOut.textContent = "No form fields found on this page — make sure the add-listing form is open in the tab.";
+        return;
+      }
+      autoOut.textContent =
+        `Filled ${outcome.filled.length}${outcome.filled.length ? ` (${outcome.filled.join(", ")})` : ""}` +
+        `${noMatch.length ? ` · no field found for: ${noMatch.join(", ")} — copy those below` : ""}` +
+        `. Review the page before you submit.`;
+    };
+    card.append(auto, autoOut);
+    card.append(el("div", { className: "muted", textContent: "Or copy any value:" }));
+    for (const f of task.fields) {
+      const row = el("div", { className: "field" },
+        el("span", { className: "muted", textContent: f.label }), el("b", { textContent: f.value }));
+      row.onclick = () => void navigator.clipboard.writeText(f.value);
+      card.append(row);
+    }
+  }
+  card.append(actions);
+
+  const url = el("input", { placeholder: "Public listing URL…" });
+  const done = el("button", { className: "primary", textContent: "Mark submitted" });
+  const outcome = el("div"); // holds the refusal message + the honest override actions
+
+  async function submit(operatorConfirmed: boolean): Promise<void> {
+    const liveUrl = url.value.trim();
+    if (!liveUrl && !operatorConfirmed) {
+      outcome.replaceChildren(el("div", { className: "muted",
+        textContent: "Paste the public listing URL, or use “No public URL — I submitted it”." }));
+      return;
+    }
+    done.disabled = true;
+    outcome.replaceChildren(el("div", { className: "muted", textContent: "Checking the page…" }));
+    const res = await send({ type: "markSubmitted", taskId: task.taskId, liveUrl, note: "", operatorConfirmed });
+    done.disabled = false;
+    if (!res.ok) { outcome.replaceChildren(); renderError(res); return; }
+    const result = res.data as CompleteResult;
+    if (result.accepted) {
+      flash = result.operatorConfirmed
+        ? `${task.directory}: recorded as submitted (your confirmation) — a re-check will verify it.`
+        : `${task.directory}: live — verified on the page.`;
+      void refreshSessionView();
+      return;
+    }
+    // Refused. Show what we saw, and — when the page simply could not be READ (JS-render,
+    // a block, a moderation hold) — offer the honest override that records the operator's
+    // confirmation as `submitted` (never a fabricated "live"). If the page loaded fine but
+    // the business was absent, no override is offered: that is a genuinely-not-live answer.
+    outcome.replaceChildren(
+      el("div", { className: "note" },
+        el("b", { textContent: "Not accepted: " }),
+        result.reason || "the business wasn't found on that page"),
+    );
+    if (result.canConfirm) {
+      const confirmBtn = el("button", { textContent: "It's live — I checked (record my confirmation)" });
+      confirmBtn.onclick = () => void submit(true);
+      outcome.append(el("div", { className: "row" }, confirmBtn));
+    }
+  }
+  done.onclick = () => void submit(false);
+  // Some directories expose no public listing URL at all (the listing exists but there's
+  // no page to link). This records an operator-confirmed submission with no URL.
+  const noUrl = el("button", { textContent: "No public URL — I submitted it" });
+  noUrl.onclick = () => { url.value = ""; void submit(true); };
+  const skip = el("button", { textContent: "Skip" });
+  skip.onclick = async () => {
+    const reason = prompt("Why skip this one?") ?? "";
+    if (!reason.trim()) return;
+    const res = await send({ type: "skipTask", taskId: task.taskId, reason: reason.trim() });
+    if (!res.ok) { renderError(res); return; }
+    void refreshSessionView();
+  };
+  const defer = el("button", { textContent: "Later" });
+  defer.onclick = async () => {
+    const res = await send({ type: "deferTask", taskId: task.taskId });
+    if (!res.ok) { renderError(res); return; }
+    void refreshSessionView();
+  };
+  const cant = el("button", { textContent: "Can't" });
+  cant.onclick = async () => {
+    const reasons = Object.keys(BLOCK_REASONS).join(", ");
+    const reason = prompt(`Reason (${reasons}):`, "captcha_wall") ?? "";
+    if (!BLOCK_REASONS[reason]) return;
+    const res = await send({ type: "blockTask", taskId: task.taskId, reason, detail: "" });
+    if (!res.ok) { renderError(res); return; }
+    void refreshSessionView();
+  };
+  card.append(
+    el("div", { className: "row" }, url),
+    el("div", { className: "row" }, done, noUrl),
+    outcome,
+    el("div", { className: "row" }, skip, defer, cant),
+  );
+  wrapper.append(card);
+  return wrapper;
+}
+
+/**
+ * One web2 placement card (0136). The approved draft travels as COPY-BLOCKS the
+ * operator pastes into the platform's own editor; the extension NEVER auto-submits
+ * and never fills contenteditable — a Fill button appears only when an ACTIVE earned
+ * placement spec provides plain selectors (fail-closed to copy-blocks otherwise).
+ * "Mark placed" asks for the public URL; the SERVER verifies host + link before
+ * anything moves, and a refusal renders inline.
+ */
+function renderWeb2SessionTask(task: Web2PlacementTaskCard): HTMLElement {
+  const card = el("div", { className: "note" });
+  card.append(
+    el("b", { textContent: `${task.platform}${task.title ? ` · ${task.title}` : ""}` }),
+    el("span", { className: "muted", textContent: ` · ${STATE_LABEL[task.uiState] ?? task.uiState}` }),
+  );
+  if (TERMINAL_STATES.has(task.uiState)) return card;
+
+  const actions = el("div", { className: "row" });
+  const open = el("button", {
+    textContent: task.editorUrl ? "Open editor" : "No editor URL on file",
+    disabled: !task.editorUrl,
+  });
+  open.onclick = async () => { await send({ type: "openTask", taskId: task.taskId }); };
+  actions.append(open);
+
+  if (task.hasSpec) {
+    const fill = el("button", { textContent: "Fill" });
+    fill.onclick = async () => {
+      fill.disabled = true;
+      const res = await send({ type: "fillTask", taskId: task.taskId });
+      fill.disabled = false;
+      if (!res.ok) { renderError(res); return; }
+      const outcome = res.data as FillOutcome;
+      card.append(el("div", { className: "muted",
+        textContent: `${outcome.filled.length} filled, ${outcome.failed.length} not` }));
+    };
+    actions.append(fill);
+  } else {
+    card.append(el("div", { className: "muted",
+      textContent: "No verified editor spec — paste the draft yourself:" }));
+  }
+  // Copy-blocks are ALWAYS offered (they are the lane's default, not a fallback UI):
+  // title, body, anchor, link target — click to copy, paste into the editor.
+  for (const b of task.copyBlocks) {
+    const preview = b.value.length > 120 ? `${b.value.slice(0, 117)}…` : b.value;
+    const row = el("div", { className: "field" },
+      el("span", { className: "muted", textContent: `${b.label} (copy)` }),
+      el("b", { textContent: preview }));
+    row.onclick = () => void navigator.clipboard.writeText(b.value);
+    card.append(row);
+  }
+  card.append(actions);
+
+  const url = el("input", { placeholder: "Public post URL…" });
+  const done = el("button", { className: "primary", textContent: "Mark placed" });
+  done.onclick = async () => {
+    const postUrl = url.value.trim();
+    if (!postUrl) return;
+    done.disabled = true;
+    const res = await send({ type: "markPlaced", taskId: task.taskId, url: postUrl });
+    done.disabled = false;
+    if (!res.ok) { renderError(res); return; }
+    const result = res.data as PlacementCompleteResult;
+    if (result.accepted) {
+      flash = `${task.platform}: published — link verified on the page.`;
+      void refreshSessionView();
+      return;
+    }
+    // A refusal renders INLINE: commonest cause is a post still propagating, or a
+    // URL pasted from the wrong tab. The honest state is "not verified yet".
+    card.append(el("div", { className: "note" },
+      el("b", { textContent: "Not accepted yet: " }),
+      result.reason || "the link was not verified on that page"));
+  };
+  const skip = el("button", { textContent: "Skip" });
+  skip.onclick = async () => {
+    const reason = prompt("Why skip this one?") ?? "";
+    if (!reason.trim()) return;
+    const res = await send({ type: "skipTask", taskId: task.taskId, reason: reason.trim() });
+    if (!res.ok) { renderError(res); return; }
+    void refreshSessionView();
+  };
+  const defer = el("button", { textContent: "Later" });
+  defer.onclick = async () => {
+    const res = await send({ type: "deferTask", taskId: task.taskId });
+    if (!res.ok) { renderError(res); return; }
+    void refreshSessionView();
+  };
+  const cant = el("button", { textContent: "Can't" });
+  cant.onclick = async () => {
+    const reasons = Object.keys(BLOCK_REASONS).join(", ");
+    const reason = prompt(`Reason (${reasons}):`, "account_required") ?? "";
+    if (!BLOCK_REASONS[reason]) return;
+    const res = await send({ type: "blockTask", taskId: task.taskId, reason, detail: "" });
+    if (!res.ok) { renderError(res); return; }
+    void refreshSessionView();
+  };
+  card.append(el("div", { className: "row" }, url), el("div", { className: "row" }, done, skip, defer, cant));
+  return card;
+}
+
+function renderSession(state: ActiveSession): void {
+  root.replaceChildren();
+  const web2 = sessionKind(state) === "web2_placement";
+  const web2Tasks = state.web2Tasks ?? [];
+  root.append(el("h1", { textContent: `${web2 ? "Web 2.0 session" : "Session"} · ${state.client}` }));
+  if (flash) { root.append(el("div", { className: "note", textContent: flash })); flash = ""; }
+
+  // The batch progress strip: where we are, and how the whole session is going.
+  const all: Array<{ uiState: string; batchNo: number }> = web2 ? web2Tasks : state.tasks;
+  const counts: Record<string, number> = {};
+  for (const t of all) counts[t.uiState] = (counts[t.uiState] ?? 0) + 1;
+  const done = all.filter((t) => TERMINAL_STATES.has(t.uiState)).length;
+  root.append(
+    el("p", {
+      className: "muted",
+      textContent:
+        `Batch ${state.currentBatch} of ${state.totalBatches} · ` +
+        `${done}/${all.length} finished · ` +
+        Object.entries(counts).map(([s, n]) => `${n} ${STATE_LABEL[s] ?? s}`).join(" · "),
+    }),
+  );
+
+  if (web2) {
+    for (const task of web2Tasks.filter((t) => t.batchNo === state.currentBatch)) {
+      root.append(renderWeb2SessionTask(task));
+    }
+  } else {
+    const current = state.tasks.filter((t) => t.batchNo === state.currentBatch);
+    for (const task of current) root.append(renderSessionTask(task));
+  }
+
+  const later = all.filter((t) => t.batchNo > state.currentBatch).length;
+  if (later > 0) {
+    root.append(el("p", {
+      className: "muted",
+      textContent: `${later} more task(s) release automatically when this batch is finished.`,
+    }));
+  }
+
+  root.append(el("hr"));
+  const sync = el("button", { textContent: "Refresh" });
+  sync.onclick = () => void refreshSessionView();
+  const close = el("button", { textContent: "Close session" });
+  close.onclick = async () => {
+    close.disabled = true;
+    await send({ type: "closeSession" });
+    flash = "Session closed.";
+    void refresh();
+  };
+  root.append(el("div", { className: "row" }, sync, close));
 }
 
 function renderItem(): void {
@@ -321,6 +841,11 @@ async function refresh(): Promise<void> {
   if (!session.ok) return renderPairing(session.error);
   const { paired, claim } = session.data as { paired: boolean; claim: { citationId: string } | null };
   if (!paired) return renderPairing();
+
+  // Session mode wins: an active batch session (local, or adopted from the server
+  // after a browser restart) IS the operator's work surface.
+  const work = await send({ type: "sessionState" });
+  if (work.ok && work.data) return renderSession(work.data as ActiveSession);
 
   if (claim) {
     // The worker may have been terminated and rebuilt since; re-fetch the item rather

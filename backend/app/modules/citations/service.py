@@ -57,7 +57,8 @@ def automatable_directories(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         r
         for r in rows
-        if r.get("tier") in AUTOMATABLE_TIERS
+        if bool(r.get("active", True))
+        and r.get("tier") in AUTOMATABLE_TIERS
         and not str(r.get("submit_method") or "").startswith("aggregator:fed_by_")
         and not is_prohibited(r)
     ]
@@ -252,16 +253,16 @@ def estimate_campaign_cost(rows: list[dict[str, Any]], settings: Settings) -> fl
     they contribute nothing because they will not run. The moment a price is configured
     the estimate becomes real and the batch total moves with it. The old
     ``citation_api_cost_estimate`` was deleted with the Bing/Foursquare submitters: it
-    priced calls to endpoints that return 404."""
+    priced calls to endpoints that return 404.
+
+    ``bot_fillable``/``captcha_assisted`` rows price at ZERO because they cost nothing
+    METERED: the Playwright bot (and its per-submit compute/solve/proxy estimates) is
+    retired, so those rows are operator-queue work - a person's minutes, tracked as
+    ``worked_seconds`` on the row, never as provider spend through this estimate."""
     total = 0.0
     for row in rows:
-        tier = row.get("tier")
-        if tier in ("api", "aggregator"):
+        if row.get("tier") in ("api", "aggregator"):
             total += settings.data_axle_add_cost_estimate
-        elif tier == "bot_fillable":
-            total += settings.citation_bot_cost_estimate
-        elif tier == "captcha_assisted":
-            total += settings.citation_captcha_cost_estimate
     return round(total, 4)
 
 
@@ -272,24 +273,40 @@ def submit_method_label(directory: dict[str, Any]) -> str:
     return str(directory.get("submit_method") or "")
 
 
+def is_human_queue_method(submit_method: str) -> bool:
+    """Whether this ``submit_method`` is HUMAN work by design (off-page redesign
+    Phase 3, plan C1): every form route the retired Playwright bot used to claim
+    (``bot:*``, non-fed ``aggregator:*``) plus the catalogue's explicit ``manual``.
+    These rows go to the operator queue - the extension autofills where a directory
+    spec was earned, and the person reviews and submits in their own browser."""
+    if submit_method.startswith("aggregator:fed_by_"):
+        return False  # nothing to submit at all - the listing arrives via the feed
+    return (
+        submit_method.startswith("bot:")
+        or submit_method.startswith("aggregator:")
+        or submit_method == "manual"
+    )
+
+
 def submitter_for(
     submit_method: str,
     *,
     api_submitters: dict[str, CitationSubmitter],
-    bot: CitationSubmitter | None,
-    signup_bot: CitationSubmitter | None = None,
 ) -> tuple[CitationSubmitter | None, str]:
     """Pick the engine one queued row's ``submit_method`` routes to.
 
     Returns ``(submitter, reason)`` - ``reason`` is only meaningful when
-    ``submitter`` is ``None`` (why nothing could be dispatched: an unconfigured
-    engine, or a directory that needs no separate action at all). Never raises -
-    an unrecognised ``submit_method`` is a clean "no engine", not a crash.
+    ``submitter`` is ``None`` (why nothing is dispatched: human-by-design work, an
+    unconfigured API engine, or a directory that needs no separate action at all).
+    Never raises - an unrecognised ``submit_method`` is a clean "no engine", not a
+    crash.
 
-    ``bot:signup`` routes to the account-creation+email-verify engine (``signup_bot``,
-    ``integrations.citation_signup``); the plain ``bot:``/``aggregator:`` public-form
-    path (``bot``) is unchanged. ``bot:signup`` is matched BEFORE the generic ``bot:``
-    prefix so a signup directory never falls through to the no-signup engine.
+    THE BOT ROUTES ARE GONE (Phase 3, plan C1). ``bot:*`` (the signup variant
+    included) and non-fed ``aggregator:*`` no longer dispatch to Playwright -
+    the bot, its CAPTCHA solver and its anti-detection were retired outright, so a
+    form directory is a PERSON's work in the operator queue, stated as a decision
+    rather than dressed up as a missing engine. Only the legitimate API submitters
+    (``api:data_axle``, ``api:apple_business``) and the aggregator no-ops survive.
     """
     if submit_method.startswith("aggregator:fed_by_"):
         return None, "no action needed - covered by seeding the core aggregator(s)"
@@ -299,21 +316,12 @@ def submitter_for(
         if sub is not None:
             return sub, ""
         return None, f"no API submitter configured for {key!r}"
-    if submit_method.startswith("bot:signup"):
-        if signup_bot is not None:
-            return signup_bot, ""
-        return None, "signup bot not configured (no IMAP mailbox / mail domain / Playwright)"
-    if submit_method.startswith("aggregator:") or submit_method.startswith("bot:"):
-        if bot is not None:
-            return bot, ""
-        return None, "Playwright bot not installed/configured"
-    # `manual` and `closed` are DECISIONS, not gaps, and they read differently to an
-    # operator: the first means a human submits this one, the second means the directory
-    # takes no submissions at all. Before 0115 both fell through to "no automatable
-    # engine for submit_method='manual'", which reads as a bug in the dispatcher rather
-    # than the catalogue saying what it meant.
-    if submit_method == "manual":
-        return None, "manual submission only - queued for an operator"
+    if is_human_queue_method(submit_method):
+        return None, (
+            "human work by design - the form bot is retired; an operator finishes this "
+            "directory through the queue (the extension autofills where a spec is earned)"
+        )
+    # `closed` is a DECISION, not a gap: the directory takes no submissions at all.
     if submit_method == "closed":
         return None, "directory is closed to new submissions"
     return None, f"no automatable engine for submit_method={submit_method!r}"
@@ -335,11 +343,17 @@ def submitter_for(
 # 176 bot-tier directories that a human can work by hand today.
 # --------------------------------------------------------------------------- #
 
-# Reasons where a human in a real browser is exactly the right answer. Each one means the
-# ENGINE is missing or unverified - never that the submission itself is unwanted.
+# Reasons where a human in a real browser is exactly the right answer.
+#
+# `human_queue` is the honest post-retirement code (Phase 3, plan C1): a form directory
+# routes to a person BY DESIGN, not because an engine happens to be unconfigured. The
+# rest of the set survives for rows already carrying those codes (and for `no_engine`,
+# which still describes a genuinely unconfigured API engine - Apple without a key is
+# work an operator can do by hand today).
 _HUMAN_WORKABLE_REASONS: frozenset[str] = frozenset({
-    "no_engine",         # no dispatcher for this method, or the engine is unconfigured
-    "no_verified_spec",  # the bot has no earned spec; a person does not need one
+    "human_queue",       # form work is a person's by design - the bot is retired
+    "no_engine",         # an API engine for this method is unconfigured / unwritten
+    "no_verified_spec",  # historical (bot era): rows blocked on the empty whitelist
     "captcha",           # a workflow boundary by policy - the operator solves it themselves
     "waf_403",           # the site refused a scripted client; a real session is not scripted
     "account_gated",     # the form needs a login the operator holds
@@ -443,7 +457,7 @@ _IN_FLIGHT_SUBMIT: frozenset[str] = frozenset({"queued", "submitting"})
 _COVERING_SUBMIT: frozenset[str] = _DONE_SUBMIT | _IN_FLIGHT_SUBMIT
 
 #: An in-flight row older than this is STUCK. The dispatcher classifies a row in under a
-#: second and a Playwright submit runs minutes, so a quarter hour of silence means the
+#: second and an API submit runs seconds, so a quarter hour of silence means the
 #: pipeline, not the work.
 DEFAULT_STUCK_AFTER_MINUTES = 15
 # ONLY `live` earns a place in `live_urls`. `submitted` means a form was sent and nothing
@@ -453,6 +467,14 @@ DEFAULT_STUCK_AFTER_MINUTES = 15
 # services/citation_liveness.py has FETCHED live_url and found the business in it.
 _LIVE_SUBMIT: frozenset[str] = frozenset({"live"})
 _COVERING_NAP: frozenset[str] = frozenset({"consistent", "inconsistent"})
+# Evidence tiers (0129). A monitoring row COVERS its directory only when the evidence
+# actually supports a listing existing: `confirmed` (fetched / >=2-source NAP match) or
+# `inconsistent_nap` (the listing exists, its NAP drifted). `uncertain` is neither a
+# cover nor a gap - it goes to the VERIFY-FIRST bucket. `no_evidence` is a gap, and
+# only a *candidate* gap: zero hits is never proof of absence. '' = a pre-tier row,
+# which keeps the legacy nap_status rule.
+_COVERING_EVIDENCE: frozenset[str] = frozenset({"confirmed", "inconsistent_nap"})
+_VERIFY_FIRST_EVIDENCE = "uncertain"
 
 
 # Directory-name matching lives in a leaf module (app/services/directory_names.py):
@@ -471,17 +493,34 @@ def _norm_directory(name: str) -> str:
 
 def _row_covers(row: dict[str, Any]) -> bool:
     """Whether an existing citation counts as DELIVERED coverage of its directory. A
-    monitoring row that FOUND a listing (nap consistent/inconsistent) covers it; a
     submission row that is done (submitted/verified/live/drifted) covers it; a
-    blocked/failed row is an open gap; an in-flight row is neither (its caller reports
-    it separately)."""
+    monitoring row covers it only when its EVIDENCE says a listing exists - tier
+    `confirmed`/`inconsistent_nap` when a tier was recorded (0129), else the legacy
+    nap consistent/inconsistent rule for pre-tier rows. A blocked/failed row is an
+    open gap; an in-flight row is neither (its caller reports it separately); an
+    `uncertain` row is the verify-first bucket, not coverage; `no_evidence` is a gap
+    (a *candidate* gap - absence is never proof)."""
     submit = str(row.get("submit_status") or "not_started")
     nap = str(row.get("nap_status") or "")
+    level = str(row.get("evidence_level") or "")
     if submit in _DONE_SUBMIT:
         return True
-    if submit in _IN_FLIGHT_SUBMIT:
+    if submit in _IN_FLIGHT_SUBMIT or submit in ("failed", "blocked"):
         return False
-    return submit not in ("failed", "blocked") and nap in _COVERING_NAP
+    if level:
+        return level in _COVERING_EVIDENCE
+    return nap in _COVERING_NAP
+
+
+def _row_needs_verification(row: dict[str, Any]) -> bool:
+    """Whether this row belongs in the VERIFY-FIRST bucket: a discovery hit exists but
+    nothing fetched or corroborated it (`evidence_level = 'uncertain'`, 0129). Never
+    true for a row a submission pipeline already owns (done / in-flight / failed /
+    blocked) - those states carry their own meaning."""
+    submit = str(row.get("submit_status") or "not_started")
+    if submit in _DONE_SUBMIT or submit in _IN_FLIGHT_SUBMIT or submit in ("failed", "blocked"):
+        return False
+    return str(row.get("evidence_level") or "") == _VERIFY_FIRST_EVIDENCE
 
 
 def _mark_covered(row: dict[str, Any], ids: set[str], names: set[str]) -> None:
@@ -521,8 +560,16 @@ class CitationGap:
     stuck: list[dict[str, str]] = field(default_factory=list)
     missing: list[dict[str, Any]] = field(default_factory=list)
     live_urls: list[dict[str, str]] = field(default_factory=list)
+    # VERIFY FIRST (0129): rows whose discovery evidence is `uncertain` - a hit exists
+    # but nothing fetched/corroborated it. Deduped from `missing` (never rebuilt while
+    # unverified) but NOT counted covered (nothing is proven). {directory, url,
+    # evidence_level} per row.
+    verify_first: list[dict[str, str]] = field(default_factory=list)
     by_submit_status: dict[str, int] = field(default_factory=dict)
     by_nap_status: dict[str, int] = field(default_factory=dict)
+    # Tier tallies over rows that HAVE a tier ('' pre-tier rows are not counted - an
+    # untiered row saying nothing is not a tier).
+    by_evidence_level: dict[str, int] = field(default_factory=dict)
     # Every catalog row NOT in `missing` and NOT already covered, each with a reason.
     # This is a required output, not a nicety: without it a shorter-than-promised list
     # is indistinguishable from a system that quietly failed.
@@ -558,8 +605,11 @@ def compute_citation_gap(
     for row in existing_citations:
         submit = str(row.get("submit_status") or "not_started")
         nap = str(row.get("nap_status") or "unknown")
+        level = str(row.get("evidence_level") or "")
         gap.by_submit_status[submit] = gap.by_submit_status.get(submit, 0) + 1
         gap.by_nap_status[nap] = gap.by_nap_status.get(nap, 0) + 1
+        if level:
+            gap.by_evidence_level[level] = gap.by_evidence_level.get(level, 0) + 1
         # live_url ONLY. `proof_url` is a screenshot key (0045 documents it as
         # "screenshot/receipt") and the Playwright bot used to return an absolute server
         # filesystem path for it, so reading it here published /var/lib/... strings to
@@ -582,6 +632,19 @@ def compute_citation_gap(
             _mark_covered(row, covered_ids, covered_names)
         elif _row_covers(row):
             gap.covered_count += 1
+            _mark_covered(row, covered_ids, covered_names)
+        elif _row_needs_verification(row):
+            # VERIFY FIRST (0129): an `uncertain` hit dedupes from `missing` (do not
+            # rebuild a listing that may already exist) without ever counting covered.
+            # Everything else that falls through - `no_evidence` included - stays a
+            # gap, and only a *candidate* gap: absence of evidence is never proof.
+            gap.verify_first.append(
+                {
+                    "directory": str(row.get("directory") or ""),
+                    "url": str(row.get("discovered_url") or ""),
+                    "evidence_level": _VERIFY_FIRST_EVIDENCE,
+                }
+            )
             _mark_covered(row, covered_ids, covered_names)
 
     candidates = automatable_directories(directories)
@@ -665,7 +728,8 @@ def build_audit_plan(
     stuck_after_minutes: int = DEFAULT_STUCK_AFTER_MINUTES,
 ) -> AuditPlan:
     """Group the client's relevant catalog into Generic -> Country -> Niche and tag each
-    directory built | missing | in_flight | stuck.
+    directory built | missing | in_flight | stuck | verify_first (0129: an `uncertain`
+    discovery hit must be verified, never rendered "built").
 
     Reuses the EXISTING selection + gap logic rather than re-ranking: the ordered
     universe is ``select_campaign_directories`` (no cap - the whole plan is shown), and a
@@ -710,12 +774,26 @@ def build_audit_plan(
         target = stuck_keys if name in stuck_names else in_flight_keys
         target |= keys
 
+    # Which directories carry an `uncertain` discovery (0129): tagged verify_first,
+    # never "built" - an unfetched search hit is not a delivered listing.
+    verify_keys: set[str] = set()
+    for c in existing_citations:
+        if not _row_needs_verification(c):
+            continue
+        if c.get("directory_id"):
+            verify_keys.add(str(c["directory_id"]))
+        name = canonical_norm(str(c.get("directory") or ""))
+        if name:
+            verify_keys.add(name)
+
     def _status_of(row: dict[str, Any]) -> str:
         keys = {str(row.get("id")), canonical_norm(str(row.get("name") or ""))}
         if keys & stuck_keys:
             return "stuck"
         if keys & in_flight_keys:
             return "in_flight"
+        if keys & verify_keys:
+            return "verify_first"
         return "missing" if str(row.get("id")) in missing_ids else "built"
 
     plan = AuditPlan()

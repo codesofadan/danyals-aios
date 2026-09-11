@@ -185,18 +185,13 @@ def test_web2_board_rollup_counts() -> None:
 # --------------------------------------------------------------------------- #
 # Citation engine status board
 # --------------------------------------------------------------------------- #
-def test_engine_status_all_missing_on_keyless_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The bot's availability is install-based, not key-based - and the design-capture
-    # work now installs the automation extra into this venv, so its absence is
-    # SIMULATED rather than assumed of the environment.
-    import integrations.citation_status as cs
-
-    monkeypatch.setattr(cs, "playwright_bot_available", lambda: False)
+def test_engine_status_on_keyless_settings() -> None:
+    """Keyless: the API engines are honestly MISSING, while the human-queue lane is
+    honestly PRESENT - it is the product, not a credential, since the bot's retirement."""
     settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
     engines = {e.key: e for e in citation_engine_status(settings)}
-    assert engines["playwright_bot"].connected is False
+    assert engines["human_queue"].connected is True
+    assert "retired" in engines["human_queue"].reason
     assert engines["data_axle"].connected is False
     assert engines["gbp"].connected is False
     # every engine carries an honest reason and (where a config could help) names it
@@ -207,41 +202,43 @@ def test_engine_status_all_missing_on_keyless_settings(
 
 def test_the_ghost_engines_stay_off_the_board_but_their_story_survives() -> None:
     """Bing/Foursquare rows are DELETED (a status board is for things that can change
-    state; 'no key can enable an endpoint that does not exist' is not a state). The
-    retirement record — including that FOURSQUARE_API_KEY is still live for DISCOVERY —
-    moves to the module docstring, and this holds it there so nobody deletes the key
-    on the strength of a missing row."""
+    state; 'no key can enable an endpoint that does not exist' is not a state), and the
+    Phase-3 retirements joined them: the Playwright bot, the CAPTCHA solver, the proxy
+    and the signup bot. The retirement record — including that FOURSQUARE_API_KEY is
+    still live for DISCOVERY — lives in the module docstring, and this holds it there
+    so nobody deletes the key (or resurrects a lane) on the strength of a missing row."""
     import inspect
 
     import integrations.citation_status as cs
 
     settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
     keys = {e.key for e in citation_engine_status(settings)}
-    assert not ({"bing_places", "foursquare"} & keys)
+    assert not ({"bing_places", "foursquare", "playwright_bot", "captcha_solver", "proxy", "signup_bot"} & keys)
     doc = inspect.getdoc(cs) or ""
     assert "404" in doc and "DISCOVERY" in doc and "Retired 2026-08-23" in doc.replace("retired 2026-08-23", "Retired 2026-08-23")
+    assert "2026-09-05" in doc  # the bot lane's own retirement record
 
 
-def test_the_board_headline_is_the_whitelist_not_the_transport(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """"3/5 connected" once coexisted with ZERO machine-submittable directories. The
-    binding constraint now leads the board, and an installed bot with no earned spec
-    is NOT connected."""
-    import integrations.citation_status as cs
+def test_the_board_headline_carries_the_spec_count_with_honest_semantics() -> None:
+    """"3/5 connected" once coexisted with ZERO machine-submittable directories, and
+    later a spec count could read as "the bot submits here". Post-retirement the count
+    is EXTENSION-AUTOFILL coverage: the whitelist note must say no machine submits a
+    form, and the human-queue lane must carry the count in its reason."""
     from integrations.citation_status import citation_engine_board
 
-    monkeypatch.setattr(cs, "playwright_bot_available", lambda: True)
     settings = Settings(_env_file=None, app_env="dev")  # type: ignore[call-arg]
 
     empty = citation_engine_board(settings, active_spec_count=0)
     assert empty.machine_submittable_directories == 0
-    assert {e.key: e.connected for e in empty.engines}["playwright_bot"] is False
-    assert "operator queue" in {e.key: e for e in empty.engines}["playwright_bot"].reason
+    assert "NO machine submits" in empty.whitelist_note
+    assert "AUTOFILL" in empty.whitelist_note
 
     earned = citation_engine_board(settings, active_spec_count=3)
     assert earned.machine_submittable_directories == 3
-    assert {e.key: e.connected for e in earned.engines}["playwright_bot"] is True
+    lanes = {e.key: e for e in earned.engines}
+    assert "3 earned spec(s)" in lanes["human_queue"].reason
+    # An earned spec never flips a machine lane "connected" - there is no machine lane.
+    assert set(lanes) == {"human_queue", "data_axle", "apple_business", "gbp"}
 
 
 def test_data_axle_lights_by_config_alone() -> None:

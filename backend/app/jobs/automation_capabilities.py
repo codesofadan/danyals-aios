@@ -192,6 +192,34 @@ _ALL: Final[tuple[Capability, ...]] = (
         needs=("SERPER_API_KEY",),
     ),
     Capability(
+        kind="offpage.verify_backlinks",
+        task="verify_backlinks",
+        label="Verify backlinks are really live",
+        description=(
+            "Fetches each due referring page and looks for the client's link "
+            "itself, so 'live' is an observation rather than a provider's claim. "
+            "A loss is confirmed by a second look a week later before a link is "
+            "marked lost. Plain HTTP requests, so it spends nothing."
+        ),
+        scope="platform",
+        paid=False,
+        default_interval_seconds=86_400,
+    ),
+    Capability(
+        kind="web2.link_recheck",
+        task="recheck_web2_links",
+        label="Re-check Web 2.0 links are still live",
+        description=(
+            "Re-fetches published Web 2.0 properties and confirms the placed link "
+            "is still on the page. A deleted post or a stripped link demotes the "
+            "placement and alerts - never silently green. Plain HTTP requests, so "
+            "it spends nothing."
+        ),
+        scope="platform",
+        paid=False,
+        default_interval_seconds=86_400,
+    ),
+    Capability(
         kind="ranks.refresh_local",
         task="refresh_local_ranks",
         label="Refresh local map-pack ranks",

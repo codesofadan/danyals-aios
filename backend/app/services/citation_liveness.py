@@ -208,6 +208,7 @@ def next_recheck_days(*, recheck_count: int, authority_tier: str = "", route: st
 # --------------------------------------------------------------------------- #
 _PROBE_TIMEOUT_SECONDS = 15.0
 _PROBE_MAX_BYTES = 2_000_000
+_PROBE_MAX_REDIRECTS = 5
 # Identify honestly. A directory that would rather not be probed can then say so, and
 # we are not pretending to be a person - this is a status check on a listing we built,
 # not an attempt to look like organic traffic.
@@ -222,23 +223,44 @@ def http_liveness_probe(url: str) -> LivenessProbe:
     client's citation because of our own timeout would be a fabrication pointing the
     other way, and it is the more dangerous direction: it invents work to redo.
 
+    REDIRECTS ARE FOLLOWED MANUALLY, EVERY HOP SSRF-RE-VALIDATED (the same
+    ``EvidenceFetcher`` pattern the verification sweeps use). The callers'
+    ``is_public_url`` guard covers only the FIRST url; with automatic redirects a
+    public listing URL that 302s into a private range would be fetched server-side
+    and its body judged - leaking an internal server's status and a content oracle
+    through ``matched_fields``. A refused hop collapses to `status_code=None`
+    ("could not look"), never to a verdict.
+
     Unauthenticated on purpose. A listing that only renders for a logged-in session is
     not publicly visible, and public visibility is the entire point of a citation."""
     import httpx
 
-    try:
-        with httpx.Client(
-            follow_redirects=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            headers={"User-Agent": _PROBE_UA},
-        ) as client:
-            response = client.get(url)
-            return LivenessProbe(
-                status_code=response.status_code,
-                text=response.text[:_PROBE_MAX_BYTES],
-                final_url=str(response.url),
-                checked_from="http_probe",
-            )
-    except Exception:
-        # No logging of the exception body: a URL can carry a token in a query string.
-        return LivenessProbe(status_code=None, checked_from="http_probe:unreachable")
+    from app.core.security import is_public_url
+
+    current = url
+    for _hop in range(_PROBE_MAX_REDIRECTS + 1):
+        # Re-validated EVERY hop: the redirect target is as attacker-controllable as
+        # the stored URL (TOCTOU / rebinding contract in app/core/security.py).
+        if not is_public_url(current):
+            return LivenessProbe(status_code=None, checked_from="http_probe:refused_non_public")
+        try:
+            with httpx.Client(
+                follow_redirects=False,
+                timeout=_PROBE_TIMEOUT_SECONDS,
+                headers={"User-Agent": _PROBE_UA},
+            ) as client:
+                response = client.get(current)
+        except Exception:
+            # No logging of the exception body: a URL can carry a token in a query string.
+            return LivenessProbe(status_code=None, checked_from="http_probe:unreachable")
+        location = response.headers.get("location", "")
+        if response.status_code in (301, 302, 303, 307, 308) and location:
+            current = str(httpx.URL(current).join(location))
+            continue
+        return LivenessProbe(
+            status_code=response.status_code,
+            text=response.text[:_PROBE_MAX_BYTES],
+            final_url=current,
+            checked_from="http_probe",
+        )
+    return LivenessProbe(status_code=None, checked_from="http_probe:too_many_redirects")

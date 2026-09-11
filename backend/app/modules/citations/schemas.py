@@ -26,6 +26,9 @@ LinkRel = Literal["dofollow", "nofollow", "mixed", "unknown"]
 
 AuthorityTier = Literal["core", "tier1", "tier2"]
 DirectoryAccess = Literal["open", "apply_gated", "aggregator"]
+# Evidence tiers, verbatim from 0129's CHECK ('' = a pre-tier row). `no_evidence` is a
+# *candidate* gap - absence of evidence is never proof of absence.
+CitationEvidenceLevel = Literal["", "confirmed", "inconsistent_nap", "uncertain", "no_evidence"]
 
 _MARKETS: frozenset[str] = frozenset({"US", "UK", "CA", "AU", "GLOBAL"})
 _TIERS: frozenset[str] = frozenset(
@@ -347,11 +350,27 @@ class CitationSkip(BaseModel):
     clause: str = ""
 
 
+class CitationVerifyFirst(BaseModel):
+    """One DISCOVERED listing whose evidence is `uncertain` (0129): a hit exists but
+    nothing fetched or corroborated it. Deduped from `missing` (never rebuilt while
+    unverified) yet NOT counted covered - the operator verifies it first."""
+
+    directory: str
+    url: str = ""
+    evidence_level: CitationEvidenceLevel = Field(
+        default="uncertain", serialization_alias="evidenceLevel"
+    )
+
+
 class GapAnalysisResponse(BaseModel):
     """The reconciliation of a client's citations vs the automatable catalog: what is
     covered, what is still MISSING (the build target, in build order), the live URLs
     earned, and the honest per-status tallies. Also reports the resolved NAP so the UI
-    can stop showing "No business profile yet" once one is derived from the client."""
+    can stop showing "No business profile yet" once one is derived from the client.
+
+    Evidence tiers (0129): a GAP is now `evidence_level = 'no_evidence'` OR no row at
+    all; `uncertain` rows land in the separate `verifyFirst` bucket; the per-tier
+    tallies ride in `byEvidenceLevel`."""
 
     client: str
     has_nap: bool = Field(serialization_alias="hasNap")
@@ -370,12 +389,23 @@ class GapAnalysisResponse(BaseModel):
     missing_count: int = Field(serialization_alias="missingCount")
     missing: list[DirectoryResponse]
     live_urls: list[CitationLiveUrl] = Field(serialization_alias="liveUrls")
+    # `uncertain` discoveries to verify before building (0129) - a bucket of their own,
+    # neither covered nor missing.
+    verify_first: list[CitationVerifyFirst] = Field(
+        default_factory=list, serialization_alias="verifyFirst"
+    )
     skipped: list[CitationSkip] = Field(default_factory=list)
     by_submit_status: dict[str, int] = Field(serialization_alias="bySubmitStatus")
     by_nap_status: dict[str, int] = Field(serialization_alias="byNapStatus")
+    by_evidence_level: dict[str, int] = Field(
+        default_factory=dict, serialization_alias="byEvidenceLevel"
+    )
 
 
 # --- audit plan (generic -> country -> niche) ------------------------------------
+
+
+AuditPlanItemStatus = Literal["built", "missing", "in_flight", "stuck", "verify_first"]
 
 
 class AuditPlanItem(BaseModel):
@@ -388,12 +418,13 @@ class AuditPlanItem(BaseModel):
     tier: DirectoryTier
     url: str
     # `in_flight` = an attempt is pending (deduped, not built). `stuck` = that attempt
-    # has sat unmoved past the staleness threshold. Neither may render as "built".
-    status: Literal["built", "missing", "in_flight", "stuck"]
+    # has sat unmoved past the staleness threshold. `verify_first` = an `uncertain`
+    # discovery hit awaiting verification (0129). None of these may render as "built".
+    status: AuditPlanItemStatus
 
     @classmethod
     def from_directory(
-        cls, row: dict[str, Any], *, status: Literal["built", "missing", "in_flight", "stuck"]
+        cls, row: dict[str, Any], *, status: AuditPlanItemStatus
     ) -> AuditPlanItem:
         market, tier = row.get("market"), row.get("tier")
         return cls(
@@ -508,8 +539,9 @@ class QueueItemResponse(BaseModel):
     citation_id: str = Field(serialization_alias="citationId")
     client: str
     directory: str
-    # The catalog row this item builds — what the teach-the-bot flow files a spec
-    # against after a verified completion (W4.1). Empty for a legacy monitoring row.
+    # The catalog row this item builds — what the teach-the-extension flow files a
+    # spec against after a verified completion (an earned spec powers autofill;
+    # the bot it once fed is retired). Empty for a legacy monitoring row.
     directory_id: str = Field(default="", serialization_alias="directoryId")
     directory_url: str = Field(serialization_alias="directoryUrl")
     # The verified deep link to the add-listing form. Empty when the catalogue has never
@@ -517,8 +549,8 @@ class QueueItemResponse(BaseModel):
     # UI says so rather than presenting an empty link as if it were a destination.
     add_url: str = Field(serialization_alias="addUrl")
     fields: list[QueueFieldValue]
-    # Why this is a human's job rather than the bot's. Shown to the operator because
-    # knowing the obstacle before opening the tab is worth ~a minute an item.
+    # Why this row reached the queue (its blocked_reason). Shown to the operator
+    # because knowing the obstacle before opening the tab is worth ~a minute an item.
     queued_because: str = Field(serialization_alias="queuedBecause")
     claim_expires_at: str | None = Field(default=None, serialization_alias="claimExpiresAt")
     human_attempts: int = Field(serialization_alias="humanAttempts")
@@ -555,13 +587,21 @@ class QueueHeartbeatRequest(BaseModel):
 
 
 class QueueCompleteRequest(BaseModel):
-    """Close an item WITH the public URL of the listing that was created.
+    """Close an item with the public URL of the listing that was created.
 
-    `live_url` is required and is checked before it is stored. An operator cannot mark
-    an item done by asserting it - the same liveness probe the re-check uses has to
-    fetch that URL and find the business on it first."""
+    The default path is PROBE-VERIFIED: the same liveness probe the re-check uses has
+    to fetch that URL and find the business on it before the row is marked `live`.
 
-    live_url: str = Field(min_length=1, alias="liveUrl")
+    ``operator_confirmed`` is the honest escape hatch for a probe FALSE NEGATIVE — a
+    directory that renders its listing with JavaScript, or that blocks our fetch, so the
+    page reads empty to us while being genuinely live in a browser. It does NOT claim
+    `live`: it records the row as `submitted` with ``verification_method='human'`` and
+    schedules a re-check, so the operator is never blocked by a page we cannot read, and
+    the system never lies about what it actually verified. With ``operator_confirmed``
+    the URL may be empty too (some directories expose no public listing URL at all)."""
+
+    live_url: str = Field(default="", alias="liveUrl")
+    operator_confirmed: bool = Field(default=False, alias="operatorConfirmed")
     worked_seconds: int = Field(default=0, ge=0, le=86400, alias="workedSeconds")
     note: str = ""
     model_config = ConfigDict(populate_by_name=True)
@@ -601,6 +641,223 @@ class QueueCompleteResponse(BaseModel):
     # Present when accepted is false: what we fetched and why it did not convince us.
     reason: str = ""
     matched_fields: list[str] = Field(default_factory=list, serialization_alias="matchedFields")
+    # True on a refusal the operator may override: we could not READ the page (JS-render,
+    # a block, a moderation hold), which is distinct from a URL that loaded fine without
+    # the business on it. The panel offers "I checked — it's live" only when this is set.
+    can_confirm: bool = Field(default=False, serialization_alias="canConfirm")
+    # True on an accepted OPERATOR-CONFIRMED completion (submitted, not probe-verified
+    # live) so the panel can say so honestly rather than claiming "verified on the page".
+    operator_confirmed: bool = Field(default=False, serialization_alias="operatorConfirmed")
+
+
+# --- operator sessions (0130) ------------------------------------------------------
+#
+# NOTE ON THE WIRE CONTRACT: these shapes are server-authoritative for now (the module
+# README's rule for a surface whose TS consumer is still settling) - the frontend
+# mirrors them in frontend/lib/offpage.ts and the extension in extension/src/lib/
+# messages.ts, and both must move in the same change as any key here.
+
+SessionStatus = Literal["active", "paused", "completed", "abandoned"]
+SessionKind = Literal["citation", "web2_placement"]
+# The full ui_state vocabulary, verbatim from 0130's CHECK. The REQUEST schema below
+# deliberately admits only the extension-reportable subset - terminal values are not
+# representable on the wire, which is half of "terminal is server-written only".
+SessionTaskState = Literal[
+    "pending", "released", "opened", "form_detected", "filled",
+    "awaiting_submit", "submitted", "skipped", "deferred", "blocked",
+]
+SessionTelemetryState = Literal["opened", "form_detected", "filled", "awaiting_submit"]
+
+
+class SessionTaskCard(BaseModel):
+    """One task inside a session: which citation, where the form lives, whether an
+    EARNED spec powers autofill (`hasSpec` - fail-closed: no active spec means false
+    and every field ships an empty selector, so the panel offers copy-buttons), and
+    the canonical NAP values to type."""
+
+    task_id: str = Field(serialization_alias="taskId")
+    citation_id: str = Field(serialization_alias="citationId")
+    batch_no: int = Field(serialization_alias="batchNo")
+    position: int
+    ui_state: SessionTaskState = Field(serialization_alias="uiState")
+    directory: str
+    directory_id: str = Field(default="", serialization_alias="directoryId")
+    directory_url: str = Field(default="", serialization_alias="directoryUrl")
+    add_url: str = Field(default="", serialization_alias="addUrl")
+    has_spec: bool = Field(default=False, serialization_alias="hasSpec")
+    fields: list[QueueFieldValue] = Field(default_factory=list)
+    queued_because: str = Field(default="", serialization_alias="queuedBecause")
+    prohibited_warning: str = Field(default="", serialization_alias="prohibitedWarning")
+    # The catalogue's own cost note (e.g. "Free", "Free; paid upsells", "Paid $2.50").
+    # Surfaced so an operator sees BEFORE working a directory whether submission costs
+    # money — a paid directory the client will not pay for is wasted effort.
+    price_note: str = Field(default="", serialization_alias="priceNote")
+
+
+class OperatorSessionResponse(BaseModel):
+    """One session's headline: whose work, which client, and how far the batches got."""
+
+    id: str
+    client: str
+    client_id: str = Field(default="", serialization_alias="clientId")
+    status: SessionStatus
+    kind: SessionKind = "citation"
+    batch_size: int = Field(serialization_alias="batchSize")
+    current_batch: int = Field(serialization_alias="currentBatch")
+    total_batches: int = Field(default=1, serialization_alias="totalBatches")
+    task_count: int = Field(default=0, serialization_alias="taskCount")
+    by_ui_state: dict[str, int] = Field(default_factory=dict, serialization_alias="byUiState")
+    created_at: str = Field(default="", serialization_alias="createdAt")
+    updated_at: str = Field(default="", serialization_alias="updatedAt")
+    closed_at: str | None = Field(default=None, serialization_alias="closedAt")
+
+
+class Web2CopyBlock(BaseModel):
+    """One paste-ready value from the approved draft (title / body / anchor / link
+    target). Copy-blocks are the placement lane's DEFAULT and its fail-closed
+    fallback: they exist whether or not a spec is earned, and they are all the
+    extension offers when none is."""
+
+    key: str
+    label: str
+    value: str
+
+
+class Web2PlacementTaskCard(BaseModel):
+    """One web2_placement task (0136): the approved draft as copy-blocks, where the
+    editor lives, and - ONLY under an ACTIVE earned placement spec - plain-selector
+    fill fields. ``hasSpec`` is fail-closed exactly like the citation card's: no
+    active spec means false, zero selectors, copy-blocks only; the extension never
+    fills contenteditable on a guess and NEVER submits."""
+
+    task_id: str = Field(serialization_alias="taskId")
+    web2_id: str = Field(serialization_alias="web2Id")
+    batch_no: int = Field(serialization_alias="batchNo")
+    position: int
+    ui_state: SessionTaskState = Field(serialization_alias="uiState")
+    platform: str
+    title: str = ""
+    # Spec editor_url when an active spec exists (host-pinned by 0136's trigger),
+    # else the platform's homepage, else '' - the UI says "no URL on file" honestly.
+    editor_url: str = Field(default="", serialization_alias="editorUrl")
+    anchor: str = ""
+    target_url: str = Field(default="", serialization_alias="targetUrl")
+    has_spec: bool = Field(default=False, serialization_alias="hasSpec")
+    copy_blocks: list[Web2CopyBlock] = Field(
+        default_factory=list, serialization_alias="copyBlocks"
+    )
+    # Selector-bearing fill fields - non-empty ONLY under an active spec with fields.
+    fields: list[QueueFieldValue] = Field(default_factory=list)
+
+
+class SessionDetailResponse(OperatorSessionResponse):
+    """The session plus every task card (batch 1 arrives already released+claimed).
+
+    Kind-split task lists: a citation session fills ``tasks``, a web2_placement
+    session fills ``web2Tasks`` - the shapes differ (NAP fields vs draft
+    copy-blocks) and a union would make every consumer guess."""
+
+    tasks: list[SessionTaskCard] = Field(default_factory=list)
+    web2_tasks: list[Web2PlacementTaskCard] = Field(
+        default_factory=list, serialization_alias="web2Tasks"
+    )
+
+
+class SessionFromGaps(BaseModel):
+    """The from-gaps selector: which evidence tiers to pull (candidate gaps /
+    verify-first discoveries) and how many citations at most. Queue rows already
+    `ready_for_human` are always included - they ARE the human work."""
+
+    tiers: list[Literal["uncertain", "no_evidence"]] | None = None
+    limit: int = Field(default=25, ge=1, le=100)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SessionCreateRequest(BaseModel):
+    """POST /citation-builder/sessions body. Exactly one selection path: `fromGaps`
+    (the default when both are omitted) or an explicit `citationIds` list."""
+
+    client_id: str = Field(min_length=1, alias="clientId")
+    # 'web2_placement' (0136): the session works the client's parked extension-lane
+    # properties instead of citations; `fromGaps`/`citationIds` apply to citations only.
+    kind: SessionKind = "citation"
+    batch_size: int = Field(default=10, ge=1, le=25, alias="batchSize")
+    from_gaps: SessionFromGaps | None = Field(default=None, alias="fromGaps")
+    citation_ids: list[str] | None = Field(default=None, alias="citationIds")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SessionTelemetryRequest(BaseModel):
+    """The extension's ui_state report. FORWARD-ONLY and NON-TERMINAL by construction:
+    the Literal admits only the reportable states, so `submitted`/`skipped`/etc. are a
+    422 before any handler runs - the server's terminal handlers are the only writers
+    of terminal values."""
+
+    ui_state: SessionTelemetryState = Field(alias="uiState")
+    detail: str = Field(default="", max_length=500)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SessionSkipRequest(BaseModel):
+    """Skip a task: not worked, claim released, reason recorded on the task telemetry
+    (`citations.skip_reason` was dropped as a zombie in 0121 - the task row is where
+    this fact lives now)."""
+
+    reason: str = Field(min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SessionWeb2BlockRequest(BaseModel):
+    """Block a WEB2 placement task - the same closed vocabulary the citation queue
+    uses (one rollup across both lanes), written to the TASK only: the property
+    itself stays parked, because an operator's obstacle is not evidence about the
+    placement. Citation tasks must go through /queue/{id}/blocked instead (which
+    also writes the citation row + the drift hook)."""
+
+    reason: Literal[
+        "captcha_wall",
+        "account_required",
+        "paid_only",
+        "form_changed",
+        "duplicate_listing",
+        "directory_dead",
+        "phone_verification",
+        "postcard_verification",
+        "other",
+    ]
+    detail: str = Field(default="", max_length=500)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SessionActionResponse(BaseModel):
+    """The outcome of a skip/defer: what the task became, and whether finishing it
+    released the next batch."""
+
+    ok: bool = True
+    session_id: str = Field(serialization_alias="sessionId")
+    task_id: str = Field(serialization_alias="taskId")
+    state: str = ""
+    batch_no: int = Field(default=0, serialization_alias="batchNo")
+    released: int = 0
+
+
+class SessionHeartbeatResponse(BaseModel):
+    ok: bool = True
+    lease_seconds: int = Field(serialization_alias="leaseSeconds")
+    extended: int = 0
+
+
+class SessionClientCount(BaseModel):
+    """One client's session-able workload, for the extension's client selector - a
+    cheap counts read, never a per-client gap analysis."""
+
+    client_id: str = Field(serialization_alias="clientId")
+    client: str
+    ready_for_human: int = Field(default=0, serialization_alias="readyForHuman")
+    verify_first: int = Field(default=0, serialization_alias="verifyFirst")
+    candidate_gaps: int = Field(default=0, serialization_alias="candidateGaps")
+    # 0136: parked extension-lane placements awaiting a web2_placement session.
+    web2_placements: int = Field(default=0, serialization_alias="web2Placements")
 
 
 # --- the earned spec whitelist (0111) ----------------------------------------------

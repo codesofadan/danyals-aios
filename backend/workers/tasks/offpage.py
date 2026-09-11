@@ -30,10 +30,11 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.config import Settings, get_settings
+from app.core.security import is_public_url
 from app.db.database import privileged_connection
 from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
@@ -45,6 +46,7 @@ from app.services.cost_store import PostgresCostStore
 from app.services.deliverables import emit_deliverable
 from app.services.directory_names import canonical_norm
 from app.services.vault import find_secret
+from app.services.web2_linkcheck import check_link
 from app.services.web2_pacing import PacingCaps, Placement
 from app.services.web2_pipeline import (
     SimilarityOutcome,
@@ -181,7 +183,9 @@ def diff_citations(
 ) -> CitationDiff:
     """Diff pulled directory listings against the stored ledger, keyed by directory.
     NEW = a directory not yet stored. CHANGED = a stored directory whose NAP state now
-    differs. Pure + deterministic."""
+    differs - OR whose EVIDENCE moved (0129: a fresh pull that found the URL or a
+    stronger/weaker tier must update the row even when the NAP verdict is unchanged,
+    or the evidence columns would freeze at their first write). Pure + deterministic."""
     stored_by_dir: dict[str, dict[str, Any]] = {}
     for row in stored:
         key = str(row.get("directory") or "").lower()
@@ -193,9 +197,27 @@ def diff_citations(
         existing = stored_by_dir.get(rec.directory.lower())
         if existing is None:
             new.append(rec)
-        elif str(existing.get("nap_status") or "") != rec.nap_status:
+            continue
+        nap_moved = str(existing.get("nap_status") or "") != rec.nap_status
+        evidence_moved = bool(rec.evidence_level) and (
+            str(existing.get("evidence_level") or "") != rec.evidence_level
+        )
+        url_moved = bool(rec.url) and str(existing.get("discovered_url") or "") != rec.url
+        if nap_moved or evidence_moved or url_moved:
             changed.append((existing, rec))
     return CitationDiff(new=new, changed=changed)
+
+
+def _discovery_evidence(rec: CitationRecord, checked_at: datetime) -> dict[str, Any]:
+    """The persisted ``discovery_evidence`` jsonb (0129): the record's own receipt
+    ({sources, queries, snippet, nap, classifier}) plus a SERVER-SIDE ``checked_at``
+    stamped at write time. A record with no evidence at all yields ``{}`` (the column
+    default) rather than a lone timestamp claiming evidence that does not exist."""
+    if not rec.evidence and not rec.evidence_level:
+        return {}
+    evidence: dict[str, Any] = dict(rec.evidence)
+    evidence["checked_at"] = checked_at.isoformat()
+    return evidence
 
 
 # --------------------------------------------------------------------------- #
@@ -241,6 +263,9 @@ def run_backlink_monitor(
             client_id=client_id, client_name=client_name, ref_domain=rec.ref_domain,
             anchor=rec.anchor, authority=rec.authority, spam=rec.spam,
             first_seen=rec.first_seen, status=rec.status,
+            # 0133: the verification coordinates. Persisted at ingest so the verify
+            # sweep can fetch the referring page itself; discovery never sets liveness.
+            source_url=rec.source_url, target_url=rec.target_url,
         )
     for row in diff.lost:
         store.set_backlink_status(str(row["id"]), "lost")
@@ -301,6 +326,12 @@ def run_citation_monitor(
     # One BrightLocal monitoring pull. BrightLocal is a subscription with no per-call
     # meter, so the committed cost is the per-pull unit price itself (1 pull performed)
     # -- a real unit of work, not a flat per-call guess of a token/query count.
+    # The search-discovery provider's whole bundle (Serper + Places + Foursquare +
+    # optional Firecrawl + the optional DataForSEO Business Listings corroboration
+    # call, 0129) rides this SAME single per-pull estimate on the citation_discovery
+    # dial: there is no per-source metering inside the provider, so one more gated
+    # call inside the already-gated pull folds into the one commit rather than
+    # inventing a second meter.
     gate.commit(ctx, float(settings.offpage_monitor_cost_estimate))
 
     stored = store.list_citations_for_client(client_id)
@@ -316,22 +347,317 @@ def run_citation_monitor(
     except Exception:
         logger.warning("citation_directory_lookup_failed", business=business)
         catalog = {}
+    # ONE server-side timestamp for the whole batch (0129): `checked_at` inside the
+    # evidence receipt and the `evidence_checked_at` column are stamped HERE at write
+    # time, never trusted from a provider record.
+    checked_at = datetime.now(UTC)
     for rec in diff.new:
         store.insert_citation(
             client_id=client_id, client_name=client_name, directory=rec.directory,
             nap_status=rec.nap_status, action=action_for(rec.nap_status), note=rec.note,
             directory_id=catalog.get(canonical_norm(rec.directory)),
+            discovered_url=rec.url,
+            discovery_evidence=_discovery_evidence(rec, checked_at),
+            evidence_level=rec.evidence_level,
+            evidence_checked_at=checked_at if rec.evidence_level else None,
         )
     for existing, rec in diff.changed:
         store.update_citation_status(
             str(existing["id"]), nap_status=rec.nap_status,
             action=action_for(rec.nap_status), note=rec.note,
+            # Evidence fields ride the same update (0129) - but ONLY when this pull
+            # actually produced them, so a tier-less provider record can never blank
+            # what an earlier discovery recorded.
+            discovered_url=rec.url or None,
+            discovery_evidence=(
+                _discovery_evidence(rec, checked_at) if rec.evidence_level else None
+            ),
+            evidence_level=rec.evidence_level or None,
+            evidence_checked_at=checked_at if rec.evidence_level else None,
         )
     logger.info(
         "citation_monitor_done", business=business,
         new=len(diff.new), changed=len(diff.changed),
     )
     return {"state": "ok", "new": len(diff.new), "changed": len(diff.changed)}
+
+
+# --------------------------------------------------------------------------- #
+# Verification sweeps (0133): backlink liveness + Web 2.0 link recheck.
+# Free by construction - plain HTTP GETs against pages we already know about, no
+# provider call - so neither goes through the money dial. Both reuse
+# `web2_linkcheck.check_link` verbatim: one definition of "our link is on that
+# page" for publish-time verification, backlinks and the recheck alike.
+# --------------------------------------------------------------------------- #
+
+#: A verified-live link is re-confirmed monthly; a missing one is looked at again in
+#: a week so the LOSS is confirmed by a second, separated observation before the
+#: monitoring status may flip to `lost`. `unknown` retries soon - nothing was
+#: learned, so it must not consume a month of not-looking.
+_LIVE_RECHECK_DAYS = 30
+_MISSING_CONFIRM_DAYS = 7
+_UNKNOWN_RETRY_DAYS = 1
+
+#: HTTP answers that are evidence the PAGE ITSELF is gone (vs "we could not look").
+_GONE_STATUSES = frozenset({404, 410})
+
+
+class EvidenceFetcher:
+    """SSRF-guarded page fetcher for the verification sweeps. Never raises.
+
+    Mirrors ``_fetch_page``'s honest User-Agent (no browser impersonation beyond the
+    compat prefix, and the AIOS name is right there), but hardens the redirect path
+    per ``app/core/security.py``'s caller contract: redirects are followed MANUALLY
+    with every hop re-validated through ``is_public_url``, so a public page cannot
+    30x this worker into the metadata service. The terminal HTTP status is kept on
+    ``self.status`` so the verdict's evidence can say what the server answered -
+    ``check_link``'s fetcher seam only carries HTML, and an evidence receipt that
+    cannot name the status would make 404 and timeout indistinguishable.
+    """
+
+    user_agent = "Mozilla/5.0 (compatible; AIOS-linkcheck/1.0)"
+
+    def __init__(self, *, timeout: float = 15.0, max_redirects: int = 5) -> None:
+        self._timeout = timeout
+        self._max_redirects = max_redirects
+        self.status: int | None = None
+        self.detail: str = ""
+
+    def __call__(self, url: str) -> str | None:
+        import httpx
+
+        current = url
+        for _hop in range(self._max_redirects + 1):
+            # Re-validated EVERY hop, not just once: the redirect target is as
+            # attacker-controllable as the first URL (TOCTOU / rebinding contract).
+            if not is_public_url(current):
+                self.detail = "refused: non-public URL"
+                return None
+            try:
+                with httpx.Client(
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                    headers={"User-Agent": self.user_agent},
+                ) as client:
+                    resp = client.get(current)
+            except Exception as exc:
+                self.detail = f"fetch failed: {type(exc).__name__}"
+                return None
+            self.status = resp.status_code
+            location = resp.headers.get("location", "")
+            if resp.status_code in (301, 302, 303, 307, 308) and location:
+                current = str(httpx.URL(current).join(location))
+                continue
+            if resp.status_code >= 400:
+                self.detail = f"http {resp.status_code}"
+                return None
+            return resp.text
+        self.detail = "too many redirects"
+        return None
+
+
+def _check_evidence(check: Any, fetcher: EvidenceFetcher, checked_at: datetime) -> dict[str, Any]:
+    """The persisted receipt for one verification look: what the server answered,
+    what the checker concluded, and when - stamped server-side, like 0129's."""
+    detail = str(check.detail or "")
+    if fetcher.detail and fetcher.detail not in detail:
+        detail = f"{detail} ({fetcher.detail})" if detail else fetcher.detail
+    return {"http_status": fetcher.status, "detail": detail, "checked_at": checked_at.isoformat()}
+
+
+def execute_verify_backlinks(
+    store: ServiceOffpageStore,
+    *,
+    limit: int = 25,
+    fetcher_factory: Callable[[], EvidenceFetcher] | None = None,
+    notify: NotifyFn = notify_new_lost,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Verify the due backlinks by fetching each referring page ourselves.
+
+    WHY. `backlinks.status` is a PROVIDER's claim from the last paid pull; nothing
+    ever looked at the page. This sweep is the platform's own observation: fetch
+    `source_url`, look for `target_url` with the same `check_link` the Web 2.0
+    pipeline trusts, and record what was actually seen. Three verdicts on purpose -
+    `live` / `missing` / `unknown` - because "could not check" shown as either of the
+    others silently converts an outage into a false accusation or a false pass.
+
+    LOSS IS CONFIRMED, NEVER INFERRED FROM ONE LOOK: the first `missing` only
+    schedules a +7d re-look; a row missing TWICE flips its monitoring status to
+    `lost` (only from `new` - a `toxic` link stays in the disavow queue whether or
+    not it is still up) and fires the same `notify_new_lost` seam the monitor uses.
+
+    Never raises: one unreachable page must not cost the other rows their check, and
+    a redelivered job would just re-claim whatever is still due (the claim's lease +
+    idempotent verdict writes make that harmless).
+    """
+    moment = now or datetime.now(UTC)
+    try:
+        rows = store.claim_due_backlink_checks(limit=limit)
+    except Exception:
+        logger.exception("backlink_verify_load_failed")
+        return {"state": "error", "checked": 0, "outcomes": {}, "lost_confirmed": 0}
+
+    make_fetcher = fetcher_factory or EvidenceFetcher
+    checked = 0
+    lost_confirmed = 0
+    outcomes: dict[str, int] = {}
+    for row in rows:
+        backlink_id = str(row.get("id"))
+        try:
+            fetcher = make_fetcher()
+            check = check_link(
+                str(row.get("source_url") or ""), str(row.get("target_url") or ""), fetcher
+            )
+            liveness = {"found": "live", "missing": "missing"}.get(check.state, "unknown")
+            if liveness == "unknown" and fetcher.status in _GONE_STATUSES:
+                # The referring page itself answered 404/410. That IS an observation
+                # about the backlink - the page (and the link on it) is gone - not a
+                # failed look, and it is the COMMONEST loss mode: without this the
+                # two-observation `lost` ladder could never start for a deleted page
+                # (the web2 recheck below makes the same upgrade).
+                liveness = "missing"
+            checked += 1
+            outcomes[liveness] = outcomes.get(liveness, 0) + 1
+
+            confirm_lost = liveness == "missing" and str(row.get("liveness") or "") == "missing"
+            # Only a `new` link demotes to `lost`; `toxic` outranks lost (the disavow
+            # queue must keep it) and an already-`lost` row has nothing to flip.
+            mark_lost = confirm_lost and str(row.get("status") or "") == "new"
+            days = (
+                _LIVE_RECHECK_DAYS if liveness == "live"
+                else _MISSING_CONFIRM_DAYS if liveness == "missing"
+                else _UNKNOWN_RETRY_DAYS
+            )
+            store.record_backlink_check(
+                backlink_id,
+                liveness=liveness,
+                link_rel=check.rel,
+                check_evidence=_check_evidence(check, fetcher, moment),
+                checked_at=moment,
+                next_check_at=moment + timedelta(days=days),
+                mark_lost=mark_lost,
+            )
+            if mark_lost:
+                lost_confirmed += 1
+                client_id = str(row["client_id"]) if row.get("client_id") else None
+                notify(client_id, str(row.get("client_name") or ""), [], [dict(row)])
+        except Exception:
+            logger.exception("backlink_verify_row_failed", backlink_id=backlink_id)
+
+    logger.info(
+        "backlink_verify_done", checked=checked, lost_confirmed=lost_confirmed, **outcomes
+    )
+    return {
+        "state": "ok", "checked": checked, "outcomes": outcomes,
+        "lost_confirmed": lost_confirmed,
+    }
+
+
+def _notify_web2_link_lost(
+    client_id: str | None, client_name: str, platform: str, post_url: str
+) -> None:
+    """Alert that a published Web 2.0 property no longer carries its link.
+
+    The same seam shape as ``notify_new_lost``: a LOST placed link is the actionable
+    negative signal, so it rides the existing ``lost_link`` alert taxonomy - lazily +
+    guarded, best-effort, never raises. The log line fires regardless, so even with
+    no client id (a legacy row) the demotion is never silent."""
+    logger.warning(
+        "web2_link_lost", client=client_name, platform=platform, post_url=post_url
+    )
+    if not client_id:
+        return
+    try:
+        import asyncio
+
+        from app.services.notifications import raise_alert
+    except Exception:
+        return
+    detail = (
+        f"the {platform} placement for {client_name} no longer carries its link "
+        f"({post_url})"
+    ).strip()
+    try:
+        asyncio.run(raise_alert(client_id, "lost_link", "warning", detail))
+    except Exception:
+        logger.warning("web2_link_lost_alert_failed", client=client_name)
+
+
+def execute_web2_link_recheck(
+    store: ServiceOffpageStore,
+    *,
+    limit: int = 50,
+    fetcher_factory: Callable[[], EvidenceFetcher] | None = None,
+    now: datetime | None = None,
+    alert: Callable[[str | None, str, str, str], None] = _notify_web2_link_lost,
+) -> dict[str, Any]:
+    """Re-measure the placed link on published Web 2.0 properties.
+
+    `published` was checked ONCE, at publish time; platforms delete posts, strip
+    links and add rel=nofollow afterwards, and none of that notifies us. Sweeping
+    least-recently-checked-first keeps every property inside a bounded staleness
+    window without a per-row schedule.
+
+    HONESTY RULES. A page that answers 404/410 is EVIDENCE (the post is gone), so it
+    demotes like a stripped link; any other failed look stays `unknown` and touches
+    only `link_checked_at` - `link_found` keeps its last real observation, because
+    downgrading it on our own network blip would invent a client-facing defect. A
+    demotion (link_found -> false) always emits the alert seam ON THE TRANSITION, so
+    a lost link is reported once rather than re-alarmed every day it stays lost -
+    and never silently shown green. Never raises."""
+    moment = now or datetime.now(UTC)
+    try:
+        rows = store.list_published_web2_for_recheck(limit=limit)
+    except Exception:
+        logger.exception("web2_link_recheck_load_failed")
+        return {"state": "error", "checked": 0, "outcomes": {}, "demoted": 0}
+
+    make_fetcher = fetcher_factory or EvidenceFetcher
+    checked = 0
+    demoted = 0
+    outcomes: dict[str, int] = {}
+    for row in rows:
+        web2_id = str(row.get("id"))
+        try:
+            fetcher = make_fetcher()
+            check = check_link(
+                str(row.get("post_url") or ""), str(row.get("target_url") or ""), fetcher
+            )
+            state = check.state
+            if state == "unknown" and fetcher.status in _GONE_STATUSES:
+                # The page itself is gone. That IS an observation about the placement
+                # - the post was deleted - not a failed look.
+                state = "missing"
+            checked += 1
+            outcomes[state] = outcomes.get(state, 0) + 1
+
+            if state == "found":
+                store.update_web2(
+                    web2_id,
+                    {"link_found": True, "link_rel": check.rel, "link_checked_at": moment},
+                )
+            elif state == "missing":
+                previously_found = row.get("link_found")
+                store.update_web2(
+                    web2_id,
+                    {"link_found": False, "link_rel": check.rel, "link_checked_at": moment},
+                )
+                if previously_found is not False:
+                    demoted += 1
+                    client_id = str(row["client_id"]) if row.get("client_id") else None
+                    alert(
+                        client_id, str(row.get("client_name") or ""),
+                        str(row.get("platform") or ""), str(row.get("post_url") or ""),
+                    )
+            else:
+                # Could not look: record THAT we tried, change no verdict column.
+                store.update_web2(web2_id, {"link_checked_at": moment})
+        except Exception:
+            logger.exception("web2_link_recheck_row_failed", web2_id=web2_id)
+
+    logger.info("web2_link_recheck_done", checked=checked, demoted=demoted, **outcomes)
+    return {"state": "ok", "checked": checked, "outcomes": outcomes, "demoted": demoted}
 
 
 # --------------------------------------------------------------------------- #
@@ -558,7 +884,19 @@ def _publisher_for(store: ServiceOffpageStore, web2_id: str) -> Web2Publisher | 
             if not vault_label:
                 return None
             logger.info("web2_publisher_legacy_client_label", web2_id=web2_id, platform=platform)
-        return build_publisher(vault_label=vault_label, platform=platform, lookup=find_secret)
+        # OAuth platforms route through the refresh service (Phase 5): the vault holds
+        # a {access_token, refresh_token, expires_at} BUNDLE (or a legacy single
+        # string), and the publisher needs a CURRENT access token - sealing-time
+        # tokens expire within the hour, which is exactly the live Blogger 401. A
+        # failed refresh returns None here, so the publish HOLDS at needs_review
+        # (honest degradation) while the refresh service degrades the account's
+        # health and alerts. Lazy import per the worker template.
+        from app.services.web2_token_refresh import OAUTH_BUNDLE_PLATFORMS, refreshing_lookup
+
+        lookup = find_secret
+        if platform in OAUTH_BUNDLE_PLATFORMS:
+            lookup = refreshing_lookup(platform=platform, account_id=account_id)
+        return build_publisher(vault_label=vault_label, platform=platform, lookup=lookup)
     except Exception:
         logger.warning("web2_publisher_lookup_failed", web2_id=web2_id)
         return None
@@ -731,30 +1069,24 @@ def execute_web2_provision_tick(limit: int = 25) -> dict[str, Any]:
 
 
 def _run_api_signup(platform: str, handle: str) -> tuple[str, dict[str, str], str]:
-    """Drive the platform's own signup API. Returns (status, credentials, error)."""
-    from integrations.web2_signup import SignupContext, api_signup_provider_for
+    """Drive the platform's own signup API. Returns (status, credentials, error).
+
+    The HTTP seam is ``httpx_json`` - the REAL ``HttpJson`` the signup module ships.
+    A local wrapper used to stand here with the wrong signature (``data=`` sent as a
+    JSON body, no ``json_body``/``headers`` kwargs at all), so any provider calling
+    the protocol as documented raised ``TypeError`` and the auto lane never actually
+    ran. There is exactly one correct implementation of that protocol; use it."""
+    from integrations.web2_signup import SignupContext, api_signup_provider_for, httpx_json
 
     provider = api_signup_provider_for(platform)
     if provider is None:
         return ("blocked", {}, f"{platform} has no automatic signup.")
     ctx = SignupContext(
         platform=platform, alias_email="", username=handle or "aios", password="",
-        http=_signup_http(),
+        http=httpx_json,
     )
     result = provider.signup(ctx)
     return (result.status, dict(result.credentials), result.error or "")
-
-
-def _signup_http() -> Any:
-    """The JSON HTTP seam the API signup providers call."""
-    import httpx
-
-    def call(url: str, *, method: str = "GET", data: dict[str, Any] | None = None) -> Any:
-        with httpx.Client(timeout=25.0, follow_redirects=False) as client:
-            resp = client.request(method, url, json=data)
-            return resp.json()
-
-    return call
 
 
 def _check_mail(mailbox: Any, alias: str, since: datetime) -> tuple[bool, str]:
@@ -1008,5 +1340,87 @@ def monitor_offpage_job(
         )
     return JobOutcome.completed(
         f"{counts['citations_new']} new and {counts['citations_changed']} changed listings",
+        result=counts,
+    )
+
+
+def _verify_backlinks_target(limit: int = 25) -> JobTarget:
+    """Idempotency = the DAY. A hand-fired second run on the same day collapses onto
+    the first (nothing new would be due minutes later anyway); the automations
+    dispatcher overrides with its own per-occurrence key, so a scheduled cadence is
+    never blocked by a manual run. No client_id: the sweep is platform-wide."""
+    return JobTarget(idempotency_key=f"backlinks:verify:{datetime.now(UTC):%Y-%m-%d}")
+
+
+@aios_job(
+    name="verify_backlinks",
+    job_name="offpage.verify_backlinks",
+    queue=JobQueue.STANDARD,
+    max_attempts=1,
+    target=_verify_backlinks_target,
+)
+def verify_backlinks_job(ctx: JobContext, limit: int = 25) -> JobOutcome:
+    """Entry point: fetch each due referring page and confirm the client's link.
+
+    Cost: plain HTTP GETs against already-known pages - no provider call, so it does
+    NOT go through the money dial (mirrors citation_liveness_recheck). Driven by the
+    paused `offpage.verify_backlinks` automation row (0134) or on demand; beat stays
+    off either way.
+    """
+    ctx.checkpoint()
+    result = execute_verify_backlinks(service_offpage_store(), limit=limit)
+    counts = {
+        "checked": int(result.get("checked") or 0),
+        "lost_confirmed": int(result.get("lost_confirmed") or 0),
+        "outcomes": result.get("outcomes") or {},
+    }
+    if result.get("state") == "error":
+        # The due list itself could not be read. `completed, 0 checked` would claim
+        # "nothing was due", which is a different fact entirely.
+        return JobOutcome.degraded(
+            "backlink_verify_unavailable",
+            "the backlinks due a check could not be claimed, so none were verified",
+            result=counts,
+        )
+    return JobOutcome.completed(
+        f"verified {counts['checked']} backlinks, {counts['lost_confirmed']} confirmed lost",
+        result=counts,
+    )
+
+
+def _recheck_web2_target(limit: int = 50) -> JobTarget:
+    """Same day-bucket rule as the backlink sweep, same dispatcher-override escape."""
+    return JobTarget(idempotency_key=f"web2:linkcheck:{datetime.now(UTC):%Y-%m-%d}")
+
+
+@aios_job(
+    name="recheck_web2_links",
+    job_name="web2.link_recheck",
+    queue=JobQueue.STANDARD,
+    max_attempts=1,
+    target=_recheck_web2_target,
+)
+def recheck_web2_links_job(ctx: JobContext, limit: int = 50) -> JobOutcome:
+    """Entry point: re-measure the placed link on published Web 2.0 properties.
+
+    `published != still-linked`: this is what keeps `link_found` an observation
+    rather than a publish-day claim. Free (plain GETs), so no money dial; driven by
+    the paused `web2.link_recheck` automation row (0134) or on demand.
+    """
+    ctx.checkpoint()
+    result = execute_web2_link_recheck(service_offpage_store(), limit=limit)
+    counts = {
+        "checked": int(result.get("checked") or 0),
+        "demoted": int(result.get("demoted") or 0),
+        "outcomes": result.get("outcomes") or {},
+    }
+    if result.get("state") == "error":
+        return JobOutcome.degraded(
+            "web2_link_recheck_unavailable",
+            "the published properties could not be listed, so no links were re-checked",
+            result=counts,
+        )
+    return JobOutcome.completed(
+        f"re-checked {counts['checked']} placements, {counts['demoted']} demoted",
         result=counts,
     )

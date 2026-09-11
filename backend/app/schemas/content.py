@@ -557,3 +557,29 @@ class SiteDesignResponse(BaseModel):
     status: Literal["ok", "degraded"]
     profile: SiteDesignProfile | None = None
     reason: str = ""
+
+
+class SiteNavigationRequest(BaseModel):
+    """Assemble a client's navbar from its already-published content pages.
+
+    ``site_url`` is optional: when omitted, the target site is taken from a published
+    job's ``source_pack`` (seeded from the client's site). No page is created here — the
+    pages already exist; this rebuilds the NESTED menu (Services / Locations / Blog
+    parents with their bulk pages as dropdown children)."""
+
+    client_id: str = Field(alias="clientId")
+    site_url: str = Field(default="", alias="siteUrl")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SiteNavigationResponse(BaseModel):
+    """The outcome of a navigation rebuild. ``delivered`` is False (with a ``reason``)
+    when there are no published pages, or no AIOS Publisher plugin is configured for the
+    client's site — an honest no-op, not an error."""
+
+    delivered: bool
+    pages: int
+    menu_items: int = Field(default=0, serialization_alias="menuItems")
+    issues: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    reason: str = ""

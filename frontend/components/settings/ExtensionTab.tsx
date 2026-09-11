@@ -26,6 +26,10 @@ type MintedToken = {
    *  minted the token, never guessed. (The 2026-09-01 outage: extension on :8000,
    *  dashboard on :8099, and no surface anywhere could say so.) */
   apiBase: string;
+  /** The 30-day installation identity this token chains under (0131). The token
+   *  rotates itself every shift; the INSTALL is what expires monthly. */
+  installId: string;
+  pairingExpiresAt: string;
   warning: string;
 };
 
@@ -42,6 +46,9 @@ type TokenRow = {
   expiresAt: string;
   revoked: boolean;
   lastUsedAt: string | null;
+  /** Null only on a legacy token minted before installation identities existed. */
+  installId: string | null;
+  pairingExpiresAt: string | null;
 };
 
 function when(iso: string): string {
@@ -73,8 +80,11 @@ export default function ExtensionTab() {
   });
 
   const mint = useMutation({
+    // Scopes deliberately omitted: the server's default is the granular citation-queue
+    // working set (read/write + client profile). Naming a scope list here is how the
+    // frontend once pinned every mint to the legacy umbrella scope.
     mutationFn: (deviceLabel: string) =>
-      api.post<MintedToken>("/extension/tokens", { deviceLabel, scopes: ["citation_queue"] }),
+      api.post<MintedToken>("/extension/tokens", { deviceLabel }),
     onSuccess: (t) => {
       setMinted(t);
       setCopied(false);
@@ -200,7 +210,9 @@ export default function ExtensionTab() {
             <div className="op-muted" style={{ marginTop: 8, fontSize: 12 }}>
               Open the extension&apos;s side panel and paste the token with this address:{" "}
               <code>{minted.apiBase}</code>. It expires {when(minted.expiresAt)} — about one
-              shift — and can reach the citation queue and nothing else.
+              shift — and can reach the citation queue and nothing else. Once paired, the
+              extension rotates it by itself; this install stays paired until{" "}
+              {when(minted.pairingExpiresAt)}, then you re-pair here.
             </div>
           </div>
         )}
@@ -235,6 +247,10 @@ export default function ExtensionTab() {
 
         {rows.map((t) => {
           const dead = t.revoked || isExpired(t.expiresAt);
+          // The INSTALL is the monthly identity; the token under it rotates itself.
+          // A lapsed pairing window means rotation has stopped extending this device —
+          // the operator re-pairs above (the token may still be live for a few hours).
+          const pairingLapsed = t.pairingExpiresAt !== null && isExpired(t.pairingExpiresAt);
           return (
             <div
               key={t.id}
@@ -255,9 +271,18 @@ export default function ExtensionTab() {
               {/* Minted but never authenticated is the exact signature of a pairing
                   that failed in the browser — amber, because waiting won't fix it. */}
               {!t.lastUsedAt && !dead && <span className="status-pill warn">never connected</span>}
+              {pairingLapsed && !dead && <span className="status-pill warn">re-pair needed</span>}
               <span className="op-muted" style={{ fontSize: 12 }}>
                 {t.lastUsedAt ? `last seen ${when(t.lastUsedAt)}` : "no successful request yet"} ·
                 expires {when(t.expiresAt)}
+                {t.installId && t.pairingExpiresAt && (
+                  <>
+                    {" "}· install <code style={{ fontSize: 11 }}>{t.installId.slice(0, 8)}</code>{" "}
+                    {pairingLapsed
+                      ? `pairing lapsed ${when(t.pairingExpiresAt)}`
+                      : `paired until ${when(t.pairingExpiresAt)}`}
+                  </>
+                )}
               </span>
               {!dead && (
                 <button

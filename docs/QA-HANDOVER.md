@@ -43,8 +43,10 @@ psql "$DATABASE_URL" -f ../db/migrations/*.sql   # in filename order
 cd ../frontend && npm install && npm run dev     # http://localhost:3000
 ```
 
-On Windows there are three double-click launchers at the repo root
-(`Start-Backend.bat`, `Start-Dashboard.bat`, `Finish-Citations.bat`) — see `RUN-LOCALLY.md`.
+On Windows there are two double-click launchers at the repo root
+(`Start-Backend.bat`, `Start-Dashboard.bat`) — see `RUN-LOCALLY.md`. (`Finish-Citations.bat`
+was deleted in the off-page redesign's Phase 0; citations finish through the
+`/admin/citations/queue` page instead.)
 
 **Python 3.14 will not work.** The dependency set does not resolve on it. Use 3.12.
 

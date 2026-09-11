@@ -12,12 +12,16 @@ import { PLATFORM_ISSUES, PLATFORM_META, type Web2Platform, type Web2PlatformSta
  * truth.
  *
  * The board is five-state and every state renders honestly:
- *  - eligible          -> the pickable grid
- *  - not_connected     -> "connect an account", with the setup guide attached
- *  - not_eligible      -> a REVIEWED exclusion, shown with its terms evidence + date
- *  - not_reviewed      -> nobody has read this platform's terms yet; a safe default,
- *                         named as such — never dressed up as a policy verdict
- *  - not_supported     -> catalogued build target, no publisher code yet
+ *  - eligible           -> the pickable grid
+ *  - eligible_extension -> the extension-assisted lane (0135): real and usable, but an
+ *                          OPERATOR publishes there in their own logged-in session via
+ *                          a Phase 7 placement task — listed in its own group, never
+ *                          pickable as an API campaign target
+ *  - not_connected      -> "connect an account", with the setup guide attached
+ *  - not_eligible       -> a REVIEWED exclusion, shown with its terms evidence + date
+ *  - not_reviewed       -> nobody has read this platform's terms yet; a safe default,
+ *                          named as such — never dressed up as a policy verdict
+ *  - not_supported      -> catalogued build target, no publisher code yet
  */
 export default function Web2PlatformPicker({
   clientId,
@@ -56,6 +60,11 @@ export default function Web2PlatformPicker({
   const selectable = [...eligible, ...advisory];
   const needsAccount = board.filter((r) => r.status === "not_connected");
   const notSupported = board.filter((r) => r.status === "not_supported");
+  // The extension-assisted lane (0135). Deliberately NOT in the pickable grid: this
+  // picker chooses API publish targets, and an operator's browser session is not one.
+  // Dropping the rows instead would silently shrink the catalogue — the exact lie the
+  // five-state board exists to prevent.
+  const extensionLane = board.filter((r) => r.status === "eligible_extension");
   const chosenAdvisories = advisory.filter((r) => selected.has(r.platform ?? r.name));
 
   if (!clientId) {
@@ -178,6 +187,22 @@ export default function Web2PlatformPicker({
           but their own rules argue against it. Hover one to read why; choosing it asks
           you to confirm.
         </div>
+      )}
+
+      {extensionLane.length > 0 && (
+        <details className="fld-hint" style={{ marginTop: 8 }}>
+          <summary>
+            {extensionLane.length} extension-assisted platform(s) — an operator publishes
+            there in their own session (placement sessions), not through this pipeline
+          </summary>
+          <ul style={{ margin: "8px 0 0 16px" }}>
+            {extensionLane.map((row) => (
+              <li key={row.name} style={{ marginBottom: 4 }}>
+                <b>{row.name}</b> — {row.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {notSupported.length > 0 && (

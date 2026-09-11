@@ -1,18 +1,19 @@
-"""Unit tests for the web2 house-account signup + verify + provision flow (7B-5).
+"""Unit tests for the web2 house-account API signup + verify + provision flow (7B-5).
 
 Every test runs fully offline with fakes -- no live signup, no real IMAP, no vault:
   * the API providers (Telegra.ph anonymous token, Write.as/WriteFreely signup) over a
     recorder ``HttpJson``;
-  * the spec-driven browser provider over a fake Playwright ``page`` + a fake mailbox
-    that yields a real ``EmailMessage`` (so the REAL ``extract_verification`` parses it);
   * ``provision_account`` sealing the exact ``web2:<platform>`` vault shape, its
     idempotent skip, and its "only a created result is sealed" guarantee.
+
+The Playwright ``BrowserSignupProvider`` (with its CAPTCHA step and human-cadence
+typing) was DELETED in the off-page redesign's Phase 3 (resolution C2) -- a guard
+below keeps it deleted. The guided lane's own tests live in ``test_offpage_worker.py``
+(provisioning tick) and ``test_web2_accounts*``.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from email.message import EmailMessage
 from typing import Any
 
 import pytest
@@ -25,12 +26,10 @@ from integrations.web2_publishers import (
     PLATFORM_WRITEAS,
 )
 from integrations.web2_signup import (
-    LIVEJOURNAL_SIGNUP_SPEC,
     STATUS_BLOCKED,
     STATUS_CREATED,
     STATUS_EXISTS,
     STATUS_FAILED,
-    BrowserSignupProvider,
     FakeSignupProvider,
     TelegraphAnonymousProvider,
     Web2SignupResult,
@@ -76,71 +75,6 @@ class _FakeHttp:
         return resp
 
 
-class _FakeMailbox:
-    """Returns a canned ``EmailMessage`` (or ``None``) and records the alias polled."""
-
-    def __init__(self, message: EmailMessage | None) -> None:
-        self._message = message
-        self.calls: list[str] = []
-
-    def wait_for_message(self, *, to_alias: str, since: datetime, **_: Any) -> EmailMessage | None:
-        self.calls.append(to_alias)
-        return self._message
-
-
-class _FakePage:
-    """Minimal Playwright ``page`` recorder. ``content`` drives the text= indicators."""
-
-    def __init__(self, content: str = "please confirm ... account validated") -> None:
-        self._content = content
-        self.gotos: list[str] = []
-        self.filled: list[tuple[str, str]] = []
-        self.typed: list[tuple[str, str, int]] = []
-        self.checked: list[str] = []
-        self.selected: list[tuple[str, str]] = []
-        self.evaluated: list[Any] = []
-        self.clicked: list[str] = []
-        self.sitekey: str | None = None
-
-    def goto(self, url: str, **_: Any) -> None:
-        self.gotos.append(url)
-
-    def fill(self, selector: str, value: str, **_: Any) -> None:
-        self.filled.append((selector, value))
-
-    def type(self, selector: str, value: str, **kw: Any) -> None:
-        """Typing replaced `fill` in the executor: `fill` sets a value in one assignment,
-        which is a behavioural tell, and several real forms validate on keystroke events
-        a bulk set never fires. The per-character delay is recorded so a regression to a
-        constant (or absent) cadence is visible."""
-        self.filled.append((selector, value))
-        self.typed.append((selector, value, int(kw.get("delay") or 0)))
-
-    def check(self, selector: str, **_: Any) -> None:
-        self.checked.append(selector)
-
-    def is_checked(self, _selector: str) -> bool:
-        return False
-
-    def select_option(self, selector: str, value: str, **_: Any) -> None:
-        self.selected.append((selector, value))
-
-    def get_attribute(self, _selector: str, _name: str) -> str | None:
-        return self.sitekey
-
-    def evaluate(self, _script: str, arg: Any = None) -> None:
-        self.evaluated.append(arg)
-
-    def click(self, selector: str, **_: Any) -> None:
-        self.clicked.append(selector)
-
-    def wait_for_timeout(self, _ms: int) -> None:
-        return None
-
-    def content(self) -> str:
-        return self._content
-
-
 class _FakeVault:
     """In-memory vault seam: ``find``/``add`` over a ``{(provider,label): secret}`` map."""
 
@@ -154,18 +88,6 @@ class _FakeVault:
     def add(self, *, provider: str, label: str, secret: str, kind: str) -> None:
         self.added.append({"provider": provider, "label": label, "secret": secret, "kind": kind})
         self.rows[(provider, label)] = secret
-
-
-def _confirm_email(link: str = "https://www.livejournal.com/confirm?token=abc123") -> EmailMessage:
-    msg = EmailMessage()
-    msg["To"] = "lj-alias@mail.qanry.com"
-    msg["Subject"] = "Confirm your LiveJournal account"
-    msg.set_content(f"Welcome! Please confirm your account: {link}")
-    return msg
-
-
-def _fixed_clock() -> datetime:
-    return datetime(2026, 8, 19, 10, 0, tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -267,47 +189,27 @@ def test_writefreely_provider_missing_token_fails() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Browser provider (spec-driven, injected page + mailbox).
+# The deleted browser lane stays deleted (Phase 3, resolution C2).
 # --------------------------------------------------------------------------- #
-def _browser_ctx(page: Any, mailbox: Any) -> Any:
-    return make_context(
-        platform=PLATFORM_LIVEJOURNAL,
-        client_id=_CLIENT,
-        catchall_domain=_DOMAIN,
-        page=page,
-        mailbox=mailbox,
-    )
+def test_the_browser_signup_lane_stays_deleted() -> None:
+    """`BrowserSignupProvider` carried a CAPTCHA-injection step and human-cadence
+    typing - the anti-detection posture this platform has ruled out - and was never
+    wired to a worker. If it comes back from git history, this fails and points at the
+    guided lane (0123) as the sanctioned path for browser-only platforms."""
+    import integrations.web2_signup as ws
 
-
-def test_browser_signup_happy_path_seals_username_password() -> None:
-    page = _FakePage()
-    mailbox = _FakeMailbox(_confirm_email())
-    ctx = _browser_ctx(page, mailbox)
-    result = BrowserSignupProvider(LIVEJOURNAL_SIGNUP_SPEC).signup(ctx)
-    assert result.status == STATUS_CREATED
-    assert result.credentials == {"username": ctx.username, "password": ctx.password}
-    # It filled the form, submitted, and navigated to the verification link.
-    assert page.clicked == [LIVEJOURNAL_SIGNUP_SPEC.submit_selector]
-    assert any("confirm" in g for g in page.gotos)
-    assert mailbox.calls == [ctx.alias_email]
-
-
-def test_browser_signup_blocks_without_mailbox() -> None:
-    ctx = make_context(
-        platform=PLATFORM_LIVEJOURNAL, client_id=_CLIENT, catchall_domain=_DOMAIN, page=_FakePage()
-    )
-    assert BrowserSignupProvider(LIVEJOURNAL_SIGNUP_SPEC).signup(ctx).status == STATUS_BLOCKED
-
-
-def test_browser_signup_blocks_when_no_verification_email() -> None:
-    ctx = _browser_ctx(_FakePage(), _FakeMailbox(None))
-    assert BrowserSignupProvider(LIVEJOURNAL_SIGNUP_SPEC).signup(ctx).status == STATUS_BLOCKED
-
-
-def test_browser_signup_fails_when_form_not_accepted() -> None:
-    page = _FakePage(content="error: username already taken")  # no success indicator
-    ctx = _browser_ctx(page, _FakeMailbox(_confirm_email()))
-    assert BrowserSignupProvider(LIVEJOURNAL_SIGNUP_SPEC).signup(ctx).status == STATUS_FAILED
+    for name in (
+        "BrowserSignupProvider",
+        "BrowserSignupSpec",
+        "LIVEJOURNAL_SIGNUP_SPEC",
+        "Step",
+        "_solve_captcha",
+        "_run_steps",
+    ):
+        assert not hasattr(ws, name), f"{name} was deleted with the citation bot (C2)"
+    # The context no longer carries browser/captcha seams either.
+    ctx = make_context(platform=PLATFORM_WRITEAS, client_id=_CLIENT, catchall_domain=_DOMAIN)
+    assert not hasattr(ctx, "page") and not hasattr(ctx, "captcha")
 
 
 # --------------------------------------------------------------------------- #

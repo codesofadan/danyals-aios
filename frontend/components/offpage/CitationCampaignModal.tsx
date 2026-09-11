@@ -94,7 +94,9 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
   const engineQ = useCitationEngineStatus();
   const queueBoardQ = useCitationQueue();
   const specBoardQ = useSpecBoard();
-  // Directory ids with an ACTIVE earned spec — the bot really will attempt these.
+  // Directory ids with an ACTIVE earned spec — the EXTENSION pre-fills these forms
+  // for the operator. Post-retirement (Phase 3) a spec never means machine
+  // submission: it only makes the team's queue work faster.
   const activeSpecDirs = useMemo(
     () =>
       new Set(
@@ -103,14 +105,17 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
     [specBoardQ.data],
   );
 
-  // The honest split: where each selected directory will actually go. Derived from
-  // the engine board (transport) — the earned-spec whitelist decides the bot rows,
-  // and with it empty every bot-tier row is your team's work.
+  // The honest split: where each selected directory will actually go. Only the two
+  // direct-API engines ever submit by machine — the form bot is RETIRED (Phase 3):
+  // the backend routes every bot:*/aggregator/manual row to the operator queue
+  // regardless of an earned spec (`submitter_for`), so every non-api row is the
+  // team's work here too. Saying otherwise at the dispatch moment would promise
+  // automation that cannot happen and hide unplanned operator time.
   const split = useMemo(() => {
     const engines = new Map((engineQ.data?.engines ?? []).map((e) => [e.key, e.connected]));
-    const specCount = engineQ.data?.machineSubmittableDirectories ?? 0;
     let auto = 0;
     let team = 0;
+    let autofill = 0; // team rows where an earned spec lets the extension pre-fill
     const held: { name: string; why: string }[] = [];
     for (const d of selected) {
       const method = d.submitMethod || "";
@@ -122,13 +127,12 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
         else team += 1; // keyless → routed to the operator queue
       } else if (method.startsWith("api:")) {
         team += 1; // gbp & friends: no engine written → queue
-      } else if (activeSpecDirs.has(d.id)) {
-        auto += 1; // an EARNED spec: the bot really attempts this one
       } else {
-        team += 1; // bot tiers without an earned spec are queue work
+        team += 1; // every form/manual row is a PERSON's work — the bot is retired
+        if (activeSpecDirs.has(d.id)) autofill += 1;
       }
     }
-    return { auto, team, held, specCount };
+    return { auto, team, autofill, held };
   }, [selected, engineQ.data, activeSpecDirs]);
 
   const canSaveProfile = businessName.trim().length > 1 && addressLine1.trim().length > 1 && city.trim().length > 0;
@@ -186,14 +190,20 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
   const clientOptions = useMemo(() => clientsQ.data ?? [], [clientsQ.data]);
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+    // The modal-scrim / modal styles are scoped `.tw .modal-scrim` in globals.css, so
+    // without a `.tw` ancestor this rendered inline as a card instead of a fixed
+    // overlay. Every working modal (EditClientModal, AddClientWizard…) self-wraps in
+    // `.tw`; the admin layout does NOT provide one.
+    <div className="tw">
+      <div className="modal-scrim" onClick={onClose}>
+        <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-h">
           <div>
             <div className="modal-t">Build citations</div>
             <div className="modal-s">
-              Queue a submission campaign — direct API, aggregator push, or the self-hosted
-              Playwright bot, by directory tier. Manual-only directories never queue.
+              Queue a submission campaign — direct API and aggregator rows submit
+              automatically; every form directory routes to your team&apos;s queue (the
+              extension autofills where a spec is earned). Manual-only directories never queue.
             </div>
           </div>
           <button type="button" className="modal-x" onClick={onClose} aria-label="Close">
@@ -468,7 +478,7 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                           method === "api:data_axle"
                             ? { label: "held — unpriced", cls: "warn" }
                             : activeSpecDirs.has(d.id)
-                              ? { label: "bot — spec earned", cls: "ok" }
+                              ? { label: "your team — autofill ready", cls: "ok" }
                               : { label: "your team", cls: "info" };
                         return (
                           <label key={d.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 2px", cursor: "pointer" }}>
@@ -509,15 +519,18 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
                   <div className="op-note warn" style={{ marginTop: 8 }}>
                     <b>Ready to build {selected.length} directories:</b>
                     <div style={{ marginTop: 4 }}>
-                      • <b>{split.auto}</b> will be attempted automatically.
-                      {split.specCount === 0 && split.auto === 0 && (
-                        <> No directory has an earned form spec yet — each one your team
-                        finishes by hand can be taught to the bot afterwards.</>
-                      )}
+                      • <b>{split.auto}</b> will be attempted automatically — direct-API
+                      engines only. Form directories are always your team&apos;s work now;
+                      the form bot is retired.
                     </div>
                     <div>
-                      • <b>{split.team}</b> will go to your team&apos;s queue — every field
-                      pre-filled, each verified live by fetching its URL before it counts.
+                      • <b>{split.team}</b> will go to your team&apos;s queue
+                      {split.autofill > 0 && (
+                        <> ({split.autofill} with an earned spec, so the extension
+                        pre-fills the form)</>
+                      )}{" "}
+                      — every field pre-filled, each verified live by fetching its URL
+                      before it counts.
                       {queueBoardQ.data?.medianSeconds != null ? (
                         <> Estimated operator time ~
                         {Math.round((split.team * queueBoardQ.data.medianSeconds) / 60)} min
@@ -566,6 +579,7 @@ export default function CitationCampaignModal({ onClose, initialClientId }: { on
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

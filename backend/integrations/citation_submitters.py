@@ -7,11 +7,13 @@ a listing already exists (a BrightLocal-style read). Every directory in the cata
 engine handles it - this module defines the shared contract every engine implements,
 so the worker dispatches on ``tier`` without caring which concrete engine runs:
 
-* ``api``               - a direct, documented write API (``integrations.citation_apis``).
+* ``api``               - a direct, documented write API
+  (``integrations.citation_aggregators``: Data Axle, Apple Business Connect).
 * ``aggregator``        - a push to a data aggregator that fans out downstream (same
   module - an aggregator push and a direct API write share this Protocol).
-* ``bot_fillable`` / ``captcha_assisted`` - a Playwright form-fill
-  (``integrations.citation_bot``), the latter routed through a CAPTCHA solver first.
+* ``bot_fillable`` / ``captcha_assisted`` - HUMAN work in the operator queue since the
+  Playwright form bot's retirement (off-page redesign Phase 3, C1); earned directory
+  specs power extension autofill there. Nothing machine-submits these tiers.
 * ``manual_only`` directories have NO engine and are never dispatched to a worker -
   they exist in the catalog purely for completeness/reporting.
 
@@ -27,10 +29,9 @@ from typing import Protocol, runtime_checkable
 
 # Submission outcomes. 'blocked' is distinct from 'failed': a cost-gate hold or an
 # explicit "this directory requires manual review" case, vs. an engine actually
-# erroring out mid-submit. 'ready_for_human' is distinct from both: the bot got far
-# enough to hit a CAPTCHA it couldn't clear (or an undeclared one it wasn't
-# expecting) - the browser profile is left paused, not torn down, so a human can
-# finish the step through a remote session instead of the engine giving up.
+# erroring out mid-submit. 'ready_for_human' is distinct from both: the row is real
+# work a PERSON can finish through the operator queue - since the form bot's
+# retirement it is the standard disposition for every form-tier directory.
 CitationSubmitStatus = str  # 'submitted' | 'verified' | 'failed' | 'blocked' | 'ready_for_human'
 
 

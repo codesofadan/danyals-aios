@@ -17,6 +17,31 @@ from pathlib import Path
 
 from app.config import Settings
 
+# The evidence-tier rule (0129). The pure function lives in integrations/citations.py
+# because the discovery sources derive their tiers there and integrations must not
+# import app.modules (this package's __init__ pulls the router, i.e. the whole API
+# surface). Re-exported here (see __all__) so the module layer + tests read it from
+# its natural home.
+from integrations.citations import (
+    EVIDENCE_CONFIRMED,
+    EVIDENCE_INCONSISTENT_NAP,
+    EVIDENCE_LEVELS,
+    EVIDENCE_NO_EVIDENCE,
+    EVIDENCE_UNCERTAIN,
+    evidence_level_for,
+)
+
+__all__ = [
+    "EVIDENCE_CONFIRMED",
+    "EVIDENCE_INCONSISTENT_NAP",
+    "EVIDENCE_LEVELS",
+    "EVIDENCE_NO_EVIDENCE",
+    "EVIDENCE_UNCERTAIN",
+    "CitationEvidenceStore",
+    "citation_evidence_store",
+    "evidence_level_for",
+]
+
 
 class CitationEvidenceStore:
     """Traversal-safe reader for the citation proof-screenshot root."""

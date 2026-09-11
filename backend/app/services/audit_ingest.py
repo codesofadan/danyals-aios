@@ -26,8 +26,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.db.database import privileged_connection
-from app.services import audit_roadmap as RM
-from app.services import audit_rollups as R
+from app.services import audit_roadmap as RM  # noqa: N812 - module-as-namespace alias
+from app.services import audit_rollups as R  # noqa: N812 - module-as-namespace alias
 from app.services.audit_altitude import (
     FINGERPRINT_VERSION,
     Cause,

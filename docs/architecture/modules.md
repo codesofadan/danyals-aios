@@ -70,7 +70,10 @@ proxy spend. Every off-page query is pinned to the client's own profile
   fingerprints, `0103` platform tiers + per-client eligibility, `0104` pacing +
   measured link `rel`, `0105` campaigns).
 - API: `/offpage/kpis`, `/offpage/backlinks` (+ `/flag-toxic`), `/offpage/citations`
-  (+ `/action`, `/bulk`), `/offpage/web2` (+ `/plan`, `/{id}/approve`, `/catalog`,
+  (+ `/action` — annotation-only since the off-page redesign's Phase 0: `Note` is the
+  one verb; `Submit`/`Update` and all of `/bulk` refuse with 409 because a listing is
+  marked live/consistent only by the probe-verified operator-queue complete path),
+  `/offpage/web2` (+ `/plan`, `/{id}/approve`, `/catalog`,
   `/platform-board`, `/campaigns` + `/campaigns/estimate` + `/campaigns/{id}`
   + `/campaigns/{id}/approve` — ONE operator decision that still transitions each
   property individually and re-runs the gate per row, because Tumblr's API License
@@ -93,10 +96,15 @@ proxy spend. Every off-page query is pinned to the client's own profile
   `label = <web2_accounts.id>` (migration `0100`; the `WEB2_HOUSE_CREDENTIALS_JSON`
   fan-out was removed 2026-08-25 under R2-06); citations `DATA_AXLE_API_KEY` +
   `DATA_AXLE_ADD_COST_ESTIMATE` (both required — O-2), `APPLE_BUSINESS_API_KEY` +
-  `APPLE_BUSINESS_ORG_ID`, `CAPTCHA_SOLVER_*`, `CITATION_PROXY_URL`, `CITATION_IMAP_*`
-  + `CITATION_MAIL_DOMAIN` (signup bot, off pending the human loop). The Bing/
-  Foursquare submitters were DELETED 2026-08-23 (their write endpoints 404) — those
-  keys enable nothing; `FOURSQUARE_API_KEY` remains live for DISCOVERY reads only.
+  `APPLE_BUSINESS_ORG_ID`, `CITATION_IMAP_*` + `CITATION_MAIL_DOMAIN` (the shared
+  catch-all mailbox — still live, it serves guided signups). The Playwright
+  form/signup bot, its CAPTCHA solver and residential proxy were RETIRED 2026-09-05
+  (off-page redesign Phase 3): `CAPTCHA_SOLVER_*` and `CITATION_PROXY_URL` are no
+  longer read — cancel those subscriptions; form directories are worked by operators
+  through the citation queue (the Chrome extension autofills where a directory spec
+  is earned). The Bing/Foursquare
+  submitters were DELETED 2026-08-23 (their write endpoints 404) — those keys
+  enable nothing; `FOURSQUARE_API_KEY` remains live for DISCOVERY reads only.
   Full: `backend/docs/CITATIONS-WEB2-CREDENTIALS.md`.
 - Skills: `offpage`, `backlink-audit`, `citation-builder`, `citation-submit`, `web2-build`.
 

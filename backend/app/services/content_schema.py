@@ -107,6 +107,19 @@ _REQUIRED_BY_TYPE: dict[str, frozenset[str]] = {
     "BreadcrumbList": frozenset({"itemListElement"}),
     "FAQPage": frozenset({"mainEntity"}),
     "HowTo": frozenset({"name", "step"}),
+    # Schema.org's REQUIRED properties for the extended SEO types a planner may inject.
+    # A node missing any of these is malformed/empty and is rejected (never emitted),
+    # so a bare `{"@type":"Product"}` or a ghost JobPosting cannot ship as clean markup.
+    "Product": frozenset({"name"}),
+    "Event": frozenset({"name", "startDate", "location"}),
+    "Recipe": frozenset({"name", "recipeIngredient", "recipeInstructions"}),
+    "JobPosting": frozenset({"title", "datePosted", "hiringOrganization"}),
+    "Course": frozenset({"name", "provider"}),
+    "SoftwareApplication": frozenset({"name", "applicationCategory"}),
+    "VideoObject": frozenset({"name", "description", "thumbnailUrl", "uploadDate"}),
+    "Review": frozenset({"itemReviewed", "reviewRating", "author"}),
+    "WebSite": frozenset({"name", "url"}),
+    "WebPage": frozenset({"name"}),
 }
 
 # Recommended-but-not-required properties (missing -> warning, not error).
@@ -117,6 +130,24 @@ _RECOMMENDED_BY_FAMILY: dict[str, tuple[str, ...]] = {
 }
 
 _SCHEMA_CONTEXT = "https://schema.org"
+
+# Schema.org has a large vocabulary and Google adds/removes rich-result features
+# independently of it. Keep the generator open to every SEO-relevant node while
+# retaining a small discoverable catalogue for planners and callers.
+SEO_SCHEMA_TYPES: frozenset[str] = frozenset(
+    {
+        "Article", "BlogPosting", "BreadcrumbList", "Course", "Event", "FAQPage",
+        "HowTo", "JobPosting", "LocalBusiness", "Organization", "Product", "Recipe",
+        "Review", "Service", "SoftwareApplication", "VideoObject", "WebPage", "WebSite",
+    }
+)
+
+# Extended SEO types that carry a single human-visible name/title claim the page must
+# state (Recipe is handled on its own because its ingredients are claims too; Review is
+# excluded because its claim lives in a nested itemReviewed object, not a bare name).
+_INJECTED_NAMED_TYPES: frozenset[str] = frozenset(
+    {"Product", "Event", "JobPosting", "Course", "SoftwareApplication", "VideoObject", "WebPage", "WebSite"}
+)
 
 # Match-visible claim kinds.
 _TEXT = "text"
@@ -248,6 +279,10 @@ class Page:
     image: str = ""
     faqs: tuple[FaqItem, ...] = ()
     how_to_steps: tuple[HowToStep, ...] = ()
+    # Additional evidence-backed nodes are supplied by research/page planners. The
+    # primary page node above remains deterministic; this avoids pretending every
+    # page is a Product, Event, or Recipe when the visible page does not say so.
+    schema_nodes: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -442,6 +477,35 @@ def _howto_node(page: Page) -> dict[str, Any] | None:
     }
 
 
+def _additional_schema_nodes(page: Page) -> list[dict[str, Any]]:
+    """Emit caller-supplied SEO nodes FAIL-CLOSED: a node ships only if its ``@type`` is
+    a recognized SEO type (``SEO_SCHEMA_TYPES``) AND it carries every property schema.org
+    requires for that type. Anything else - an empty ``{"@type":"Product"}``, a ghost
+    ``JobPosting``, an unknown type - is DROPPED, not emitted, because invalid/invisible
+    structured data is the fastest way to earn a Google manual action (the whole reason
+    this module exists). Well-formed nodes still face the visible-content match in
+    :func:`validate_json_ld`, which will error a fabricated claim that is not on the page."""
+    nodes: list[dict[str, Any]] = []
+    for raw in page.schema_nodes:
+        if not isinstance(raw, dict):
+            continue
+        type_name = raw.get("@type")
+        if not isinstance(type_name, str) or not type_name.strip():
+            continue
+        clean = type_name.strip()
+        if clean not in SEO_SCHEMA_TYPES:
+            continue  # unknown/unvetted type - do not ship it
+        node = dict(raw)
+        node["@type"] = clean
+        # Reject a node missing any required property for its type (empty/fabricated).
+        errors: list[str] = []
+        _check_required(node, clean, errors)
+        if errors:
+            continue
+        nodes.append(node)
+    return nodes
+
+
 def _service_graph(
     business: Business, page: Page, breadcrumbs: Sequence[Breadcrumb]
 ) -> list[dict[str, Any]]:
@@ -583,6 +647,7 @@ def build_json_ld(
     howto = _howto_node(page)
     if howto is not None:
         graph.append(howto)
+    graph.extend(_additional_schema_nodes(page))
 
     return {"@context": _SCHEMA_CONTEXT, "@graph": graph}
 
@@ -683,6 +748,21 @@ def _content_claims(node: Mapping[str, Any]) -> Iterator[tuple[str, str, str]]:
             value = step.get("name") or step.get("text")
             if isinstance(value, str) and value:
                 yield ("HowTo step", value, _TEXT)
+    elif _primary_type(node) == "Recipe":
+        # A recipe's name AND every listed ingredient are human claims that must be on
+        # the page - a fabricated ingredient list is the classic invisible-claim trap.
+        name = node.get("name")
+        if isinstance(name, str) and name:
+            yield ("Recipe name", name, _TEXT)
+        for ingredient in _as_list(node.get("recipeIngredient")):
+            yield ("Recipe ingredient", ingredient, _TEXT)
+    elif _primary_type(node) in _INJECTED_NAMED_TYPES:
+        # The extended SEO types (Product, Event, JobPosting, …) each carry a headline
+        # name/title the visible page must actually state, so a ghost node is caught.
+        label = _primary_type(node)
+        headline = node.get("name") or node.get("title")
+        if isinstance(headline, str) and headline:
+            yield (f"{label} name", headline, _TEXT)
 
 
 def _visible_match(value: str, kind: str, visible: VisibleContent) -> bool:

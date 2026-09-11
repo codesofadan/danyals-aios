@@ -150,6 +150,65 @@ def build_site_plan(
 
     by_slug = {p.slug: p for p in planned}
 
+    # Bulk generators often know a page's family but do not repeat the hub slug on
+    # every item. When the matching hub is part of this same delivery, nest the
+    # generated pages under it so WordPress can render one nav link with a dropdown.
+    hub_by_type = {"service": "services", "local": "locations", "blog": "blog"}
+    available_hubs = set(by_slug)
+    raw_by_slug = {
+        slugify(str(raw.get("slug") or "") or str(raw.get("title") or "")): raw
+        for raw in pages
+        if isinstance(raw, dict)
+    }
+
+    # AUTO-CREATE a missing family hub so the nav dropdown ALWAYS forms. Without a
+    # "Services"/"Locations"/"Blog" parent in the delivery, the bulk pages would fall
+    # flat as top-level links with no dropdown and no signal (the gap this closes). We
+    # synthesize a minimal hub page, flag it for real landing content, and nest under it.
+    hub_titles = {"services": "Services", "locations": "Locations", "blog": "Blog"}
+    needed_hubs: dict[str, str] = {}
+    for page in planned:
+        raw = raw_by_slug.get(page.slug, {})
+        page_type = str(raw.get("page_type") or raw.get("pageType") or "").lower()
+        group_slug = slugify(str(raw.get("navigation_group") or raw.get("nav_group") or ""))
+        hub = group_slug or hub_by_type.get(page_type, "")
+        if hub and hub != page.slug and hub not in by_slug:
+            needed_hubs.setdefault(hub, hub_titles.get(hub) or hub.replace("-", " ").title())
+    for hub_slug, hub_title in needed_hubs.items():
+        planned.append(PlannedPage(
+            slug=hub_slug, title=hub_title,
+            content=f"<p>Explore our {hub_title.lower()}.</p>",
+            elementor_data="", template="", parent_slug="", menu_order=0, in_menu=True,
+        ))
+        notes.append(
+            f"auto-created a {hub_title!r} hub page so its bulk pages nest under one nav "
+            "dropdown — give it real landing content before publish"
+        )
+    if needed_hubs:
+        by_slug = {p.slug: p for p in planned}
+        available_hubs = set(by_slug)
+
+    grouped: list[PlannedPage] = []
+    for page in planned:
+        raw = raw_by_slug.get(page.slug, {})
+        explicit_parent = page.parent_slug
+        page_type = str(raw.get("page_type") or raw.get("pageType") or "").lower()
+        group_slug = slugify(str(raw.get("navigation_group") or raw.get("nav_group") or ""))
+        suggested_parent = group_slug or hub_by_type.get(page_type, "")
+        parent_slug = explicit_parent or (
+            suggested_parent if suggested_parent in available_hubs and suggested_parent != page.slug else ""
+        )
+        grouped.append(
+            page if parent_slug == explicit_parent else PlannedPage(
+                slug=page.slug, title=page.title, content=page.content,
+                elementor_data=page.elementor_data, template=page.template,
+                parent_slug=parent_slug, menu_order=page.menu_order,
+                in_menu=page.in_menu, is_front_page=page.is_front_page,
+            )
+        )
+    planned = grouped
+    by_slug = {p.slug: p for p in planned}
+
     for page in planned:
         if page.parent_slug and page.parent_slug not in by_slug:
             issues.append(

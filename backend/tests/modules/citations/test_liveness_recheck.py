@@ -195,3 +195,80 @@ def test_a_brand_new_listing_walks_the_settling_ladder() -> None:
     execute_liveness_recheck(store, fetch=_serving(f"<p>{_NAME}</p><p>555-010-9999</p>"))
     days = (store.updates["c1"]["next_recheck_at"] - before).days
     assert days in (2, 3)
+
+
+# --------------------------------------------------------------------------- #
+# Discovered-URL promotion (0129): THE PROBE GRANTS LIVE - discovery never does.
+# --------------------------------------------------------------------------- #
+def _discovered_row(cid: str = "c1", **over: Any) -> dict[str, Any]:
+    row = _row(
+        cid,
+        live_url="",
+        submit_status="not_started",
+        recheck_count=0,
+        discovered_url="https://directory.example/biz/bright-harbour",
+        evidence_level="confirmed",
+    )
+    row.update(over)
+    return row
+
+
+def test_a_passing_probe_promotes_a_discovered_url_to_live() -> None:
+    store = _FakeStore([_discovered_row()])
+    execute_liveness_recheck(store, fetch=_serving(f"<p>{_NAME}</p><p>555-010-9999</p>"))
+    written = store.updates["c1"]
+    assert written["submit_status"] == "live"
+    assert written["live_url"] == "https://directory.example/biz/bright-harbour"
+    # 'discovery' is the method 0106 reserved for exactly this promotion path.
+    assert written["verification_method"] == "discovery"
+    assert isinstance(written["live_url_verified_at"], datetime)
+
+
+def test_a_probe_that_finds_the_name_but_not_the_nap_promotes_as_drifted() -> None:
+    """The listing EXISTS at the discovered URL (it covers the directory) but its NAP
+    no longer matches ours - the existing judge's `drifted`, not a fresh `live`."""
+    store = _FakeStore([_discovered_row()])
+    execute_liveness_recheck(store, fetch=_serving(f"<p>{_NAME}</p><p>555-777-1234</p>"))
+    written = store.updates["c1"]
+    assert written["submit_status"] == "drifted"
+    assert written["live_url"] == "https://directory.example/biz/bright-harbour"
+    assert written["verification_method"] == "discovery"
+    assert "live_url_verified_at" not in written  # only a confirmed LIVE stamps it
+
+
+def test_a_failing_probe_never_grants_live_and_demotes_the_tier() -> None:
+    """The probe looked and the business was not there. That is NOT a delisting
+    (nothing was ever live here) - it is the discovery claim failing verification, so
+    the row keeps live_url='' and drops to the verify-first bucket."""
+    store = _FakeStore([_discovered_row()])
+    execute_liveness_recheck(store, fetch=_serving("", status=404))
+    written = store.updates["c1"]
+    assert "live_url" not in written, "a failed probe must never write live_url"
+    assert "submit_status" not in written, "delisted would claim it was once live"
+    assert "verification_method" not in written
+    assert written["evidence_level"] == "uncertain"
+
+
+def test_a_soft_404_on_the_discovered_url_also_refuses_promotion() -> None:
+    """A removed/wrong listing usually 301s to a healthy homepage - 200 with no
+    business name on it proves nothing, so nothing is promoted."""
+    store = _FakeStore([_discovered_row()])
+    execute_liveness_recheck(store, fetch=_serving("<p>Welcome to Example Directory</p>"))
+    written = store.updates["c1"]
+    assert "live_url" not in written
+    assert written["evidence_level"] == "uncertain"
+
+
+def test_an_unreachable_host_neither_promotes_nor_demotes_a_discovery() -> None:
+    """Could-not-look holds a promotion candidate exactly as it holds a live row: our
+    own timeout is evidence of nothing, so the tier stands and it is retried soon."""
+
+    def _boom(_url: str) -> LivenessProbe:
+        raise TimeoutError("connect timeout")
+
+    store = _FakeStore([_discovered_row()])
+    execute_liveness_recheck(store, fetch=_boom)
+    written = store.updates["c1"]
+    assert "live_url" not in written
+    assert "evidence_level" not in written  # the failed look is not a verdict
+    assert "submit_status" not in written

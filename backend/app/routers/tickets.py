@@ -24,6 +24,7 @@ from app.db.clients_repo import ClientsRepoDep
 from app.db.tasks_repo import TasksRepoDep
 from app.db.threads_repo import ThreadsRepo, ThreadsRepoDep
 from app.db.tickets_repo import TicketsRepoDep
+from app.logging_setup import get_logger
 from app.schemas.tasks import TaskResponse
 from app.schemas.tickets import (
     TicketCreate,
@@ -33,7 +34,6 @@ from app.schemas.tickets import (
     TicketStatusUpdate,
     TicketToTaskRequest,
 )
-from app.logging_setup import get_logger
 from app.services.activity import record_activity
 from app.services.notifications import email_client, notify_client_in_app
 from app.services.task_assignment import assign_task

@@ -298,10 +298,15 @@ def env() -> Any:
             (artifact_dir / "report.pdf").write_bytes(b"%PDF-1.4 contract-test\n%%EOF\n")
             (artifact_dir / "findings.json").write_text('{"findings": []}', encoding="utf-8")
             cur.execute(
+                # visible_to_client=true is the operator's 0096 disclosure opt-in:
+                # since 20436e0 the portal serves ONLY audits someone decided to
+                # publish, so the "client reads its own done audit" cases below
+                # model a published one. Without it they would probe the
+                # unpublished-404 branch and prove nothing about ownership.
                 "insert into public.audits "
                 "(id, client_id, client_name, url, types, tier, status, score, scores, "
-                " runtime_seconds, pdf_path, json_path) "
-                "values (%s, %s, 'Contract Test Co', %s, %s, 'free', 'done', 88, %s, 372, %s, %s)",
+                " runtime_seconds, pdf_path, json_path, visible_to_client) "
+                "values (%s, %s, 'Contract Test Co', %s, %s, 'free', 'done', 88, %s, 372, %s, %s, true)",
                 (
                     audit_a2_id, tenant_id, _PUBLIC_URL, ["technical"],
                     Json({"overall": 88, "technical": 90}),
@@ -490,7 +495,11 @@ def _matrix_cases(env: Any) -> list[dict[str, Any]]:
         # --- clients ---
         c("clients.list.owner", "owner", "GET", f"{v}/clients", 200, shape=ClientResponse, is_list=True),
         c("clients.list.unauth", None, "GET", f"{v}/clients", 401),
-        c("clients.list.client", "client", "GET", f"{v}/clients", 200, shape=ClientResponse, is_list=True),
+        # 098988e put require_staff() on the client reads and /activity: "an
+        # absent policy is not the app layer granting anything". Before it, a
+        # client got 200 with RLS naming the zero; the deliberate contract is
+        # now an app-layer refusal, not an empty list.
+        c("clients.list.client", "client", "GET", f"{v}/clients", 403),
         c("clients.post.specialist", "specialist", "POST", f"{v}/clients", 403, body=valid_client_body),
         c("clients.get.owner", "owner", "GET", f"{v}/clients/{t}", 200, shape=ClientResponse),
         c("clients.get.missing", "owner", "GET", f"{v}/clients/{missing}", 404),
@@ -525,7 +534,7 @@ def _matrix_cases(env: Any) -> list[dict[str, Any]]:
         # --- activity ---
         c("activity.owner", "owner", "GET", f"{v}/activity", 200, shape=ActivityResponse, is_list=True),
         c("activity.unauth", None, "GET", f"{v}/activity", 401),
-        c("activity.client", "client", "GET", f"{v}/activity", 200, shape=ActivityResponse, is_list=True),
+        c("activity.client", "client", "GET", f"{v}/activity", 403),  # 098988e, as above
         # --- cost ---
         c("cost.budgets.owner", "owner", "GET", f"{v}/cost/budgets", 200, shape=ClientBudgetResponse, is_list=True),
         c("cost.budgets.put.specialist", "specialist", "PUT", f"{v}/cost/budgets/{t}", 403, body={"cap": 100}),
@@ -860,7 +869,11 @@ async def test_validation_contract_422(env: Any) -> None:
     async with LifespanManager(app):
         for label, method, path, body in [
             ("clients.missing.cn", "POST", "/api/v1/clients", {"industry": "x"}),
-            ("audits.missing.client_id", "POST", "/api/v1/audits", {"url": _PUBLIC_URL}),
+            # `client_id` is deliberately OPTIONAL on AuditCreate (a client-less
+            # internal/prospect run - see the schema's comment), so omitting it is
+            # a VALID body. The malformed-body probe for this endpoint is a
+            # missing `url`, which is required and min_length=1.
+            ("audits.missing.url", "POST", "/api/v1/audits", {"client_id": t}),
             ("tasks.bad.type", "POST", "/api/v1/tasks",
              {"title": "x", "client_id": t, "type": "Bogus Type", "assignee_id": env["staff_uids"]["owner"]}),
             ("budget.negative.cap", "PUT", f"/api/v1/cost/budgets/{t}", {"cap": -5}),

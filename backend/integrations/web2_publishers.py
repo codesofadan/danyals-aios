@@ -190,7 +190,6 @@ from urllib.parse import quote
 
 import jwt as pyjwt  # already a base dependency (pyjwt[crypto]) - signs Ghost's Admin JWT
 
-from app.config import Settings
 from app.logging_setup import get_logger
 from integrations.errors import ProviderCallError, ProviderNotConfiguredError
 from integrations.http_client import HttpProviderClient
@@ -3135,16 +3134,11 @@ def _slugify(title: str) -> str:
     return slug or "post"
 
 
-def web2_publisher_from_settings(settings: Settings) -> Web2Publisher | None:
-    """The default publisher a WORKER uses, or ``None`` (degraded - hold at review).
-
-    Live Web 2.0 publishing needs a per-account OAuth token that is per-property and
-    lives in the VAULT, NOT in settings (mirroring WordPress application passwords). The
-    factory has no such credential, so it returns ``None`` and the publish stage HOLDS
-    the placement at the review gate until the service layer builds a real per-account
-    client from the vault (a later chunk). No secret is ever logged - only the reason."""
-    logger.info("web2_publisher_degraded", reason="per_account_oauth_in_vault")
-    return None
+# NOTE: `web2_publisher_from_settings` is GONE (Phase 5 cleanup). It was a stub that
+# always returned None - "the default publisher a worker uses" that no worker ever
+# called, because the real dispatch is `integrations.web2_credentials.build_publisher`
+# (per-account, vault-backed) and has been since 7B-4. A permanently-degraded factory
+# with zero callers is exactly the kind of thing that gets wired in by mistake later.
 
 
 # --------------------------------------------------------------------------- #

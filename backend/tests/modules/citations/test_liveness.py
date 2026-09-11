@@ -414,3 +414,100 @@ def test_the_database_enum_and_the_wire_type_hold_the_same_values() -> None:
         f"db-only: {sorted(db_values - literal_values)}; "
         f"literal-only: {sorted(literal_values - db_values)}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The probe's redirect handling: every hop SSRF-re-validated BEFORE it is fetched.
+# --------------------------------------------------------------------------- #
+class _RedirectResp:
+    def __init__(self, status_code: int, *, text: str = "", location: str = "") -> None:
+        self.status_code = status_code
+        self.text = text
+        self.headers = {"location": location} if location else {}
+
+
+def _scripted_httpx(monkeypatch: pytest.MonkeyPatch, pages: dict[str, _RedirectResp]) -> list[str]:
+    """Replace httpx.Client with a script keyed by URL; returns the fetch log."""
+    import httpx
+
+    fetched: list[str] = []
+
+    class _Client:
+        def __init__(self, **kw: object) -> None:
+            # The contract under test: redirects must NOT be followed transparently.
+            assert kw.get("follow_redirects") is False
+
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *a: object) -> bool:
+            return False
+
+        def get(self, url: str) -> _RedirectResp:
+            fetched.append(url)
+            return pages[url]
+
+    monkeypatch.setattr(httpx, "Client", _Client)
+    return fetched
+
+
+def test_a_redirect_into_a_private_host_is_refused_before_it_is_fetched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SSRF the callers' initial is_public_url cannot catch: a PUBLIC listing URL
+    that 302s into a private range. The private hop must never be requested — with
+    automatic redirects the GET fires before any check, and the internal page's
+    status/body would leak through the verdict's evidence and matched_fields."""
+    import app.core.security as security
+    from app.services.citation_liveness import http_liveness_probe
+
+    monkeypatch.setattr(security, "is_public_url", lambda u: "internal" not in u)
+    fetched = _scripted_httpx(monkeypatch, {
+        "https://directory.example/biz/1": _RedirectResp(
+            302, location="http://internal.host/admin"
+        ),
+    })
+
+    probe = http_liveness_probe("https://directory.example/biz/1")
+    assert probe.status_code is None  # "could not look" — held, never judged
+    assert fetched == ["https://directory.example/biz/1"], (
+        "the private redirect target must never be requested"
+    )
+    v = judge_liveness(probe, business_name=_NAME, phone=_PHONE)
+    assert v.status == SUBMITTED
+
+
+def test_a_public_redirect_chain_is_followed_and_the_landing_page_judged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.security as security
+    from app.services.citation_liveness import http_liveness_probe
+
+    monkeypatch.setattr(security, "is_public_url", lambda u: True)
+    fetched = _scripted_httpx(monkeypatch, {
+        "https://directory.example/old": _RedirectResp(
+            301, location="https://directory.example/new"
+        ),
+        "https://directory.example/new": _RedirectResp(200, text=_page(_NAME, _PHONE)),
+    })
+
+    probe = http_liveness_probe("https://directory.example/old")
+    assert fetched == ["https://directory.example/old", "https://directory.example/new"]
+    assert probe.status_code == 200
+    assert probe.final_url == "https://directory.example/new"
+    assert _judge(probe).status == LIVE
+
+
+def test_a_redirect_loop_gives_up_as_could_not_look(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.security as security
+    from app.services.citation_liveness import http_liveness_probe
+
+    monkeypatch.setattr(security, "is_public_url", lambda u: True)
+    _scripted_httpx(monkeypatch, {
+        "https://directory.example/a": _RedirectResp(302, location="https://directory.example/a"),
+    })
+    probe = http_liveness_probe("https://directory.example/a")
+    assert probe.status_code is None
+    assert probe.checked_from == "http_probe:too_many_redirects"

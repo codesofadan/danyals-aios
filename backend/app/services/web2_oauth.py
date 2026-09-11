@@ -19,7 +19,9 @@ button.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -148,15 +150,102 @@ def exchange_payload(
     )
 
 
+def refresh_payload(
+    platform: str, settings: Any, *, refresh_token: str
+) -> tuple[str, dict[str, str]]:
+    """The token-endpoint URL and form body for the REFRESH grant.
+
+    This is the half the original connect flow was missing, and its absence was a
+    live defect: Blogger's refresh token was sealed and then sent VERBATIM as a
+    Bearer header, which Google answers with 401 - the account connected once and
+    never published. The refresh service (``web2_token_refresh``) posts this form to
+    trade the durable refresh token for a short-lived access token whenever the
+    sealed one is stale. Empty URL when the platform has no OAuth path or no
+    registered app - the caller degrades, it does not guess."""
+    spec = spec_for(platform)
+    if spec is None:
+        return ("", {})
+    client_id = _setting(settings, spec.client_id_setting)
+    if not client_id:
+        return ("", {})
+    return (
+        spec.token_endpoint,
+        {
+            "client_id": client_id,
+            "client_secret": _setting(settings, spec.client_secret_setting),
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+    )
+
+
+def token_expires_at(tokens: dict[str, Any]) -> str:
+    """Server-side absolute expiry from the response's relative ``expires_in``.
+
+    Stamped HERE, at exchange time, because ``expires_in`` is meaningless later -
+    "3600 seconds" sealed in a vault answers nothing next week. Empty when the
+    platform does not expire its tokens (WordPress.com), which the refresh service
+    reads as "never stale"."""
+    try:
+        seconds = int(tokens.get("expires_in") or 0)
+    except (TypeError, ValueError):
+        seconds = 0
+    if seconds <= 0:
+        return ""
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
+
+
 def credential_from_tokens(platform: str, tokens: dict[str, Any]) -> dict[str, str]:
     """Turn a token response into the credential the publisher reads.
 
-    Prefers the REFRESH token where one is issued: an access token expires within the
-    hour, so sealing it would produce an account that connects today and quietly stops
-    publishing tomorrow.
+    Seals the FULL BUNDLE - {access_token, refresh_token, expires_at, token_type} as
+    a JSON string in the platform's token field - rather than choosing one token.
+    Choosing was the original sin, and both choices lose: seal the access token and
+    the account quietly stops publishing within the hour; seal the refresh token and
+    it gets sent as a Bearer header and 401s on the spot (the live Blogger defect).
+    The bundle keeps both halves so ``web2_token_refresh.fresh_access_token`` can
+    serve a current access token forever, re-sealing as it refreshes. The vault path
+    is unchanged: same provider/label row, same credential dict shape - only the
+    field's VALUE is now a bundle instead of a bare token.
     """
     spec = spec_for(platform)
     if spec is None:
         return {}
-    token = str(tokens.get("refresh_token") or tokens.get("access_token") or "")
-    return {spec.token_field: token} if token else {}
+    access = str(tokens.get("access_token") or "")
+    refresh = str(tokens.get("refresh_token") or "")
+    if not access and not refresh:
+        return {}
+    bundle = {
+        "access_token": access,
+        "refresh_token": refresh,
+        "expires_at": token_expires_at(tokens),
+        "token_type": str(tokens.get("token_type") or "Bearer"),
+    }
+    return {spec.token_field: json.dumps(bundle)}
+
+
+def parse_token_bundle(value: str) -> dict[str, str] | None:
+    """The bundle inside an OAuth credential field, or ``None`` for a LEGACY value.
+
+    Detection is BY SHAPE, not by a version marker: a bundle is a JSON object
+    carrying at least one token key; anything else - including the bare tokens every
+    pre-bundle row holds - is legacy and returns ``None`` so the caller applies the
+    legacy rules (a Google-style refresh token is refreshed; a non-expiring PAT is
+    passed through untouched)."""
+    text = (value or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    if not (parsed.get("access_token") or parsed.get("refresh_token")):
+        return None
+    return {
+        "access_token": str(parsed.get("access_token") or ""),
+        "refresh_token": str(parsed.get("refresh_token") or ""),
+        "expires_at": str(parsed.get("expires_at") or ""),
+        "token_type": str(parsed.get("token_type") or "Bearer"),
+    }
