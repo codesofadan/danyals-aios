@@ -524,6 +524,17 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
         settings["stretch_section"] = "section-stretched"
         settings["layout"] = "boxed"
     settings["content_width"] = {"unit": "px", "size": container_px}
+    # A DECLARED minimum height, when that is what holds the band open - the
+    # full-height hero. Without it Elementor sizes the section to its content and an
+    # 900px hero collapses to the height of its headline, which is the most visible
+    # single way a replica stops resembling its source.
+    #
+    # `height` / `custom_height` are the section controls Elementor's own registry
+    # carries (both present in `section_keys`), so this passes the oracle rather than
+    # being silently swallowed as an unknown setting.
+    if section.min_height:
+        settings["height"] = "min-height"
+        settings["custom_height"] = {"unit": "px", "size": int(section.min_height)}
     bg = _colour(section.background)
     if bg:
         settings["background_background"] = "classic"
@@ -612,11 +623,48 @@ def _section(section: InferredSection, ds: DesignSystem, ids: _IdGen,
 def build_tree(page: InferredPage, ds: DesignSystem,
                responsive: dict[str, dict[str, int]] | None = None,
                mobile_pos: dict[str, tuple[int, int]] | None = None,
-               band_pad: dict[str, dict[str, tuple[int, int]]] | None = None
+               band_pad: dict[str, dict[str, tuple[int, int]]] | None = None,
+               hidden: dict[str, set[str]] | None = None,
                ) -> list[dict[str, Any]]:
     ids = _IdGen()
-    return [_section(s, ds, ids, page.container_px, responsive, mobile_pos, band_pad)
+    tree = [_section(s, ds, ids, page.container_px, responsive, mobile_pos, band_pad)
             for s in page.sections]
+    if hidden:
+        _apply_visibility(tree, hidden)
+    return tree
+
+
+#: Where each widget type keeps its copy, for matching against the per-breakpoint
+#: visibility facts. Derived from the builders rather than guessed.
+_TEXT_SETTING = {"heading": "title", "text-editor": "editor", "button": "text"}
+
+
+def _apply_visibility(nodes: list[dict[str, Any]], hidden: dict[str, set[str]]) -> None:
+    """Set `hide_tablet` / `hide_mobile` on widgets the SOURCE stops rendering.
+
+    A POST-PASS rather than another parameter threaded through `_section` ->
+    `_column` -> `_widget`: the fact is per-WIDGET and matched by text, so it needs no
+    context from the walk, and five more optional arguments would make every signature
+    harder to read for a setting that applies to a handful of elements.
+
+    `hide_*` live in the oracle's `common_keys`, so they validate on any widget type.
+    Only widgets whose copy matched a UNIQUELY-occurring desktop string are touched -
+    see `hidden_at_breakpoint` for why ambiguity is excluded rather than guessed at.
+    """
+    for node in nodes:
+        if node.get("elType") == "widget":
+            key = _TEXT_SETTING.get(str(node.get("widgetType") or ""))
+            if key:
+                raw = str((node.get("settings") or {}).get(key) or "")
+                text = re.sub(r"<[^>]+>", " ", raw)
+                text = re.sub(r"\s+", " ", text).strip()
+                if text:
+                    for device, strings in hidden.items():
+                        if text in strings:
+                            node.setdefault("settings", {})[f"hide_{device}"] = "hidden"
+        kids = node.get("elements")
+        if isinstance(kids, list):
+            _apply_visibility(kids, hidden)
 
 
 def mobile_text_positions(captures: dict[str, dict[str, Any]]) -> dict[str, tuple[int, int]]:
@@ -754,6 +802,63 @@ def _section_anchor(section: InferredSection) -> str:
                     if text:
                         return text
     return ""
+
+
+
+def hidden_at_breakpoint(captures: dict[str, dict[str, Any]]) -> dict[str, set[str]]:
+    """{device: {text}} for copy the SOURCE stops rendering at that width.
+
+    THE FACT THIS RECOVERS. A responsive site does not merely reflow - it drops things.
+    A desktop-only stats strip, a phone-only tap-to-call bar, a tablet-and-up testimonial
+    row. Elementor expresses that with `hide_tablet` / `hide_mobile`, which are in its
+    own registry, and the replica emitted neither: every element was shown at every
+    width, so a page that hides half its hero on a phone rebuilt as a phone page with a
+    desktop hero crammed into it.
+
+    Matched by TEXT, for the same reason `responsive_heading_sizes` is: node identity
+    does not survive across viewports (the prune keeps different wrappers at different
+    widths) while a string is the same page-fact wherever it renders.
+
+    AMBIGUOUS TEXT IS EXCLUDED, and that is load-bearing. A row of cards whose buttons
+    all read "View more" gives one string many homes; concluding anything about its
+    visibility would hide or show all of them together. Only strings that occur EXACTLY
+    ONCE in the desktop capture are considered - the same rule `mobile_text_positions`
+    arrived at after this exact defect.
+
+    Desktop is the baseline: a string present at desktop and absent at a narrower width
+    is hidden there. The reverse (mobile-only copy) is deliberately NOT emitted - it
+    would need `hide_desktop` on an element the desktop tree never produced, so there is
+    nothing to hang the setting on.
+    """
+    desktop = captures.get("desktop")
+    if not desktop:
+        return {}
+
+    def texts(root: dict[str, Any]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+
+        def walk(n: dict[str, Any]) -> None:
+            t = (n.get("txt") or "").strip()
+            if t:
+                counts[t] = counts.get(t, 0) + 1
+            for k in n.get("kids") or []:
+                walk(k)
+
+        walk(root)
+        return counts
+
+    base = texts(desktop)
+    unique = {t for t, n in base.items() if n == 1}
+    out: dict[str, set[str]] = {}
+    for device in ("tablet", "mobile"):
+        root = captures.get(device)
+        if not root:
+            continue
+        seen = set(texts(root))
+        gone = {t for t in unique if t not in seen}
+        if gone:
+            out[device] = gone
+    return out
 
 
 def responsive_heading_sizes(captures: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:

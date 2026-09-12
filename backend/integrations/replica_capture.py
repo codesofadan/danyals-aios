@@ -101,6 +101,12 @@ _JS_TEMPLATE = """
 (() => {
   const PROPS = __PROPS__;
   const MAX_NODES = __MAX_NODES__, MAX_DEPTH = __MAX_DEPTH__, MAX_TEXT = __MAX_TEXT__;
+  // Elements the CONTENT walk must not descend into - the header and footer, once
+  // they have been identified as chrome. Tag-level SKIP cannot express this: the
+  // chrome is ordinary markup, and on a single-root SPA it sits INSIDE the content
+  // root, so without an element-level exclusion it is walked twice (doubling its
+  // nodes and re-emitting the navbar as a content section).
+  const SKIP_EL = new Set();
   const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','SVG','CANVAS',
                         'LINK','META','BR','HEAD']);
   const REPLACED = new Set(['IMG','PICTURE','VIDEO','IFRAME','SVG','CANVAS']);
@@ -209,6 +215,7 @@ _JS_TEMPLATE = """
     // as content, and <text> inside an icon leaked into the page's copy.
     const TAG = el.tagName.toUpperCase();
     if (SKIP.has(TAG)) return null;
+    if (SKIP_EL.has(el)) return null;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') return null;
@@ -347,11 +354,31 @@ _JS_TEMPLATE = """
       return true;
     })
     .sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height);
+  // THE BODY FALLBACK IS NOT document.body, and this is the fix for the torso.
+  // A React/Tailwind storefront has no <main>, no <article> and no Elementor
+  // boundary, so the old chain landed on document.body - and then every guard below
+  // rejected the site's own header and footer, because document.body CONTAINS them.
+  // The replica came back without a navbar or footer and the notes blamed the
+  // source ("no header element was found"), which measured false on a page whose
+  // <nav> and <footer> were both present and full width.
+  //
+  // Prefer the tallest REAL body child instead: on a single-root app that is the
+  // application container, which is the genuine content boundary. Falling through
+  // to document.body is kept for a page with no such container, but it is now the
+  // last resort rather than the common case.
+  const bodyRoot = () => {
+    let best = null, bestH = 0;
+    for (const el of Array.from(document.body.children)) {
+      if (SKIP.has(el.tagName.toUpperCase())) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < innerWidth * 0.5) continue;
+      if (r.height > bestH) { best = el; bestH = r.height; }
+    }
+    return best || document.body;
+  };
   const root = candidates[0] ||
                document.querySelector('main') ||
-               document.querySelector('article') || document.body;
-
-  const tree = walk(root, 0, getComputedStyle(document.body));
+               document.querySelector('article') || bodyRoot();
 
   // HEADER and FOOTER are captured as their own trees - the owner's mandate: a
   // replica without the site's navbar and footer is a torso. They are found by
@@ -359,25 +386,53 @@ _JS_TEMPLATE = """
   // templates), never by guessing from geometry alone, and they must not contain
   // or equal the content root (a degenerate page whose only landmark IS the
   // body). Content is walked FIRST so it wins the node budget.
-  const pickRegion = (sels) => {
+  const pickRegion = (sels, wantTop) => {
+    const docH = document.documentElement.scrollHeight;
     for (const sel of sels) {
-      let el; try { el = document.querySelector(sel); } catch (e) { continue; }
-      if (!el) continue;
-      if (el === root || el.contains(root) || root.contains(el)) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width < innerWidth * 0.5 || r.height < 20) continue;
-      return el;
+      let els; try { els = Array.from(document.querySelectorAll(sel)); } catch (e) { continue; }
+      for (const el of els) {
+        // A candidate that IS or WRAPS the content root is the page, not chrome.
+        // `root.contains(el)` is DELIBERATELY no longer disqualifying: on a
+        // single-root app the header legitimately sits inside the container, and
+        // rejecting it there is exactly what produced the torso. Walking it twice is
+        // prevented by SKIP_EL below - by excluding it from the CONTENT walk, not by
+        // refusing to recognise it.
+        if (el === root || el.contains(root)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < innerWidth * 0.5 || r.height < 20) continue;
+        // Position sanity. A header sits at the top of the document and a footer at
+        // the bottom. Without this the widened selectors below would let a mid-page
+        // <nav> - a category strip, a sidebar menu, an in-article table of contents -
+        // be adopted as the site header, which is worse than finding none.
+        const top = r.top + scrollY;
+        if (wantTop && top > Math.max(400, docH * 0.25)) continue;
+        if (!wantTop && (top + r.height) < docH * 0.5) continue;
+        return el;
+      }
     }
     return null;
   };
+  // Semantic landmarks first, then ARIA roles, then <nav> LAST - a site with a real
+  // <header> should never be represented by a nav nested inside it. Every entry
+  // still has to clear the size and position checks above.
   const headerEl = pickRegion([
     '[data-elementor-type="header"]', '.elementor-location-header',
     'header.site-header', 'body header', '#masthead', 'body > div header',
-  ]);
+    '[role="banner"]', 'nav',
+  ], true);
   const footerEl = pickRegion([
     '[data-elementor-type="footer"]', '.elementor-location-footer',
     'footer.site-footer', 'body footer', '#colophon', 'body > div footer',
-  ]);
+    '[role="contentinfo"]',
+  ], false);
+
+  // The content walk runs AFTER the chrome is identified, so it can exclude those
+  // subtrees. With a container-level root the header and footer are INSIDE the
+  // content tree; walking them twice both doubles their nodes and re-emits the
+  // navbar as an ordinary content section.
+  if (headerEl) SKIP_EL.add(headerEl);
+  if (footerEl) SKIP_EL.add(footerEl);
+  const tree = walk(root, 0, getComputedStyle(document.body));
   // Content is finished; give the chrome a budget of its own so a long page
   // cannot silently cost the site its navbar and footer. `truncated` is reset
   // around these walks and reported separately: a truncated BODY and a truncated
@@ -385,6 +440,8 @@ _JS_TEMPLATE = """
   const contentTruncated = truncated;
   budget = count + CHROME_RESERVE;
   truncated = false;
+  // The chrome is walked ON PURPOSE now, so the content-walk exclusion is lifted.
+  SKIP_EL.clear();
   const headerTree = headerEl ? walk(headerEl, 0, getComputedStyle(document.body)) : null;
   const footerTree = footerEl ? walk(footerEl, 0, getComputedStyle(document.body)) : null;
   chromeTruncated = truncated;

@@ -58,6 +58,17 @@ class FakeStore:
         self.validations.append(row)
         return row
 
+    def list_visual_validations(self, job_id: str) -> list[dict[str, Any]]:
+        """Oldest first, matching the real store - the correction loop counts rounds
+        from these and reconstructs which diagnostics it already attempted."""
+        return [dict(v) for v in self.validations if v["job_id"] == job_id]
+
+    def update_design_ir(self, design_ir_id: str, body: dict[str, Any]) -> None:
+        for i, d in enumerate(self.designs):
+            if d["id"] == design_ir_id:
+                self.designs[i] = {**d, "body": body}
+                return
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         row = self.jobs.get(job_id)
         return dict(row) if row else None
@@ -433,3 +444,74 @@ def test_publish_then_auto_validates_and_completes() -> None:
     )
     assert result["status"] in ("completed", "correcting")  # visual QA ran and reached a verdict
     assert len(store.validations) == 1
+
+
+# --------------------------------------------------------------------------- #
+# THE CORRECTION LOOP (0141). `correcting` used to be where a job STOPPED: the diff
+# was measured, stored, and nothing advanced it. `app/services/correcting.py` was
+# written and unit-tested to close that and was never imported by anything.
+# --------------------------------------------------------------------------- #
+class _MismatchAnalyzer:
+    """A capture that differs from `_design_row()` enough to produce diagnostics -
+    the same shape the passing test above uses."""
+
+    def capture(self, url: str, *, viewports: Any) -> CaptureResult:
+        return CaptureResult(
+            status="ok",
+            capture=SiteCapture(
+                url=url,
+                viewports=[
+                    ViewportCapture(
+                        viewport="desktop", width=1440, height=900, container_width_px=500,
+                        sections=[
+                            SectionSnapshot(tag="div", role="section",
+                                            bg_color="rgb(0, 0, 0)", width=400, height=200)
+                        ],
+                    )
+                ],
+            ),
+        )
+
+
+def test_a_mismatch_no_longer_dead_ends_in_correcting() -> None:
+    """THE FIX. A measured mismatch must either correct and re-publish, or land on a
+    terminal state. What it must never do again is sit in `correcting` with nothing
+    queued to advance it."""
+    store = FakeStore()
+    store.designs.append(_design_row())
+    store.jobs["job-1"] = _job(design_ir_id="design-1")
+    sent: list[str] = []
+
+    result = execute_visual_qa(
+        store, "job-1", rendered_url="https://example.com",
+        analyzer_builder=lambda: _MismatchAnalyzer(),  # type: ignore[arg-type]
+        republish=sent.append,
+    )
+    if result["status"] == "correcting":
+        assert sent == ["job-1"], "correcting with no re-publish is the old dead end"
+    else:
+        assert result["status"] in {"degraded", "completed"}
+
+
+def test_an_exhausted_loop_lands_on_degraded_and_spends_nothing_more() -> None:
+    """`completed` would claim the page matches the design; `failed` would claim
+    nothing was produced. It is live and imperfect - which is its own outcome, and the
+    word the platform job contract already uses for it."""
+    store = FakeStore()
+    store.designs.append(_design_row())
+    store.jobs["job-1"] = _job(design_ir_id="design-1")
+    for _ in range(3):
+        store.insert_visual_validation(
+            job_id="job-1", rendered_url="https://example.com", status="fail",
+            diagnostics=[{"kind": "layout", "section": "hero", "detail": "x", "magnitude": 0.9}],
+        )
+    sent: list[str] = []
+    result = execute_visual_qa(
+        store, "job-1", rendered_url="https://example.com",
+        analyzer_builder=lambda: _MismatchAnalyzer(),  # type: ignore[arg-type]
+        republish=sent.append,
+    )
+    assert result["status"] == "degraded"
+    assert result.get("error") == "visual_qa_unresolved"
+    assert result.get("stage_detail"), "a degraded run must say why"
+    assert sent == [], "an exhausted loop must not spend another publish"

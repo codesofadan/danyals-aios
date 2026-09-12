@@ -28,6 +28,7 @@ from app.services.elementor_replica import (
     UnknownSettingError,
     build_navbar,
     build_tree,
+    hidden_at_breakpoint,
     mobile_text_positions,
     responsive_band_padding,
     responsive_heading_sizes,
@@ -136,6 +137,24 @@ def replicate(
             flatten(k)
 
     flatten(raw)
+    # The design system is read from the WHOLE page, chrome included. The content walk
+    # deliberately excludes the header and footer (they are rebuilt as their own
+    # sections), but a site's strongest brand signal usually lives in exactly those two
+    # places - the gradient navbar, the dark footer, the accent on the logo. Extracting
+    # from content alone measured a storefront as having a two-colour palette and
+    # reported "styling will be thin" about a page whose header was a pink-to-purple
+    # gradient. `nodes` feeds `extract` ONLY; `raw` still drives layout inference, so
+    # the chrome cannot leak back in as a content section.
+    design_nodes: list[dict[str, Any]] = list(nodes)
+
+    def flatten_into(sink: list[dict[str, Any]], n: dict[str, Any]) -> None:
+        sink.append(n)
+        for k in n.get("kids") or []:
+            flatten_into(sink, k)
+
+    for chrome in (desktop.header, desktop.footer):
+        if chrome is not None:
+            flatten_into(design_nodes, _serialize(chrome))
 
     on_stage("Working out the page's sections, rows and columns")
     page: InferredPage = infer_layout(raw, viewport_width=desktop.width)
@@ -146,7 +165,7 @@ def replicate(
         return result
 
     on_stage("Reading the design system - colours, type scale and spacing")
-    ds: DesignSystem = extract(nodes, css_vars=capture.css_vars)
+    ds: DesignSystem = extract(design_nodes, css_vars=capture.css_vars)
     if not ds.is_grounded:
         result.note("design system is ungrounded (few measured values); styling will be thin")
     # Capture it for the content pipeline before the rebuild consumes it. `container_px`
@@ -163,6 +182,10 @@ def replicate(
         responsive_heading_sizes(captures),
         mobile_text_positions(captures),
         responsive_band_padding(captures),
+        # What the SOURCE stops rendering at tablet / mobile. Without this every
+        # element showed at every width, so a page that hides half its hero on a
+        # phone rebuilt with the desktop hero crammed into a 390px screen.
+        hidden_at_breakpoint({"desktop": raw, **captures}),
     )
 
     # THE SITE'S CHROME. A replica without the source's navbar and footer is a

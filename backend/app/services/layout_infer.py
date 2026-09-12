@@ -344,6 +344,15 @@ class InferredSection:
     background_image: str = ""
     classes: tuple[str, ...] = ()
     element_id: str = ""
+    #: The band's DECLARED minimum height, when the author set one and it exceeds what
+    #: the content needs - the full-height hero pattern (`min-height: 100vh`).
+    #:
+    #: Without this a hero that the source holds open to 900px collapses to the height
+    #: of its headline, which is the single most visible way a replica stops looking
+    #: like the page it came from. `height` above is what the band MEASURED; this is
+    #: what the author asked for, and they differ exactly when it matters.
+    #: 0 = no declared minimum worth emitting.
+    min_height: int = 0
 
     @property
     def multi_column(self) -> bool:
@@ -647,6 +656,30 @@ def _descend_to_content(node: dict[str, Any]) -> dict[str, Any]:
         if len(kids) != 1:
             return cursor
         cursor = kids[0]
+
+
+
+def _declared_min_height(node: dict[str, Any], *, measured: int) -> int:
+    """A band's declared `min-height`, when it is the thing holding the band open.
+
+    Returned ONLY when the declaration is close to (or above) what was measured -
+    within 8%. That test is what separates a full-height hero, where the minimum IS
+    the height, from a band that declares a small floor its content has long since
+    outgrown: emitting the latter would pin an 800px section open at 120px and change
+    nothing, while adding a control to the document for no reason.
+
+    `100vh` and friends arrive already resolved to pixels by `getComputedStyle`, so no
+    unit parsing is needed here. Bounded to a sane band height: a 20000px reading is a
+    bad capture, not a design.
+    """
+    raw = _px_float(_style(node).get("minHeight", ""))
+    if not raw or raw < MIN_SECTION_HEIGHT:
+        return 0
+    if raw > 5000:
+        return 0
+    if measured and raw < measured * 0.92:
+        return 0
+    return int(raw)
 
 
 def _rows_of(node: dict[str, Any], depth: int = 0, page_w: int = 0) -> list[InferredRow]:
@@ -1174,6 +1207,7 @@ def infer_layout(root: dict[str, Any], *, viewport_width: int) -> InferredPage:
             background_image=bg_image,
             classes=tuple(_own_classes(cand)),
             element_id=cand.get("eid") or "",
+            min_height=_declared_min_height(cand, measured=h),
         ))
 
     if not sections:

@@ -247,9 +247,33 @@ class BlueprintSection:
     kind: str = "section"
     heading: str = ""
     layout: str = "stacked"
+    #: HOW MANY repeated items this section presents - 3 pricing cards, 4 testimonials,
+    #: 6 service tiles. 0 means "not a repeating section" or "not measured".
+    #:
+    #: This is the field that makes content generation design-AWARE rather than
+    #: design-adjacent. Without it the blueprint says a page has a pricing section and
+    #: says nothing about it holding three cards, so a generator writes seven plans and
+    #: the publish path quietly absorbs the overflow into whichever section is marked
+    #: `absorb`. The layout was always measured; it was never carried.
+    items: int = 0
+    #: Character budgets measured from the SOURCE's own copy in this section, so a hero
+    #: built for a six-word headline is not handed a thirty-word one. 0 = unmeasured.
+    heading_chars: int = 0
+    body_chars: int = 0
 
-    def as_dict(self) -> dict[str, str]:
-        return {"kind": self.kind, "heading": self.heading, "layout": self.layout}
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "kind": self.kind, "heading": self.heading, "layout": self.layout,
+        }
+        # Omitted when unmeasured, so an older stored profile round-trips unchanged and
+        # a zero is never mistaken for a measured "this section holds nothing".
+        if self.items:
+            out["items"] = self.items
+        if self.heading_chars:
+            out["headingChars"] = self.heading_chars
+        if self.body_chars:
+            out["bodyChars"] = self.body_chars
+        return out
 
 
 @dataclass(frozen=True)
@@ -443,6 +467,19 @@ def _section_list(value: object, *, limit: int) -> list[str]:
     return out
 
 
+
+def _bounded_count(value: object) -> int:
+    """A measured count, or 0. Bounded at 200: a "400 cards" reading is a bad capture,
+    not a design, and handing it on as a budget is worse than having none."""
+    if not isinstance(value, (int, float, str)):
+        return 0
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return n if 0 < n <= 200 else 0
+
+
 def _blueprint_list(value: object, *, limit: int) -> list[BlueprintSection]:
     """Coerce the model's ``blueprint`` array into a bounded, ordered list of
     :class:`BlueprintSection`. Tolerant: a non-list -> ``[]``; a bare string item ->
@@ -465,6 +502,14 @@ def _blueprint_list(value: object, *, limit: int) -> list[BlueprintSection]:
                     kind=kind,
                     heading=str(item.get("heading") or "").strip(),
                     layout=str(item.get("layout") or "stacked").strip() or "stacked",
+                    # Capacity, when the source of this blueprint measured it. Accepts
+                    # both spellings because a stored profile is camelCase on the wire
+                    # while an analyzer writes snake_case.
+                    items=_bounded_count(item.get("items") or item.get("itemCount")),
+                    heading_chars=_bounded_count(
+                        item.get("headingChars") or item.get("heading_chars")),
+                    body_chars=_bounded_count(
+                        item.get("bodyChars") or item.get("body_chars")),
                 )
             )
         if len(out) >= limit:

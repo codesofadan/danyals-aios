@@ -561,3 +561,50 @@ class TestNavbarRecognition:
         page = infer_layout(root, viewport_width=1440)
         assert page.sections
         assert page.sections[0].background_image == "https://x/leafy.jpg"
+
+
+# --------------------------------------------------------------------------- #
+# MIN-HEIGHT (E3). A full-height hero (`min-height: 100vh`) used to collapse to the
+# height of its headline, because `InferredSection` carried only what the band
+# MEASURED and never what the author DECLARED. The two differ exactly when it matters.
+# --------------------------------------------------------------------------- #
+class TestDeclaredMinHeight:
+    def test_a_declaration_that_holds_the_band_open_is_kept(self) -> None:
+        from app.services.layout_infer import _declared_min_height
+        node = {"s": {"minHeight": "900px"}, "box": [0, 0, 1440, 900]}
+        assert _declared_min_height(node, measured=900) == 900
+
+    def test_a_floor_the_content_outgrew_is_dropped(self) -> None:
+        """THE DISCRIMINATION THAT MATTERS. A band declaring `min-height: 120px` whose
+        content is 800px tall is not a full-height hero - emitting 120px would pin it
+        open at a height it passed long ago, adding a control that changes nothing."""
+        from app.services.layout_infer import _declared_min_height
+        node = {"s": {"minHeight": "120px"}, "box": [0, 0, 1440, 800]}
+        assert _declared_min_height(node, measured=800) == 0
+
+    def test_a_declaration_slightly_under_the_measurement_still_counts(self) -> None:
+        """Content that fills a 100vh hero to 905px still had 900px declared; an exact
+        equality test would drop the very case this exists for."""
+        from app.services.layout_infer import _declared_min_height
+        node = {"s": {"minHeight": "900px"}, "box": [0, 0, 1440, 950]}
+        assert _declared_min_height(node, measured=950) == 900
+
+    @pytest.mark.parametrize("value", ["", "0px", "auto", "none", "20000px", "10px"])
+    def test_unusable_or_implausible_declarations_are_dropped(self, value: str) -> None:
+        from app.services.layout_infer import _declared_min_height
+        node = {"s": {"minHeight": value}, "box": [0, 0, 1440, 900]}
+        assert _declared_min_height(node, measured=900) == 0
+
+    def test_the_emitter_uses_the_oracles_own_control_ids(self) -> None:
+        """`height` + `custom_height` are what Elementor's registry carries. An unknown
+        setting is SILENTLY SWALLOWED by Elementor - the page renders with a hole and
+        nothing appears in any log - which is why the oracle exists."""
+        import json
+        from pathlib import Path
+        oracle = json.loads(
+            (Path(__file__).resolve().parents[1]
+             / "app" / "services" / "data" / "elementor_oracle_4_7.json")
+            .read_text(encoding="utf-8")
+        )
+        assert "height" in oracle["section_keys"]
+        assert "custom_height" in oracle["section_keys"]

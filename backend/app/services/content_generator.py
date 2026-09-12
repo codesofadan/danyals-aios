@@ -362,6 +362,22 @@ class GeneratorTuning:
     max_faq: int = MAX_FAQ
     max_coverage_entities: int = MAX_COVERAGE_ENTITIES
     max_internal_spokes: int = MAX_INTERNAL_SPOKES
+    #: THE DESIGN CONTRACT, from ``page_blueprints.capacity_brief`` - the measured
+    #: capacities of the sections this copy will be slotted into ("pricing (grid):
+    #: exactly 3 items", "hero: heading up to about 48 characters").
+    #:
+    #: WHY IT IS HANDED TO THE WRITER AND NOT ONLY VALIDATED AFTER. The publish path
+    #: has always slotted content into the analyzed design's sections BY KIND, so a
+    #: page's structure was respected. What it never knew was CAPACITY: a design with
+    #: three pricing cards happily received seven plans, and the overflow was absorbed
+    #: into whichever section carried the `absorb` flag. Catching that after the draft
+    #: exists means regenerating - a second paid call, producing copy that reads like
+    #: it was cut to length, because it was. Telling the writer up front is the cheap
+    #: half; the validator then has almost nothing left to catch.
+    #:
+    #: Empty string = no measured design, and the writer is told nothing rather than
+    #: being handed an empty instruction.
+    design_capacity: str = ""
 
 
 DEFAULT_TUNING = GeneratorTuning()
@@ -651,6 +667,21 @@ class _Builder:
 # --------------------------------------------------------------------------- #
 # Writer-driven prose (the ONLY external touch; bounded + grounded)
 # --------------------------------------------------------------------------- #
+
+def _system_blocks(design: str) -> str | list[str]:
+    """The writer's system contract, plus the measured design contract when there is one.
+
+    An ORDERED SEQUENCE, which is what `SystemSummarizer` accepts and what prompt
+    caching wants: most-stable-first. `CONTENT_SYSTEM_PROMPT` is identical on every call
+    forever, so it stays the cache prefix; the design capacities change per page and go
+    second. Reversing them would invalidate the whole prefix on every new page.
+
+    A plain string when no design was measured - not a sequence with an empty second
+    block, which would add a cache breakpoint carrying nothing.
+    """
+    return [CONTENT_SYSTEM_PROMPT, design] if design.strip() else CONTENT_SYSTEM_PROMPT
+
+
 def _write(
     writer: SystemSummarizer,
     model: str,
@@ -662,6 +693,7 @@ def _write(
     grounded: Sequence[tuple[str, str]],
     entities: Sequence[str],
     max_words: int,
+    design: str = "",
 ) -> str:
     """Ask the writer for one section's prose from ONLY the grounded facts, then
     hard-bound it to ``max_words``. The writer phrases; it never sources."""
@@ -682,7 +714,7 @@ def _write(
     prompt = "\n".join(lines)
     result = writer.summarize(
         prompt, model=model, max_tokens=max(1, round(max_words * _MAX_TOKENS_PER_WORD)),
-        system=CONTENT_SYSTEM_PROMPT,
+        system=_system_blocks(design),
     )
     return _bound_words(result.text, max_words)
 
@@ -696,6 +728,7 @@ def _answer_block(
     intent: str,
     grounded: Sequence[tuple[str, str]],
     tuning: GeneratorTuning,
+    design: str = "",
 ) -> str:
     """The 40-55-word extractable direct answer (§4). Bounded to the max; the
     primary is guaranteed present (front-loaded) so QA #6 has its anchor."""
@@ -709,7 +742,7 @@ def _answer_block(
     result = writer.summarize(
         "\n".join(lines), model=model,
         max_tokens=max(1, round(tuning.answer_max_words * _MAX_TOKENS_PER_WORD)),
-        system=CONTENT_SYSTEM_PROMPT,
+        system=_system_blocks(design),
     )
     answer = _bound_words(result.text, tuning.answer_max_words)
     if primary.lower() not in answer.lower():
@@ -1090,6 +1123,7 @@ def _photo_briefs(
     primary: str,
     intent: str,
     headings: Sequence[str],
+    design: str = "",
 ) -> list[str]:
     """Author ONE concrete, camera-ready real-world scene per slot in a SINGLE batched
     writer call (the only external touch here; the worker's gated writer meters it on the
@@ -1106,7 +1140,7 @@ def _photo_briefs(
             _photo_brief_prompt(primary=primary, intent=intent, headings=headings),
             model=model,
             max_tokens=max(_PHOTO_BRIEF_MIN_TOKENS, n * _PHOTO_BRIEF_TOKENS_PER_SCENE),
-            system=CONTENT_SYSTEM_PROMPT,
+            system=_system_blocks(design),
         )
         scenes = _parse_photo_briefs(result.text, n)
     except Exception:  # spend block / provider error / junk -> concrete fallback, never crash
@@ -1232,7 +1266,8 @@ def generate(
             grounded=intro_grounded,
             entities=brief.cluster.supporting[:3],
             max_words=int(per_section * _INTRO_WORD_FRACTION),
-        )
+                design=tuning.design_capacity,
+)
     )
 
     # B. Key heading + the 40-55-word extractable answer block (§4).
@@ -1247,7 +1282,8 @@ def generate(
         intent=intent,
         grounded=[(f"source_pack.facts.{k}", str(v)) for k, v in list(source_pack.facts.items())[:2]],
         tuning=tuning,
-    )
+        design=tuning.design_capacity,
+)
     builder.answer = answer
     builder.para(answer)
 
@@ -1277,7 +1313,8 @@ def generate(
                 grounded=grounded,
                 entities=section_entities,
                 max_words=per_section,
-            )
+                        design=tuning.design_capacity,
+)
         )
         for label, value in grounded:
             builder.ground(label, value)
@@ -1296,7 +1333,8 @@ def generate(
                 grounded=[("differentiation.angle", angle.statement)],
                 entities=angle.derived_from[:2],
                 max_words=per_section,
-            )
+                        design=tuning.design_capacity,
+)
         )
         builder.ground("differentiation.angle", angle.statement)
     else:
@@ -1341,7 +1379,8 @@ def generate(
             grounded=[("source_pack.client_name", client)],
             entities=(),
             max_words=max(_MIN_SECTION_WORDS, per_section // 2),
-        )
+                design=tuning.design_capacity,
+)
     )
 
     _plan_images(

@@ -26,6 +26,7 @@ from app.modules.site_builder.service import (
     page_title_for_design,
     slugify,
 )
+from app.services.correcting import CorrectionHistory, apply_overrides, plan_corrections
 from app.services.editor_mode import resolve_editor_mode
 from app.services.elementor import elementor_json_from_model
 from app.services.gutenberg import model_to_gutenberg
@@ -220,6 +221,7 @@ def execute_visual_qa(
     *,
     rendered_url: str,
     analyzer_builder: Callable[[], SiteAnalyzer | None] = build_site_analyzer,
+    republish: Callable[[str], None] = lambda _job_id: None,
 ) -> dict[str, Any]:
     """Diff ONE job's resolved DesignIR against a fresh capture of ``rendered_url``
     (the actual published page), persist the structured verdict, and advance the
@@ -270,11 +272,51 @@ def execute_visual_qa(
         updated = store.update_job(
             job_id, {"status": "completed", "stage_detail": "Visual accuracy confirmed"}
         )
-    else:
+        return dict(updated) if updated else {"id": job_id, "status": diff.status}
+
+    # THE CORRECTION LOOP, finally consumed. `correcting` used to be where a job
+    # stopped: the diff was measured, stored, and then nothing happened - a
+    # non-terminal state nobody advanced. `app/services/correcting.py` was written and
+    # unit-tested to close this and was never imported.
+    #
+    # ROUNDS ARE COUNTED FROM THE STORED VALIDATIONS, not from a new column: each round
+    # inserts exactly one, so the ledger already knows. `attempted` is reconstructed
+    # from the earlier rounds' diagnostics so a RECURRENCE is recognised - if a
+    # diagnostic survives an override, something downstream is winning and re-sending
+    # it cannot change that. That check, not the round cap, is what stops oscillation.
+    prior = store.list_visual_validations(job_id)
+    history = CorrectionHistory(rounds=max(0, len(prior) - 1))
+    for earlier in prior[:-1]:
+        for raw in earlier.get("diagnostics") or []:
+            if isinstance(raw, dict):
+                history.attempted.add((str(raw.get("kind", "")), str(raw.get("section", ""))))
+
+    plan = plan_corrections(diff, history)
+    if plan.should_republish:
+        body = design_row.get("body")
+        corrected = apply_overrides(dict(body) if isinstance(body, dict) else {}, plan.overrides)
+        store.update_design_ir(str(design_ir_id), corrected)
         updated = store.update_job(
-            job_id, {"status": "correcting", "stage_detail": f"Visual QA found {len(diff.diagnostics)} issue(s)"}
+            job_id,
+            {"status": "correcting",
+             "stage_detail": f"Correcting {len(plan.overrides)} measured mismatch(es), "
+                             f"round {history.rounds + 1}"},
         )
-    return dict(updated) if updated else {"id": job_id, "status": diff.status}
+        republish(job_id)
+        return dict(updated) if updated else {"id": job_id, "status": "correcting"}
+
+    # Nothing safe left to change. DEGRADED, not failed and not completed: the page is
+    # live and editable, and it does not match the design - `completed` would claim it
+    # did, `failed` would claim nothing was produced (0141).
+    updated = store.update_job(
+        job_id,
+        {"status": "degraded",
+         "error": "visual_qa_unresolved",
+         "stage_detail": plan.reason
+                         or f"{len(diff.diagnostics)} visual mismatch(es) remain; "
+                            "the page is live and needs a human eye"},
+    )
+    return dict(updated) if updated else {"id": job_id, "status": "degraded"}
 
 
 # --------------------------------------------------------------------------- #
@@ -320,7 +362,14 @@ def render_and_publish_site(job_id: str) -> dict[str, Any]:
 def run_visual_qa(job_id: str, rendered_url: str) -> dict[str, Any]:
     """Entry point: visually validate ONE job's rendered build."""
     try:
-        return execute_visual_qa(service_site_builder_store(), job_id, rendered_url=rendered_url)
+        return execute_visual_qa(
+            service_site_builder_store(), job_id, rendered_url=rendered_url,
+            # Re-render + re-publish the corrected design. Enqueued rather than called
+            # so the round runs on the worker's own budget: `render_and_publish_site`
+            # ends by re-running visual QA, which is what makes this a LOOP rather
+            # than a single retry.
+            republish=lambda jid: render_and_publish_site.delay(jid),
+        )
     except Exception:
         logger.exception("run_visual_qa_task_failed", job_id=job_id)
         try:

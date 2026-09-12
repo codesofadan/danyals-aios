@@ -88,6 +88,22 @@ class SectionSpec:
     layout: str = _DEFAULT_LAYOUT
     content: bool = True
     absorb: bool = False
+    #: CAPACITY, carried from the measured design (``site_design.BlueprintSection``).
+    #: ``max_items`` is how many repeated items the section actually presents - three
+    #: pricing cards, four testimonials. 0 means unmeasured, and a generator must then
+    #: fall back to its own judgement rather than to zero.
+    #:
+    #: Before these existed the blueprint could say "this page has a pricing section"
+    #: and not "it holds three cards", so a draft with seven plans was slotted in and
+    #: the overflow absorbed - a design-aware pipeline that was only aware of order.
+    max_items: int = 0
+    heading_chars: int = 0
+    body_chars: int = 0
+
+    @property
+    def has_capacity(self) -> bool:
+        """Whether anything about this section's capacity was actually measured."""
+        return bool(self.max_items or self.heading_chars or self.body_chars)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -336,6 +352,20 @@ _CHROME_KINDS: frozenset[str] = frozenset(
 )
 
 
+
+def _count(value: Any) -> int:
+    """A non-negative measured count, or 0 when absent/unusable.
+
+    Bounded: a measurement of 400 cards is a bad capture, not a design, and passing it
+    to a generator as a budget would be worse than having no budget at all.
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return n if 0 < n <= 200 else 0
+
+
 def section_from_raw(raw: Any) -> SectionSpec | None:
     """Coerce ONE raw section (a dict ``{kind, heading?, layout?, ...}`` or a bare
     kind string) into a :class:`SectionSpec`; ``None`` when it has no usable kind."""
@@ -359,6 +389,11 @@ def section_from_raw(raw: Any) -> SectionSpec | None:
         layout=_coerce_layout(d.get("layout"), kind=kind),
         content=bool(content) if content is not None else kind not in _CHROME_KINDS,
         absorb=bool(d.get("absorb", False)),
+        # Accepts either spelling: the measured profile emits camelCase (it is a wire
+        # shape), a template or a hand-written blueprint uses snake_case.
+        max_items=_count(d.get("items") or d.get("max_items") or d.get("maxItems")),
+        heading_chars=_count(d.get("headingChars") or d.get("heading_chars")),
+        body_chars=_count(d.get("bodyChars") or d.get("body_chars")),
     )
 
 
@@ -462,3 +497,53 @@ def render_markdown() -> str:
 
 if __name__ == "__main__":  # pragma: no cover - regeneration convenience
     print(render_markdown(), end="")
+
+
+def capacity_brief(specs: list[SectionSpec]) -> str:
+    """The blueprint's CAPACITY as a line-per-section brief a generator can be given.
+
+    WHY A BRIEF AND NOT JUST A VALIDATOR. Enforcing capacity only after the draft
+    exists means regenerating, which costs a second call and usually produces copy that
+    reads like it was cut to length - because it was. Telling the writer up front that
+    the pricing section holds exactly three cards and the hero headline has about eight
+    words of room is the cheap half of the fix, and the validator then has almost
+    nothing left to catch.
+
+    Only MEASURED facts appear. A section whose capacity was never measured contributes
+    nothing rather than a zero, because "this section holds 0 items" is a different and
+    false claim - and a generator handed it would write nothing at all.
+
+    Returns "" when nothing about the blueprint was measured, which the caller should
+    treat as "no design constraints known" and fall back to its own judgement.
+    """
+    lines: list[str] = []
+    for index, spec in enumerate(specs, start=1):
+        if not spec.content or not spec.has_capacity:
+            continue
+        parts: list[str] = []
+        if spec.max_items:
+            parts.append(
+                f"exactly {spec.max_items} item{'s' if spec.max_items != 1 else ''}"
+            )
+        if spec.heading_chars:
+            parts.append(f"heading up to about {spec.heading_chars} characters")
+        if spec.body_chars:
+            parts.append(f"body up to about {spec.body_chars} characters")
+        if parts:
+            lines.append(f"{index}. {spec.kind} ({spec.layout}): " + "; ".join(parts))
+    if not lines:
+        return ""
+    return (
+        "The page this copy is for has a MEASURED layout. Write to it - these are "
+        "capacities, not suggestions, and copy that overflows is cut rather than "
+        "given more room:\n" + "\n".join(lines)
+    )
+
+
+def overflowing(spec: SectionSpec, item_count: int) -> bool:
+    """Whether ``item_count`` exceeds what this section was measured to hold.
+
+    An UNMEASURED section never overflows: 0 means "not measured", and treating it as a
+    limit would refuse every section on a page nobody analysed.
+    """
+    return bool(spec.max_items) and item_count > spec.max_items

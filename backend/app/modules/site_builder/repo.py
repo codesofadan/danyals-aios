@@ -170,6 +170,31 @@ class ServiceSiteBuilderStore:
             cur.execute("select * from public.design_irs where id = %s limit 1", (design_ir_id,))
             return cur.fetchone()
 
+    def update_design_ir(self, design_ir_id: str, body: dict[str, Any]) -> None:
+        """Replace a design's body with the corrected one.
+
+        Called only by the correction loop, with a COPY produced by
+        ``correcting.apply_overrides`` - the original is never mutated, because the
+        next round must diff against the design, not against the previous round's
+        corrections.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.design_irs set body = %s where id = %s",
+                (Jsonb(body), design_ir_id),
+            )
+
+    def list_visual_validations(self, job_id: str) -> _Rows:
+        """This job's validation rounds, OLDEST FIRST - the correction loop counts
+        rounds from them and reconstructs which diagnostics were already attempted."""
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.visual_validations where job_id = %s "
+                "order by created_at asc",
+                (job_id,),
+            )
+            return cur.fetchall()
+
     def insert_visual_validation(
         self, *, job_id: str, rendered_url: str, status: str, diagnostics: list[dict[str, Any]],
     ) -> dict[str, Any]:

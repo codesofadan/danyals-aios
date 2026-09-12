@@ -31,6 +31,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.services.color_spaces import css_color_to_rgb
+
 # Fonts that are icon sets, not typography. Elementor ships `eicons`; capturing it as
 # the body face would set every paragraph in an icon font.
 _ICON_FONTS = frozenset({"eicons", "font awesome", "fontawesome", "dashicons",
@@ -62,12 +64,59 @@ def to_hex(value: str) -> str:
             return "#" + "".join(c * 2 for c in raw[1:])
         return raw if len(raw) == 7 else ""
     m = _RGB_RE.match(raw)
-    if not m:
+    if m:
+        if m.group(4) is not None and float(m.group(4)) < 0.05:
+            return ""  # effectively transparent
+        r, g, b = (min(255, int(x)) for x in m.groups()[:3])
+        return f"#{r:02x}{g:02x}{b:02x}"
+    # EVERY OTHER CSS COLOR 4 SPACE. Chrome returns whatever space the author wrote,
+    # and Tailwind v4 - which is most sites built since 2024 - writes `oklch()` and
+    # `lab()`. Without this branch those all returned "", and a measured storefront
+    # came back with a two-role WHITE-ON-WHITE palette plus "styling will be thin",
+    # about a page whose header was a pink-to-purple gradient. The colours were there;
+    # nothing could read them.
+    rgb = css_color_to_rgb(raw)
+    if rgb is None:
         return ""
-    if m.group(4) is not None and float(m.group(4)) < 0.05:
-        return ""  # effectively transparent
-    r, g, b = (min(255, int(x)) for x in m.groups()[:3])
-    return f"#{r:02x}{g:02x}{b:02x}"
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+
+#: Colour stops inside a CSS gradient. A modern site paints its brand with
+#: `background-image: linear-gradient(...)` and leaves `background-color` transparent,
+#: so an extractor that reads only the latter measures nothing on exactly the pages
+#: whose branding is strongest.
+_GRADIENT_RE = re.compile(r"(?:linear|radial|conic)-gradient\s*\(", re.I)
+_STOP_RE = re.compile(
+    r"(#[0-9a-f]{3,8}"
+    r"|(?:rgba?|hsla?|oklch|oklab|lab|lch|color)\s*\([^()]*(?:\([^()]*\)[^()]*)*\))",
+    re.I,
+)
+
+
+def gradient_colours(value: str) -> list[str]:
+    """Every colour stop in a CSS ``background-image`` gradient, as ``#rrggbb``.
+
+    WHY THIS EXISTS. Measured on a live Tailwind storefront: 201 captured nodes
+    produced a palette of TWO roles (background, text) and `is_grounded` False, so the
+    pipeline warned "styling will be thin" and every colour fell back to a default.
+    The page was not colourless - its hero, header and buttons were all
+    `bg-gradient-to-br from-pink-...`, which computes to
+    `background-color: rgba(0, 0, 0, 0)` plus a `background-image` the extractor never
+    read. The brand was sitting in a property nobody looked at.
+
+    ``url(...)`` backgrounds yield nothing: a photograph is not a design token, and
+    sampling one would put an arbitrary pixel colour into the palette.
+    """
+    raw = (value or "").strip()
+    if not raw or raw.lower() == "none" or not _GRADIENT_RE.search(raw):
+        return []
+    out: list[str] = []
+    for match in _STOP_RE.findall(raw):
+        hexed = to_hex(match)
+        if hexed and hexed not in out:
+            out.append(hexed)
+    return out
 
 
 def luminance(hex_colour: str) -> float:
@@ -176,6 +225,17 @@ def _scale(values: list[float], *, limit: int = 8) -> tuple[int, ...]:
     return tuple(out[:limit])
 
 
+
+def _segments(token_name: str) -> frozenset[str]:
+    """The whole words of a CSS custom-property name.
+
+    ``--color-pink-300`` -> ``{"color", "pink", "300"}``. Used so a role's declared-
+    token match is a word match: "ink" finds ``--color-ink`` and no longer finds
+    ``--color-pink-300``.
+    """
+    return frozenset(part for part in re.split(r"[^a-z0-9]+", token_name.lower()) if part)
+
+
 def _modal(counter: Counter[str]) -> str:
     return counter.most_common(1)[0][0] if counter else ""
 
@@ -223,6 +283,8 @@ def extract(
     text_counts: Counter[str] = Counter()
     head_counts: Counter[str] = Counter()
     link_counts: Counter[str] = Counter()
+    #: Colour stops recovered from gradients - accent candidates, see the node loop.
+    gradient_counts: Counter[str] = Counter()
     body_fonts: Counter[str] = Counter()
     head_fonts: Counter[str] = Counter()
     radii: list[float] = []
@@ -243,6 +305,20 @@ def extract(
         bg = to_hex(style.get("backgroundColor", ""))
         if bg and area >= _LARGE_AREA:
             bg_counts[bg] += 1
+        # A gradient IS the background on a modern site, and its stops are brand
+        # colours by construction - nobody reaches for a gradient by accident. Read
+        # only when `backgroundColor` resolved to nothing, so a solid fill still wins:
+        # a gradient overlay on a coloured band must not outvote the band itself.
+        if not bg:
+            stops = gradient_colours(str(style.get("backgroundImage", "")))
+            if stops and area >= _LARGE_AREA:
+                for stop in stops:
+                    bg_counts[stop] += 1
+            # Every stop is also an ACCENT candidate regardless of the painted area:
+            # a gradient button is small and is still the page's strongest colour
+            # signal, which is precisely what the accent role is looking for.
+            for stop in stops:
+                gradient_counts[stop] += 1
         colour = to_hex(style.get("color", ""))
         if colour and text:
             (head_counts if heading else text_counts)[colour] += 1
@@ -267,7 +343,13 @@ def extract(
     def assign(role: str, derived: str, *names: str) -> None:
         for name in names:
             for key, hexed in declared_colours.items():
-                if name in key:
+                # WHOLE SEGMENTS, not a substring. `name in key` matched "ink" inside
+                # "--color-PINK-300", so a Tailwind page's heading colour was resolved
+                # to its pink swatch while the actually-measured #101828 was discarded.
+                # Every role name here is short enough for that to happen again:
+                # "bg" matches "--color-bgrey", "hair" matches "--chair-*". Splitting
+                # the token name into segments makes the match mean what it says.
+                if name in _segments(key):
                     palette[role] = hexed
                     provenance[f"palette.{role}"] = "declared"
                     return
@@ -320,10 +402,21 @@ def extract(
     #
     # A brand accent is the most CHROMATIC colour the page uses with any regularity, not
     # the most frequent one: it appears on a few buttons and links, by design.
-    candidates = Counter(link_counts) + Counter(text_counts)
+    candidates = Counter(link_counts) + Counter(text_counts) + Counter(gradient_counts)
     chromatic = [
         c for c, n in candidates.items()
-        if saturation(c) >= _MIN_ACCENT_SATURATION and n >= _MIN_ACCENT_USES
+        # A GRADIENT STOP IS EXEMPT FROM THE USES THRESHOLD, and the distinction is
+        # about signal quality rather than frequency. `_MIN_ACCENT_USES` exists to stop
+        # a colour that appears once - which could be anything - from being read as the
+        # brand. A gradient is not that: nobody reaches for `linear-gradient` by
+        # accident, so one hero gradient IS the brand statement even though it paints a
+        # single element. Measured on a live storefront whose whole identity was one
+        # pink-to-purple header gradient: its stops appeared twice, fell under the
+        # threshold, and the page came back with no accent at all.
+        # The saturation bar and the framework-colour exclusion still apply - those are
+        # the checks that decide whether a colour is chromatic and deliberate.
+        if saturation(c) >= _MIN_ACCENT_SATURATION
+        and (n >= _MIN_ACCENT_USES or c in gradient_counts)
         and c not in framework_colours
     ]
     chromatic.sort(key=lambda c: (-saturation(c), -candidates[c]))

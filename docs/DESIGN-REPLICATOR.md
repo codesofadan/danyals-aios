@@ -143,6 +143,18 @@ the page looks, which is the one thing this exists to measure.
 
 Read this section before promising a client anything.
 
+**Modern colour spaces are read (since 2026-09-12).** Chrome's `getComputedStyle`
+returns whatever space the author wrote, and Tailwind v4 — most sites built since
+roughly 2024 — writes `oklch()` and `lab()`. The extractor understood only `#hex` and
+`rgb()`, so on those sites every brand colour parsed as nothing and the only survivors
+were literal whites: a measured storefront produced a TWO-role palette, both `#ffffff`,
+under the note *"design system is ungrounded; styling will be thin"* — about a page
+whose header was a pink-to-purple gradient. `app/services/color_spaces.py` now
+implements the CSS Color 4 transforms (`oklch`/`oklab`/`lab`/`lch`/`hsl`/`color()`),
+gradient colour STOPS are read from `background-image` (a gradient is the background on
+a modern site), and the design system is extracted from the whole page including the
+chrome, where branding usually lives. Same page after: **7 palette roles, grounded.**
+
 **Images are imported, but nothing else is.** The AIOS Publisher plugin walks the Elementor
 tree on arrival and sideloads every image into the client's own media library, rewriting
 both the URL and the attachment id (the id is what lets Elementor emit `srcset`). Fonts,
@@ -193,7 +205,7 @@ refused. The ones worth recognising:
 | `the page returned HTTP 4xx/5xx` | You replicated an error page. Check the URL. |
 | `the request was redirected to …` | You replicated a different URL than you typed. |
 | `a header element WAS found but could not be measured` | Ours, not the site's. |
-| `no header element was found on the source` | Genuinely no recognisable header. |
+| `no header element was found on the source` | Genuinely no recognisable header. **Corrected 2026-09-12:** this used to fire on sites that HAD one. The content root fell back to `document.body`, and the chrome guard rejected any candidate the root contained — i.e. every header and footer on a page with no `<main>`, no `<article>` and no Elementor boundary. Measured on a live React/Tailwind storefront: a full-width `<nav>` and a 1440x441 `<footer>`, both present, both dropped. The root now prefers the tallest real body child, the guard rejects only a candidate that IS or WRAPS the root, and double-walking is prevented by excluding the chrome from the content walk instead. |
 | `capability: assuming the free Elementor widget set` | The site did not answer the probe. Never guessed upward. |
 | `design system is ungrounded` | Too few measured values; styling will be thin. |
 | `refused by the oracle: …` | A bug in **our** emitter. Nothing was published. Report it. |

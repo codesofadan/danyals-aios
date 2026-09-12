@@ -228,6 +228,17 @@ class TestThePagesOwnGround:
         assert ReplicaCapture(url="https://x").body_bg == ""
 
 
+
+def _js_without_comments(js: str) -> str:
+    """The extractor JS with `//` line comments removed.
+
+    Deliberately simple: it is used only to assert that a given CALL is absent from
+    the code, and the alternative - matching the raw source - lets the comment that
+    EXPLAINS why a call was removed fail the test that checks it was removed.
+    """
+    return chr(10).join(line.split("//")[0] for line in js.splitlines())
+
+
 class TestTheChromeAndTheHead:
     """Header, footer and <head> fundamentals ride the capture."""
 
@@ -236,8 +247,58 @@ class TestTheChromeAndTheHead:
         assert "pickRegion" in js
         assert '[data-elementor-type="header"]' in js
         assert '[data-elementor-type="footer"]' in js
-        assert "el.contains(root) || root.contains(el)" in js, (
+        # A region that IS or WRAPS the content root is the page, not chrome.
+        assert "el === root || el.contains(root)" in js, (
             "a region equal to or containing the content root is not chrome")
+
+    def test_a_region_inside_the_content_root_is_still_chrome(self) -> None:
+        """THE TORSO BUG, pinned.
+
+        This guard used to also reject `root.contains(el)`. On a React/Tailwind site
+        there is no <main>, no <article> and no Elementor boundary, so the root fell
+        back to `document.body` - which contains the header and the footer - and every
+        candidate was rejected. Measured on a live storefront: the page had a
+        full-width <nav> and a 1440x441 <footer>, and the replica came back with
+        neither, reporting "no header element was found on the source" about a source
+        that had one.
+
+        Double-walking (the real reason the old guard existed) is now prevented by
+        excluding the chrome from the CONTENT walk instead of refusing to recognise it.
+        """
+        # Asserted against CODE, not prose: the comment above the guard necessarily
+        # names the call it stopped making, and a substring check over the raw source
+        # would match that explanation and fail a correct implementation.
+        code = _js_without_comments(_extractor_js())
+        assert "root.contains(el)" not in code, (
+            "a header inside the content root is still the site's header")
+        js = _extractor_js()
+        assert "SKIP_EL" in js, "the content walk must exclude the chrome subtrees"
+        assert "SKIP_EL.add(headerEl)" in js and "SKIP_EL.add(footerEl)" in js
+        assert "SKIP_EL.clear()" in js, (
+            "the exclusion must be lifted before the chrome is walked on purpose")
+
+    def test_the_body_fallback_prefers_a_real_container_over_document_body(self) -> None:
+        """`document.body` as the content root is what made every chrome candidate a
+        descendant. The fallback now picks the tallest full-width body child - the app
+        container on a single-root site - and keeps document.body as a last resort."""
+        js = _extractor_js()
+        assert "bodyRoot" in js
+        assert "document.body.children" in js
+
+    def test_the_chrome_selectors_cover_a_framework_site(self) -> None:
+        """A Tailwind/React storefront ships <nav> and <footer> with no `site-header`
+        class and no `#masthead`; the original list matched none of them."""
+        js = _extractor_js()
+        for needle in ("[role=\"banner\"]", "'nav'", "[role=\"contentinfo\"]"):
+            assert needle in js, needle
+
+    def test_a_mid_page_nav_cannot_be_adopted_as_the_site_header(self) -> None:
+        """Widening the selectors to <nav> would otherwise let a category strip or an
+        in-article table of contents become the site header, which is worse than
+        finding none. Position sanity is what keeps the widening safe."""
+        js = _extractor_js()
+        assert "wantTop" in js
+        assert "docH" in js
 
     def test_the_head_fundamentals_are_collected(self) -> None:
         js = _extractor_js()

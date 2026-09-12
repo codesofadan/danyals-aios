@@ -130,6 +130,38 @@ class SystemSummarizer(Protocol):
     ) -> LLMResult: ...
 
 
+# The thinking allowance a REASONING model needs on top of its answer.
+#
+# MEASURED 2026-09-12 against the live router, not guessed. Every caller in this
+# codebase sizes `max_tokens` from the ANSWER it wants — `content_generator` uses
+# `max_words * 3.0`, itself measured in 2026-08 against a non-reasoning model where
+# output tokens are essentially the answer. A reasoning model spends the same budget on
+# thinking FIRST, and only then writes:
+#
+#     deepseek-v4-flash   357 words cost 3233 output tokens   (~9 tokens/word)
+#     glm-5.3             363 words cost 5313 output tokens   (~15 tokens/word)
+#
+# So a 110-word block asking for 330 tokens gets ZERO text: the model thinks past the
+# ceiling and the API stops it at `stop_reason=max_tokens` having produced nothing. That
+# is exactly the `EmptyCompletionError` below, and it killed every Web 2.0 draft and
+# every content write the moment the models with quota became reasoning models.
+#
+# The floor is applied here rather than at each of the ~15 call sites because it is a
+# property of the MODEL, not of the caller's word budget — a caller cannot know whether
+# the tier it was handed thinks. Raising a budget can only prevent a truncation, never
+# cause one: `max_tokens` is a runaway guard and the prompt's stated word count is what
+# actually binds the length (see `content_generator._MAX_TOKENS_PER_WORD`'s header).
+#
+# It is a FLOOR, not a multiplier: a caller that already asks for more keeps its value.
+#
+# WHY 8192 AND NOT THE 4096 THAT DEEPSEEK NEEDED. `max_tokens` is a CEILING, not a
+# purchase: billing is on tokens actually produced, so a ceiling the model does not
+# reach costs nothing. Sizing it to the tightest model that happens to be configured
+# today would re-break the moment the tier changes — 8192 clears the slowest thinker
+# measured (glm-5.3 at 5313) with real headroom, for free.
+_REASONING_TOKEN_FLOOR = 8192
+
+
 class AnthropicSummarizer:
     """Real ``Summarizer`` backed by Claude; lazy-imports the ``anthropic`` SDK.
 
@@ -204,9 +236,12 @@ class AnthropicSummarizer:
                 breakpoints += 1
             system_param.append(entry)
 
+        # See `_REASONING_TOKEN_FLOOR`: the caller sized this for an ANSWER, and a
+        # reasoning model spends it on thinking before writing a word.
+        budget = max(int(max_tokens), _REASONING_TOKEN_FLOOR)
         message = self._client.messages.create(
             model=model,
-            max_tokens=max_tokens,
+            max_tokens=budget,
             system=system_param,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -222,7 +257,8 @@ class AnthropicSummarizer:
         usage = message.usage
         if not text.strip() and getattr(message, "stop_reason", None) == "max_tokens":
             raise EmptyCompletionError(
-                f"the model produced no text within max_tokens={max_tokens} "
+                f"the model produced no text within max_tokens={budget} "
+                f"(caller asked for {max_tokens}; the reasoning floor applied) "
                 f"({usage.output_tokens} output tokens were spent, all on reasoning). "
                 "Raise max_tokens: a complex prompt needs budget for thinking AND the "
                 "answer."

@@ -148,3 +148,80 @@ def test_skills_reference_markdown_is_in_sync() -> None:
         "PAGE-TEMPLATES.md is stale — regenerate with "
         "`python -m app.services.page_blueprints > <path>` (it drifted from the module)."
     )
+
+
+# --------------------------------------------------------------------------- #
+# CAPACITY. The blueprint used to say a page HAS a pricing section and not that it
+# holds three cards, so a draft with seven plans was slotted in and the overflow
+# absorbed - design-aware only about order. These carry the measurement.
+# --------------------------------------------------------------------------- #
+class TestCapacity:
+    def test_measured_capacity_survives_the_raw_coercion(self) -> None:
+        from app.services.page_blueprints import section_from_raw
+        spec = section_from_raw(
+            {"kind": "pricing", "layout": "grid", "items": 3,
+             "headingChars": 42, "bodyChars": 180}
+        )
+        assert spec is not None
+        assert (spec.max_items, spec.heading_chars, spec.body_chars) == (3, 42, 180)
+        assert spec.has_capacity is True
+
+    def test_both_spellings_are_accepted(self) -> None:
+        """A stored profile is camelCase on the wire; a hand-written blueprint or a
+        template uses snake_case. Accepting one silently drops the other."""
+        from app.services.page_blueprints import section_from_raw
+        a = section_from_raw({"kind": "pricing", "items": 3})
+        b = section_from_raw({"kind": "pricing", "max_items": 3})
+        assert a is not None and b is not None
+        assert a.max_items == b.max_items == 3
+
+    def test_an_unmeasured_section_reports_no_capacity(self) -> None:
+        """0 means "not measured", NOT "holds nothing" - the distinction the whole
+        feature turns on."""
+        from app.services.page_blueprints import section_from_raw
+        spec = section_from_raw({"kind": "pricing"})
+        assert spec is not None
+        assert spec.has_capacity is False
+        assert spec.max_items == 0
+
+    @pytest.mark.parametrize("bad", [0, -3, 9999, "many", None, {}])
+    def test_an_implausible_count_is_refused(self, bad: object) -> None:
+        """A "400 cards" reading is a bad capture, not a design. Passing it on as a
+        budget would be worse than having none."""
+        from app.services.page_blueprints import section_from_raw
+        spec = section_from_raw({"kind": "pricing", "items": bad})
+        assert spec is not None and spec.max_items == 0
+
+    def test_overflow_is_measured_against_a_measured_limit_only(self) -> None:
+        from app.services.page_blueprints import SectionSpec, overflowing
+        measured = SectionSpec(kind="pricing", max_items=3)
+        assert overflowing(measured, 7) is True
+        assert overflowing(measured, 3) is False
+        # An unmeasured section can never overflow, or every page nobody analysed
+        # would be refused.
+        assert overflowing(SectionSpec(kind="pricing"), 99) is False
+
+    def test_the_brief_states_only_what_was_measured(self) -> None:
+        from app.services.page_blueprints import SectionSpec, capacity_brief
+        brief = capacity_brief([
+            SectionSpec(kind="hero", heading_chars=48),
+            SectionSpec(kind="pricing", layout="grid", max_items=3),
+            SectionSpec(kind="about"),                      # unmeasured - contributes nothing
+            SectionSpec(kind="map", content=False, max_items=9),  # chrome - not written to
+        ])
+        assert "exactly 3 items" in brief
+        assert "48 characters" in brief
+        # Assert on the LINES, not on substrings: "about" legitimately occurs in
+        # the prose ("up to about 48 characters"), so a substring check for the
+        # unmeasured `about` SECTION would test the wording, not the behaviour.
+        numbered = [ln for ln in brief.splitlines() if ln[:1].isdigit()]
+        kinds = [ln.split(" ", 1)[1].split(" (", 1)[0] for ln in numbered]
+        assert kinds == ["hero", "pricing"], (
+            "an unmeasured section and a chrome section both contribute nothing"
+        )
+
+    def test_a_wholly_unmeasured_blueprint_yields_no_brief(self) -> None:
+        """Not an empty instruction - NO instruction. A generator handed "write to
+        these capacities:" followed by nothing would be worse than being told nothing."""
+        from app.services.page_blueprints import SectionSpec, capacity_brief
+        assert capacity_brief([SectionSpec(kind="hero"), SectionSpec(kind="cta")]) == ""

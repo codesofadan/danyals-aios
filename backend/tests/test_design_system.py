@@ -182,3 +182,102 @@ def test_an_empty_capture_degrades_rather_than_raising() -> None:
     ds = extract([])
     assert ds.is_grounded is False
     assert any("no palette" in n for n in ds.notes)
+
+
+# --------------------------------------------------------------------------- #
+# Modern-CSS extraction: gradients, colour spaces, and token-name matching.
+#
+# Added after a live Tailwind v4 storefront replicated with a TWO-role palette
+# (background and text, both #ffffff) and the note "design system is ungrounded;
+# styling will be thin" - on a page whose header was a pink-to-purple gradient.
+# Three separate defects produced that, and each has a test below.
+# --------------------------------------------------------------------------- #
+class TestGradientColours:
+    """DEFECT 1: the extractor read only `backgroundColor`. A modern site paints with
+    `background-image: linear-gradient(...)` and leaves `background-color`
+    transparent, so the strongest brand signal on the page was invisible."""
+
+    def test_stops_are_recovered_from_a_linear_gradient(self) -> None:
+        from app.services.design_system import gradient_colours
+        assert gradient_colours(
+            "linear-gradient(to bottom right, rgb(236, 72, 153), rgb(168, 85, 247))"
+        ) == ["#ec4899", "#a855f7"]
+
+    def test_hex_and_modern_spaces_both_parse(self) -> None:
+        from app.services.design_system import gradient_colours
+        assert gradient_colours("linear-gradient(90deg, #ff0088, #8800ff)") == [
+            "#ff0088", "#8800ff"
+        ]
+        assert len(gradient_colours("linear-gradient(oklch(0.7 0.2 30), lab(50% 40 -40))")) == 2
+
+    def test_a_photograph_is_not_a_design_token(self) -> None:
+        """Sampling a `url()` background would put an arbitrary pixel colour into the
+        palette and call it the brand."""
+        from app.services.design_system import gradient_colours
+        assert gradient_colours('url("/hero.jpg")') == []
+        assert gradient_colours("none") == []
+        assert gradient_colours("") == []
+
+    def test_a_gradient_layered_over_an_image_still_yields_its_stops(self) -> None:
+        from app.services.design_system import gradient_colours
+        assert gradient_colours("url(/a.png), linear-gradient(#ffffff, #000000)") == [
+            "#ffffff", "#000000"
+        ]
+
+    def test_transparent_stops_are_dropped(self) -> None:
+        from app.services.design_system import gradient_colours
+        assert gradient_colours("radial-gradient(circle, #123456, rgba(0,0,0,0))") == [
+            "#123456"
+        ]
+
+    def test_duplicate_stops_collapse(self) -> None:
+        from app.services.design_system import gradient_colours
+        assert gradient_colours("linear-gradient(#fff, #ffffff, #fff)") == ["#ffffff"]
+
+
+class TestModernColourSpaces:
+    """DEFECT 2: `to_hex` understood only #hex and rgb(). Tailwind v4 - most sites
+    built since ~2024 - emits oklch() and lab(), so every brand colour returned "" and
+    only literal whites survived into the palette."""
+
+    def test_to_hex_reads_the_spaces_a_modern_framework_emits(self) -> None:
+        from app.services.design_system import to_hex
+        assert to_hex("lab(52.0183% 66.11 -78.2316)") != ""
+        assert to_hex("oklch(0.627 0.265 303.9)") != ""
+        assert to_hex("hsl(210 100% 50%)") == "#0080ff"
+        assert to_hex("color(srgb 0 0.5 1)") == "#0080ff"
+
+    def test_the_legacy_paths_are_unchanged(self) -> None:
+        from app.services.design_system import to_hex
+        assert to_hex("#abc") == "#aabbcc"
+        assert to_hex("#a1b2c3") == "#a1b2c3"
+        assert to_hex("rgb(1, 2, 3)") == "#010203"
+        assert to_hex("rgba(1, 2, 3, 0)") == ""
+        assert to_hex("") == ""
+
+    def test_an_unreadable_colour_is_still_no_measurement(self) -> None:
+        from app.services.design_system import to_hex
+        assert to_hex("notacolour(1 2 3)") == ""
+
+
+class TestDeclaredTokenMatching:
+    """DEFECT 3: role names were matched as SUBSTRINGS of the CSS variable name, so
+    "ink" matched `--color-PINK-300` and a page's heading colour resolved to its pink
+    swatch while the measured #101828 was discarded."""
+
+    def test_a_role_name_matches_whole_segments_only(self) -> None:
+        from app.services.design_system import _segments
+        assert "ink" not in _segments("--color-pink-300")
+        assert "ink" in _segments("--color-ink")
+
+    def test_the_segments_are_the_words_of_the_token(self) -> None:
+        from app.services.design_system import _segments
+        assert _segments("--color-pink-300") == frozenset({"color", "pink", "300"})
+
+    def test_other_short_role_names_are_protected_too(self) -> None:
+        """Every role name here is short enough for the same accident: "bg" inside
+        "bgrey", "hair" inside "chair"."""
+        from app.services.design_system import _segments
+        assert "bg" not in _segments("--color-bgrey")
+        assert "hair" not in _segments("--chair-rail")
+        assert "bg" in _segments("--bg-page")

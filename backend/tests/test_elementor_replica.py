@@ -736,3 +736,111 @@ class TestTheRebuildIsResponsive:
         pos = mobile_text_positions({"mobile": mobile})
         ys = [pos[t][1] for t in ("2,400+", "10 yr", "4.9/5")]
         assert max(ys) - min(ys) <= 30, "a real inline trio must still read as one band"
+
+
+# --------------------------------------------------------------------------- #
+# PER-BREAKPOINT VISIBILITY (E3). A responsive site does not merely reflow - it DROPS
+# things. Neither `hide_tablet` nor `hide_mobile` was ever emitted, so every element
+# showed at every width and a page that hides half its hero on a phone rebuilt with
+# the desktop hero crammed into 390px.
+# --------------------------------------------------------------------------- #
+def _tree(text: str, kids: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "txt": text, "box": [0, 0, 100, 20], "s": {}, "t": "div",
+        "kids": kids or [],
+    }
+
+
+class TestHiddenAtBreakpoint:
+    def test_copy_the_source_drops_on_mobile_is_reported(self) -> None:
+        from app.services.elementor_replica import hidden_at_breakpoint
+        out = hidden_at_breakpoint({
+            "desktop": _tree("", [_tree("Keep me"), _tree("Desktop only strip")]),
+            "mobile": _tree("", [_tree("Keep me")]),
+        })
+        assert out["mobile"] == {"Desktop only strip"}
+
+    def test_ambiguous_copy_is_excluded_rather_than_guessed(self) -> None:
+        """THE LOAD-BEARING EXCLUSION. A row of cards whose buttons all read "View
+        more" gives one string many homes; concluding anything about its visibility
+        would hide or show all of them together. The same defect
+        `mobile_text_positions` already had to fix."""
+        from app.services.elementor_replica import hidden_at_breakpoint
+        out = hidden_at_breakpoint({
+            "desktop": _tree("", [_tree("View more"), _tree("View more"), _tree("Solo")]),
+            "mobile": _tree("", []),
+        })
+        assert "View more" not in out.get("mobile", set())
+        assert out["mobile"] == {"Solo"}
+
+    def test_mobile_only_copy_is_not_emitted(self) -> None:
+        """`hide_desktop` would have to hang off an element the desktop tree never
+        produced - there is nothing to set it on."""
+        from app.services.elementor_replica import hidden_at_breakpoint
+        out = hidden_at_breakpoint({
+            "desktop": _tree("", [_tree("Shared")]),
+            "mobile": _tree("", [_tree("Shared"), _tree("Tap to call")]),
+        })
+        assert out == {}
+
+    def test_no_desktop_capture_means_no_conclusions(self) -> None:
+        from app.services.elementor_replica import hidden_at_breakpoint
+        assert hidden_at_breakpoint({"mobile": _tree("", [_tree("x")])}) == {}
+
+
+class TestVisibilityIsEmitted:
+    def test_a_dropped_heading_gets_hide_mobile(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_tree, to_json
+        from app.services.layout_infer import (
+            InferredColumn,
+            InferredPage,
+            InferredRow,
+            InferredSection,
+            InferredWidget,
+        )
+        widget = InferredWidget(type="heading", node={"txt": "Desktop only strip", "s": {}})
+        col = InferredColumn(width_pct=100, x=0, width_px=1440, widgets=(widget,))
+        page = InferredPage(
+            sections=(InferredSection(
+                y=0, height=200, full_bleed=True,
+                rows=(InferredRow(columns=(col,), y=0),),
+            ),),
+            container_px=1200,
+        )
+        js = to_json(build_tree(
+            page, DesignSystem(), hidden={"mobile": {"Desktop only strip"}},
+        ))
+        assert "hide_mobile" in js
+        # And the control is one Elementor's own registry carries - an unknown setting
+        # is SILENTLY swallowed, so the page would render with a hole and no log line.
+        import json
+        from pathlib import Path
+        oracle = json.loads(
+            (Path(__file__).resolve().parents[1] / "app" / "services" / "data"
+             / "elementor_oracle_4_7.json").read_text(encoding="utf-8")
+        )
+        assert "hide_mobile" in oracle["common_keys"]
+        assert "hide_tablet" in oracle["common_keys"]
+
+    def test_untouched_when_nothing_is_hidden(self) -> None:
+        from app.services.design_system import DesignSystem
+        from app.services.elementor_replica import build_tree, to_json
+        from app.services.layout_infer import (
+            InferredColumn,
+            InferredPage,
+            InferredRow,
+            InferredSection,
+            InferredWidget,
+        )
+        widget = InferredWidget(type="heading", node={"txt": "Shown everywhere", "s": {}})
+        col = InferredColumn(width_pct=100, x=0, width_px=1440, widgets=(widget,))
+        page = InferredPage(
+            sections=(InferredSection(
+                y=0, height=200, full_bleed=True,
+                rows=(InferredRow(columns=(col,), y=0),),
+            ),),
+            container_px=1200,
+        )
+        js = to_json(build_tree(page, DesignSystem(), hidden={}))
+        assert "hide_mobile" not in js and "hide_tablet" not in js
