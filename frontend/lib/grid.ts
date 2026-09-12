@@ -175,8 +175,33 @@ export function pointLabel(point: GridPoint): string {
  * entire point of the three-state contract.
  */
 export function coverageSentence(run: GridRun): string {
+  // A RUN THAT HAS NOT FINISHED HAS NOT FAILED.
+  //
+  // `shareTop3` is null whenever nothing has been measured YET, which is true of a
+  // queued or running grid as much as of one where every probe errored. Treating the
+  // two alike made an in-flight run announce "No point could be measured (25 probes
+  // failed)" - reported from production on 2026-09-12, on a grid that was mid-sweep
+  // and had failed nothing. That is the module's own defect class turned on itself:
+  // claiming a measurement outcome that never happened.
+  if (run.status === "queued" || run.status === "running") {
+    const done = run.pointsMeasured + run.pointsError;
+    return done === 0
+      ? `Measuring ${run.pointsTotal} point${run.pointsTotal === 1 ? "" : "s"}...`
+      : `Measuring - ${done} of ${run.pointsTotal} probes done.`;
+  }
   if (run.shareTop3 === null) {
-    return `No point could be measured (${run.pointsTotal} probe${run.pointsTotal === 1 ? "" : "s"} failed).`;
+    // Terminal with nothing measured. WHY matters: a provider that answered nothing
+    // and a spend gate that refused before the first probe send an operator to
+    // completely different places, and the run records which.
+    if (run.pointsError === 0) {
+      return run.reason
+        ? `Nothing was measured - ${run.reason}`
+        : "Nothing was measured on this run.";
+    }
+    const failed = `${run.pointsError} probe${run.pointsError === 1 ? "" : "s"}`;
+    return run.reason
+      ? `No point could be measured (${failed} unanswered) - ${run.reason}`
+      : `No point could be measured (${failed} failed).`;
   }
   const pct = Math.round(run.shareTop3 * 100);
   const base =

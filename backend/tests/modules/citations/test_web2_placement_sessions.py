@@ -156,7 +156,35 @@ class TestWeb2RepoShape:
         src = inspect.getsource(OperatorSessionsRepo.web2_task_rows)
         assert "sp.active" in src, "only an ACTIVE spec may power autofill"
         assert "lateral" in src
-        assert "platform_enum = w.platform::text) desc" in src
+        # The ORDER BY still prefers the enum mapping over the free-text name.
+        assert "desc, " in src and "platform_enum" in src
+
+    def test_the_enum_comparison_is_cast_on_both_sides(self) -> None:
+        """THE BUG THIS PINS, found in production on 2026-09-12.
+
+        `web2_platforms.platform_enum` and `web2_properties.platform` are both the
+        `web2_platform` enum. Casting only the right-hand side left
+        `web2_platform = text`, for which Postgres has no operator, so this query
+        raised 42883 for EVERY web2 placement card:
+
+            ERROR: operator does not exist: web2_platform = text
+
+        It shipped with 0136 and had never been EXECUTED - the unit tests around it
+        use fakes, and the integration test auto-skips without a database - so the
+        first real run was in production. The session read 500d, which meant the
+        extension panel could not ADOPT its own session, tried to create a second
+        one, and showed "You already have an active session" forever.
+
+        The previous version of the test above asserted the uncast string verbatim, so
+        it pinned the defect in place. This asserts the property instead: wherever
+        `platform_enum` is compared to `w.platform`, BOTH sides are cast to text.
+        """
+        src = inspect.getsource(OperatorSessionsRepo.web2_task_rows)
+        for line in src.splitlines():
+            if "platform_enum" in line and "w.platform" in line:
+                assert "platform_enum::text" in line, (
+                    f"uncast enum comparison would raise 42883: {line.strip()}"
+                )
         assert "limit 1" in src, "a property must never fan out into two cards"
 
     def test_the_repo_still_never_touches_the_privileged_pool(self) -> None:

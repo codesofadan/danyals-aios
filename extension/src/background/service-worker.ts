@@ -655,8 +655,30 @@ async function handle(request: PanelRequest): Promise<PanelResponse> {
           await writeSession(adopted);
           await chrome.alarms.create(SESSION_HEARTBEAT_ALARM, { periodInMinutes: 1 });
           return { ok: true, data: adopted };
-        } catch {
-          return { ok: true, data: null };
+        } catch (err) {
+          // A FAILED ADOPTION IS NOT "NO SESSION".
+          //
+          // This used to swallow the error and report `data: null`, so the panel
+          // believed the operator had no session and offered Start session - which the
+          // server then refused with "You already have an active session", because
+          // there IS one and only one is allowed per operator, whichever lane it
+          // belongs to. The operator saw that refusal on a loop with nothing naming
+          // the cause, and it hit BOTH tabs: a stuck web2 session blocks a citation
+          // start just as hard.
+          //
+          // Reported from production on 2026-09-12, where the underlying read was
+          // 500ing on an uncast enum comparison. That query is fixed, but a
+          // swallow-and-claim-nothing is wrong whatever made the read fail - so the
+          // failure is surfaced with the one action that resolves it.
+          if (err instanceof NeedsPairing) throw err;
+          return {
+            ok: false,
+            error:
+              "You have an active session that could not be loaded, so a new one " +
+              "cannot be started (only one runs at a time). Press Close session to " +
+              "release it, then start again. " +
+              ((err as Error)?.message ?? ""),
+          };
         }
       }
 
@@ -749,14 +771,28 @@ async function handle(request: PanelRequest): Promise<PanelResponse> {
       }
 
       case "closeSession": {
+        // CLOSE WORKS WITHOUT LOCAL STATE, which is the whole point of the fallback
+        // below. Close used to be a no-op when `storage.session` held nothing - and
+        // that is exactly the situation an operator is in when a session cannot be
+        // adopted: the server has one, the panel does not know about it, and the only
+        // action that would release it did nothing. So the one escape from "You
+        // already have an active session" was unreachable.
         const state = await readSession();
-        if (state) {
+        let sessionId = state?.sessionId ?? "";
+        if (!sessionId) {
           try {
-            await api.closeSession(state.sessionId);
-          } finally {
-            await chrome.alarms.clear(SESSION_HEARTBEAT_ALARM);
-            await clearSession();
+            const mine = (await api.myActiveSessions()) as Array<{ id: string }>;
+            sessionId = mine[0]?.id ?? "";
+          } catch {
+            // Nothing to close, or the list itself is unreachable. Clearing local
+            // state below is still correct and still safe.
           }
+        }
+        try {
+          if (sessionId) await api.closeSession(sessionId);
+        } finally {
+          await chrome.alarms.clear(SESSION_HEARTBEAT_ALARM);
+          await clearSession();
         }
         return { ok: true, data: null };
       }

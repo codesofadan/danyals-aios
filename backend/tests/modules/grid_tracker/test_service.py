@@ -150,3 +150,36 @@ class TestCoverageBand:
     )
     def test_the_bands_are_stable_at_their_boundaries(self, share: float, band: str) -> None:
         assert coverage_band(share) == band
+
+def test_creating_the_same_grid_twice_is_idempotent_not_a_500() -> None:
+    """THE BUG THIS PINS, reported from production on 2026-09-12.
+
+    0138 declares `unique (profile_id, keyword)` - one standing grid per business per
+    keyword, which is right: a duplicate would double the weekly probe bill and split
+    one keyword's history across two charts. But the raw INSERT let that constraint
+    surface as an unhandled `psycopg.errors.UniqueViolation`, so an operator who
+    submitted "health center near me" twice for the same client got:
+
+        POST /api/v1/grid/definitions -> 500 Internal Server Error
+
+    A constraint doing its job must never reach the operator as a crash. The insert is
+    now `on conflict (profile_id, keyword) do nothing` with a read-back, so asking
+    twice returns the grid that already exists.
+
+    This asserts the SQL carries both halves, because the behaviour needs a database to
+    exercise and this module's suite is deliberately DB-free (the repo is faked
+    everywhere else). A source assertion is weaker than a round trip - so it checks the
+    two things whose absence caused the 500, and says so.
+    """
+    import inspect
+
+    from app.modules.grid_tracker.repo import GridRepo
+
+    src = inspect.getsource(GridRepo.create_definition)
+    assert "on conflict (profile_id, keyword) do nothing" in src, (
+        "a duplicate keyword must not raise UniqueViolation at the operator"
+    )
+    assert "select * from public.grid_definitions" in src, (
+        "on conflict do nothing returns NO row, so the existing grid must be read back "
+        "- without this the caller gets None and reports a failure for a grid that exists"
+    )

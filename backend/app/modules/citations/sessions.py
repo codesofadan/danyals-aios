@@ -461,8 +461,20 @@ class OperatorSessionsRepo:
                 "join public.web2_properties w on w.id = t.web2_id "
                 "left join lateral ( "
                 "  select p.id, p.name, p.homepage_url from public.web2_platforms p "
-                "  where p.platform_enum = w.platform::text or p.name = w.platform::text "
-                "  order by (p.platform_enum = w.platform::text) desc, p.name limit 1 "
+                # BOTH SIDES CAST TO text. `web2_platforms.platform_enum` is the
+                # `web2_platform` ENUM and `web2_properties.platform` is the same
+                # enum, but casting only the right-hand side left
+                # `web2_platform = text`, for which Postgres has no operator - so
+                # this query raised 42883 for EVERY web2 placement card. It shipped
+                # with 0136 and was never executed: the unit tests use fakes and the
+                # integration test auto-skips without a database, so the first real
+                # run was in production, where it 500d the session read - which left
+                # the panel unable to ADOPT its own session and looping on "you
+                # already have an active session".
+                "  where p.platform_enum::text = w.platform::text "
+                "     or p.name = w.platform::text "
+                "  order by (p.platform_enum::text = w.platform::text) desc, "
+                "           p.name limit 1 "
                 ") pl on true "
                 "left join public.web2_placement_specs sp "
                 "  on sp.platform_id = pl.id and sp.active "

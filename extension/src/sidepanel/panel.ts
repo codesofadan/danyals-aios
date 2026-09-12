@@ -980,6 +980,25 @@ async function refresh(): Promise<void> {
   // after a browser restart) IS the operator's work surface.
   const work = await send({ type: "sessionState" });
   if (work.ok && work.data) return renderSession(work.data as ActiveSession);
+  // A session exists on the server and could NOT be loaded. Falling through to the
+  // board would offer Start session, which the server refuses ("You already have an
+  // active session") - the loop reported on 2026-09-12, on both tabs, because only
+  // one session runs per operator whichever lane it belongs to. Say what is wrong and
+  // give the one action that clears it.
+  if (!work.ok) {
+    root.replaceChildren();
+    root.append(el("h1", { textContent: "AIOS Extension" }));
+    root.append(el("div", { className: "note bad", textContent: work.error }));
+    const release = el("button", { className: "primary", textContent: "Close the stuck session" });
+    release.onclick = async () => {
+      release.disabled = true;
+      await send({ type: "closeSession" });
+      flash = "Session released - you can start a new one.";
+      void refresh();
+    };
+    root.append(el("div", { className: "row" }, release));
+    return;
+  }
 
   if (claim) {
     // The worker may have been terminated and rebuilt since; re-fetch the item rather
