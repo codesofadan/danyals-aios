@@ -527,6 +527,32 @@ class Settings(BaseSettings):
     # linear cost. The batch caps how many rows ONE tick claims.
     local_rank_refresh_seconds: int = 86_400
     local_rank_refresh_batch: int = 100
+    # --- Geo-grid tracking (0138, its own module + its own `grid_tracker` dial) ---
+    # UNLIKE the settings above, the grid has NO fake fallback: it REQUIRES the
+    # DataForSEO credential, because only DataForSEO accepts a per-point
+    # `location_coordinate`. A Serper-only deploy cannot run a grid at all - see
+    # `app.modules.grid_tracker.provider.grid_provider_is_live` for why substituting
+    # a name-addressed provider would silently produce a uniform, fictional heat map.
+    #
+    # The per-POINT estimate is what the cost gate meters, and a run is `points`
+    # probes: a 2-ring grid is 17 points, a 5-ring grid is 41. The ceiling lives in
+    # the migration's CHECK (rings 1..5), so the worst case per run is bounded at the
+    # database rather than by a constant here.
+    grid_point_cost_estimate: float = 0.003  # ONE map-pack probe at ONE coordinate
+    # The map scale each probe is run at ("lat,lng,ZOOM"). 14 is street/neighbourhood
+    # level, which is the scale a local pack is actually drawn at; lower zooms widen
+    # the net until the grid stops discriminating between its own points.
+    grid_probe_zoom: int = 14
+    # How many due grids ONE dispatch tick claims. Each claimed grid fans out to its
+    # own child job, so this caps the fan-out, not the work.
+    grid_dispatch_batch: int = 25
+    # --- Semantic form mapping (0140) -------------------------------------------
+    # ONE LLM call per UNCACHED form. The durable cache (`form_field_maps`) is keyed
+    # on a structural fingerprint, so the FIRST operator to meet a directory's form
+    # pays and everyone after reads a row - which is why this is metered per form
+    # rather than per fill. Billed with NO client attached: the mapping describes a
+    # DIRECTORY's form, not a client's data.
+    form_mapping_cost_estimate: float = 0.002
     # Google Business Profile OAuth client (DORMANT). The GBP API is APPROVAL-gated -
     # a new project starts at 0 QPM and approval takes days-to-weeks - so these stay
     # unset and `sync_gbp_profile` HOLDS cleanly; map-pack rank + citations work

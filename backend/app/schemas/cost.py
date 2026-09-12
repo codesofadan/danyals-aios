@@ -130,6 +130,15 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # module (the e8964de lesson — an unregistered key is unswitchable-on), it just
     # never actually costs anything.
     DialFeatureMeta(key="site_analytics", label="Site Analytics (GSC/GA4)", icon="query_stats", provider="Google", note="Search Console + GA4 — free tier", default_mode="api"),
+    # 0138 — geo-grid tracking. Its OWN dial rather than a reuse of "local_seo",
+    # because the two have different cost SHAPES and an operator throttling one must
+    # not be forced to throttle the other: a local_seo check is ONE paid probe, and a
+    # grid run is `1 + 8*rings` of them (17 at the default, 41 at the ceiling). Folding
+    # the grid into the local_seo dial would mean the only way to stop a 41-probe run
+    # is to also stop every single-locale check and the GBP surface with it.
+    # Defaults OFF for the same reason rank_tracker does: it is a standing, recurring,
+    # per-client cost, so switching it on is an explicit ops decision.
+    DialFeatureMeta(key="grid_tracker", label="Grid Tracking", icon="grid_on", provider="DataForSEO", note="Map-pack heat map — 17-41 paid probes per run", default_mode="off"),
 )
 
 DIAL_KEYS: frozenset[str] = frozenset(f.key for f in DIAL_FEATURES)

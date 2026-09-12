@@ -69,6 +69,28 @@ _ALL: Final[tuple[Capability, ...]] = (
         default_interval_seconds=300,
     ),
     Capability(
+        kind="grid.dispatch_runs",
+        task="dispatch_grid_runs",
+        label="Refresh local search grids",
+        description=(
+            "Re-runs each active grid so its heat map stays current. EXPENSIVE and "
+            "recurring: one run is a paid map-pack probe per grid point (17 at the "
+            "default geometry, up to 41), per grid, every time it fires. A weekly "
+            "cadence is the sensible starting point - a service area's shape does not "
+            "move daily, and every tighter cadence multiplies the bill by the point "
+            "count rather than by one."
+        ),
+        scope="platform",
+        paid=True,
+        # WEEKLY, deliberately - see the description. Every other paid sweep in this
+        # table costs one call per due row; this one costs up to 41.
+        default_interval_seconds=604_800,
+        # Grid tracking has NO fallback provider: only DataForSEO accepts a per-point
+        # coordinate, so without these the sweep can only refuse. Surfacing that as
+        # "waiting on" stops an operator enabling an automation that would never run.
+        needs=("DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD"),
+    ),
+    Capability(
         kind="citations.liveness_recheck",
         task="citation_liveness_recheck",
         label="Re-check citation listings are still live",

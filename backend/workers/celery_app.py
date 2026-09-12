@@ -161,6 +161,11 @@ celery_app = Celery(
         # keyword is a standing per-client subscription, so it needs the beat entries
         # below and DOES take the R6 overlap lock.
         "app.modules.rank_tracker.tasks",
+        # 0138: the geo-grid workers (run_grid / dispatch_grid_runs). run_grid is
+        # event-driven (an operator presses Run) AND schedulable via the automations
+        # row; dispatch_grid_runs is the sweep and takes the R6 overlap lock. Both
+        # refuse before claiming when no coordinate-capable provider is configured.
+        "app.modules.grid_tracker.tasks",
         # Part 8 Phase 2G: the data-import worker (run_import). Event-driven (enqueued
         # when a lead commits an uploaded file), so no beat entry is needed. It takes no
         # overlap lock either: the run-CLAIM (a conditional UPDATE to 'importing') is a

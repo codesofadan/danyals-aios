@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.cost_repo import get_cost_repo
+from app.schemas.cost import DIAL_KEYS
 
 pytestmark = pytest.mark.unit
 
@@ -124,12 +125,17 @@ async def test_dial_merges_defaults(client: httpx.AsyncClient, wire: Callable[[s
     resp = await client.get("/api/v1/cost/dial")
     assert resp.status_code == 200
     dial = {d["key"]: d for d in resp.json()}
-    # +1 citations (7B-4), +1 site_analytics (7C), +1 policy watcher, +1 gmb,
-    # +1 public_audit (P0-2: the free funnel gets its OWN dial so an operator can
-    # switch the lead magnet off without disabling every client's paid audit),
-    # +1 citation_discovery (2026-09-02: split from backlinks, whose byhand default
-    # silently blocked every citation audit behind a 202).
-    assert len(dial) == 19
+    # The endpoint must surface EVERY registered dial, compared against the registry
+    # rather than against a hand-kept tally.
+    #
+    # This used to read `assert len(dial) == 19` above a comment tallying which module
+    # contributed which key. That is the drift invariant #9 already names: a count kept
+    # by hand beside a growing list is a second copy of the list, and every new module
+    # has to remember to bump it. It also under-tested - nineteen WRONG keys passed.
+    # Comparing the key SET to the registry is strictly stronger: it catches a dial
+    # that is registered but never served (unswitchable-on - the e8964de defect) and
+    # one that is served but unregistered.
+    assert set(dial) == set(DIAL_KEYS)
     assert dial["public_audit"]["key"] == "public_audit"
     assert dial["public_audit"]["provider"] == "AuditEngine"
     assert dial["keywords"]["mode"] == "off"  # default

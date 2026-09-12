@@ -27,6 +27,7 @@ from app.modules.content_experience import router as content_experience_router
 from app.modules.content_planning import router as content_planning_router
 from app.modules.data_import import router as data_import_router
 from app.modules.gmb import router as gmb_router
+from app.modules.grid_tracker import router as grid_tracker_router
 from app.modules.indexing import router as indexing_router
 from app.modules.keyword_research import router as keyword_research_router
 from app.modules.local_seo import router as local_seo_router
@@ -44,6 +45,11 @@ MODULE_ROUTERS: list[APIRouter] = [
     client_onboarding_router,
     billing_router,
     local_seo_router,
+    # 0138: local-search GRID tracking - map-pack position ACROSS a service area.
+    # Separate from local_seo (which deliberately checks one representative locale
+    # and whose scope guards keep it that way) and separately dialled, because a
+    # grid run is 17-41 paid probes where a local_seo check is one.
+    grid_tracker_router,
     on_page_router,
     rank_tracker_router,
     competitor_intel_router,

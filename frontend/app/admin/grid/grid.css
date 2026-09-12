@@ -1,0 +1,219 @@
+/* ============================================================
+   AIOS · Grid tracking screen (migration 0138)
+
+   Colocated with the page, like admin/web2's offpage.css. Every class used by
+   GridWorkspace / GridHeatMap is defined HERE or is one of the shared vocabulary
+   in globals.css (card, card-h, ct, cs, tools, tbl, tbl-wrap, status-pill,
+   sec-note, primary-btn, mini-btn). Nothing renders against an undefined class.
+
+   THE PALETTE IS THE POINT. `gp-unmeasured` is neutral grey with a dashed edge —
+   it must never sit on the same red-to-green ramp as the measured states, because
+   a point nobody looked at is not a bad ranking. Everything else in this file is
+   ordinary layout.
+   ============================================================ */
+
+.gw-empty { padding: 28px 4px; text-align: center; }
+.gw-empty-t { font-size: 14px; font-weight: 800; color: var(--fg-strong); }
+.gw-empty-s { font-size: 12.5px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+
+.gw-row-on td { background: var(--hover); }
+.tbl tbody tr { cursor: pointer; }
+
+.gw-loc { font-weight: 700; color: var(--fg-strong); }
+.gw-geo { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.gw-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+
+/* --- the heat map: a real map with the probes pinned on it ---------------- */
+
+.gm-wrap {
+  display: grid;
+  grid-template-columns: minmax(320px, 560px) 1fr;
+  gap: 22px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.gm-map {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #e8eaed;           /* the colour OSM land renders as, so a tile that
+                                     has not loaded yet does not flash dark */
+  max-width: 100%;
+}
+.gm-tile {
+  position: absolute;
+  width: 256px; height: 256px;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* A PIN is a button: it is clickable, focusable, and announces its own reading. */
+.gm-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #0b1020;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+  transition: transform .09s ease;
+}
+.gm-pin:hover  { transform: translate(-50%, -50%) scale(1.14); z-index: 3; }
+.gm-pin:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring), 0 1px 4px rgba(0, 0, 0, .45);
+  z-index: 4;
+}
+
+/* The four MEASURED bands are a ramp. The fifth is deliberately not on it. */
+.gm-pin.gp-top3   { background: #16a34a; color: #fff; }
+.gm-pin.gp-top10  { background: #84cc16; }
+.gm-pin.gp-deep   { background: #f59e0b; }
+.gm-pin.gp-absent { background: #dc2626; color: #fff; }
+
+/* NEVER measured is NOT "ranking badly": neutral grey, dashed, and it never joins the
+   red-to-green scale. Colouring a hole in the data as a bad rank is the fabrication
+   this whole module exists to refuse. */
+.gm-pin.gp-unmeasured {
+  background: repeating-linear-gradient(45deg, #9ca3af, #9ca3af 3px, #d1d5db 3px, #d1d5db 6px);
+  border-style: dashed;
+  color: #1f2937;
+}
+
+.gm-attrib {
+  position: absolute; right: 0; bottom: 0;
+  font-size: 9.5px;
+  color: #3c4043;
+  background: rgba(255, 255, 255, .82);
+  padding: 2px 6px;
+  border-top-left-radius: 6px;
+}
+
+.gm-side { display: flex; flex-direction: column; gap: 14px; }
+
+.gm-headline {
+  font-size: 15px; font-weight: 700; color: var(--fg-strong);
+  line-height: 1.45; letter-spacing: -.01em;
+}
+
+.gm-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.gm-stat {
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.gm-stat-n {
+  font-size: 24px; font-weight: 800; color: var(--fg-strong);
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1;
+}
+.gm-stat-l { font-size: 11px; font-weight: 800; color: var(--body); letter-spacing: .02em; }
+.gm-stat-l em {
+  display: block; font-style: normal; font-weight: 500;
+  color: var(--muted); margin-top: 3px; letter-spacing: 0; line-height: 1.35;
+}
+
+.gm-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.gm-legend li {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: var(--body);
+}
+.gm-legend i { width: 12px; height: 12px; border-radius: 50%; flex: none; border: 1.5px solid rgba(255,255,255,.9); }
+.gm-legend i.gp-top3       { background: #16a34a; }
+.gm-legend i.gp-top10      { background: #84cc16; }
+.gm-legend i.gp-deep       { background: #f59e0b; }
+.gm-legend i.gp-absent     { background: #dc2626; }
+.gm-legend i.gp-unmeasured {
+  background: repeating-linear-gradient(45deg, #9ca3af, #9ca3af 3px, #d1d5db 3px, #d1d5db 6px);
+  border-style: dashed; border-color: var(--line);
+}
+
+/* Clicking a pin: what the pack looked like at that exact point. */
+.gm-detail {
+  border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px;
+  display: flex; flex-direction: column; gap: 6px; background: var(--hover);
+}
+.gm-detail-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gm-detail-h b { font-size: 14px; color: var(--fg-strong); }
+.gm-detail-s { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.gm-detail-lbl {
+  font-size: 10px; font-weight: 800; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--muted); margin-top: 4px;
+}
+.gm-detail-list { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--body); }
+.gm-detail-list li { margin: 2px 0; }
+
+.gm-caveat { margin-top: 0; }
+
+/* --- run status pills (tone only; .status-pill owns the shape) ----------- */
+
+.gs-ok   { background: rgba(52, 211, 153, .14); color: #34d399; }
+.gs-warn { background: rgba(251, 191, 36, .14); color: #fbbf24; }
+.gs-bad  { background: rgba(248, 113, 113, .14); color: #f87171; }
+.gs-wait { background: rgba(148, 163, 184, .14); color: var(--muted); }
+.gs-mute { background: rgba(148, 163, 184, .10); color: var(--muted); }
+
+/* --- the create form ---------------------------------------------------- */
+
+.gw-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 6px; }
+.gw-field { display: flex; flex-direction: column; gap: 6px; }
+.gw-field > span { font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.gw-field input,
+.gw-field select {
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--ink);
+  background: var(--navy-2, rgba(255, 255, 255, .03));
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+}
+.gw-field input:focus,
+.gw-field select:focus { outline: none; border-color: var(--violet-2); box-shadow: 0 0 0 3px var(--ring); }
+
+.gw-form-foot {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+}
+.gw-price { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.gw-price strong { color: var(--fg-strong); font-weight: 800; }
+
+@media (max-width: 1100px) {
+  .gm-wrap { grid-template-columns: 1fr; }
+  .gm-stats { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* The chosen location's own facts, shown before anything is spent — so an operator
+   can see the grid is about to be centred on the right business. */
+.gw-picked {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--hover);
+}
+.gw-picked-t { font-size: 13.5px; font-weight: 800; color: var(--fg-strong); }
+.gw-picked-s { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+
+/* Inline "add a client location" — the way out of an empty picker. */
+.gw-addloc { grid-column: 1 / -1; }
+.gw-newloc {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--hover);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.gw-newloc-t { font-size: 13px; font-weight: 800; color: var(--fg-strong); }
+.gw-newloc-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;
+}
+.gw-newloc-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+}
+.gw-centre {
+  font-size: 10.5px; color: var(--muted); margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}

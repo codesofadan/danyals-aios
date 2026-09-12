@@ -51,6 +51,61 @@ export type ParkedEntry = {
 };
 
 export const PARKED: ParkedEntry[] = [
+  // --- The Web 2.0 CAMPAIGN flow ---------------------------------------------
+  // Unmounted 2026-09-12 on owner instruction, replaced by the single-article flow
+  // (`Web2ArticleWizard`). KEPT, not deleted: the backend half is intact and proven -
+  // /offpage/web2/campaigns, the estimate quote, the pacing caps, the distinct-topic
+  // refusal and the per-campaign approval all still exist and still pass their tests.
+  // Deleting the UI would throw away the only surface that drives them.
+  {
+    path: "offpage/Web2CampaignWizard.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-12 Web 2.0 flow rewrite (owner instruction)",
+    reason:
+      "The dashboard now has ONE Web 2.0 door: write an article, read it, choose " +
+      "where it publishes. The campaign wizard was the batch door - N distinct " +
+      "topics behind one quote and one approval - and two doors into the same table " +
+      "with different rules is what made the old screen hard to reason about. Its " +
+      "own value is real (a quote before it commits, a distinct topic per article, " +
+      "framework rotation) which is why it is parked rather than deleted.",
+    reEnableWhen:
+      "Batch Web 2.0 is wanted again. Nothing needs repairing first: it was green " +
+      "when unmounted, and its platform picker was already replaced by the " +
+      "server-side spread (`_auto_platforms`), so it no longer asks the operator to " +
+      "choose from ninety platforms.",
+  },
+  {
+    path: "offpage/Web2CampaignBoard.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-12 Web 2.0 flow rewrite (owner instruction)",
+    reason:
+      "The Campaigns VIEW that listed what the wizard created. It has nothing to " +
+      "list while the wizard is parked, so it went with it. Every placement a " +
+      "campaign ever created is still visible under Links built, which is " +
+      "campaign-agnostic by design.",
+    reEnableWhen: "Web2CampaignWizard comes back - they are one feature in two files.",
+  },
+
+  // --- The bot-era automation counter ----------------------------------------
+  // Unmounted by the off-page redesign and never recorded here, so this test has
+  // been red since that commit. The reason is already written out in full at the
+  // removal site (`components/offpage/CitationsTab.tsx`, the 2026-09-07 comment);
+  // this entry is that decision put where the registry can see it.
+  {
+    path: "offpage/AutomationPanel.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-07 off-page redesign (Phase 3, the Playwright submitter retirement)",
+    reason:
+      "It counted how many directories a MACHINE may submit to - a bot-era framing " +
+      "retired with the Playwright submitter. Submission is now human-in-the-loop " +
+      "through the extension queue, so that counter read 0 forever and only misled. " +
+      "The component was kept on purpose, not overlooked.",
+    reEnableWhen:
+      "Earned directory_specs actually exist. The specs it managed still power " +
+      "EXTENSION AUTOFILL and are taught from the queue after a verified completion, " +
+      "so a re-framed \"extension autofill specs\" surface is the thing that brings " +
+      "this back - not the automation counter it used to be.",
+  },
   // --- The wizard the content flow replaced -----------------------------------
   // SUPERSEDED, not merely unmounted. `components/content/flow/` is the same job
   // done as four screens with the step in the URL; this was five steps mounted
