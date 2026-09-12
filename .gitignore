@@ -62,3 +62,7 @@ logs.zip
 # tools/redis/  = portable Redis for Windows; a ~12 MB vendored binary + its AOF.
 .local-state/
 tools/redis/
+
+# Scratch files from interactive sessions. These have carried a live production
+# access token into a commit once (2026-09-12, caught before push); never again.
+*.tmp
