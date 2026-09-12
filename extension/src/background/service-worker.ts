@@ -12,6 +12,7 @@
  * minute — which is why the server's claim lease is twenty minutes rather than two.
  */
 
+import type { FormAnalysis } from "../lib/api";
 import { api, clearCredentials, NeedsPairing, readCredentials, storeCredentials } from "../lib/api";
 import { diagnoseConnection } from "../lib/diagnose";
 import type {
@@ -263,6 +264,157 @@ async function autofillSessionTask(taskId: string): Promise<FillOutcome> {
   if (formSeen) await sendTelemetry(taskId, "form_detected");
   if (outcome.filled.length > 0) await sendTelemetry(taskId, "filled");
   return outcome;
+}
+
+
+/** The stages the panel reports while an AI-assisted fill runs. */
+export type AiFillStage = "analyzing" | "mapping" | "filling" | "ready" | "held";
+
+export type AiFillResult = {
+  stage: AiFillStage;
+  outcome: FillOutcome;
+  /** Fields mapped but BELOW the confidence bar: offered for the operator to check,
+   *  never typed on their behalf. */
+  review: { selector: string; key: string; confidence: number }[];
+  /** True when the mapping was served from the cache, so this cost nothing. */
+  cached: boolean;
+  /** Set when nothing could be mapped. The panel shows it and the operator pastes. */
+  reason: string;
+  notes: string[];
+};
+
+/**
+ * AI-assisted fill: the keyword heuristic first, the model only for what it missed.
+ *
+ * THE ORDER IS THE COST MODEL. `fillFormHeuristic` is free and instant and genuinely
+ * handles a conventionally labelled form - measured, in `tests/heuristicGap.test.ts`.
+ * Paying a model to re-derive "the box labelled Phone takes the phone number" would be
+ * spending on a question already answered. So the model is asked only when fields are
+ * still unfilled, and its plan is then narrowed to exactly those keys: a field the
+ * heuristic already got right is never overwritten by a second opinion.
+ *
+ * What the model adds, and the heuristic provably cannot: an abbreviation nobody put in
+ * a synonym list, a field whose only clue is the text beside it, and the traps - a
+ * honeypot named `url` that the heuristic fills with the website and then truthfully
+ * reports as filled, while the directory silently discards the submission.
+ *
+ * NOTHING IS SUBMITTED. This fills and reports; a person reviews and presses the
+ * site's own button, exactly as before.
+ */
+async function aiFillSessionTask(taskId: string): Promise<AiFillResult> {
+  const state = await readSession();
+  if (!state) throw new Error("No active session.");
+  const task =
+    state.tasks.find((t) => t.taskId === taskId) ??
+    (state.web2Tasks ?? []).find((t) => t.taskId === taskId);
+  if (!task) throw new Error("No such task in this session.");
+
+  let tabId: number | undefined;
+  for (const [tid, mapped] of Object.entries(state.tabMap)) {
+    if (mapped === taskId) tabId = Number(tid);
+  }
+  if (tabId === undefined) {
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    tabId = active?.id;
+  }
+  if (tabId === undefined) throw new Error("No tab to fill.");
+
+  const values = (task.fields ?? []).map((f) => ({ key: f.key, label: f.label, value: f.value }));
+  const byKey = new Map(values.map((v) => [v.key, v.value] as const));
+  if (values.length === 0) {
+    return {
+      stage: "held", cached: false, review: [], notes: [],
+      reason: "This task carries no business values to fill.",
+      outcome: { filled: [], failed: [{ key: "*", reason: "no_business_values_for_this_task" }] },
+    };
+  }
+
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["filler.js"] });
+
+  // PASS 1 - free, instant, and right on a conventionally labelled form.
+  const heuristic = (await chrome.tabs.sendMessage(
+    tabId, { type: "aios-autofill", values },
+  )) as FillOutcome;
+  const already = new Set(heuristic.filled);
+  const missing = values.filter((v) => !already.has(v.key) && v.value.trim());
+  if (missing.length === 0) {
+    if (heuristic.filled.length) await sendTelemetry(taskId, "filled");
+    return {
+      stage: "ready", outcome: heuristic, review: [], cached: true, reason: "",
+      notes: ["every field was matched without asking the model"],
+    };
+  }
+
+  // PASS 2 - describe the form and ask what the remaining boxes want.
+  const tab = await chrome.tabs.get(tabId);
+  const fields = (await chrome.tabs.sendMessage(tabId, { type: "aios-collect" })) as unknown[];
+  if (!Array.isArray(fields) || fields.length === 0) {
+    return {
+      stage: "held", outcome: heuristic, review: [], cached: false, notes: [],
+      reason: "No form fields were found on this page.",
+    };
+  }
+
+  let analysis: FormAnalysis;
+  try {
+    analysis = await api.analyzeForm(tab.url ?? "", fields);
+  } catch (err) {
+    // A refusal must leave the operator exactly where they were, not break the panel.
+    return {
+      stage: "held", outcome: heuristic, review: [], cached: false, notes: [],
+      reason: err instanceof Error ? err.message : "The form mapper is unavailable.",
+    };
+  }
+  if (!analysis.ok) {
+    return {
+      stage: "held", outcome: heuristic, review: [], cached: analysis.cached,
+      notes: analysis.notes, reason: analysis.error || "The form could not be mapped.",
+    };
+  }
+
+  // Narrowed to the keys the heuristic MISSED - a field it already filled correctly is
+  // not overwritten by a second opinion, and a key we hold no value for is skipped
+  // (typing an empty string can clear a pre-filled default).
+  const wanted = new Set(missing.map((m) => m.key));
+  const plan = analysis.mappings
+    .filter((m) => m.fill && wanted.has(m.key))
+    .map((m) => ({ selector: m.selector, valueKey: m.key, value: byKey.get(m.key) ?? "" }))
+    .filter((p) => p.value.trim());
+
+  const review = analysis.mappings
+    .filter((m) => !m.fill && wanted.has(m.key))
+    .map((m) => ({ selector: m.selector, key: m.key, confidence: m.confidence }));
+
+  if (plan.length === 0) {
+    return {
+      stage: "ready", outcome: heuristic, review, cached: analysis.cached,
+      notes: analysis.notes,
+      reason: review.length
+        ? "The remaining fields need a human eye - see the review list."
+        : "",
+    };
+  }
+
+  const aiOutcome = (await chrome.tabs.sendMessage(
+    tabId, { type: "aios-fill", plan },
+  )) as FillOutcome;
+
+  const merged: FillOutcome = {
+    filled: [...heuristic.filled, ...aiOutcome.filled],
+    // A key the AI then filled is no longer a failure; keep only the genuinely unfilled.
+    failed: [
+      ...heuristic.failed.filter((f) => !aiOutcome.filled.includes(f.key)),
+      ...aiOutcome.failed,
+    ],
+  };
+  if (merged.filled.length > 0) {
+    await sendTelemetry(taskId, "form_detected");
+    await sendTelemetry(taskId, "filled");
+  }
+  return {
+    stage: "ready", outcome: merged, review, cached: analysis.cached,
+    reason: "", notes: analysis.notes,
+  };
 }
 
 /** Resolve once a tab finishes loading (or after a timeout, so a slow/looping page
@@ -526,6 +678,9 @@ async function handle(request: PanelRequest): Promise<PanelResponse> {
 
       case "fillTaskAuto":
         return { ok: true, data: await autofillSessionTask(request.taskId) };
+
+      case "fillTaskAi":
+        return { ok: true, data: await aiFillSessionTask(request.taskId) };
 
       case "openAndAutofill":
         return { ok: true, data: await openAndAutofill(request.taskId) };

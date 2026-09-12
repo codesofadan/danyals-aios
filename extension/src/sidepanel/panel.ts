@@ -18,11 +18,23 @@ import type {
   QueueBoard,
   QueueItem,
   SessionClientCount,
-  SessionKind,
   SessionTaskCard,
   Web2PlacementTaskCard,
 } from "../lib/messages";
 import { type ActiveSession, sessionKind } from "../lib/sessionBoard";
+import {
+  clientSummary,
+  clientsForLane,
+  type Lane,
+  LANE_BLURB,
+  LANE_LABEL,
+  LANES,
+  laneToSessionKind,
+  laneWorkCount,
+  readLane,
+  sessionKindToLane,
+  writeLane,
+} from "../lib/lanes";
 import { needsGrant, originPattern } from "../lib/origins";
 
 const root = document.getElementById("root") as HTMLElement;
@@ -42,6 +54,9 @@ const BLOCK_REASONS: Record<string, string> = {
 let item: QueueItem | null = null;
 let lastFill: FillOutcome | null = null;
 let flash = "";
+/** The chosen tab. Restored from `storage.local` at boot (see `lanes.ts`), so an
+ *  operator working one lane is not dropped back onto the other every reopen. */
+let lane: Lane = "citation";
 
 async function send(request: PanelRequest): Promise<PanelResponse> {
   return (await chrome.runtime.sendMessage(request)) as PanelResponse;
@@ -220,37 +235,66 @@ function renderPairing(message = "", baseValue = ""): void {
 // --------------------------------------------------------------------------- //
 // The queue.
 // --------------------------------------------------------------------------- //
+/**
+ * The tab bar. Present on every board and on an open session, because an operator has
+ * to be able to see which lane they are in without reading the task cards.
+ *
+ * `lockedTo` is passed when a session is open: that lane's tab is marked current and
+ * the other is DISABLED with the reason on it, rather than hidden. Hiding it would
+ * read as "Web 2.0 is gone"; disabling it says "finish this session first", which is
+ * the actual rule — a session is a server-side lease over specific tasks, and starting
+ * a second lane's session would leave the first one's tabs orphaned.
+ */
+function renderTabs(active: Lane, lockedTo: Lane | null = null): HTMLElement {
+  const bar = el("nav", { className: "tabs" });
+  for (const l of LANES) {
+    const current = l === active;
+    const locked = lockedTo !== null && l !== lockedTo;
+    const tab = el("button", {
+      className: `tab${current ? " tab-on" : ""}`,
+      textContent: LANE_LABEL[l],
+      disabled: locked,
+      title: locked
+        ? `A ${LANE_LABEL[lockedTo!]} session is open — close it to switch lane.`
+        : LANE_BLURB[l],
+    });
+    tab.setAttribute("aria-current", current ? "page" : "false");
+    if (!current && !locked) {
+      tab.onclick = async () => {
+        lane = l;
+        await writeLane(l);
+        void refresh();
+      };
+    }
+    bar.append(tab);
+  }
+  return bar;
+}
+
 function renderBoard(board: QueueBoard): void {
   root.replaceChildren();
-  root.append(el("h1", { textContent: "Citation queue" }));
+  root.append(el("h1", { textContent: "AIOS Extension" }));
+  root.append(renderTabs(lane));
   if (flash) { root.append(el("div", { className: "note", textContent: flash })); flash = ""; }
-  root.append(
-    el("p", {
-      className: "muted",
-      textContent:
-        `${board.waiting} waiting · ${board.inProgress} in progress · median ` +
-        (board.medianSeconds != null ? mmss(board.medianSeconds) : "not yet measured"),
-    }),
-  );
 
-  // --- session mode (0130; web2 placement since 0136): pick a client + lane. --- //
-  root.append(el("h1", { textContent: "Work session" }));
-  root.append(
-    el("p", {
-      className: "muted",
-      textContent:
-        "Start a session to work a client in batches of 10: every page opens in its " +
-        "own tab, autofill runs where a spec is earned, and the next batch releases " +
-        "when this one is finished. Web 2.0 placement sessions hand you each approved " +
-        "draft as copy-blocks — you publish in your own logged-in account; nothing is " +
-        "ever submitted for you.",
-    }),
-  );
-  const kindSelect = el("select");
-  kindSelect.append(
-    el("option", { value: "citation", textContent: "Citations (directory listings)" }),
-    el("option", { value: "web2_placement", textContent: "Web 2.0 placement (approved drafts)" }),
-  );
+  // The citation queue's own numbers belong to the citation lane only. Showing them
+  // above a Web 2.0 board would attribute directory work to placements.
+  if (lane === "citation") {
+    root.append(
+      el("p", {
+        className: "muted",
+        textContent:
+          `${board.waiting} waiting · ${board.inProgress} in progress · median ` +
+          (board.medianSeconds != null ? mmss(board.medianSeconds) : "not yet measured"),
+      }),
+    );
+  }
+
+  // --- session mode (0130; web2 placement since 0136): pick a client. --- //
+  root.append(el("h1", { textContent: `${LANE_LABEL[lane]} session` }));
+  root.append(el("p", { className: "muted", textContent: LANE_BLURB[lane] }));
+  const laneTotal = el("p", { className: "muted" });
+  root.append(laneTotal);
   const clientSelect = el("select");
   // The client list is fetched on demand AND re-fetchable: this call used to fire once
   // at render, so a fetch that raced with pairing — or ran a moment before an audit
@@ -270,21 +314,35 @@ function renderBoard(board: QueueBoard): void {
       clientSelect.append(el("option", { value: "", textContent: "Couldn't load clients — press ↻ to retry" }));
       return;
     }
-    const clients = res.data as SessionClientCount[];
-    if (clients.length === 0) {
+    const all = res.data as SessionClientCount[];
+    // The lane's OWN total, and the clients that have work in it. A count the server
+    // did not report reads "not reported", never "0" — see `lanes.ts`.
+    const total = laneWorkCount(lane, all);
+    laneTotal.textContent =
+      all.length === 0
+        ? ""
+        : total === null
+          ? `This server did not report a ${LANE_LABEL[lane]} backlog — the clients below may still have work.`
+          : `${total} ${lane === "web2" ? "placement(s)" : "item(s)"} outstanding across ${all.length} client(s).`;
+    if (all.length === 0) {
       clientSelect.append(
         el("option", { value: "", textContent: "No work yet — run an audit / queue a build, then press ↻" }),
       );
       return;
     }
-    for (const c of clients) {
+    const mine = clientsForLane(lane, all);
+    if (mine.length === 0) {
       clientSelect.append(
         el("option", {
-          value: c.clientId,
-          textContent:
-            `${c.client} — ${c.readyForHuman} ready · ${c.verifyFirst} verify · ` +
-            `${c.candidateGaps} gaps · ${c.web2Placements ?? 0} web2`,
+          value: "",
+          textContent: `No ${LANE_LABEL[lane]} work for any client — try the other tab, or press ↻`,
         }),
+      );
+      return;
+    }
+    for (const c of mine) {
+      clientSelect.append(
+        el("option", { value: c.clientId, textContent: clientSummary(lane, c) }),
       );
     }
   }
@@ -297,30 +355,35 @@ function renderBoard(board: QueueBoard): void {
     const res = await send({
       type: "startSession",
       clientId: clientSelect.value,
-      kind: (kindSelect.value || "citation") as SessionKind,
+      kind: laneToSessionKind(lane),
     });
     start.disabled = false;
     if (!res.ok) { renderError(res); return; }
     renderSession(res.data as ActiveSession);
   };
   root.append(
-    el("div", { className: "row" }, kindSelect),
     el("div", { className: "row" }, clientSelect, refreshClients),
     el("div", { className: "row" }, start),
   );
 
-  root.append(el("hr"));
-  const take = el("button", { textContent: "Take one item (no session)" });
-  take.onclick = async () => {
-    take.disabled = true;
-    const res = await send({ type: "claim" });
-    if (!res.ok) { renderError(res); return; }
-    if (!res.data) { flash = "Nothing waiting — the queue is empty."; void refresh(); return; }
-    item = res.data as QueueItem;
-    lastFill = null;
-    renderItem();
-  };
-  root.append(el("div", { className: "row" }, take));
+  // Single-claim mode is a CITATION-QUEUE affordance: `claim` pops the next citation
+  // off that queue. There is no equivalent for placements (a placement is released by
+  // an approved campaign, not claimed one at a time), so offering the button on the
+  // Web 2.0 tab would hand the operator a citation while they are working placements.
+  if (lane === "citation") {
+    root.append(el("hr"));
+    const take = el("button", { textContent: "Take one item (no session)" });
+    take.onclick = async () => {
+      take.disabled = true;
+      const res = await send({ type: "claim" });
+      if (!res.ok) { renderError(res); return; }
+      if (!res.data) { flash = "Nothing waiting — the queue is empty."; void refresh(); return; }
+      item = res.data as QueueItem;
+      lastFill = null;
+      renderItem();
+    };
+    root.append(el("div", { className: "row" }, take));
+  }
   const unpair = el("button", { textContent: "Unpair this device" });
   unpair.onclick = async () => { await send({ type: "unpair" }); renderPairing(); };
   root.append(el("hr"), el("div", { className: "row" }, unpair));
@@ -486,6 +549,71 @@ function renderSessionTask(task: SessionTaskCard): HTMLElement {
         `. Review the page before you submit.`;
     };
     card.append(auto, autoOut);
+
+    // AI-ASSISTED FILL. The heuristic above matches on a curated synonym list, which
+    // is free and instant and provably runs out on three things (measured in
+    // tests/heuristicGap.test.ts): an abbreviation nobody listed ("Org.", "Ph."), a
+    // box whose only clue is the text beside it, and a honeypot named `url` that the
+    // heuristic FILLS with the website and then truthfully reports as filled - while
+    // the directory silently discards the submission.
+    //
+    // This button describes the form's STRUCTURE to the server (never a value, never
+    // the page) and asks what each remaining box wants. It still never submits.
+    const ai = el("button", { textContent: "AI fill" });
+    const aiOut = el("div", { className: "muted" });
+    const aiReview = el("div", { className: "muted" });
+    ai.onclick = async () => {
+      ai.disabled = true;
+      aiReview.textContent = "";
+      const permitted = await ensureInjectPermission(task.addUrl);
+      if (!permitted) {
+        ai.disabled = false;
+        aiOut.textContent =
+          "Chrome needs permission to read this form. When it asks, choose Allow, then click AI fill again.";
+        return;
+      }
+      // The four stages the operator sees. They are narrated rather than hidden behind
+      // one spinner because the middle one can take a few seconds, and a button that
+      // looks stuck is a button people press twice.
+      aiOut.textContent = "Analysing form…";
+      const res = await send({ type: "fillTaskAi", taskId: task.taskId });
+      ai.disabled = false;
+      if (!res.ok) {
+        aiOut.textContent =
+          `AI fill couldn't run: ${res.error ?? "unknown error"}. The copy buttons below still work.`;
+        return;
+      }
+      const out = res.data as {
+        stage: string;
+        outcome: FillOutcome;
+        review: { key: string; confidence: number }[];
+        cached: boolean;
+        reason: string;
+        notes: string[];
+      };
+      if (out.stage === "held") {
+        // An honest refusal, not an error: the operator lands back on copy buttons,
+        // which is exactly where they were before this feature existed.
+        aiOut.textContent = out.reason || "The form could not be mapped — copy the values below.";
+        return;
+      }
+      const filled = out.outcome.filled;
+      const noMatch = out.outcome.failed
+        .filter((f) => f.reason === "no_field_matched").map((f) => f.key);
+      aiOut.textContent =
+        `Ready for review — filled ${filled.length}` +
+        `${filled.length ? ` (${filled.join(", ")})` : ""}` +
+        `${out.cached ? " · cached, cost nothing" : ""}` +
+        `${noMatch.length ? ` · no field found for: ${noMatch.join(", ")}` : ""}` +
+        `. Check the page before you submit.`;
+      if (out.review.length) {
+        // Mapped but under the confidence bar. OFFERED, never typed: a phone number in
+        // a "fax" box is worse than an empty box.
+        aiReview.textContent =
+          `Needs your eye (not filled): ${out.review.map((r) => r.key).join(", ")}.`;
+      }
+    };
+    card.append(ai, aiOut, aiReview);
     card.append(el("div", { className: "muted", textContent: "Or copy any value:" }));
     for (const f of task.fields) {
       const row = el("div", { className: "field" },
@@ -677,7 +805,13 @@ function renderSession(state: ActiveSession): void {
   root.replaceChildren();
   const web2 = sessionKind(state) === "web2_placement";
   const web2Tasks = state.web2Tasks ?? [];
+  // A session ADOPTED after a browser restart may be in the lane the operator was not
+  // last looking at. The session is the authority on which lane is being worked, so it
+  // moves the tab rather than the tab contradicting the work on screen.
+  const sessionLane = sessionKindToLane(sessionKind(state));
+  if (sessionLane !== lane) { lane = sessionLane; void writeLane(lane); }
   root.append(el("h1", { textContent: `${web2 ? "Web 2.0 session" : "Session"} · ${state.client}` }));
+  root.append(renderTabs(sessionLane, sessionLane));
   if (flash) { root.append(el("div", { className: "note", textContent: flash })); flash = ""; }
 
   // The batch progress strip: where we are, and how the whole session is going.
@@ -858,4 +992,11 @@ async function refresh(): Promise<void> {
   renderBoard(board.data as QueueBoard);
 }
 
-void refresh();
+/** Restore the chosen tab BEFORE the first render, so the panel never flashes the
+ *  citation board on its way to the lane the operator was actually working. */
+async function boot(): Promise<void> {
+  lane = await readLane();
+  await refresh();
+}
+
+void boot();

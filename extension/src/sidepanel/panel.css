@@ -41,6 +41,24 @@ input, textarea, select {
 .pill.ok { background: var(--ok); color: #fff; }
 .pill.warn { background: var(--warn); color: #fff; }
 .pill.bad { background: var(--bad); color: #fff; }
+/* The lane tabs. A bottom rule across the whole bar with the active tab's segment
+   knocked out, so the current lane reads as continuous with the board below it —
+   colour alone would not survive a forced-colours / high-contrast profile. */
+.tabs {
+  display: flex; gap: 2px; margin: 0 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.tabs .tab {
+  flex: 1; padding: 8px 10px; border: 1px solid var(--line);
+  border-bottom: 0; border-radius: 6px 6px 0 0;
+  background: var(--surface); color: var(--muted); font-weight: 600;
+  margin-bottom: -1px;
+}
+.tabs .tab-on {
+  background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--paper);
+}
+.tabs .tab:disabled { opacity: .45; cursor: not-allowed; }
+
 .note { border-left: 3px solid var(--warn); padding: 8px 10px; margin-top: 10px; background: var(--surface); }
 .note.bad { border-color: var(--bad); }
 hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }

@@ -181,6 +181,11 @@ export type PanelRequest =
   // Best-effort autofill when the directory has no earned spec: match business values
   // to the page's own fields by their attributes. Honest read-back; never submits.
   | { type: "fillTaskAuto"; taskId: string }
+  // AI-assisted fill: the keyword heuristic FIRST (free, instant), then the model for
+  // the fields it could not match - an abbreviation nobody listed, a box whose only
+  // clue is the text beside it, a honeypot the heuristic would happily fill. Sends
+  // field STRUCTURE only; still never submits.
+  | { type: "fillTaskAi"; taskId: string }
   // One-click: open the add-form tab, wait for it to load, then autofill it.
   | { type: "openAndAutofill"; taskId: string }
   | { type: "markSubmitted"; taskId: string; liveUrl: string; note: string; operatorConfirmed?: boolean }

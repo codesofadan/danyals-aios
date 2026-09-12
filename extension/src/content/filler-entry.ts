@@ -11,6 +11,7 @@
  * a renderer shared with the directory's own JavaScript.
  */
 
+import { collectFormFields, type CollectedField } from "./collector";
 import { fillForm, fillFormHeuristic, type FieldPlanItem, type FillOutcome, type HeuristicValue } from "./filler";
 
 declare global {
@@ -28,8 +29,15 @@ if (!window.__aiosFillerLoaded) {
     (
       msg: { type?: string; plan?: FieldPlanItem[]; values?: HeuristicValue[] },
       _sender: unknown,
-      respond: (value: FillOutcome) => void,
+      respond: (value: FillOutcome | CollectedField[]) => void,
     ) => {
+      // Describe the form so the SERVER can work out what each field wants. Structure
+      // only - no values, no page HTML (see collector.ts). Synchronous: the DOM is
+      // already there, so there is nothing to await and no channel to keep open.
+      if (msg?.type === "aios-collect") {
+        respond(collectFormFields());
+        return;
+      }
       // Spec-driven fill (exact selectors from an earned spec).
       if (msg?.type === "aios-fill") {
         void fillForm(msg.plan ?? []).then(respond);

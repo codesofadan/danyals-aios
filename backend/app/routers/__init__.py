@@ -24,6 +24,7 @@ from app.routers.content import router as content_router
 from app.routers.context import router as context_router
 from app.routers.cost import router as cost_router
 from app.routers.extension_tokens import router as extension_tokens_router
+from app.routers.form_intelligence import router as form_intelligence_router
 from app.routers.integrations import router as integrations_router
 from app.routers.jobs import router as jobs_router
 from app.routers.me import router as me_router
@@ -71,6 +72,10 @@ api_v1.include_router(tasks_router)
 api_v1.include_router(team_router)
 api_v1.include_router(milestones_router)
 api_v1.include_router(offpage_router)
+# 0140: semantic form mapping. Shared by BOTH operator lanes (citation submission
+# and web2 publishing), so it is its own router rather than a second copy inside
+# each queue's surface.
+api_v1.include_router(form_intelligence_router)
 api_v1.include_router(reports_router)
 api_v1.include_router(policy_router)
 api_v1.include_router(command_center_router)

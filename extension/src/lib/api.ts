@@ -183,6 +183,39 @@ async function performCall<T>(
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+
+/** One field's resolved meaning, from `POST /form-intelligence/analyze`. */
+export type FormMapping = {
+  selector: string;
+  key: string;
+  confidence: number;
+  /** Whether this may be typed WITHOUT the operator confirming it first. */
+  fill: boolean;
+};
+
+/**
+ * The server's answer for one form.
+ *
+ * `ok: false` with an `error` is an HONEST REFUSAL, not a transport failure: no
+ * coordinate-capable model configured, the dial is off, the form could not be mapped.
+ * The panel shows the sentence and the operator falls back to copy buttons - which is
+ * exactly where they were before this feature existed, so a refusal costs nothing.
+ *
+ * `cached: true` means the analysis was free (another operator already met this form).
+ */
+export type FormAnalysis = {
+  ok: boolean;
+  fingerprint: string;
+  cached: boolean;
+  mappings: FormMapping[];
+  reviewCount: number;
+  fillCount: number;
+  ignoredCount: number;
+  notes: string[];
+  error: string;
+  threshold: number;
+};
+
 export const api = {
   /** Exchange the live token for its 12h successor. The presented token is consumed:
    *  replaying it afterwards revokes this whole install, by design. Callers wrap the
@@ -194,6 +227,17 @@ export const api = {
       { method: "POST", body: "{}" },
       { insideRotation: true },
     ),
+  /** Map the open form's fields to canonical business keys.
+   *
+   * Sends field STRUCTURE only - the collector strips values, credentials and file
+   * inputs before this is ever called, and the server sanitises again on arrival.
+   * Metered per UNCACHED form and cached server-side by a structural fingerprint, so
+   * the second operator to meet a directory pays nothing. */
+  analyzeForm: (url: string, fields: unknown[]) =>
+    call<FormAnalysis>("/form-intelligence/analyze", {
+      method: "POST",
+      body: JSON.stringify({ url, fields }),
+    }),
   board: () => call<unknown>("/citation-builder/queue"),
   claim: () => call<unknown>("/citation-builder/queue/claim", { method: "POST", body: "{}" }),
   item: (id: string) => call<unknown>(`/citation-builder/queue/${id}`),
