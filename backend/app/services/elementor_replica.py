@@ -929,8 +929,28 @@ def validate_tree(tree: list[dict[str, Any]], oracle: dict[str, Any] | None = No
         else:
             raise UnknownSettingError(f"{path}: unknown elType {el!r}")
         for key in settings:
-            # Responsive variants store as `<key>_tablet` / `<key>_mobile`; the
-            # registry lists base control ids. A variant is valid iff its base is.
+            # THE LITERAL KEY WINS, and it has to be checked FIRST.
+            #
+            # Two kinds of key live in this registry and the difference is not
+            # cosmetic. Most responsive controls are stored as `<base>_tablet` with
+            # only the BASE listed (`_inline_size` is registered; `_inline_size_tablet`
+            # is not, and is valid), so the suffix is stripped and the base looked up.
+            # But the responsive-VISIBILITY controls are listed as whole composite
+            # names - `hide_tablet`, `hide_mobile`, `hide_desktop` are all in
+            # `common_keys` and plain `hide` is not a control at all.
+            #
+            # Checking the base first therefore REJECTED a key the oracle explicitly
+            # lists: `hide_tablet` was stripped to `hide`, found absent, and refused.
+            # Shipped in 275e5f3 alongside the emitter that started producing those
+            # keys, and it failed every replication of a site that hides any widget at
+            # a breakpoint - seen on mariaazka.com, which returned 0 sections because
+            # the whole tree was refused.
+            #
+            # Literal-then-base is the correct order: an explicitly registered key is
+            # valid by definition, and stripping is only a fallback for the variants
+            # the registry declines to enumerate.
+            if key in allowed:
+                continue
             base = key
             for suffix in ("_tablet", "_mobile", "_laptop", "_widescreen"):
                 if key.endswith(suffix):

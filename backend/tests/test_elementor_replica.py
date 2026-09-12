@@ -844,3 +844,45 @@ class TestVisibilityIsEmitted:
         )
         js = to_json(build_tree(page, DesignSystem(), hidden={}))
         assert "hide_mobile" not in js and "hide_tablet" not in js
+
+def test_a_literally_registered_responsive_key_is_not_stripped_to_an_unknown_base() -> None:
+    """THE BUG THIS PINS, reported from production on 2026-09-12.
+
+    `mariaazka.com` replicated to "Degraded, 0 sections, 0 widgets" with:
+
+        refused by the oracle: widget/text-editor settings key 'hide_tablet'
+        (base 'hide') is not in Elementor 4.7's registry
+
+    Two kinds of key live in the registry. Most responsive controls list only the BASE
+    (`_inline_size` is registered, `_inline_size_tablet` is not, and is valid) - so the
+    validator strips the suffix and checks the base. But responsive VISIBILITY is listed
+    as whole composite names: `hide_tablet` / `hide_mobile` / `hide_desktop` are all in
+    `common_keys`, and plain `hide` is not a control at all.
+
+    Checking the base FIRST therefore refused a key the oracle explicitly lists, and
+    because the guard raises on the whole tree, one hidden widget lost the entire
+    replication. Literal-then-base fixes it; both paths are asserted here, plus the
+    proof that an unknown key is still refused - a validator that accepts everything
+    would also make this test pass.
+    """
+    oracle = load_oracle()
+    tree = [{
+        "id": "s1", "elType": "section", "settings": {}, "elements": [{
+            "id": "c1", "elType": "column",
+            "settings": {"_column_size": 100, "_inline_size": 100,
+                         # base-stripped path: the base IS registered, the variant is not
+                         "_inline_size_tablet": 50},
+            "elements": [{
+                "id": "w1", "elType": "widget", "widgetType": "text-editor",
+                # literal path: these exact names are in common_keys
+                "settings": {"editor": "<p>hi</p>",
+                             "hide_tablet": "hidden-tablet",
+                             "hide_mobile": "hidden-mobile"},
+            }],
+        }],
+    }]
+    validate_tree(tree, oracle)  # must NOT raise
+
+    tree[0]["elements"][0]["elements"][0]["settings"]["not_a_real_control"] = 1
+    with pytest.raises(UnknownSettingError):
+        validate_tree(tree, oracle)
