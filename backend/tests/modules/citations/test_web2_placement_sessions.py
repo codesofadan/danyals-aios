@@ -196,19 +196,19 @@ class TestKindScopeGuard:
     async def test_a_web2_session_needs_web2_queue_scope_not_citation_scope(self) -> None:
         self._current = _Principal("citation_queue:read", "citation_queue:write",
                                    "client_profile:read")
-        assert await _refuse("aop_x", "web2_placement", write=True) == 401
+        assert await _refuse("aop_x", "web2_placement", write=True) == 403
         self._current = _Principal("web2_queue:write")
         assert await _refuse("aop_x", "web2_placement", write=True, cards=True) is None
 
     async def test_a_citation_session_still_needs_its_own_scopes(self) -> None:
         self._current = _Principal("web2_queue:read", "web2_queue:write")
-        assert await _refuse("aop_x", "citation", write=True) == 401
+        assert await _refuse("aop_x", "citation", write=True) == 403
         self._current = _Principal("citation_queue:write", "client_profile:read")
         assert await _refuse("aop_x", "citation", write=True, cards=True) is None
 
     async def test_citation_cards_still_require_client_profile_read(self) -> None:
         self._current = _Principal("citation_queue:read")
-        assert await _refuse("aop_x", "citation", write=False, cards=True) == 401
+        assert await _refuse("aop_x", "citation", write=False, cards=True) == 403
         self._current = _Principal("citation_queue:read", "client_profile:read")
         assert await _refuse("aop_x", "citation", write=False, cards=True) is None
 
@@ -217,6 +217,32 @@ class TestKindScopeGuard:
         demanding client_profile:read would widen a web2-only token for nothing."""
         self._current = _Principal("web2_queue:read")
         assert await _refuse("aop_x", "web2_placement", write=False, cards=True) is None
+
+    async def test_a_scope_refusal_names_the_missing_scope(self) -> None:
+        """THE BUG THIS PINS, reproduced against production on 2026-09-12.
+
+        This check - not the route's scope floor - is what actually refuses an operator
+        on the Web 2.0 tab. The floor accepts EITHER lane's scope set, so a
+        citation-only token passes it and is stopped here. It answered 401, the
+        extension maps 401 to `NeedsPairing`, and `DEFAULT_MINT_SCOPES` withholds the
+        web2 scopes - so re-pairing handed back the same token and the operator looped
+        on the pairing screen with nothing naming the cause.
+
+        A refusal an operator cannot act on is barely better than a loop, so the
+        message must name the scope AND say that re-pairing will not fix it.
+        """
+        self._current = _Principal("citation_queue:read", "citation_queue:write",
+                                   "client_profile:read")
+        try:
+            await citations_router._refuse_kind_scope(
+                "aop_x", "web2_placement", write=True
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 403
+            assert "web2_queue:write" in str(exc.detail)
+            assert "re-pairing" in str(exc.detail).lower()
+        else:
+            raise AssertionError("a citation-only token must not reach a web2 session")
 
     async def test_an_unverifiable_token_is_401_not_a_pass(self) -> None:
         self._current = None

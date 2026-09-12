@@ -1843,9 +1843,27 @@ _KIND_SCOPES: dict[str, dict[str, str]] = {
 async def _refuse_kind_scope(
     x_operator_token: str | None, kind: str, *, write: bool, cards: bool = False
 ) -> None:
-    """401 unless the presented extension token holds the SESSION KIND's exact scope
+    """Refuse unless the presented extension token holds the SESSION KIND's exact scope
     (+ `client_profile:read` for citation card payloads, which carry the canonical
-    NAP). Bearer callers pass untouched - their role already governed the floor."""
+    NAP). Bearer callers pass untouched - their role already governed the floor.
+
+    THE STATUS CODE IS LOAD-BEARING. This check used to answer 401 "Not authenticated"
+    for a token that is perfectly valid and simply lacks one scope, and THAT is the
+    refusal an operator actually hits: the route's scope FLOOR accepts either lane's
+    set, so a citation-only token passes the floor and is stopped here, by the
+    kind-specific check.
+
+    The extension maps every 401 to `NeedsPairing` and shows the pairing screen. So an
+    operator on the Web 2.0 tab was told to re-pair, re-paired, received the same
+    citation-only scopes (`DEFAULT_MINT_SCOPES` withholds the web2 ones), and was sent
+    back to the pairing screen - forever, with nothing ever naming the cause. Reported
+    as a bug on 2026-09-12 and reproduced against production.
+
+    403 is also simply the correct code: the holder IS authenticated (the principal
+    verified), they are not permitted. Nothing is leaked by saying which scope is
+    missing, because identity is already proven - and that is the one fact that lets
+    the operator fix it.
+    """
     if not x_operator_token:
         return
     principal = await asyncio.to_thread(operator_principal_of, x_operator_token)
@@ -1853,11 +1871,23 @@ async def _refuse_kind_scope(
     needed = [_KIND_SCOPES.get(kind, _KIND_SCOPES["citation"])[verb]]
     if kind == "citation" and cards:
         needed.append("client_profile:read")
-    if principal is None or not all(principal.has(s) for s in needed):
+    if principal is None:
+        # A token that does not verify at all IS an authentication failure.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    missing = [s for s in needed if not principal.has(s)]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"This extension token cannot work the {kind!r} lane: it is missing "
+                + ", ".join(missing)
+                + ". Mint a token with that scope in the dashboard under Settings -> "
+                "Extension (choose the lanes) - re-pairing the same scopes will not help."
+            ),
         )
 
 # Session creation throttle: fail-OPEN like the claim limiter (same reasoning - the
