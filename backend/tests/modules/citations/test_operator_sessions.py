@@ -812,6 +812,46 @@ async def _real_app_codes(
     return codes
 
 
+async def test_a_scope_refusal_is_403_and_names_the_scopes_to_fix_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusal must not read as "your credential is bad".
+
+    THE BUG THIS PINS. A missing scope used to answer 401. The extension maps every 401
+    to `NeedsPairing` and shows the pairing screen, so an operator whose token lacked
+    `web2_queue:write` (which `DEFAULT_MINT_SCOPES` deliberately does not grant) was
+    told to re-pair — re-paired, received the same citation-only scopes, and was sent
+    back to the pairing screen again, forever. The server was reporting the wrong
+    problem, so the only fix that would work was never named.
+
+    Two things are asserted, because fixing the code alone would still leave the
+    operator guessing: the status is 403, AND the detail names the scopes that would
+    satisfy it. A refusal an operator cannot act on is barely better than a loop.
+    """
+    from asgi_lifespan import LifespanManager
+
+    import app.modules.citations.operator_auth as operator_auth
+    from app.main import create_app
+
+    monkeypatch.setattr(
+        operator_auth, "verify_operator_token",
+        lambda raw: _principal_with("citation_queue:read", "citation_queue:write"),
+    )
+    app = create_app()
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            r = await c.post(
+                "/api/v1/citation-builder/sessions",
+                headers={"X-Operator-Token": "aop_x_y"},
+                json={"clientId": "c1", "kind": "web2_placement"},
+            )
+    assert r.status_code == 403, "a verified token short a scope is FORBIDDEN, not unauthenticated"
+    detail = r.json()["error"]["message"]
+    assert "web2_queue:write" in detail, "the refusal must name the scope that would fix it"
+    assert "re-pairing" in detail.lower(), "and must say that re-pairing will not help"
+
+
 async def test_the_task_card_reads_need_client_profile_read_on_top_of_queue_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -824,13 +864,13 @@ async def test_the_task_card_reads_need_client_profile_read_on_top_of_queue_read
         operator_auth, "verify_operator_token",
         lambda raw: _principal_with("citation_queue:read", "citation_queue:write"),
     )
-    assert (await _real_app_codes(route)) == [401]
+    assert (await _real_app_codes(route)) == [403]
     # With the profile scope the refusal is gone (later failures are env, never 401).
     monkeypatch.setattr(
         operator_auth, "verify_operator_token",
         lambda raw: _principal_with("citation_queue:read", "client_profile:read"),
     )
-    assert 401 not in (await _real_app_codes(route))
+    assert 403 not in (await _real_app_codes(route))
 
 
 async def test_session_creation_needs_write_plus_profile_scopes(
@@ -844,13 +884,13 @@ async def test_session_creation_needs_write_plus_profile_scopes(
         operator_auth, "verify_operator_token",
         lambda raw: _principal_with("citation_queue:read", "citation_queue:write"),
     )
-    assert (await _real_app_codes(route)) == [401]
+    assert (await _real_app_codes(route)) == [403]
     # Profile alone: refused (creation is a queue write).
     monkeypatch.setattr(
         operator_auth, "verify_operator_token",
         lambda raw: _principal_with("client_profile:read"),
     )
-    assert (await _real_app_codes(route)) == [401]
+    assert (await _real_app_codes(route)) == [403]
 
 
 async def test_telemetry_and_heartbeat_need_only_the_write_scope(
@@ -868,12 +908,12 @@ async def test_telemetry_and_heartbeat_need_only_the_write_scope(
         operator_auth, "verify_operator_token",
         lambda raw: _principal_with("citation_queue:read", "citation_queue:write"),
     )
-    assert 401 not in (await _real_app_codes(routes))
+    assert 403 not in (await _real_app_codes(routes))
     monkeypatch.setattr(
         operator_auth, "verify_operator_token",
         lambda raw: _principal_with("citation_queue:read"),
     )
-    assert set(await _real_app_codes(routes)) == {401}
+    assert set(await _real_app_codes(routes)) == {403}
 
 
 # --- the client selector's counts read ----------------------------------------------

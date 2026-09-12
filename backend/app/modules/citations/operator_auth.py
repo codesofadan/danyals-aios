@@ -241,7 +241,31 @@ def require_operator_scope_sets(
             None,
         )
         if held is None:
-            raise _UNAUTHENTICATED
+            # 403, NOT 401 — and the difference is the whole bug it fixes.
+            #
+            # The token is VERIFIED by the line above: this holder is authenticated,
+            # they simply lack a scope this route needs. Answering 401 tells the client
+            # the credential is bad, and the extension maps every 401 to "your token
+            # expired, pair again" (`api.ts` -> `NeedsPairing`). So an operator on the
+            # Web 2.0 tab — whose session needs `web2_queue:write`, which
+            # `DEFAULT_MINT_SCOPES` deliberately does NOT grant — was told to re-pair,
+            # re-paired, got another citation-only token, and looped forever. The one
+            # fix that would work (mint a token WITH the web2 scopes) was never named
+            # because the server had reported the wrong problem.
+            #
+            # Nothing is leaked by the distinction: identity is already proven, so 403
+            # reveals only which capability is missing, which is exactly what the
+            # holder needs to be told. The detail names the scopes, not the token.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "This extension token cannot reach that lane. It needs every scope "
+                    "of one of: "
+                    + " OR ".join("[" + ", ".join(group) + "]" for group in scope_sets)
+                    + ". Mint a token with those scopes in the dashboard under "
+                    "Settings -> Extension — re-pairing the same scopes will not help."
+                ),
+            )
         # Reuse the single-scope resolver for the epoch check + user load, presenting
         # a scope the principal provably holds - one verification path, not two.
         resolver = require_operator_scope(held[0])

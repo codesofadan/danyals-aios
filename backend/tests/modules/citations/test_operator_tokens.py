@@ -142,7 +142,15 @@ def test_the_queue_is_the_only_surface_that_accepts_an_operator_token() -> None:
 
     # `app.modules.citations.router` is ambiguous - the package __init__ re-exports an
     # APIRouter under that name - so `import ... as` binds the ROUTER, not the module.
-    src = Path(sys.modules["app.modules.citations.router"].__file__).read_text()
+    # `encoding="utf-8"` is REQUIRED, not tidiness. Without it `read_text` uses the
+    # platform default, which on Windows is cp1252, and the router contains curly
+    # quotes inside its operator-facing copy. The guard then died with a
+    # UnicodeDecodeError - so the containment it asserts was NOT being checked on this
+    # platform at all, while the failure looked like a security regression. A source
+    # scanner must pin its encoding or it silently stops scanning.
+    src = Path(sys.modules["app.modules.citations.router"].__file__).read_text(
+        encoding="utf-8"
+    )
     # Every function that takes the either-credential dependency.
     accepting = [
         line for line in src.splitlines()

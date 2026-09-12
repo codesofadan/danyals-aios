@@ -496,6 +496,22 @@ export type Web2CampaignEstimate = {
   notes: string[];
 };
 
+/** The DRAFTED ARTICLE, for the review step of the write flow.
+ *
+ *  `blocks` is the paste-ready text - the same extraction the extension's placement
+ *  lane uses, so the reviewer reads exactly what an operator would paste. `needs` are
+ *  the writer's own unfilled grounding gaps: a draft carrying them looks publishable
+ *  and is not. `lane` says which route approval takes by default. */
+export type Web2Draft = {
+  id: string;
+  platform: string;
+  status: string;
+  reason: string;
+  blocks: { key: string; label: string; value: string }[];
+  needs: string[];
+  lane: string;
+};
+
 export type Web2CampaignInput = {
   clientId: string;
   title?: string;
@@ -503,7 +519,12 @@ export type Web2CampaignInput = {
   /** ONE DISTINCT TOPIC PER ARTICLE. The server refuses a campaign that reuses a topic:
    *  one topic across N platforms produces N identical articles. */
   topics: string[];
-  platforms: string[];
+  /** OPTIONAL since 2026-09-12. Omitted, the server spreads the campaign across the
+   *  platforms actually open for this client - best authority first, API lane before
+   *  extension lane, one article per platform (the footprint diversification a campaign
+   *  exists for). Eligibility is per client and moves as accounts are connected, which
+   *  is why choosing by hand from a grid of ninety went wrong. */
+  platforms?: string[];
   anchors: string[];
   targetUrl: string;
   pacing: Web2PacingMode;

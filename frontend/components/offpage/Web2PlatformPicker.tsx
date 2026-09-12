@@ -57,14 +57,23 @@ export default function Web2PlatformPicker({
   const advisory = board.filter(
     (r) => r.status === "not_eligible" || r.status === "not_reviewed",
   );
-  const selectable = [...eligible, ...advisory];
+  // The extension-assisted lane (0135) IS pickable (2026-09-12, owner instruction).
+  //
+  // It was held out on the reasoning that "this picker chooses API publish targets, and
+  // an operator's browser session is not one". That was true of the pipeline and false
+  // of the WORK: the single-property door already passes `allow_extension=True`, and
+  // `approve_web2` already routes an extension-lane platform to a parked placement
+  // instead of the publish worker. So the server would happily have drafted these — the
+  // picker was the only thing refusing, which left 15 real, usable platforms visible
+  // but unreachable, and left the operator with a permanently disabled build button
+  // whenever the client had no API-eligible platform.
+  //
+  // The content is written identically either way. The lane decides only who presses
+  // publish at the end, so it is a BADGE on the choice, not a reason to refuse it.
+  const extensionLane = board.filter((r) => r.status === "eligible_extension");
+  const selectable = [...eligible, ...extensionLane, ...advisory];
   const needsAccount = board.filter((r) => r.status === "not_connected");
   const notSupported = board.filter((r) => r.status === "not_supported");
-  // The extension-assisted lane (0135). Deliberately NOT in the pickable grid: this
-  // picker chooses API publish targets, and an operator's browser session is not one.
-  // Dropping the rows instead would silently shrink the catalogue — the exact lie the
-  // five-state board exists to prevent.
-  const extensionLane = board.filter((r) => r.status === "eligible_extension");
   const chosenAdvisories = advisory.filter((r) => selected.has(r.platform ?? r.name));
 
   if (!clientId) {
@@ -98,12 +107,24 @@ export default function Web2PlatformPicker({
             const on = selected.has(key);
             const meta = PLATFORM_META[key as Web2Platform];
             const flagged = PLATFORM_ISSUES[key as Web2Platform];
-            const isAdvisory = row.status !== "eligible";
+            // An extension-lane row is NOT an advisory: nothing about it needs
+            // acknowledging, it simply publishes by a different hand. Folding it in
+            // with the reviewed-exclusion warning would ask the operator to accept a
+            // risk that does not exist, and train them to tick the box that DOES
+            // matter without reading it.
+            const isExtension = row.status === "eligible_extension";
+            const isAdvisory = row.status !== "eligible" && !isExtension;
             return (
               <button
                 type="button" key={key} onClick={() => onToggle(key)}
                 className={`w2-plat${on ? " on" : ""}`} aria-pressed={on}
-                title={isAdvisory ? row.reason : (flagged ?? undefined)}
+                title={
+                  isAdvisory
+                    ? row.reason
+                    : isExtension
+                      ? "Extension lane: the article is written here, then handed to an operator to publish in their own logged-in session from the extension's Web 2.0 tab."
+                      : (flagged ?? undefined)
+                }
               >
                 <span className="op-plat-ic" style={{ background: meta?.c ?? "#64748b" }}>
                   <span className="material-symbols-rounded" style={{ fontSize: 14 }}>
@@ -118,6 +139,16 @@ export default function Web2PlatformPicker({
                   {flagged && <span style={{ color: "#92400e" }}> *</span>}
                   {isAdvisory && (
                     <span style={{ color: "#92400e" }} title={row.reason}> ⚠</span>
+                  )}
+                  {/* Says WHO publishes, so the operator knows before choosing whether
+                      approval ends in a live URL or in their own queue. */}
+                  {isExtension && (
+                    <span
+                      style={{ color: "#1d4ed8", fontSize: "0.78em", fontWeight: 700 }}
+                      title="Published by an operator via the extension"
+                    >
+                      {" "}EXT
+                    </span>
                   )}
                 </span>
                 <span className="material-symbols-rounded w2-plat-check">
@@ -190,19 +221,13 @@ export default function Web2PlatformPicker({
       )}
 
       {extensionLane.length > 0 && (
-        <details className="fld-hint" style={{ marginTop: 8 }}>
-          <summary>
-            {extensionLane.length} extension-assisted platform(s) — an operator publishes
-            there in their own session (placement sessions), not through this pipeline
-          </summary>
-          <ul style={{ margin: "8px 0 0 16px" }}>
-            {extensionLane.map((row) => (
-              <li key={row.name} style={{ marginBottom: 4 }}>
-                <b>{row.name}</b> — {row.reason}
-              </li>
-            ))}
-          </ul>
-        </details>
+        <div className="fld-hint" style={{ marginTop: 8 }}>
+          <b>{extensionLane.length} platform(s) marked EXT</b> are in the grid above and
+          can be chosen normally. The article is written here either way; on approval it
+          is handed to an operator, who publishes it from the extension&rsquo;s Web 2.0
+          tab and pastes the public URL back. The server then checks the host and the
+          link before it counts as published.
+        </div>
       )}
 
       {notSupported.length > 0 && (

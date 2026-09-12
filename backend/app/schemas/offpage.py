@@ -445,7 +445,12 @@ class Web2PlanRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     client_id: str = Field(min_length=1, alias="clientId")
-    platform: Web2Platform
+    #: OPTIONAL since 2026-09-12. Omitted, the server picks the highest-authority
+    #: platform that is genuinely open for this client (see `_auto_platform`), because
+    #: the operator's brief is about a client and a topic - not about which of ninety
+    #: catalogued properties carries it. A platform may still be named explicitly; the
+    #: campaign path always names them.
+    platform: Web2Platform | None = None
     anchor: str = Field(min_length=1)
     target_url: str = Field(min_length=1, alias="targetUrl")
     topic: str | None = None
@@ -972,6 +977,40 @@ _CAMPAIGN_STATUSES = frozenset(
 )
 
 
+class Web2DraftResponse(BaseModel):
+    """The DRAFTED ARTICLE, for the review step of the write flow (2026-09-12).
+
+    WHY THIS EXISTS. Nothing returned a property's body. The list endpoint carries the
+    eight ledger keys (`Web2Property`) and no prose, so an operator asked to approve an
+    article was approving a ROW - a platform name and a status pill - having never read
+    what was written. The whole point of a human review gate is that a human read it.
+
+    The body is extracted with ``web2_placement.copy_blocks_for``, the same function the
+    extension's placement lane already uses, so the reviewer sees exactly the text an
+    operator would paste. A block only exists when the draft actually holds a value for
+    it - an empty "Title" would teach a reviewer to skim.
+
+    ``needs`` are the writer's own ``[NEEDS: ...]`` gaps. They are surfaced because a
+    draft with gaps is publishable-looking and not publishable: the generator emits them
+    when it lacked first-hand grounding, and approving past them ships a placeholder.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    platform: str
+    status: str
+    #: '' unless the row is in a non-clean state; then the recorded reason verbatim.
+    reason: str = ""
+    #: [{key, label, value}] - title / body / anchor / link target, in paste order.
+    blocks: list[dict[str, str]] = Field(default_factory=list)
+    #: The writer's unfilled grounding gaps, if any.
+    needs: list[str] = Field(default_factory=list)
+    #: Which lane approval will take BY DEFAULT, so the review step can name the
+    #: destination before the operator chooses one: 'api' | 'extension' | ''.
+    lane: str = ""
+
+
 class Web2ReviewRequest(BaseModel):
     """POST /offpage/web2/{id}/approve body: the lead's decision at the review gate.
 
@@ -991,6 +1030,23 @@ class Web2ReviewRequest(BaseModel):
 
     action: Web2ReviewAction = "approve"
     acknowledge_similarity: bool = Field(default=False, alias="acknowledgeSimilarity")
+    #: WHERE an approved article goes, chosen by the lead at the gate (2026-09-12).
+    #:
+    #: ``None`` keeps the original behaviour exactly: the 0135 capability lane decides,
+    #: so every existing caller and the campaign path are unaffected.
+    #:
+    #: ``"connected"`` publishes through a platform API; ``"extension"`` parks the draft
+    #: for an operator to publish in their own session. The two exist because the
+    #: decision belongs to the person who just read the article - one that reads well as
+    #: a developer post may be better placed by hand on a platform with a real audience
+    #: - and because a single "Approve" button that silently did one or the other left a
+    #: parked row looking like a publish that had stalled.
+    #:
+    #: If the row's current platform cannot serve the chosen destination, the server
+    #: RETARGETS it to one that can (nothing has been published yet, and the article's
+    #: prose is platform-agnostic). A retarget that finds no open platform refuses with
+    #: the eligibility board's reason rather than approving into a dead end.
+    destination: Literal["connected", "extension"] | None = None
 
 
 # --- extension-assisted placement completion (0136, Phase 7) --------------------

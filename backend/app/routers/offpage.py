@@ -27,7 +27,7 @@ import json
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, time
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
@@ -66,12 +66,14 @@ from app.schemas.offpage import (
     Web2CatalogResponse,
     Web2ClientIdentityRequest,
     Web2ClientIdentityResponse,
+    Web2DraftResponse,
     Web2Mechanism,
     Web2PlacementCompleteRequest,
     Web2PlacementCompleteResponse,
     Web2PlacementResponse,
     Web2PlannedPropertyResponse,
     Web2PlanRequest,
+    Web2Platform,
     Web2PlatformCatalogResponse,
     Web2PlatformStatusResponse,
     Web2PropertyResponse,
@@ -459,8 +461,29 @@ async def plan_web2(
     # `allow_extension` (0136): the single-property door may plan an extension-lane
     # platform - drafting is our own writer, and approval then routes to a placement
     # session instead of the publish worker. Campaigns deliberately keep the default.
+    # NO PLATFORM NAMED -> the server picks one. The API lane is tried first so the
+    # default path ends in an automatic publish; if nothing there is connected, the
+    # extension lane is tried, because a client with an open operator lane is not a
+    # client with nowhere to publish. Only if BOTH are closed does this refuse, and it
+    # refuses with the board's own reason so the operator knows what to connect.
+    platform = body.platform
+    if platform is None:
+        picked, why_api = await asyncio.to_thread(
+            _auto_platform, repo, body.client_id, lane="api"
+        )
+        if not picked:
+            picked, why_ext = await asyncio.to_thread(
+                _auto_platform, repo, body.client_id, lane="extension"
+            )
+            if not picked:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"{why_api} {why_ext}".strip(),
+                )
+        platform = cast(Web2Platform, picked)
+
     selection = await asyncio.to_thread(
-        _eligible_for, repo, body.client_id, [body.platform],
+        _eligible_for, repo, body.client_id, [platform],
         acknowledged=body.acknowledge_platform_advisory, allow_extension=True,
     )
     if selection.advisories:
@@ -479,7 +502,7 @@ async def plan_web2(
             detail=(
                 selection.blocked[0]
                 if selection.blocked
-                else f"{body.platform} cannot be used for this client."
+                else f"{platform} cannot be used for this client."
             ),
         )
 
@@ -535,7 +558,7 @@ async def plan_web2(
         repo.create_web2,
         client_id=body.client_id,
         client_name=name,
-        platform=body.platform,
+        platform=platform,
         anchor=body.anchor,
         target_url=body.target_url,
         topic=(body.topic or body.anchor),
@@ -631,6 +654,154 @@ def _guard_similarity(row: dict[str, Any], body: Web2ReviewRequest, live_code: s
         )
 
 
+@router.post("/offpage/web2/{web2_id}/syndicate", response_model=Web2PropertyResponse)
+async def syndicate_web2(
+    web2_id: str,
+    body: Web2ReviewRequest,
+    repo: OffpageRepoDep,
+    actor: Lead,
+    enqueue: Web2PublishEnqueuerDep,
+) -> Web2PropertyResponse:
+    """Send an ALREADY-APPROVED article down the OTHER lane as a second placement.
+
+    WHY THIS IS A NEW ROW AND NOT A SECOND APPROVAL. One `web2_properties` row holds one
+    platform, one post_url and one status - it cannot simultaneously be published on
+    Ghost and awaiting an operator on Medium. So "publish this AND hand it to the
+    extension" is two placements of one article, which is exactly what it is: the same
+    prose, two properties, two links.
+
+    NO SECOND REVIEW GATE, deliberately. A human already read this body and approved it;
+    requiring them to read the identical text again would teach them to click through
+    the gate that matters. The approval travels with the body, and the activity log
+    records that this placement was syndicated rather than separately reviewed.
+
+    THE DUPLICATE-CONTENT CAVEAT IS REAL AND IS NOT SUPPRESSED. The same article on two
+    platforms is the footprint the cross-property similarity gate exists to catch. The
+    gate ALWAYS runs on the new row and ALWAYS records its verdict; whether a `block`
+    refuses is the existing `web2_similarity_enforce` decision, unchanged here. This
+    route does not bypass it - it just does not pretend the two articles are different.
+    """
+    row = await asyncio.to_thread(repo.get_web2, web2_id)
+    if row is None:
+        raise _WEB2_NOT_FOUND
+    # Only an APPROVED article may be syndicated: a draft has not been read by anyone,
+    # and a rejected one was read and refused.
+    if str(row.get("status") or "") not in ("publishing", "published"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Only an approved article can be sent down a second lane "
+                f"(this one is {row.get('status') or 'unknown'})."
+            ),
+        )
+    if not str(row.get("body_md") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This placement holds no drafted body, so there is nothing to syndicate.",
+        )
+
+    want = body.destination or "extension"
+    lane = "extension" if want == "extension" else "api"
+    client_id = str(row.get("client_id") or "")
+    picked, why = await asyncio.to_thread(_auto_platform, repo, client_id, lane=lane)
+    if not picked:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=why)
+    if picked == str(row.get("platform") or ""):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{picked} already carries this article. Connect another account in that "
+                "lane to place it a second time."
+            ),
+        )
+
+    # The provenance rides in `source_pack`, the property's own jsonb metadata bag.
+    # NOT in `shared_origin`, which is a BOOLEAN meaning "published through a shared
+    # house account" (the R2-07 footprint marker) - a different fact entirely, and
+    # writing a row id into it both failed to cast and would have corrupted what the
+    # consolidation CLI reads.
+    origin_pack = dict(row.get("source_pack") or {})
+    origin_pack["syndicated_from"] = web2_id
+    clone = await asyncio.to_thread(
+        repo.create_web2,
+        client_id=client_id,
+        client_name=str(row.get("client_name") or ""),
+        platform=picked,
+        anchor=str(row.get("anchor") or ""),
+        target_url=str(row.get("target_url") or ""),
+        topic=str(row.get("topic") or ""),
+        page_type=str(row.get("page_type") or "blog"),
+        framework=str(row.get("framework") or "Auto"),
+        source_pack=origin_pack,
+    )
+    if clone is None:
+        raise _WEB2_NOT_FOUND
+
+    # Carry the APPROVED body across and route it, skipping `draft` -> the writer would
+    # otherwise spend real money re-writing prose a human has already signed off.
+    changes: dict[str, Any] = {
+        "body_md": row.get("body_md"),
+        "status": "publishing",
+        "publish_method": "extension" if lane == "extension" else "api",
+    }
+    placed = await asyncio.to_thread(repo.update_web2_status, str(clone["id"]), changes)
+    if placed is None:
+        raise _WEB2_NOT_FOUND
+    if lane == "api" and not _is_scheduled_later(placed):
+        enqueue(str(clone["id"]))
+
+    ent_type, ent_id = _client_entity(row)
+    await record_activity(
+        actor, kind="content",
+        action=(
+            f"syndicated an approved Web 2.0 article to {picked} "
+            f"({'operator placement' if lane == 'extension' else 'API publish'})"
+        ),
+        target=str(row.get("client_name") or ""), entity_type=ent_type, entity_id=ent_id,
+    )
+    return Web2PropertyResponse.from_row(placed)
+
+
+@router.get("/offpage/web2/{web2_id}/draft", response_model=Web2DraftResponse)
+async def web2_draft(
+    web2_id: str, repo: OffpageRepoDep, _user: ViewReports
+) -> Web2DraftResponse:
+    """The drafted ARTICLE, so a reviewer can read what they are approving.
+
+    The write flow polls this while the worker drafts (`draft` -> `needs_review`), then
+    renders the blocks. A row still drafting returns its status and no blocks rather
+    than an error: "not written yet" is a state, not a failure, and the caller shows a
+    spinner for it. A row that FAILED returns its recorded reason - the operator needs
+    to know the writer hit a 402 or a provider outage, not just see an empty page.
+    """
+    row = await asyncio.to_thread(repo.get_web2, web2_id)
+    if row is None:
+        raise _WEB2_NOT_FOUND
+
+    from app.services.web2_placement import copy_blocks_for
+
+    matrix = await asyncio.to_thread(
+        repo.platform_matrix_for, str(row.get("platform") or "")
+    )
+    # `needs` are stored inside the article body by the writer, not in a column, so they
+    # are read back out of it. A line-scan, because the marker is emitted inline.
+    body = str(row.get("body_md") or "")
+    needs = [
+        line.strip()
+        for line in body.splitlines()
+        if line.strip().startswith("[NEEDS:")
+    ]
+    return Web2DraftResponse(
+        id=str(row.get("id") or ""),
+        platform=str(row.get("platform") or ""),
+        status=str(row.get("status") or ""),
+        reason=str(row.get("error") or ""),
+        blocks=copy_blocks_for(row),
+        needs=needs,
+        lane=str(matrix.get("mechanism") or "") if matrix is not None else "",
+    )
+
+
 @router.post("/offpage/web2/{web2_id}/approve", response_model=Web2PropertyResponse)
 async def approve_web2(
     web2_id: str,
@@ -680,7 +851,36 @@ async def approve_web2(
     matrix = await asyncio.to_thread(
         repo.platform_matrix_for, str(row.get("platform") or "")
     )
-    if matrix is not None and str(matrix.get("mechanism") or "") == "extension":
+    lane = str(matrix.get("mechanism") or "") if matrix is not None else ""
+
+    # THE LEAD'S CHOICE OF DESTINATION (2026-09-12), applied before the lane decides.
+    #
+    # `destination` is None for every legacy caller and for campaigns, so the matrix
+    # keeps deciding exactly as before. When a lead DOES choose, and the row's current
+    # platform cannot serve that choice, the row is RETARGETED: nothing is published
+    # yet and the drafted prose names no platform, so moving it is honest. What is NOT
+    # honest is approving into a destination that cannot receive it, so a retarget with
+    # no open platform refuses with the board's own reason instead.
+    want = body.destination
+    retargeted = ""
+    if want is not None:
+        want_lane = "extension" if want == "extension" else "api"
+        if lane != want_lane:
+            picked, why = await asyncio.to_thread(
+                _auto_platform, repo, str(row.get("client_id") or ""), lane=want_lane
+            )
+            if not picked:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=why
+                )
+            moved = await asyncio.to_thread(
+                repo.update_web2_status, web2_id, {"platform": picked}
+            )
+            if moved is None:
+                raise _WEB2_NOT_FOUND
+            row, lane, retargeted = moved, want_lane, picked
+
+    if lane == "extension":
         updated = await asyncio.to_thread(
             repo.update_web2_status, web2_id,
             {"status": "publishing", "publish_method": "extension"},
@@ -689,7 +889,11 @@ async def approve_web2(
             raise _WEB2_NOT_FOUND
         await record_activity(
             actor, kind="content",
-            action="approved a Web 2.0 property (awaiting operator placement)",
+            action=(
+                "approved a Web 2.0 property (awaiting operator placement"
+                + (f", retargeted to {retargeted}" if retargeted else "")
+                + ")"
+            ),
             target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
         )
         return Web2PropertyResponse.from_row(updated)
@@ -707,7 +911,11 @@ async def approve_web2(
     if not _is_scheduled_later(updated):
         enqueue(web2_id)
     await record_activity(
-        actor, kind="content", action="approved a Web 2.0 property",
+        actor, kind="content",
+        action=(
+            "approved a Web 2.0 property"
+            + (f" (retargeted to {retargeted})" if retargeted else "")
+        ),
         target=row.get("client_name", ""), entity_type=ent_type, entity_id=ent_id,
     )
     return Web2PropertyResponse.from_row(updated)
@@ -968,12 +1176,112 @@ def _eligible_for(
     )
 
 
+#: Authority order for an automatic platform choice. Highest authority first, because
+#: when the operator has not named a platform the only defensible tie-break is "the one
+#: whose link is worth most".
+_AUTHORITY_RANK = {"high": 0, "medium": 1, "low": 2, "": 3}
+
+
+def _auto_platform(repo: Any, client_id: str, *, lane: str) -> tuple[str, str]:
+    """The best platform for this client in ``lane`` (``'api'`` or ``'extension'``).
+
+    WHY THE SERVER CHOOSES. The operator's brief is about a CLIENT and a TOPIC; which
+    Web 2.0 property carries it is an operational detail they were being asked to
+    decide from a grid of ninety, most of which their client may not use. Worse, the
+    choice had to be made BEFORE the article existed, so "which platform suits this
+    piece?" was unanswerable at the moment it was asked.
+
+    Returns ``(platform, "")`` on success or ``("", reason)`` when the lane is empty for
+    this client - the reason being the eligibility board's own words, so the operator is
+    told what to fix (connect an account / review terms) rather than "no platforms".
+
+    Only genuinely usable platforms are considered: ``eligible`` means the API lane has
+    a connected account, and ``eligible_extension`` means the operator lane is open.
+    Advisory states are deliberately NOT auto-chosen - overriding a platform's own
+    content rule is a decision a human takes deliberately, never a default the server
+    picks on their behalf.
+    """
+    from app.services.web2_eligibility import evaluate_catalog
+
+    scope = repo.client_web2_scope(client_id)
+    board = evaluate_catalog(
+        repo.eligible_catalog(),
+        client_scope=scope,
+        connected_platforms=repo.connected_platforms_for(client_id),
+    )
+    wanted = "eligible_extension" if lane == "extension" else "eligible"
+    open_lane = [v for v in board if v.status == wanted and v.platform_enum]
+    if not open_lane:
+        if lane == "extension":
+            return "", (
+                "No extension-assisted platform is open for this client, so there is "
+                "nothing for an operator to place."
+            )
+        advisory = [v for v in board if v.status in ("not_connected", "not_reviewed")]
+        hint = f" Closest: {advisory[0].name} - {advisory[0].reason}" if advisory else ""
+        return "", (
+            "No platform with a connected account is available for this client, so "
+            "nothing can be published through an API yet." + hint
+        )
+    open_lane.sort(key=lambda v: (_AUTHORITY_RANK.get(v.authority_tier, 3), v.name))
+    return str(open_lane[0].platform_enum), ""
+
+
+def _auto_platforms(repo: Any, client_id: str, want: int) -> tuple[list[str], str]:
+    """Up to ``want`` platforms for a CAMPAIGN, best first, or ``([], reason)``.
+
+    A campaign deliberately spreads N articles across N platforms - reusing one
+    platform for several articles concentrates the footprint it exists to diversify.
+    So this returns a SPREAD, API lane first (those publish themselves) then the
+    extension lane, and never more than are genuinely open.
+
+    Returning fewer than ``want`` is correct and is not an error here: the planner
+    cycles the list, and three platforms carrying nine articles is a real campaign,
+    where inventing six more platforms would be a lie about what is connected.
+    """
+    from app.services.web2_eligibility import evaluate_catalog
+
+    scope = repo.client_web2_scope(client_id)
+    board = evaluate_catalog(
+        repo.eligible_catalog(),
+        client_scope=scope,
+        connected_platforms=repo.connected_platforms_for(client_id),
+    )
+    ranked: list[str] = []
+    for wanted in ("eligible", "eligible_extension"):
+        lane = [v for v in board if v.status == wanted and v.platform_enum]
+        lane.sort(key=lambda v: (_AUTHORITY_RANK.get(v.authority_tier, 3), v.name))
+        ranked.extend(str(v.platform_enum) for v in lane)
+    if not ranked:
+        return [], (
+            "No platform is open for this client, so a campaign has nowhere to publish. "
+            "Connect an account, or review a platform's terms, and try again."
+        )
+    return ranked[: max(1, want)], ""
+
+
 def _build_plan(repo: Any, body: Web2CampaignRequest, client_name: str) -> Any:
     from app.services.web2_campaign import CampaignRefusedError, plan_campaign
 
+    # NO PLATFORMS NAMED -> the server spreads the campaign across what is open
+    # (2026-09-12, owner instruction: the dashboard no longer asks). `platforms` has
+    # always defaulted to an empty list, and an empty selection previously fell through
+    # to "No platform in this selection can be used" - technically true and completely
+    # unhelpful, since the operator had not made a selection to be wrong about.
+    chosen = list(body.platforms)
+    if not chosen:
+        chosen, why = _auto_platforms(repo, body.client_id, body.article_count)
+        if not chosen:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=why
+            )
+
     selection = _eligible_for(
-        repo, body.client_id, list(body.platforms),
-        acknowledged=body.acknowledge_platform_advisories,
+        repo, body.client_id, chosen,
+        # An auto-chosen spread only ever contains platforms the board already called
+        # OPEN, so it carries no advisories to acknowledge. The flag stays the
+        # operator's when they named the platforms themselves.
+        acknowledged=body.acknowledge_platform_advisories or not body.platforms,
     )
     allowed, refusals = selection.allowed, selection.blocked
     # An UNACKNOWLEDGED judgement platform stops the request and asks, rather than

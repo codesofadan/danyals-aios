@@ -1,14 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PLATFORM_META, type Web2PipelineStatus, type Web2Platform, type Web2Verified } from "@/lib/offpage";
-import { useApproveWeb2, useWeb2, useWeb2Placements } from "@/lib/hooks/offpage";
+import {
+  PLATFORM_META,
+  type Web2Mechanism,
+  type Web2PipelineStatus,
+  type Web2Platform,
+  type Web2Verified,
+} from "@/lib/offpage";
+import {
+  useApproveWeb2,
+  useWeb2,
+  useWeb2Catalog,
+  useWeb2Placements,
+} from "@/lib/hooks/offpage";
 import { useClients } from "@/lib/hooks/clients";
-import Web2CampaignBoard from "./Web2CampaignBoard";
 import Web2AccountBoard from "./Web2AccountBoard";
 import Web2PlacementTable from "./Web2PlacementTable";
-import Web2CampaignWizard from "./Web2CampaignWizard";
-import Web2PlanModal from "./Web2PlanModal";
+import Web2ArticleWizard from "./Web2ArticleWizard";
 import Web2StatusBoard from "./Web2StatusBoard";
 import ReadMore from "@/components/ui/ReadMore";
 
@@ -19,6 +28,11 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "verified", label: "Verified" },
   { key: "pending", label: "Pending" },
 ];
+
+/** Sentinel for the Accounts view's client select. `""` means "not chosen yet" and
+ *  HOUSE means "deliberately agency-owned" — two different things that used to share
+ *  the empty string, which is how the UI's default became its riskiest option. */
+const HOUSE = "__house__";
 
 const PIPELINE_META: Record<Web2PipelineStatus, { label: string; cls: string }> = {
   draft: { label: "Drafting", cls: "mut" },
@@ -31,12 +45,11 @@ const PIPELINE_META: Record<Web2PipelineStatus, { label: string; cls: string }> 
 
 export default function Web2Tab() {
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [view, setView] = useState<"ledger" | "campaigns" | "links" | "accounts" | "status">("ledger");
+  const [view, setView] = useState<"ledger" | "links" | "accounts" | "status">("ledger");
   const web2Q = useWeb2();
   const web2Properties = web2Q.data ?? [];
   const approve = useApproveWeb2();
   const [showPlan, setShowPlan] = useState(false);
-  const [showCampaign, setShowCampaign] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
   // WHOSE accounts the Accounts view is showing and registering.
@@ -54,6 +67,23 @@ export default function Web2Tab() {
   const clientList = clientsQ.data ?? [];
   const [accountsClientId, setAccountsClientId] = useState("");
 
+  // WHICH ROUTE APPROVAL WILL TAKE, named before the operator commits.
+  //
+  // `approve_web2` already branches on the 0135 capability lane: an API-lane platform
+  // is enqueued for the publish worker, while an extension-lane one is parked at
+  // `publish_method='extension'` and enqueues NOTHING — the parked row IS the
+  // operator's placement task. Both outcomes arrived behind one button labelled
+  // "Approve", so the operator could not tell whether pressing it published an
+  // article or handed them work; a parked row then looked like a publish that had
+  // stalled. The lane is a fact about the platform, so it is read from the catalogue
+  // rather than guessed from the row (whose `publishMethod` is only set BY approval).
+  const catalogQ = useWeb2Catalog();
+  const laneOf = useMemo(() => {
+    const map = new Map<string, Web2Mechanism>();
+    for (const p of catalogQ.data?.platforms ?? []) map.set(p.name, p.mechanism);
+    return map;
+  }, [catalogQ.data]);
+
   const rows = useMemo(
     () => web2Properties.filter((w) => filter === "all" || w.verified === filter),
     [web2Properties, filter],
@@ -63,9 +93,14 @@ export default function Web2Tab() {
   // acknowledging one collision can never wave through another.
   const [pendingAck, setPendingAck] = useState<{ id: string; message: string } | null>(null);
 
-  function act(id: string, action: "approve" | "reject", acknowledgeSimilarity = false) {
+  function act(
+    id: string,
+    action: "approve" | "reject",
+    acknowledgeSimilarity = false,
+    destination?: "connected" | "extension",
+  ) {
     approve.mutate(
-      { id, action, acknowledgeSimilarity },
+      { id, action, acknowledgeSimilarity, destination },
       {
         onSuccess: () => {
           setPendingAck(null);
@@ -103,23 +138,16 @@ export default function Web2Tab() {
             actions were sharing one flex line with two segmented controls and two
             buttons, which crowded on any laptop-width screen. */}
         <div className="op-toolset">
-          {/* Two doors on purpose, not an accident of history: ONE property gets
-              per-property review (the only path Tumblr's API licence permits), while a
-              CAMPAIGN batches N distinct topics behind one quote and one approval.
-              Merging them would route Tumblr singles through campaign approval. */}
+          {/* THE PRIMARY DOOR (2026-09-12). One article, start to finish, in four
+              steps: client -> brief -> read it -> choose where it publishes. It is the
+              primary button because it is what an operator does most, and because it is
+              the only path where the approver has actually READ the article. */}
           <button
-            className="ghost-btn" onClick={() => setShowPlan(true)}
-            title="One article on one platform — reviewed and approved individually. Tumblr must go this way."
+            className="primary-btn" onClick={() => setShowPlan(true)}
+            title="Write one article: pick the client, brief the writer, read what it wrote, then publish by API or hand it to the extension."
           >
-            <span className="material-symbols-rounded">add</span>
-            One property
-          </button>
-          <button
-            className="primary-btn" onClick={() => setShowCampaign(true)}
-            title="A batch across platforms — a distinct topic per article, one quote, one approval, capped per campaign."
-          >
-            <span className="material-symbols-rounded">campaign</span>
-            New campaign
+            <span className="material-symbols-rounded">edit_note</span>
+            Write a new Web 2.0 article
           </button>
         </div>
       </div>
@@ -127,7 +155,6 @@ export default function Web2Tab() {
       <div className="w2-tabs">
         <div className="seg">
           <button className={view === "ledger" ? "on" : undefined} onClick={() => setView("ledger")}>Placements</button>
-          <button className={view === "campaigns" ? "on" : undefined} onClick={() => setView("campaigns")}>Campaigns</button>
           <button className={view === "links" ? "on" : undefined} onClick={() => setView("links")}>Links built</button>
           <button className={view === "accounts" ? "on" : undefined} onClick={() => setView("accounts")}>Accounts</button>
             <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>Integrations</button>
@@ -143,7 +170,6 @@ export default function Web2Tab() {
         )}
       </div>
 
-      {view === "campaigns" && <Web2CampaignBoard />}
       {view === "links" && <LinksBuilt />}
       {view === "accounts" && (
         <>
@@ -156,24 +182,47 @@ export default function Web2Tab() {
             <label htmlFor="w2-accounts-client" style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
               Accounts for
             </label>
+            {/* HOUSE IS THE EXCEPTION, NOT THE DEFAULT. This select used to open on
+                "House (agency-shared)", and the register form derives ownership from
+                exactly that — so the easiest path through the UI produced a house
+                account for a platform that cannot use one. Worse, a house account is
+                the shared-footprint shape R2-06 spent a migration removing: one login
+                behind every client is one suspension away from taking them all down,
+                and per-client copies let a platform enumerate the client base from a
+                single ban. So the first option is a PROMPT: the operator states whose
+                account this is before the form can derive anything. */}
             <select
               id="w2-accounts-client"
               value={accountsClientId}
               onChange={(e) => setAccountsClientId(e.target.value)}
               style={{ minWidth: 240 }}
             >
-              <option value="">House (agency-shared)</option>
+              <option value="">Choose whose account…</option>
               {clientList.map((c) => (
                 <option key={c.id} value={c.id}>{c.cn}</option>
               ))}
+              <option value={HOUSE}>House (agency-shared) — Telegra.ph only</option>
             </select>
             <span className="cs" style={{ flexBasis: "100%" }}>
-              {accountsClientId
-                ? "New accounts here are owned by this client, which is what most platforms require."
-                : "House accounts are shared across clients. Only Telegra.ph accepts one — pick a client for every other platform."}
+              {accountsClientId === HOUSE
+                ? "House accounts are shared across every client, so one suspension takes them all down. Only a platform where publishing implies no durable identity — Telegra.ph and the like — should use one."
+                : accountsClientId
+                  ? "New accounts here are owned by this client, which is what almost every platform requires."
+                  : "Pick a client to see and register accounts they own. Almost every platform needs a per-client account; House is for the few where publishing carries no durable identity."}
             </span>
           </div>
-          <Web2AccountBoard clientId={accountsClientId || undefined} />
+          {accountsClientId === "" ? (
+            <div className="op-empty">
+              Choose a client above to see the accounts they own and register new ones.
+              Accounts are per-client by default because that is what the platforms
+              require — and because it keeps one client&apos;s suspension from becoming
+              everyone&apos;s.
+            </div>
+          ) : (
+            <Web2AccountBoard
+              clientId={accountsClientId === HOUSE ? undefined : accountsClientId}
+            />
+          )}
         </>
       )}
       {view === "status" && <Web2StatusBoard />}
@@ -208,8 +257,7 @@ export default function Web2Tab() {
           </div>
         </div>
       )}
-      {showPlan && <Web2PlanModal onClose={() => setShowPlan(false)} />}
-      {showCampaign && <Web2CampaignWizard onClose={() => setShowCampaign(false)} />}
+      {showPlan && <Web2ArticleWizard onClose={() => setShowPlan(false)} />}
       {flash && (
         <div className="op-flash">
           <span className="material-symbols-rounded">task_alt</span>{flash}
@@ -293,14 +341,41 @@ export default function Web2Tab() {
                       </td>
                       <td>
                         {w.status === "needs_review" ? (
-                          <div className="op-toolset" style={{ gap: 6 }}>
-                            <button className="op-act update" onClick={() => act(w.id, "approve")} disabled={approve.isPending}>
-                              <span className="material-symbols-rounded">check</span>Approve
-                            </button>
-                            <button className="ghostbtn" onClick={() => act(w.id, "reject")} disabled={approve.isPending}>
-                              <span className="material-symbols-rounded">close</span>Reject
-                            </button>
-                          </div>
+                          (() => {
+                            // THE CONTENT IS WRITTEN. The only question left is where it
+                            // goes, so BOTH routes are offered explicitly rather than one
+                            // "Approve" that silently picked for you. The platform's own
+                            // lane decides which is the default action — but either is
+                            // reachable, and the server retargets the row if the lead
+                            // chooses the route its current platform cannot serve.
+                            const lane = laneOf.get(w.platform);
+                            const native = lane === "extension" ? "extension" : "connected";
+                            return (
+                              <div className="op-toolset" style={{ gap: 6, flexWrap: "wrap" }}>
+                                <button
+                                  className={native === "connected" ? "op-act update" : "ghostbtn"}
+                                  onClick={() => act(w.id, "approve", false, "connected")}
+                                  disabled={approve.isPending}
+                                  title="Publishes the approved article through a connected platform's API and returns the live URL. If this row's platform has no connected account, it is moved to one that does."
+                                >
+                                  <span className="material-symbols-rounded">publish</span>
+                                  Publish to connected
+                                </button>
+                                <button
+                                  className={native === "extension" ? "op-act update" : "ghostbtn"}
+                                  onClick={() => act(w.id, "approve", false, "extension")}
+                                  disabled={approve.isPending}
+                                  title="Hands the approved article to an operator: it appears in the extension's Web 2.0 tab as copy-blocks, they publish it in their own logged-in session and paste the public URL back."
+                                >
+                                  <span className="material-symbols-rounded">extension</span>
+                                  Forward to extension
+                                </button>
+                                <button className="ghostbtn" onClick={() => act(w.id, "reject")} disabled={approve.isPending}>
+                                  <span className="material-symbols-rounded">close</span>Reject
+                                </button>
+                              </div>
+                            );
+                          })()
                         ) : (
                           <span className={`status-pill ${pipeline.cls}`}>{pipeline.label}</span>
                         )}

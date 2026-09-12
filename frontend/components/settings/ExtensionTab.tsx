@@ -65,6 +65,9 @@ export default function ExtensionTab() {
   const qc = useQueryClient();
   const [label, setLabel] = useState("");
   const [minted, setMinted] = useState<MintedToken | null>(null);
+  /** Which lanes the token may work. Defaults to BOTH because the extension ships both
+   *  tabs — a citation-only token silently breaks the Web 2.0 one. */
+  const [lanes, setLanes] = useState<"both" | "citation">("both");
   const [copied, setCopied] = useState(false);
 
   const tokensQ = useQuery({
@@ -80,11 +83,37 @@ export default function ExtensionTab() {
   });
 
   const mint = useMutation({
-    // Scopes deliberately omitted: the server's default is the granular citation-queue
-    // working set (read/write + client profile). Naming a scope list here is how the
-    // frontend once pinned every mint to the legacy umbrella scope.
+    // THE SCOPES ARE NAMED HERE, and they have to be (2026-09-12).
+    //
+    // They were omitted so the server's `DEFAULT_MINT_SCOPES` applied — the citation
+    // working set, with the web2 scopes deliberately withheld because "touching the
+    // web2 queue is a different act and has to be asked for". That reasoning was
+    // written when the extension had one linear citation flow. It now ships a Web 2.0
+    // TAB as a first-class surface, and a token minted from this screen could not
+    // reach it: session creation needs `web2_queue:write`, the operator was refused,
+    // and — because a missing scope used to answer 401 — the panel showed the PAIRING
+    // screen. Re-pairing minted the same citation-only scopes and refused again. An
+    // operator could loop on that forever without a single message naming the cause.
+    //
+    // So this screen asks for the full operator working set, and `lanes` lets it be
+    // narrowed deliberately rather than by accident. `citation_credential` is still
+    // NOT requested: revealing a directory password remains a separate act, and
+    // nothing in the panel needs it.
+    //
+    // The SERVER default is unchanged — a programmatic caller that names nothing still
+    // gets citation-only. This is the human door widening, not the policy.
     mutationFn: (deviceLabel: string) =>
-      api.post<MintedToken>("/extension/tokens", { deviceLabel }),
+      api.post<MintedToken>("/extension/tokens", {
+        deviceLabel,
+        scopes: [
+          "citation_queue:read",
+          "citation_queue:write",
+          "client_profile:read",
+          ...(lanes === "both"
+            ? ["web2_queue:read", "web2_queue:write"]
+            : []),
+        ],
+      }),
     onSuccess: (t) => {
       setMinted(t);
       setCopied(false);
@@ -157,6 +186,16 @@ export default function ExtensionTab() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
           />
+          <select
+            className="op-input"
+            value={lanes}
+            onChange={(e) => setLanes(e.target.value as "both" | "citation")}
+            style={{ minWidth: 230 }}
+            aria-label="Which lanes this token may work"
+          >
+            <option value="both">Citations + Web 2.0 (both tabs)</option>
+            <option value="citation">Citations only</option>
+          </select>
           <button
             className="primary-btn"
             onClick={() => mint.mutate(label.trim())}
@@ -165,6 +204,11 @@ export default function ExtensionTab() {
             <span className="material-symbols-rounded">key</span>
             {mint.isPending ? "Creating…" : "Create a token"}
           </button>
+        </div>
+        <div className="op-muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+          {lanes === "both"
+            ? "This token can work both extension tabs. Choose “Citations only” to mint one that cannot touch Web 2.0 placements."
+            : "Citations only — the extension’s Web 2.0 tab will refuse this token, and it will say so rather than asking you to re-pair."}
         </div>
         {mint.isError && (
           <div className="op-note crit" style={{ marginTop: 10 }}>

@@ -15,23 +15,12 @@ export default function Web2Page() {
         title="Web 2.0"
         searchPlaceholder="Search platforms, placements, anchors…"
       />
-      <section className="card" style={{ marginBottom: 16 }}>
-        <div className="card-h">
-          <div>
-            <div className="ct">
-              <span className="material-symbols-rounded" style={{ verticalAlign: "middle", marginRight: 8 }}>
-                science
-              </span>
-              In testing — not validated for client delivery
-            </div>
-            <div className="cs">
-              Publishing runs behind a human approval gate and per-client account
-              ownership. Treat placements made here as test data until the module has
-              passed its acceptance run.
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* The "In testing — not validated for client delivery" banner was removed on
+          owner instruction (2026-09-12). The guarantees it described are not notices,
+          they are enforced: publishing still passes a lead's approval gate, accounts
+          are still per-client by ownership constraint in `0100`, and the similarity
+          gate still records a verdict on every placement. Nothing was relaxed by
+          taking the banner down. */}
       <section className="card">
         <div className="card-h">
           <div>

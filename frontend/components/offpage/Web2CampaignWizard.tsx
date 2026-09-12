@@ -7,7 +7,6 @@ import {
   useEstimateWeb2Campaign,
 } from "@/lib/hooks/offpage";
 import { type Web2PacingMode } from "@/lib/offpage";
-import Web2PlatformPicker from "./Web2PlatformPicker";
 import { useWeb2ClientIdentity } from "@/lib/hooks/offpage";
 
 /**
@@ -39,7 +38,6 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   const [targetUrl, setTargetUrl] = useState("");
   // Fixed: approved campaigns publish as fast as the safety caps allow.
   const pacing: Web2PacingMode = "immediate";
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [proof, setProof] = useState("");
   // A SECOND grounding input, not a nicety. The generator asks for two different things
   // and gaps on each separately: `proofPoints` answers "why choose us" (real projects,
@@ -49,7 +47,6 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   const [uniqueData, setUniqueData] = useState("");
   // One answer covering every advisory platform in THIS campaign. Cleared whenever the
   // client or the platform set changes, so it can never outlive what it answered for.
-  const [ackAdvisories, setAckAdvisories] = useState(false);
   const [created, setCreated] = useState<{ id: string; total: number } | null>(null);
   const [error, setError] = useState("");
   // The inputs AS THEY WERE when the quote was taken. Without this the operator can
@@ -71,19 +68,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   const anchors = lines(anchorsText);
   const proofLines = lines(proof);
   const canQuote =
-    !!clientId && topics.length > 0 && selected.size > 0 && targetUrl.trim().startsWith("http");
-
-  function toggle(platform: string) {
-    // Changing the platform set retracts the acknowledgement: it answered a specific
-    // list of warnings, and a different list is a different question.
-    setAckAdvisories(false);
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(platform)) next.delete(platform);
-      else next.add(platform);
-      return next;
-    });
-  }
+    !!clientId && topics.length > 0 && targetUrl.trim().startsWith("http");
 
   function body() {
     return {
@@ -93,13 +78,11 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
       // what makes "thirty copies of one article" unrepresentable in this UI.
       articleCount: topics.length,
       topics,
-      platforms: Array.from(selected),
       anchors,
       targetUrl: targetUrl.trim(),
       pacing,
       proofPoints: proofLines.slice(0, 12),
       uniqueData: lines(uniqueData).slice(0, 12),
-      acknowledgePlatformAdvisories: ackAdvisories,
     };
   }
 
@@ -116,7 +99,6 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
       clientId,
       articleCount: topics.length,
       topics,
-      platforms: Array.from(selected).sort(),
       pacing,
     });
   }
@@ -178,7 +160,7 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
           <div className="wiz-body">
             <div className="fld">
               <label>Client</label>
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setSelected(new Set()); setAckAdvisories(false); }}>
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
                 <option value="">Choose a client…</option>
                 {clientOptions.map((c) => (
                   <option key={c.id} value={c.id}>{c.cn}</option>
@@ -240,32 +222,18 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
               </div>
             </div>
 
-            {/* Platform board — server-computed per client, nothing hidden. */}
-            <div className="fld">
-              <label style={{ margin: 0 }}>Platforms</label>
-              <Web2PlatformPicker
-                clientId={clientId || undefined}
-                selected={selected}
-                onToggle={toggle}
-                acknowledged={ackAdvisories}
-                onAcknowledgedChange={setAckAdvisories}
-                hint={(eligibleCount) => (
-                  <div className="fld-hint">
-                    <b>{selected.size}</b> of {eligibleCount} eligible selected. Spreading across
-                    more platforms finishes sooner <em>and</em> leaves a lighter footprint.
-                  </div>
-                )}
-                emptyEligibleHint={
-                  // "0 of 0 eligible selected" over an empty grid is not an explanation.
-                  // Nothing here is broken - this client has no CONNECTED account on any
-                  // platform it is allowed to use. The lists below say which fix applies.
-                  <div className="fld-hint">
-                    <b>No platform is ready for this client yet.</b> If platforms this
-                    client may use are listed below, add an account under <b>Accounts</b>{" "}
-                    with this client selected — that is a ten-minute fix, not a bug.
-                  </div>
-                }
-              />
+            {/* NO PLATFORM BOARD (2026-09-12, owner instruction).
+                The server spreads the campaign across the platforms actually open for
+                this client, best authority first, API lane before extension lane. That
+                is what an operator picking from a grid of ninety was approximating by
+                hand — and getting wrong, because eligibility is per client and changes
+                as accounts are connected. One article per platform is deliberate: it is
+                the footprint diversification a campaign exists for. */}
+            <div className="fld-hint" style={{ marginBottom: 10 }}>
+              Platforms are chosen for you — the campaign spreads across whatever is open
+              for this client, strongest first, one article per platform. Connecting more
+              accounts under <b>Accounts</b> widens the spread; the quote below tells you
+              exactly which platforms it priced before anything is created.
             </div>
 
             {/* The pace SELECTOR is gone by decision (2026-08-29): approved campaigns
@@ -353,13 +321,11 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
             {!quoted && (
               <div className="fld-hint" style={{ textAlign: "right" }}>
                 {!canQuote
-                  ? selected.size === 0
-                    ? "Choose at least one platform above — if none are offered, connect an account under Accounts first."
-                    : topics.length === 0
-                      ? "Add at least one topic — one per line."
-                      : !targetUrl.trim().startsWith("http")
-                        ? "Add the target URL these properties will link to."
-                        : "Choose a client to continue."
+                  ? topics.length === 0
+                    ? "Add at least one topic — one per line."
+                    : !targetUrl.trim().startsWith("http")
+                      ? "Add the target URL these properties will link to."
+                      : "Choose a client to continue."
                   : quoteWentStale
                     ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
                     : "Get a quote first — it shows the cost and the finish date before anything is created."}

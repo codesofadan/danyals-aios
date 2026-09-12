@@ -83,8 +83,6 @@ async function fillMinimum(topics: string) {
   fireEvent.change(screen.getByPlaceholderText(/https:\/\/client.example/i), {
     target: { value: "https://leedsdrainage.co.uk/drains" },
   });
-  await waitFor(() => expect(screen.getByText("Blogger")).toBeTruthy());
-  fireEvent.click(screen.getByText("Blogger"));
 }
 
 describe("Web2CampaignWizard", () => {
@@ -179,20 +177,19 @@ describe("Web2CampaignWizard", () => {
     ]);
   });
 
-  it("offers a discouraged platform, warns with its own rule, and takes the answer", async () => {
-    // The operator picks where their client posts. A platform whose own rules argue
-    // against it is still offered — marked, quoted, and gated behind one explicit
-    // answer — rather than dropped from the plan behind their back.
+  it("asks for no platform, and sends none", async () => {
+    // 2026-09-12: the wizard stopped choosing platforms. The server spreads the
+    // campaign across whatever is open for the client - eligibility is per client and
+    // moves as accounts are connected, which is what an operator picking from a grid
+    // of ninety was approximating by hand and getting wrong. The picker's own refusal
+    // rules still run and are covered in `Web2PlatformPicker.test.tsx`.
     renderWizard();
-    await fillMinimum("one");
-    expect(screen.getByText(/are marked ⚠/i)).toBeTruthy();
+    await fillMinimum("one\ntwo");
+    expect(screen.queryByRole("button", { name: /^Blogger/i })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /dev\.to/i }));
-    expect(screen.getByText(/Restricted to developer clients/i)).toBeTruthy();
-    const ack = screen.getByRole("checkbox", { name: /choosing them for this client anyway/i });
-    expect(ack).not.toBeChecked();
-    fireEvent.click(ack);
-    expect(ack).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: /Get quote/i }));
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+    expect(posts[0].body).not.toHaveProperty("platforms");
   });
 
   it("keeps a quote alive when the operator edits the copy it never priced", async () => {
@@ -215,34 +212,15 @@ describe("Web2CampaignWizard", () => {
     expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("still invalidates the quote when the PLATFORM set changes", async () => {
-    // The other half of the same property: platforms decide the finish date, so a
-    // quote taken for one platform must not authorise two.
-    renderWizard();
-    await fillMinimum("one\ntwo");
-
-    fireEvent.click(screen.getByRole("button", { name: /Get quote/i }));
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(false),
-    );
-
-    fireEvent.click(screen.getByText("Tumblr"));
-
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: /Create/i }) as HTMLButtonElement).disabled).toBe(true),
-    );
-    expect(screen.getByText(/changed since that quote/i)).toBeTruthy();
-  });
-
   it("names the missing input instead of telling the operator to get an impossible quote", async () => {
-    // "Get a quote first" is only true when a quote can be taken. With no platform
-    // selected it points at a button that is disabled for a different reason again.
+    // "Get a quote first" is only true when a quote can be taken.
     renderWizard();
     const [clientSelect] = screen.getAllByRole("combobox") as HTMLSelectElement[];
     fireEvent.change(clientSelect, { target: { value: "cl-1" } });
-    await waitFor(() => expect(screen.getByText("Blogger")).toBeTruthy());
 
-    expect(screen.getByText(/choose at least one platform/i)).toBeTruthy();
+    // With a client chosen and no topics, the honest blocker is the topic list - not
+    // "get a quote first", which points at a button disabled for another reason again.
+    expect(screen.getByText(/at least one topic/i)).toBeTruthy();
     expect(screen.queryByText(/Get a quote first/i)).toBeNull();
   });
 });

@@ -46,6 +46,7 @@ import type {
   Web2CampaignEstimate,
   Web2Placement,
   Web2CampaignInput,
+  Web2Draft,
   Web2PlatformStatusRow,
   Web2Property,
   Web2Status,
@@ -279,7 +280,10 @@ export function useCreateCitationCampaign() {
 // --- Web 2.0 plan / approve ----------------------------------------------------
 export type Web2PlanInput = {
   clientId: string;
-  platform: string;
+  /** OPTIONAL. Omitted, the server picks the highest-authority platform open for
+   *  this client - the brief is about a client and a topic, and the publish route is
+   *  chosen later at the review gate. Campaigns still name their platforms. */
+  platform?: string;
   anchor: string;
   targetUrl: string;
   topic?: string;
@@ -305,20 +309,59 @@ export function usePlanWeb2() {
   });
 }
 
+/** The drafted article, polled while the write worker works.
+ *
+ *  `draft` is the pre-written state and `needs_review` the written one, so the poll
+ *  runs only between those two - it stops the moment there is something to read, and
+ *  never spins on a terminal row. 2.5s because a write takes seconds, not minutes. */
+/** Send an ALREADY-APPROVED article down the OTHER lane, as a second placement.
+ *
+ *  One row holds one platform and one status, so "publish AND hand to the extension"
+ *  is two placements of one article - not a second approval of the same row. The body
+ *  carries its human approval across; the similarity gate still runs on the new row. */
+export function useSyndicateWeb2() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, destination }: { id: string; destination: "connected" | "extension" }) =>
+      api.post<Web2Property>(`/offpage/web2/${encodeURIComponent(id)}/syndicate`, {
+        action: "approve",
+        destination,
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: WEB2_KEY }),
+  });
+}
+
+export function useWeb2Draft(web2Id: string | null) {
+  return useQuery({
+    queryKey: ["offpage", "web2", "draft", web2Id ?? ""],
+    queryFn: () => api.get<Web2Draft>(`/offpage/web2/${encodeURIComponent(web2Id!)}/draft`),
+    enabled: !!web2Id,
+    refetchInterval: (q) => {
+      const s = q.state.data?.status;
+      return s === "draft" || s === "" || s === undefined ? 2500 : false;
+    },
+  });
+}
+
 export function useApproveWeb2() {
   const qc = useQueryClient();
   return useMutation({
     // `acknowledgeSimilarity` is only sent when the operator has actually seen a
     // similarity finding and confirmed the article is distinct. A plain approve
     // deliberately does not carry it, so a collision cannot be clicked past by habit.
-    mutationFn: ({ id, action, acknowledgeSimilarity }: {
+    mutationFn: ({ id, action, acknowledgeSimilarity, destination }: {
       id: string;
       action: "approve" | "reject";
       acknowledgeSimilarity?: boolean;
+      /** WHERE an approved article goes. `connected` publishes through a platform API;
+       *  `extension` parks it for an operator to place in their own session. Omitted,
+       *  the server's capability lane decides exactly as it always did. */
+      destination?: "connected" | "extension";
     }) =>
       api.post<Web2Property>(`/offpage/web2/${id}/approve`, {
         action,
         ...(acknowledgeSimilarity ? { acknowledgeSimilarity: true } : {}),
+        ...(destination ? { destination } : {}),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: WEB2_KEY }),
   });
