@@ -39,6 +39,7 @@ import {
   readSession,
   sessionKind,
   taskForTab,
+  openUrlFor,
   tasksNeedingTabs,
   withoutTab,
   withTab,
@@ -446,9 +447,14 @@ async function openAndAutofill(taskId: string): Promise<FillOutcome> {
   if (!state) throw new Error("No active session.");
   const task = state.tasks.find((t) => t.taskId === taskId);
   if (!task) throw new Error("No such task in this session.");
-  if (!task.addUrl) throw new Error("No add-listing URL on file for this directory.");
+  // Falls back to the directory homepage when no add-listing URL is on file - see
+  // `openUrlFor`. Only a directory with NEITHER is genuinely unopenable.
+  const target = openUrlFor(task);
+  if (!target) {
+    throw new Error("No add-listing URL and no homepage on file for this directory.");
+  }
 
-  const tab = await chrome.tabs.create({ url: task.addUrl, active: true });
+  const tab = await chrome.tabs.create({ url: target, active: true });
   if (tab.id === undefined) throw new Error("Could not open the form tab.");
   await writeSession(withTab((await readSession()) ?? state, tab.id, taskId));
   await sendTelemetry(taskId, "opened");
@@ -689,8 +695,12 @@ async function handle(request: PanelRequest): Promise<PanelResponse> {
         const state = await readSession();
         if (!state) return { ok: false, error: "No active session." };
         const task = state.tasks.find((t) => t.taskId === request.taskId);
-        if (!task || !task.addUrl) return { ok: false, error: "No add-listing URL on file." };
-        const tab = await chrome.tabs.create({ url: task.addUrl, active: true });
+        if (!task) return { ok: false, error: "No such task in this session." };
+        const target = openUrlFor(task);
+        if (!target) {
+          return { ok: false, error: "No add-listing URL and no homepage on file." };
+        }
+        const tab = await chrome.tabs.create({ url: target, active: true });
         if (tab.id !== undefined) await writeSession(withTab(state, tab.id, task.taskId));
         return { ok: true, data: null };
       }

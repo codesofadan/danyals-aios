@@ -75,8 +75,43 @@ export function taskRefs(state: ActiveSession): TaskRef[] {
     }));
   }
   return state.tasks.map((t) => ({
-    taskId: t.taskId, uiState: t.uiState, batchNo: t.batchNo, openUrl: t.addUrl,
+    taskId: t.taskId, uiState: t.uiState, batchNo: t.batchNo, openUrl: openUrlFor(t),
   }));
+}
+
+/**
+ * WHICH URL a citation task opens: its add-listing page, or the directory's homepage.
+ *
+ * WHY THE FALLBACK EXISTS. `add_url` was back-filled by 0106 only from directories
+ * whose free-text `automation_note` happened to contain `signup:<url>` - 70 of the 206
+ * active rows. The other 136 have never had one. Since `tasksNeedingTabs` skips a task
+ * with no URL, a released batch of ten opened ONE tab (measured in production: nine of
+ * ten batch-1 tasks had `addUrl === ""`), which read as "the batch feature is broken"
+ * rather than "the catalogue is thin".
+ *
+ * A homepage is a worse starting point than a verified add-listing page and a far
+ * better one than nothing: the operator lands on the directory and finds its own "add
+ * your business" link. Every active directory has a homepage, so this turns one tab
+ * back into ten.
+ *
+ * `addUrl` IS LEFT ALONE - it stays empty when we do not know the add page, because it
+ * is also what the completion evidence and the earned-spec work read. Only the thing
+ * we OPEN falls back, and `isFallbackOpen` lets the panel label the tab honestly
+ * instead of implying we knew where to send them.
+ */
+export function openUrlFor(task: { addUrl: string; directoryUrl: string }): string {
+  const add = (task.addUrl ?? "").trim();
+  if (add) return add;
+  const home = (task.directoryUrl ?? "").trim();
+  if (!home) return "";
+  // The catalogue stores bare hosts ("yellowpages.com") as often as full URLs.
+  return /^https?:\/\//i.test(home) ? home : `https://${home}`;
+}
+
+/** True when the tab we would open is the directory HOMEPAGE, not a known add page -
+ *  so the card can say so rather than letting an operator assume it is the form. */
+export function isFallbackOpen(task: { addUrl: string; directoryUrl: string }): boolean {
+  return !(task.addUrl ?? "").trim() && !!(task.directoryUrl ?? "").trim();
 }
 
 export async function readSession(): Promise<ActiveSession | null> {

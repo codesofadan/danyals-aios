@@ -12,6 +12,8 @@ import {
   withoutTab,
   withTab,
   writeSession,
+  openUrlFor,
+  isFallbackOpen,
 } from "../src/lib/sessionBoard";
 
 /**
@@ -140,10 +142,16 @@ describe("tasksNeedingTabs (what the worker opens on start / batch release)", ()
         card(),                                                     // released, no tab -> open
         card({ taskId: "t2", citationId: "c2", uiState: "pending" }),   // not released yet
         card({ taskId: "t3", citationId: "c3", uiState: "submitted" }), // terminal
-        card({ taskId: "t4", citationId: "c4", addUrl: "" }),           // nowhere to go
+        // GENUINELY nowhere to go: no add URL AND no homepage. Since 2026-09-12 a
+        // missing addUrl alone is NOT nowhere - it falls back to the directory's
+        // homepage, because 136 of 206 active directories have no add URL on file and
+        // skipping them turned a batch of ten into one open tab.
+        card({ taskId: "t4", citationId: "c4", addUrl: "", directoryUrl: "" }),
+        // Homepage only -> still opened, via the fallback.
+        card({ taskId: "t5", citationId: "c5", addUrl: "", directoryUrl: "d5.example" }),
       ],
     });
-    expect(tasksNeedingTabs(s).map((t) => t.taskId)).toEqual(["t1"]);
+    expect(tasksNeedingTabs(s).map((t) => t.taskId)).toEqual(["t1", "t5"]);
   });
 
   it("a task that already has a tab is never opened twice", () => {
@@ -175,5 +183,49 @@ describe("mergeServerSession (the server is the authority on states and batches)
     expect(merged.tasks[0]!.uiState).toBe("submitted"); // the server's word wins
     expect(merged.tabMap["42"]).toBe("t1");             // tabs are local knowledge
     expect(merged.sentTelemetry["t1"]).toEqual(["opened"]); // so is the ledger
+  });
+});
+
+describe("which URL a citation task opens", () => {
+  const task = (over: Record<string, unknown> = {}) =>
+    ({ taskId: "t1", uiState: "released", batchNo: 1, addUrl: "", directoryUrl: "", ...over }) as never;
+
+  it("opens the DIRECTORY HOMEPAGE when no add-listing URL is on file", () => {
+    // THE BUG THIS PINS, measured in production 2026-09-12. `add_url` was back-filled
+    // by 0106 only from directories whose free-text note contained `signup:<url>` - 70
+    // of 206 active rows. `tasksNeedingTabs` skips a task with no URL, so a released
+    // batch of TEN opened ONE tab: nine of ten batch-1 tasks had addUrl === "". That
+    // read as "batching is broken" when the catalogue was simply thin.
+    expect(openUrlFor(task({ directoryUrl: "yellowpages.com" })))
+      .toBe("https://yellowpages.com");
+    expect(isFallbackOpen(task({ directoryUrl: "yellowpages.com" }))).toBe(true);
+  });
+
+  it("prefers a real add-listing URL and does NOT call that a fallback", () => {
+    const t = task({ addUrl: "https://d.example/add", directoryUrl: "d.example" });
+    expect(openUrlFor(t)).toBe("https://d.example/add");
+    expect(isFallbackOpen(t)).toBe(false);
+  });
+
+  it("leaves a directory with NEITHER url genuinely unopenable", () => {
+    // The filter still has a job: inventing a URL would open about:blank and report
+    // a tab that shows nothing.
+    expect(openUrlFor(task())).toBe("");
+    expect(isFallbackOpen(task())).toBe(false);
+  });
+
+  it("accepts a bare host or a full URL - the catalogue stores both", () => {
+    expect(openUrlFor(task({ directoryUrl: "http://d.example" }))).toBe("http://d.example");
+    expect(openUrlFor(task({ directoryUrl: "  d.example  " }))).toBe("https://d.example");
+  });
+
+  it("turns a ten-task batch back into ten openable tabs", () => {
+    const tasks = Array.from({ length: 10 }, (_, i) => ({
+      taskId: `t${i}`, uiState: "released", batchNo: 1,
+      // one with a real add URL, nine with only a homepage - the production shape
+      addUrl: i === 9 ? "https://d9.example/add" : "",
+      directoryUrl: `d${i}.example`,
+    }));
+    expect(tasks.filter((t) => openUrlFor(t as never) !== "")).toHaveLength(10);
   });
 });

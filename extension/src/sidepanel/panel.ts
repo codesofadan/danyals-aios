@@ -21,7 +21,12 @@ import type {
   SessionTaskCard,
   Web2PlacementTaskCard,
 } from "../lib/messages";
-import { type ActiveSession, sessionKind } from "../lib/sessionBoard";
+import {
+  type ActiveSession,
+  isFallbackOpen,
+  openUrlFor,
+  sessionKind,
+} from "../lib/sessionBoard";
 import {
   clientSummary,
   clientsForLane,
@@ -465,7 +470,7 @@ function renderSessionTask(task: SessionTaskCard): HTMLElement {
     const oneOut = el("div", { className: "muted" });
     oneClick.onclick = async () => {
       oneClick.disabled = true;
-      const permitted = await ensureInjectPermission(task.addUrl);
+      const permitted = await ensureInjectPermission(openUrlFor(task));
       if (!permitted) {
         oneClick.disabled = false;
         oneOut.textContent = "Chrome needs permission to fill this site. Choose Allow, then click again.";
@@ -486,7 +491,19 @@ function renderSessionTask(task: SessionTaskCard): HTMLElement {
     actions.append(oneClick);
     card.append(oneOut);
   }
-  const open = el("button", { textContent: task.addUrl ? "Open" : "No add URL" , disabled: !task.addUrl });
+  // `openUrlFor` falls back to the directory homepage when no add-listing URL is on
+  // file - 136 of 206 active directories have none, and skipping them is why a batch
+  // of ten opened one tab. The LABEL changes so nobody mistakes a homepage for the
+  // form: "Open site" is a different promise from "Open".
+  const target = openUrlFor(task);
+  const viaHomepage = isFallbackOpen(task);
+  const open = el("button", {
+    textContent: !target ? "No URL on file" : viaHomepage ? "Open site" : "Open",
+    disabled: !target,
+    title: viaHomepage
+      ? "No add-listing URL is on file for this directory, so this opens its homepage - find its own “add your business” link from there."
+      : undefined,
+  });
   open.onclick = async () => { await send({ type: "openTask", taskId: task.taskId }); };
   actions.append(open);
 
@@ -495,7 +512,7 @@ function renderSessionTask(task: SessionTaskCard): HTMLElement {
     const fillOut = el("div", { className: "muted" });
     fill.onclick = async () => {
       fill.disabled = true;
-      const permitted = await ensureInjectPermission(task.addUrl);
+      const permitted = await ensureInjectPermission(openUrlFor(task));
       if (!permitted) {
         fill.disabled = false;
         fillOut.textContent = "Chrome needs permission to fill this site. Choose Allow, then click Fill again.";
@@ -521,7 +538,7 @@ function renderSessionTask(task: SessionTaskCard): HTMLElement {
       auto.disabled = true;
       // FIRST await, inside the gesture: grant access to the directory's host so the
       // filler can be injected. Without this the inject throws and nothing happens.
-      const permitted = await ensureInjectPermission(task.addUrl);
+      const permitted = await ensureInjectPermission(openUrlFor(task));
       if (!permitted) {
         auto.disabled = false;
         autoOut.textContent =
@@ -565,7 +582,7 @@ function renderSessionTask(task: SessionTaskCard): HTMLElement {
     ai.onclick = async () => {
       ai.disabled = true;
       aiReview.textContent = "";
-      const permitted = await ensureInjectPermission(task.addUrl);
+      const permitted = await ensureInjectPermission(openUrlFor(task));
       if (!permitted) {
         ai.disabled = false;
         aiOut.textContent =
