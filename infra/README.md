@@ -15,8 +15,6 @@ runbook.
 - **Redis** installed natively (app cache db 0, broker db 1, results db 2)
 - **systemd** units for the API (uvicorn), the Celery worker, and Celery beat
 - **Caddy** reverse proxy with automatic TLS
-- **CI** (GitHub Actions) at `.github/workflows/backend-ci.yml`: ruff + mypy +
-  tests + the RLS gate, plus a Redis-service integration job
 - Secrets kept out of the repo; each environment supplies its own
   `/etc/aios/aios.env` (see `deploy/aios.env.example`)
 
@@ -29,5 +27,5 @@ infra/
 └── alerts/            # backend-alerts.yml (Prometheus rules)
 ```
 
-Backend CI lives at the repo root under `.github/workflows/` (GitHub only
-discovers workflows there).
+GitHub Actions CI was removed 2026-09-17 (`.github/` deleted with it); the local
+gates in `backend/CLAUDE.md` are the only gates.

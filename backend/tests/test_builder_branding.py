@@ -49,7 +49,6 @@ _SHIPPED_ROOTS = (
     "infra",
     "tools",
     "db",
-    ".github",
 )
 
 _SHIPPED_FILES = (
