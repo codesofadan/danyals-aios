@@ -587,3 +587,97 @@ def test_service_store_factory_is_stateless(seam: _Seam) -> None:
     # safe to build per call from the task.
     assert isinstance(service_keyword_store(), ServiceKeywordStore)
     assert service_keyword_store() is not service_keyword_store()
+
+
+# --------------------------------------------------------------------------- #
+# An estimate never overwrites a measurement (2026-09-17)
+# --------------------------------------------------------------------------- #
+# The update used to set every column unconditionally. The content recommender banks
+# bucket MIDPOINTS (easy/medium/hard -> 25/50/75) under metrics_confidence='low', so
+# any term the keyword module had already MEASURED against DataForSEO - real volume,
+# real difficulty, real CPC - was silently replaced by them on the next research run.
+# The row still looked measured afterwards, and nothing downstream could tell.
+_MEASURED_ROW = {"id": "kw-1", "client_name": "Verde Cafe", "metrics_confidence": "high"}
+
+_LOW_WRITE: dict[str, Any] = {
+    "client_id": "cl-1", "client_name": "Verde Cafe", "keyword": "plumber", "geo": None,
+    "volume": 50, "difficulty": 50.0, "cpc": 0.0, "competition": 0.0,
+    "intent": None, "intent_source": None, "intent_confidence": 0.0,
+    "cluster_id": None, "opportunity": 33.0, "winnable": None,
+    "source": "content", "metrics_confidence": "low", "provider": "content_research",
+    "fetched_at": None,
+}
+
+
+def test_a_low_confidence_write_never_overwrites_measured_metrics(
+    cur: _FakeCursor, seam: _Seam
+) -> None:
+    """The defect, pinned. Re-inject by dropping the ``keep_measured`` branch and this
+    fails: volume/difficulty/cpc/metrics_confidence appear in the UPDATE again."""
+    cur.rows = [_MEASURED_ROW]
+    assert ServiceKeywordStore().upsert_keyword(**_LOW_WRITE) is False
+
+    update = cur.last_query
+    assert "update public.keywords" in update
+    for measured in ("volume =", "difficulty =", "cpc =", "competition =",
+                     "metrics_confidence =", "provider =", "fetched_at ="):
+        assert measured not in update, f"an estimate is overwriting {measured!r}"
+    # opportunity is DERIVED from volume+difficulty, so it must stay with them.
+    assert "opportunity =" not in update
+
+
+def test_classifications_still_update_over_a_measured_row(
+    cur: _FakeCursor, seam: _Seam
+) -> None:
+    """Intent, cluster and winnable are judgements, not measurements - the newer one
+    wins. Preserving the metrics must not freeze the whole row."""
+    cur.rows = [_MEASURED_ROW]
+    ServiceKeywordStore().upsert_keyword(
+        **{**_LOW_WRITE, "cluster_id": "cu-9", "intent": "Commercial", "winnable": True}
+    )
+    update = cur.last_query
+    for classification in ("intent =", "cluster_id =", "winnable ="):
+        assert classification in update
+
+
+def test_a_measured_write_still_refreshes_everything(
+    cur: _FakeCursor, seam: _Seam
+) -> None:
+    """The guard is one-directional: a real provider pull must still update a stale
+    measured row, or the bank would freeze at its first measurement forever."""
+    cur.rows = [_MEASURED_ROW]
+    ServiceKeywordStore().upsert_keyword(
+        **{**_LOW_WRITE, "metrics_confidence": "high", "provider": "dataforseo",
+           "volume": 12100, "difficulty": 41.0}
+    )
+    update = cur.last_query
+    assert "volume = %s" in update and "metrics_confidence = %s" in update
+
+
+def test_a_low_write_over_a_low_row_refreshes_normally(
+    cur: _FakeCursor, seam: _Seam
+) -> None:
+    """Estimate-over-estimate is not a downgrade, so it refreshes as before."""
+    cur.rows = [{"id": "kw-1", "client_name": "Verde Cafe", "metrics_confidence": "low"}]
+    ServiceKeywordStore().upsert_keyword(**_LOW_WRITE)
+    assert "volume = %s" in cur.last_query
+
+
+def test_an_empty_client_name_never_blanks_a_real_one(
+    cur: _FakeCursor, seam: _Seam
+) -> None:
+    """POST /content/research did not pass a client name, so every banked row wrote
+    client_name='' over whatever the row already held. A caller that does not know
+    the name must not be able to erase it."""
+    cur.rows = [_MEASURED_ROW]
+    ServiceKeywordStore().upsert_keyword(**{**_LOW_WRITE, "client_name": ""})
+    params = cur.calls[-1][1]
+    assert params[0] == "Verde Cafe"  # the stored name survived
+
+
+def test_a_real_client_name_still_updates_the_snapshot(
+    cur: _FakeCursor, seam: _Seam
+) -> None:
+    cur.rows = [{"id": "kw-1", "client_name": "Old Name", "metrics_confidence": "low"}]
+    ServiceKeywordStore().upsert_keyword(**{**_LOW_WRITE, "client_name": "New Name"})
+    assert cur.calls[-1][1][0] == "New Name"

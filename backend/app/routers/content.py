@@ -45,6 +45,7 @@ from app.db.content_repo import ContentRepo, ContentRepoDep
 from app.logging_setup import get_logger
 from app.modules.content_planning.repo import ContentPlanningStore
 from app.schemas.content import (
+    BrandKitApprovalResponse,
     ContentBulkGenerateRequest,
     ContentBulkGenerateResponse,
     ContentJobCreate,
@@ -100,6 +101,10 @@ PublishContent = Annotated[CurrentUser, Depends(require_perm("publish_content"))
 # The review gate + limited edits are LEAD-only (owner/admin/manager) - the exact
 # set the DB guard's path-2 recognises for the needs_review exit.
 LeadOnly = Annotated[CurrentUser, Depends(require_role("owner", "admin", "manager"))]
+# The same three roles as a plain set, for code that must ASK whether the caller is a lead
+# rather than refuse them outright (brand-kit approval: a lead's capture is approved
+# on the spot, a specialist's is stored for review).
+_LEAD_ROLES: frozenset[str] = frozenset({"owner", "admin", "manager"})
 
 # The server-only rich columns each rich-retrieval endpoint returns (never in the
 # 15-key ContentJob contract). Keyed by the URL suffix.
@@ -607,6 +612,7 @@ async def research_content(
     settings: SettingsDep,
     researcher: ResearchResearcherDep,
     gate: ResearchGateDep,
+    clients: ClientsRepoDep,
     _actor: PublishContent,
 ) -> ContentResearchResponse:
     """Recommend a set of pages to build for a site + content type (the "checkboxes").
@@ -632,6 +638,17 @@ async def research_content(
             detail="Could not reach that site URL - check it is a valid, public web address.",
         ) from exc
 
+    # The client's display name for the bank snapshot (best-effort: an unknown
+    # client simply yields no name, and the repo then preserves whatever the
+    # existing row holds rather than blanking it).
+    client_name = ""
+    if body.client_id:
+        try:
+            row = await asyncio.to_thread(clients.get_client, body.client_id)
+            client_name = str((row or {}).get("name") or "")
+        except Exception:
+            logger.warning("content_research_client_lookup_failed")
+
     def _run() -> ContentResearchResponse:
         # Research must NEVER 500: any unexpected failure (a provider/gate/DB hiccup)
         # degrades to an honest empty result so the dashboard shows a clean message
@@ -647,6 +664,11 @@ async def research_content(
                 # Carrying the client is what lets the paid result be SAVED to that
                 # client's keyword bank instead of dying with the wizard screen.
                 client_id=body.client_id,
+                # The bank stores a display name SNAPSHOT. Passing it was
+                # missed, so every banked row carried client_name='' - and
+                # the upsert then wrote that empty string over whatever name
+                # an existing row already had.
+                client_name=client_name,
             )
         except Exception:
             logger.exception("content_research_endpoint_error")
@@ -1026,14 +1048,21 @@ async def analyze_site_design(
     # from a measured one the next time a page is generated.
     saved_kit_id: str | None = None
     saved_version: int | None = None
+    saved_approved = False
     save_error = ""
     if body.client_id and profile is not None and result.status == "ok":
         try:
-            saved_kit_id, saved_version = await asyncio.to_thread(
+            # A capture is ACCEPTED as the client's design system only by someone
+            # entitled to accept it. A lead's deliberate capture is that person, so
+            # it is approved in the same write; anyone else's is stored and waits
+            # (0146). An unapproved kit does not shape pages.
+            approver = actor.id if actor.role in _LEAD_ROLES else None
+            saved_kit_id, saved_version, saved_approved = await asyncio.to_thread(
                 _persist_brand_kit,
                 client_id=body.client_id,
                 source_url=body.site,
                 profile=profile,
+                approved_by=approver,
             )
         except Exception as exc:  # never lose the analysis over a storage failure
             save_error = type(exc).__name__
@@ -1052,14 +1081,23 @@ async def analyze_site_design(
         reason=result.reason,
         saved_kit_id=saved_kit_id,
         saved_version=saved_version,
+        saved_approved=saved_approved,
         save_error=save_error,
     )
 
 
 def _persist_brand_kit(
-    *, client_id: str, source_url: str, profile: SiteDesignProfile
-) -> tuple[str, int]:
-    """Store ``profile`` as the client's active brand kit; return (id, version).
+    *,
+    client_id: str,
+    source_url: str,
+    profile: SiteDesignProfile,
+    approved_by: str | None = None,
+) -> tuple[str, int, bool]:
+    """Store ``profile`` as the client's active brand kit.
+
+    Returns (id, version, approved). ``approved`` reports whether this capture is
+    usable by the generation path yet - an unapproved kit is stored and reviewable
+    but does not shape pages.
 
     Blocking (psycopg), so callers run it off the event loop. The store handles
     versioning and the deactivate-then-insert transaction; a new capture never
@@ -1087,9 +1125,45 @@ def _persist_brand_kit(
             "cta_style": layout.cta_style,
             "notes": profile.notes,
         },
+        approved_by=approved_by,
     )
     kit = store.active_brand_kit(client_id) or {}
-    return kit_id, int(kit.get("version") or 1)
+    return kit_id, int(kit.get("version") or 1), kit.get("approved_at") is not None
+
+
+@router.post("/content/brand-kit/{kit_id}/approve", response_model=BrandKitApprovalResponse)
+async def approve_brand_kit(
+    kit_id: str, actor: LeadOnly,
+) -> BrandKitApprovalResponse:
+    """Accept one captured design as the client's design system (LEAD-only).
+
+    Until a kit is approved the generation path will not build pages to it (0146):
+    the analyzer can produce a profile that validates and is wrong - a bot-blocked
+    capture, a cookie wall, a site mid-redesign - and letting whatever was measured
+    last silently become the system dozens of pages are built to is expensive to
+    discover and expensive to undo.
+
+    Approval records WHO accepted it and WHEN, so a page that looks wrong months
+    later has an answerable provenance rather than a mystery.
+    """
+    row = await asyncio.to_thread(
+        ContentPlanningStore().approve_brand_kit, kit_id=kit_id, approved_by=actor.id
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Brand kit not found"
+        )
+    await record_activity(
+        actor, kind="content", action="approved a client design system",
+        target=str(row.get("source_url") or ""),
+    )
+    return BrandKitApprovalResponse(
+        kit_id=str(row["id"]),
+        client_id=str(row.get("client_id") or ""),
+        version=int(row.get("version") or 1),
+        source_url=str(row.get("source_url") or ""),
+        approved_at=str(row.get("approved_at") or ""),
+    )
 
 
 # --------------------------------------------------------------------------- #

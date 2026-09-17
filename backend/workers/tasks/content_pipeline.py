@@ -273,11 +273,17 @@ def _design_profile_for(
     """The design system this page is built to: the client's STORED kit, else the
     profile the request carried.
 
-    The stored kit wins. A per-request ``design_profile`` is whatever the wizard
-    happened to hold in React state at launch; the kit is what the client's design
-    system actually IS, versioned and approved. Reading it here - server-side, at
-    generation time - is what makes "analyse once, conform forever" true, rather
-    than requiring every caller to remember to send the design with every job.
+    The stored kit wins, and only an APPROVED kit counts. A per-request
+    ``design_profile`` is whatever the wizard happened to hold in React state at
+    launch; the kit is what the client's design system actually IS, versioned and
+    accepted by a human. Reading it here - server-side, at generation time - is what
+    makes "analyse once, conform forever" true, rather than requiring every caller
+    to remember to send the design with every job.
+
+    An UNAPPROVED capture is deliberately not used (0146). The analyzer can produce
+    a profile that validates and is wrong - a bot-blocked capture, a cookie wall, a
+    site mid-redesign - and letting whatever was measured last silently become the
+    system forty pages are built to is expensive to discover and expensive to undo.
 
     An explicit per-job profile is still honoured when no kit exists, so a client
     who has never been analysed keeps today's behaviour exactly.
@@ -290,7 +296,7 @@ def _design_profile_for(
         try:
             from app.modules.content_planning.repo import ContentPlanningStore
 
-            kit = ContentPlanningStore().active_brand_kit(client_id)
+            kit = ContentPlanningStore().approved_brand_kit(client_id)
             if kit:
                 blueprint = kit.get("blueprint") or []
                 raw = kit.get("raw_measurements") or {}

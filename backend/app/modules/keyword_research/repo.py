@@ -295,16 +295,54 @@ class ServiceKeywordStore:
         """Idempotently upsert one researched keyword keyed by (client_id, keyword,
         geo) - NULL-safe via ``is not distinct from`` so a re-run refreshes the metrics
         in place rather than duplicating a bank row. Returns ``True`` when a NEW row was
-        inserted (so the worker can count fresh saves)."""
+        inserted (so the worker can count fresh saves).
+
+        AN ESTIMATE NEVER OVERWRITES A MEASUREMENT. The update used to set every
+        column unconditionally, so a `low`-confidence writer could silently replace a
+        `high`-confidence provider row. That is exactly what happened in production:
+        the content recommender banks bucket MIDPOINTS (easy/medium/hard -> 25/50/75)
+        under `metrics_confidence='low'`, and any term the keyword module had already
+        measured against DataForSEO - real volume, real difficulty, real CPC - was
+        overwritten by them on the next research run. The bank then looked measured
+        (the row exists, the numbers are plausible) while holding invented figures,
+        and nothing downstream could tell.
+
+        So when the stored row is `high` and the incoming write is not, the MEASURED
+        metrics are kept. `opportunity` is kept with them because it is DERIVED from
+        volume and difficulty - taking the new score beside the old metrics would
+        leave the row internally inconsistent.
+
+        The non-metric fields (cluster, intent, winnable) still update: they are
+        classifications, not measurements, and the newer one is the better one.
+        """
         with privileged_connection() as cur:
             cur.execute(
-                "select id from public.keywords "
+                "select id, client_name, metrics_confidence from public.keywords "
                 "where keyword = %s and client_id is not distinct from %s "
                 "and geo is not distinct from %s limit 1",
                 (keyword, client_id, geo),
             )
             existing = cur.fetchone()
             if existing is not None:
+                keep_measured = (
+                    str(existing.get("metrics_confidence") or "") == "high"
+                    and metrics_confidence != "high"
+                )
+                # Never blank a real name with an empty one. A caller that does not
+                # know the client's name must not be able to erase it from the bank.
+                name = client_name or str(existing.get("client_name") or "")
+                if keep_measured:
+                    cur.execute(
+                        "update public.keywords set "
+                        "client_name = %s, intent = %s, intent_source = %s, "
+                        "intent_confidence = %s, cluster_id = %s, winnable = %s "
+                        "where id = %s",
+                        (
+                            name, intent, intent_source, intent_confidence,
+                            cluster_id, winnable, existing["id"],
+                        ),
+                    )
+                    return False
                 cur.execute(
                     "update public.keywords set "
                     "client_name = %s, volume = %s, difficulty = %s, cpc = %s, "
@@ -313,7 +351,7 @@ class ServiceKeywordStore:
                     "winnable = %s, metrics_confidence = %s, provider = %s, "
                     "fetched_at = %s where id = %s",
                     (
-                        client_name, volume, difficulty, cpc, competition, intent,
+                        name, volume, difficulty, cpc, competition, intent,
                         intent_source, intent_confidence, cluster_id, opportunity,
                         winnable, metrics_confidence, provider, fetched_at,
                         existing["id"],

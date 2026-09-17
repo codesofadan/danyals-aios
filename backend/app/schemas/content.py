@@ -588,7 +588,26 @@ class SiteDesignResponse(BaseModel):
     reason: str = ""
     saved_kit_id: str | None = Field(default=None, serialization_alias="savedKitId")
     saved_version: int | None = Field(default=None, serialization_alias="savedVersion")
+    # Whether the stored kit is APPROVED, and therefore whether generated pages will
+    # actually be built to it. A lead's capture is approved on the spot; anyone
+    # else's is stored for review and does NOT shape pages until a lead accepts it.
+    # Reported rather than assumed: "saved" and "in use" are different facts, and an
+    # operator who confuses them generates a run of pages against a template.
+    saved_approved: bool = Field(default=False, serialization_alias="savedApproved")
     save_error: str = Field(default="", serialization_alias="saveError")
+
+
+class BrandKitApprovalResponse(BaseModel):
+    """The kit a lead just accepted as the client's design system.
+
+    ``approvedAt`` is the fact that matters: until it is set the generation path
+    will not build pages to this capture (migration 0146)."""
+
+    kit_id: str = Field(serialization_alias="kitId")
+    client_id: str = Field(serialization_alias="clientId")
+    version: int
+    source_url: str = Field(serialization_alias="sourceUrl")
+    approved_at: str = Field(serialization_alias="approvedAt")
 
 
 class SiteNavigationRequest(BaseModel):

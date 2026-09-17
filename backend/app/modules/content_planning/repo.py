@@ -403,6 +403,44 @@ class ContentPlanningStore:
             )
             return cur.fetchone()
 
+    def approved_brand_kit(self, client_id: str) -> _Row | None:
+        """The client's newest APPROVED kit, or None.
+
+        This is the read the GENERATION path uses. ``active_brand_kit`` answers
+        "which capture is current"; this answers "which design system has a human
+        actually accepted". They are different questions, and conflating them is
+        what would let a fresh, unreviewed capture silently change what forty pages
+        are built to (0146).
+
+        Newest-approved rather than active-and-approved on purpose: re-capturing
+        makes the new kit active, and until someone approves it the previously
+        approved kit must keep building pages rather than generation falling back
+        to a template mid-campaign.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select * from public.brand_kits "
+                "where client_id = %s and approved_at is not null "
+                "order by approved_at desc limit 1",
+                (client_id,),
+            )
+            return cur.fetchone()
+
+    def approve_brand_kit(self, *, kit_id: str, approved_by: str | None) -> _Row | None:
+        """Record a human's acceptance of one kit. Returns the updated row, or None.
+
+        Idempotent by intent: approving an already-approved kit re-stamps it with the
+        current approver rather than failing, because the useful fact is who stands
+        behind it now.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.brand_kits set approved_at = now(), approved_by = %s "
+                "where id = %s returning *",
+                (approved_by, kit_id),
+            )
+            return cur.fetchone()
+
     def save_brand_kit(
         self,
         *,
@@ -414,6 +452,7 @@ class ContentPlanningStore:
         components: dict[str, Any],
         blueprint: list[dict[str, Any]],
         raw_measurements: dict[str, Any] | None = None,
+        approved_by: str | None = None,
     ) -> str:
         """Store a new kit VERSION and make it the active one.
 
@@ -440,16 +479,23 @@ class ContentPlanningStore:
                 "where client_id = %s and active",
                 (client_id,),
             )
+            # `approved_by` stamps approval in the same statement ONLY when the
+            # caller passed one - i.e. when the person capturing is entitled to
+            # accept it. Everyone else's capture lands unapproved and waits for a
+            # lead, rather than quietly becoming the design forty pages are built
+            # to (0146).
             cur.execute(
                 """insert into public.brand_kits
                      (client_id, source_url, version, palette, typography, spacing,
-                      components, blueprint, raw_measurements, active)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, true)
+                      components, blueprint, raw_measurements, active,
+                      approved_at, approved_by)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, true,
+                           case when %s::uuid is null then null else now() end, %s)
                    returning id""",
                 (
                     client_id, source_url, version, Jsonb(palette), Jsonb(typography),
                     Jsonb(spacing), Jsonb(components), Jsonb(blueprint),
-                    Jsonb(raw_measurements or {}),
+                    Jsonb(raw_measurements or {}), approved_by, approved_by,
                 ),
             )
             inserted = cur.fetchone()
