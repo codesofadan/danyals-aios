@@ -971,3 +971,81 @@ def test_the_nightly_dispatch_propagates_its_correlation_id(
 
     disposition = dispatch_rank_checks.run()
     assert set(seen) == {disposition["correlation_id"]}
+
+
+# --------------------------------------------------------------------------- #
+# DataForSEO envelope honesty (2026-09-17 fixes).
+# --------------------------------------------------------------------------- #
+def test_a_failed_dataforseo_task_degrades_the_snapshot_instead_of_raising() -> None:
+    """``fetch_serp`` documents a NEVER-raises contract, but ``_dfs_items`` raises
+    ``DataForSeoTaskError`` on an in-envelope task failure and the call used to sit
+    OUTSIDE the try - so a rejected task crashed the check worker instead of
+    returning a degraded read. Re-inject by moving ``_dfs_items(data)`` back out of
+    the try block and this fails."""
+    from app.modules.rank_tracker.provider import DataForSeoRankProvider
+
+    provider = DataForSeoRankProvider(login="l", password="p", cost_per_check=0.002)
+    envelope = {
+        "status_code": 20000,
+        "tasks": [{"status_code": 40501, "status_message": "Invalid Field.", "result": None}],
+    }
+    provider.request_json = lambda *a, **k: envelope  # type: ignore[method-assign]
+
+    snap = provider.fetch_serp("emergency plumber")  # must not raise
+    assert snap.error == "dfs_task_40501"
+    assert snap.organic == []
+
+
+def test_a_missing_location_rides_as_a_numeric_location_code() -> None:
+    """A blank location used to fall back to ``location_name: country.upper()`` -
+    and DataForSEO rejects a bare ISO code ("US") with task status 40501, so every
+    no-location check failed. The fix resolves the country hint to the vendor's
+    NUMERIC location_code instead. Re-inject the old fallback and this fails."""
+    from app.modules.rank_tracker.provider import DataForSeoRankProvider
+
+    provider = DataForSeoRankProvider(login="l", password="p", cost_per_check=0.002)
+    captured: dict[str, Any] = {}
+
+    def _capture(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs.get("json_body")[0])
+        return {"status_code": 20000, "tasks": [{"status_code": 20000, "result": [{"items": []}]}]}
+
+    provider.request_json = _capture  # type: ignore[method-assign]
+
+    snap = provider.fetch_serp("emergency plumber", location="", country="us")
+    assert snap.error is None
+    assert captured.get("location_code") == 2840
+    assert "location_name" not in captured
+
+
+def test_a_free_text_location_still_rides_as_location_name() -> None:
+    from app.modules.rank_tracker.provider import DataForSeoRankProvider
+
+    provider = DataForSeoRankProvider(login="l", password="p", cost_per_check=0.002)
+    captured: dict[str, Any] = {}
+
+    def _capture(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs.get("json_body")[0])
+        return {"status_code": 20000, "tasks": [{"status_code": 20000, "result": [{"items": []}]}]}
+
+    provider.request_json = _capture  # type: ignore[method-assign]
+
+    provider.fetch_serp("emergency plumber", location="Dallas,Texas,United States")
+    assert captured.get("location_name") == "Dallas,Texas,United States"
+    assert "location_code" not in captured
+
+
+def test_an_unknown_country_hint_is_an_honest_error_not_wrong_country_data() -> None:
+    """``resolve_location_code`` raises on an unrecognised hint rather than serving
+    United States data for a request that said otherwise; ``fetch_serp`` must turn
+    that into a degraded snapshot, not a crash."""
+    from app.modules.rank_tracker.provider import DataForSeoRankProvider
+
+    provider = DataForSeoRankProvider(login="l", password="p", cost_per_check=0.002)
+    provider.request_json = lambda *a, **k: (_ for _ in ()).throw(  # type: ignore[method-assign]
+        AssertionError("the provider must not be reached with an unresolvable location")
+    )
+
+    snap = provider.fetch_serp("emergency plumber", location="", country="xz")
+    assert snap.error is not None
+    assert snap.organic == []

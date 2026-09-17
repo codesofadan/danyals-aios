@@ -521,7 +521,10 @@ class Settings(BaseSettings):
     # deterministic fake (never None). The per-check estimate is logged through the
     # cost gate against the `local_rank` money-dial (R5 pre-check), billed to the
     # ranking's CLIENT. ---
-    local_rank_cost_estimate: float = 0.003  # one map-pack position check
+    local_rank_cost_estimate: float = 0.003  # one Serper map-pack position check
+    # DataForSEO Maps live-advanced bills ~$2/1k tasks with 100 results included in
+    # the base price, so it carries its own estimate rather than borrowing Serper's.
+    local_rank_dfs_cost_estimate: float = 0.002  # one DataForSEO Maps task
     # The refresh BEAT's cadence + batch. Daily by default: a map-pack position does
     # not move hourly and every check is paid, so a tighter cadence buys noise at
     # linear cost. The batch caps how many rows ONE tick claims.
@@ -631,6 +634,10 @@ class Settings(BaseSettings):
     # monthly commitment projection, so the two can never disagree. ---
     rank_tracker_provider: str = "serper"  # serper | dataforseo | fake
     rank_tracker_cost_estimate: float = 0.001  # one SERP read (Serper ~ $1/1k queries)
+    # DataForSEO's live-advanced organic price is ~2x Serper's ($2/1k tasks at base
+    # depth), so the vendors carry SEPARATE estimates - one shared knob silently
+    # under-gated every DataForSEO check at half its real price.
+    rank_tracker_dfs_cost_estimate: float = 0.002  # one DataForSEO SERP task (base page)
     # 20, not 100: both vendors bill per 10-result page, so depth 100 is 5x the price
     # of depth 20 on the platform's largest line item and buys positions nobody acts
     # on. Kept in step with `rank_tracker.provider.DEFAULT_DEPTH` by a test.

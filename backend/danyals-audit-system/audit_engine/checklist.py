@@ -79,6 +79,10 @@ _BILLABLE: frozenset[str] = frozenset({
     "competitor_moz_da", "competitor_moz_links", "embeddings", "google_nl",
     "google_places", "moz_da", "moz_keyword", "moz_links", "moz_links_historical",
     "moz_spam_score", "otterly", "serper", "serper_geo", "serper_top10", "web_search",
+    # LOC-029's geo grid. Billable, and served by the platform's grid tracker
+    # rather than this engine - but classified here so the source is never an
+    # unknown that slips into a zero-spend tier by omission.
+    "dataforseo_maps",
 })
 
 

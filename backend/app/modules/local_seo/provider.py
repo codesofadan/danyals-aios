@@ -257,17 +257,51 @@ class DataForSeoMapsProvider(HttpProviderClient):
                 "local_pack_fetch_failed", provider=self.provider, error=type(exc).__name__
             )
             return LocalRankResult(provider=self.provider, error=f"{type(exc).__name__}")
+        task_error = _dfs_task_error(data)
+        if task_error is not None:
+            # A failed TASK inside a 20000-Ok envelope. Returning the empty item
+            # list here used to read as "measured, business absent from the pack" -
+            # a rate-limited afternoon rendered as the client's map presence
+            # collapsing. error set = UNMEASURED, never absence.
+            logger.warning(
+                "local_pack_task_failed", provider=self.provider, detail=task_error
+            )
+            return LocalRankResult(provider=self.provider, error=task_error)
         return _result_from_entries(
             _dfs_items(data), place_id=place_id, business_name=business_name,
             provider=self.provider,
         )
 
 
+_DFS_TASK_OK = 20000
+
+
+def _dfs_task_error(data: dict[str, Any]) -> str | None:
+    """A machine-branchable error string when any task in the envelope failed.
+
+    DataForSEO reports per-TASK failures inside an envelope whose own status_code
+    is 20000 Ok, so the caller must look one level down before trusting an empty
+    item list.
+    """
+    tasks = data.get("tasks") or []
+    if not isinstance(tasks, list):
+        return None
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        code = task.get("status_code")
+        if isinstance(code, int) and code != _DFS_TASK_OK:
+            return f"dfs_task_{code}"
+    return None
+
+
 def _dfs_items(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Pull the maps items out of a DataForSEO envelope defensively.
 
     The envelope nests ``tasks[].result[].items[]``; any level may be absent on a
-    thin/failed task, so every hop is guarded rather than indexed.
+    thin task, so every hop is guarded rather than indexed. Task FAILURES are the
+    caller's job via ``_dfs_task_error`` - by the time this runs, an empty list
+    means a measured empty result.
     """
     tasks = data.get("tasks") or []
     if not isinstance(tasks, list) or not tasks:
@@ -337,23 +371,27 @@ def local_pack_provider_is_live(settings: Settings) -> bool:
 
 
 def local_pack_provider_from_settings(settings: Settings) -> LocalPackProvider:
-    """The map-pack provider for this deploy: the house Serper Places default, the
-    DataForSEO Maps fallback, else the deterministic fake (NEVER ``None``).
+    """The map-pack provider for this deploy: DataForSEO Maps first, the Serper
+    Places fallback, else the deterministic fake (NEVER ``None``).
 
-    Preference order is deliberate: Serper is the key the platform already holds, so
-    a live deploy activates local rank with no new vendor. Only the REASON is ever
-    logged - never a credential.
+    Preference order flipped 2026-09-17 on the owner's decision: local SEO runs on
+    the DataForSEO API (the credential the client supplies), with Serper as the
+    fallback so a DataForSEO-less deploy still measures rather than degrading. The
+    result always carries ``provider``, so the two sources are never mixed
+    unlabelled. Only the REASON is ever logged - never a credential.
     """
-    cost = float(settings.local_rank_cost_estimate)
-    serper = settings.serper_api_key
-    if serper:
-        return SerperPlacesProvider(api_key=serper.get_secret_value(), cost=cost)
     dfs_password = settings.dataforseo_password
-    if settings.dataforseo_login and dfs_password:
+    if settings.dataforseo_login and dfs_password and dfs_password.get_secret_value():
         return DataForSeoMapsProvider(
             login=settings.dataforseo_login,
             password=dfs_password.get_secret_value(),
-            cost=cost,
+            cost=float(settings.local_rank_dfs_cost_estimate),
         )
-    logger.info("local_pack_provider_degraded", reason="missing_serper_and_dataforseo_keys")
+    serper = settings.serper_api_key
+    if serper and serper.get_secret_value():
+        return SerperPlacesProvider(
+            api_key=serper.get_secret_value(),
+            cost=float(settings.local_rank_cost_estimate),
+        )
+    logger.info("local_pack_provider_degraded", reason="missing_dataforseo_and_serper_keys")
     return FakeLocalPackProvider()

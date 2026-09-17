@@ -67,7 +67,12 @@ def test_every_data_source_is_deliberately_classified(registry):
     one of the four sets."""
     known = cl._ZERO | cl._FREE_QUOTA | cl._CONNECTION | cl._BILLABLE
     seen = {s for spec in registry.values() for s in spec.data_sources}
-    assert len(seen) == 52
+    # 53 since 2026-09-17: LOC-029 declares `dataforseo_maps` (billable). It was
+    # `serper_geo`, naming a deleted engine module that sent location="lat,lng"
+    # into a place-NAME parameter - the fictional-heat-map defect. The check is
+    # served by the platform's grid tracker; the source is classified so it can
+    # never default into a zero-spend tier.
+    assert len(seen) == 53
     assert seen <= known, f"unclassified data sources: {sorted(seen - known)}"
 
 

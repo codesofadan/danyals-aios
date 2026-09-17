@@ -268,8 +268,15 @@ checks:
     subcategory: local-pack
     owner_agent: D4
     severity_default: critical
-    data_sources: [serper_geo]
-    analyzer: audit_engine.analyzers.local_pack.geo_grid
+    data_sources: [dataforseo_maps]
+    # Served by the PLATFORM's grid tracker (backend/app/modules/grid_tracker),
+    # not by this engine: DataForSEO Maps with a real location_coordinate, and
+    # three-state points so an unmeasured ring is never drawn as a rank.
+    # The engine's own geo_grid.py was deleted 2026-09-17 - it sent
+    # location="lat,lng" into a parameter expecting a place NAME, which returned
+    # the same unlocalised SERP for every point: a smooth, entirely fictional
+    # heat map. The analyzer path named here never existed.
+    analyzer: null
     automation: full
 
   - id: LOC-030

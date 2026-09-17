@@ -395,16 +395,29 @@ class DataForSeoRankProvider(HttpProviderClient):
         depth: int = DEFAULT_DEPTH,
     ) -> SerpSnapshot:
         """One live SERP read. NEVER raises - a failure returns ``error`` set."""
-        from integrations.keyword_data import _dfs_items
+        from integrations.keyword_data import DataForSeoTaskError, _dfs_items, resolve_location_code
 
         task: dict[str, Any] = {
             "keyword": keyword,
             "language_code": language,
-            # DataForSEO requires SOME location; a blank one falls back to the country.
-            "location_name": location or country.upper(),
             "device": device if device in ("desktop", "mobile") else "desktop",
             "depth": max(1, depth),
         }
+        # DataForSEO requires SOME location. A free-text location rides as
+        # location_name; with none, the country hint resolves to a NUMERIC
+        # location_code - passing a bare ISO code as location_name ("US") is
+        # rejected with task status 40501, which used to make every
+        # no-location check fail (and, worse, raise - see below).
+        if location:
+            task["location_name"] = location
+        else:
+            try:
+                task["location_code"] = resolve_location_code(country)
+            except ValueError as exc:
+                logger.warning(
+                    "rank_serp_unknown_location", provider=self.provider, country=country
+                )
+                return SerpSnapshot(keyword=keyword, provider=self.provider, error=str(exc))
         try:
             data = self.request_json(
                 "POST",
@@ -412,12 +425,24 @@ class DataForSeoRankProvider(HttpProviderClient):
                 json_body=[task],
                 auth=self._auth,
             )
+            # INSIDE the try on purpose: _dfs_items raises DataForSeoTaskError on an
+            # in-envelope task failure (the envelope itself says 20000 Ok). It used to
+            # sit outside, so a failed task escaped this method's NEVER-raises
+            # contract and crashed the caller instead of returning a degraded read.
+            items = _dfs_items(data)
+        except DataForSeoTaskError as exc:
+            logger.warning(
+                "rank_serp_task_failed", provider=self.provider, code=exc.code,
+                message=exc.message,
+            )
+            return SerpSnapshot(
+                keyword=keyword, provider=self.provider, error=f"dfs_task_{exc.code}"
+            )
         except Exception as exc:
             logger.warning(
                 "rank_serp_fetch_failed", provider=self.provider, error=type(exc).__name__
             )
             return SerpSnapshot(keyword=keyword, provider=self.provider, error=type(exc).__name__)
-        items = _dfs_items(data)
         return SerpSnapshot(
             keyword=keyword,
             organic=_dfs_organic(items),
@@ -589,7 +614,7 @@ def _build_dataforseo(settings: Settings) -> RankProvider:
     return DataForSeoRankProvider(
         login=settings.dataforseo_login,
         password=password.get_secret_value(),
-        cost_per_check=float(settings.rank_tracker_cost_estimate),
+        cost_per_check=float(settings.rank_tracker_dfs_cost_estimate),
     )
 
 

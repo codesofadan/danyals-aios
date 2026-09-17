@@ -112,6 +112,7 @@ class _Runner(Protocol):
         comprehensive: bool = False,
         depth: str | None = None,
         max_pages: int | None = None,
+        business_name: str | None = None,
     ) -> AuditRunResult: ...
 
 
@@ -484,6 +485,10 @@ def execute_audit(
             # back to the config default - i.e. exactly what those rows already
             # ran at, so a queued-before-deploy job is unaffected.
             max_pages=row.get("max_pages"),
+            # Identify the business to Google Places by what we KNOW, not by
+            # whatever the homepage <title> happens to say. The audit row carries
+            # no city; the engine's domain check is what actually proves identity.
+            business_name=row.get("client_name"),
         )
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("audit_job_crashed", audit_id=audit_id)

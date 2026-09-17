@@ -153,6 +153,8 @@ def build_argv(
     profile: str,
     comprehensive: bool = False,
     depth: str | None = None,
+    business_name: str | None = None,
+    city: str | None = None,
 ) -> list[str]:
     """Build the ``python -m audit_engine.cli.main full ...`` argument vector.
 
@@ -205,6 +207,19 @@ def build_argv(
         )
         argv += ["--agents", "on" if scope["agents"] else "off"]
         argv += ["--ai-narrative", "on" if scope["narrative"] else "off"]
+        # The CLIENT'S OWN name and city, when we hold them. Without these the
+        # engine derives the business name from the homepage <title> and asks
+        # Google Places for it - and a generic title ("Home", "Best Plumbing")
+        # returns somebody else's profile, which then gets scored as this
+        # client's GBP. The same failure was MEASURED on the grid-tracker path
+        # ("Brand Kit Test" returned Walgreens, then Meijer), which is why that
+        # module added a plausibility match. Passing what we already know is the
+        # cheaper half of the fix; the engine also verifies the matched Place's
+        # website domain against the audited domain.
+        if business_name and business_name.strip():
+            argv += ["--business-name", business_name.strip()]
+        if city and city.strip():
+            argv += ["--city", city.strip()]
         return argv
     # ---------------------------------------------------------------------- #
     # PUBLIC free-audit funnel (comprehensive=False)
@@ -312,6 +327,8 @@ def run_audit(
     comprehensive: bool = False,
     depth: str | None = None,
     max_pages: int | None = None,
+    business_name: str | None = None,
+    city: str | None = None,
 ) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
@@ -363,6 +380,7 @@ def run_audit(
     argv = build_argv(
         domain=url, mode=mode, max_pages=pages, profile=cfg.profile,
         comprehensive=comprehensive, depth=depth,
+        business_name=business_name, city=city,
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}

@@ -1777,12 +1777,13 @@ async def _run_full(
         query = f"{derived_name}" + (f" {city}" if city else "")
         try:
             async with PlacesClient(api_key=keys.google_places) as places_client:
-                place = await places_client.find_place(query)
+                place = await places_client.find_place(query, expected_domain=slug)
             if place and place.place_id:
                 (artifact_dir / "places.json").write_text(
                     json.dumps(place.__dict__, indent=2, default=str), encoding="utf-8"
                 )
-                console.print(f"  Place found: [cyan]{place.name}[/cyan] ({place.place_id})")
+                ident = "identity verified" if place.identity_verified else "IDENTITY UNVERIFIED - profile findings are low-confidence"
+                console.print(f"  Place found: [cyan]{place.name}[/cyan] ({place.place_id}) - {ident}")
             elif place and place.error:
                 console.print(f"  [yellow]Places: {place.error}[/yellow]")
             else:
@@ -1805,13 +1806,16 @@ async def _run_full(
                         "business_query": citations_summary.business_query,
                         "total_checked": citations_summary.total_checked,
                         "found_count": citations_summary.found_count,
-                        "missing_count": citations_summary.missing_count,
+                        "missing_count": citations_summary.not_observed_count,  # legacy key; see note
+                        "not_observed_count": citations_summary.not_observed_count,
+                        "measurement_note": ("presence inferred from a SERP sample, not a per-directory fetch: not_observed is NOT evidence of absence"),
                         "inconsistent_count": citations_summary.inconsistent_count,
                         "average_nap_score": citations_summary.average_nap_score,
                         "per_source": [
                             {
                                 "source": s.source,
                                 "found": s.found,
+                                "state": s.state,
                                 "listing_url": s.listing_url,
                                 "name_match": s.name_match,
                                 "address_match": s.address_match,
@@ -2174,12 +2178,13 @@ async def _run_local(
         query = f"{derived_name}" + (f" {city}" if city else "")
         try:
             async with PlacesClient(api_key=keys.google_places) as places_client:
-                place = await places_client.find_place(query)
+                place = await places_client.find_place(query, expected_domain=slug)
             if place and place.place_id:
                 (artifact_dir / "places.json").write_text(
                     json.dumps(place.__dict__, indent=2, default=str), encoding="utf-8"
                 )
-                console.print(f"  Place found: [cyan]{place.name}[/cyan] ({place.place_id})")
+                ident = "identity verified" if place.identity_verified else "IDENTITY UNVERIFIED - profile findings are low-confidence"
+                console.print(f"  Place found: [cyan]{place.name}[/cyan] ({place.place_id}) - {ident}")
             elif place and place.error:
                 console.print(f"  [yellow]Places: {place.error}[/yellow]")
             else:
@@ -2204,13 +2209,16 @@ async def _run_local(
                         "business_query": citations.business_query,
                         "total_checked": citations.total_checked,
                         "found_count": citations.found_count,
-                        "missing_count": citations.missing_count,
+                        "missing_count": citations.not_observed_count,  # legacy key; see note
+                        "not_observed_count": citations.not_observed_count,
+                        "measurement_note": ("presence inferred from a SERP sample, not a per-directory fetch: not_observed is NOT evidence of absence"),
                         "inconsistent_count": citations.inconsistent_count,
                         "average_nap_score": citations.average_nap_score,
                         "per_source": [
                             {
                                 "source": s.source,
                                 "found": s.found,
+                                "state": s.state,
                                 "listing_url": s.listing_url,
                                 "name_match": s.name_match,
                                 "address_match": s.address_match,
@@ -2242,6 +2250,22 @@ async def _run_local(
         if not cp.parsed:
             continue
         pid = page_id_by_url.get(cp.url)
+        # The same subset the full profile runs per page (its loop body was
+        # DROPPED here for months - the console line above announced analyzers
+        # that never ran). Homepage HTTPS is the one per-page on-page check.
+        if cp.url == crawl_result.site_url:
+            v = check_https(cp)
+            findings.append(
+                Finding(
+                    run_id=run_id, page_id=pid, check_id="ON-099",
+                    check_name=_check_name_for("ON-099"), category="on-page",
+                    subcategory="security", owner_agent="B5",
+                    status=v.status, severity=v.severity, score=v.score,
+                    confidence=v.confidence,
+                    evidence_json=encode_evidence(v.evidence),
+                    remediation=v.remediation, references_json=None, impact_usd=None,
+                )
+            )
     # ----- Local analyzers -----
     console.print("[bold]> Running local analyzers...[/bold]")
     for check_id, category, owner, verdict in iter_local_findings(

@@ -218,15 +218,20 @@ def check_citation_consistency(summary: CitationSummary) -> Verdict:
     if summary.total_checked == 0:
         return Verdict("n_a", 0.0, "info", 0.4, {"reason": "no citations data"})
     inconsistent = summary.inconsistent_count
-    missing = summary.missing_count
+    not_observed = summary.not_observed_count
     avg = summary.average_nap_score or 0
-    if missing == 0 and inconsistent == 0:
+    if not_observed == 0 and inconsistent == 0:
         return Verdict(
             "pass", 10.0, "info", 0.6,
             {"checked": summary.total_checked, "avg_nap_score": avg},
         )
-    score = max(0.0, 10.0 - missing * 0.5 - inconsistent * 1.0)
-    sev = "critical" if inconsistent >= 5 else "major" if (inconsistent + missing) >= 5 else "minor"
+    # A directory that did not surface in two broad queries is UNMEASURED, not a
+    # confirmed missing listing - so it carries a fraction of the weight of an
+    # observed NAP mismatch, which IS evidence. Scoring the two alike (0.5 each)
+    # let absence-of-evidence drive the verdict and the remediation told the
+    # client to "claim" listings that may already exist.
+    score = max(0.0, 10.0 - not_observed * 0.2 - inconsistent * 1.0)
+    sev = "critical" if inconsistent >= 5 else "major" if inconsistent >= 2 else "minor"
     return Verdict(
         status=status_from_score(score),
         score=score,
@@ -234,16 +239,23 @@ def check_citation_consistency(summary: CitationSummary) -> Verdict:
         confidence=0.6,
         evidence={
             "checked": summary.total_checked,
-            "found": summary.found_count,
-            "missing": missing,
+            "listed": summary.found_count,
+            "not_observed": not_observed,
             "inconsistent": inconsistent,
             "avg_nap_score": avg,
             "method": "serper-snippet-inference",
+            "measurement_note": (
+                "Presence is inferred from a SERP sample, not a per-directory fetch. "
+                "'not_observed' means this method did not see a listing - it is NOT "
+                "evidence the listing is absent."
+            ),
         },
         remediation=(
-            f"{missing} tier-1 directories show no SERP presence and {inconsistent} show NAP drift. "
-            "Claim or create the missing listings (start with Yelp, Facebook, Foursquare, Apple Maps, Bing Places), "
-            "then audit each inconsistent listing for name/address/phone variance vs the GBP canonical."
+            f"{inconsistent} tier-1 directories show NAP drift in their SERP snippets; "
+            f"{not_observed} did not surface at all. Audit each inconsistent listing for "
+            "name/address/phone variance vs the GBP canonical first - that is measured. "
+            "Then check the not-observed directories directly (Yelp, Facebook, Foursquare, "
+            "Apple Maps, Bing Places) and claim only the ones genuinely absent."
         ),
     )
 

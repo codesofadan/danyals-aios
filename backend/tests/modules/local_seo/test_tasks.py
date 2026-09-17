@@ -791,3 +791,73 @@ def test_the_degraded_path_logs_no_secret(caplog: pytest.LogCaptureFixture) -> N
     with caplog.at_level("INFO"):
         local_pack_provider_from_settings(settings)
     assert "secret-login" not in caplog.text  # only the reason is logged
+
+
+def test_dataforseo_is_preferred_over_serper_when_both_credentials_exist() -> None:
+    """Owner decision 2026-09-17: local SEO runs on the DataForSEO API (the credential
+    the client supplies). With BOTH vendors configured the factory must pick
+    DataForSEO Maps - re-inject the old Serper-first order and this fails."""
+    from app.modules.local_seo.provider import (
+        DataForSeoMapsProvider,
+        local_pack_provider_from_settings,
+    )
+
+    settings = _settings(
+        serper_api_key="serper-key",
+        dataforseo_login="dfs-login",
+        dataforseo_password="dfs-pass",
+    )
+    provider = local_pack_provider_from_settings(settings)
+    assert isinstance(provider, DataForSeoMapsProvider)
+
+
+def test_serper_remains_the_fallback_without_dataforseo_credentials() -> None:
+    from app.modules.local_seo.provider import (
+        SerperPlacesProvider,
+        local_pack_provider_from_settings,
+    )
+
+    settings = _settings(serper_api_key="serper-key")
+    provider = local_pack_provider_from_settings(settings)
+    assert isinstance(provider, SerperPlacesProvider)
+
+
+def test_a_failed_dataforseo_task_reads_as_error_never_as_absence() -> None:
+    """DataForSEO reports per-TASK failures inside a 20000-Ok envelope. The old
+    ``_dfs_items`` walked straight past them and returned [], which downstream is
+    indistinguishable from 'measured: the business is not in the pack' - a rate
+    limit rendered as the client's map presence collapsing. Re-inject by removing
+    the ``_dfs_task_error`` check in ``rank()`` and this fails."""
+    from app.modules.local_seo.provider import DataForSeoMapsProvider
+
+    provider = DataForSeoMapsProvider(login="l", password="p", cost=0.002)
+    envelope = {
+        "status_code": 20000,
+        "tasks": [{"status_code": 40501, "status_message": "Invalid Field: location", "result": None}],
+    }
+    provider.request_json = lambda *a, **k: envelope  # type: ignore[method-assign]
+
+    result = provider.rank(
+        keyword="plumber dallas", geo="Dallas,TX", place_id=None, business_name="Ace Plumbing"
+    )
+    assert result.error == "dfs_task_40501"
+    assert result.rank is None
+
+
+def test_an_empty_but_successful_task_is_still_honest_absence() -> None:
+    """The inverse guard: a 20000-Ok task with zero items IS a measured absence -
+    the task-failure check must not convert real emptiness into an error."""
+    from app.modules.local_seo.provider import DataForSeoMapsProvider
+
+    provider = DataForSeoMapsProvider(login="l", password="p", cost=0.002)
+    envelope = {
+        "status_code": 20000,
+        "tasks": [{"status_code": 20000, "result": [{"items": []}]}],
+    }
+    provider.request_json = lambda *a, **k: envelope  # type: ignore[method-assign]
+
+    result = provider.rank(
+        keyword="plumber dallas", geo="Dallas,TX", place_id=None, business_name="Ace Plumbing"
+    )
+    assert result.error is None
+    assert result.rank is None

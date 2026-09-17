@@ -79,17 +79,40 @@ class CitationStatus:
     phone_match: float | None
     nap_score: float | None
 
+    @property
+    def state(self) -> str:
+        """``listed`` or ``not_observed`` - never ``absent``.
+
+        This method infers presence from a couple of broad Serper queries, so a
+        directory that does not surface was NOT looked at directly: that is
+        unmeasured, not proof the listing is missing. The third state this
+        method can never produce is a confirmed absence.
+        """
+        return "listed" if self.found else "not_observed"
+
 
 @dataclass
 class CitationSummary:
     business_query: str
     total_checked: int
     found_count: int
-    missing_count: int
+    # Directories that did not surface in the SERP sample. NOT a missing-listing
+    # count - see CitationStatus.state. Named for what the evidence supports.
+    not_observed_count: int
     inconsistent_count: int
     average_nap_score: float | None
     per_source: list[CitationStatus] = field(default_factory=list)
     error: str | None = None
+
+    @property
+    def missing_count(self) -> int:
+        """DEPRECATED alias for ``not_observed_count``.
+
+        Kept so existing readers keep working, but the name is a lie this module
+        no longer tells: nothing here can distinguish "not listed" from "not
+        surfaced by two broad queries".
+        """
+        return self.not_observed_count
 
 
 def _host(link: str) -> str:
@@ -204,7 +227,7 @@ class CitationsClient:
                 business_query=business_name,
                 total_checked=0,
                 found_count=0,
-                missing_count=0,
+                not_observed_count=0,
                 inconsistent_count=0,
                 average_nap_score=None,
                 error="SERPER_API_KEY not set",
@@ -304,7 +327,7 @@ class CitationsClient:
             business_query=business_name,
             total_checked=len(per),
             found_count=found_count,
-            missing_count=len(per) - found_count,
+            not_observed_count=len(per) - found_count,
             inconsistent_count=inconsistent_count,
             average_nap_score=(sum(nap_scores) / len(nap_scores)) if nap_scores else None,
             per_source=per,

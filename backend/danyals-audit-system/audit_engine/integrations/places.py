@@ -66,6 +66,27 @@ class Place:
     latitude: float | None = None
     longitude: float | None = None
     error: str | None = None
+    # Whether this Place was matched to the AUDITED business rather than merely
+    # being the top text-search hit. True only when the Place's website domain
+    # matches the audited domain. False means every GBP-derived finding must be
+    # LOW-confidence: the profile being scored may belong to someone else.
+    identity_verified: bool = False
+
+
+def _bare_host(url: str) -> str:
+    """Lowercased bare host of a URL or bare domain (``www.`` stripped)."""
+    from urllib.parse import urlsplit
+
+    text = (url or "").strip().lower()
+    if not text:
+        return ""
+    if "//" not in text:
+        text = f"//{text}"
+    try:
+        host = urlsplit(text).hostname or ""
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
 
 
 class PlacesClient(BaseClient):
@@ -86,8 +107,19 @@ class PlacesClient(BaseClient):
     def enabled(self) -> bool:
         return self._enabled
 
-    async def find_place(self, query: str) -> Place | None:
-        """Text-search the Places API. Returns the top result or None."""
+    async def find_place(self, query: str, *, expected_domain: str | None = None) -> Place | None:
+        """Text-search the Places API for the AUDITED business.
+
+        Blindly accepting the top text-search hit scored whichever business Google
+        thought the query meant - for an ambiguous name that is routinely a
+        different company, and every GBP finding downstream then described someone
+        else's profile as the client's. So up to five candidates are fetched and
+        the FIRST whose website domain matches ``expected_domain`` wins with
+        ``identity_verified=True``. With no domain match (or no expected domain),
+        the top hit is still returned - a candidate is more useful than nothing -
+        but ``identity_verified`` stays False and the caller must treat every
+        profile-derived verdict as low-confidence.
+        """
         if not self._enabled:
             return Place(
                 place_id="",
@@ -101,7 +133,7 @@ class PlacesClient(BaseClient):
         try:
             resp = await self.post(
                 "places:searchText",
-                json_body={"textQuery": query, "maxResultCount": 1},
+                json_body={"textQuery": query, "maxResultCount": 5},
                 headers={"X-Goog-FieldMask": f"places.{PLACE_FIELDS.replace(',', ',places.')}"},
             )
             data = resp.json()
@@ -119,6 +151,19 @@ class PlacesClient(BaseClient):
         results = data.get("places") or []
         if not results:
             return None
+        want = _bare_host(expected_domain) if expected_domain else ""
+        if want:
+            for raw in results:
+                candidate = _parse_place(raw)
+                if candidate.website and _bare_host(candidate.website) == want:
+                    candidate.identity_verified = True
+                    return candidate
+            log.warning(
+                "places_identity_unverified",
+                query=query,
+                expected_domain=want,
+                candidates=len(results),
+            )
         return _parse_place(results[0])
 
     async def place_details(self, place_id: str) -> Place:

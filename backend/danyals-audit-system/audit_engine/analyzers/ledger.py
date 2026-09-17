@@ -42,6 +42,10 @@ class Reason(StrEnum):
 REASON_REQUIRES: dict[Reason, frozenset[str]] = {
     Reason.NEEDS_PROVIDER: frozenset({
         "serper", "serper_geo", "serper_top10", "google_places", "otterly",
+        # LOC-029 geo grid: the engine has no DataForSEO Maps client. The PLATFORM
+        # serves that check (backend/app/modules/grid_tracker) with a real
+        # location_coordinate; the engine stays parked on the provider it lacks.
+        "dataforseo_maps",
         "google_nl", "w3c_validator", "web_fetch", "wikidata",
     }),
     Reason.NEEDS_SEARCH_CONSOLE: frozenset({
