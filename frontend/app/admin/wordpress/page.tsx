@@ -1,10 +1,15 @@
 import TopBar from "@/components/TopBar";
-import DesignReplicator from "@/components/wordpress/DesignReplicator";
 import WpConnections from "@/components/wordpress/WpConnections";
 
-// WordPress: the sites we publish through, and the replication engine that
-// rebuilds a page onto them. Stacked on one screen rather than split behind
-// tabs - connecting a site and building onto it are the same sitting.
+// WordPress: the sites we publish through.
+//
+// The Design Replicator card used to sit under this table, which made design work a
+// second place an operator had to go: replicate here, then start again in Content to
+// build anything on what was measured. It is now one flow - screen 3 of
+// /admin/content/new offers all three design sources (measure the client's site,
+// replicate any URL, reuse an earlier replication) - so design lives where the pages
+// that use it are made. The component is kept and recorded in parked.registry.ts;
+// what is gone is the second door, not the capability.
 export default function WordPressPage() {
   return (
     <>
@@ -15,7 +20,6 @@ export default function WordPressPage() {
         hideSearch
       />
       <WpConnections />
-      <DesignReplicator />
     </>
   );
 }

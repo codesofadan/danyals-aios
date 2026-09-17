@@ -267,6 +267,51 @@ def _sme_with_client_facts(
     return run
 
 
+def _design_profile_for(
+    row: dict[str, Any], pack: dict[str, Any]
+) -> dict[str, Any] | None:
+    """The design system this page is built to: the client's STORED kit, else the
+    profile the request carried.
+
+    The stored kit wins. A per-request ``design_profile`` is whatever the wizard
+    happened to hold in React state at launch; the kit is what the client's design
+    system actually IS, versioned and approved. Reading it here - server-side, at
+    generation time - is what makes "analyse once, conform forever" true, rather
+    than requiring every caller to remember to send the design with every job.
+
+    An explicit per-job profile is still honoured when no kit exists, so a client
+    who has never been analysed keeps today's behaviour exactly.
+
+    Never raises: a storage failure falls back to the request's profile rather than
+    failing the job.
+    """
+    client_id = str(row.get("client_id") or "").strip()
+    if client_id:
+        try:
+            from app.modules.content_planning.repo import ContentPlanningStore
+
+            kit = ContentPlanningStore().active_brand_kit(client_id)
+            if kit:
+                blueprint = kit.get("blueprint") or []
+                raw = kit.get("raw_measurements") or {}
+                if blueprint or raw.get("section_order"):
+                    return {
+                        "palette": kit.get("palette") or {},
+                        "typography": kit.get("typography") or {},
+                        "components": kit.get("components") or {},
+                        "layout": {
+                            "blueprint": blueprint,
+                            "section_order": raw.get("section_order") or [],
+                            "container_width": raw.get("container_width") or "1200px",
+                            "hero_style": raw.get("hero_style") or "centered",
+                            "cta_style": raw.get("cta_style") or "banner",
+                        },
+                    }
+        except Exception:
+            logger.warning("brand_kit_read_failed", client_id=client_id)
+    return pack.get("design_profile") or None
+
+
 def _blueprint_sections(
     row: dict[str, Any], pack: dict[str, Any]
 ) -> tuple[tuple[str, str], ...]:
@@ -283,7 +328,7 @@ def _blueprint_sections(
         from app.services.page_blueprints import resolve_blueprint
 
         specs = resolve_blueprint(
-            design_profile=(pack.get("design_profile") or None),
+            design_profile=_design_profile_for(row, pack),
             template=(str(pack.get("template") or "").strip() or None),
             page_type=str(row.get("page_type") or "blog"),
         )

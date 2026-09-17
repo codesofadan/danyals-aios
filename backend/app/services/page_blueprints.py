@@ -353,17 +353,23 @@ _CHROME_KINDS: frozenset[str] = frozenset(
 
 
 
-def _count(value: Any) -> int:
+def _count(value: Any, *, maximum: int = 200) -> int:
     """A non-negative measured count, or 0 when absent/unusable.
 
     Bounded: a measurement of 400 cards is a bad capture, not a design, and passing it
     to a generator as a budget would be worse than having no budget at all.
+
+    ``maximum`` exists because these are not all the same UNIT. One shared cap of 200
+    was applied to item counts AND character budgets alike, so every section whose
+    body copy ran past 200 characters - which is nearly every real section - had its
+    measured budget silently rewritten to 0, i.e. "never measured". The generator
+    then wrote to no budget at all and the capture looked empty rather than wrong.
     """
     try:
         n = int(value)
     except (TypeError, ValueError):
         return 0
-    return n if 0 < n <= 200 else 0
+    return n if 0 < n <= maximum else 0
 
 
 def section_from_raw(raw: Any) -> SectionSpec | None:
@@ -391,9 +397,15 @@ def section_from_raw(raw: Any) -> SectionSpec | None:
         absorb=bool(d.get("absorb", False)),
         # Accepts either spelling: the measured profile emits camelCase (it is a wire
         # shape), a template or a hand-written blueprint uses snake_case.
-        max_items=_count(d.get("items") or d.get("max_items") or d.get("maxItems")),
-        heading_chars=_count(d.get("headingChars") or d.get("heading_chars")),
-        body_chars=_count(d.get("bodyChars") or d.get("body_chars")),
+        # Units differ, so the bounds do: repeated items are a small count, while
+        # the char budgets are page copy (a 600-character services blurb is normal).
+        max_items=_count(
+            d.get("items") or d.get("max_items") or d.get("maxItems"), maximum=64
+        ),
+        heading_chars=_count(
+            d.get("headingChars") or d.get("heading_chars"), maximum=512
+        ),
+        body_chars=_count(d.get("bodyChars") or d.get("body_chars"), maximum=8192),
     )
 
 
@@ -421,26 +433,37 @@ def resolve_blueprint(
 ) -> list[SectionSpec]:
     """The ONE effective ordered blueprint a job's page is built to, by precedence:
 
-    1. an EXPLICITLY chosen TEMPLATE (one of the 7) - if the operator picked a template,
-       the page is built to it and the content is slotted into ITS sections;
-    2. else the ANALYZED profile's rich ``layout.blueprint`` (the client's real sections)
-       - so a page with no template mirrors the client's own analyzed site EXACTLY;
+    1. the ANALYZED profile's rich ``layout.blueprint`` - the CLIENT'S OWN measured
+       sections, in their own order, with their own capacities;
+    2. else an explicitly chosen TEMPLATE (one of the 7);
     3. else the analyzed profile's ``layout.section_order`` (names only -> default layouts);
     4. else the DEFAULT template for the page type (service/local/blog);
     5. else ``[]`` - nothing to shape by (the publish path keeps its plain behaviour).
 
-    So "pick a template -> use the template; otherwise mirror the analyzed site". Returns
-    a list of :class:`SectionSpec` (possibly empty). Degrade-safe: a malformed / unknown
-    input at any tier falls through to the next.
+    THE MEASURED DESIGN WINS (changed 2026-09-17, owner decision). It used to be the
+    other way around: a chosen template outranked the analyzed blueprint. That reads
+    as reasonable - "the operator picked it, honour it" - but the operator was not
+    picking. The content flow sends a template on EVERY launch
+    (``StepLaunch.tsx``), so the "explicit choice" tier matched every single job and
+    the client's captured design never once shaped a page. A design system stored
+    against a client is now the thing pages are built to; the template is what we
+    fall back to when we have not measured them yet.
+
+    A template still wins over a *thin* profile (tier 3): a bare
+    ``section_order`` carries names with no capacities, which is weaker grounding
+    than a real template.
+
+    Returns a list of :class:`SectionSpec` (possibly empty). Degrade-safe: a
+    malformed / unknown input at any tier falls through to the next.
     """
-    chosen = get_template(template)
-    if chosen is not None:
-        return list(chosen.sections)
     profile = _as_dict(design_profile)
     layout = _as_dict(profile.get("layout"))
     analyzed = sections_from_raw(layout.get("blueprint"))
     if analyzed:
         return analyzed
+    chosen = get_template(template)
+    if chosen is not None:
+        return list(chosen.sections)
     from_order = sections_from_raw(layout.get("section_order"))
     if from_order:
         return from_order

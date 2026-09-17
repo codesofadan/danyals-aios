@@ -64,9 +64,67 @@ def test_page_template_literal_matches_module() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The resolver precedence: template wins -> analyzed site -> default -> nothing.
+# The resolver precedence: MEASURED design -> template -> thin section_order ->
+# default -> nothing.
 # --------------------------------------------------------------------------- #
-def test_explicit_template_wins_over_analyzed_profile() -> None:
+def test_the_measured_blueprint_wins_over_a_template() -> None:
+    """The client's captured design is what pages are built to.
+
+    This was the reverse until 2026-09-17, and the consequence was total: the
+    content flow sends a template on EVERY launch, so the "explicit template"
+    tier matched every job and a client's analyzed design never shaped a single
+    page. Re-inject by moving the ``get_template`` check back above the analyzed
+    blueprint and this fails.
+    """
+    profile = {
+        "layout": {
+            "blueprint": [
+                {"kind": "hero", "layout": "split"},
+                {"kind": "services", "layout": "grid"},
+                {"kind": "proof", "layout": "carousel"},
+                {"kind": "faq", "layout": "accordion"},
+                {"kind": "cta", "layout": "banner"},
+            ]
+        }
+    }
+    specs = resolve_blueprint(design_profile=profile, template="faq", page_type="blog")
+    assert [s.kind for s in specs] == ["hero", "services", "proof", "faq", "cta"]
+    assert [s.kind for s in specs] != [s.kind for s in TEMPLATES["faq"].sections]
+
+
+def test_five_measured_sections_resolve_to_exactly_five() -> None:
+    """The owner's rule stated as a test: a design with five sections produces a
+    five-section blueprint - not the template's count, not a truncation."""
+    blueprint = [{"kind": k} for k in ("hero", "intro", "services", "proof", "cta")]
+    specs = resolve_blueprint(
+        design_profile={"layout": {"blueprint": blueprint}},
+        template="service",
+        page_type="service",
+    )
+    assert len(specs) == 5
+
+
+def test_measured_capacities_survive_the_resolver() -> None:
+    """Capacity is the other half of conformance: matching a section sequence while
+    overflowing every slot is not matching the design. These were measured and then
+    dropped at the API wire model, so max_items was always 0 in production."""
+    profile = {
+        "layout": {
+            "blueprint": [
+                {"kind": "hero", "headingChars": 48, "bodyChars": 180},
+                {"kind": "services", "items": 3, "bodyChars": 320},
+            ]
+        }
+    }
+    specs = resolve_blueprint(design_profile=profile, template=None, page_type="service")
+    assert specs[0].heading_chars == 48
+    assert specs[1].max_items == 3
+    assert specs[1].body_chars == 320
+
+
+def test_explicit_template_still_wins_over_a_thin_section_order() -> None:
+    """A bare section_order carries names with no capacities - weaker grounding than
+    a real template, so the template keeps this tier."""
     profile = {"layout": {"section_order": ["hero", "about", "cta"]}}
     specs = resolve_blueprint(design_profile=profile, template="faq", page_type="blog")
     assert [s.kind for s in specs] == [s.kind for s in TEMPLATES["faq"].sections]

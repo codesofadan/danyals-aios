@@ -189,3 +189,110 @@ def test_citation_submit_blocks_when_nap_is_missing() -> None:
     # the row is marked blocked with an honest reason - nothing was dispatched/spent
     assert store.updates and store.updates[-1]["submit_status"] == "blocked"
     assert "no business profile" in store.updates[-1]["error"]
+
+
+# --------------------------------------------------------------------------- #
+# Keyword bank seeded at client creation (2026-09-17)
+# --------------------------------------------------------------------------- #
+# The content module targets terms from the client's bank. Onboarding has always
+# had a "Build keyword seed list" STEP, but it was a checklist tickbox with no data
+# behind it, so every client started with an empty bank and each content run
+# invented its own targets - which is how content and rank tracking end up chasing
+# different terms for the same client.
+class _FakeKeywordRepo:
+    """Captures what the create endpoint writes to the bank."""
+
+    calls: list[dict[str, Any]] = []
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+
+    def add_keywords(
+        self, *, client_id: str | None, client_name: str, geo: str | None,
+        keywords: list[str], created_by: str,
+    ) -> list[dict[str, Any]]:
+        _FakeKeywordRepo.calls.append({
+            "client_id": client_id, "client_name": client_name, "geo": geo,
+            "keywords": list(keywords), "created_by": created_by,
+        })
+        return [{"keyword": k} for k in keywords]
+
+
+@pytest.fixture
+def bank(monkeypatch: pytest.MonkeyPatch) -> type[_FakeKeywordRepo]:
+    _FakeKeywordRepo.calls = []
+    monkeypatch.setattr(
+        "app.modules.keyword_research.repo.KeywordRepo", _FakeKeywordRepo, raising=True
+    )
+    return _FakeKeywordRepo
+
+
+async def test_create_client_seeds_the_keyword_bank(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    bank: type[_FakeKeywordRepo],
+) -> None:
+    """The wiring that makes onboarding feed content. Re-inject by deleting the
+    `if body.keywords:` block in create_client and this fails."""
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/clients",
+        json={
+            "cn": "Acme Dental",
+            "keywords": ["emergency dentist", "teeth whitening"],
+            "keywordGeo": "Bellevue",
+        },
+    )
+    assert resp.status_code == 201
+    assert len(bank.calls) == 1
+    call = bank.calls[0]
+    assert call["client_id"] == resp.json()["id"]
+    assert call["client_name"] == "Acme Dental"
+    assert call["geo"] == "Bellevue"
+    assert call["keywords"] == ["emergency dentist", "teeth whitening"]
+
+
+async def test_create_client_without_keywords_touches_the_bank_not_at_all(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    bank: type[_FakeKeywordRepo],
+) -> None:
+    wire("manager")
+    resp = await client.post("/api/v1/clients", json={"cn": "No Keywords Co"})
+    assert resp.status_code == 201
+    assert bank.calls == []
+
+
+async def test_a_blank_geo_is_sent_as_none_not_an_empty_string(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    bank: type[_FakeKeywordRepo],
+) -> None:
+    """geo is part of the bank's uniqueness key (client, keyword, geo). An empty
+    string and NULL are different keys, so a non-local client's terms must land as
+    NULL or they dedupe against nothing."""
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/clients", json={"cn": "National Co", "keywords": ["seo software"]}
+    )
+    assert resp.status_code == 201
+    assert bank.calls[0]["geo"] is None
+
+
+async def test_a_bank_failure_never_fails_the_client_creation(
+    client: httpx.AsyncClient, repo: FakeRepo, wire: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Best-effort, exactly like the NAP seed above: a client that already exists in
+    the database must not 500 because a follow-on write hiccuped."""
+    class _Boom:
+        def __init__(self, user_id: str) -> None: ...
+        def add_keywords(self, **kw: Any) -> list[dict[str, Any]]:
+            raise RuntimeError("bank unavailable")
+
+    monkeypatch.setattr(
+        "app.modules.keyword_research.repo.KeywordRepo", _Boom, raising=True
+    )
+    wire("manager")
+    resp = await client.post(
+        "/api/v1/clients", json={"cn": "Resilient Co", "keywords": ["plumber"]}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["id"] in repo.clients

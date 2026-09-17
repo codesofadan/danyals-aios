@@ -3,10 +3,15 @@
 // Screen 2 — which pages to build.
 //
 // Three ways in, because an agency genuinely works all three ways: pick from
-// keywords already researched, run fresh research, or add a page you already know
-// you want. The first of those is new - the keyword bank and its clusters existed
-// with volume, difficulty and intent, and the content flow could not see any of
-// it. Six of the keyword module's nine endpoints had no caller at all.
+// keywords already researched, run a bulk page research, or add a page you already
+// know you want. The first of those is new - the keyword bank and its clusters
+// existed with volume, difficulty and intent, and the content flow could not see any
+// of it. Six of the keyword module's nine endpoints had no caller at all.
+//
+// The middle door is named BULK PAGE RESEARCHES, not "research": one paid run
+// recommends a whole page SET to build around a topical map. It is a different thing
+// from the per-job "Research" stage a single page runs later inside its own pipeline
+// (ContentJobDetail), which keeps that name.
 //
 // Every row shows what it is chosen ON: volume, difficulty, intent. A page picked
 // without those is a guess, and guesses are what the bank exists to end.
@@ -73,13 +78,13 @@ export default function StepPages({
       {
         onSuccess: (r) => {
           if (r.status === "degraded") {
-            toast.error("Research didn't run", researchFix(r.reason));
+            toast.error("The bulk page research didn't run", researchFix(r.reason));
             return;
           }
           patch({ picks: [...state.picks, ...r.items.filter((i) => !chosen.has(i.title))] });
           toast.success(`${r.items.length} pages recommended`, "All selected — untick any you don't want.");
         },
-        onError: (e: unknown) => toast.error("Research failed", describeError(e)),
+        onError: (e: unknown) => toast.error("The bulk page research failed", describeError(e)),
       },
     );
   };
@@ -98,7 +103,7 @@ export default function StepPages({
   return (
     <div style={{ display: "grid", gap: 16, maxWidth: 860 }}>
       <div className="co-chips wrap" role="tablist" aria-label="Where the pages come from">
-        {([["bank", "Keyword bank"], ["research", "Run research"], ["manual", "Add by hand"]] as const).map(
+        {([["bank", "Keyword bank"], ["research", "Bulk page researches"], ["manual", "Add by hand"]] as const).map(
           ([key, label]) => (
             <button
               key={key} type="button" role="tab" aria-selected={source === key}
@@ -120,7 +125,7 @@ export default function StepPages({
             <EmptyState
               icon="travel_explore"
               title="Nothing researched for this client yet"
-              hint="Run research on this screen, or use the Search workspace to build the bank first."
+              hint="Run a bulk page research on this screen, or use the Search workspace to build the bank first."
             />
           ) : (
             <section className="card" style={{ padding: "var(--s-7)" }}>
@@ -179,10 +184,11 @@ export default function StepPages({
 
       {source === "research" && (
         <section className="card" style={{ padding: "var(--s-7)" }}>
-          <div className="ct">Research {state.siteDomain || "the site"}</div>
+          <div className="ct">Bulk page researches for {state.siteDomain || "the site"}</div>
           <div className="cs" style={{ margin: "4px 0 14px" }}>
-            Claude reads the live SERP for this site&apos;s market and recommends a page set.
-            A paid call, metered against the content budget.
+            Claude reads the live SERP for this site&apos;s market and recommends a whole
+            page set in one run — say five pages built around one topical map, rather
+            than a page researched at a time. A paid call, metered against the content budget.
           </div>
           <div className="fld-row">
             <div className="fld" style={{ maxWidth: 190 }}>
@@ -197,13 +203,13 @@ export default function StepPages({
           <button
             type="button" className="primary-btn" style={{ marginTop: 12 }}
             onClick={runResearch} disabled={research.isPending || !state.siteDomain}
-            title={state.siteDomain ? undefined : "Research needs a site to measure against"}
+            title={state.siteDomain ? undefined : "A bulk page research needs a site to measure against"}
           >
             <span className="material-symbols-rounded">travel_explore</span>
             {research.isPending ? "Researching…" : "Recommend pages"}
           </button>
-          {/* Say why, rather than leaving a grey button. Research measures the
-              client's site against the SERP, so it genuinely needs a domain -
+          {/* Say why, rather than leaving a grey button. A bulk page research measures
+              the client's site against the SERP, so it genuinely needs a domain -
               unlike the rest of the flow, which no longer does. */}
           {!state.siteDomain && (
             <div className="cs" style={{ marginTop: 8 }}>
@@ -289,7 +295,7 @@ export default function StepPages({
   }
 }
 
-/** The operator-actionable reason a research run produced nothing. */
+/** The operator-actionable reason a bulk page research produced nothing. */
 function researchFix(reason: string): string {
   if (reason === "provider_out_of_credit")
     return "The AI provider account is out of credit. Top it up, then try again — nothing was charged.";

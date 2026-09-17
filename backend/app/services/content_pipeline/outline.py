@@ -233,6 +233,40 @@ def run_outline(
             forbidden = []
             notes.append(f"attempt {attempt + 1}: reply was not a JSON outline")
             continue
+
+        # CONFORMANCE to the client's stored design. The prompt asks for EXACTLY
+        # one section per slot; until now nothing checked whether it got them, and
+        # a mismatch was absorbed silently at publish (_wrap_sections_specs folds
+        # surplus h2-groups into the LAST section). So a five-section design could
+        # publish as four sections plus a bloated fifth, and the run still reported
+        # success. The count is the design contract: retry on a mismatch, and if
+        # the retries do not produce it, say so instead of quietly reshaping the
+        # client's layout.
+        expected = len(ctx.blueprint_sections)
+        if expected:
+            got = len(parsed.get("sections") or [])
+            if got != expected:
+                shortfall = f"returned {got} sections, the layout has {expected} slots"
+                notes.append(f"attempt {attempt + 1} rejected: {shortfall}")
+                if attempt < MAX_REPAIRS:
+                    forbidden = []
+                    continue
+                # Out of repairs: keep the outline (partial copy beats none) but
+                # the stage is NOT ok, so the job lands for review rather than
+                # sailing through as conformant.
+                outline = parsed
+                ctx.outline = outline
+                return ctx.record(StageResult(
+                    STAGE, outcome="degraded",
+                    notes=(*notes, f"outline does not match the stored design: {shortfall}"),
+                    data={"sections": got, "expected_sections": expected},
+                    cost=accounting.cost, llm_calls=accounting.calls,
+                    input_tokens=accounting.input_tokens,
+                    output_tokens=accounting.output_tokens,
+                    cache_write_tokens=accounting.cache_write_tokens,
+                    cache_read_tokens=accounting.cache_read_tokens,
+                    chunk_ids=tuple(accounting.chunk_ids),
+                ))
         outline = parsed
 
         headings = heading_text(outline)

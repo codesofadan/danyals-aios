@@ -361,7 +361,13 @@ class Settings(BaseSettings):
     # engines land a job at `needs_review` and share the publish path.
     content_engine: str = "v2"
     content_research_model: str = "claude-sonnet-5"  # web-search Claude for the page-set recommender
-    content_research_count: int = 12  # recommended pages returned per research call (default cap)
+    # Pages returned per BULK PAGE RESEARCH (the default cap; the caller may still
+    # ask for more). Five, not twelve, on the owner's 2026-09-17 instruction: a bulk
+    # research proposes a small set built around ONE topical map (the recommender
+    # already returns a pillar + its supporting spokes), and those pages then go
+    # through the full build. Twelve pages is more than one cluster honestly holds,
+    # so the tail of the set drifted away from the pillar it was supposed to support.
+    content_research_count: int = 5
     content_research_max_searches: int = 6  # web_search tool max_uses per recommend lookup
     content_research_max_tokens: int = 4096  # bound the JSON page-set reply (a list of items)
     # --- Site-design EXTRACTOR (POST /content/site-design). Before a page is published

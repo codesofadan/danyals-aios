@@ -43,6 +43,7 @@ from app.core.security import PrivateAddressError, validate_public_host
 from app.db.clients_repo import ClientsRepo, ClientsRepoDep
 from app.db.content_repo import ContentRepo, ContentRepoDep
 from app.logging_setup import get_logger
+from app.modules.content_planning.repo import ContentPlanningStore
 from app.schemas.content import (
     ContentBulkGenerateRequest,
     ContentBulkGenerateResponse,
@@ -1016,10 +1017,79 @@ async def analyze_site_design(
 
         result = await asyncio.to_thread(_run)
     profile = SiteDesignProfile.model_validate(result.profile.as_dict()) if result.profile else None
+
+    # PERSIST, when the capture is for a known client and actually succeeded. This is
+    # the seam the whole design-conformance story hangs on: before it existed the
+    # measured design lived only in the wizard's React state, so it died on a refresh
+    # and no generated page was ever built to it. A degraded result is NEVER stored -
+    # a defaulted profile saved as a client's design system would be indistinguishable
+    # from a measured one the next time a page is generated.
+    saved_kit_id: str | None = None
+    saved_version: int | None = None
+    save_error = ""
+    if body.client_id and profile is not None and result.status == "ok":
+        try:
+            saved_kit_id, saved_version = await asyncio.to_thread(
+                _persist_brand_kit,
+                client_id=body.client_id,
+                source_url=body.site,
+                profile=profile,
+            )
+        except Exception as exc:  # never lose the analysis over a storage failure
+            save_error = type(exc).__name__
+            logger.error(
+                "brand_kit_save_failed",
+                client_id=body.client_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
     await record_activity(
         actor, kind="content", action="analyzed target site design", target=body.site,
     )
-    return SiteDesignResponse(status=result.status, profile=profile, reason=result.reason)
+    return SiteDesignResponse(
+        status=result.status,
+        profile=profile,
+        reason=result.reason,
+        saved_kit_id=saved_kit_id,
+        saved_version=saved_version,
+        save_error=save_error,
+    )
+
+
+def _persist_brand_kit(
+    *, client_id: str, source_url: str, profile: SiteDesignProfile
+) -> tuple[str, int]:
+    """Store ``profile`` as the client's active brand kit; return (id, version).
+
+    Blocking (psycopg), so callers run it off the event loop. The store handles
+    versioning and the deactivate-then-insert transaction; a new capture never
+    overwrites the kit that already-published pages were built to.
+    """
+    store = ContentPlanningStore()
+    layout = profile.layout
+    kit_id = store.save_brand_kit(
+        client_id=client_id,
+        source_url=source_url,
+        palette=profile.palette.model_dump(),
+        typography=profile.typography.model_dump(),
+        # The measured design has no separate spacing block; its spacing cue lives
+        # on components. Stored under its own key so a later, richer capture can
+        # fill it without a migration.
+        spacing={"scale": profile.components.spacing_scale},
+        components=profile.components.model_dump(),
+        # The ordered section blueprint WITH its capacities - this is what
+        # resolve_blueprint reads back to shape every future page.
+        blueprint=[section.model_dump() for section in layout.blueprint],
+        raw_measurements={
+            "container_width": layout.container_width,
+            "section_order": list(layout.section_order),
+            "hero_style": layout.hero_style,
+            "cta_style": layout.cta_style,
+            "notes": profile.notes,
+        },
+    )
+    kit = store.active_brand_kit(client_id) or {}
+    return kit_id, int(kit.get("version") or 1)
 
 
 # --------------------------------------------------------------------------- #

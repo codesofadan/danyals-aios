@@ -129,6 +129,34 @@ export const PARKED: ParkedEntry[] = [
       "turns out to be missed, then delete the file.",
   },
 
+  // --- Design replication: one door, and it is inside the content flow --------
+  // The card on /admin/wordpress was the SECOND place design work could start, and
+  // the weaker one: it rebuilds a single page and writes no copy, so an operator who
+  // wanted pages built on a replicated design replicated there and then began again
+  // in Content. Screen 3 of /admin/content/new (StepBrief) offers all three design
+  // sources - measure the client's site, replicate any URL, reuse an earlier
+  // replication - and reads this component's own runs back out of the job ledger, so
+  // no replication anyone has already paid for is stranded by the removal.
+  //
+  // Kept rather than deleted for a capability the flow does NOT have: POST /replica
+  // also publishes the rebuilt page to the client's WordPress site as native
+  // Elementor, and this is its only caller. The content flow consumes a measured
+  // design profile; it does not rebuild one existing page onto a site.
+  {
+    path: "wordpress/DesignReplicator.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-17 owner instruction that design replication live in the content flow",
+    reason:
+      "\"Don't keep the design replication in a separate page - keep it in the same " +
+      "page of content, so design analysis and replication is added in the current " +
+      "flow of content not separately.\" Two doors onto the same capture, one of " +
+      "which could not write the pages that use it, is what made design a detour.",
+    reEnableWhen:
+      "Rebuilding ONE page the client already owns as an Elementor page is wanted as " +
+      "its own action again - that publish path belongs to this component alone. It " +
+      "was green when unmounted and keeps its tests (DesignReplicator.test.tsx).",
+  },
+
   // --- Phase-1 screen grammar: built ahead of the screens that mount them ----
   // The approved Screen & Hierarchy Specification (plan of 2026-08-27) builds the
   // shared vocabulary FIRST, then migrates screens onto it phase by phase. These

@@ -98,10 +98,56 @@ async def create_client(body: ClientCreate, repo: ClientsRepoDep, actor: ManageC
             )
         except Exception:
             logger.warning("client_business_profile_seed_failed", client_id=client_id)
+    # Seed the client's KEYWORD BANK. Same best-effort contract as the NAP above.
+    # The content module targets terms from this client's bank, so seeding it with
+    # the profile is what connects onboarding to content: before this, onboarding's
+    # "Build keyword seed list" step was a checklist tickbox with no data behind it,
+    # and every content run started from an empty bank.
+    #
+    # Seeds carry no volume/difficulty and are written as `manual`, so a seeded row
+    # is never mistaken for a measured one; research enriches them later.
+    if body.keywords:
+        try:
+            await asyncio.to_thread(
+                _seed_keyword_bank,
+                actor_id=actor.id,
+                client_id=client_id,
+                client_name=body.cn,
+                geo=body.keyword_geo.strip() or None,
+                keywords=body.keywords,
+            )
+        except Exception:
+            logger.warning("client_keyword_seed_failed", client_id=client_id)
     await asyncio.to_thread(
         seed_onboarding_for_client, actor.id, client_id, body.cn, actor.id, actor.name
     )
     return ClientResponse.from_row(row, site_count=0)
+
+
+def _seed_keyword_bank(
+    *,
+    actor_id: str,
+    client_id: str,
+    client_name: str,
+    geo: str | None,
+    keywords: list[str],
+) -> None:
+    """Write the client's seed terms into their keyword bank (blocking; psycopg).
+
+    Reuses the keyword-research module's own writer through its repo rather than
+    touching `public.keywords` here, so the bank has exactly one set of rules about
+    dedupe, source and the client snapshot. A duplicate term is skipped by the
+    repo's `on conflict do nothing`, which makes re-running this harmless.
+    """
+    from app.modules.keyword_research.repo import KeywordRepo
+
+    KeywordRepo(actor_id).add_keywords(
+        client_id=client_id,
+        client_name=client_name,
+        geo=geo,
+        keywords=keywords,
+        created_by=actor_id,
+    )
 
 
 @router.get("/clients/report-grants", response_model=dict[str, list[str]])

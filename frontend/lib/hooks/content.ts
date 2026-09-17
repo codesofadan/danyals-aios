@@ -223,11 +223,25 @@ export function useGenerateFromResearch() {
 // can be built to MATCH it. A single paid call metered under the content dial; a
 // keyless / dial-blocked / failed analysis DEGRADES (200, status='degraded',
 // profile=null). retry:0 so a transient failure never double-spends.
-export type SiteDesignInput = { site: string; maxPages?: number };
+export type SiteDesignInput = {
+  site: string;
+  maxPages?: number;
+  /** Makes the capture PERSISTENT: the server stores the measured design as this
+   *  client's active brand kit (versioned), so pages generated for them afterwards
+   *  are built to it. Omitted, the analysis is a one-off preview that dies with the
+   *  request — which is how every capture behaved before 2026-09-17. */
+  clientId?: string;
+};
 export type SiteDesignResult = {
   status: "ok" | "degraded";
   profile: SiteDesignProfile | null;
   reason: string;
+  /** What was PERSISTED. Both are null when no `clientId` was sent, and also when a
+   *  save was attempted and FAILED - hence `saveError`: an operator told the design
+   *  is stored, who later finds it never was, has built a run of pages on nothing. */
+  savedKitId: string | null;
+  savedVersion: number | null;
+  saveError: string;
 };
 
 export function useSiteDesign() {

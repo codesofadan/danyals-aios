@@ -47,8 +47,14 @@ export const ADMIN_NAV: NavGroup[] = [
     items: [
       { icon: "fact_check", label: "Audit", href: "/admin/audit", keywords: "seo scan report audit paid depth engine findings" },
       { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads free audits public prospects funnel pipeline" },
-      { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard" },
-      { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections replicate replica design elementor sites cms plugin" },
+      // Carries the replication keywords the WordPress entry gave up: measuring and
+      // replicating a design is a step of this flow now, so this is where a search
+      // for it should land.
+      { icon: "article", label: "Content", href: "/admin/content", keywords: "articles writing draft publish wizard design replicate replica elementor bulk page research" },
+      // Connections only. The replication keywords are gone with the card: design
+      // replication now lives on screen 3 of the content flow, so searching "replicate"
+      // must not steer an operator to a screen that no longer does it.
+      { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections sites cms plugin credentials" },
       { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "citations nap directories listings local business profile aggregator yelp" },
       { icon: "assignment_turned_in", label: "Citation queue", href: "/admin/citations/queue", keywords: "citation queue work items operator finish listing by hand manual" },
       { icon: "grid_on", label: "Grid Tracking", href: "/admin/grid", keywords: "grid geo heat map local pack rank service area coverage map pack proximity" },

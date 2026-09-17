@@ -115,6 +115,21 @@ class ClientCreate(BaseModel):
     # name/address to submit. Optional: an omitted (or empty) profile is simply not
     # persisted - the operator fills it in later from the Edit modal.
     business: ClientBusinessProfileInput | None = None
+    # The client's SEED KEYWORD BANK, captured with the profile. The content module
+    # targets terms from this client's bank (`public.keywords`), so a client created
+    # without one starts with an empty bank and every content run has to invent its
+    # own targets - which is how content and rank tracking drift apart, each chasing
+    # different terms. Onboarding has always had a "Build keyword seed list" STEP,
+    # but it was a checklist tickbox with no data behind it.
+    #
+    # Seeds only: bare terms with no volume/difficulty. Research enriches them later,
+    # and the bank records `source` so a seeded row is never mistaken for a measured
+    # one. Bounded so the create endpoint cannot be used for a bulk import.
+    keywords: list[str] = Field(default_factory=list, max_length=200)
+    # The market these seeds are for, when the client is local. Part of the bank's
+    # uniqueness key (client, keyword, geo), so the same term in two markets is two
+    # honest rows rather than one that silently overwrites the other.
+    keyword_geo: str = Field(default="", alias="keywordGeo", max_length=120)
 
     def to_row(self) -> dict[str, Any]:
         return {

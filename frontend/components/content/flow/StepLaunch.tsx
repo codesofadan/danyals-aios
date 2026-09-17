@@ -55,9 +55,16 @@ export default function StepLaunch({
         // backend applies its own fallback - first registered site, else none.
         ...(state.siteRegistered && state.siteDomain ? { siteDomain: state.siteDomain } : {}),
         framework: state.framework,
-        // An explicit template wins over the kind's default blueprint; "Auto"
-        // falls back to the blueprint the chosen page kind derives.
-        template: state.template !== "Auto" ? state.template : kind.template,
+        // The template is OMITTED when a design was measured or replicated. This used
+        // to be sent unconditionally - the page kind's default blueprint when the
+        // operator had picked nothing - so every request carried a template choice
+        // that had never been made. The server now prefers the measured design, so
+        // this no longer changes what gets built; it stops the payload asserting an
+        // intent the operator never expressed. With no design, an explicit pick wins
+        // over the kind's default blueprint, which "Auto" falls back to.
+        ...(state.design
+          ? {}
+          : { template: state.template !== "Auto" ? state.template : kind.template }),
         target: state.target,
         proofPoints: lines(state.proof).slice(0, 12),
         testimonials: lines(state.testimonials).slice(0, 12),

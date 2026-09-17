@@ -134,13 +134,29 @@ class SiteDesignTypography(BaseModel):
 
 class SiteDesignSection(BaseModel):
     """ONE section of the analyzed page blueprint: its ``kind`` (section-type name),
-    the ``heading`` shown, and the ``layout`` variant. The ordered list of these IS
-    the deep page blueprint - the exact section-by-section sequence a matching page
-    follows. Snake_case, no aliases: it round-trips into ``source_pack`` unchanged."""
+    the ``heading`` shown, the ``layout`` variant, and the section's measured
+    CAPACITY. The ordered list of these IS the deep page blueprint - the exact
+    section-by-section sequence a matching page follows. Snake_case, no aliases: it
+    round-trips into ``source_pack`` unchanged.
+
+    The capacity fields carry what the analyzer MEASURED on the client's own page:
+    how many repeated items the section holds, and the heading / body character
+    budgets it was built for. They exist because generation needs them - a page
+    that matches a design's section sequence but overflows every one of its slots
+    does not match the design. They used to be measured and then dropped right
+    here at the wire boundary, so ``SectionSpec.max_items`` was always 0 in
+    production and the generator wrote to no budget at all.
+
+    Zero means "not measured", never "zero capacity" - a consumer treats 0 as
+    absent and falls back to the template default.
+    """
 
     kind: str = "section"
     heading: str = ""
     layout: str = "stacked"
+    items: int = Field(default=0, ge=0, le=64)
+    heading_chars: int = Field(default=0, ge=0, le=512)
+    body_chars: int = Field(default=0, ge=0, le=8192)
 
 
 class SiteDesignLayout(BaseModel):
@@ -541,22 +557,38 @@ class SiteDesignRequest(BaseModel):
 
     ``site`` is the target site URL (SSRF-guarded server-side); ``maxPages`` optionally
     caps how many same-domain pages (homepage + internal) are fetched, defaulting to
-    the ``content_design_max_pages`` setting when omitted."""
+    the ``content_design_max_pages`` setting when omitted.
+
+    ``clientId`` makes the capture PERSISTENT: the measured design is stored as that
+    client's active brand kit (versioned, never overwritten), so every page generated
+    for them afterwards is built to it. Without a client id the analysis is a
+    one-off preview and dies with the request - which is how every capture behaved
+    before 2026-09-17, including the ones operators believed they had saved."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     site: str = Field(min_length=1, max_length=2048)
     max_pages: int | None = Field(default=None, alias="maxPages", ge=1, le=10)
+    client_id: str | None = Field(default=None, alias="clientId", max_length=64)
 
 
 class SiteDesignResponse(BaseModel):
     """The extracted design profile (or a clean degraded shell). ``reason`` is populated
     only when ``status='degraded'`` (keyless / dial-blocked / analysis failed); a
-    degraded result carries ``profile=None``."""
+    degraded result carries ``profile=None``.
+
+    ``savedKitId`` / ``savedVersion`` report what was PERSISTED. They are null when
+    no ``clientId`` was sent (a preview), and also when a save was attempted and
+    failed - which is why the save outcome is reported rather than assumed: an
+    operator who is told the design is stored, and finds later that it never was,
+    has generated a run of pages against nothing."""
 
     status: Literal["ok", "degraded"]
     profile: SiteDesignProfile | None = None
     reason: str = ""
+    saved_kit_id: str | None = Field(default=None, serialization_alias="savedKitId")
+    saved_version: int | None = Field(default=None, serialization_alias="savedVersion")
+    save_error: str = Field(default="", serialization_alias="saveError")
 
 
 class SiteNavigationRequest(BaseModel):

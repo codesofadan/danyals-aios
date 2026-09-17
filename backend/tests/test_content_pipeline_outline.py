@@ -171,3 +171,93 @@ def test_first_party_facts_reach_the_prompt_as_the_only_allowed_facts() -> None:
     run_outline(_ctx(facts=("1,284 emergency calls in 2025",)), writer=writer, store=_Store())
     assert "1,284 emergency calls in 2025" in writer.prompts[0]
     assert "NOTHING else as fact" in writer.prompts[0]
+
+
+# --------------------------------------------------------------------------- #
+# Design conformance: the stored blueprint's section COUNT is a contract.
+# --------------------------------------------------------------------------- #
+# The prompt has always asked for "EXACTLY N sections, one per slot, IN THIS ORDER".
+# Nothing checked whether it got them. A mismatch was absorbed silently at publish -
+# `_wrap_sections_specs` folds surplus h2-groups into the LAST section - so a
+# five-section design could publish as four sections plus a bloated fifth and the run
+# still reported success. These pin the count as a contract, not a request.
+_FIVE_SLOTS = (
+    ("hero", "Roof repair in Austin"),
+    ("intro", "What we do"),
+    ("services", "Our services"),
+    ("proof", "What customers say"),
+    ("cta", "Get a quote"),
+)
+
+
+def test_an_outline_matching_the_slot_count_is_accepted() -> None:
+    writer = _Writer([_outline("Hero", "Intro", "Services", "Proof", "Call us")])
+    ctx = _ctx(blueprint_sections=_FIVE_SLOTS)
+
+    result = run_outline(ctx, writer=writer, store=None)
+
+    assert result.outcome == "ok"
+    assert len(ctx.outline["sections"]) == 5
+    assert len(writer.prompts) == 1  # accepted first time, no wasted repair
+
+
+def test_a_short_outline_is_retried_against_the_stored_design() -> None:
+    """Three sections for a five-slot layout is a design violation, not a style
+    choice. Re-inject by deleting the `expected` check in run_outline and this
+    fails: the short outline sails through as ``ok``."""
+    writer = _Writer([
+        _outline("Hero", "Intro", "Call us"),                       # 3 - rejected
+        _outline("Hero", "Intro", "Services", "Proof", "Call us"),  # 5 - accepted
+    ])
+    ctx = _ctx(blueprint_sections=_FIVE_SLOTS)
+
+    result = run_outline(ctx, writer=writer, store=None)
+
+    assert result.outcome == "ok"
+    assert len(ctx.outline["sections"]) == 5
+    assert len(writer.prompts) == 2  # it retried rather than accepting the short one
+
+
+def test_an_overlong_outline_is_retried_too() -> None:
+    """Surplus sections are the more dangerous direction: they do not fail loudly,
+    they get folded into the last section at publish and silently reshape the page."""
+    writer = _Writer([
+        _outline("Hero", "Intro", "Services", "Proof", "Extra", "More", "Call us"),
+        _outline("Hero", "Intro", "Services", "Proof", "Call us"),
+    ])
+    ctx = _ctx(blueprint_sections=_FIVE_SLOTS)
+
+    result = run_outline(ctx, writer=writer, store=None)
+
+    assert result.outcome == "ok"
+    assert len(ctx.outline["sections"]) == 5
+
+
+def test_a_persistent_mismatch_degrades_instead_of_reporting_success() -> None:
+    """When the retries do not produce the layout, the job must land for review
+    saying so - never report ``ok`` on a page that does not match the design the
+    client's pages are supposed to conform to."""
+    writer = _Writer([_outline("Hero", "Intro", "Call us")])  # always 3
+    ctx = _ctx(blueprint_sections=_FIVE_SLOTS)
+
+    result = run_outline(ctx, writer=writer, store=None)
+
+    assert result.outcome == "degraded"
+    assert result.data["expected_sections"] == 5
+    assert result.data["sections"] == 3
+    assert any("does not match the stored design" in n for n in result.notes)
+    assert len(writer.prompts) == MAX_REPAIRS + 1  # it really did use its repairs
+    # The copy is still kept: a partial outline an operator can fix beats nothing.
+    assert ctx.outline["sections"]
+
+
+def test_a_page_with_no_stored_design_is_unconstrained() -> None:
+    """No blueprint means no contract - an article-shaped page plans freely, exactly
+    as every page did before conformance existed."""
+    writer = _Writer([_outline("A", "B")])
+    ctx = _ctx()
+
+    result = run_outline(ctx, writer=writer, store=None)
+
+    assert result.outcome == "ok"
+    assert len(writer.prompts) == 1
