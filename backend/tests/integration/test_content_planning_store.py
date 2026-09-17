@@ -217,6 +217,78 @@ def test_a_client_with_no_kit_reads_as_none(store: Any) -> None:
     assert store.active_brand_kit(_client_id(store)) is None
 
 
+# --------------------------------------------------------------------------- #
+# Approval (0146): a capture is not the client's design system until a human says so
+# --------------------------------------------------------------------------- #
+def test_an_unapproved_capture_is_active_but_not_approved(store: Any) -> None:
+    """The distinction the whole gate rests on, proven in Postgres rather than
+    against a fake. `active` answers "which capture is current"; `approved_at`
+    answers "has a human accepted it". Generation reads the second."""
+    client_id = _client_id(store)
+    _kit(store, client_id)
+
+    assert store.active_brand_kit(client_id) is not None
+    assert store.approved_brand_kit(client_id) is None
+
+
+def test_approving_a_kit_makes_it_the_one_generation_builds_to(store: Any) -> None:
+    client_id = _client_id(store)
+    kit_id = _kit(store, client_id)
+
+    row = store.approve_brand_kit(kit_id=kit_id, approved_by=None)
+    assert row is not None and row["approved_at"] is not None
+
+    approved = store.approved_brand_kit(client_id)
+    assert approved is not None and str(approved["id"]) == kit_id
+
+
+def test_a_capture_approved_at_save_time_is_immediately_usable(store: Any) -> None:
+    """A lead's own capture is approved in the same write, so the operator who
+    measured it does not have to go and accept their own work."""
+    client_id = _client_id(store)
+    kit_id = _kit(store, client_id, approved_by=None)
+    assert store.approved_brand_kit(client_id) is None  # no approver -> pending
+
+    store.approve_brand_kit(kit_id=kit_id, approved_by=None)
+    assert store.approved_brand_kit(client_id) is not None
+
+
+def test_a_fresh_capture_does_not_unpublish_the_approved_one(store: Any) -> None:
+    """THE ORDER THAT MAKES THIS SAFE. Re-capturing makes the new kit ACTIVE, but
+    until someone approves it the previously approved kit must keep building pages -
+    otherwise a routine re-measure would silently drop a live campaign back to a
+    template mid-run."""
+    client_id = _client_id(store)
+    first = _kit(store, client_id, palette={"primary": "#111111"})
+    store.approve_brand_kit(kit_id=first, approved_by=None)
+
+    second = _kit(store, client_id, palette={"primary": "#222222"})
+
+    active = store.active_brand_kit(client_id)
+    approved = store.approved_brand_kit(client_id)
+    assert str(active["id"]) == second, "the new capture is current"
+    assert str(approved["id"]) == first, "but pages still build to the approved one"
+    assert approved["palette"]["primary"] == "#111111"
+
+
+def test_the_newest_approval_wins_once_the_new_capture_is_accepted(store: Any) -> None:
+    client_id = _client_id(store)
+    first = _kit(store, client_id, palette={"primary": "#111111"})
+    store.approve_brand_kit(kit_id=first, approved_by=None)
+    second = _kit(store, client_id, palette={"primary": "#222222"})
+    store.approve_brand_kit(kit_id=second, approved_by=None)
+
+    approved = store.approved_brand_kit(client_id)
+    assert str(approved["id"]) == second
+    assert approved["palette"]["primary"] == "#222222"
+
+
+def test_approving_an_unknown_kit_returns_none_rather_than_raising(store: Any) -> None:
+    assert store.approve_brand_kit(
+        kit_id="00000000-0000-0000-0000-000000000000", approved_by=None
+    ) is None
+
+
 def test_the_same_asset_bytes_are_stored_once(store: Any) -> None:
     """Content-addressed dedup. A logo appearing on every captured page is fetched
     once and stored once - `on conflict do nothing` rather than an existence check,
