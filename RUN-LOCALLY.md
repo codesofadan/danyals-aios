@@ -78,5 +78,5 @@ requiring a BYPASSRLS superuser owner, or the SECURITY DEFINER helpers recurse
 through `users_select`. Stop the API/worker/beat first so nothing holds a connection.
 
 Prereqs are already installed: `frontend/node_modules`, the `backend/.venv` Python
-environment, and `danyals-audit-system/.venv` (the audit engine's own isolated venv,
+environment, and `backend/danyals-audit-system/.venv` (the audit engine's own isolated venv,
 mirroring `/opt/audit-venv` in the prod image).

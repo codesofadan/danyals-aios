@@ -117,10 +117,10 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
-    # --- Audit engine (Module 01). The SEO audit engine (danyals-audit-system)
+    # --- Audit engine (Module 01). The SEO audit engine (backend/danyals-audit-system)
     # is a SEPARATE Python product with its OWN dependency set; it is invoked as
     # an EXTERNAL subprocess using ITS OWN interpreter, never imported here. ---
-    audit_engine_dir: str | None = None  # repo root of danyals-audit-system
+    audit_engine_dir: str | None = None  # repo root of backend/danyals-audit-system
     audit_engine_python: str | None = None  # interpreter inside that repo's venv
     # Worker-owned hard timeout for one engine run. MUST be < the Celery
     # task_time_limit (1800) so the worker kills a hung engine (which never
@@ -1137,7 +1137,7 @@ def apply_provider_env(settings: Settings) -> None:
     its child env from ``os.environ``, and the engine's ``load_dotenv`` is called
     WITHOUT ``override=True`` - so a value present here wins over the engine's own
     committed ``.env``. Without this export the engine would keep using whatever key
-    is sitting in ``danyals-audit-system/.env``.
+    is sitting in ``backend/danyals-audit-system/.env``.
 
     Idempotent, and a blank setting is a no-op: absent configuration must never
     silently rewrite a host the operator did not ask to change.

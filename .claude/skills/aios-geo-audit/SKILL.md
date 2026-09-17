@@ -78,4 +78,4 @@ Data gaps / [NEEDS:]: <verbatim or "none">   -> route to a human
 Next: <fix extractability / structure | re-audit via /aios-audit (Paid) | manual citation probe>
 ```
 
-Rubric enforced (reference, not inlined): the A5 GEO SOP `danyals-audit-system/.claude/agents/onpage/a5-geo-ai-search.md`, `danyals-audit-system/checklists/on-page.yaml` (ON-048/049, ON-100..107) + `off-page.yaml` (OFF-067..069), and `backend/docs/CONTENT-DOCTRINE.md` §4 (extractable answer). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): the A5 GEO SOP `backend/danyals-audit-system/.claude/agents/onpage/a5-geo-ai-search.md`, `backend/danyals-audit-system/checklists/on-page.yaml` (ON-048/049, ON-100..107) + `off-page.yaml` (OFF-067..069), and `backend/docs/CONTENT-DOCTRINE.md` §4 (extractable answer). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

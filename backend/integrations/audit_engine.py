@@ -1,4 +1,4 @@
-"""Adapter for the external SEO audit engine (``danyals-audit-system``).
+"""Adapter for the external SEO audit engine (``backend/danyals-audit-system``).
 
 The engine is a SEPARATE Python product with its OWN dependency set. We never
 import it; we invoke its CLI as an external SUBPROCESS using ITS OWN interpreter

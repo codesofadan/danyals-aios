@@ -76,4 +76,4 @@ By area: GBP <n> · Citations/NAP <n> · Reviews <n> · LocalPack/Geo <n>
 Next: <fix roadmap | reconcile NAP via /aios-citation-builder | re-audit via /aios-audit (Paid)>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` (LOC-* checks) and the Team D SOPs `danyals-audit-system/.claude/agents/local/d1..d4*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/local.yaml` (LOC-* checks) and the Team D SOPs `backend/danyals-audit-system/.claude/agents/local/d1..d4*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

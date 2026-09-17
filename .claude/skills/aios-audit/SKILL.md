@@ -78,4 +78,4 @@ Recommended next:
   <or: run Paid types (spends, cost-gated) | pull report.pdf>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/README.md` (the 339-check taxonomy + ID prefixes ON-/TECH-/OFF-/LOC-) and the meta SOPs `danyals-audit-system/.claude/agents/meta/m1-orchestrator.md`, `m2-prioritizer.md` (severity x score x confidence ranking). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/README.md` (the 339-check taxonomy + ID prefixes ON-/TECH-/OFF-/LOC-) and the meta SOPs `backend/danyals-audit-system/.claude/agents/meta/m1-orchestrator.md`, `m2-prioritizer.md` (severity x score x confidence ranking). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

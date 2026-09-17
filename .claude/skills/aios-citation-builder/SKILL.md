@@ -101,4 +101,4 @@ Excluded by RLS (bulk): <n or "none">
 Next: <supply canonical NAP | continue Update pass | re-monitor drift>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` and the Team D SOP `danyals-audit-system/.claude/agents/local/d2-citations-nap.md` (LOC-011..020: citation audit, consistency, NAP exactness, aggregators). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/local.yaml` and the Team D SOP `backend/danyals-audit-system/.claude/agents/local/d2-citations-nap.md` (LOC-011..020: citation audit, consistency, NAP exactness, aggregators). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

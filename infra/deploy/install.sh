@@ -257,7 +257,7 @@ else
 fi
 
 # --- 7.5 Audit engine (Module 01): its OWN venv + a headless browser -----------
-# The engine (danyals-audit-system) is a SEPARATE product with its OWN interpreter
+# The engine (backend/danyals-audit-system) is a SEPARATE product with its OWN interpreter
 # (AUDIT_ENGINE_PYTHON), invoked by the worker as a subprocess - it is NOT part of
 # the backend venv above. A full audit CRAWLS with Playwright and RENDERS the
 # consulting report.pdf with a headless browser; on a server with no system Chrome

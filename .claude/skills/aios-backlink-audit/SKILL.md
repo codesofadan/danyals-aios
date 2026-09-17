@@ -69,4 +69,4 @@ Note: toxic = queued for disavow review, NOT submitted to Google.
 Next: <LEAD confirm threshold | export disavow set for review | re-monitor>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` and the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1-backlink-profile.md` (OFF-001..016, 070/071 profile) + `c2-anchor-toxicity.md` (OFF-007/008 toxicity, OFF-017..023 anchors, OFF-036..040 PBN/disavow). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/off-page.yaml` and the Team C SOPs `backend/danyals-audit-system/.claude/agents/offpage/c1-backlink-profile.md` (OFF-001..016, 070/071 profile) + `c2-anchor-toxicity.md` (OFF-007/008 toxicity, OFF-017..023 anchors, OFF-036..040 PBN/disavow). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

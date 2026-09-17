@@ -140,7 +140,7 @@ def test_every_real_evidence_blob_on_disk_renders_safely():
     A unit test over invented dicts proves the rules; this proves the rules
     cover what the engine ACTUALLY emits.
     """
-    root = (pathlib.Path(__file__).resolve().parents[2]
+    root = (pathlib.Path(__file__).resolve().parents[1]
             / "danyals-audit-system" / "data" / "audits")
     if not root.exists():  # pragma: no cover - engine artifacts absent
         pytest.skip("engine run artifacts not present in this checkout")

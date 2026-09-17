@@ -14,13 +14,13 @@ daniyals-frontend
 **/.next
 
 # Sibling trees the backend image never needs (keep the root context lean + fast).
-# NOTE: danyals-audit-system IS now built into the image (the worker subprocess-invokes
+# NOTE: backend/danyals-audit-system IS now built into the image (the worker subprocess-invokes
 # it as the audit engine), so it is NO LONGER excluded wholesale — only its heavy /
 # unneeded subtrees are dropped from the context below.
-danyals-audit-system/data
-danyals-audit-system/generated-audits
-danyals-audit-system/tests
-danyals-audit-system/docs
+backend/danyals-audit-system/data
+backend/danyals-audit-system/generated-audits
+backend/danyals-audit-system/tests
+backend/danyals-audit-system/docs
 aios
 aios-skills
 .claude

@@ -44,7 +44,7 @@ ARG PKG_SPEC=".[ai,automation]"
 RUN pip install --upgrade pip && pip install "${PKG_SPEC}" \
     && python -P -c "import importlib.util as u, sys; miss=[m for m in ('app','app.db.rls_check','workers','integrations') if u.find_spec(m) is None]; sys.exit('BUILD ABORT — backend packages missing from the venv: '+', '.join(miss)) if miss else print('backend package import-check OK')"
 
-# --- audit engine (danyals-audit-system): its OWN venv, kept SEPARATE from the backend
+# --- audit engine (backend/danyals-audit-system): its OWN venv, kept SEPARATE from the backend
 # venv so their dependency sets can never clash (the reason it was external in the first
 # place). The Celery worker invokes it as a subprocess (integrations/audit_engine.py).
 # CORE install only — the curl_cffi browser-impersonating crawler + the deterministic
@@ -52,7 +52,7 @@ RUN pip install --upgrade pip && pip install "${PKG_SPEC}" \
 # (a JS-render fallback) and WeasyPrint (PDF rasteriser) are OPTIONAL backends the engine
 # SKIPS gracefully when absent, so a free-mode run still writes run.json (0-100 scores)
 # + findings.json. Prove the CLI imports so a broken engine fails the BUILD, not runtime.
-COPY danyals-audit-system /src-audit
+COPY backend/danyals-audit-system /src-audit
 RUN python -m venv /opt/audit-venv \
     && /opt/audit-venv/bin/pip install --upgrade pip \
     && /opt/audit-venv/bin/pip install /src-audit markdown pygments anthropic \
@@ -89,7 +89,7 @@ RUN (playwright install chromium && chmod -R a+rX /opt/ms-playwright) \
 # templates from its CWD (AUDIT_ENGINE_DIR) and writes artifacts under <dir>/data/, so
 # the source ships here (its data/ is git+docker-ignored; a writable one is made below).
 COPY --from=builder /opt/audit-venv /opt/audit-venv
-COPY danyals-audit-system /app/audit-engine
+COPY backend/danyals-audit-system /app/audit-engine
 
 WORKDIR /app
 # Migrations + the bootstrap entrypoint the `migrate` one-shot service runs. The

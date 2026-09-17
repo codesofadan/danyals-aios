@@ -93,7 +93,7 @@ _BINARY_OK_PREFIXES: tuple[str, ...] = (
     "docs/",                       # the client PDF pack, reference PDFs
     "frontend/public/",            # served assets
     "tools/wordpress-demo/",       # a demo article and its featured image
-    "danyals-audit-system/",       # the vendored engine's own fixtures
+    "backend/danyals-audit-system/",  # the vendored engine's own fixtures
 )
 
 # EMPTY, and it should stay that way. SEO-CONTENT-OS.zip used to sit here: it was the

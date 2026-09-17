@@ -76,4 +76,4 @@ By area: crawl/index <n> · CWV <n> · rendering <n> · schema <n> · security <
 Next: <fix roadmap week1 / month1 | re-audit via /aios-audit after fixes>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/technical.yaml` (TECH-* checks) and the Team B SOPs `danyals-audit-system/.claude/agents/technical/b1..b5*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/technical.yaml` (TECH-* checks) and the Team B SOPs `backend/danyals-audit-system/.claude/agents/technical/b1..b5*.md`; prioritization per `.../agents/meta/m2-prioritizer.md`. Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

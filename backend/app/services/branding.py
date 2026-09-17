@@ -60,11 +60,11 @@ def _candidates() -> list[Path]:
     engine_dir = getattr(get_settings(), "audit_engine_dir", None)
     if engine_dir:
         out.append(Path(engine_dir) / "branding.json")
-    # The platform and the engine are checked out side by side in every
-    # environment that has both; `parents[3]` is the shared root from
+    # The engine is vendored at backend/danyals-audit-system (moved from the
+    # repo root 2026-09-17); `parents[3]` is the repo root from
     # backend/app/services/branding.py.
     root = Path(__file__).resolve().parents[3]
-    out.append(root / "danyals-audit-system" / "branding.json")
+    out.append(root / "backend" / "danyals-audit-system" / "branding.json")
     out.append(root / "branding.json")
     return out
 

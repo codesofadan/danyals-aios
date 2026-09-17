@@ -105,4 +105,4 @@ Progress (poll /offpage/citations): <"not yet dispatched" | "check submitStatus 
 Next: <LEAD confirms the plan | poll for submitStatus | add a vault credential for a blocked direct-API engine>
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/local.yaml` and the Team D SOP `danyals-audit-system/.claude/agents/local/d2-citations-nap.md` (LOC-011..020: citation audit, consistency, NAP exactness, aggregators). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/local.yaml` and the Team D SOP `backend/danyals-audit-system/.claude/agents/local/d2-citations-nap.md` (LOC-011..020: citation audit, consistency, NAP exactness, aggregators). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

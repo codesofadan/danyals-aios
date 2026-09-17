@@ -78,4 +78,4 @@ Apply gate (closed loop):
 Applied result: <n/a | overlay now active v<version>, weight <weight>>
 ```
 
-Rubric enforced (reference, not inlined): the Policy KB (`GET /policy/kb`) and the affected-check mapping in `danyals-audit-system/checklists/*.yaml`; narrative discipline in `backend/docs/CONTENT-DOCTRINE.md`. Shared wiring + the closed-loop overlay contract: `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): the Policy KB (`GET /policy/kb`) and the affected-check mapping in `backend/danyals-audit-system/checklists/*.yaml`; narrative discipline in `backend/docs/CONTENT-DOCTRINE.md`. Shared wiring + the closed-loop overlay contract: `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

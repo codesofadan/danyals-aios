@@ -73,4 +73,4 @@ Route the work:
   web 2.0 build / approve       -> /aios-web2-build (LEAD; publishes; cost-gated)
 ```
 
-Rubric enforced (reference, not inlined): `danyals-audit-system/checklists/off-page.yaml` (OFF-* checks) + the Team C SOPs `danyals-audit-system/.claude/agents/offpage/c1..c4*.md`; citation/NAP rubric in `local.yaml` (D2). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): `backend/danyals-audit-system/checklists/off-page.yaml` (OFF-* checks) + the Team C SOPs `backend/danyals-audit-system/.claude/agents/offpage/c1..c4*.md`; citation/NAP rubric in `local.yaml` (D2). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

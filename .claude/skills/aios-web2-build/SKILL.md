@@ -115,4 +115,4 @@ Note: this skill never auto-publishes; approve is a deliberate LEAD action.
 Next: <LEAD reads draft + approves/rejects | re-plan on a different platform | monitor publish>
 ```
 
-Rubric enforced (reference, not inlined): draft quality per `backend/docs/CONTENT-DOCTRINE.md`; footprint/anchor safety per `danyals-audit-system/checklists/off-page.yaml` + the Team C SOP `danyals-audit-system/.claude/agents/offpage/c2-anchor-toxicity.md` (OFF-017..023 anchors, OFF-036 PBN footprint). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.
+Rubric enforced (reference, not inlined): draft quality per `backend/docs/CONTENT-DOCTRINE.md`; footprint/anchor safety per `backend/danyals-audit-system/checklists/off-page.yaml` + the Team C SOP `backend/danyals-audit-system/.claude/agents/offpage/c2-anchor-toxicity.md` (OFF-017..023 anchors, OFF-036 PBN footprint). Shared depth in `${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/reference/`.

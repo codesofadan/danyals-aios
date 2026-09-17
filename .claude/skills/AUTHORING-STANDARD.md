@@ -22,7 +22,7 @@ Authoritative sources this standard is built on (2026):
 - anthropics/skills — reference skills + spec: https://github.com/anthropics/skills
 - Internal ranking rubric skills MUST cite: `_shared/reference/CONTENT-DOCTRINE.md` (a verbatim mirror
   of `backend/docs/CONTENT-DOCTRINE.md` — the backend copy is the source of truth).
-- Internal audit SOPs skills mirror: `danyals-audit-system/.claude/agents/`, `danyals-audit-system/checklists/`
+- Internal audit SOPs skills mirror: `backend/danyals-audit-system/.claude/agents/`, `backend/danyals-audit-system/checklists/`
 
 ---
 
@@ -122,7 +122,7 @@ Bad: `Helps with content.` / `Creates a page then reviews it then publishes it.`
 
 Body ≤ **500 lines**, ideally far less. State what to do; don't narrate why at length (the
 rubric doc holds the "why"). Fixed section order — mirrors the audit-engine agent SOPs
-(`danyals-audit-system/.claude/agents/*` → *Checks you own · Inputs · Rubric · Hard rules ·
+(`backend/danyals-audit-system/.claude/agents/*` → *Checks you own · Inputs · Rubric · Hard rules ·
 Output*), tuned for operator skills:
 
 1. **`# <Verb-first Title>`** — e.g. `# Generate a Local Service Page`. One line.
@@ -221,7 +221,7 @@ only when needed.
 - **The ranking rubric is referenced, never inlined.** Content skills cite
   `_shared/reference/CONTENT-DOCTRINE.md` (the 14 QA dimensions, entity coverage, E-E-A-T,
   differentiation angle, frameworks). Audit skills cite the relevant
-  `danyals-audit-system/checklists/*.yaml` + agent SOP. One source of truth; skills point at
+  `backend/danyals-audit-system/checklists/*.yaml` + agent SOP. One source of truth; skills point at
   it. If a number changes, it changes in the doc (and the backend constant it governs) — not
   copied into 5 skills.
 - **Scripts: say run-vs-read.** *"Run `aios_client.py create-job …`"* (execute — the default;
