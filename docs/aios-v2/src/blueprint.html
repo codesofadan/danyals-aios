@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AIOS v2 — Build Blueprint</title>
+<style>
+/*FONTCSS*/
+</style>
+<style>
+:root{
+  --maroon:#6E1423; --maroon-2:#8C1D2E; --maroon-deep:#3F0E18;
+  --rose:#B85C6B; --rose-soft:#D89AA3;
+  --blush:#F8ECEE; --blush-2:#F1DADE; --line:#E8D2D7;
+  --ink:#241015; --white:#ffffff; --muted:#7A5A61;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+@page{ size:A4; margin:0 }
+html,body{background:#fff}
+body{
+  font-family:'Bricolage Grotesque',system-ui,-apple-system,Segoe UI,sans-serif;
+  color:var(--ink); font-weight:400;
+  -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  font-variant-ligatures:none;
+}
+.page{
+  width:210mm; height:296mm; background:#fff; position:relative;
+  padding:62px 58px 58px; overflow:hidden; page-break-after:always;
+}
+.page:last-child{page-break-after:auto}
+
+/* ---------- chrome ---------- */
+.ph{display:flex;justify-content:space-between;align-items:baseline;
+    border-bottom:2px solid var(--line); padding-bottom:12px; margin-bottom:34px}
+.ph .t{font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--maroon)}
+.ph .n{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.06em}
+.pf{position:absolute;left:58px;right:58px;bottom:30px;display:flex;
+    justify-content:space-between;align-items:center;
+    border-top:1px solid var(--line);padding-top:12px;
+    font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.08em}
+.pf b{color:var(--maroon);font-weight:800}
+
+/* ---------- type ---------- */
+.kicker{font-size:13px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;
+        color:var(--rose);margin-bottom:10px}
+h1.sec{font-size:43px;font-weight:800;line-height:1.02;letter-spacing:-.022em;
+       color:var(--maroon-deep);margin-bottom:14px}
+p.lede{font-size:16px;font-weight:450;line-height:1.45;color:var(--ink);max-width:640px;margin-bottom:26px}
+h2.sub{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--maroon);
+       margin:24px 0 12px}
+p,li{font-size:14.5px;font-weight:450;line-height:1.5}
+strong{font-weight:800}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px}
+
+/* ---------- layout ---------- */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.g5{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.gap8{gap:8px}
+
+/* ---------- cards ---------- */
+.card{background:var(--blush);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.card h3{font-size:17px;font-weight:800;color:var(--maroon-deep);margin-bottom:6px;letter-spacing:-.01em}
+.card p{font-size:13.5px;line-height:1.42;color:var(--ink)}
+.card .id{font-size:11px;font-weight:800;letter-spacing:.1em;color:var(--rose);margin-bottom:4px}
+.dark{background:var(--maroon-deep);border-color:var(--maroon-deep);color:#fff}
+.dark h3{color:#fff}.dark p{color:#F3DDE1}.dark .id{color:var(--rose-soft)}
+.mid{background:var(--maroon);border-color:var(--maroon);color:#fff}
+.mid h3{color:#fff}.mid p{color:#F6E4E7}.mid .id{color:var(--rose-soft)}
+.plain{background:#fff}
+.tight .card{padding:12px 14px}
+.tight .card h3{font-size:16px;margin-bottom:4px}
+.tight .card p{font-size:13px;line-height:1.38}
+.tight .card .id{margin-bottom:3px}
+
+/* ---------- stats ---------- */
+.stat{background:var(--blush);border:1px solid var(--line);border-radius:12px;
+      padding:16px 16px 14px;text-align:left}
+.stat .num{font-size:46px;font-weight:800;line-height:1;color:var(--maroon);letter-spacing:-.03em}
+.stat .lab{font-size:12.5px;font-weight:700;line-height:1.3;color:var(--ink);margin-top:8px}
+.stat.d{background:var(--maroon-deep);border-color:var(--maroon-deep)}
+.stat.d .num{color:#fff}.stat.d .lab{color:var(--rose-soft)}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+   color:var(--maroon);text-align:left;padding:8px 10px;border-bottom:2px solid var(--line)}
+td{font-size:13px;font-weight:450;line-height:1.35;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+td.k{font-weight:800;color:var(--maroon-deep);white-space:nowrap}
+tr.alt td{background:var(--blush)}
+
+/* ---------- flow ---------- */
+.flow{display:flex;align-items:stretch;gap:0;margin:14px 0}
+.fstep{flex:1;background:var(--blush);border:1px solid var(--line);
+       border-radius:10px;padding:12px 10px;text-align:center}
+.fstep .t{font-size:13px;font-weight:800;color:var(--maroon-deep);line-height:1.2}
+.fstep .s{font-size:11px;font-weight:500;color:var(--muted);margin-top:4px;line-height:1.25}
+.farr{width:22px;display:flex;align-items:center;justify-content:center;
+      font-size:16px;font-weight:800;color:var(--rose)}
+.fstep.hot{background:var(--maroon);border-color:var(--maroon)}
+.fstep.hot .t{color:#fff}.fstep.hot .s{color:var(--rose-soft)}
+
+/* ---------- misc ---------- */
+.pill{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;
+      padding:4px 9px;border-radius:99px;background:var(--blush-2);color:var(--maroon);
+      border:1px solid var(--line)}
+.pill.g{background:#E7F2E9;border-color:#C6DECA;color:#28603A}
+.pill.r{background:#FBE3E6;border-color:#F0C2C8;color:#9B1C2C}
+.chip{font-size:11.5px;font-weight:700;color:var(--maroon-deep);background:var(--blush);
+      border:1px solid var(--line);border-radius:8px;padding:7px 6px;text-align:center;
+      line-height:1.15}
+.chip.b{background:var(--maroon-deep);color:#fff;border-color:var(--maroon-deep)}
+.chip.m{background:var(--blush-2)}
+.rule{height:1px;background:var(--line);margin:20px 0}
+.callout{background:var(--maroon-deep);border-radius:12px;padding:20px 22px;color:#fff}
+.callout .q{font-size:19px;font-weight:800;line-height:1.3;letter-spacing:-.01em}
+.callout .a{font-size:13px;font-weight:450;line-height:1.45;color:#EFD6DB;margin-top:8px}
+.note{background:var(--blush-2);border-left:4px solid var(--maroon-2);
+      border-radius:0 10px 10px 0;padding:13px 16px}
+.note p{font-size:13px;line-height:1.42}
+ul{list-style:none}
+ul.t li{position:relative;padding-left:18px;margin-bottom:7px;font-size:13.5px;line-height:1.42}
+ul.t li:before{content:"";position:absolute;left:0;top:7px;width:7px;height:7px;
+               border-radius:2px;background:var(--rose)}
+.dark ul.t li{color:#F3DDE1}
+.dark ul.t li:before{background:var(--rose-soft)}
+
+/* ---------- cover ---------- */
+.cover{background:var(--maroon-deep);color:#fff;padding:0;display:flex;flex-direction:column}
+.cover .band{height:14px;background:linear-gradient(90deg,var(--maroon-2) 0%,var(--rose) 60%,var(--rose-soft) 100%)}
+.cover .body{flex:1;padding:70px 58px 58px;display:flex;flex-direction:column}
+.cover .eyebrow{font-size:13px;font-weight:800;letter-spacing:.24em;text-transform:uppercase;color:var(--rose-soft)}
+.cover h1{font-size:96px;font-weight:800;line-height:.92;letter-spacing:-.045em;margin-top:26px;color:#fff}
+.cover h1 em{font-style:normal;color:var(--rose-soft)}
+.cover .tag{font-size:19px;font-weight:450;line-height:1.4;color:#EBD2D7;max-width:520px;margin-top:26px}
+.cover .meta{margin-top:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
+             border-top:1px solid rgba(255,255,255,.22);padding-top:22px}
+.cover .meta .l{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--rose-soft)}
+.cover .meta .v{font-size:15px;font-weight:700;color:#fff;margin-top:5px;line-height:1.25}
+
+/* ---------- diagram ---------- */
+.dia{border:1px solid var(--line);border-radius:12px;padding:16px;background:#fff}
+.tier{display:flex;gap:10px;align-items:stretch;margin-bottom:10px}
+.node{flex:1;border-radius:9px;padding:10px 10px;text-align:center;border:1px solid var(--line);background:var(--blush)}
+.node .n{font-size:13px;font-weight:800;color:var(--maroon-deep);line-height:1.15}
+.node .d{font-size:10.5px;font-weight:500;color:var(--muted);margin-top:3px;line-height:1.2}
+.node.dk{background:var(--maroon-deep);border-color:var(--maroon-deep)}
+.node.dk .n{color:#fff}.node.dk .d{color:var(--rose-soft)}
+.node.md{background:var(--maroon);border-color:var(--maroon)}
+.node.md .n{color:#fff}.node.md .d{color:var(--rose-soft)}
+.vconn{text-align:center;font-size:14px;color:var(--rose);font-weight:800;line-height:1;margin:2px 0 6px}
+.lbl{font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+     color:var(--rose);margin:10px 0 6px}
+
+/* ---------- three-state ---------- */
+.tri{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tri .b{border-radius:12px;padding:14px;border:1px solid var(--line)}
+.tri .b .s{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.tri .b .x{font-size:12.5px;font-weight:450;line-height:1.35;margin-top:6px}
+.s-ok{background:#E7F2E9;border-color:#C6DECA}.s-ok .s{color:#28603A}
+.s-ab{background:var(--blush);border-color:var(--line)}.s-ab .s{color:var(--maroon)}
+.s-er{background:#FBE3E6;border-color:#F0C2C8}.s-er .s{color:#9B1C2C}
+</style>
+</head>
+<body>
+
+<!-- ============ 1 · COVER ============ -->
+<section class="page cover">
+  <div class="band"></div>
+  <div class="body">
+    <div class="eyebrow">Scope &middot; SDLC &middot; Architecture &middot; Build Blueprint</div>
+    <h1>AIOS<br><em>v2</em></h1>
+    <div class="tag">A multi-tenant SEO operations platform, rebuilt from zero to be
+      measurably honest, durable under failure, and impossible to build carelessly.</div>
+    <div class="meta">
+      <div><div class="l">Prepared for</div><div class="v">Danyal</div></div>
+      <div><div class="l">Date</div><div class="v">16 Sep 2026</div></div>
+      <div><div class="l">Modules</div><div class="v">12</div></div>
+      <div><div class="l">Status</div><div class="v">Approved scope</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2 · AT A GLANCE ============ -->
+<section class="page">
+  <div class="ph"><div class="t">At a glance</div><div class="n">AIOS v2</div></div>
+  <div class="kicker">The brief</div>
+  <h1 class="sec">One platform. Twelve modules.<br>Fifty to a hundred clients.</h1>
+  <p class="lede">An agency runs its entire SEO delivery here: auditing, keyword research,
+    content written in the client's own design language and published as editable pages,
+    citation building, off-page placement across 32 platforms, tracking, and reporting.</p>
+
+  <div class="g4" style="margin-bottom:18px">
+    <div class="stat d"><div class="num">12</div><div class="lab">Modules, all in scope</div></div>
+    <div class="stat"><div class="num">32</div><div class="lab">Publishing platforms, official APIs only</div></div>
+    <div class="stat"><div class="num">160<span style="font-size:28px">+</span></div><div class="lab">Citation directories in the registry</div></div>
+    <div class="stat"><div class="num">10</div><div class="lab">Engineering principles that cannot be violated</div></div>
+  </div>
+
+  <h2 class="sub">What this document set contains</h2>
+  <div class="g2">
+    <div class="card">
+      <div class="id">STRATEGY</div>
+      <h3>Scope &amp; requirements</h3>
+      <p>Executive scope, 12 module specifications, and a numbered requirement register.
+         Every task traces to an id; a change with no requirement is out of scope.</p>
+    </div>
+    <div class="card">
+      <div class="id">PROCESS</div>
+      <h3>SDLC &amp; quality</h3>
+      <p>Phases, gates, branch policy, definition of done, the seven CI gates, and the
+         non-vacuity rule that makes tests mean something.</p>
+    </div>
+    <div class="card">
+      <div class="id">ENGINEERING</div>
+      <h3>Architecture &amp; data</h3>
+      <p>Target architecture, the durable job engine, the data model with row-level
+         tenant isolation, the API contract, and the AI runtime.</p>
+    </div>
+    <div class="card">
+      <div class="id">EXECUTION</div>
+      <h3>Roadmap &amp; acceptance</h3>
+      <p>Ten sequenced milestones with exit criteria, per-module acceptance tests, and the
+         eight release gates that define done.</p>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:20px">
+    <p><strong>This is a rebuild, not a refactor.</strong> v1 exists, runs, and proved the
+      domain. Its defects are structural: data that was synthesised and shown as measured,
+      jobs that reported success having done nothing, and design capture that could not
+      produce an editable page. v2 keeps the domain knowledge and discards the architecture.</p>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>02</b></span></div>
+</section>
+
+<!-- ============ 3 · THE MODULES ============ -->
+<section class="page">
+  <div class="ph"><div class="t">01 &middot; The modules</div><div class="n">All twelve in scope</div></div>
+  <h1 class="sec">Twelve modules, one spine</h1>
+  <p class="lede">All mount on a shared core: one identity, one job engine, one cost gate,
+    one vault, one provenance layer.</p>
+
+  <div class="g3" style="margin-bottom:12px">
+    <div class="card dark"><div class="id">M01</div><h3>Portal &amp; Core</h3>
+      <p>Identity, RBAC, clients, NAP, tasks, reviews, vault, cost control, the job engine.</p></div>
+    <div class="card"><div class="id">M02</div><h3>Audit</h3>
+      <p>Free lead-magnet audit plus six paid types. One findings source, two renderers.</p></div>
+    <div class="card mid"><div class="id">M03</div><h3>Content System</h3>
+      <p>Learn the design language, plan from a topical map, write, QA, publish as editable Elementor.</p></div>
+  </div>
+  <div class="g3" style="margin-bottom:12px">
+    <div class="card mid"><div class="id">M04</div><h3>Citations</h3>
+      <p>Extension + AI agent that creates accounts and fills forms. A human presses submit.</p></div>
+    <div class="card mid"><div class="id">M05</div><h3>Web 2.0 &amp; Social</h3>
+      <p>32 platforms, official APIs, per-client identity, anchors, pacing, link liveness.</p></div>
+    <div class="card"><div class="id">M06</div><h3>Policy Radar</h3>
+      <p>Watch the industry, detect changes, map exposure per client, brief daily.</p></div>
+  </div>
+  <div class="g3" style="margin-bottom:12px">
+    <div class="card"><div class="id">M07</div><h3>Rank &amp; Grid</h3>
+      <p>Organic rank and local geo-grid. Sources labelled, never mixed. Three-state points.</p></div>
+    <div class="card"><div class="id">M08</div><h3>Keyword Research</h3>
+      <p>The single upstream of the word bank: volumes, intent, clusters, topical map.</p></div>
+    <div class="card"><div class="id">M09</div><h3>Indexing</h3>
+      <p>Submit to Google, IndexNow and Bing with quota queueing. Verify indexation.</p></div>
+  </div>
+  <div class="g3">
+    <div class="card"><div class="id">M10</div><h3>Local &amp; GBP</h3>
+      <p>Profile, posts, reviews, Q&amp;A, and the canonical NAP citations propagate.</p></div>
+    <div class="card"><div class="id">M11</div><h3>Reporting</h3>
+      <p>One document model. HTML and PDF are two renderers, never two templates.</p></div>
+    <div class="card"><div class="id">M12</div><h3>Billing &amp; Cost</h3>
+      <p>Tiers, entitlements, money dials, caps, and the loaded cost of every unit.</p></div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>03</b></span></div>
+</section>
+
+<!-- ============ 4 · PRINCIPLES ============ -->
+<section class="page">
+  <div class="ph"><div class="t">02 &middot; Principles</div><div class="n">Non-negotiable</div></div>
+  <h1 class="sec">Ten rules. Each one is<br>a defect v1 shipped.</h1>
+  <p class="lede" style="margin-bottom:16px">These are not style preferences. A change that
+    violates one is rejected in review regardless of whether its tests pass.</p>
+
+  <div class="g2 tight" style="gap:9px">
+    <div class="card"><div class="id">P1</div><h3>Never invent data</h3>
+      <p>An unconfigured provider returns a <strong>degraded result</strong> — never a
+         plausible number. Enforced by a CI gate over every writing path.</p></div>
+    <div class="card"><div class="id">P2</div><h3>Three states, never two</h3>
+      <p><strong>Measured</strong>, <strong>absent</strong> and <strong>unmeasured</strong>
+         are different facts. Every ratio divides by measured only.</p></div>
+    <div class="card"><div class="id">P3</div><h3>Degrade, never crash</h3>
+      <p>Every external seam returns a typed result with a machine-branchable reason. No
+         caller parses a message string.</p></div>
+    <div class="card"><div class="id">P4</div><h3>Terminal states are honest</h3>
+      <p>A publish with no credentials is <strong>blocked</strong>, not done. Success
+         requires the effect to be <strong>confirmed</strong>.</p></div>
+    <div class="card"><div class="id">P5</div><h3>Money is gated first</h3>
+      <p>The estimate gates before the call; the actual is committed after. A blocked call
+         never reaches the provider.</p></div>
+    <div class="card"><div class="id">P6</div><h3>The database enforces tenancy</h3>
+      <p>Forced row-level security on every client table. Application code is the second
+         line of defence, never the first.</p></div>
+    <div class="card"><div class="id">P7</div><h3>Jobs are idempotent</h3>
+      <p>Durable, resumable, retried with bounds, dead-lettered with context. Re-running
+         never double-spends or double-publishes.</p></div>
+    <div class="card"><div class="id">P8</div><h3>Provenance on every value</h3>
+      <p>Measured, derived, declared, inferred or defaulted — with source and timestamp.
+         No provenance, no display.</p></div>
+    <div class="card"><div class="id">P9</div><h3>Secrets are sealed</h3>
+      <p>Envelope-encrypted, per client, audited on read. Never in a log, a response, a job
+         payload or a trace.</p></div>
+    <div class="card dark"><div class="id">P10</div><h3>Tests prove behaviour</h3>
+      <p>Every test must <strong>fail when its defect is re-injected</strong>. One that
+         passes against a broken implementation is deleted, not kept.</p></div>
+  </div>
+
+  <div class="callout" style="margin-top:12px;padding:15px 20px">
+    <div class="q" style="font-size:17px">v1 had roughly 4,900 tests and still shipped a
+      form-filler that reported success while filling a honeypot.</div>
+    <div class="a" style="margin-top:6px">The test could not fail: the environment made its
+      branch unreachable. Test count is not the metric — non-vacuity is.</div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>04</b></span></div>
+</section>
+
+<!-- ============ 5 · ARCHITECTURE ============ -->
+<section class="page">
+  <div class="ph"><div class="t">03 &middot; Architecture</div><div class="n">Runtime topology</div></div>
+  <h1 class="sec">A modular monolith with<br>detachable workers</h1>
+  <p class="lede">One VPS. Modules are enforced package boundaries, not services — the
+    isolation without the distributed-system tax.</p>
+
+  <div class="dia">
+    <div class="lbl">Edge</div>
+    <div class="tier"><div class="node md" style="flex:1"><div class="n">Caddy</div>
+      <div class="d">TLS &middot; HTTP/3 &middot; rate limit &middot; static</div></div></div>
+    <div class="vconn">▼</div>
+    <div class="lbl">Application</div>
+    <div class="tier">
+      <div class="node"><div class="n">web</div><div class="d">Next.js 15 &middot; RSC</div></div>
+      <div class="node"><div class="n">api ×2</div><div class="d">FastAPI &middot; stateless</div></div>
+    </div>
+    <div class="vconn">▼</div>
+    <div class="lbl">State — one durable store</div>
+    <div class="tier">
+      <div class="node dk" style="flex:2"><div class="n">PostgreSQL 16</div>
+        <div class="d">tenant data (FORCE RLS) &middot; job ledger &middot; vault &middot; cost ledger &middot; pgvector &middot; graph checkpoints</div></div>
+      <div class="node"><div class="n">Redis</div><div class="d">cache &middot; locks &middot; rate limits<br><strong>ephemeral only</strong></div></div>
+    </div>
+    <div class="vconn">▲ ▼</div>
+    <div class="lbl">Workers</div>
+    <div class="tier">
+      <div class="node md"><div class="n">job-worker ×3</div><div class="d">pipelines &middot; providers &middot; LangGraph</div></div>
+      <div class="node md"><div class="n">browser-worker ×2</div><div class="d">Playwright &middot; capture &middot; render &middot; liveness</div></div>
+      <div class="node"><div class="n">scheduler</div><div class="d">leader-locked</div></div>
+    </div>
+    <div class="vconn">▼</div>
+    <div class="lbl">External</div>
+    <div class="tier">
+      <div class="node m" style="background:var(--blush-2)"><div class="n">AI &amp; data</div>
+        <div class="d">Anthropic &middot; DataForSEO &middot; serper &middot; Firecrawl</div></div>
+      <div class="node m" style="background:var(--blush-2)"><div class="n">Publish</div>
+        <div class="d">WordPress &middot; 32 platform APIs &middot; Google</div></div>
+      <div class="node m" style="background:var(--blush-2)"><div class="n">Ops</div>
+        <div class="d">Sentry &middot; LangSmith &middot; proxies &middot; IMAP</div></div>
+    </div>
+  </div>
+
+  <div class="g3" style="margin-top:18px">
+    <div class="card plain"><h3>One store</h3>
+      <p>A job's state and its side-effect rows commit in the <strong>same transaction</strong>.
+         That single property removes v1's whole class of phantom successes.</p></div>
+    <div class="card plain"><h3>One-way imports</h3>
+      <p>A module reaches another only through its public interface. Enforced by a build
+         gate, not by good intentions.</p></div>
+    <div class="card plain"><h3>Separable by config</h3>
+      <p>Browser workers claim jobs over the database, so moving them to a second host is an
+         environment change — never a code change.</p></div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>05</b></span></div>
+</section>
+
+<!-- ============ 6 · JOB ENGINE ============ -->
+<section class="page">
+  <div class="ph"><div class="t">04 &middot; The job engine</div><div class="n">The foundation</div></div>
+  <h1 class="sec">The piece v1 did not have</h1>
+  <p class="lede">Almost every v1 reliability failure traces to work that could run twice,
+    could not resume, and could not honestly say what it had done.</p>
+
+  <h2 class="sub">Terminal states — each one distinct, each one true</h2>
+  <div class="g3" style="gap:10px;margin-bottom:8px">
+    <div class="card plain" style="padding:12px 14px"><h3 style="font-size:15px">succeeded</h3>
+      <p style="font-size:12.5px">The effect was <strong>confirmed</strong> — not attempted.</p></div>
+    <div class="card plain" style="padding:12px 14px"><h3 style="font-size:15px">partial</h3>
+      <p style="font-size:12.5px">Some children completed, some did not.</p></div>
+    <div class="card plain" style="padding:12px 14px"><h3 style="font-size:15px">failed</h3>
+      <p style="font-size:12.5px">Retryable attempts exhausted.</p></div>
+  </div>
+  <div class="g3" style="gap:10px;margin-bottom:20px">
+    <div class="card" style="padding:12px 14px"><h3 style="font-size:15px">blocked</h3>
+      <p style="font-size:12.5px">A precondition is missing — no credentials, no capability, cost refused.</p></div>
+    <div class="card plain" style="padding:12px 14px"><h3 style="font-size:15px">timed_out</h3>
+      <p style="font-size:12.5px">Exceeded its limit. Not the same as failed.</p></div>
+    <div class="card plain" style="padding:12px 14px"><h3 style="font-size:15px">dead</h3>
+      <p style="font-size:12.5px">Dead-lettered with full context, requeueable.</p></div>
+  </div>
+
+  <h2 class="sub">Eight guarantees</h2>
+  <table>
+    <tr class="alt"><td class="k">At-least-once</td><td>Lease with heartbeat. A worker that dies has its lease expire and the job is re-picked.</td></tr>
+    <tr><td class="k">Effectively-once effects</td><td>Idempotency key → side-effect ledger. Recorded before attempt, checked before retry.</td></tr>
+    <tr class="alt"><td class="k">Atomic state + effect</td><td>State and its outbox event commit together. No window where a page is published and the ledger does not know.</td></tr>
+    <tr><td class="k">Bounded retry</td><td>Backoff with jitter; retryable and terminal failures distinguished by class, not by string.</td></tr>
+    <tr class="alt"><td class="k">Dead letter</td><td>Full error chain, last provider response, one-click requeue.</td></tr>
+    <tr><td class="k">Honest terminal state</td><td>Success requires confirmation of the effect.</td></tr>
+    <tr class="alt"><td class="k">Caps and fairness</td><td>Per-client concurrency and per-provider rate limits checked at lease time. One client's 50-page run cannot starve the rest.</td></tr>
+    <tr><td class="k">Resumability</td><td>Parent/child ledger plus checkpointed AI graph state. A restart resumes at the first incomplete child.</td></tr>
+  </table>
+
+  <div class="note" style="margin-top:18px">
+    <p><strong>Schedules ship disabled</strong> and are enabled one module at a time, only
+      after that job kind survives the chaos suite. This is the deliberate inverse of v1,
+      where the scheduler was off <em>because</em> the jobs were unsafe — and nobody could
+      tell which.</p>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>06</b></span></div>
+</section>
+
+<!-- ============ 7 · CONTENT: DESIGN ============ -->
+<section class="page">
+  <div class="ph"><div class="t">05 &middot; Content — design analysis</div><div class="n">M03</div></div>
+  <h1 class="sec">Learn the client's design<br>language, then speak it</h1>
+  <p class="lede">The operator pastes the client's <strong>previous website</strong>. That
+    site is the source of truth for the design language every new page must speak.</p>
+
+  <div class="flow">
+    <div class="fstep"><div class="t">Render</div><div class="s">Real browser, 5 pages by type</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Read</div><div class="s">Computed styles + declared tokens</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Corroborate</div><div class="s">Vision over screenshots</div></div>
+    <div class="farr">→</div>
+    <div class="fstep hot"><div class="t">DesignIR</div><div class="s">Tokens with provenance</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Approve</div><div class="s">Human reviews &amp; edits</div></div>
+  </div>
+
+  <h2 class="sub">What DesignIR captures</h2>
+  <div class="g4" style="gap:10px;margin-bottom:8px">
+    <div class="chip m">Colour roles</div><div class="chip m">Type scale</div>
+    <div class="chip m">Spacing scale</div><div class="chip m">Container &amp; grid</div>
+  </div>
+  <div class="g4" style="gap:10px;margin-bottom:8px">
+    <div class="chip m">Breakpoints</div><div class="chip m">Radii &amp; shadows</div>
+    <div class="chip m">Buttons &amp; CTAs</div><div class="chip m">Form controls</div>
+  </div>
+  <div class="g4" style="gap:10px;margin-bottom:8px">
+    <div class="chip m">Image treatment</div><div class="chip m">Icon style</div>
+    <div class="chip m">Nav &amp; header</div><div class="chip m">Footer structure</div>
+  </div>
+  <div class="g4" style="gap:10px;margin-bottom:20px">
+    <div class="chip m">Section grammar</div><div class="chip m">Section order</div>
+    <div class="chip m">Motion</div><div class="chip b">Coverage report</div>
+  </div>
+
+  <h2 class="sub">Provenance decides which source wins</h2>
+  <table>
+    <tr class="alt"><td class="k">declared</td><td>A CSS custom property the author wrote. It carries a <strong>name</strong>, which no clustering can recover. Highest rank.</td></tr>
+    <tr><td class="k">derived</td><td>Clustered computed styles from the rendered page. Covers every role the declarations miss.</td></tr>
+    <tr class="alt"><td class="k">inferred</td><td>Extrapolated for a section the source site never had. Labelled as such to the reviewer.</td></tr>
+    <tr><td class="k">defaulted</td><td>Nothing was found. <strong>Made visible, never hidden</strong> — v1's profiles silently collapsed to defaults.</td></tr>
+  </table>
+
+  <div class="callout" style="margin-top:18px">
+    <div class="q">Fidelity target: the same design system, a new composition.</div>
+    <div class="a">The test is <strong>token conformance</strong>, not a pixel diff — every
+      colour, face, size, radius and spacing value on a generated page must exist in the
+      approved DesignIR. Checked programmatically before publish. 100%, or it does not ship.</div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>07</b></span></div>
+</section>
+
+<!-- ============ 8 · CONTENT: PRODUCTION ============ -->
+<section class="page">
+  <div class="ph"><div class="t">06 &middot; Content — production</div><div class="n">M03</div></div>
+  <h1 class="sec">From keyword bank to an<br>editable published page</h1>
+  <p class="lede">The word bank is the SEO keyword bank with volumes. If a term is not in it,
+    no page targets it and no tracker follows it.</p>
+
+  <div class="flow" style="margin-bottom:6px">
+    <div class="fstep"><div class="t">Topical map</div><div class="s">Clusters → page types</div></div>
+    <div class="farr">→</div>
+    <div class="fstep hot"><div class="t">Human approves<br>the page set</div><div class="s">Before any spend</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Fan-out</div><div class="s">Up to 50, resumable</div></div>
+  </div>
+  <div class="flow" style="margin-top:6px">
+    <div class="fstep"><div class="t">Research</div><div class="s">Cited evidence</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Outline</div><div class="s">Design-aware</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Draft</div><div class="s">Per section</div></div>
+    <div class="farr">→</div>
+    <div class="fstep hot"><div class="t">Grounding</div><div class="s">Unresolved claim = blocked</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Links + schema</div><div class="s">Validated</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">QA</div><div class="s">Nine dimensions</div></div>
+  </div>
+
+  <h2 class="sub">The publish requirement — and what fails it</h2>
+  <div class="g2">
+    <div class="card dark">
+      <h3>✓ Required</h3>
+      <ul class="t" style="margin-top:8px">
+        <li>A real Elementor <strong>element tree</strong>: container → container → widget</li>
+        <li>Every heading, paragraph, image and button an <strong>addressable widget</strong></li>
+        <li>Colours and fonts referenced through Elementor <strong>global tokens</strong>, so a client restyle propagates</li>
+        <li>Written via the companion plugin, which regenerates Elementor's CSS cache</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>✗ Explicit failure</h3>
+      <ul class="t" style="margin-top:8px">
+        <li>The whole page inside <strong>one HTML widget</strong></li>
+        <li>Hard-coded hex values the client cannot restyle</li>
+        <li>A raw REST meta write — the page renders <strong>unstyled</strong></li>
+        <li>Reporting <span class="mono">done</span> when no credentials existed</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:16px">
+    <p><strong>Acceptance is physical:</strong> open the published page in Elementor, select
+      any element, edit it, save. That is the test. v1 never built this, and it is the
+      difference between a product and a demo.</p>
+  </div>
+
+  <h2 class="sub">Publish flow</h2>
+  <div class="flow" style="margin-top:2px">
+    <div class="fstep"><div class="t">WordPress draft</div><div class="s">Default</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Render check</div><div class="s">Tokens present?</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Go live</div><div class="s">Second explicit action</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Index</div><div class="s">Registered</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Revert</div><div class="s">Always available</div></div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>08</b></span></div>
+</section>
+
+<!-- ============ 9 · CITATIONS ============ -->
+<section class="page">
+  <div class="ph"><div class="t">07 &middot; Citations</div><div class="n">M04</div></div>
+  <h1 class="sec">An agent that creates the<br>account. A human who submits.</h1>
+  <p class="lede">A browser extension as a thin actuator over a backend agent. All
+    intelligence is server-side; the extension holds no credentials and no client data.</p>
+
+  <h2 class="sub">Division of labour</h2>
+  <div class="g3" style="margin-bottom:18px">
+    <div class="card mid"><h3>Backend graph</h3>
+      <p>Decides everything: field mapping, account strategy, verification, trap detection.
+         Generates and vaults credentials.</p></div>
+    <div class="card"><h3>Extension</h3>
+      <p>Observes, applies a fill plan, shows the operator every value. <strong>Has no
+         submit capability</strong> — a code-level absence, not a policy.</p></div>
+    <div class="card dark"><h3>Operator</h3>
+      <p>Reviews the staged values and <strong>presses submit</strong>. Confirms the result.</p></div>
+  </div>
+
+  <h2 class="sub">Account creation — the gap v1 never closed</h2>
+  <div class="flow">
+    <div class="fstep"><div class="t">Identity</div><div class="s">Generated, vaulted server-side</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Email alias</div><div class="s">Per-client, catch-all domain</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Fill signup</div><div class="s">Heuristic → model</div></div>
+    <div class="farr">→</div>
+    <div class="fstep hot"><div class="t">Human submits</div><div class="s">Always</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Verify</div><div class="s">IMAP, graph parks durably</div></div>
+  </div>
+
+  <div class="g2" style="margin-top:16px">
+    <div class="card">
+      <h3>Mappings cached on structure</h3>
+      <p>The cache key is a fingerprint of <strong>form shape</strong> — field order, types,
+         label shapes. Never the URL, never CSS selectors: directories rotate class names
+         per load and reuse one form across many URLs.</p>
+      <p style="margin-top:8px">A cache hit returns a plan in under 400&nbsp;ms with
+         <strong>no model spend</strong>. The fiftieth client on a directory costs almost nothing.</p>
+    </div>
+    <div class="card dark">
+      <h3>Honeypots: zero, not "low"</h3>
+      <p>v1's filler put the client's website into a honeypot named <span class="mono">url</span>
+         and <strong>truthfully reported success</strong>, while the directory silently
+         discarded every submission.</p>
+      <p style="margin-top:8px">Now: hidden, off-screen and decoy fields are classified
+         <strong>ignore</strong>; the model reads "leave this empty" beside an input, which
+         no heuristic can. Touching one is a <strong>hard failure</strong>. The eval bar is
+         <strong>0%</strong>.</p>
+    </div>
+  </div>
+
+  <div class="g4" style="margin-top:16px">
+    <div class="stat d"><div class="num">100</div><div class="lab">Live, NAP-verified citations — the release gate</div></div>
+    <div class="stat"><div class="num">25<span style="font-size:28px">+</span></div><div class="lab">Directories with automated account creation</div></div>
+    <div class="stat"><div class="num">95<span style="font-size:28px">%</span></div><div class="lab">Field-mapping accuracy on the fixture corpus</div></div>
+    <div class="stat"><div class="num">0<span style="font-size:28px">%</span></div><div class="lab">Honeypot touches. Not a target — a gate</div></div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>09</b></span></div>
+</section>
+
+<!-- ============ 10 · WEB 2.0 ============ -->
+<section class="page">
+  <div class="ph"><div class="t">08 &middot; Web 2.0 &amp; social</div><div class="n">M05</div></div>
+  <h1 class="sec">Thirty-two platforms.<br>Official APIs only.</h1>
+  <p class="lede">The reference surface is <strong>SoMePoster</strong>. We rebuild it
+    multi-tenant and add the link-building spine a posting tool has no reason to have.</p>
+
+  <div class="g5" style="margin-bottom:8px">
+    <div class="chip">X</div><div class="chip">Facebook</div><div class="chip">LinkedIn</div><div class="chip">Instagram</div><div class="chip">Threads</div>
+  </div>
+  <div class="g5" style="margin-bottom:8px">
+    <div class="chip">Bluesky</div><div class="chip">Mastodon</div><div class="chip">Nostr</div><div class="chip">TikTok</div><div class="chip">YouTube</div>
+  </div>
+  <div class="g5" style="margin-bottom:8px">
+    <div class="chip">Pinterest</div><div class="chip b">Blogger</div><div class="chip b">WordPress.com</div><div class="chip b">WP self-host</div><div class="chip b">Ghost</div>
+  </div>
+  <div class="g5" style="margin-bottom:8px">
+    <div class="chip b">DEV.to</div><div class="chip b">Micro.blog</div><div class="chip b">LiveJournal</div><div class="chip b">Telegraph</div><div class="chip">GMB Profile</div>
+  </div>
+  <div class="g5" style="margin-bottom:8px">
+    <div class="chip">Webflow</div><div class="chip">Wix</div><div class="chip">Shopify</div><div class="chip">Mailchimp</div><div class="chip">Telegram</div>
+  </div>
+  <div class="g5" style="margin-bottom:18px">
+    <div class="chip">Discord</div><div class="chip">Slack</div><div class="chip">Pastebin</div><div class="chip">Google Drive</div><div class="chip">Diigo</div>
+  </div>
+  <div class="g5" style="margin-bottom:20px">
+    <div class="chip">Raindrop</div><div class="chip">n8n</div><div class="chip">Make.com</div>
+    <div class="chip" style="background:#FBE3E6;border-color:#F0C2C8;color:#9B1C2C">Medium — no API</div>
+    <div class="chip" style="background:#fff;border-style:dashed;color:var(--muted)">+ registry</div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <h3>What we take from SoMePoster</h3>
+      <ul class="t" style="margin-top:8px">
+        <li>The connection grid and compose-once editor</li>
+        <li>Video composer, AI studio, calendar, posts ledger</li>
+        <li><strong>Parasite Poster</strong> — keyword-targeted content on high-authority hosts</li>
+      </ul>
+    </div>
+    <div class="card dark">
+      <h3>What we add</h3>
+      <ul class="t" style="margin-top:8px">
+        <li>Multi-tenancy with per-client identity and house-account caps</li>
+        <li>Anchor bank with enforced distribution</li>
+        <li>Internal linking, pacing, link liveness, account-health gating</li>
+        <li>Approval and cost gates</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:16px">
+    <p><strong>A platform with no usable API is skipped, never automated.</strong> Medium is
+      the worked example — its publishing API was withdrawn, so it is marked unsupported
+      rather than scripted. Browser-automating a platform that forbids it risks the
+      <em>client's</em> properties to save one integration.</p>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>10</b></span></div>
+</section>
+
+<!-- ============ 11 · MEASUREMENT ============ -->
+<section class="page">
+  <div class="ph"><div class="t">09 &middot; Measurement</div><div class="n">M07 · M09</div></div>
+  <h1 class="sec">The numbers a client keeps</h1>
+  <p class="lede">This is where every integrity rule either pays off or fails publicly.
+    Tracking output goes straight into client reports.</p>
+
+  <h2 class="sub">Three states, enforced by the database</h2>
+  <div class="tri" style="margin-bottom:8px">
+    <div class="b s-ok"><div class="s">ranked</div><div class="x">Measured, and found at position N.</div></div>
+    <div class="b s-ab"><div class="s">absent</div><div class="x"><strong>Measured</strong>, and not present in the result set.</div></div>
+    <div class="b s-er"><div class="s">error</div><div class="x"><strong>Never measured</strong> — rate limit, timeout, provider failure.</div></div>
+  </div>
+  <div class="note" style="margin-bottom:20px">
+    <p>Collapsing <strong>absent</strong> and <strong>error</strong> renders a rate-limited
+      afternoon as a client's service area collapsing — permanently, in an append-only table,
+      in a report they keep. A CHECK constraint makes the blur impossible, and every ratio
+      divides by <strong>measured points only</strong>.</p>
+  </div>
+
+  <h2 class="sub">Three sources, never mixed</h2>
+  <table style="margin-bottom:18px">
+    <tr class="alt"><td class="k">DataForSEO</td><td>Organic rank position, SERP features, competitors.</td><td style="width:36%"><span class="pill r">Never local pack or grid</span></td></tr>
+    <tr><td class="k">serper.dev</td><td>Local pack presence and geo-grid points, queried by coordinate.</td><td><span class="pill r">Never organic history</span></td></tr>
+    <tr class="alt"><td class="k">Search Console</td><td>First-party impressions, clicks, CTR, <strong>average</strong> position.</td><td><span class="pill r">An average is not a rank</span></td></tr>
+  </table>
+
+  <div class="g2">
+    <div class="card">
+      <h3>The v1 grid was fiction</h3>
+      <p>It sent <span class="mono">location="lat,lng"</span> into a parameter that expects a
+        place name, returning an unlocalised SERP for every point — a perfectly smooth,
+        entirely fictional heat map. The fix is not cosmetic: the old data is worthless.</p>
+    </div>
+    <div class="card">
+      <h3>Publishing is not the deliverable</h3>
+      <p>An <strong>indexed</strong> page is. Submissions that would exceed quota are
+        <strong>queued, never dropped</strong>, and indexation is verified rather than
+        assumed. <span class="mono">unknown</span> is a real state and is shown as one.</p>
+    </div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>11</b></span></div>
+</section>
+
+<!-- ============ 12 · AI STACK ============ -->
+<section class="page">
+  <div class="ph"><div class="t">10 &middot; AI stack</div><div class="n">LangGraph · LangSmith · Sentry</div></div>
+  <h1 class="sec">Orchestration by graph.<br>Calls by our own router.</h1>
+  <p class="lede">LangGraph earns its place for checkpointed, resumable state — the same
+    property durable jobs provide. Both checkpoint to the same database.</p>
+
+  <div class="dia" style="margin-bottom:20px">
+    <div class="tier"><div class="node dk" style="flex:1"><div class="n">Durable job</div><div class="d">owns the lifecycle</div></div></div>
+    <div class="vconn">▼</div>
+    <div class="tier"><div class="node md" style="flex:1"><div class="n">LangGraph</div><div class="d">owns the reasoning state · checkpointed to Postgres</div></div></div>
+    <div class="vconn">▼</div>
+    <div class="tier"><div class="node" style="flex:1"><div class="n">ModelRouter</div><div class="d">tier → model · cost gate · cache breakpoints · trace · error mapping</div></div></div>
+    <div class="vconn">▼</div>
+    <div class="tier">
+      <div class="node m"><div class="n">Anthropic SDK</div><div class="d">default · full features</div></div>
+      <div class="node m"><div class="n">agentrouter</div><div class="d">fallback · feature-degraded by definition</div></div>
+    </div>
+  </div>
+
+  <h2 class="sub">Task tiers</h2>
+  <table style="margin-bottom:18px">
+    <tr class="alt"><td class="k">reasoning · judge</td><td>Design reconciliation, page planning, audit narrative, QA judging, citation field mapping</td><td class="k" style="width:22%">Opus&nbsp;5</td></tr>
+    <tr><td class="k">drafting</td><td>Page bodies, Web 2.0 posts, GBP posts</td><td class="k">Opus&nbsp;5</td></tr>
+    <tr class="alt"><td class="k">structured</td><td>Schema extraction, classification, intent labelling</td><td class="k">Sonnet&nbsp;5</td></tr>
+    <tr><td class="k">bulk</td><td>Alt text, meta variants, description variants, tags</td><td class="k">Haiku&nbsp;4.5</td></tr>
+  </table>
+
+  <div class="g3">
+    <div class="card"><h3>Caching is the cost model</h3>
+      <p>A 50-page run reuses the same client context 50 times. Stable prefix first, volatile
+         content after the last breakpoint, and cache-hit rate <strong>charted per module</strong>
+         so a silent invalidator gets caught.</p></div>
+    <div class="card"><h3>The judge is never the generator</h3>
+      <p>Evaluation uses a different prompt and a different tier configuration from the
+         thing it grades. Six eval suites gate CI against fixed fixtures.</p></div>
+    <div class="card dark"><h3>The agent cannot submit</h3>
+      <p>The citation graph has <strong>no submit tool</strong>. Scraped content enters
+         prompts as clearly-delimited data, and nodes that read it have no tools at all.</p></div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>12</b></span></div>
+</section>
+
+<!-- ============ 13 · SDLC ============ -->
+<section class="page">
+  <div class="ph"><div class="t">11 &middot; SDLC</div><div class="n">How work moves</div></div>
+  <h1 class="sec">Nothing lands that nobody<br>can account for</h1>
+  <p class="lede">There is one deployed environment. The process compensates: every migration
+    is backward-compatible, every deploy is revertible by image tag, every module ships behind
+    a flag.</p>
+
+  <div class="flow" style="margin-bottom:20px">
+    <div class="fstep"><div class="t">Understand</div><div class="s">Read everything cited</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Design note</div><div class="s">Owner approves</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Implement</div><div class="s">Vertical slice</div></div>
+    <div class="farr">→</div>
+    <div class="fstep hot"><div class="t">Self-verify</div><div class="s">Re-inject each defect</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Review</div><div class="s">Nine questions</div></div>
+    <div class="farr">→</div>
+    <div class="fstep"><div class="t">Verify live</div><div class="s">Evidence attached</div></div>
+  </div>
+
+  <h2 class="sub">The seven CI gates — none may be skipped or weakened</h2>
+  <div class="g4" style="gap:10px;margin-bottom:10px">
+    <div class="card plain" style="padding:12px 14px"><div class="id">GATE 1</div><h3 style="font-size:15px">Lint &amp; format</h3></div>
+    <div class="card plain" style="padding:12px 14px"><div class="id">GATE 2</div><h3 style="font-size:15px">Types, strict</h3></div>
+    <div class="card plain" style="padding:12px 14px"><div class="id">GATE 3</div><h3 style="font-size:15px">Unit + integration</h3></div>
+    <div class="card plain" style="padding:12px 14px"><div class="id">GATE 4</div><h3 style="font-size:15px">Migrations from zero</h3></div>
+  </div>
+  <div class="g3" style="gap:10px;margin-bottom:20px">
+    <div class="card" style="padding:12px 14px"><div class="id">GATE 5</div><h3 style="font-size:15px">RLS adversarial</h3>
+      <p style="font-size:12.5px">Cross-tenant reads attempted on <strong>every</strong> table.</p></div>
+    <div class="card" style="padding:12px 14px"><div class="id">GATE 6</div><h3 style="font-size:15px">Truth</h3>
+      <p style="font-size:12.5px">No synthetic value reachable from any writing path.</p></div>
+    <div class="card" style="padding:12px 14px"><div class="id">GATE 7</div><h3 style="font-size:15px">Contract + eval</h3>
+      <p style="font-size:12.5px">API conformance and AI quality against fixed baselines.</p></div>
+  </div>
+
+  <h2 class="sub">Definition of done</h2>
+  <div class="g2">
+    <div class="card plain">
+      <ul class="t">
+        <li>Behaviour matches the requirement, <strong>including its failure modes</strong></li>
+        <li>Every failure mode has an honest terminal state</li>
+        <li>Migration is forward-only and applies from zero</li>
+        <li>New tenant tables have forced RLS and a policy</li>
+        <li>Every paid call passes the cost gate</li>
+      </ul>
+    </div>
+    <div class="card plain">
+      <ul class="t">
+        <li>Every test <strong>fails when its defect is re-injected</strong></li>
+        <li>Types clean, no unjustified escapes</li>
+        <li>OpenAPI and the typed clients regenerated</li>
+        <li>Traces, logs and metrics emitted</li>
+        <li><strong>Verified in the running system, with evidence</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>13</b></span></div>
+</section>
+
+<!-- ============ 14 · ROADMAP ============ -->
+<section class="page">
+  <div class="ph"><div class="t">12 &middot; Roadmap</div><div class="n">Exit criteria, not dates</div></div>
+  <h1 class="sec">Ten milestones.<br>The order is load-bearing.</h1>
+  <p class="lede">The two hardest things — emitting an editable Elementor tree and creating
+    directory accounts at scale — are attempted early. If either is impossible, it is far
+    cheaper to learn in week four than in month four.</p>
+
+  <table>
+    <tr class="alt"><td class="k">M0</td><td><strong>Foundation</strong> — repo, compose stack, RLS pattern, error taxonomy, auth, all seven gates failing loudly on seeded violations</td></tr>
+    <tr><td class="k">M1</td><td><strong>Job engine &amp; cost gate</strong> — leases, idempotency, side-effect ledger, dead letters, vault, provenance, chaos suite v1</td></tr>
+    <tr class="alt"><td class="k">M2</td><td><strong>Vertical slice</strong> — design analysis → DesignIR → <strong>one page published as an editable Elementor tree</strong>. <em>This milestone decides the product.</em></td></tr>
+    <tr><td class="k">M3</td><td><strong>Content at volume</strong> — keyword research, topical map, 50-page fan-out, internal linking, QA calibration</td></tr>
+    <tr class="alt"><td class="k">M4</td><td><strong>Citations</strong> — registry, extension, form intelligence, <strong>account creation</strong>, proof, liveness, cost accounting</td></tr>
+    <tr><td class="k">M5</td><td><strong>Web 2.0 &amp; social</strong> — 32 platforms, ownership tiering, anchors, pacing, liveness, Parasite Poster</td></tr>
+    <tr class="alt"><td class="k">M6</td><td><strong>Measurement</strong> — rank, geo-grid, Search Console, indexing, local &amp; GBP</td></tr>
+    <tr><td class="k">M7</td><td><strong>Audit</strong> — six paid types plus the free lead magnet, findings contract, narrative constraints</td></tr>
+    <tr class="alt"><td class="k">M8</td><td><strong>Portal, reporting, tiers</strong> — tasks, Command Center, capability truth table, client portal, document model, entitlements</td></tr>
+    <tr><td class="k">M9</td><td><strong>Hardening &amp; hand-over</strong> — chaos across all job kinds, load at 100 clients, restore drill, runbooks, security checklist</td></tr>
+  </table>
+
+  <div class="note" style="margin-top:20px">
+    <p><strong>If a milestone's exit criteria cannot be met, stop and re-plan.</strong> Do not
+      proceed on a known-broken foundation with a note to fix it later — that is precisely
+      how v1 arrived where it did.</p>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>14</b></span></div>
+</section>
+
+<!-- ============ 15 · SUCCESS ============ -->
+<section class="page">
+  <div class="ph"><div class="t">13 &middot; Definition of shipped</div><div class="n">Eight release gates</div></div>
+  <h1 class="sec">Done is demonstrated,<br>not declared</h1>
+  <p class="lede">All eight must be true on production data, with evidence attached. A green
+    test suite is not one of them.</p>
+
+  <div class="g2" style="gap:12px">
+    <div class="card dark"><div class="id">S1 · CONTENT</div><h3>50 pages, zero repair</h3>
+      <p>Generated, QA'd, reviewed and published to a real site as editable Elementor trees
+         in the client's design system, all passing token conformance.</p></div>
+    <div class="card dark"><div class="id">S2 · CITATIONS</div><h3>100 live listings</h3>
+      <p>NAP-verified with proof artefacts, and a loaded cost per citation inside the agreed
+         ceiling.</p></div>
+    <div class="card"><div class="id">S3 · OFF-PAGE</div><h3>One campaign, 15+ platforms</h3>
+      <p>Per-client identities, images, internal links, correct SEO fields, official APIs
+         only, no platform ban.</p></div>
+    <div class="card"><div class="id">S4 · AUDIT</div><h3>Six types, no degradation</h3>
+      <p>Each paid audit type completes inside its cost ceiling with zero degraded sections
+         on a fully-keyed environment.</p></div>
+    <div class="card"><div class="id">S5 · ISOLATION</div><h3>Adversarial reads all fail</h3>
+      <p>Cross-tenant access attempted against every table in the schema, and refused by
+         every one.</p></div>
+    <div class="card mid"><div class="id">S6 · TRUTH</div><h3>No unlabelled number</h3>
+      <p>With every provider key removed, the system displays nothing that is not marked
+         degraded — anywhere in the product.</p></div>
+    <div class="card"><div class="id">S7 · RECOVERY</div><h3>Eight job kinds survive a kill</h3>
+      <p>Each resumes or dead-letters correctly under a mid-run worker kill, and none
+         double-spends.</p></div>
+    <div class="card"><div class="id">S8 · RESTORE</div><h3>Backup restored, verified</h3>
+      <p>Full restore into a clean host, passing a data-integrity check inside the documented
+         recovery objective.</p></div>
+  </div>
+
+  <div class="callout" style="margin-top:20px">
+    <div class="q">A requirement closed with "tests pass" and no runtime evidence is not closed.</div>
+    <div class="a">Each closure records what was done, how it was verified in the running
+      system, the evidence reference, and anything deliberately left undone.</div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>15</b></span></div>
+</section>
+
+<!-- ============ 16 · V1 → V2 ============ -->
+<section class="page">
+  <div class="ph"><div class="t">14 &middot; What changed</div><div class="n">v1 → v2</div></div>
+  <h1 class="sec">Keep the knowledge.<br>Replace the architecture.</h1>
+  <p class="lede">v1 holds years of SEO domain knowledge worth porting. Its structure is the
+    thing this rebuild exists to replace.</p>
+
+  <table style="margin-bottom:20px">
+    <tr><th style="width:44%">v1</th><th>v2</th></tr>
+    <tr class="alt"><td>Sheets-as-store, then Postgres, then both</td><td><strong>Postgres only.</strong> Sheets is an export format, never a store</td></tr>
+    <tr><td>Celery + Redis, empty schedule, no job contract</td><td><strong>Postgres-backed durable jobs</strong> with idempotency, leases, dead letters</td></tr>
+    <tr class="alt"><td>Direct model calls across ~40 services</td><td><strong>One router + checkpointed graphs.</strong> Nothing else imports the SDK</td></tr>
+    <tr><td>Design capture ending in a styled HTML wrap</td><td><strong>DesignIR → Elementor block tree</strong> with a conformance gate</td></tr>
+    <tr class="alt"><td>Hand-maintained DOM specs per directory</td><td><strong>Structural fingerprint + learned cache</strong>, plus account creation</td></tr>
+    <tr><td>Web 2.0 via shared house accounts and scrapers</td><td><strong>32 platforms, official APIs, per-client identity</strong> where it matters</td></tr>
+    <tr class="alt"><td><span class="mono">status="done"</span> on a publish that published nothing</td><td><strong>Honest terminal states</strong>, enforced by test</td></tr>
+    <tr><td>Synthetic providers reachable in production</td><td><strong>Degrade-only</strong>, enforced by a CI gate</td></tr>
+  </table>
+
+  <h2 class="sub">The three lessons, stated plainly</h2>
+  <div class="g3">
+    <div class="card"><h3>A test that cannot fail is worse than no test</h3>
+      <p>It advertises coverage that does not exist, and it is why 4,900 tests did not catch
+         a filler that failed silently.</p></div>
+    <div class="card"><h3>Silent degradation is the expensive failure</h3>
+      <p>Every v1 defect that reached a client was the system continuing confidently with
+         data it did not have.</p></div>
+    <div class="card"><h3>The job contract is the foundation</h3>
+      <p>Not a detail. Work that can run twice, cannot resume, and cannot say what it did
+         will produce every other failure eventually.</p></div>
+  </div>
+
+  <div class="pf"><span>AIOS v2 &middot; Build Blueprint</span><span><b>16</b></span></div>
+</section>
+
+<!-- ============ 17 · CLOSE ============ -->
+<section class="page cover">
+  <div class="band"></div>
+  <div class="body">
+    <div class="eyebrow">Next</div>
+    <h1 style="font-size:64px;line-height:1.0;margin-top:22px">Hand this pack<br>to the build<br><em>agent.</em></h1>
+    <div class="tag" style="margin-top:28px">Sixteen documents, twelve module specifications,
+      a numbered requirement register and a working agreement — enough context to start
+      building in an empty repository without a single clarifying question.</div>
+
+    <div style="margin-top:34px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:16px 18px">
+        <div style="font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--rose-soft);text-transform:uppercase">Read first</div>
+        <div style="font-size:14px;font-weight:600;color:#fff;margin-top:8px;line-height:1.5">
+          00 Executive scope<br>03 Architecture<br>12 Decision records<br>AGENTS.md</div>
+      </div>
+      <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:16px 18px">
+        <div style="font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--rose-soft);text-transform:uppercase">Then build</div>
+        <div style="font-size:14px;font-weight:600;color:#fff;margin-top:8px;line-height:1.5">
+          In the order given by<br>10 Backlog &amp; roadmap.<br>The order is load-bearing.</div>
+      </div>
+    </div>
+
+    <div class="meta" style="margin-top:auto">
+      <div><div class="l">Pack</div><div class="v">docs/aios-v2/</div></div>
+      <div><div class="l">Requirements</div><div class="v">130+ numbered</div></div>
+      <div><div class="l">Decisions</div><div class="v">21 recorded</div></div>
+      <div><div class="l">Precedence</div><div class="v">ADRs → pack → code</div></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

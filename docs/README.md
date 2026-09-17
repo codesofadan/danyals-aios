@@ -1,99 +1,53 @@
 # Documentation
 
-One tree. Every document has exactly one home, and when two documents disagree the
-order below decides which wins.
-
-## Precedence — highest first
+One tree, one rule of precedence — and as of **2026-09-17** it has two eras:
 
 | # | Source | Why it ranks here |
 |---|---|---|
-| 1 | `recovery/DECISIONS_LOG.md` | Decisions the owner actually made, in their own words. Nothing outranks a decision. |
-| 2 | `decisions/` (ADRs) | Deliberate architectural choices, dated, with the alternatives recorded. |
-| 3 | `architecture/` | How the system is built. |
-| 4 | `research/` | Phase 1 evidence records — sourced and dated, but they inform decisions rather than make them. |
-| 5 | `recovery/`, `audit/`, `implementation/` | The historical record. **Accurate as of its date, not necessarily now.** |
+| 1 | [`aios-v2/`](aios-v2/) | **The v2 build blueprint — the specification.** When any other document disagrees with it, the pack wins. Start at [`aios-v2/README.md`](aios-v2/README.md). |
+| 2 | `architecture/` | How the **running v1** (app.qanry.com) is built. Operational reference for maintaining v1 — not the target design. |
+| 3 | `operations/` | Deploy and runbooks for the running v1. |
+| 4 | `implementation/` | v1 work log, test baseline, known limitations. Operational reference. |
+| 5 | Code | On any question of what v1 *does*, code outranks every document above except the pack's statements about what v2 *will do*. |
 
-**Code is not on this list, because code outranks all of it.** A document describing
-behaviour the code does not have is wrong, however senior its author or confident its
-prose. That is not a hypothetical:
-
-> `backend/CLAUDE.md` invariant #12 stated that content publishing was protected by a
-> hard QA gate raising `PublishBlocked`. **`PublishBlocked` is raised nowhere.** The claim
-> appeared in four places, and the recovery specification then cited
-> *`[CONFIRMED — [CODE] backend/CLAUDE.md item 12]`* as evidence for one of its six
-> headline defects. The audit cited documentation as code evidence, and the documentation
-> was false.
->
-> **2026-08-26: a fifth site.** `backend/docs/CONTENT-DOCTRINE.md` still said "the publish
-> gate is load-bearing: `workers/tasks/content.py` blocks any draft whose `QaScore.passed`
-> is not `True`" — three days after the other four were corrected, and in direct
-> contradiction of `CONTENT-MODULE.md` in the same folder. A sweep that fixes the places
-> you remember is not a sweep. The check is
-> `grep -rn "raise PublishBlocked" app workers integrations`, and it still returns nothing.
-
-Separately, a forensic audit's single RED verdict rested on a count of **3** where the
-real figure is **50** — established four times over, including from the audited commit
-itself.
-
-**Both failures share one cause: a confident document that nobody re-derived from
-source.** Hence the rules below.
-
-## Rules
-
-1. **Every document carries a date and a status** (`current` · `historical` · `superseded`).
-2. **Historical records are corrected, never silently edited.** The recovery and audit
-   trees are dated evidence. When one is wrong, add the correction visibly — an erratum,
-   or a struck line with the reason. Quietly rewriting a premise destroys the thing that
-   made the record citable.
-3. **A claim about code cites a file and line, and is re-derived before reuse.** Citing a
-   document that cites a document is how the failure above happened.
-4. **A claim about the database schema is settled by a built database, never by reading a
-   migration.** A column's type is its creating migration plus every later `ALTER`; across
-   85 ordered migrations that is not something to eyeball. `db/ci/verify_fresh_apply.py
-   --keep`, then query `information_schema`. Two sessions got the same column wrong on the
-   same day by reading `0006` and missing `0044`. See `db/migrations/README.md`.
+**Code is not a spec, but it is the only evidence of behaviour.** A document describing
+behaviour the code does not have is wrong, however confident its prose. A claim about
+code cites a file and line and is re-derived before reuse. A claim about the database
+schema is settled by a built database (`db/ci/verify_fresh_apply.py --keep`, then
+`information_schema`), never by eyeballing migrations.
 
 ## Layout
 
 | Directory | Contents | Status |
 |---|---|---|
-| `architecture/` | how the system is built; `reference/` holds the original PDFs | current |
-| `operations/` | deploy, runbooks, credentials | current |
-| `research/` | the seven Phase 1 decision records + cross-track index | current, dated |
-| `recovery/` | specification, requirements traceability, decisions, open questions | mixed — read `DECISIONS_LOG.md` first |
-| `audit/` | the forensic audit set and salvageability matrix | historical, 2026-08-23 |
-| `implementation/` | the work log, test baseline, known limitations | current |
+| [`aios-v2/`](aios-v2/) | the complete v2 rebuild blueprint: scope, requirements, SDLC, architecture, data model, API, AI stack, security, testing, infra, roadmap, ADRs, glossary, salvage map, module specs | **current — governs all new work** |
+| `scope/` | the pre-scope discovery questionnaire that produced the pack | historical, 2026-09-16 |
+| `architecture/` | how v1 is built; `reference/` holds the original PDFs | v1 operational reference |
+| `operations/` | v1 deploy, runbooks | v1 operational reference |
+| `implementation/` | v1 work log, test baseline, known limitations | v1 operational reference |
+| `audit/fixtures/` | recorded real audit runs — **referenced by tests** (`test_audit_altitude.py`, `auditAltitude.test.ts`) | current, load-bearing |
 | `deliverables/` | the client-facing PDF pack | current |
-| `meeting-notes/` | call records | historical |
 
-### On the two architecture documents
+## Removed 2026-09-17 — where the rest went
 
-`ARCHITECTURE-AND-PLAN.md` is the **plan** (the v1 locked architecture, July).
-`architecture-as-built.md` is **what exists**. They overlap and in places disagree —
-because the second describes a system the first predicted.
+The v1 planning and forensic prose (`recovery/`, `research/`, `audit/` minus
+`fixtures/`, `meeting-notes/`, and the root-level `CI-RED-GATES.md`,
+`DESIGN-REPLICATOR.md`, `QA-HANDOVER.md`, `PLATFORM-CREDENTIALS-CHECKLIST.md`,
+`offpage-module-briefing-prompt.md`) was removed from `main` when the v2 pack landed:
+superseded as specification, and a live hallucination risk next to the pack.
 
-**They are deliberately not merged here.** Reconciling them means deciding, case by case,
-whether the plan or the build is right, and each of those is an architectural decision
-that belongs in `decisions/` with its reasoning visible. Merging them silently would
-destroy exactly the evidence needed to make those calls. Until then, `as-built` wins on
-questions of fact and the plan wins on questions of intent — and the code wins over both.
+Nothing was destroyed. All of it — the entire v1 tree as it stood — is preserved at:
 
-## Where things moved (2026-08-23)
+- branch **`v1-archive`** (pushed to origin) — tip also carries `docs/scope/`
+- tag **`v1-final`** = commit `e3bb2c8`, the v1 state at cut-over
 
-`context/` and `knowledge-base/` were separate top-level trees describing the same system
-to different depths, with nothing stating which governed. Both are now here. The old
-paths appear in older documents and commit messages; they resolve as:
+Retrieve any file with `git show v1-archive:docs/recovery/DECISIONS_LOG.md`, or check
+the branch out. Historical records there are dated evidence: correct them with visible
+errata on the archive branch if ever needed, never silently.
 
-| Was | Now |
-|---|---|
-| `context/ARCHITECTURE-AND-PLAN.md` | `docs/architecture/ARCHITECTURE-AND-PLAN.md` |
-| `context/PRODUCT-OVERHAUL-BACKLOG.md` | `docs/architecture/PRODUCT-OVERHAUL-BACKLOG.md` |
-| `context/*.pdf` | `docs/architecture/reference/` |
-| `knowledge-base/architecture.md` | `docs/architecture/architecture-as-built.md` |
-| `knowledge-base/{modules,data-model,apis-and-keys,cost-and-dials}.md` | `docs/architecture/` |
-| `knowledge-base/deploy.md` | `docs/operations/deploy.md` |
+### On the two v1 architecture documents
 
-Note "knowledge base" also names a **Policy Radar domain concept** (`kb_entries`,
-`KBEntry`) which has nothing to do with the old directory. Occurrences in
-`backend/app/schemas/policy.py` and `services/policy_watch.py` are that concept, not a
-path, and were correctly left alone.
+`architecture/ARCHITECTURE-AND-PLAN.md` is the July **plan**;
+`architecture/architecture-as-built.md` is **what exists**. They disagree in places.
+`as-built` wins on questions of fact, the plan on questions of intent, code over both —
+and the `aios-v2/` pack over all of it for anything being built from now on.
