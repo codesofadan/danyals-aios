@@ -220,7 +220,21 @@ export default function ClientDirectory() {
                   <tr key={c.id}>
                     <td>
                       <div className="cd-client">
-                        <div className="cd-name"><Link href={`/admin/clients/${c.id}`} title={`Open ${c.cn} in full`}>{c.cn}</Link></div>
+                        <div className="cd-name">
+                          <Link href={`/admin/clients/${c.id}`} title={`Open ${c.cn} in full`}>{c.cn}</Link>
+                          {/* Which accounts run the local audit pipeline, at a glance. The
+                              flag decides whether an audit buys Google Places and citation
+                              lookups at all, so it is worth seeing without opening each row. */}
+                          {c.isLocalBusiness && (
+                            <span
+                              className="status-pill info"
+                              style={{ marginLeft: "var(--s-4)" }}
+                              title="Audits include Google Business Profile, citations & local-pack checks"
+                            >
+                              Local
+                            </span>
+                          )}
+                        </div>
                         <div className="cd-meta">{c.industry}{c.since ? ` · since ${c.since}` : ""}</div>
                       </div>
                     </td>

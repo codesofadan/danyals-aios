@@ -69,6 +69,12 @@ export type ClientRecord = {
   renews: string; // next renewal date
   mrr: number; // monthly recurring revenue (USD)
   portal: PortalAccess;
+  /** Whether audits run the LOCAL pipeline for this client - the Google Business
+   *  Profile lookup, citation discovery and the LOC-* checks (0147). An operator
+   *  STATES it; it is never inferred from whether a NAP happens to be filled in,
+   *  because a client whose address nobody has typed in yet would silently lose
+   *  the local checks they are paying for. */
+  isLocalBusiness: boolean;
 };
 
 // Total active accounts on the platform, month over month.

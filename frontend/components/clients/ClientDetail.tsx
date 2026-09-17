@@ -82,6 +82,9 @@ export default function ClientDetail({ clientId }: { clientId: string }) {
       }
       facts={[
         { label: "Industry", value: client.industry || "—" },
+        // Whether this account's audits run the local pipeline at all - the answer
+        // to "why is there no GBP section in this report?" lives here.
+        { label: "Local business", value: client.isLocalBusiness ? "Yes" : "No" },
         { label: "Since", value: client.since },
         { label: "Sites", value: client.sites },
         { label: "MRR", value: usd(client.mrr) },

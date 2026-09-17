@@ -5,13 +5,46 @@ import { reportBundles, type SubTier } from "@/lib/data";
 import type { NewClientInput } from "@/lib/hooks/clients";
 import { genPortalLogin, genPortalPassword } from "@/lib/portalCredentials";
 import type { BusinessMarket } from "@/lib/offpage";
+import { SettingRow, Switch } from "@/components/settings/controls";
 import nap from "@/components/offpage/Wave4.module.css";
 
 const MARKETS: BusinessMarket[] = ["US", "UK", "CA", "AU", "GLOBAL"];
 
+/** Split pasted seed terms into a clean, de-duplicated list.
+ *
+ * Operators paste from a sheet or a doc, so newlines AND commas both separate.
+ * Blanks and duplicates are dropped here rather than sent for the server to
+ * clean up, and the cap matches the API's own bound (200) so a paste of a whole
+ * spreadsheet is truncated visibly here instead of 422-ing on submit. */
+function parseSeeds(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[\n,]/)) {
+    const term = part.trim();
+    if (!term) continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+
 export default function AddClientWizard({ onClose, onAdd }: { onClose: () => void; onAdd: (c: NewClientInput) => void }) {
   const [cn, setCn] = useState("");
   const [industry, setIndustry] = useState("");
+  // Whether audits run this client's LOCAL pipeline - the Google Business Profile
+  // lookup, citation discovery and the LOC-* checks. Defaults off: nobody has been
+  // asked yet, and a missing local section an operator can switch on beats billing
+  // a SaaS client for Places + citation lookups that find nothing.
+  const [isLocalBusiness, setIsLocalBusiness] = useState(false);
+  // Seed terms for the client's keyword BANK. The content module targets terms
+  // from the bank, so a client created without one starts empty and every content
+  // run invents its own targets - which is how content and rank tracking end up
+  // chasing different keywords for the same client. Optional: research fills the
+  // bank out later, and these are stored as bare seeds with no invented metrics.
+  const [keywordSeeds, setKeywordSeeds] = useState("");
   // Plan is a free monthly $ amount the admin types (any value); the SubTier enum
   // label is derived from it purely for categorisation/colour.
   const [mrr, setMrr] = useState<number>(690);
@@ -62,6 +95,14 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
     onAdd({
       cn: cn.trim(),
       industry: industry.trim() || "General",
+      isLocalBusiness,
+      // One term per line or comma-separated - operators paste from a sheet, so
+      // both separators are accepted and blanks/dupes are dropped here rather
+      // than sent for the server to clean up.
+      keywords: parseSeeds(keywordSeeds),
+      // The NAP city is the market these terms are for when there is one; the
+      // bank keys on (client, keyword, geo) so this keeps two markets distinct.
+      keywordGeo: napCity.trim(),
       tier,
       mrr,
       contactName: contactName.trim(),
@@ -129,6 +170,40 @@ export default function AddClientWizard({ onClose, onAdd }: { onClose: () => voi
                 />
               </div>
             </div>
+            {/* Last of the account fields, beside Industry: this is the same kind of
+                claim about the business, and it is deliberately NOT part of the NAP
+                block below - the backend never reads it from the address, so an
+                operator who fills the NAP in later still keeps their local checks. */}
+            <div className="set-list" style={{ marginBottom: 14 }}>
+              <SettingRow
+                icon="location_on"
+                title="Local business"
+                desc="Audits for this client include the Google Business Profile lookup, citation discovery and the local-pack checks. Leave it off for SaaS or e-commerce clients with no Google Business Profile - those lookups are billed and find nothing."
+              >
+                <Switch checked={isLocalBusiness} onChange={setIsLocalBusiness} label="Local business" />
+              </SettingRow>
+            </div>
+
+            {/* The keyword bank the CONTENT module writes against. Captured here
+                because onboarding's "Build keyword seed list" step was a checklist
+                tickbox with no data behind it, so the bank stayed empty. */}
+            <div className="fld">
+              <label>
+                Seed keywords <span className={nap.optTag}>optional</span>
+              </label>
+              <textarea
+                rows={3}
+                value={keywordSeeds}
+                onChange={(e) => setKeywordSeeds(e.target.value)}
+                placeholder={"emergency dentist, teeth whitening, invisalign"}
+              />
+              <div className={nap.napSub} style={{ marginTop: 6 }}>
+                One per line, or comma-separated. These start the client&apos;s keyword
+                bank, which is what content pages are written against. Saved as
+                plain terms - volume and difficulty come from research later.
+              </div>
+            </div>
+
             <div className="fld">
               <label>Primary contact name</label>
               <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="e.g. Dr. Sana Malik" />

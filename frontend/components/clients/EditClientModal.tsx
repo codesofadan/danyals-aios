@@ -6,6 +6,7 @@ import {
   useClientBusinessProfile, useSaveClientBusinessProfile, type ClientUpdate,
 } from "@/lib/hooks/clients";
 import type { BusinessMarket } from "@/lib/offpage";
+import { SettingRow, Switch } from "@/components/settings/controls";
 import nap from "@/components/offpage/Wave4.module.css";
 
 const TIERS: SubTier[] = ["Starter", "Growth", "Scale"];
@@ -41,6 +42,10 @@ export default function EditClientModal({
   const [contactName, setContactName] = useState(client.contact.name);
   const [contactRole, setContactRole] = useState(client.contact.role);
   const [contactEmail, setContactEmail] = useState(client.contact.email);
+  // An account field (PATCH /clients/{id}), not part of the NAP below - which saves
+  // on its own button. A client stops or starts being local after the fact, and the
+  // audit pipeline has to follow.
+  const [isLocalBusiness, setIsLocalBusiness] = useState(client.isLocalBusiness);
 
   // The client's own NAP (client_business_profiles, 0051): loaded independently and
   // saved with its own action (a separate PUT), so a NAP edit never depends on an
@@ -115,6 +120,7 @@ export default function EditClientModal({
     if (status !== client.status) changes.status = status;
     const mrrNum = Math.max(0, Math.round(Number(mrr)) || 0);
     if (mrrNum !== client.mrr) changes.mrr = mrrNum;
+    if (isLocalBusiness !== client.isLocalBusiness) changes.isLocalBusiness = isLocalBusiness;
     const contactChanged =
       contactName.trim() !== client.contact.name
       || contactRole.trim() !== client.contact.role
@@ -181,6 +187,19 @@ export default function EditClientModal({
                 <label>MRR ($ / month)</label>
                 <input type="number" min={0} value={mrr} onChange={(e) => setMrr(e.target.value)} placeholder="290" />
               </div>
+            </div>
+
+            {/* Same home as the Add-Client wizard's copy: the last account field,
+                above the contact block and OUTSIDE the NAP block - the NAP saves with
+                its own button, so a toggle sitting in there would read as part of it. */}
+            <div className="set-list" style={{ marginBottom: 14 }}>
+              <SettingRow
+                icon="location_on"
+                title="Local business"
+                desc="Audits for this client include the Google Business Profile lookup, citation discovery and the local-pack checks. Leave it off for SaaS or e-commerce clients with no Google Business Profile - those lookups are billed and find nothing."
+              >
+                <Switch checked={isLocalBusiness} onChange={setIsLocalBusiness} label="Local business" />
+              </SettingRow>
             </div>
 
             <div className="fld-row">

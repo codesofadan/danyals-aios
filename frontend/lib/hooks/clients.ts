@@ -26,7 +26,24 @@ export const TICKETS_KEY = ["tickets"] as const;
 // `mrr` is the monthly amount the wizard collects (any value). There is NO
 // tier->price fallback: a client's MRR is a real figure an operator enters,
 // never one the UI invents.
-export type NewClientInput = NewClient & { nap?: ClientBusinessProfileInput; mrr?: number };
+export type NewClientInput = NewClient & {
+  nap?: ClientBusinessProfileInput;
+  mrr?: number;
+  /** Whether this client is a local business, so audits run the GBP/citation/LOC-*
+   *  pipeline. Required rather than optional on purpose: the flag exists because a
+   *  HUMAN states it, so a caller that forgets to ask is a bug, not a quiet "no". */
+  isLocalBusiness: boolean;
+  /** Seed keywords for this client's keyword BANK, captured with the profile.
+   *  The content module targets terms from the bank, so a client created without
+   *  one starts empty and every content run has to invent its own targets - which
+   *  is how content and rank tracking drift apart. Bare terms only: research
+   *  enriches them later, and the server records them as `manual` so a seed is
+   *  never mistaken for a measured metric. */
+  keywords?: string[];
+  /** The market those seeds are for. Part of the bank's uniqueness key
+   *  (client, keyword, geo), so the same term in two markets stays two rows. */
+  keywordGeo?: string;
+};
 
 export const clientBusinessProfileKey = (clientId: string) =>
   ["clients", clientId, "business-profile"] as const;
@@ -159,6 +176,16 @@ export function useCreateClient() {
         industry: input.industry,
         tier: input.tier,
         mrr: input.mrr ?? 0,
+        // The operator's answer to "is this a local business?" - it decides whether an
+        // audit buys Google Places + citation lookups at all. Always sent, so what is
+        // stored is a stated answer rather than the server's default.
+        isLocalBusiness: input.isLocalBusiness,
+        // Seed the client's keyword bank at creation. Omitted when the operator
+        // entered none, so the server skips the write entirely rather than
+        // storing an empty list.
+        ...(input.keywords && input.keywords.length > 0
+          ? { keywords: input.keywords, keywordGeo: input.keywordGeo ?? "" }
+          : {}),
         contact: { name: input.contactName, email: input.contactEmail },
         portal: { admin: input.adminLogin },
         // The NAP the wizard collected (persisted into client_business_profiles); an
@@ -217,6 +244,9 @@ export type ClientUpdate = {
   renews?: string;
   mrr?: number;
   contact?: { name: string; role: string; email: string; color: string };
+  /** Switchable after creation: an operator learns a client is local (or is not)
+   *  after the fact, and the audit pipeline has to follow. */
+  isLocalBusiness?: boolean;
 };
 
 /** Edit a client's account fields (PATCH /clients/{id} → the updated ClientRecord). */
