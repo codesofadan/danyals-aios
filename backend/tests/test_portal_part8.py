@@ -406,6 +406,7 @@ def test_audit_worker_emits_audit_deliverable(monkeypatch: pytest.MonkeyPatch) -
         depth: str | None = None, max_pages: int | None = None,
         # Mirrors the _Runner protocol (client name -> Google Places).
         business_name: str | None = None,
+        is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(ok=True, run_uuid="u-1", artifact_dir="/a", score=88,
                               scores={"overall": 88}, runtime_seconds=100, exit_code=0)

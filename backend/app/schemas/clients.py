@@ -56,6 +56,10 @@ class ClientResponse(BaseModel):
     renews: str
     mrr: int
     portal: PortalAccess
+    # Whether audits run the LOCAL pipeline for this client (GBP, citations,
+    # LOC-* checks). Stated by an operator - never inferred from whether a NAP
+    # happens to be filled in (0147).
+    is_local_business: bool = Field(default=False, serialization_alias="isLocalBusiness")
 
     @classmethod
     def from_row(cls, row: dict[str, Any], *, site_count: int) -> ClientResponse:
@@ -83,6 +87,7 @@ class ClientResponse(BaseModel):
                 two_fa=bool(row.get("portal_two_fa", False)),
                 last_login=relative_ago(row.get("portal_last_login_at")),
             ),
+            is_local_business=bool(row.get("is_local_business", False)),
         )
 
 
@@ -130,6 +135,11 @@ class ClientCreate(BaseModel):
     # uniqueness key (client, keyword, geo), so the same term in two markets is two
     # honest rows rather than one that silently overwrites the other.
     keyword_geo: str = Field(default="", alias="keywordGeo", max_length=120)
+    # Whether this client is a local business, so audits run the local
+    # pipeline. Defaults False: nobody has been asked yet, and a missing
+    # local section an operator can switch on beats a surprise bill and a
+    # page of findings about a Google profile that does not exist.
+    is_local_business: bool = Field(default=False, alias="isLocalBusiness")
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -147,6 +157,7 @@ class ClientCreate(BaseModel):
             "portal_admin": self.portal.admin,
             "portal_seats": self.portal.seats,
             "portal_two_fa": self.portal.two_fa,
+            "is_local_business": self.is_local_business,
         }
 
 
@@ -161,6 +172,9 @@ class ClientUpdate(BaseModel):
     renews: str | None = None
     mrr: int | None = None
     contact: ContactInput | None = None
+    # Switchable after creation: an operator learns a client is local (or is
+    # not) after the fact, and the audit pipeline must follow.
+    is_local_business: bool | None = Field(default=None, alias="isLocalBusiness")
 
     def to_row(self) -> dict[str, Any]:
         mapping = {
@@ -171,6 +185,7 @@ class ClientUpdate(BaseModel):
             "status": "status",
             "renews": "renews_at",
             "mrr": "mrr",
+            "is_local_business": "is_local_business",
         }
         row: dict[str, Any] = {}
         for field, column in mapping.items():

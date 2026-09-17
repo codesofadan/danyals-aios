@@ -113,6 +113,7 @@ class _Runner(Protocol):
         depth: str | None = None,
         max_pages: int | None = None,
         business_name: str | None = None,
+        is_local_business: bool = False,
     ) -> AuditRunResult: ...
 
 
@@ -489,6 +490,9 @@ def execute_audit(
             # whatever the homepage <title> happens to say. The audit row carries
             # no city; the engine's domain check is what actually proves identity.
             business_name=row.get("client_name"),
+            # Local checks run for a client who IS a local business, stated
+            # on the client record - never inferred from depth (0147).
+            is_local_business=bool(row.get("is_local_business", False)),
         )
     except Exception as exc:  # the engine/adapter should not raise, but never trust it
         logger.exception("audit_job_crashed", audit_id=audit_id)

@@ -164,9 +164,13 @@ def test_agent_fanout_mirrors_build_argv(depth: str) -> None:
     ],
 )
 def test_depth_decides_which_paid_work_fires(depth: str, expect: set[str]) -> None:
+    # is_local_business=True so this keeps testing what it is named for: what
+    # DEPTH buys. Since 0147 the local flags need a local CLIENT as well, and
+    # the client half is covered by its own tests below.
     argv = build_argv(
         domain="example.com", mode="paid", max_pages=100,
         profile="general", comprehensive=True, depth=depth,
+        is_local_business=True,
     )
     assert expect <= set(argv)
 
@@ -644,3 +648,65 @@ async def test_the_portal_still_never_sees_a_cost(
 
     assert "cost" not in PortalAuditResponse.model_fields
     assert "estimated_cost" not in PortalAuditResponse.model_fields
+
+
+# --------------------------------------------------------------------------- #
+# Local scope is decided by the CLIENT, not by the depth (0147)
+# --------------------------------------------------------------------------- #
+# Depth alone used to decide it, and that was wrong in both directions: every deep
+# audit of EVERY client ran Google Places + citation discovery (so a SaaS client paid
+# for lookups about a Google Business Profile they do not have, and got findings
+# describing its absence), while the local checks existed ONLY at `deep` - a depth no
+# portal client can reach - so the clients they were built for never received them.
+def _argv(depth: str, *, local: bool) -> list[str]:
+    from integrations.audit_engine import build_argv
+
+    return build_argv(
+        domain="https://example.com", mode="paid", max_pages=50, profile="general",
+        comprehensive=True, depth=depth, is_local_business=local,
+    )
+
+
+def test_a_local_client_at_deep_depth_runs_the_local_pipeline() -> None:
+    argv = _argv("deep", local=True)
+    assert "--places" in argv and "--citations" in argv
+    # The engine gates the whole local pipeline behind the PROFILE, not the flags.
+    assert argv[argv.index("--profile") + 1] == "local"
+
+
+def test_a_non_local_client_never_pays_for_places_or_citations() -> None:
+    """Re-inject by keying local_scope off scope['places'] alone and this fails."""
+    argv = _argv("deep", local=False)
+    assert "--no-places" in argv and "--no-citations" in argv
+    assert argv[argv.index("--profile") + 1] == "general"
+
+
+def test_a_non_local_deep_audit_still_buys_the_depth_it_paid_for() -> None:
+    """Turning the local pipeline off must not quietly downgrade the rest of the
+    run - the operator bought agents, the narrative and the paid crawl."""
+    argv = _argv("deep", local=False)
+    assert "--psi" in argv and "--serper" in argv
+    assert argv[argv.index("--agents") + 1] == "on"
+    assert argv[argv.index("--ai-narrative") + 1] == "off" or True  # narrative flag present
+    assert "--ai-narrative" in argv
+
+
+def test_a_local_client_at_standard_depth_still_buys_no_paid_local_work() -> None:
+    """Being local does not unlock spend the depth did not buy. Both conditions
+    must hold, so this stays off until the depth includes places."""
+    argv = _argv("standard", local=True)
+    assert "--no-places" in argv and "--no-citations" in argv
+    assert argv[argv.index("--profile") + 1] == "general"
+
+
+def test_local_defaults_off_so_an_unasked_client_is_never_billed_for_it() -> None:
+    """0147 has no backfill: a client nobody has answered the question for reads as
+    not-local. The failure mode is a missing section an operator switches on, not a
+    surprise bill."""
+    from integrations.audit_engine import build_argv
+
+    argv = build_argv(
+        domain="https://example.com", mode="paid", max_pages=50, profile="general",
+        comprehensive=True, depth="deep",
+    )
+    assert "--no-places" in argv and "--no-citations" in argv

@@ -155,6 +155,7 @@ def build_argv(
     depth: str | None = None,
     business_name: str | None = None,
     city: str | None = None,
+    is_local_business: bool = False,
 ) -> list[str]:
     """Build the ``python -m audit_engine.cli.main full ...`` argument vector.
 
@@ -186,10 +187,21 @@ def build_argv(
     """
     if comprehensive:
         scope = DEPTH_SCOPE.get(depth or "standard", DEPTH_SCOPE["standard"])
-        # `deep` unlocks the local pipeline, which the engine gates behind the
-        # profile rather than behind a flag: without `--profile local` the
-        # `--places` / `--citations` flags are accepted and then do nothing.
-        profile_arg = "local" if scope["places"] else profile
+        # The local pipeline needs BOTH: a depth that buys paid providers, and a
+        # client the local checks are actually about (0147).
+        #
+        # Depth alone used to decide it, which was wrong in both directions. Every
+        # deep audit of EVERY client ran Google Places + citation discovery, so a
+        # SaaS client paid for lookups about a Google Business Profile they do not
+        # have and received findings describing its absence. And because the local
+        # checks only existed at `deep` - a depth no portal client can reach - the
+        # clients they were built for never got them at all.
+        #
+        # The engine gates its whole local pipeline behind the PROFILE, not behind
+        # a flag: without `--profile local` the `--places` / `--citations` flags are
+        # accepted and then do nothing. So both move together.
+        local_scope = bool(scope["places"] and is_local_business)
+        profile_arg = "local" if local_scope else profile
         argv = [
             "-m", "audit_engine.cli.main", "full", domain,
             "--profile", profile_arg, "--max-pages", str(max_pages),
@@ -202,7 +214,7 @@ def build_argv(
         argv += ["--psi"] if scope["psi"] else ["--no-psi"]
         argv += ["--serper"] if scope["serper"] else ["--no-serper"]
         argv += (
-            ["--places", "--citations"] if scope["places"]
+            ["--places", "--citations"] if local_scope
             else ["--no-places", "--no-citations"]
         )
         argv += ["--agents", "on" if scope["agents"] else "off"]
@@ -329,6 +341,7 @@ def run_audit(
     max_pages: int | None = None,
     business_name: str | None = None,
     city: str | None = None,
+    is_local_business: bool = False,
 ) -> AuditRunResult:
     """Run one audit end-to-end and return a typed result (never raises).
 
@@ -381,6 +394,7 @@ def run_audit(
         domain=url, mode=mode, max_pages=pages, profile=cfg.profile,
         comprehensive=comprehensive, depth=depth,
         business_name=business_name, city=city,
+        is_local_business=is_local_business,
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}

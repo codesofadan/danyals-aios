@@ -111,6 +111,7 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
         depth: str | None = None, max_pages: int | None = None,
         # Mirrors the _Runner protocol (client name -> Google Places).
         business_name: str | None = None,
+        is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir=str(tmp_path / "engine"), score=80,
