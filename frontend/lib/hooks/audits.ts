@@ -192,3 +192,35 @@ export function useSetAuditVisibility() {
     },
   });
 }
+
+/** What `POST /audits/{id}/public-page` returns: where a shared report lives. */
+export type AuditPublicPage = {
+  slug: string;
+  url: string;
+  published: boolean;
+  kind: string;
+};
+
+/**
+ * Publish an audit report to a public URL, or take it back down.
+ *
+ * THE LINK THIS MINTS IS OPENABLE BY ANYONE WHO HAS IT — that is the point, it
+ * is meant to be pasted into a WhatsApp chat or a Fiverr message. Which is also
+ * why it is an explicit act: a paid audit is client deliverable work, so its page
+ * is unpublished until someone decides otherwise (migration 0126).
+ *
+ * A 409 means the audit has no page yet — pages are minted when a run completes,
+ * so an unfinished audit has no report to put at a URL. A 404 means the update
+ * matched no row, which (as with visibility above) covers an RLS refusal as well
+ * as an unknown id; both must read as "it did not publish", never as success.
+ */
+export function usePublishAuditPage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, published }: { id: string; published: boolean }) =>
+      api.post<AuditPublicPage>(`/audits/${id}/public-page`, { published }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: AUDITS_KEY });
+    },
+  });
+}

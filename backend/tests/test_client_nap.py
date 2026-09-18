@@ -6,7 +6,7 @@ the citation-submit worker that BLOCKS (never force-fails) a listing with no NAP
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import pytest
@@ -202,7 +202,10 @@ def test_citation_submit_blocks_when_nap_is_missing() -> None:
 class _FakeKeywordRepo:
     """Captures what the create endpoint writes to the bank."""
 
-    calls: list[dict[str, Any]] = []
+    # CLASS-level on purpose: the endpoint constructs this fake itself, so the
+    # test never holds the instance and cannot read a per-instance list. The
+    # `bank` fixture resets it before each  test.
+    calls: ClassVar[list[dict[str, Any]]] = []
 
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id

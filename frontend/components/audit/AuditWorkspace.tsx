@@ -18,6 +18,7 @@ import {
   useAuditStats,
   useCreateAudit,
   useSetAuditVisibility,
+  usePublishAuditPage,
   type AuditEstimate,
 } from "@/lib/hooks/audits";
 import { useClients } from "@/lib/hooks/clients";
@@ -81,6 +82,14 @@ export default function AuditWorkspace() {
   const { halted } = useSpendHalted(); // global API-spend kill-switch
   // The audit awaiting a "share this into the client's portal" confirmation.
   const [sharePrompt, setSharePrompt] = useState<AuditRow | null>(null);
+  const publishPage = usePublishAuditPage();
+  // The audit awaiting a "put this report at a public URL" confirmation. A
+  // separate prompt from `sharePrompt` because it is a WIDER disclosure: the
+  // portal share reaches one signed-in client, this reaches anyone holding the
+  // link.
+  const [publishPrompt, setPublishPrompt] = useState<AuditRow | null>(null);
+  // Which row just had its link copied, so the button can confirm it silently.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const rows = auditsQ.data ?? [];
   const clients = clientsQ.data ?? [];
@@ -461,6 +470,49 @@ export default function AuditWorkspace() {
                             {r.visibleToClient ? "Shared" : "Internal"}
                           </span>
                         </button>
+
+                        {/* THE PUBLIC LINK. Anyone holding this URL can open the
+                            report, so publishing asks first - and, like the portal
+                            share beside it, withdrawing stays one click because that
+                            is the safe direction.
+
+                            Only offered on a DONE audit: a page is minted when a run
+                            completes, so publishing anything else returns a 409, and
+                            disabling it here tells the operator before the click. */}
+                        <button
+                          className={`au-share${r.publicUrl ? " is-on" : ""}${r.status === "done" ? "" : " is-disabled"}`}
+                          aria-pressed={Boolean(r.publicUrl)}
+                          disabled={publishPage.isPending || r.status !== "done"}
+                          title={
+                            r.status !== "done"
+                              ? "The report is only published once the audit has finished."
+                              : r.publicUrl
+                                ? `Public: ${r.publicUrl} - click to copy. Shift-click to unpublish.`
+                                : "Not public. Click to publish a link you can send on WhatsApp or Fiverr."
+                          }
+                          onClick={(e) => {
+                            if (!r.publicUrl) {
+                              setPublishPrompt(r);
+                              return;
+                            }
+                            if (e.shiftKey) {
+                              publishPage.mutate({ id: r.id, published: false });
+                              return;
+                            }
+                            // Copying is the common case once a link exists, so a
+                            // plain click copies rather than re-publishing.
+                            void navigator.clipboard?.writeText(r.publicUrl);
+                            setCopiedId(r.id);
+                            window.setTimeout(() => setCopiedId(null), 1600);
+                          }}
+                        >
+                          <span className="material-symbols-rounded">
+                            {r.publicUrl ? (copiedId === r.id ? "check" : "link") : "link_off"}
+                          </span>
+                          <span className="au-share-t">
+                            {r.publicUrl ? (copiedId === r.id ? "Copied" : "Public") : "Get link"}
+                          </span>
+                        </button>
                       </td>
                       <td>
                         <div className="au-arts">
@@ -737,6 +789,39 @@ export default function AuditWorkspace() {
           }
         />
       )}
+
+      <ConfirmDialog
+        open={publishPrompt !== null}
+        title="Publish this report to a public link?"
+        body={
+          <>
+            Anyone who has the link will be able to open this audit of{" "}
+            <b>{publishPrompt?.url}</b> - its score, findings and full report - without
+            signing in. The page ends with your Fiverr services.
+          </>
+        }
+        reassurance="The link is not listed or search-indexed, and you can unpublish it at any time - though that will not un-read what has already been opened."
+        confirmLabel="Publish the link"
+        pending={publishPage.isPending}
+        onCancel={() => setPublishPrompt(null)}
+        onConfirm={() => {
+          const target = publishPrompt;
+          if (!target) return;
+          publishPage.mutate(
+            { id: target.id, published: true },
+            {
+              onSuccess: (page) => {
+                setPublishPrompt(null);
+                // Hand the operator the URL immediately - fetching the board
+                // again to read it back would make the copy a second step.
+                void navigator.clipboard?.writeText(page.url);
+                setCopiedId(target.id);
+                window.setTimeout(() => setCopiedId(null), 1600);
+              },
+            },
+          );
+        }}
+      />
 
       <ConfirmDialog
         open={sharePrompt !== null}

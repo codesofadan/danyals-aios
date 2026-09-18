@@ -85,6 +85,17 @@ const isPending = (r: PublicReport | undefined) => r?.status === "queued" || r?.
  * row. 409/400 surface as an ApiError whose `.status` + `.message` the caller
  * renders as a first-class state.
  */
+// RETIRED SURFACE, kept only so the parked funnel components still compile.
+//
+// `useCreatePublicAudit` and `usePublicReport` target POST /public/audits and its
+// token-polled read. The CREATE endpoint was removed on 2026-09-17 with the
+// self-serve funnel (see frontend/parked.registry.ts), so this mutation now has no
+// server to call - it is here because FreeAuditFlow/FreeAuditReport are parked
+// rather than deleted, and parked code has to keep type-checking.
+//
+// Do not wire either of these into a live surface. The report route the platform
+// still serves is the slug-based one further down (`usePublicPage`), which backs
+// /leads/<slug> - the page an operator shares.
 export function useCreatePublicAudit() {
   return useMutation<PublicAuditCreated, unknown, CreatePublicAuditInput>({
     mutationFn: (input) => api.post<PublicAuditCreated>("/public/audits", input),

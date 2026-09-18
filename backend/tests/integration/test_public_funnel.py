@@ -16,16 +16,11 @@ configured. The 3-portal login routing is proven separately in test_auth_login.p
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
-import httpx
 import pytest
-from asgi_lifespan import LifespanManager
 
 from app.config import get_settings
 from app.db.database import privileged_connection
-from app.main import create_app
-from app.routers.public import get_public_audit_enqueuer, get_public_funnel_gate
 
 pytestmark = pytest.mark.integration
 
@@ -53,73 +48,16 @@ def _row_by_email(email: str) -> dict[str, Any] | None:
         return cur.fetchone()
 
 
-async def test_public_funnel_end_to_end() -> None:
-    _require_local_stack()
-    email = f"lead_{uuid4().hex[:10]}@example.com"
-
-    app = create_app()
-    # No live broker: the DB gateway stays REAL (this test's whole point is the
-    # real `public_audits` round-trip, including the real daily-cap count query).
-    # The cost gate is pinned OPEN so the assertion under test is the funnel's
-    # behaviour, not whichever dial mode this database happens to hold.
-    enqueued: list[str] = []
-    app.dependency_overrides[get_public_audit_enqueuer] = lambda: enqueued.append
-    app.dependency_overrides[get_public_funnel_gate] = lambda: (lambda: True)
-
-    async with LifespanManager(app):
-        try:
-            transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
-                # --- POST creates a lead row + token (NO auth header) ---
-                first = await ac.post(
-                    "/api/v1/public/audits", json={"email": email, "url": _PUBLIC_URL}
-                )
-                assert first.status_code == 201, first.text
-                created = first.json()
-                assert set(created) == {"report_token", "status"}  # never the internal id
-                assert created["status"] == "queued"
-                token = created["report_token"]
-                assert len(token) >= 24  # opaque, unguessable capability
-
-                # The lead landed in public_audits with our email + url.
-                row = _row_by_email(email)
-                assert row is not None
-                assert row["url"] == _PUBLIC_URL
-                assert row["report_token"] == token
-                assert enqueued == [str(row["id"])]  # worker enqueued
-                # NO cost row is written at request time any more: the worker
-                # commits exactly one ledger entry, priced from what the run did.
-
-                # --- one-audit-per-email: a SECOND POST same email -> 409 ---
-                dup = await ac.post(
-                    "/api/v1/public/audits", json={"email": email.upper(), "url": _PUBLIC_URL}
-                )
-                assert dup.status_code == 409, dup.text
-                assert "already exists" in dup.json()["error"]["message"]
-
-                # --- GET {token} -> curated report + fiverr_url, no tenant/internal leak ---
-                report = await ac.get(f"/api/v1/public/audits/{token}")
-                assert report.status_code == 200, report.text
-                body = report.json()
-                assert set(body) == {
-                    "status", "score", "scores", "has_pdf", "has_report",
-                    "url", "when", "fiverr_url", "publicSlug",
-                }
-                # The /leads/<brand> page publishes on COMPLETION; this audit is
-                # still queued, so the slug is the documented empty-string default.
-                assert body["publicSlug"] == ""
-                assert body["url"] == _PUBLIC_URL
-                assert body["fiverr_url"] == get_settings().fiverr_upsell_url
-                raw = report.text
-                assert str(row["id"]) not in raw  # internal id never exposed
-                assert email.lower() not in raw.lower()  # email never exposed
-
-                # --- a random token -> 404 ---
-                missing = await ac.get(f"/api/v1/public/audits/{uuid4().hex}")
-                assert missing.status_code == 404
-        finally:
-            _delete_lead(email)
-
+# `test_public_funnel_end_to_end` was removed with the endpoint it drove
+# (POST /public/audits, retired 2026-09-17): an operator now runs the audit from
+# the dashboard and publishes it as a link, so there is no anonymous create path
+# left to walk end to end. The equivalent coverage for the new flow is
+# tests/integration/test_audit_public_pages.py.
+#
+# The structural check below STAYS and is not about the endpoint: `public_audits`
+# must remain unable to reach any tenant row, which is what made an
+# unauthenticated read of it safe in the first place - and the table, its rows and
+# its read routes all still exist.
 
 def test_public_audits_is_structurally_tenant_isolated() -> None:
     """public_audits has NO client_id column and no FK into any tenant table."""

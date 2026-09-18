@@ -154,13 +154,13 @@ export type AuditRow = {
   // Render it wherever an audit is listed: exposure a reviewer cannot see is
   // exposure nobody reviews.
   visibleToClient: boolean;
-  // The PUBLIC report link, when one is live — the URL an operator pastes into a
+  // The PUBLIC report link, when one is live - the URL an operator pastes into a
   // WhatsApp chat or a Fiverr message. Anyone holding it can open the report.
   //
   // `null` means there is nothing to paste, for either of two reasons the UI does
   // not need to tell apart: no page has been minted (the run has not completed),
   // or a page exists but nobody has published it. The backend only ever fills
-  // these for a PUBLISHED page, so a non-null value is always openable — handing
+  // these for a PUBLISHED page, so a non-null value is always openable - handing
   // an operator a link that 404s for the recipient is the failure this shape
   // exists to prevent.
   publicUrl: string | null;

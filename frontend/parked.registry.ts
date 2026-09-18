@@ -157,6 +157,34 @@ export const PARKED: ParkedEntry[] = [
       "was green when unmounted and keeps its tests (DesignReplicator.test.tsx).",
   },
 
+  // --- The public free-audit funnel, retired 2026-09-17 --------------------
+  {
+    path: "free-audit/FreeAuditFlow.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-17 client instruction to stop offering a self-serve public audit",
+    reason:
+      "\"The user-facing free audit page - don't build it that way. In the audit " +
+      "module of the admin dashboard there should be a flow where we enter the " +
+      "client's website and details, and that same full report page appears with a " +
+      "public URL we can send on WhatsApp or Fiverr.\" An operator now runs the " +
+      "audit and publishes the link, so the anonymous self-serve path - the only " +
+      "unauthenticated route that could cause a real crawl - is gone with it.",
+    reEnableWhen:
+      "A self-serve lead magnet is wanted again. NOTE the backend half it drove " +
+      "(POST /public/audits and its four abuse controls) was removed too, so this " +
+      "needs that endpoint back before it can do anything.",
+  },
+  {
+    path: "free-audit/FreeAuditReport.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-17 client instruction to stop offering a self-serve public audit",
+    reason:
+      "The in-flow report screen of the retired funnel. The SHARED report page " +
+      "(/leads/<slug>, PublicAuditPage) is the surviving one and renders the same " +
+      "consulting report - this rendered the token-polled result inside the flow.",
+    reEnableWhen: "FreeAuditFlow returns; it has no other caller.",
+  },
+
   // --- Phase-1 screen grammar: built ahead of the screens that mount them ----
   // The approved Screen & Hierarchy Specification (plan of 2026-08-27) builds the
   // shared vocabulary FIRST, then migrates screens onto it phase by phase. These

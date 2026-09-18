@@ -65,6 +65,9 @@ vi.mock("@/lib/hooks/audits", () => ({
   useCreateAudit: () => ({ mutate: createMutate, isPending: false }),
   useAuditEstimate: () => ({ mutate: vi.fn(), isPending: false }),
   useSetAuditVisibility: () => ({ mutate: visibilityMutate, isPending: false }),
+  // The public-report link control lives beside the portal share in
+  // AuditWorkspace, so every test that renders it needs this seam.
+  usePublishAuditPage: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock("@/lib/hooks/clients", () => ({
   useClients: () => ({ data: clientList, isLoading: clientsLoading }),

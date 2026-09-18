@@ -39,18 +39,14 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from psycopg import errors as psycopg_errors
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 from app.core.deps import SettingsDep
-from app.core.ratelimit import rate_limit_ip
-from app.core.security import PrivateAddressError, validate_public_host
 from app.db.database import privileged_connection
 from app.logging_setup import get_logger
 from app.schemas.audits import AuditTypeKey
@@ -63,8 +59,6 @@ from app.services.content_images import (
     LocalContentImageStore,
     content_image_store_from_settings,
 )
-from app.services.cost_gate import CostGate, GateContext
-from app.services.cost_store import PostgresCostStore
 
 logger = get_logger("app.public")
 
@@ -100,10 +94,6 @@ _DEFAULT_TYPES: tuple[AuditTypeKey, ...] = (
     "strategy",
 )
 
-_DUPLICATE_EMAIL = HTTPException(
-    status_code=status.HTTP_409_CONFLICT,
-    detail="A free audit already exists for this email",
-)
 _REPORT_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
 )
@@ -124,31 +114,6 @@ _FUNNEL_UNAVAILABLE = HTTPException(
 # --------------------------------------------------------------------------- #
 # Request / response shapes
 # --------------------------------------------------------------------------- #
-class PublicAuditCreate(BaseModel):
-    """Landing-page payload. ``email`` is validated (``EmailStr``).
-
-    ``types`` is accepted for wire compatibility with the existing landing page
-    but does NOT scope the run, and never did: the engine has no per-dimension
-    flag on its light path (see ``integrations.audit_engine.build_argv``). The
-    public funnel runs one fixed CONDENSED shape - the deterministic on-page,
-    technical and AI-search analyzers, no paid provider (DECISIONS_LOG D-1).
-
-    The report renders whatever score categories that run actually produced, so a
-    caller asking for a dimension the condensed run does not cover simply does not
-    see it - it is never fabricated to match the request."""
-
-    email: EmailStr
-    url: str = Field(min_length=1, max_length=2048)
-    types: list[AuditTypeKey] = Field(default_factory=lambda: list(_DEFAULT_TYPES))
-
-
-class PublicAuditCreated(BaseModel):
-    """201 response: the capability token + initial status. NOT the internal id."""
-
-    report_token: str
-    status: str
-
-
 class PublicReport(BaseModel):
     """The CURATED public report. No internal id, no email, no error, no paths."""
 
@@ -249,58 +214,6 @@ def get_public_gateway() -> PublicAuditsGateway:
 PublicGatewayDep = Annotated[PublicAuditsGateway, Depends(get_public_gateway)]
 
 
-def get_public_audit_enqueuer() -> Callable[[str], None]:
-    """Dependency: enqueue the public-audit worker (overridable in tests).
-
-    The task is imported lazily so the API process never pulls in Celery modules
-    just to import this router.
-    """
-
-    def _enqueue(public_audit_id: str) -> None:
-        from workers.tasks.audit import run_public_audit_job
-
-        run_public_audit_job.delay(public_audit_id)
-
-    return _enqueue
-
-
-PublicEnqueuerDep = Annotated[Callable[[str], None], Depends(get_public_audit_enqueuer)]
-
-
-def get_public_funnel_gate() -> Callable[[], bool]:
-    """Dependency: is the free-audit funnel currently open?
-
-    Consults the SAME cost gate every paid call passes, under the funnel's own
-    ``public_audit`` dial. Returns True only for an ``api`` dial with no
-    agency-global spend halt engaged.
-
-    This REPLACES a "funnel-entry $0 cost" writer that logged a hardcoded $0.00
-    into the money ledger at request time. That row asserted a cost before any
-    work had happened and was a duplicate of the worker's own commit - the
-    worker now writes exactly one ledger row per run, with the cost DERIVED from
-    what the run actually did (``workers/tasks/audit.py``). What the request path
-    needs from the gate is not a ledger entry: it is permission to proceed.
-
-    Overridable in tests (the default reads through the privileged cost store).
-    """
-
-    def _open() -> bool:
-        ctx = GateContext(
-            feature_key=_COST_FEATURE,
-            client_id=None,
-            provider=_COST_PROVIDER,
-            estimated_cost=0.0,
-            job_id="",
-            job_type=_COST_JOB_TYPE,
-            client_name="",
-        )
-        return CostGate(PostgresCostStore(), _NoCostCache()).evaluate(ctx).allowed
-
-    return _open
-
-
-PublicFunnelGateDep = Annotated[Callable[[], bool], Depends(get_public_funnel_gate)]
-
 
 def get_public_artifact_store(settings: SettingsDep) -> LocalArtifactStore | None:
     """Dependency: the configured artifact store, or ``None`` when unset."""
@@ -327,98 +240,24 @@ _IMAGE_CACHE_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
 # --------------------------------------------------------------------------- #
 # Endpoints (UNAUTHENTICATED - note: NO CurrentUser dependency anywhere here)
 # --------------------------------------------------------------------------- #
-@router.post(
-    "/audits",
-    response_model=PublicAuditCreated,
-    status_code=status.HTTP_201_CREATED,
-    # FAIL CLOSED. On every other route the limiter is one control among several
-    # (authentication, permissions, budget caps); here it is the only thing between
-    # an anonymous caller and a crawl, so "we cannot count" must mean "no".
-    dependencies=[Depends(rate_limit_ip("public_audit", 5, fail_closed=True))],
-)
-async def create_public_audit(
-    body: PublicAuditCreate,
-    gateway: PublicGatewayDep,
-    enqueue: PublicEnqueuerDep,
-    funnel_open: PublicFunnelGateDep,
-    settings: SettingsDep,
-) -> PublicAuditCreated:
-    """Create ONE condensed free audit for an email (lead capture). SSRF-guarded.
-
-    Order of checks is deliberate, cheapest-and-most-decisive first: the funnel
-    gate and the daily cap decide whether we are accepting ANY request right now,
-    and both run before the SSRF DNS lookup so a closed funnel costs no work. The
-    per-request guards (SSRF, one-per-email) follow.
-    """
-    # 1. Is the funnel open at all? The operator dial + the agency-global spend
-    #    halt. A gate failure is treated as CLOSED: if we cannot establish that
-    #    spending is permitted, we do not spend.
-    try:
-        is_open = await asyncio.to_thread(funnel_open)
-    except Exception:
-        logger.error("public_audit_gate_check_failed")
-        raise _FUNNEL_UNAVAILABLE from None
-    if not is_open:
-        logger.info("public_audit_funnel_closed")
-        raise _FUNNEL_UNAVAILABLE
-
-    # 2. The agency-wide daily ceiling. Per-IP limiting bounds ONE abuser; this
-    #    bounds a distributed one. FAILS CLOSED for the same reason as the gate:
-    #    an uncountable ceiling is an unenforced ceiling.
-    cap = settings.public_audit_daily_cap
-    if cap > 0:
-        try:
-            used = await asyncio.to_thread(gateway.count_today)
-        except Exception:
-            logger.error("public_audit_daily_cap_check_failed")
-            raise _FUNNEL_UNAVAILABLE from None
-        if used >= cap:
-            logger.warning("public_audit_daily_cap_reached", used=used, cap=cap)
-            raise _FUNNEL_UNAVAILABLE
-
-    # 3. SSRF guard: getaddrinfo blocks, so validate off the event loop.
-    try:
-        await asyncio.to_thread(validate_public_host, body.url)
-    except PrivateAddressError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"URL is not a public address: {exc}",
-        ) from exc
-
-    email = str(body.email)
-    # One free audit per email. Check first for a clean 409; the DB unique index
-    # on lower(email) is the real guard (closes the check-then-insert race below).
-    if await asyncio.to_thread(gateway.find_by_email, email) is not None:
-        raise _DUPLICATE_EMAIL
-
-    try:
-        row = await asyncio.to_thread(gateway.insert, email, body.url, "landing")
-    except psycopg_errors.UniqueViolation as exc:
-        # Concurrent duplicate slipped past the pre-check -> same 409.
-        raise _DUPLICATE_EMAIL from exc
-
-    public_audit_id = str(row["id"])
-    # Enqueue the worker. If the broker (Redis) is unreachable the job can NEVER run,
-    # so don't leave an orphaned 'queued' row that also blocks this email forever
-    # (one-audit-per-email → a permanent 409). Roll the row back and return a clean
-    # 503 the funnel can retry, instead of a raw 500.
-    try:
-        enqueue(public_audit_id)
-    except Exception as exc:
-        logger.warning("public_audit_enqueue_failed", public_audit_id=public_audit_id)
-        try:
-            await asyncio.to_thread(gateway.delete_by_id, public_audit_id)
-        except Exception:
-            logger.warning("public_audit_rollback_failed", public_audit_id=public_audit_id)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The audit service is temporarily unavailable. Please try again shortly.",
-        ) from exc
-    # No cost row is written here. The WORKER commits exactly one ledger entry per
-    # run, priced from what the run actually did - see workers/tasks/audit.py. A $0
-    # row written at request time asserted a cost before any work existed.
-    return PublicAuditCreated(report_token=str(row["report_token"]), status=str(row["status"]))
-
+# THE SELF-SERVE CREATE ENDPOINT WAS REMOVED (2026-09-17).
+#
+# `POST /public/audits` let an anonymous visitor run a real crawl: it was the only
+# route on the platform an unauthenticated caller could use to cause real work,
+# which is why it carried four independent abuse controls (SSRF guard,
+# one-audit-per-email, a fail-closed per-IP limiter, and an agency-wide daily cap)
+# plus a cost gate.
+#
+# The client retired the self-serve funnel: an operator now runs the audit from the
+# dashboard and PUBLISHES it as a link (`POST /audits/{id}/public-page`), which
+# produces the same report without an anonymous path to a crawl. Removing the
+# endpoint removes that entire abuse surface rather than leaving it switched off
+# behind a flag someone can flip back on without re-reading the controls.
+#
+# THE READ ROUTES BELOW STAY. Every free-audit report link already sent out
+# resolves through them, and they only ever return a curated projection of a
+# completed run. Deleting them would break links that are already in people's
+# inboxes.
 
 @router.get("/audits/{report_token}", response_model=PublicReport)
 async def get_public_report(report_token: str, gateway: PublicGatewayDep, settings: SettingsDep) -> PublicReport:
