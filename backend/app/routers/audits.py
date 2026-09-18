@@ -655,7 +655,9 @@ def public_page_url(settings: Settings, slug: str) -> str:
     the right origin for it because in this deployment the dashboard and the API
     share a host (Caddy proxies `/api` to the backend).
     """
-    base = (settings.public_file_base_url or "").rstrip("/")
+    # The dashboard origin, since /leads/<slug> is a Next.js route. Falls back
+    # to the API origin, which is correct wherever one proxy fronts both.
+    base = (settings.public_site_base_url or settings.public_file_base_url or "").rstrip("/")
     return f"{base}/leads/{slug}" if base else f"/leads/{slug}"
 
 

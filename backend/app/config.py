@@ -76,6 +76,17 @@ class Settings(BaseSettings):
     # dashboard preview; SET this in prod so a WordPress-embedded image resolves).
     # Not a secret. Mirrors the frontend's NEXT_PUBLIC_FILE_BASE_URL.
     public_file_base_url: str = ""
+    # Public origin the DASHBOARD is reachable at (e.g. https://app.qanry.com).
+    # Used to build the shareable audit-report link (`/leads/<slug>`), which is
+    # served by the Next.js app, NOT by this API.
+    #
+    # Separate from `public_file_base_url` because they are different origins
+    # whenever the two are not behind one proxy. In production Caddy fronts both
+    # on one host so they coincide; in local dev the API is :8000 and the
+    # dashboard is :3000, and building the link from the API origin produces a
+    # URL that 404s for whoever it was sent to. Blank -> falls back to
+    # `public_file_base_url`, so an existing deploy keeps working unchanged.
+    public_site_base_url: str = ""
 
     # --- Local Postgres (the data plane). Two DSNs, one per trust level. ---
     # Authenticated-role DSN -> the per-request RLS pool (RLS binds this connection).
