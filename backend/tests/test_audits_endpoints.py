@@ -28,6 +28,11 @@ class FakeAuditsRepo:
         self.rows: dict[str, dict[str, Any]] = {}
         self._seq = 0
         self.last_page: tuple[int | None, int] | None = None
+        # Keyed by audit id. A row ABSENT here is an audit whose page was
+        # never minted - a different state from minted-but-unpublished,
+        # and the endpoints distinguish the two. Per-instance, not a class
+        # attribute: a shared dict would leak published pages between tests.
+        self.pages: dict[str, dict[str, Any]] = {}
 
     def seed(self, **over: Any) -> dict[str, Any]:
         self._seq += 1
@@ -79,6 +84,24 @@ class FakeAuditsRepo:
             return None
         row["visible_to_client"] = visible
         return row
+
+    # --- public report pages (the shareable /leads/<slug> link) ---------- #
+    def public_page(self, audit_id: str) -> dict[str, Any] | None:
+        return self.pages.get(audit_id)
+
+    def published_pages(self) -> dict[str, str]:
+        return {
+            aid: str(p["slug"]) for aid, p in self.pages.items() if p.get("published")
+        }
+
+    def set_public_page_published(
+        self, audit_id: str, *, published: bool
+    ) -> dict[str, Any] | None:
+        page = self.pages.get(audit_id)
+        if page is None:
+            return None
+        page["published"] = published
+        return page
 
 
 class FakeClientsRepo:
@@ -146,8 +169,13 @@ async def test_create_enqueues_queued_row(
         "visibleToClient",
         # Whether a client is attached at all - false for an internal/prospect run.
         "hasClient",
+        # The shareable public report link, present only once a page is PUBLISHED.
+        "publicUrl", "publicSlug",
     }
     assert body["visibleToClient"] is False  # internal until someone shares it
+    # A freshly queued run has no report yet, so there is nothing to share. Null
+    # here is the honest answer, not a placeholder to be filled in later.
+    assert body["publicUrl"] is None and body["publicSlug"] is None
     assert body["depth"] == "free"  # Free tier pins the depth
     assert body["maxPages"] == 15
     assert body["estimatedCost"] == 0.0  # a free run fires no paid provider
@@ -657,3 +685,123 @@ async def test_a_clientless_paid_run_still_passes_the_spend_gate(
     assert resp.status_code == 402
     # The gate was consulted, and told the truth about the missing tenant.
     assert seen == [None]
+
+
+# --------------------------------------------------------------------------
+# The SHAREABLE PUBLIC REPORT LINK (POST /audits/{id}/public-page).
+#
+# The client's requirement: run an audit from the dashboard, get a URL that can
+# be pasted into a WhatsApp chat or a Fiverr message, and have the recipient see
+# the full report with the agency's Fiverr gigs beneath it.
+#
+# The registry (0126) already minted a slug for every completed audit, but a PAID
+# audit's page defaults to `published = false` - a paid audit is client
+# deliverable work - and NOTHING could flip it, so `/leads/<slug>` 404'd for every
+# admin-run audit. These pin the publish control and, more importantly, the rule
+# that an operator is never handed a link that does not resolve.
+# --------------------------------------------------------------------------
+
+async def test_publishing_returns_the_link_an_operator_pastes(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    repo.seed(id="aud-pub")
+    repo.pages["aud-pub"] = {"slug": "northpeak-9f3a1c0d", "kind": "paid", "published": False}
+
+    resp = await client.post("/api/v1/audits/aud-pub/public-page", json={"published": True})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["published"] is True
+    assert body["slug"] == "northpeak-9f3a1c0d"
+    assert body["url"].endswith("/leads/northpeak-9f3a1c0d")
+    assert repo.pages["aud-pub"]["published"] is True
+
+
+async def test_an_operator_can_take_a_shared_report_back_down(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """A link that has been sent out must be revocable - otherwise publishing is a
+    one-way door and an operator who shares the wrong client's report has no move."""
+    wire("manager")
+    repo.seed(id="aud-pub")
+    repo.pages["aud-pub"] = {"slug": "northpeak-9f3a1c0d", "kind": "paid", "published": True}
+
+    resp = await client.post("/api/v1/audits/aud-pub/public-page", json={"published": False})
+
+    assert resp.status_code == 200
+    assert resp.json()["published"] is False
+    assert repo.pages["aud-pub"]["published"] is False
+
+
+async def test_an_audit_with_no_minted_page_is_refused_with_a_reason(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """A page is minted on completion. Publishing one that was never minted would
+    return a link to nothing, so it is a 409 that says what to do instead."""
+    wire("manager")
+    repo.seed(id="aud-queued")  # no entry in repo.pages
+
+    resp = await client.post("/api/v1/audits/aud-queued/public-page", json={"published": True})
+
+    assert resp.status_code == 409
+    # The app wraps errors as {"error": {type, message, request_id}}.
+    assert "completes" in resp.json()["error"]["message"]
+
+
+async def test_publishing_an_unknown_audit_is_a_404(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    resp = await client.post("/api/v1/audits/nope/public-page", json={"published": True})
+    assert resp.status_code == 404
+
+
+async def test_sharing_a_report_publicly_needs_run_audits(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """Putting a document in front of someone outside the agency is an
+    outward-facing act, gated exactly like /visibility beside it."""
+    wire("viewer")
+    repo.seed(id="aud-pub")
+    repo.pages["aud-pub"] = {"slug": "northpeak-9f3a1c0d", "kind": "paid", "published": False}
+
+    resp = await client.post("/api/v1/audits/aud-pub/public-page", json={"published": True})
+
+    assert resp.status_code == 403
+    assert repo.pages["aud-pub"]["published"] is False  # and it really did not publish
+
+
+async def test_only_a_published_page_surfaces_as_a_link(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    """THE RULE THIS WHOLE SHAPE EXISTS FOR. An unpublished page has a slug, but
+    `/leads/<slug>` does not resolve for it - so reporting that slug as a link
+    would hand the operator a URL that 404s for the person they sent it to."""
+    wire("manager")
+    repo.seed(id="aud-unpub")
+    repo.pages["aud-unpub"] = {"slug": "quiet-1a2b3c4d", "kind": "paid", "published": False}
+
+    detail = await client.get("/api/v1/audits/aud-unpub")
+    assert detail.json()["publicUrl"] is None
+    assert detail.json()["publicSlug"] is None
+
+    board = await client.get("/api/v1/audits")
+    row = next(r for r in board.json() if r["id"] == "aud-unpub")
+    assert row["publicUrl"] is None
+
+
+async def test_a_published_page_surfaces_on_the_board_and_the_detail(
+    client: httpx.AsyncClient, repo: FakeAuditsRepo, wire: Callable[..., None]
+) -> None:
+    wire("manager")
+    repo.seed(id="aud-live")
+    repo.pages["aud-live"] = {"slug": "northpeak-9f3a1c0d", "kind": "paid", "published": True}
+
+    detail = await client.get("/api/v1/audits/aud-live")
+    assert detail.json()["publicSlug"] == "northpeak-9f3a1c0d"
+    assert detail.json()["publicUrl"].endswith("/leads/northpeak-9f3a1c0d")
+
+    board = await client.get("/api/v1/audits")
+    row = next(r for r in board.json() if r["id"] == "aud-live")
+    assert row["publicUrl"].endswith("/leads/northpeak-9f3a1c0d")

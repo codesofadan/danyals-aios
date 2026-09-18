@@ -58,6 +58,10 @@ def test_response_matches_auditrow_shape() -> None:
         # rather than inferring it from an empty `client` name, which is the
         # client's NAME and not the same question.
         "hasClient",
+        # The shareable public report link. `from_row` alone cannot know it - the
+        # slug lives in its own registry (0126) - so it is null here and the
+        # endpoints fill it in for a PUBLISHED page only.
+        "publicUrl", "publicSlug",
     }
     assert body["client"] == "NorthPeak Dental"
     assert body["tier"] == "Paid"  # stored 'paid' -> surfaced 'Paid'

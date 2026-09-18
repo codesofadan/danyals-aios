@@ -59,6 +59,61 @@ class AuditsRepo:
             )
             return cur.fetchone()
 
+    def public_page(self, audit_id: str) -> dict[str, Any] | None:
+        """This audit's public-page registry row (slug + published), or None.
+
+        The registry (0126) mints a slug for every completed audit, but a PAID
+        audit's page is `published = false` by default because it is client
+        deliverable work. So the presence of a row means "a link could exist",
+        never "a link is live" - callers must read `published`.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select slug, kind, published from public.public_audit_pages "
+                "where audit_id = %s limit 1",
+                (audit_id,),
+            )
+            return cur.fetchone()
+
+    def published_pages(self) -> dict[str, str]:
+        """``{audit_id: slug}`` for every audit whose public page is LIVE.
+
+        One query for the whole board rather than one per row: the audit list is
+        paginated but still renders many rows, and a per-row lookup would be an
+        N+1 on a page an operator opens constantly.
+
+        Only published rows are returned, so a caller cannot accidentally render
+        a link to a page that 404s for the person it was sent to.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select audit_id, slug from public.public_audit_pages "
+                "where published and audit_id is not null"
+            )
+            return {str(r["audit_id"]): str(r["slug"]) for r in cur.fetchall()}
+
+    def set_public_page_published(
+        self, audit_id: str, *, published: bool
+    ) -> dict[str, Any] | None:
+        """Publish this audit's public page, or take it back down.
+
+        Returns the registry row, or None when nothing was updated - which is
+        the same load-bearing distinction as `set_visibility` above: an RLS
+        refusal matches zero rows rather than raising, so reporting success
+        without checking would tell an operator a link is live when it is not.
+
+        This does NOT mint a page. Minting happens on completion in the worker,
+        which is what keeps slug derivation in one place; publishing a report
+        that was never generated has nothing to point at.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.public_audit_pages set published = %s "
+                "where audit_id = %s returning slug, kind, published",
+                (published, audit_id),
+            )
+            return cur.fetchone()
+
     def clear_error(self, audit_id: str) -> dict[str, Any] | None:
         """Drop the recorded reason a completed audit's findings were unavailable.
 

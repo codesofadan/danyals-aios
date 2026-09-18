@@ -152,6 +152,40 @@ class AuditVisibilityUpdate(BaseModel):
     visible_to_client: bool
 
 
+class AuditPublicPageUpdate(BaseModel):
+    """The one field ``POST /audits/{id}/public-page`` may change.
+
+    Same single-field shape, and for the same reason, as
+    :class:`AuditVisibilityUpdate`: this route exists to put a report at a URL a
+    stranger can open, and a wider body would let a completed run's own fields be
+    edited through a route reviewed as a sharing control.
+    """
+
+    published: bool
+
+
+class AuditPublicPageResponse(BaseModel):
+    """Where a shared audit report lives - or why it does not live anywhere yet.
+
+    ``url`` is absolute when the deploy knows its own public origin
+    (``public_file_base_url``), because the whole point of this value is to be
+    pasted into WhatsApp or a Fiverr message, and a relative path is useless
+    there. It falls back to the site-relative path rather than inventing a
+    hostname - a guessed origin produces a link that 404s for the recipient,
+    which is worse than an obviously-incomplete one.
+
+    ``published`` is reported rather than assumed. A slug exists for every
+    completed audit; only a published page actually resolves, and telling an
+    operator "here is the link" for a page that 404s is the failure this field
+    exists to prevent.
+    """
+
+    slug: str
+    url: str
+    published: bool
+    kind: str
+
+
 class AuditReingestResponse(BaseModel):
     """What ``POST /audits/{id}/reingest`` rebuilt, in the numbers that show it worked.
 
@@ -223,6 +257,16 @@ class AuditResponse(BaseModel):
     # NULL but carries no non-empty check). Deriving it from the name would make
     # a badly-named client look untenanted.
     has_client: bool = Field(default=False, serialization_alias="hasClient")
+    # The PUBLIC report link for this audit, when one is live.
+    #
+    # Null means "no shareable link", and it means that for two different
+    # reasons the operator does not need to distinguish here: no page has been
+    # minted yet (the run has not completed), or a page exists but is not
+    # published. Both come down to "there is nothing to paste into a chat".
+    # Only a PUBLISHED page yields a value, because handing an operator a URL
+    # that 404s for the recipient is the failure this field exists to prevent.
+    public_url: str | None = Field(default=None, serialization_alias="publicUrl")
+    public_slug: str | None = Field(default=None, serialization_alias="publicSlug")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> AuditResponse:

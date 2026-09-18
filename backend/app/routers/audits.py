@@ -26,6 +26,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
+from app.config import Settings
 from app.core.auth import CurrentUser, require_perm
 from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
@@ -37,6 +38,8 @@ from app.schemas.audits import (
     AuditCreate,
     AuditEstimateRequest,
     AuditEstimateResponse,
+    AuditPublicPageResponse,
+    AuditPublicPageUpdate,
     AuditReingestResponse,
     AuditResponse,
     AuditStatsResponse,
@@ -190,25 +193,41 @@ PaidAuditGateDep = Annotated[
 
 
 def _rows_to_responses(
-    rows: list[dict[str, Any]], store: LocalArtifactStore | None
+    rows: list[dict[str, Any]],
+    store: LocalArtifactStore | None,
+    settings: Settings,
+    slugs: dict[str, str],
 ) -> list[AuditResponse]:
     """Build the AuditRow responses with the pdf/json download flags DOWNGRADED to
     on-disk reality (see ``honest_artifact_flags``) so the dashboard never offers a
-    download that 404s. Runs in a worker thread (filesystem ``stat`` per row)."""
+    download that 404s. Runs in a worker thread (filesystem ``stat`` per row).
+
+    ``slugs`` carries only PUBLISHED pages, so an audit missing from it renders
+    with no public link - which is the honest reading of both reasons it can be
+    missing (never minted, or minted but not published)."""
     out: list[AuditResponse] = []
     for r in rows:
         resp = AuditResponse.from_row(r)
         resp.pdf, resp.json_ = honest_artifact_flags(store, r)
+        slug = slugs.get(str(r.get("id")))
+        if slug:
+            resp.public_slug = slug
+            resp.public_url = public_page_url(settings, slug)
         out.append(resp)
     return out
 
 
 @router.get("/audits", response_model=list[AuditResponse])
 async def list_audits(
-    repo: AuditsRepoDep, page: PageDep, store: ArtifactStoreDep, _user: ViewReports
+    repo: AuditsRepoDep,
+    page: PageDep,
+    store: ArtifactStoreDep,
+    settings: SettingsDep,
+    _user: ViewReports,
 ) -> list[AuditResponse]:
     rows = await asyncio.to_thread(repo.list_audits, limit=page.limit, offset=page.offset)
-    return await asyncio.to_thread(_rows_to_responses, rows, store)
+    slugs = await asyncio.to_thread(repo.published_pages)
+    return await asyncio.to_thread(_rows_to_responses, rows, store, settings, slugs)
 
 
 @router.get("/audits/stats", response_model=AuditStatsResponse)
@@ -219,13 +238,23 @@ async def audit_stats(repo: AuditsRepoDep, _user: ViewReports) -> AuditStatsResp
 
 @router.get("/audits/{audit_id}", response_model=AuditResponse)
 async def get_audit(
-    audit_id: str, repo: AuditsRepoDep, store: ArtifactStoreDep, _user: ViewReports
+    audit_id: str,
+    repo: AuditsRepoDep,
+    store: ArtifactStoreDep,
+    settings: SettingsDep,
+    _user: ViewReports,
 ) -> AuditResponse:
     row = await asyncio.to_thread(repo.get_audit, audit_id)
     if row is None:
         raise _AUDIT_NOT_FOUND
     resp = AuditResponse.from_row(row)
     resp.pdf, resp.json_ = await asyncio.to_thread(honest_artifact_flags, store, row)
+    # The detail view is where an operator goes to copy the link, so the page is
+    # read here even though the list already carries it for the board.
+    page_row = await asyncio.to_thread(repo.public_page, audit_id)
+    if page_row and page_row.get("published"):
+        resp.public_slug = str(page_row["slug"])
+        resp.public_url = public_page_url(settings, str(page_row["slug"]))
     return resp
 
 
@@ -610,6 +639,88 @@ async def set_audit_visibility(
     resp = AuditResponse.from_row(row)
     resp.pdf, resp.json_ = await asyncio.to_thread(honest_artifact_flags, store, row)
     return resp
+
+
+def public_page_url(settings: Settings, slug: str) -> str:
+    """The address an operator pastes into a chat, for one published page.
+
+    `public_file_base_url` is the deploy's own public origin (the same setting
+    that makes a WordPress-embedded content image resolve). When it is unset the
+    SITE-RELATIVE path is returned rather than a guessed hostname: a link built
+    on a wrong origin 404s for the recipient, which is worse than one that is
+    visibly missing its prefix and can be completed by hand.
+
+    Note this is the READABLE page route (`/leads/<slug>`), which the frontend
+    serves - not an `/api/v1/...` path. The API's own `public_file_base_url` is
+    the right origin for it because in this deployment the dashboard and the API
+    share a host (Caddy proxies `/api` to the backend).
+    """
+    base = (settings.public_file_base_url or "").rstrip("/")
+    return f"{base}/leads/{slug}" if base else f"/leads/{slug}"
+
+
+@router.post("/audits/{audit_id}/public-page", response_model=AuditPublicPageResponse)
+async def set_audit_public_page(
+    audit_id: str,
+    body: AuditPublicPageUpdate,
+    repo: AuditsRepoDep,
+    settings: SettingsDep,
+    actor: RunAudits,
+) -> AuditPublicPageResponse:
+    """Put this audit's report at a shareable public URL, or take it back down.
+
+    THE LINK THIS MINTS IS OPENABLE BY ANYONE WHO HAS IT. That is the point - it
+    is meant to be pasted into a WhatsApp chat or a Fiverr message - but it is
+    also why publishing is an explicit staff act rather than something completion
+    does on its own. `0126` deliberately defaults a paid page to
+    `published = false` because a paid audit is client deliverable work, and the
+    slug carries a random suffix so that even once published it is not
+    enumerable from the client's name.
+
+    Gated on ``run_audits``, matching ``/visibility`` beside it: putting a
+    document in front of someone outside the agency is an outward-facing act, and
+    that permission is exactly the set the ``audits_modify`` RLS policy admits.
+
+    The page is not minted here. Completion mints it (workers/tasks/audit.py),
+    which keeps slug derivation in one place - and a report that has not been
+    generated has nothing to publish, so a missing row is a 409 that says so
+    rather than a link to an empty page.
+    """
+    page = await asyncio.to_thread(repo.public_page, audit_id)
+    if page is None:
+        # Distinguish the two reasons there is no page, because they need
+        # different actions from the operator.
+        current = await asyncio.to_thread(repo.get_audit, audit_id)
+        if current is None:
+            raise _AUDIT_NOT_FOUND
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This audit has no public page yet. A page is minted when a run "
+                "completes, so finish (or re-run) the audit first."
+            ),
+        )
+    row = await asyncio.to_thread(
+        repo.set_public_page_published, audit_id, published=body.published
+    )
+    if row is None:
+        raise _AUDIT_NOT_FOUND
+    await record_activity(
+        actor,
+        kind="audit",
+        action=(
+            "published a public audit report"
+            if body.published
+            else "unpublished a public audit report"
+        ),
+        target=str(row["slug"]),
+    )
+    return AuditPublicPageResponse(
+        slug=str(row["slug"]),
+        url=public_page_url(settings, str(row["slug"])),
+        published=bool(row["published"]),
+        kind=str(row["kind"]),
+    )
 
 
 @router.post("/audits/{audit_id}/reingest", response_model=AuditReingestResponse)
