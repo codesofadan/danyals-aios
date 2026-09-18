@@ -218,7 +218,51 @@ _EXTRACTOR_JS = """
   if (header) top.push(header);
   const nav = document.querySelector('nav');
   if (nav) top.push(nav);
-  const main = document.querySelector('main') || document.body;
+  let main = document.querySelector('main') || document.body;
+  // DESCEND THROUGH WRAPPERS before treating children as sections.
+  //
+  // Page builders nest every real section inside one container: an Elementor page
+  // is <main><div data-elementor-type="wp-page">[section][section]...</div></main>,
+  // and Divi/WPBakery/Gutenberg-theme markup does the same. Walking `main.children`
+  // directly therefore found exactly ONE child and reported the page as a
+  // single-section design - measured on spotino.org (a live Elementor site with 9
+  // h2s), which captured as one `hero` and nothing else.
+  //
+  // That is not a cosmetic miss: the generated page is built to the captured
+  // section grammar, so an under-read design silently produces a one-section page
+  // and the conformance check passes it, having compared it to the wrong thing.
+  //
+  // So: while the container holds a single element child that is itself tall
+  // enough to be the content root, step into it. Bounded to 4 hops so a
+  // pathologically nested document cannot walk us down to a leaf, and it stops
+  // the moment a level has more than one real child - that level IS the sections.
+  for (let hop = 0; hop < 4; hop++) {
+    const kids = Array.from(main.children).filter((c) => {
+      const t = c.tagName.toLowerCase();
+      if (['script', 'style', 'link', 'noscript'].includes(t)) return false;
+      return c.getBoundingClientRect().height >= 40;
+    });
+    if (kids.length !== 1) break;
+    const only = kids[0];
+    // Only descend into a plain container. Stepping into a <header>/<nav>/
+    // <footer> would make the chrome guard reject the very element it is meant
+    // to classify, which is the torso-replica failure in the other direction.
+    const tag = only.tagName.toLowerCase();
+    if (!['div', 'section', 'article'].includes(tag)) break;
+    // LOOK AHEAD before stepping in. A wrapper whose own children are all too
+    // small to be sections (a div holding just a heading) would leave the walk
+    // with nothing, and an EMPTY capture reads downstream as "this site has no
+    // design" rather than "we could not find its sections" - a worse failure
+    // than the under-read this descent exists to fix. So only descend when the
+    // level below actually yields section candidates.
+    const inner = Array.from(only.children).filter((c) => {
+      const t2 = c.tagName.toLowerCase();
+      if (['script', 'style', 'link', 'noscript'].includes(t2)) return false;
+      return c.getBoundingClientRect().height >= 40;
+    });
+    if (inner.length === 0) break;
+    main = only;
+  }
   const maxWidths = [];
   for (const child of Array.from(main.children)) {
     const tag = child.tagName.toLowerCase();
